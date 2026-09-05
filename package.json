@@ -1,0 +1,36 @@
+{
+  "name": "slopcad",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "check-types": "turbo run check-types",
+    "dev:web": "turbo run dev -F web --",
+    "db:push": "turbo run db:push -F @slopcad/db --",
+    "db:studio": "turbo run db:studio -F @slopcad/db --",
+    "db:generate": "turbo run db:generate -F @slopcad/db --",
+    "db:migrate": "turbo run db:migrate -F @slopcad/db --",
+    "db:local": "turbo run db:local -F @slopcad/db --",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f"
+  },
+  "dependencies": {
+    "@slopcad/env": "workspace:*",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@slopcad/config": "workspace:*",
+    "@types/node": "catalog:",
+    "turbo": "^2.10.7",
+    "typescript": "catalog:"
+  },
+  "packageManager": "pnpm@10.34.5"
+}

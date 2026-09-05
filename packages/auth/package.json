@@ -1,0 +1,24 @@
+{
+  "name": "@slopcad/auth",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@slopcad/db": "workspace:*",
+    "@slopcad/env": "workspace:*",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@slopcad/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}

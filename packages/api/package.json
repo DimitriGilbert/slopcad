@@ -1,0 +1,26 @@
+{
+  "name": "@slopcad/api",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@slopcad/auth": "workspace:*",
+    "@slopcad/db": "workspace:*",
+    "@slopcad/env": "workspace:*",
+    "@trpc/client": "catalog:",
+    "@trpc/server": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@slopcad/config": "workspace:*",
+    "typescript": "catalog:"
+  }
+}
