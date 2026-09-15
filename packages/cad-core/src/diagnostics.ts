@@ -7,7 +7,11 @@
  */
 
 import { DIMENSIONAL_ERROR_CODES } from "./dimensional";
+import { EXPRESSION_AST_ERROR_CODES } from "./expression";
+import { EXPRESSION_EVALUATION_ERROR_CODES } from "./expression-evaluator";
+import { EXPRESSION_PARSE_ERROR_CODES } from "./expression-parser";
 import { type AnyCadId, ID_ERROR_CODES, parseAnyCadId } from "./ids";
+import { PARAMETER_ERROR_CODES } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { UNIT_ERROR_CODES } from "./units";
 
@@ -59,6 +63,47 @@ export const DIAGNOSTIC_CODES = {
     DIMENSIONAL_ERROR_CODES.incompatibleDimensions,
   arithmeticDivisionByZero: DIMENSIONAL_ERROR_CODES.divisionByZero,
   arithmeticNonFiniteResult: DIMENSIONAL_ERROR_CODES.nonFiniteResult,
+  expressionAstMalformed: EXPRESSION_AST_ERROR_CODES.malformed,
+  expressionEmpty: EXPRESSION_PARSE_ERROR_CODES.empty,
+  expressionUnexpectedCharacter:
+    EXPRESSION_PARSE_ERROR_CODES.unexpectedCharacter,
+  expressionInvalidNumber: EXPRESSION_PARSE_ERROR_CODES.invalidNumber,
+  expressionUnknownUnit: EXPRESSION_PARSE_ERROR_CODES.unknownUnit,
+  expressionUnexpectedToken: EXPRESSION_PARSE_ERROR_CODES.unexpectedToken,
+  expressionUnexpectedEndOfInput:
+    EXPRESSION_PARSE_ERROR_CODES.unexpectedEndOfInput,
+  expressionMissingClosingParenthesis:
+    EXPRESSION_PARSE_ERROR_CODES.missingClosingParenthesis,
+  expressionUnknownFunction: EXPRESSION_PARSE_ERROR_CODES.unknownFunction,
+  expressionInvalidFunctionArity:
+    EXPRESSION_PARSE_ERROR_CODES.invalidFunctionArity,
+  expressionTooDeep: EXPRESSION_PARSE_ERROR_CODES.tooDeep,
+  expressionUnknownIdentifier:
+    EXPRESSION_EVALUATION_ERROR_CODES.unknownIdentifier,
+  expressionModuloIncompatibleDimensions:
+    EXPRESSION_EVALUATION_ERROR_CODES.moduloIncompatibleDimensions,
+  expressionModuloByZero: EXPRESSION_EVALUATION_ERROR_CODES.moduloByZero,
+  expressionInvalidExponentDimension:
+    EXPRESSION_EVALUATION_ERROR_CODES.invalidExponentDimension,
+  expressionInvalidExponentValue:
+    EXPRESSION_EVALUATION_ERROR_CODES.invalidExponentValue,
+  expressionInvalidSqrtDimension:
+    EXPRESSION_EVALUATION_ERROR_CODES.invalidSqrtDimension,
+  expressionMinMaxIncompatibleDimensions:
+    EXPRESSION_EVALUATION_ERROR_CODES.minMaxIncompatibleDimensions,
+  expressionNonFiniteResult:
+    EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+  expressionMalformedCall: EXPRESSION_EVALUATION_ERROR_CODES.malformedCall,
+  parameterMalformed: PARAMETER_ERROR_CODES.malformed,
+  parameterIdInvalid: PARAMETER_ERROR_CODES.idInvalid,
+  parameterIdConflict: PARAMETER_ERROR_CODES.idConflict,
+  parameterNameInvalid: PARAMETER_ERROR_CODES.nameInvalid,
+  parameterNameReserved: PARAMETER_ERROR_CODES.nameReserved,
+  parameterNameConflict: PARAMETER_ERROR_CODES.nameConflict,
+  parameterInvalidValue: PARAMETER_ERROR_CODES.invalidValue,
+  parameterInvalidExpression: PARAMETER_ERROR_CODES.invalidExpression,
+  parameterInvalidMetadata: PARAMETER_ERROR_CODES.invalidMetadata,
+  parameterNotFound: PARAMETER_ERROR_CODES.notFound,
 } as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES];

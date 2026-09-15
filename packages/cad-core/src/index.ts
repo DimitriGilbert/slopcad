@@ -124,6 +124,80 @@ export {
   valueIn,
   volume,
 } from "./dimensional";
+export type {
+  BinaryNode,
+  BinaryOperator,
+  CallNode,
+  ExpressionAstError,
+  ExpressionAstErrorCode,
+  ExpressionFunction,
+  ExpressionNode,
+  ExpressionNodeKind,
+  IdentifierNode,
+  NumberNode,
+  UnaryNode,
+  UnitLiteralNode,
+} from "./expression";
+export {
+  BINARY_OPERATORS,
+  EXPRESSION_AST_ERROR_CODES,
+  EXPRESSION_FUNCTIONS,
+  EXPRESSION_NODE_KINDS,
+  extractExpressionDependencies,
+  isBinaryOperator,
+  isExpressionFunction,
+  isExpressionIdentifierName,
+  isValidCallArity,
+  MAX_EXPRESSION_DEPTH,
+  MAX_EXPRESSION_IDENTIFIER_LENGTH,
+  parseExpressionAst,
+  printExpression,
+} from "./expression";
+export type {
+  ExpressionParseError,
+  ExpressionParseErrorCode,
+} from "./expression-parser";
+export {
+  EXPRESSION_PARSE_ERROR_CODES,
+  parseExpression,
+} from "./expression-parser";
+export type {
+  ExpressionEnvironment,
+  ExpressionEvaluationError,
+  ExpressionEvaluationErrorCode,
+} from "./expression-evaluator";
+export {
+  evaluateExpression,
+  EXPRESSION_EVALUATION_ERROR_CODES,
+} from "./expression-evaluator";
+export type {
+  Parameter,
+  ParameterCollection,
+  ParameterError,
+  ParameterErrorCode,
+  ParameterInput,
+  ParameterMetadata,
+  ParameterMetadataValue,
+  SerializedParameter,
+  SerializedParameterCollection,
+} from "./parameter";
+export {
+  addParameter,
+  EMPTY_PARAMETER_COLLECTION,
+  findParameterByName,
+  getParameter,
+  PARAMETER_ERROR_CODES,
+  parameterEnvironment,
+  parseParameter,
+  parseParameterCollection,
+  removeParameter,
+  serializeParameter,
+  serializeParameterCollection,
+  updateParameterExpression,
+  updateParameterMetadata,
+  updateParameterValue,
+} from "./parameter";
+export { findParameterCycle, parameterDependencyEdges } from "./parameter-graph";
 export type { ParseFailure, ParseResult } from "./result";
 export { fail, ok } from "./result";
 export { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
