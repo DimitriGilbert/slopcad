@@ -18,8 +18,17 @@
     "**/test-setup.ts",
     "**/vitest.config.ts",
     "**/playwright.config.ts",
+    "**/playwright.spike.config.ts",
     "**/e2e/**",
-    "**/*.gen.ts"
+    "**/e2e-spike/**",
+    "**/*.gen.ts",
+    "**/src/spike/**"
   ],
-  "ignoreDependencies": ["@slopcad/config"]
+  "ignoreDependencies": [
+    "@slopcad/config",
+    "manifold-3d",
+    "three",
+    "@types/three",
+    "@react-three/fiber"
+  ]
 }

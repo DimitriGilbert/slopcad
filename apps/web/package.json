@@ -10,10 +10,12 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:spike": "playwright test -c playwright.spike.config.ts",
     "lint": "eslint ."
   },
   "dependencies": {
     "@libsql/client": "catalog:",
+    "@react-three/fiber": "9.7.0",
     "@slopcad/api": "workspace:*",
     "@slopcad/auth": "workspace:*",
     "@slopcad/env": "workspace:*",
@@ -31,12 +33,14 @@
     "dotenv": "catalog:",
     "libsql": "catalog:",
     "lucide-react": "catalog:",
+    "manifold-3d": "3.5.3",
     "next-themes": "catalog:",
     "nitro": "^3.0.260610-beta",
     "react": "catalog:",
     "react-dom": "catalog:",
     "sonner": "catalog:",
     "tailwindcss": "catalog:",
+    "three": "0.186.0",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -48,6 +52,7 @@
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@types/three": "0.186.0",
     "@vitejs/plugin-react": "^6.0.4",
     "@vitest/coverage-istanbul": "catalog:",
     "jsdom": "catalog:",
