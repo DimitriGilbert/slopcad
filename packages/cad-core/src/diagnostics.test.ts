@@ -67,6 +67,21 @@ describe("DIAGNOSTIC_CODES", () => {
       expect(isDiagnosticCode(invalid)).toBe(false);
     }
   });
+
+  it("registers the Phase 5 expression and parameter domains", () => {
+    expect(DIAGNOSTIC_CODES.expressionUnknownIdentifier).toBe(
+      "expression/unknown-identifier",
+    );
+    expect(DIAGNOSTIC_CODES.expressionMissingClosingParenthesis).toBe(
+      "expression/missing-closing-parenthesis",
+    );
+    expect(DIAGNOSTIC_CODES.expressionInvalidSqrtDimension).toBe(
+      "expression/invalid-sqrt-dimension",
+    );
+    expect(DIAGNOSTIC_CODES.parameterNameConflict).toBe(
+      "parameter/name-conflict",
+    );
+  });
 });
 
 describe("parseDiagnostic", () => {
