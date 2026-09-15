@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   CAD_ID_MAX_PAYLOAD_LENGTH,
   CAD_ID_PREFIXES,
+  CadIdGeneratorExhaustedError,
   createBodyId,
   createDocumentId,
   createFeatureId,
   createIdGenerator,
   createParameterId,
   createReferenceId,
+  ID_GENERATOR_ERROR_CODES,
   parseAnyCadId,
   parseBodyId,
   parseDocumentId,
@@ -225,6 +227,42 @@ describe("createIdGenerator", () => {
     expect(() =>
       createIdGenerator({ document: 0, parameter: Number.NaN, feature: 0, body: 0, reference: 0 }),
     ).toThrow(RangeError);
+  });
+
+  it("refuses emission structurally once a counter reaches MAX_SAFE_INTEGER", () => {
+    const generator = createIdGenerator({
+      document: 0,
+      parameter: 0,
+      feature: 0,
+      body: Number.MAX_SAFE_INTEGER,
+      reference: 0,
+    });
+    expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);
+    try {
+      generator.nextBodyId();
+    } catch (error) {
+      if (!(error instanceof CadIdGeneratorExhaustedError)) {
+        throw new Error("expected CadIdGeneratorExhaustedError");
+      }
+      expect(error.code).toBe(ID_GENERATOR_ERROR_CODES.exhausted);
+      expect(error.kind).toBe("body");
+    }
+    // The refusal is structural, not state-corrupting: the exhausted
+    // counter stays put and every other kind keeps emitting.
+    expect(generator.state().body).toBe(Number.MAX_SAFE_INTEGER);
+    expect(generator.nextDocumentId()).toBe("doc_000001");
+  });
+
+  it("emits the highest safe payload 2^53 - 1 exactly once, then refuses", () => {
+    const generator = createIdGenerator({
+      document: 0,
+      parameter: 0,
+      feature: 0,
+      body: Number.MAX_SAFE_INTEGER - 1,
+      reference: 0,
+    });
+    expect(generator.nextBodyId()).toBe("body_9007199254740991");
+    expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);
   });
 });
 

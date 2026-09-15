@@ -313,7 +313,46 @@ export function createReferenceId(raw: string): ReferenceId {
  */
 export type IdGeneratorState = Readonly<Record<CadIdKind, number>>;
 
-/** Deterministic generator of document-scoped ids. */
+/**
+ * Stable failure code carried by {@link CadIdGeneratorExhaustedError} when
+ * the generator refuses to emit an id past the exact-integer range.
+ */
+export const ID_GENERATOR_ERROR_CODES = {
+  exhausted: "id/generator-exhausted",
+} as const;
+
+export type IdGeneratorErrorCode =
+  (typeof ID_GENERATOR_ERROR_CODES)[keyof typeof ID_GENERATOR_ERROR_CODES];
+
+/**
+ * Thrown by the {@link IdGenerator} methods when the counter for a kind is
+ * already at Number.MAX_SAFE_INTEGER. Ids with numeric payloads beyond
+ * 2^53 - 1 are outside the generator's contract — float64 counters stop
+ * being exact there, and continuing would let rounding re-emit an id the
+ * generator already produced — so the generator refuses structurally
+ * instead. The exhausted counter is left untouched and every other kind
+ * keeps emitting.
+ */
+export class CadIdGeneratorExhaustedError extends Error {
+  readonly code: IdGeneratorErrorCode;
+  readonly kind: CadIdKind;
+
+  constructor(kind: CadIdKind) {
+    super(
+      `The ${kind} id counter has reached Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER}); ids with numeric payloads beyond it are outside the generator's contract.`,
+    );
+    this.name = "CadIdGeneratorExhaustedError";
+    this.code = ID_GENERATOR_ERROR_CODES.exhausted;
+    this.kind = kind;
+  }
+}
+
+/**
+ * Deterministic generator of document-scoped ids. Each `next*` method throws
+ * {@link CadIdGeneratorExhaustedError} — leaving the counter untouched —
+ * when that kind's counter is already at Number.MAX_SAFE_INTEGER, so
+ * emission never leaves the exact-integer range.
+ */
 export interface IdGenerator {
   nextDocumentId(): DocumentId;
   nextParameterId(): ParameterId;
@@ -353,14 +392,22 @@ function normalizeGeneratorState(initial: IdGeneratorState): Record<CadIdKind, n
  * produces identical id sequences (no randomness, no clock), which keeps
  * command replay and document regeneration reproducible. Generated ids pass
  * through the wire-format validators, so a generator can never emit an id
- * that would fail to parse.
+ * that would fail to parse — and never a numeric payload beyond
+ * Number.MAX_SAFE_INTEGER (2^53 - 1): once a counter reaches that bound the
+ * next method throws {@link CadIdGeneratorExhaustedError} instead, so
+ * float64 rounding can never make the generator re-emit an id it has
+ * already produced.
  */
 export function createIdGenerator(
   initial: IdGeneratorState = DEFAULT_GENERATOR_STATE,
 ): IdGenerator {
   const counters = normalizeGeneratorState(initial);
   const nextRawId = (kind: CadIdKind): string => {
-    const count = counters[kind] + 1;
+    const current = counters[kind];
+    if (current >= Number.MAX_SAFE_INTEGER) {
+      throw new CadIdGeneratorExhaustedError(kind);
+    }
+    const count = current + 1;
     counters[kind] = count;
     return `${CAD_ID_PREFIXES[kind]}_${String(count).padStart(ID_COUNTER_WIDTH, "0")}`;
   };
