@@ -17,6 +17,21 @@ import { PARAMETER_ERROR_CODES } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { UNIT_ERROR_CODES } from "./units";
 
+/**
+ * Kernel-execution failures (Phase 8): emitted by the feature-executor
+ * bridge that lives in `@slopcad/cad-kernel` when it interprets document
+ * feature records as kernel operations. The codes are defined here — the
+ * diagnostics registry's one source of truth — because diagnostics are
+ * cad-core data the bridge must produce, while kernel *operation* failures
+ * (`kernel/invalid-length` and friends) stay in the kernel contract.
+ */
+const KERNEL_EXECUTION_ERROR_CODES = {
+  unknownFeatureKind: "kernel/unknown-feature-kind",
+  featureInputInvalid: "kernel/feature-input-invalid",
+  parameterInvalid: "kernel/parameter-invalid",
+  operationFailed: "kernel/operation-failed",
+} as const;
+
 /** Severity levels in increasing order of seriousness. */
 export const DIAGNOSTIC_SEVERITIES = ["info", "warning", "error", "fatal"] as const;
 
@@ -122,6 +137,10 @@ export const DIAGNOSTIC_CODES = {
   documentNotFound: DOCUMENT_ERROR_CODES.notFound,
   documentInUse: DOCUMENT_ERROR_CODES.inUse,
   graphCycle: FEATURE_GRAPH_ERROR_CODES.cycle,
+  kernelUnknownFeatureKind: KERNEL_EXECUTION_ERROR_CODES.unknownFeatureKind,
+  kernelFeatureInputInvalid: KERNEL_EXECUTION_ERROR_CODES.featureInputInvalid,
+  kernelParameterInvalid: KERNEL_EXECUTION_ERROR_CODES.parameterInvalid,
+  kernelOperationFailed: KERNEL_EXECUTION_ERROR_CODES.operationFailed,
 } as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES];
