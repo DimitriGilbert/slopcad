@@ -1,0 +1,30 @@
+{
+  "name": "@slopcad/cad-kernel-manifold",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@slopcad/cad-kernel": "workspace:*",
+    "manifold-3d": "3.5.3"
+  },
+  "devDependencies": {
+    "@slopcad/config": "workspace:*",
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
