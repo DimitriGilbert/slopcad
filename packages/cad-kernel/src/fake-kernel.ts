@@ -44,12 +44,18 @@
  * of {@link FAKE_KERNEL_TESSELLATION_SEGMENTS} segments ×
  * {@link FAKE_KERNEL_TESSELLATION_RINGS} rings; segment-based cylinder and
  * cone fans) — triangle counts are closed-form functions of those constants.
- * Booleans emit the depth-first concatenation of their primitive leaves'
- * triangles, keeping exactly the triangles fully inside the node's
- * conservative bounds: a deterministic candidate soup that is
- * contract-valid (indexed, finite, inside bounds) but not the exact boolean
- * surface — semantic truth for booleans lives in `volume`/`bounds`, never
- * in the soup. Translations shift triangles exactly.
+ * Every canonical triangle is wound counter-clockwise seen from outside the
+ * solid, so the per-facet normal (the normalized cross product of a
+ * triangle's edges) always points away from the material: honest kernel
+ * normals require consistent winding, and the fake kernel's normals are
+ * exactly those per-facet normals, one per triangle corner — flat shading,
+ * truthful for the faceted meshes it serves. Booleans emit the depth-first
+ * concatenation of their primitive leaves' triangles, keeping exactly the
+ * triangles fully inside the node's conservative bounds: a deterministic
+ * candidate soup that is contract-valid (indexed, finite, inside bounds)
+ * but not the exact boolean surface — semantic truth for booleans lives in
+ * `volume`/`bounds`, never in the soup. Translations shift triangles (and
+ * their unchanged normals) exactly.
  *
  * Volume is memoized per handle (WeakMap), so repeated `volume` calls are
  * cheap; `tessellate` recomputes from the tree on every call, which
@@ -394,8 +400,11 @@ function sphereTriangles(radius: number): readonly Triangle[] {
   const bottom = at(rings, 0);
   const triangles: Triangle[] = [];
   for (let seg = 0; seg < segments; seg += 1) {
-    triangles.push([top, at(1, seg + 1), at(1, seg)]);
-    triangles.push([bottom, at(rings - 1, seg), at(rings - 1, seg + 1)]);
+    // Cap fans are wound CCW seen from outside: increasing longitude at the
+    // north pole, decreasing at the south (mirrored), so facet normals point
+    // away from the sphere's centre.
+    triangles.push([top, at(1, seg), at(1, seg + 1)]);
+    triangles.push([bottom, at(rings - 1, seg + 1), at(rings - 1, seg)]);
     for (let ring = 1; ring < rings - 1; ring += 1) {
       triangles.push([at(ring, seg), at(ring + 1, seg), at(ring + 1, seg + 1)]);
       triangles.push([at(ring, seg), at(ring + 1, seg + 1), at(ring, seg + 1)]);
@@ -440,7 +449,9 @@ function coneTriangles(
   if (topRadius === 0) {
     const apex: Vec3 = [0, 0, height];
     for (let seg = 0; seg < segments; seg += 1) {
-      triangles.push([apex, bottomAt(seg + 1), bottomAt(seg)]);
+      // The apex fan follows the frustum side winding (increasing longitude)
+      // so its facets face outward, away from the cone's axis.
+      triangles.push([apex, bottomAt(seg), bottomAt(seg + 1)]);
       triangles.push([[0, 0, 0], bottomAt(seg + 1), bottomAt(seg)]);
     }
     return triangles;
@@ -573,17 +584,54 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
   return kept;
 }
 
+/**
+ * The outward unit normal of a canonical triangle: the normalized cross
+ * product of two edge vectors, following the triangle's (consistently
+ * outward, CCW-seen-from-outside) winding. Canonical meshes never contain
+ * degenerate triangles, so the cross product is always non-zero.
+ */
+function triangleNormal(triangle: Triangle): Vec3 {
+  const p1 = cornerOf(triangle, 0);
+  const p2 = cornerOf(triangle, 1);
+  const p3 = cornerOf(triangle, 2);
+  const e1: Vec3 = [
+    at(p2, 0) - at(p1, 0),
+    at(p2, 1) - at(p1, 1),
+    at(p2, 2) - at(p1, 2),
+  ];
+  const e2: Vec3 = [
+    at(p3, 0) - at(p1, 0),
+    at(p3, 1) - at(p1, 1),
+    at(p3, 2) - at(p1, 2),
+  ];
+  const cx = at(e1, 1) * at(e2, 2) - at(e1, 2) * at(e2, 1);
+  const cy = at(e1, 2) * at(e2, 0) - at(e1, 0) * at(e2, 2);
+  const cz = at(e1, 0) * at(e2, 1) - at(e1, 1) * at(e2, 0);
+  const length = Math.hypot(cx, cy, cz);
+  if (!(length > 0)) {
+    throw new Error(
+      "Invariant violation: canonical triangles are never degenerate.",
+    );
+  }
+  return [cx / length, cy / length, cz / length];
+}
+
 function shapeTessellation(shape: FakeShape): Tessellation {
   const positions: number[] = [];
+  const normals: number[] = [];
   const indices: number[] = [];
   for (const triangle of renderTriangles(shape)) {
+    const normal = triangleNormal(triangle);
     const base = positions.length / 3;
     for (const corner of triangle) {
       positions.push(at(corner, 0), at(corner, 1), at(corner, 2));
+      normals.push(at(normal, 0), at(normal, 1), at(normal, 2));
     }
     indices.push(base, base + 1, base + 2);
   }
-  return { positions, indices };
+  return normals.length > 0
+    ? { positions, indices, normals }
+    : { positions, indices };
 }
 
 function kernelError(code: KernelErrorCode, message: string): KernelError {

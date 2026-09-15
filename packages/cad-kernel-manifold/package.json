@@ -18,6 +18,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@slopcad/cad-core": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
     "manifold-3d": "3.5.3"
   },

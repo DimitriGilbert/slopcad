@@ -137,10 +137,24 @@ export interface KernelBounds {
  * triangles exactly for empty solids. It does NOT promise a specific
  * triangulation — correctness criteria are semantic (bounds, volume,
  * validity), never exact buffer equality.
+ *
+ * `normals` carries optional kernel-computed vertex normals (Phase 9
+ * extension): a flat xyz unit-vector array, one normal per position triple,
+ * paired index-for-index with `positions`. Kernels that can compute normals
+ * honestly provide them — the Manifold adapter emits crease-aware normals
+ * (edges sharper than a documented threshold get split normals, so planar
+ * faces keep one exact normal and curved surfaces shade smooth); the fake
+ * kernel emits the exact per-facet normals of its canonical meshes. Kernels
+ * that cannot compute normals omit the field entirely — consumers must
+ * treat `undefined` as "compute your own" and never synthesize kernel
+ * normals elsewhere. When present, normals are finite, unit length, exactly
+ * as long as `positions`, and deterministic with the rest of the soup.
+ * Empty solids omit `normals` along with their (empty) positions.
  */
 export interface Tessellation {
   readonly positions: readonly number[];
   readonly indices: readonly number[];
+  readonly normals?: readonly number[];
 }
 
 /** The number of triangles in a tessellation (`indices.length / 3`). */
