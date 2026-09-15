@@ -17,6 +17,9 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint ."
   },
+  "dependencies": {
+    "@slopcad/cad-core": "workspace:*"
+  },
   "devDependencies": {
     "@slopcad/config": "workspace:*",
     "@vitest/coverage-istanbul": "catalog:",
