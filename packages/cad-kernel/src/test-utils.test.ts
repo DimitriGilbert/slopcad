@@ -194,4 +194,44 @@ describe("assertTessellationValid", () => {
       }),
     ).toThrow(/lies outside the bounds/);
   });
+
+  it("accepts unit normals paired with positions", () => {
+    expect(() =>
+      assertTessellationValid({
+        positions: valid.positions,
+        indices: valid.indices,
+        normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects normals whose length does not match positions", () => {
+    expect(() =>
+      assertTessellationValid({
+        positions: valid.positions,
+        indices: valid.indices,
+        normals: [0, 0, 1],
+      }),
+    ).toThrow(/does not match positions length/);
+  });
+
+  it("rejects non-finite normals", () => {
+    expect(() =>
+      assertTessellationValid({
+        positions: valid.positions,
+        indices: valid.indices,
+        normals: [0, 0, Number.NaN, 0, 0, 1, 0, 0, 1],
+      }),
+    ).toThrow(/not a finite vector/);
+  });
+
+  it("rejects non-unit normals", () => {
+    expect(() =>
+      assertTessellationValid({
+        positions: valid.positions,
+        indices: valid.indices,
+        normals: [0, 0, 0.7, 0, 0, 0.7, 0, 0, 0.7],
+      }),
+    ).toThrow(/not unit within/);
+  });
 });

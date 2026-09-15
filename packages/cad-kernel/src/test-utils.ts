@@ -37,6 +37,14 @@ import {
 export const DEFAULT_BOUNDS_TOLERANCE_MM = 1e-6;
 
 /**
+ * Default tolerance for kernel-normal unit-length checks: normals arrive as
+ * single-precision floats computed inside geometry kernels, so anything
+ * within 0.1% of unit length passes; genuinely synthetic or corrupted
+ * normals fail.
+ */
+export const DEFAULT_NORMAL_UNIT_TOLERANCE = 1e-3;
+
+/**
  * Unwraps a successful kernel result, throwing a descriptive error (code +
  * message) on failure. The standard way test code consumes kernel outputs.
  */
@@ -258,7 +266,7 @@ export function assertTessellationValid(
     toleranceMm = DEFAULT_BOUNDS_TOLERANCE_MM,
     requireTriangles = true,
   } = options;
-  const { positions, indices } = tessellation;
+  const { positions, indices, normals } = tessellation;
   if (positions.length % 3 !== 0) {
     throw new Error(
       `Tessellation positions length ${positions.length} is not divisible by 3.`,
@@ -268,6 +276,39 @@ export function assertTessellationValid(
     throw new Error(
       `Tessellation indices length ${indices.length} is not divisible by 3.`,
     );
+  }
+  if (
+    normals !== undefined &&
+    normals.length !== positions.length
+  ) {
+    throw new Error(
+      `Tessellation normals length ${normals.length} does not match positions length ${positions.length}.`,
+    );
+  }
+  if (normals !== undefined) {
+    for (let i = 0; i < normals.length; i += 3) {
+      const nx = normals[i];
+      const ny = normals[i + 1];
+      const nz = normals[i + 2];
+      if (
+        nx === undefined ||
+        ny === undefined ||
+        nz === undefined ||
+        !Number.isFinite(nx) ||
+        !Number.isFinite(ny) ||
+        !Number.isFinite(nz)
+      ) {
+        throw new Error(
+          `Tessellation normal ${i / 3} is not a finite vector (got [${String(nx)}, ${String(ny)}, ${String(nz)}]).`,
+        );
+      }
+      const length = Math.hypot(nx, ny, nz);
+      if (Math.abs(length - 1) > DEFAULT_NORMAL_UNIT_TOLERANCE) {
+        throw new Error(
+          `Tessellation normal ${i / 3} has length ${length}, not unit within ${DEFAULT_NORMAL_UNIT_TOLERANCE}.`,
+        );
+      }
+    }
   }
   const vertexCount = positions.length / 3;
   if (requireTriangles && tessellationTriangleCount(tessellation) === 0) {

@@ -216,6 +216,12 @@ export function defineKernelContractSuite(
         bounds: { min: [0, 0, 0], max: [30, 20, 10] },
       });
       expect(tessellationTriangleCount(first)).toBeGreaterThan(0);
+      // Optional kernel normals stay optional (tessellation-only kernels
+      // omit them), but when present they pair with positions one-for-one;
+      // finiteness and unit length are judged inside the validity helper.
+      if (first.normals !== undefined) {
+        expect(first.normals.length).toBe(first.positions.length);
+      }
       const second = unwrapKernelResult(kernel.tessellate(solid), "tessellate");
       expect(second).toEqual(first);
     });

@@ -367,6 +367,9 @@ importers:
 
   packages/cad-kernel-manifold:
     dependencies:
+      '@slopcad/cad-core':
+        specifier: workspace:*
+        version: link:../cad-core
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel

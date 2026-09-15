@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { length } from "@slopcad/cad-core";
 
-import { tessellationTriangleCount } from "./contract";
+import { type KernelSolid, tessellationTriangleCount } from "./contract";
 import {
   createFakeKernel,
   FAKE_BOX_TRIANGLE_COUNT,
@@ -281,6 +281,164 @@ describe("fake kernel tessellation counts and validity", () => {
     );
     const soup = unwrapKernelResult(kernel.tessellate(cut), "tessellate");
     expect(tessellationTriangleCount(soup)).toBe(FAKE_BOX_TRIANGLE_COUNT);
+  });
+});
+
+describe("fake kernel normals", () => {
+  function flatAt(values: readonly number[], index: number): number {
+    const value = values[index];
+    if (value === undefined) {
+      throw new Error(`Missing flat-array value at index ${index}.`);
+    }
+    return value;
+  }
+
+  it("emits per-facet unit normals paired with positions for every primitive", () => {
+    const kernel = createFakeKernel();
+    const cases: readonly (readonly [
+      string,
+      KernelSolid,
+      readonly [number, number, number],
+    ])[] = [
+      [
+        "box",
+        unwrapKernelResult(
+          kernel.createBox({
+            width: length(30),
+            depth: length(20),
+            height: length(10),
+          }),
+          "createBox",
+        ),
+        [15, 10, 5],
+      ],
+      [
+        "sphere",
+        unwrapKernelResult(
+          kernel.createSphere({ radius: length(5) }),
+          "createSphere",
+        ),
+        [0, 0, 0],
+      ],
+      [
+        "cylinder",
+        unwrapKernelResult(
+          kernel.createCylinder({ radius: length(4), height: length(10) }),
+          "createCylinder",
+        ),
+        [0, 0, 5],
+      ],
+      [
+        "sharp cone",
+        unwrapKernelResult(
+          kernel.createCone({
+            bottomRadius: length(4),
+            topRadius: length(0),
+            height: length(10),
+          }),
+          "createCone",
+        ),
+        [0, 0, 2],
+      ],
+      [
+        "frustum",
+        unwrapKernelResult(
+          kernel.createCone({
+            bottomRadius: length(4),
+            topRadius: length(2),
+            height: length(10),
+          }),
+          "createCone",
+        ),
+        [0, 0, 2],
+      ],
+    ];
+    for (const [label, solid, interior] of cases) {
+      const soup = unwrapKernelResult(kernel.tessellate(solid), "tessellate");
+      assertTessellationValid(soup);
+      const normals = soup.normals;
+      if (normals === undefined) {
+        throw new Error(`${label} tessellation carried no kernel normals.`);
+      }
+      expect(normals.length).toBe(soup.positions.length);
+      const triangleCount = tessellationTriangleCount(soup);
+      for (let tri = 0; tri < triangleCount; tri += 1) {
+        const corners = [
+          flatAt(soup.indices, tri * 3),
+          flatAt(soup.indices, tri * 3 + 1),
+          flatAt(soup.indices, tri * 3 + 2),
+        ];
+        let cx = 0;
+        let cy = 0;
+        let cz = 0;
+        for (const corner of corners) {
+          cx += flatAt(soup.positions, corner * 3);
+          cy += flatAt(soup.positions, corner * 3 + 1);
+          cz += flatAt(soup.positions, corner * 3 + 2);
+        }
+        cx /= 3;
+        cy /= 3;
+        cz /= 3;
+        const normalCorner = corners[0];
+        if (normalCorner === undefined) {
+          throw new Error("Invariant violation: corner list always has three entries.");
+        }
+        const dot =
+          flatAt(normals, normalCorner * 3) * (cx - interior[0]) +
+          flatAt(normals, normalCorner * 3 + 1) * (cy - interior[1]) +
+          flatAt(normals, normalCorner * 3 + 2) * (cz - interior[2]);
+        if (!(dot > 0)) {
+          throw new Error(
+            `${label} triangle ${tri} normal points inward (dot product ${dot}).`,
+          );
+        }
+      }
+    }
+  });
+
+  it("emits exactly the six axis directions as box normals", () => {
+    const { kernel, solid } = box(30, 20, 10);
+    const soup = unwrapKernelResult(kernel.tessellate(solid), "tessellate");
+    const normals = soup.normals;
+    if (normals === undefined) {
+      throw new Error("Box tessellation carried no kernel normals.");
+    }
+    const distinct = new Set<string>();
+    for (let v = 0; v < normals.length / 3; v += 1) {
+      distinct.add(
+        [
+          flatAt(normals, v * 3),
+          flatAt(normals, v * 3 + 1),
+          flatAt(normals, v * 3 + 2),
+        ]
+          .map((component) => Math.round(component * 1e6) / 1e6)
+          .join(","),
+      );
+    }
+    expect([...distinct].sort()).toEqual([
+      "-1,0,0",
+      "0,-1,0",
+      "0,0,-1",
+      "0,0,1",
+      "0,1,0",
+      "1,0,0",
+    ]);
+  });
+
+  it("omits normals for empty solids alongside the empty soup", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({ width: length(10), depth: length(10), height: length(10) }),
+      "createBox",
+    );
+    const empty = unwrapKernelResult(
+      kernel.subtract(solid, [solid]),
+      "subtract",
+    );
+    const soup = unwrapKernelResult(kernel.tessellate(empty), "tessellate");
+    expect(soup.positions).toEqual([]);
+    expect(soup.indices).toEqual([]);
+    expect(soup.normals).toBeUndefined();
   });
 });
 
