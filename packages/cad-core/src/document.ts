@@ -186,6 +186,7 @@ export const DOCUMENT_ERROR_CODES = {
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
   inputUnknown: "document/input-unknown",
+  inputOrderInvalid: "document/input-order-invalid",
   outputUnknown: "document/output-unknown",
   notFound: "document/not-found",
   inUse: "document/in-use",
@@ -228,7 +229,16 @@ function validateBodyName(name: unknown): ParseResult<string, DocumentError> {
 
 const FEATURE_KIND_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 
-function validateFeatureKind(kind: unknown): ParseResult<string, DocumentError> {
+/**
+ * Validates untrusted input as a feature kind string: 1-64 characters,
+ * starting with a letter, drawn from letters, digits, dots, underscores, and
+ * hyphens (real feature kinds arrive with the geometry-kernel phases). The
+ * command layer reuses this so a serialized feature command and a document
+ * feature record validate their kind through one source of truth.
+ */
+export function parseFeatureKind(
+  kind: unknown,
+): ParseResult<string, DocumentError> {
   if (typeof kind !== "string" || !FEATURE_KIND_PATTERN.test(kind)) {
     return fail(
       docError(
@@ -241,7 +251,15 @@ function validateFeatureKind(kind: unknown): ParseResult<string, DocumentError> 
   return ok(kind);
 }
 
-function parseFeatureInputRef(input: unknown): ParseResult<FeatureInputRef, DocumentError> {
+/**
+ * Validates untrusted input as a {@link FeatureInputRef}: a plain object
+ * whose `kind`/`id` pair is consistent (the id must carry the wire prefix of
+ * its declared kind). The command layer reuses this so serialized commands
+ * and feature records parse input references through one source of truth.
+ */
+export function parseFeatureInputRef(
+  input: unknown,
+): ParseResult<FeatureInputRef, DocumentError> {
   if (!isPlainRecord(input)) {
     return fail(
       docError(
@@ -635,7 +653,7 @@ export function addFeature(
   document: CadDocument,
   input: FeatureRecordInput,
 ): ParseResult<FeatureAddResult, DocumentError> {
-  const kind = validateFeatureKind(input.kind);
+  const kind = parseFeatureKind(input.kind);
   if (!kind.ok) return kind;
   const inputs = parseFeatureInputRefs(input.inputs);
   if (!inputs.ok) return inputs;
@@ -751,6 +769,125 @@ export function removeFeature(
       ),
     }),
   );
+}
+
+/**
+ * The mutable fields of a feature record — everything except its identity —
+ * as accepted by {@link updateFeature}. Semantics are wholesale replacement
+ * (Phase 7 `feature.update` semantics): the record ends with exactly these
+ * kind, inputs, and outputs.
+ */
+export interface FeatureRecordUpdate {
+  readonly kind: string;
+  readonly inputs: readonly FeatureInputRef[];
+  readonly outputs: readonly BodyId[];
+}
+
+/** Result of {@link updateFeature}: the next document plus the replaced record. */
+export interface FeatureUpdateResult {
+  readonly document: CadDocument;
+  readonly feature: FeatureRecord;
+}
+
+/**
+ * Replaces a feature record's mutable fields — kind, inputs, and outputs —
+ * keeping its id, its position in the feature list, the document's id
+ * generator state, and every other feature (downstream references point at
+ * the stable id, so they survive the update unchanged).
+ *
+ * The replacement is validated exactly like {@link addFeature} (kind shape,
+ * input reference shape and resolution, output existence), plus one rule
+ * that add-time validation gets for free and an update would otherwise
+ * lose: a feature input of kind `feature` must reference a feature declared
+ * *earlier* in the feature list (`document/input-order-invalid` otherwise —
+ * this also covers self-reference). The feature list is kept backward-
+ * referencable because {@link parseCadDocument} rebuilds documents by
+ * replaying the records in order, so an update that introduced a forward or
+ * self reference would produce a document that no longer round-trips through
+ * {@link serializeCadDocument} and {@link parseCadDocument} exactly.
+ */
+export function updateFeature(
+  document: CadDocument,
+  id: FeatureId,
+  update: FeatureRecordUpdate,
+): ParseResult<FeatureUpdateResult, DocumentError> {
+  const kind = parseFeatureKind(update.kind);
+  if (!kind.ok) return kind;
+  const inputs = parseFeatureInputRefs(update.inputs);
+  if (!inputs.ok) return inputs;
+  const outputs = parseBodyIdList(update.outputs);
+  if (!outputs.ok) return outputs;
+  const index = document.features.findIndex((feature) => feature.id === id);
+  if (index < 0) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No feature with id "${id}" exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  for (const ref of inputs.value) {
+    if (ref.kind === "feature") {
+      const target = document.features.findIndex(
+        (feature) => feature.id === ref.id,
+      );
+      if (target < 0) {
+        return fail(
+          docError(
+            DOCUMENT_ERROR_CODES.inputUnknown,
+            `Feature input (feature "${ref.id}") does not resolve to an entity in document "${document.id}".`,
+            update,
+          ),
+        );
+      }
+      if (target >= index) {
+        return fail(
+          docError(
+            DOCUMENT_ERROR_CODES.inputOrderInvalid,
+            `Feature "${id}" cannot reference feature "${ref.id}" as an input: feature inputs must reference features declared earlier in the document, so the record list stays replayable in order.`,
+            update,
+          ),
+        );
+      }
+      continue;
+    }
+    if (!featureInputResolves(document, ref)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.inputUnknown,
+          `Feature input (${ref.kind} "${ref.id}") does not resolve to an entity in document "${document.id}".`,
+          update,
+        ),
+      );
+    }
+  }
+  for (const output of outputs.value) {
+    if (getBody(document, output) === undefined) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.outputUnknown,
+          `Feature output body "${output}" does not exist in document "${document.id}".`,
+          update,
+        ),
+      );
+    }
+  }
+  const feature = Object.freeze({
+    id,
+    kind: kind.value,
+    inputs: inputs.value,
+    outputs: outputs.value,
+  });
+  const features = [...document.features];
+  features[index] = feature;
+  return ok({
+    document: Object.freeze({
+      ...document,
+      features: Object.freeze(features),
+    }),
+    feature,
+  });
 }
 
 /**
@@ -968,7 +1105,7 @@ function parseSerializedFeature(
       ),
     );
   }
-  const kind = validateFeatureKind(input.kind);
+  const kind = parseFeatureKind(input.kind);
   if (!kind.ok) return kind;
   const inputs = parseFeatureInputRefs(input.inputs);
   if (!inputs.ok) return inputs;

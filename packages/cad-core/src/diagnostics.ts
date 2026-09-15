@@ -117,6 +117,7 @@ export const DIAGNOSTIC_CODES = {
   documentFeatureKindInvalid: DOCUMENT_ERROR_CODES.featureKindInvalid,
   documentInputKindInvalid: DOCUMENT_ERROR_CODES.inputKindInvalid,
   documentInputUnknown: DOCUMENT_ERROR_CODES.inputUnknown,
+  documentInputOrderInvalid: DOCUMENT_ERROR_CODES.inputOrderInvalid,
   documentOutputUnknown: DOCUMENT_ERROR_CODES.outputUnknown,
   documentNotFound: DOCUMENT_ERROR_CODES.notFound,
   documentInUse: DOCUMENT_ERROR_CODES.inUse,

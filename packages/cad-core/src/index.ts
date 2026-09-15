@@ -202,6 +202,59 @@ export {
 } from "./parameter";
 export { findParameterCycle, parameterDependencyEdges } from "./parameter-graph";
 export type {
+  CadCommand,
+  CadCommandType,
+  CommandApplyError,
+  CommandError,
+  CommandErrorCode,
+  SerializedCadCommand,
+} from "./command";
+export {
+  applyCommand,
+  CAD_COMMAND_TYPES,
+  COMMAND_ERROR_CODES,
+  isCadCommandType,
+  parseCommand,
+  serializeCommand,
+} from "./command";
+export type {
+  CadTransaction,
+  SerializedCadTransaction,
+  TransactionError,
+  TransactionErrorCode,
+} from "./transaction";
+export {
+  applyTransaction,
+  parseTransaction,
+  serializeTransaction,
+  TRANSACTION_ERROR_CODES,
+} from "./transaction";
+export type {
+  DocumentHistory,
+  HistoryEntry,
+  HistoryError,
+  HistoryErrorCode,
+  HistoryMove,
+} from "./history";
+export {
+  canRedo,
+  canUndo,
+  createDocumentHistory,
+  currentDocument,
+  HISTORY_ERROR_CODES,
+  redoHistory,
+  recordTransaction,
+  undoHistory,
+} from "./history";
+export type { CadSession } from "./session";
+export {
+  applySessionCommand,
+  applySessionTransaction,
+  createSession,
+  redoSession,
+  undoSession,
+} from "./session";
+export type {
   FeatureGraphError,
   FeatureGraphErrorCode,
   FeatureGraphNodeId,
@@ -229,6 +282,8 @@ export type {
   FeatureInputRef,
   FeatureRecord,
   FeatureRecordInput,
+  FeatureRecordUpdate,
+  FeatureUpdateResult,
   SerializedBody,
   SerializedCadDocument,
   SerializedFeatureInputRef,
@@ -246,10 +301,13 @@ export {
   getDocumentParameter,
   getFeature,
   parseCadDocument,
+  parseFeatureInputRef,
+  parseFeatureKind,
   removeBody,
   removeDocumentParameter,
   removeFeature,
   serializeCadDocument,
+  updateFeature,
 } from "./document";
 export type {
   FeatureExecutionOutcome,
