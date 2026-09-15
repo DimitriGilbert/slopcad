@@ -6,8 +6,10 @@
  * however it needs.
  */
 
+import { DIMENSIONAL_ERROR_CODES } from "./dimensional";
 import { type AnyCadId, ID_ERROR_CODES, parseAnyCadId } from "./ids";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
+import { UNIT_ERROR_CODES } from "./units";
 
 /** Severity levels in increasing order of seriousness. */
 export const DIAGNOSTIC_SEVERITIES = ["info", "warning", "error", "fatal"] as const;
@@ -46,6 +48,17 @@ export const DIAGNOSTIC_CODES = {
   idEmpty: ID_ERROR_CODES.empty,
   idWrongPrefix: ID_ERROR_CODES.wrongPrefix,
   idInvalidPayload: ID_ERROR_CODES.invalidPayload,
+  unitNotAString: UNIT_ERROR_CODES.notAString,
+  unitUnknown: UNIT_ERROR_CODES.unknown,
+  valueNotARecord: DIMENSIONAL_ERROR_CODES.notARecord,
+  valueUnknownDimension: DIMENSIONAL_ERROR_CODES.unknownDimension,
+  valueUnitDimensionMismatch: DIMENSIONAL_ERROR_CODES.unitDimensionMismatch,
+  valueInvalidMagnitude: DIMENSIONAL_ERROR_CODES.invalidMagnitude,
+  valueNonFiniteMagnitude: DIMENSIONAL_ERROR_CODES.nonFiniteMagnitude,
+  arithmeticIncompatibleDimensions:
+    DIMENSIONAL_ERROR_CODES.incompatibleDimensions,
+  arithmeticDivisionByZero: DIMENSIONAL_ERROR_CODES.divisionByZero,
+  arithmeticNonFiniteResult: DIMENSIONAL_ERROR_CODES.nonFiniteResult,
 } as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES];
