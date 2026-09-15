@@ -7,6 +7,12 @@
     "./server": "./src/server.ts",
     "./web": "./src/web.ts"
   },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
+  },
   "dependencies": {
     "@t3-oss/env-core": "^0.13.11",
     "dotenv": "catalog:",
@@ -15,6 +21,8 @@
   "devDependencies": {
     "@slopcad/config": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

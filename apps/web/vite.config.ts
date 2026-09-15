@@ -11,5 +11,10 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
-  plugins: [tailwindcss(), tanstackStart(), nitro({ preset: "node-server" }), viteReact()],
+  plugins: [
+    tailwindcss(),
+    tanstackStart(),
+    nitro({ preset: "node-server" }),
+    viteReact(),
+  ],
 });

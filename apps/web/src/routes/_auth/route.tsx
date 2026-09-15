@@ -13,13 +13,6 @@ export const Route = createFileRoute("/_auth")({
     }
     return { session };
   },
-  loader: async ({ context }) => {
-    if (!context.session) {
-      throw redirect({
-        to: "/login",
-      });
-    }
-  },
 });
 
 function AuthLayout() {

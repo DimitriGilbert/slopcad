@@ -6,10 +6,10 @@ node_modules
 # Build outputs
 dist
 build
+.output
 *.tsbuildinfo
 
 # Generated files
-apps/web/src/routeTree.gen.ts
 local.db
 local.db-*
 
@@ -49,7 +49,12 @@ lerna-debug.log*
 
 # Testing
 coverage
+**/coverage
 .nyc_output
+reports
+test-results
+playwright-report
+e2e-artifacts
 
 # Misc
 *.tgz

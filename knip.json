@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "apps/web/src/router.tsx",
+    "apps/web/src/routes/__root.tsx",
+    "packages/api/src/index.ts",
+    "packages/api/src/context.ts",
+    "packages/api/src/routers/index.ts",
+    "packages/auth/src/index.ts",
+    "packages/db/src/index.ts",
+    "packages/db/src/schema/auth.ts",
+    "packages/env/src/server.ts",
+    "packages/env/src/web.ts",
+    "packages/config/vitest/base.ts"
+  ],
+  "ignore": [
+    "**/*.test.*",
+    "**/test-setup.ts",
+    "**/vitest.config.ts",
+    "**/playwright.config.ts",
+    "**/e2e/**",
+    "**/*.gen.ts"
+  ],
+  "ignoreDependencies": ["@slopcad/config"]
+}

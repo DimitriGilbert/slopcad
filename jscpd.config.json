@@ -1,0 +1,22 @@
+{
+  "minLines": 8,
+  "minTokens": 80,
+  "threshold": 100,
+  "exitCode": 0,
+  "reporters": ["console", "html", "json"],
+  "output": "reports/jscpd",
+  "format": ["typescript", "tsx"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.turbo/**",
+    "**/coverage/**",
+    "**/reports/**",
+    "**/*.test.*",
+    "**/test-setup.ts",
+    "**/e2e/**",
+    "**/*.d.ts",
+    "**/routeTree.gen.ts",
+    "**/spike/**"
+  ]
+}

@@ -9,7 +9,12 @@
       "default": "./src/*.ts"
     }
   },
-  "scripts": {},
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
+  },
   "dependencies": {
     "@slopcad/auth": "workspace:*",
     "@slopcad/db": "workspace:*",
@@ -21,6 +26,8 @@
   },
   "devDependencies": {
     "@slopcad/config": "workspace:*",
-    "typescript": "catalog:"
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }

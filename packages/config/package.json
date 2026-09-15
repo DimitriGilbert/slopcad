@@ -1,5 +1,14 @@
 {
   "name": "@slopcad/config",
   "version": "0.0.0",
-  "private": true
+  "private": true,
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
 }

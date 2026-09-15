@@ -45,7 +45,10 @@ function MarkerIcon({ className, ...props }: React.ComponentProps<"span">) {
     <span
       data-slot="marker-icon"
       aria-hidden="true"
-      className={cn("size-3.5 shrink-0 [&_svg:not([class*='size-'])]:size-3.5", className)}
+      className={cn(
+        "size-3.5 shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        className,
+      )}
       {...props}
     />
   );
