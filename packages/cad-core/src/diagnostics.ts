@@ -7,10 +7,12 @@
  */
 
 import { DIMENSIONAL_ERROR_CODES } from "./dimensional";
+import { DOCUMENT_ERROR_CODES } from "./document";
 import { EXPRESSION_AST_ERROR_CODES } from "./expression";
 import { EXPRESSION_EVALUATION_ERROR_CODES } from "./expression-evaluator";
 import { EXPRESSION_PARSE_ERROR_CODES } from "./expression-parser";
-import { type AnyCadId, ID_ERROR_CODES, parseAnyCadId } from "./ids";
+import { FEATURE_GRAPH_ERROR_CODES } from "./feature-graph";
+import { type AnyCadId, ID_ERROR_CODES, ID_GENERATOR_ERROR_CODES, parseAnyCadId } from "./ids";
 import { PARAMETER_ERROR_CODES } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { UNIT_ERROR_CODES } from "./units";
@@ -52,6 +54,7 @@ export const DIAGNOSTIC_CODES = {
   idEmpty: ID_ERROR_CODES.empty,
   idWrongPrefix: ID_ERROR_CODES.wrongPrefix,
   idInvalidPayload: ID_ERROR_CODES.invalidPayload,
+  idGeneratorExhausted: ID_GENERATOR_ERROR_CODES.exhausted,
   unitNotAString: UNIT_ERROR_CODES.notAString,
   unitUnknown: UNIT_ERROR_CODES.unknown,
   valueNotARecord: DIMENSIONAL_ERROR_CODES.notARecord,
@@ -104,6 +107,20 @@ export const DIAGNOSTIC_CODES = {
   parameterInvalidExpression: PARAMETER_ERROR_CODES.invalidExpression,
   parameterInvalidMetadata: PARAMETER_ERROR_CODES.invalidMetadata,
   parameterNotFound: PARAMETER_ERROR_CODES.notFound,
+  documentMalformed: DOCUMENT_ERROR_CODES.malformed,
+  documentVersionUnsupported: DOCUMENT_ERROR_CODES.versionUnsupported,
+  documentGeneratorStateInvalid: DOCUMENT_ERROR_CODES.generatorStateInvalid,
+  documentGeneratorExhausted: DOCUMENT_ERROR_CODES.generatorExhausted,
+  documentIdInvalid: DOCUMENT_ERROR_CODES.idInvalid,
+  documentIdConflict: DOCUMENT_ERROR_CODES.idConflict,
+  documentBodyNameInvalid: DOCUMENT_ERROR_CODES.bodyNameInvalid,
+  documentFeatureKindInvalid: DOCUMENT_ERROR_CODES.featureKindInvalid,
+  documentInputKindInvalid: DOCUMENT_ERROR_CODES.inputKindInvalid,
+  documentInputUnknown: DOCUMENT_ERROR_CODES.inputUnknown,
+  documentOutputUnknown: DOCUMENT_ERROR_CODES.outputUnknown,
+  documentNotFound: DOCUMENT_ERROR_CODES.notFound,
+  documentInUse: DOCUMENT_ERROR_CODES.inUse,
+  graphCycle: FEATURE_GRAPH_ERROR_CODES.cycle,
 } as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES];

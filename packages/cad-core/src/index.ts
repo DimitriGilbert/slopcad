@@ -11,6 +11,7 @@ export type {
   DocumentId,
   FeatureId,
   IdGenerator,
+  IdGeneratorErrorCode,
   IdGeneratorState,
   IdParseError,
   ParameterId,
@@ -21,6 +22,7 @@ export {
   CAD_ID_KINDS,
   CAD_ID_MAX_PAYLOAD_LENGTH,
   CAD_ID_PREFIXES,
+  CadIdGeneratorExhaustedError,
   CadIdValidationError,
   createBodyId,
   createDocumentId,
@@ -29,6 +31,7 @@ export {
   createParameterId,
   createReferenceId,
   ID_ERROR_CODES,
+  ID_GENERATOR_ERROR_CODES,
   parseAnyCadId,
   parseBodyId,
   parseDocumentId,
@@ -198,6 +201,79 @@ export {
   updateParameterValue,
 } from "./parameter";
 export { findParameterCycle, parameterDependencyEdges } from "./parameter-graph";
+export type {
+  FeatureGraphError,
+  FeatureGraphErrorCode,
+  FeatureGraphNodeId,
+  FeatureGraphSourceId,
+} from "./feature-graph";
+export {
+  affectedFeatures,
+  FEATURE_GRAPH_ERROR_CODES,
+  featureDependencyEdges,
+  featureEvaluationOrder,
+  findFeatureCycle,
+} from "./feature-graph";
+export type {
+  Body,
+  BodyAddResult,
+  BodyInput,
+  CadDocument,
+  DocumentEntity,
+  DocumentError,
+  DocumentErrorCode,
+  DocumentParameterAddResult,
+  DocumentParameterInput,
+  FeatureAddResult,
+  FeatureInputKind,
+  FeatureInputRef,
+  FeatureRecord,
+  FeatureRecordInput,
+  SerializedBody,
+  SerializedCadDocument,
+  SerializedFeatureInputRef,
+  SerializedFeatureRecord,
+} from "./document";
+export {
+  addBody,
+  addDocumentParameter,
+  addFeature,
+  createDocument,
+  DOCUMENT_ERROR_CODES,
+  FEATURE_INPUT_KINDS,
+  getBody,
+  getDocumentEntity,
+  getDocumentParameter,
+  getFeature,
+  parseCadDocument,
+  removeBody,
+  removeDocumentParameter,
+  removeFeature,
+  serializeCadDocument,
+} from "./document";
+export type {
+  FeatureExecutionOutcome,
+  FeatureExecutor,
+  FeatureRegenerationState,
+  FeatureRegenerationStatus,
+  RegenerateInput,
+  RegenerationError,
+  RegenerationErrorCode,
+  RegenerationRun,
+  RegenerationStateMap,
+  SerializedFeatureRegenerationStatus,
+  SerializedRegenerationStateMap,
+} from "./regeneration";
+export {
+  FEATURE_REGENERATION_STATES,
+  initialRegenerationStates,
+  isFeatureRegenerationState,
+  markStale,
+  parseRegenerationStates,
+  REGENERATION_ERROR_CODES,
+  regenerate,
+  serializeRegenerationStates,
+} from "./regeneration";
 export type { ParseFailure, ParseResult } from "./result";
 export { fail, ok } from "./result";
 export { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
