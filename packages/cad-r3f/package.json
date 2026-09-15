@@ -1,0 +1,35 @@
+{
+  "name": "@slopcad/cad-r3f",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@slopcad/cad-core": "workspace:*",
+    "@slopcad/cad-react": "workspace:*"
+  },
+  "peerDependencies": {
+    "@react-three/fiber": "9.7.0",
+    "react": "catalog:",
+    "three": "0.186.0"
+  },
+  "devDependencies": {
+    "@slopcad/config": "workspace:*",
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

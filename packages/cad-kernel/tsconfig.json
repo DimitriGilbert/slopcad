@@ -1,0 +1,3 @@
+{
+  "extends": "@slopcad/config/tsconfig.base.json"
+}
