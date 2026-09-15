@@ -32,6 +32,7 @@ import {
   removeDocumentParameter,
   removeFeature,
   serializeCadDocument,
+  updateFeature,
   type SerializedCadDocument,
 } from "./index";
 
@@ -650,6 +651,149 @@ describe("removeFeature", () => {
     expectError(
       removeFeature(document, featSketchId),
       DOCUMENT_ERROR_CODES.inUse,
+    );
+  });
+});
+
+describe("updateFeature", () => {
+  /** sampleDocument plus a downstream `extrude` feature referencing the sketch. */
+  function chainedDocument(): CadDocument {
+    return addFeatureOrDie(sampleDocument(), {
+      id: featExtrudeId,
+      kind: "extrude",
+      inputs: [{ kind: "feature", id: featSketchId }],
+      outputs: [],
+    }).document;
+  }
+
+  it("replaces kind, inputs, and outputs in place, keeping id, position, and generator state", () => {
+    const document = chainedDocument();
+    const updated = updateFeature(document, featSketchId, {
+      kind: "sketch-deep",
+      inputs: [{ kind: "parameter", id: widthId }],
+      outputs: [],
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(updated.value.feature).toEqual({
+      id: featSketchId,
+      kind: "sketch-deep",
+      inputs: [{ kind: "parameter", id: widthId }],
+      outputs: [],
+    });
+    expect(updated.value.document.features.length).toBe(document.features.length);
+    expect(updated.value.document.features[0]?.id).toBe(featSketchId);
+    expect(updated.value.document.features[1]?.id).toBe(featExtrudeId);
+    expect(updated.value.document.idGeneratorState).toEqual(
+      document.idGeneratorState,
+    );
+    // The downstream reference survives: it points at the stable id.
+    expect(updated.value.document.features[1]?.inputs).toEqual([
+      { kind: "feature", id: featSketchId },
+    ]);
+  });
+
+  it("accepts a no-op update and round-trips the result through serialization", () => {
+    const document = sampleDocument();
+    const updated = updateFeature(document, featSketchId, {
+      kind: "sketch",
+      inputs: [{ kind: "parameter", id: widthId }],
+      outputs: [bodySolidId],
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(serializeCadDocument(updated.value.document)).toEqual(
+      serializeCadDocument(document),
+    );
+    const revived = parseCadDocument(
+      JSON.parse(JSON.stringify(serializeCadDocument(updated.value.document))),
+    );
+    expect(revived.ok).toBe(true);
+    if (!revived.ok) return;
+    expect(serializeCadDocument(revived.value)).toEqual(
+      serializeCadDocument(updated.value.document),
+    );
+  });
+
+  it("fails with notFound for an unknown id", () => {
+    expectError(
+      updateFeature(sampleDocument(), createFeatureId("feat_missing"), {
+        kind: "sketch",
+        inputs: [],
+        outputs: [],
+      }),
+      DOCUMENT_ERROR_CODES.notFound,
+    );
+  });
+
+  it("validates the replacement like an add", () => {
+    expectError(
+      updateFeature(sampleDocument(), featSketchId, {
+        kind: "1sketch",
+        inputs: [],
+        outputs: [],
+      }),
+      DOCUMENT_ERROR_CODES.featureKindInvalid,
+    );
+    expectError(
+      updateFeature(sampleDocument(), featSketchId, {
+        kind: "sketch",
+        inputs: [{ kind: "nonsense", id: widthId } as unknown as FeatureInputRef],
+        outputs: [],
+      }),
+      DOCUMENT_ERROR_CODES.inputKindInvalid,
+    );
+    expectError(
+      updateFeature(sampleDocument(), featSketchId, {
+        kind: "sketch",
+        inputs: [{ kind: "parameter", id: createParameterId("param_missing") }],
+        outputs: [],
+      }),
+      DOCUMENT_ERROR_CODES.inputUnknown,
+    );
+    expectError(
+      updateFeature(sampleDocument(), featSketchId, {
+        kind: "sketch",
+        inputs: [],
+        outputs: [createBodyId("body_missing")],
+      }),
+      DOCUMENT_ERROR_CODES.outputUnknown,
+    );
+  });
+
+  it("keeps the feature list replayable: no self or forward feature inputs", () => {
+    const document = chainedDocument();
+    expectError(
+      updateFeature(document, featSketchId, {
+        kind: "sketch",
+        inputs: [{ kind: "feature", id: featSketchId }],
+        outputs: [bodySolidId],
+      }),
+      DOCUMENT_ERROR_CODES.inputOrderInvalid,
+    );
+    expectError(
+      updateFeature(document, featSketchId, {
+        kind: "sketch",
+        inputs: [{ kind: "feature", id: featExtrudeId }],
+        outputs: [bodySolidId],
+      }),
+      DOCUMENT_ERROR_CODES.inputOrderInvalid,
+    );
+    // A backward reference is fine — and the result still re-parses exactly.
+    const updated = updateFeature(document, featExtrudeId, {
+      kind: "extrude",
+      inputs: [{ kind: "feature", id: featSketchId }],
+      outputs: [bodySolidId],
+    });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    const revived = parseCadDocument(
+      JSON.parse(JSON.stringify(serializeCadDocument(updated.value.document))),
+    );
+    expect(revived.ok).toBe(true);
+    if (!revived.ok) return;
+    expect(serializeCadDocument(revived.value)).toEqual(
+      serializeCadDocument(updated.value.document),
     );
   });
 });
