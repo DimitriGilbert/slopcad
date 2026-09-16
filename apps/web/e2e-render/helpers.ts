@@ -622,6 +622,108 @@ export async function waitForImportedMeshSettled(
   return (await readIoImportSurface(page, rootId)).volume;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 19 /io GLB reference-viewer surface
+// ---------------------------------------------------------------------------
+
+/** One read of the /io fixture's GLB viewer surface (parsed attributes). */
+export interface IoGlbSurface {
+  /** "loaded" once the GLTFLoader parsed the held bytes; "" before. */
+  readonly status: string;
+  /** Loaded node names + decoded counts, JSON (e.g. one `body_plate`). */
+  readonly nodes: string;
+  /** The parsed pbrMetallicRoughness material, JSON. */
+  readonly material: string;
+  /** The decoded soup's full-precision divergence-theorem volume. */
+  readonly volumeExact: string;
+  /** The decoded soup's extents, the fixtures' `30.000 × …` form. */
+  readonly extents: string;
+  /** The page's shared error readout (GLB load failures included). */
+  readonly error: string;
+  /** The loaded scene's settle stamp (`data-cad-glb-volume`). */
+  readonly rendered: string;
+}
+
+/** Reads the /io fixture's GLB viewer surface from its attributes. */
+export async function readIoGlbSurface(
+  page: Page,
+  rootId = "io-root",
+): Promise<IoGlbSurface> {
+  const raw = await page.evaluate((id) => {
+    const root = document.getElementById(id);
+    return {
+      status: root?.getAttribute("data-glb-status") ?? null,
+      nodes: root?.getAttribute("data-glb-nodes") ?? null,
+      material: root?.getAttribute("data-glb-material") ?? null,
+      volumeExact: root?.getAttribute("data-glb-volume-exact") ?? null,
+      extents: root?.getAttribute("data-glb-extents") ?? null,
+      error: root?.getAttribute("data-import-error") ?? null,
+      rendered: root?.getAttribute("data-cad-glb-volume") ?? null,
+    };
+  }, rootId);
+  expect(raw.status, "the /io fixture must publish the GLB surface").not.toBeNull();
+  return {
+    status: raw.status ?? "",
+    nodes: raw.nodes ?? "",
+    material: raw.material ?? "",
+    volumeExact: raw.volumeExact ?? "",
+    extents: raw.extents ?? "",
+    error: raw.error ?? "",
+    rendered: raw.rendered ?? "",
+  };
+}
+
+/**
+ * The GLB viewer settle wait for /io: same discipline as
+ * `waitForImportedMeshSettled` — poll on a timer until the loaded soup's
+ * 3dp volume is published AND the viewer's settle stamp agrees with it
+ * (nudging a frame per poll against rAF starvation), then sample two
+ * animation frames so a screenshot provably lands after the loaded GLB was
+ * drawn. Returns the settled 3dp volume text.
+ */
+export async function waitForGlbViewerSettled(
+  page: Page,
+  rootId = "io-root",
+): Promise<string> {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  for (;;) {
+    const state = await page.evaluate((id) => {
+      const root = document.getElementById(id);
+      const volumeExact = root?.getAttribute("data-glb-volume-exact") ?? null;
+      return {
+        volume:
+          volumeExact === null || volumeExact === ""
+            ? null
+            : Number(volumeExact).toFixed(3),
+        rendered: root?.getAttribute("data-cad-glb-volume") ?? null,
+      };
+    }, rootId);
+    if (
+      state.volume !== null &&
+      state.volume !== "" &&
+      state.volume === state.rendered
+    ) {
+      break;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `The GLB viewer never settled (last state: ${JSON.stringify(state)}).`,
+      );
+    }
+    await forceAnimationFrame(page);
+    await page.waitForTimeout(SETTLE_POLL_MS);
+  }
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      }),
+  );
+  return (await readIoGlbSurface(page, rootId)).rendered;
+}
+
 /**
  * Pixel-diff localization: decodes two element-capture PNGs IN THE PAGE —
  * the same browser renderer that produced the bytes reads them back via

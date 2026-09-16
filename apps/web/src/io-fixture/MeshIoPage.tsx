@@ -36,6 +36,20 @@
  * (`data-import-volume`) exactly when the rendered pixels carry the
  * imported geometry.
  *
+ * The Phase 19 GLB path extends the same pattern one step further: Export
+ * GLB holds the bytes of the exported RENDER PROJECTION (cad-core's
+ * renderer-neutral render data — the exporter's input surface), and Load
+ * held GLB parses those bytes with three's GLTFLoader (the plan's
+ * reference viewer) and renders the LOADED geometry in the third viewport.
+ * Its machine surface: `data-export-glb-bytes` /
+ * `data-export-glb-triangles`, `data-glb-status` ("loaded" once the loader
+ * parsed the bytes), `data-glb-nodes` (loaded node names + decoded counts,
+ * JSON), `data-glb-material` (the parsed pbrMetallicRoughness material,
+ * JSON), `data-glb-volume-exact` / `data-glb-extents` of the decoded soup,
+ * the loaded scene's settle stamp `data-cad-glb-volume` and its
+ * rendered-frame counter `data-glb-frames`. GLB load failures share the
+ * page's error surface (`data-import-error` / the error paragraph).
+ *
  * ## Machine-readable surface (`#io-root`)
  *
  * The source session's settle attributes (written by the shared fixture
@@ -63,6 +77,7 @@ import type { ReactElement } from "react";
 // Node-targeted 3MF importer (`node:zlib`), and an index import would pull
 // that module into the browser bundle. The page uses the browser-safe
 // adapters directly; 3MF import goes through the app server instead.
+import { exportGlb } from "@slopcad/cad-io/glb-export";
 import { exportThreeMf } from "@slopcad/cad-io/three-mf-export";
 import type { ImportedThreeMfMesh } from "@slopcad/cad-io/three-mf-import";
 import { exportStlBinary } from "@slopcad/cad-io/stl-export";
@@ -72,6 +87,7 @@ import { CadScene } from "@slopcad/cad-r3f";
 import { Button } from "@slopcad/ui/components/button";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 import type { ThreeMfImportResponse } from "./io-protocol";
+import type { GlbViewerState } from "./io-glb";
 
 import {
   bootRenderFixtureSession,
@@ -83,6 +99,7 @@ import {
   meshSignedVolume,
   type ImportedMeshState,
 } from "./io-mesh";
+import { loadGlbViewerState } from "./io-glb";
 
 /** One held export: the exact bytes plus the triangle count they encode. */
 interface HeldExport {
@@ -124,10 +141,14 @@ export function MeshIoPage(): ReactElement {
   const [applied, setApplied] = useState<PlateRenderState | null>(null);
   const [heldStl, setHeldStl] = useState<HeldExport | null>(null);
   const [held3Mf, setHeld3Mf] = useState<HeldExport | null>(null);
+  const [heldGlb, setHeldGlb] = useState<HeldExport | null>(null);
   const [importView, setImportView] = useState<ImportView | null>(null);
   const [importError, setImportError] = useState("");
   const [importPending, setImportPending] = useState(false);
   const [importedFrames, setImportedFrames] = useState(0);
+  const [glbView, setGlbView] = useState<GlbViewerState | null>(null);
+  const [glbPending, setGlbPending] = useState(false);
+  const [glbFrames, setGlbFrames] = useState(0);
   const sessionRef = useRef<RenderFixtureSession | null>(null);
 
   useEffect(() => {
@@ -152,14 +173,19 @@ export function MeshIoPage(): ReactElement {
   }, []);
 
   /** Exports the settled source soup; returns null when it cannot. */
-  const exportHeld = (format: "stl" | "3mf"): HeldExport | null => {
+  const exportHeld = (format: "stl" | "3mf" | "glb"): HeldExport | null => {
     if (applied === null) return null;
     const tessellation = applied.measurement.tessellation;
     const triangles = tessellation.indices.length / 3;
     const result =
       format === "stl"
         ? exportStlBinary(tessellation)
-        : exportThreeMf(tessellation, { title: EXPORT_TITLE });
+        : format === "3mf"
+          ? exportThreeMf(tessellation, { title: EXPORT_TITLE })
+          : // GLB exports the RENDER PROJECTION — the renderer-neutral
+            // render data (kernel normals included), the plan's stated
+            // Phase 19 input — not the raw soup.
+            exportGlb(applied.projection);
     if (!result.ok) {
       setImportError(`${result.error.code}: ${result.error.message}`);
       return null;
@@ -183,6 +209,35 @@ export function MeshIoPage(): ReactElement {
     if (held === null) return;
     if (held3Mf !== null) URL.revokeObjectURL(held3Mf.downloadUrl);
     setHeld3Mf(held);
+  };
+
+  const exportGlbBytes = (): void => {
+    const held = exportHeld("glb");
+    if (held === null) return;
+    if (heldGlb !== null) URL.revokeObjectURL(heldGlb.downloadUrl);
+    setHeldGlb(held);
+  };
+
+  /**
+   * Loads the held GLB bytes through three's GLTFLoader (the reference
+   * viewer) and adopts the loaded scene as the viewer render state.
+   */
+  const loadGlb = (): void => {
+    if (heldGlb === null) return;
+    setGlbPending(true);
+    loadGlbViewerState(heldGlb.bytes)
+      .then((state) => {
+        setGlbView(state);
+        setImportError("");
+      })
+      .catch((error: unknown) => {
+        setImportError(
+          error instanceof Error ? error.message : String(error),
+        );
+      })
+      .finally(() => {
+        setGlbPending(false);
+      });
   };
 
   /** The one place an imported soup becomes the rendered import view. */
@@ -275,6 +330,15 @@ export function MeshIoPage(): ReactElement {
       data-export-stl-triangles={heldStl === null ? "" : String(heldStl.triangles)}
       data-export-3mf-bytes={held3Mf === null ? "" : String(held3Mf.bytes.length)}
       data-export-3mf-triangles={held3Mf === null ? "" : String(held3Mf.triangles)}
+      data-export-glb-bytes={heldGlb === null ? "" : String(heldGlb.bytes.length)}
+      data-export-glb-triangles={heldGlb === null ? "" : String(heldGlb.triangles)}
+      data-glb-status={glbView === null ? "" : "loaded"}
+      data-glb-nodes={glbView === null ? "" : JSON.stringify(glbView.meshes)}
+      data-glb-material={glbView === null ? "" : JSON.stringify(glbView.material)}
+      data-glb-volume-exact={glbView === null ? "" : String(glbView.volume)}
+      data-glb-extents={glbView === null ? "" : extentsText(glbView.bounds)}
+      data-cad-glb-volume=""
+      data-glb-frames={String(glbFrames)}
       data-import-source={importView === null ? "" : importView.source}
       data-import-triangles={importView === null ? "" : String(importView.mesh.triangles)}
       data-import-volume={importView === null ? "" : importView.mesh.volume.toFixed(3)}
@@ -296,7 +360,10 @@ export function MeshIoPage(): ReactElement {
           back, render the imported mesh. STL import runs in the browser; 3MF
           import parses on the app server (the 18.4 importer is
           Node-targeted) and the mesh renders locally. An imported mesh is a
-          mesh body — triangle soup, no parametric history.
+          mesh body — triangle soup, no parametric history. The GLB path
+          (Phase 19) exports the source projection and loads the bytes back
+          through three's GLTFLoader — the reference viewer — rendering the
+          loaded geometry below.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-6">
@@ -359,6 +426,34 @@ export function MeshIoPage(): ReactElement {
                 </>
               )}
             </span>
+            <Button
+              id="io-export-glb"
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={applied === null}
+              onClick={exportGlbBytes}
+            >
+              Export GLB
+            </Button>
+            <span className="font-mono text-xs" id="io-export-glb-readout">
+              {heldGlb === null ? (
+                "—"
+              ) : (
+                <>
+                  {`${String(heldGlb.bytes.length)} B`}
+                  {"\u00A0"}
+                  <a
+                    id="io-download-glb"
+                    href={heldGlb.downloadUrl}
+                    download="plate.glb"
+                    className="text-foreground underline underline-offset-2"
+                  >
+                    download
+                  </a>
+                </>
+              )}
+            </span>
           </div>
         </fieldset>
         <fieldset className="space-y-1 text-sm">
@@ -400,6 +495,16 @@ export function MeshIoPage(): ReactElement {
             >
               Import held 3MF
             </Button>
+            <Button
+              id="io-load-glb"
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={heldGlb === null || glbPending}
+              onClick={loadGlb}
+            >
+              Load held GLB
+            </Button>
           </div>
         </fieldset>
         <p
@@ -430,6 +535,23 @@ export function MeshIoPage(): ReactElement {
               <span id="io-import-extents">{extentsText(importView.mesh.bounds)}</span>
               {"\u00A0"}mm,{" "}
               <span id="io-import-detail">{importView.detailJson}</span>
+            </>
+          )}
+        </li>
+        <li data-testid="io-glb-readout">
+          {glbView === null ? (
+            <span className="text-muted-foreground">no GLB loaded</span>
+          ) : (
+            <>
+              GLB ={" "}
+              <span id="io-glb-nodes">{JSON.stringify(glbView.meshes)}</span>
+              , material ={" "}
+              <span id="io-glb-material">{JSON.stringify(glbView.material)}</span>
+              , volume ={" "}
+              <span id="io-glb-volume">{glbView.volume.toFixed(3)}</span>
+              {"\u00A0"}mm³, extents ={" "}
+              <span id="io-glb-extents">{extentsText(glbView.bounds)}</span>
+              {"\u00A0"}mm
             </>
           )}
         </li>
@@ -485,6 +607,34 @@ export function MeshIoPage(): ReactElement {
                       importView.mesh.volume.toFixed(3),
                     );
                   setImportedFrames((frames) => frames + 1);
+                }}
+              />
+            )}
+          </div>
+        </figure>
+        <figure className="space-y-1">
+          <figcaption className="text-muted-foreground text-xs">
+            GLB → reference viewer (three GLTFLoader, loaded geometry)
+          </figcaption>
+          <div
+            id="io-glb-viewport"
+            className={`overflow-hidden border ${VIEWPORT_CLASS}`}
+          >
+            {glbView === null ? (
+              <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
+                {glbPending ? "loading GLB…" : "no GLB loaded"}
+              </div>
+            ) : (
+              <CadScene
+                projection={glbView.projection}
+                onSettled={() => {
+                  document
+                    .getElementById("io-root")
+                    ?.setAttribute(
+                      "data-cad-glb-volume",
+                      glbView.volume.toFixed(3),
+                    );
+                  setGlbFrames((frames) => frames + 1);
                 }}
               />
             )}
