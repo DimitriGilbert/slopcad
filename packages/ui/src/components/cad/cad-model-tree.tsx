@@ -114,7 +114,7 @@ import {
   type RegenerationStateMap,
   type SelectionReference,
 } from "@slopcad/cad-react";
-import { cn } from "@slopcad/ui/lib/utils";
+import { cn } from "cn";
 
 /** The user-facing strings of {@link CadModelTree}. Overridable via props. */
 export interface CadModelTreeLabels {

@@ -1,0 +1,487 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "slopcad",
+  "homepage": "https://github.com/slopcad/slopcad",
+  "items": [
+    {
+      "name": "badge",
+      "type": "registry:component",
+      "title": "Badge",
+      "description": "Small status descriptor built on Base UI merge-props/use-render.",
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/badge.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "button",
+      "type": "registry:component",
+      "title": "Button",
+      "description": "Base UI button with slopcad variants and sizes.",
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/button.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "checkbox",
+      "type": "registry:component",
+      "title": "Checkbox",
+      "description": "Base UI checkbox with an indeterminate state and check icon.",
+      "dependencies": ["@base-ui/react", "lucide-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/checkbox.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "command",
+      "type": "registry:component",
+      "title": "Command",
+      "description": "cmdk command menu composed with the dialog and input-group items.",
+      "registryDependencies": ["@slopcad/dialog", "@slopcad/input-group"],
+      "dependencies": ["cmdk", "lucide-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/command.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "dialog",
+      "type": "registry:component",
+      "title": "Dialog",
+      "description": "Base UI dialog primitives with overlay and close button.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["@base-ui/react", "lucide-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/dialog.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "field",
+      "type": "registry:component",
+      "title": "Field",
+      "description": "Form field scaffold (label, description, error) over the label and separator items.",
+      "registryDependencies": ["@slopcad/label", "@slopcad/separator"],
+      "dependencies": ["class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/field.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "input",
+      "type": "registry:component",
+      "title": "Input",
+      "description": "Base UI text input with invalid and disabled styles.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/input.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "input-group",
+      "type": "registry:component",
+      "title": "Input Group",
+      "description": "Composable input group (icon, addon, element) over the button, input, and textarea items.",
+      "registryDependencies": [
+        "@slopcad/button",
+        "@slopcad/input",
+        "@slopcad/textarea"
+      ],
+      "dependencies": ["class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/input-group.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "label",
+      "type": "registry:component",
+      "title": "Label",
+      "description": "Form label with disabled and invalid styling variants.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/label.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "popover",
+      "type": "registry:component",
+      "title": "Popover",
+      "description": "Base UI popover with anchored positioning and animation.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/popover.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "radio-group",
+      "type": "registry:component",
+      "title": "Radio Group",
+      "description": "Base UI radio group with item indicator.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/radio-group.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "select",
+      "type": "registry:component",
+      "title": "Select",
+      "description": "Base UI select with trigger, popup, and item primitives.",
+      "dependencies": ["@base-ui/react", "lucide-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/select.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "separator",
+      "type": "registry:component",
+      "title": "Separator",
+      "description": "Base UI separator with horizontal and vertical orientation.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/separator.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "slider",
+      "type": "registry:component",
+      "title": "Slider",
+      "description": "Base UI slider with track, range, and thumb primitives.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/slider.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "switch",
+      "type": "registry:component",
+      "title": "Switch",
+      "description": "Base UI switch with thumb animation.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/switch.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "textarea",
+      "type": "registry:component",
+      "title": "Textarea",
+      "description": "Multi-line text input with invalid and disabled styles.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/textarea.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "formedible",
+      "type": "registry:component",
+      "title": "Formedible",
+      "description": "Schema-driven form renderer on TanStack Form: field registry, hooks, layout, and validation library.",
+      "registryDependencies": [
+        "@slopcad/badge",
+        "@slopcad/button",
+        "@slopcad/checkbox",
+        "@slopcad/command",
+        "@slopcad/field",
+        "@slopcad/input",
+        "@slopcad/popover",
+        "@slopcad/radio-group",
+        "@slopcad/select",
+        "@slopcad/slider",
+        "@slopcad/switch",
+        "@slopcad/textarea"
+      ],
+      "dependencies": [
+        "@tanstack/react-form",
+        "zod",
+        "lucide-react",
+        "clsx",
+        "tailwind-merge",
+        "cn"
+      ],
+      "files": [
+        {
+          "path": "src/components/formedible/field-renderer.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/form.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/advanced-field-utils.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/array-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/autocomplete-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/checkbox-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/color-picker-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/combobox-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/date-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/duration-picker-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/field-registry.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/field-wrapper.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/file-upload-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/location-picker-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/masked-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/multi-combobox-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/multi-select-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/number-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/object-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/password-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/phone-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/radio-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/rating-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/select-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/slider-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/switch-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/textarea-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/fields/text-field.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/hooks/use-form-analytics.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/hooks/use-formedible.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/hooks/use-form-persistence.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/hooks/use-form-tabs.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/hooks/use-multi-page.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/layout/form-layout.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/layout/form-navigation.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/layout/form-progress.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/layout/form-tabs.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/dynamic-text.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/field-path.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/field-visibility.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/normalize-field-config.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/normalize-options.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/types.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/validation.ts",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/formedible/lib/zod-errors.ts",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-model-tree",
+      "type": "registry:component",
+      "title": "CAD Model Tree",
+      "description": "Provider-driven document tree mirroring the @slopcad/cad-react session: bodies, features, and regeneration statuses.",
+      "dependencies": ["@slopcad/cad-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-model-tree.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-parameter-panel",
+      "type": "registry:component",
+      "title": "CAD Parameter Panel",
+      "description": "Provider-driven parameter editor mirroring the @slopcad/cad-react session and applying edits as parameter.set transactions through Formedible.",
+      "registryDependencies": ["@slopcad/formedible"],
+      "dependencies": ["@slopcad/cad-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-parameter-panel.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-toolbar",
+      "type": "registry:component",
+      "title": "CAD Toolbar",
+      "description": "Provider-driven tool toolbar mirroring the @slopcad/cad-react tool registry and arming tools through the store.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["@slopcad/cad-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-toolbar.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-viewport",
+      "type": "registry:component",
+      "title": "CAD Viewport",
+      "description": "WebGL viewport composing the @slopcad/cad-r3f deterministic scene with @slopcad/cad-react tool wiring, selection mirroring, and an overlay slot.",
+      "dependencies": ["@slopcad/cad-react", "@slopcad/cad-r3f", "cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-viewport.tsx",
+          "type": "registry:component"
+        }
+      ]
+    }
+  ]
+}

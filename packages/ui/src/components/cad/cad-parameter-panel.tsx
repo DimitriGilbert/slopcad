@@ -102,7 +102,7 @@ import {
   type ParameterCollection,
   type ParseResult,
 } from "@slopcad/cad-react";
-import { cn } from "@slopcad/ui/lib/utils";
+import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
 import { useFormedible } from "../formedible/hooks/use-formedible";

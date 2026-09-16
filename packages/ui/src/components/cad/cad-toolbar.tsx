@@ -65,7 +65,7 @@ import {
   useCadTools,
   type CadToolsApi,
 } from "@slopcad/cad-react";
-import { cn } from "@slopcad/ui/lib/utils";
+import { cn } from "cn";
 
 import { Button } from "../button";
 
