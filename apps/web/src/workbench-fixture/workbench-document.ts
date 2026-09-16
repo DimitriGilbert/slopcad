@@ -38,7 +38,7 @@ import {
 const WORKBENCH_BODY_ID: BodyId = createBodyId("body_plate");
 
 /** The hole diameter parameter the hooks edit. */
-export const WORKBENCH_HOLE_PARAMETER: ParameterId = createParameterId(
+const WORKBENCH_HOLE_PARAMETER: ParameterId = createParameterId(
   "param_hole_diameter",
 );
 
@@ -74,7 +74,14 @@ interface DocumentResult {
   readonly error?: { readonly message: string };
 }
 
-function requireDocumentOk(result: DocumentResult, what: string): CadDocument {
+/**
+ * Unwraps a document-building result or throws with the failing step named
+ * — the deterministic boot documents must never construct partially.
+ */
+export function requireDocumentOk(
+  result: DocumentResult,
+  what: string,
+): CadDocument {
   if (!result.ok || result.value === undefined) {
     throw new Error(
       `Workbench document rejected ${what}: ${String(result.error?.message)}`,

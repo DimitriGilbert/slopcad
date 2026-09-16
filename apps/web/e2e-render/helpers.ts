@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 
 export function sha256(bytes: Buffer): string {
@@ -229,6 +229,56 @@ export async function waitForSelectionFrame(
   );
 }
 
+/**
+ * The highlight-layer settle wait for TREE/PANEL-originated state changes.
+ * A viewport pick keeps the pointer over the canvas, whose pointer events
+ * keep the compositor servicing frames; a tree or panel pick touches only
+ * DOM, so the demand frame that must carry the selection stamp can sit
+ * unscheduled under rAF starvation — the exact condition
+ * `waitForSettledScene`'s clipped-screenshot nudge exists for. So this
+ * polls the fixture's state surface on a timer (never rAF) and nudges a
+ * frame per poll until the selection key AND the stamp agree, then samples
+ * two animation frames so a screenshot provably lands after the highlight
+ * was drawn.
+ */
+export async function waitForTreeSelectionFrame(
+  page: Page,
+  expectedKey: string,
+  rootId: string,
+): Promise<void> {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  for (;;) {
+    const matched = await page.evaluate(
+      ({ id, expected }) => {
+        const root = document.getElementById(id);
+        return (
+          root !== null &&
+          root.getAttribute("data-selection-key") === expected &&
+          root.getAttribute("data-cad-selection-frame") === expected
+        );
+      },
+      { id: rootId, expected: expectedKey },
+    );
+    if (matched) break;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `The selection frame stamp never reached "${expectedKey}".`,
+      );
+    }
+    await forceAnimationFrame(page);
+    await page.waitForTimeout(SETTLE_POLL_MS);
+  }
+  await forceAnimationFrame(page);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      }),
+  );
+}
+
 /** The selected references as the fixture serialized them (parsed JSON). */
 export async function readSelection(
   page: Page,
@@ -430,4 +480,163 @@ export async function clickFaceAnchor(
     position: { x: anchor.point[0], y: anchor.point[1] },
     modifiers: [...modifiers],
   });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 15.1 pixel-diff localization
+// ---------------------------------------------------------------------------
+
+/** A rectangle in element-capture pixels (mask regions and model regions). */
+export interface CaptureRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** The axis-aligned bounds of a set of differing capture pixels. */
+export interface DiffBounds {
+  readonly minX: number;
+  readonly minY: number;
+  readonly maxX: number;
+  readonly maxY: number;
+}
+
+/** Where two element captures' pixels differ, mask rectangles applied. */
+export interface LocalizedPixelDiff {
+  /** Differing pixels inside at least one mask rect (e.g. overlay DOM). */
+  readonly masked: number;
+  /** Differing pixels outside every mask rect. */
+  readonly unmasked: number;
+  /** Bounds of the unmasked differing pixels; null when `unmasked` is 0. */
+  readonly unmaskedBounds: DiffBounds | null;
+}
+
+/**
+ * Pixel-diff localization: decodes two element-capture PNGs IN THE PAGE —
+ * the same browser renderer that produced the bytes reads them back via
+ * `createImageBitmap` (no spec-side PNG decoder dependency) — and reports
+ * where their pixels differ. `masks` (capture-pixel rectangles, e.g.
+ * overlay DOM boxes) are counted separately and excluded from the
+ * localized bounds, so a surviving unmasked diff proves the canvas itself
+ * changed rather than composited DOM chrome. Throws in-page when the two
+ * captures' dimensions differ.
+ */
+export async function diffElementCaptures(
+  page: Page,
+  first: Buffer,
+  second: Buffer,
+  masks: readonly CaptureRect[] = [],
+): Promise<LocalizedPixelDiff> {
+  return page.evaluate<
+    LocalizedPixelDiff,
+    {
+      readonly first: string;
+      readonly second: string;
+      readonly masks: readonly CaptureRect[];
+    }
+  >(
+    ({ first: firstPng, masks: rects, second: secondPng }) => {
+      const decode = async (base64: string): Promise<ImageData> => {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        const bitmap = await createImageBitmap(
+          new Blob([bytes], { type: "image/png" }),
+        );
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext("2d");
+        if (context === null) {
+          throw new Error("decoding captures requires a 2D canvas context");
+        }
+        context.drawImage(bitmap, 0, 0);
+        return context.getImageData(0, 0, bitmap.width, bitmap.height);
+      };
+      const compare = async (): Promise<LocalizedPixelDiff> => {
+        const [a, b] = await Promise.all([
+          decode(firstPng),
+          decode(secondPng),
+        ]);
+        if (a.width !== b.width || a.height !== b.height) {
+          throw new Error(
+            `capture size mismatch: ${String(a.width)}x${String(a.height)} vs ${String(b.width)}x${String(b.height)}`,
+          );
+        }
+        let masked = 0;
+        let unmasked = 0;
+        let minX = Number.POSITIVE_INFINITY;
+        let minY = Number.POSITIVE_INFINITY;
+        let maxX = Number.NEGATIVE_INFINITY;
+        let maxY = Number.NEGATIVE_INFINITY;
+        for (let y = 0; y < a.height; y += 1) {
+          for (let x = 0; x < a.width; x += 1) {
+            const offset = (y * a.width + x) * 4;
+            const differs =
+              a.data[offset] !== b.data[offset] ||
+              a.data[offset + 1] !== b.data[offset + 1] ||
+              a.data[offset + 2] !== b.data[offset + 2] ||
+              a.data[offset + 3] !== b.data[offset + 3];
+            if (!differs) continue;
+            const insideMask = rects.some(
+              (rect) =>
+                x >= rect.x &&
+                x < rect.x + rect.width &&
+                y >= rect.y &&
+                y < rect.y + rect.height,
+            );
+            if (insideMask) {
+              masked += 1;
+              continue;
+            }
+            unmasked += 1;
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+        return {
+          masked,
+          unmasked,
+          unmaskedBounds: unmasked === 0 ? null : { maxX, maxY, minX, minY },
+        };
+      };
+      return compare();
+    },
+    {
+      first: first.toString("base64"),
+      masks,
+      second: second.toString("base64"),
+    },
+  );
+}
+
+/**
+ * A locator's bounding box as a capture-pixel mask rect: translated against
+ * `captureBox` (the captured element's page-coordinate box), scaled from
+ * CSS to capture pixels (`captureWidthPx` carries the device pixel ratio),
+ * and inflated by `inflationPx` so subpixel-antialiased glyph edges at the
+ * box boundary cannot leak into the unmasked diff.
+ */
+export async function locatorMaskRect(
+  locator: Locator,
+  captureBox: { readonly x: number; readonly y: number; readonly width: number },
+  captureWidthPx: number,
+  inflationPx = 2,
+): Promise<CaptureRect> {
+  const box = await locator.boundingBox();
+  if (box === null) {
+    throw new Error("a mask target must have a bounding box");
+  }
+  const scale = captureWidthPx / captureBox.width;
+  return {
+    x: (box.x - captureBox.x) * scale - inflationPx,
+    y: (box.y - captureBox.y) * scale - inflationPx,
+    width: box.width * scale + inflationPx * 2,
+    height: box.height * scale + inflationPx * 2,
+  };
 }
