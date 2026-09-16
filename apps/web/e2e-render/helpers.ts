@@ -248,6 +248,133 @@ export async function readSelectionRegeneration(page: Page): Promise<number> {
   return value;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 13 tool surface
+// ---------------------------------------------------------------------------
+
+/** One read of the fixture's tool surface (parsed from its data attributes). */
+export interface ToolSurface {
+  readonly toolId: string;
+  readonly phase: string;
+  readonly toolState: unknown;
+  readonly completion: unknown;
+  readonly failure: unknown;
+  readonly commandLog: unknown;
+  readonly measure: string;
+  readonly translate: unknown;
+}
+
+/** Reads the fixture's Phase 13 tool surface. */
+export async function readToolSurface(page: Page): Promise<ToolSurface> {
+  const read = async (attribute: string): Promise<string> => {
+    const raw = await page.locator("#render-root").getAttribute(attribute);
+    expect(raw, `${attribute} must exist`).not.toBeNull();
+    return raw ?? "";
+  };
+  const parse = (raw: string): unknown => (raw === "" ? null : JSON.parse(raw));
+  return {
+    toolId: await read("data-tool-id"),
+    phase: await read("data-tool-phase"),
+    toolState: parse(await read("data-tool-state")),
+    completion: parse(await read("data-tool-completion")),
+    failure: parse(await read("data-tool-failure")),
+    commandLog: parse(await read("data-command-log")),
+    measure: await read("data-measure"),
+    translate: parse(await read("data-translate")),
+  };
+}
+
+/** Activates a tool through the fixture's tool selector and waits for it. */
+export async function activateTool(page: Page, toolId: string): Promise<void> {
+  await page.locator(`#tool-${toolId}`).click();
+  await page.waitForFunction((id) => {
+    const root = document.getElementById("render-root");
+    return (
+      root !== null &&
+      root.getAttribute("data-tool-id") === id &&
+      root.getAttribute("data-tool-phase") === "active"
+    );
+  }, toolId);
+}
+
+/** Reads the settle counter (the number of rendered projection frames). */
+export async function readRenderedFrames(page: Page): Promise<number> {
+  const raw = await page.locator("#render-root").getAttribute("data-rendered-frames");
+  const value = Number(raw);
+  expect(Number.isInteger(value) && value >= 0, `frames="${String(raw)}"`).toBe(true);
+  return value;
+}
+
+/** Waits until the scene has rendered at least `atLeast` projection frames. */
+export async function waitForRenderedFrames(
+  page: Page,
+  atLeast: number,
+): Promise<void> {
+  await page.waitForFunction((count) => {
+    const root = document.getElementById("render-root");
+    const frames = Number(root?.getAttribute("data-rendered-frames") ?? "0");
+    return frames >= count;
+  }, atLeast);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      }),
+  );
+}
+
+/**
+ * Waits until the settle stamp proves the frame carrying the CURRENT
+ * applied translate offset has rendered — the precise "moved frame" wait
+ * (the volume stamp cannot distinguish it: translation is
+ * volume-invariant). Then two animation frames, so a screenshot provably
+ * samples the frame after the moved geometry was drawn.
+ */
+export async function waitForRenderedTranslate(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const root = document.getElementById("render-root");
+    return (
+      root !== null &&
+      root.getAttribute("data-cad-rendered-translate") !== null &&
+      root.getAttribute("data-cad-rendered-translate") ===
+        root.getAttribute("data-translate")
+    );
+  });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      }),
+  );
+}
+
+/**
+ * Drags from one face anchor to another (pointer down, stepped moves,
+ * pointer up) — the translate/rotate gesture the tools consume.
+ */
+export async function dragFaceAnchorToFaceAnchor(
+  page: Page,
+  from: FaceAnchor,
+  to: FaceAnchor,
+): Promise<void> {
+  const canvas = page.locator("#render-viewport canvas");
+  const box = await canvas.boundingBox();
+  expect(box, "canvas bounding box").not.toBeNull();
+  if (box === null) throw new Error("unreachable: box checked above");
+  await page.mouse.move(box.x + from.point[0], box.y + from.point[1]);
+  await page.mouse.down();
+  await page.mouse.move(
+    box.x + to.point[0],
+    box.y + to.point[1],
+    { steps: 10 },
+  );
+  await page.mouse.up();
+}
+
 /** Keyboard modifiers Playwright accepts for a click. */
 type ClickModifier = "Alt" | "Control" | "ControlOrMeta" | "Meta" | "Shift";
 

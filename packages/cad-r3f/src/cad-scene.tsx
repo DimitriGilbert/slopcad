@@ -94,6 +94,10 @@ export interface CadSceneProps {
   readonly pickCategory?: CadPickCategory;
   /** Reports resolved clicks as domain picks (forwarded to the model). */
   readonly onPick?: (pick: CadPick) => void;
+  /** Reports resolved pointer-down picks (forwarded to the model). */
+  readonly onPickDown?: (pick: CadPick) => void;
+  /** Reports resolved pointer-up picks (forwarded to the model). */
+  readonly onPickUp?: (pick: CadPick) => void;
   /** Reports deduplicated hover changes (forwarded to the model). */
   readonly onHover?: (pick: CadPick | null) => void;
   /**
@@ -140,6 +144,8 @@ function SceneCameraRig({ spec }: { spec: RenderCamera }): null {
  */
 function SceneModel({
   onPick,
+  onPickDown,
+  onPickUp,
   onHover,
   pickCategory,
   projection,
@@ -147,6 +153,8 @@ function SceneModel({
   selection,
 }: {
   onPick?: (pick: CadPick) => void;
+  onPickDown?: (pick: CadPick) => void;
+  onPickUp?: (pick: CadPick) => void;
   onHover?: (pick: CadPick | null) => void;
   pickCategory?: CadPickCategory;
   projection: RenderProjection;
@@ -161,6 +169,8 @@ function SceneModel({
     <CadModel
       onHover={onHover}
       onPick={onPick}
+      onPickDown={onPickDown}
+      onPickUp={onPickUp}
       onSync={() => invalidate()}
       pickCategory={pickCategory}
       projection={projection}
@@ -236,6 +246,8 @@ function SelectionProbe({
 export function CadScene({
   onHover,
   onPick,
+  onPickDown,
+  onPickUp,
   onSelectionRendered,
   onSettled,
   pickCategory,
@@ -257,6 +269,8 @@ export function CadScene({
       <SceneModel
         onHover={onHover}
         onPick={onPick}
+        onPickDown={onPickDown}
+        onPickUp={onPickUp}
         pickCategory={pickCategory}
         projection={projection}
         regeneration={regeneration}

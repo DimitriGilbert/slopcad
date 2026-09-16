@@ -421,3 +421,72 @@ export {
   syntheticFaceOfTriangle,
   SYNTHETIC_FACE_GROUPING_THRESHOLD_DEGREES,
 } from "./synthetic-faces";
+export type {
+  ToolEventError,
+  ToolEventErrorCode,
+  ToolEventType,
+  ToolInputEvent,
+  ToolKeyboardEvent,
+  ToolModifiers,
+  ToolPick,
+  ToolPointerEvent,
+  ToolPointerEventType,
+} from "./tool-events";
+export {
+  NO_TOOL_MODIFIERS,
+  parseToolInputEvent,
+  TOOL_EVENT_ERROR_CODES,
+  TOOL_EVENT_TYPES,
+  TOOL_POINTER_EVENT_TYPES,
+  toolModifiers,
+} from "./tool-events";
+export type {
+  ToolContext,
+  ToolRuntime,
+  ToolRuntimeOptions,
+  ToolSelectionOperation,
+} from "./tool-context";
+export { createToolRuntime } from "./tool-context";
+export type {
+  CadTool,
+  ToolCompletion,
+  ToolCompletionDetail,
+  ToolFailure,
+  ToolFailureCode,
+  ToolManager,
+  ToolManagerOptions,
+  ToolManagerPhase,
+  ToolRegistryEntry,
+  ToolStateBase,
+  ToolTransition,
+} from "./tool-manager";
+export {
+  createToolManager,
+  registerTool,
+  TOOL_FAILURE_CODES,
+  TOOL_MANAGER_PHASES,
+  toolFailure,
+} from "./tool-manager";
+export type { SelectToolState } from "./tool-select";
+export { SELECT_TOOL_ID, selectTool } from "./tool-select";
+export type { MeasureToolState } from "./tool-measure";
+export { MEASURE_TOOL_ID, measureTool } from "./tool-measure";
+export type { TranslateTarget, TranslateToolState } from "./tool-translate";
+export {
+  resolveTranslateTarget,
+  TRANSLATE_FEATURE_KIND,
+  TRANSLATE_TOOL_ID,
+  translateTool,
+} from "./tool-translate";
+export type {
+  RotateTarget,
+  RotateToolState,
+} from "./tool-rotate";
+export {
+  bodyBoundsCenter,
+  resolveRotateTarget,
+  ROTATE_FEATURE_KIND,
+  ROTATE_TOOL_ID,
+  rotateTool,
+  sweptAngleAboutZ,
+} from "./tool-rotate";

@@ -38,6 +38,12 @@ export {
   type ResolvePickInput,
 } from "./picking";
 export {
+  serializeToolInputEvent,
+  toolKeyEvent,
+  toolModifiersFromNative,
+  toolPointerEvent,
+} from "./tool-input";
+export {
   buildFaceHighlightGeometry,
   CAD_BODY_SELECTION_EMISSIVE_INTENSITY,
   CAD_FACE_HIGHLIGHT_POLYGON_OFFSET,
