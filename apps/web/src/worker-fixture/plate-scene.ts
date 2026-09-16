@@ -1,0 +1,92 @@
+/**
+ * The `/worker` fixture's parametric scene (Phase 10): a plate with one
+ * through bore — the Phase 1.6 spike scene, rebuilt as wire-protocol worker
+ * operations instead of direct kernel calls, so every value the fixture
+ * displays is computed by the REAL Manifold kernel inside the REAL worker.
+ *
+ * The scene exercises the worker operation matrix the plan's phase gate
+ * demands of a browser round trip: a primitive (`solid.createBox`,
+ * `solid.createCylinder`), the placement transform, a boolean
+ * (`solid.subtract`), and the measurements (`solid.volume`,
+ * `solid.bounds`, `solid.tessellate`). Under the kernel contract's
+ * placement conventions the box occupies `[0,30] × [0,20] × [0,10]` and the
+ * cylinder rests on `z = 0` centred on the z axis, so the bore is
+ * translated to the plate's centre and spans the plate's full height — a
+ * through hole whose analytic volume reads straight off the parameters.
+ */
+
+import { length } from "@slopcad/cad-core";
+import type { ComputationContext, KernelBounds } from "@slopcad/cad-kernel";
+
+/** The plate's x extent (mm): `solid.createBox` width. */
+const PLATE_WIDTH_MM = 30;
+/** The plate's y extent (mm): `solid.createBox` depth. */
+const PLATE_DEPTH_MM = 20;
+/** The plate's z extent (mm): `solid.createBox` height — also the bore's. */
+const PLATE_HEIGHT_MM = 10;
+
+/** The bore diameters the fixture accepts (radius ≤ 8 stays in the footprint). */
+export const PLATE_HOLE_DIAMETER_MIN_MM = 1;
+export const PLATE_HOLE_DIAMETER_MAX_MM = 16;
+
+/** The document default: the spike's original 8 mm bore. */
+export const PLATE_HOLE_DIAMETER_DEFAULT_MM = 8;
+
+/** What one computation returns: measurements of the finished plate. */
+export interface PlateMeasurement {
+  /** The plate's volume in mm³, measured by `solid.volume`. */
+  readonly volume: number;
+  /** The plate's axis-aligned bounds in mm, measured by `solid.bounds`. */
+  readonly bounds: KernelBounds;
+  /** The tessellation's triangle count (`indices.length / 3`). */
+  readonly triangles: number;
+}
+
+const mm = (value: number) => length(value, "mm");
+
+/**
+ * Builds the plate with a through bore of `holeDiameterMm` through the
+ * computation context — every request the computation issues is stamped
+ * with the coordinator's revision identity, so a superseded computation is
+ * cancelled and its solids released by the coordinator, not by this scene.
+ */
+export async function computePlateWithHole(
+  context: ComputationContext,
+  holeDiameterMm: number,
+): Promise<PlateMeasurement> {
+  const plate = await context.request("solid.createBox", {
+    width: mm(PLATE_WIDTH_MM),
+    depth: mm(PLATE_DEPTH_MM),
+    height: mm(PLATE_HEIGHT_MM),
+  });
+  const boreAtOrigin = await context.request("solid.createCylinder", {
+    radius: mm(holeDiameterMm / 2),
+    height: mm(PLATE_HEIGHT_MM),
+  });
+  const bore = await context.request("solid.transform", {
+    solid: boreAtOrigin.solid,
+    translation: {
+      x: mm(PLATE_WIDTH_MM / 2),
+      y: mm(PLATE_DEPTH_MM / 2),
+      z: mm(0),
+    },
+  });
+  const drilled = await context.request("solid.subtract", {
+    target: plate.solid,
+    tools: [bore.solid],
+  });
+  const volume = await context.request("solid.volume", {
+    solid: drilled.solid,
+  });
+  const bounds = await context.request("solid.bounds", {
+    solid: drilled.solid,
+  });
+  const tessellation = await context.request("solid.tessellate", {
+    solid: drilled.solid,
+  });
+  return {
+    volume: volume.volume,
+    bounds: bounds.bounds,
+    triangles: tessellation.tessellation.indices.length / 3,
+  };
+}
