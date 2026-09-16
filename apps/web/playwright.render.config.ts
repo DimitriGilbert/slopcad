@@ -20,6 +20,10 @@ export default defineConfig({
     timeout: 10_000,
   },
   fullyParallel: false,
+  // One worker, always: fullyParallel:false still runs the two spec files in
+  // parallel workers, and that second worker's load starves rAF under
+  // SwiftShader + video encoding, leaving R3F demand frames unscheduled.
+  workers: 1,
   retries: 0,
   reporter: [
     ["list"],

@@ -11,6 +11,7 @@
 import { cleanup, render } from "@testing-library/react";
 import type * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
+import { createBodyId } from "@slopcad/cad-core";
 import type { RenderObjectId, RenderProjection } from "@slopcad/cad-core";
 import type { RenderGeometrySnapshot } from "./geometry";
 
@@ -135,5 +136,78 @@ describe("CadModel", () => {
     for (const read of readers) {
       expect(read()).toBe(1);
     }
+  });
+});
+
+describe("CadModel selection highlight", () => {
+  const FACE_REF = {
+    kind: "face",
+    bodyId: createBodyId("body_plate"),
+    regeneration: 5,
+    faceIndex: 0,
+  } as const;
+
+  it("renders a second-pass highlight mesh for a current face reference", () => {
+    const view = render(
+      <CadModel
+        projection={BOTH_PROJECTION}
+        regeneration={5}
+        selection={[FACE_REF]}
+      />,
+    );
+    // One base mesh per object plus one highlight mesh for the plate.
+    const meshes = view.container.querySelectorAll("mesh");
+    expect(meshes.length).toBe(3);
+    const highlight = view.container.querySelector('mesh[renderorder="1"]');
+    expect(highlight).not.toBeNull();
+    const material = highlight?.querySelector("meshbasicmaterial");
+    expect(material?.getAttribute("color")).toBe("#f59e0b");
+    expect(material?.getAttribute("polygonoffsetfactor")).toBe("-2");
+    expect(material?.getAttribute("polygonoffsetunits")).toBe("-2");
+    // React drops boolean-valued props on unknown host elements (this jsdom
+    // rendering never mounts the R3F reconciler, which applies them as
+    // object properties — the drawn pixels are the browser evidence).
+  });
+
+  it("never highlights a stale synthetic reference", () => {
+    const view = render(
+      <CadModel
+        projection={BOTH_PROJECTION}
+        regeneration={6}
+        selection={[FACE_REF]}
+      />,
+    );
+    // Two base meshes, zero highlight overlays.
+    expect(view.container.querySelectorAll("mesh").length).toBe(2);
+    expect(view.container.querySelector("meshbasicmaterial")).toBeNull();
+  });
+
+  it("applies the documented body-selection material change", () => {
+    const view = render(
+      <CadModel
+        projection={BOTH_PROJECTION}
+        selection={[{ kind: "body", bodyId: createBodyId("body_plate") }]}
+      />,
+    );
+    const materials = [...view.container.querySelectorAll("meshstandardmaterial")];
+    expect(materials.length).toBe(2);
+    const highlighted = materials.filter(
+      (material) => material.getAttribute("color") === "#f59e0b",
+    );
+    expect(highlighted.length).toBe(1);
+    expect(highlighted[0]?.getAttribute("emissive")).toBe("#f59e0b");
+    expect(highlighted[0]?.getAttribute("emissiveintensity")).toBe("0.35");
+    // The unselected block keeps the documented defaults.
+    const untouched = materials.find(
+      (material) => material !== highlighted[0],
+    );
+    expect(untouched?.getAttribute("color")).toBe("#8aadf4");
+    expect(untouched?.getAttribute("emissive")).toBeNull();
+  });
+
+  it("renders no highlight without a selection", () => {
+    const { container } = renderModel(BOTH_PROJECTION);
+    expect(container.querySelectorAll("mesh").length).toBe(2);
+    expect(container.querySelector("meshbasicmaterial")).toBeNull();
   });
 });

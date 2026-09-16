@@ -378,3 +378,46 @@ export {
   assertRenderObjectValid,
   DEFAULT_PROJECTION_LINEAR_TOLERANCE_MM,
 } from "./projection-assertions";
+export type {
+  EdgeSelectionReference,
+  FaceSelectionReference,
+  SelectionCategory,
+  SelectionError,
+  SelectionErrorCode,
+  SelectionReference,
+  SelectionState,
+  SerializedSelectionReference,
+  SerializedSelectionState,
+  SolidSelectionReference,
+  StableSelectionKind,
+  StableSelectionReference,
+  SyntheticSelectionKind,
+  SyntheticSelectionReference,
+  VertexSelectionReference,
+} from "./selection";
+export {
+  beginRegeneration,
+  clearSelection,
+  createSelectionState,
+  hoverSelection,
+  isSyntheticSelectionReference,
+  parseSelectionReference,
+  parseSelectionState,
+  pickSelection,
+  SELECTION_CATEGORIES,
+  SELECTION_ERROR_CODES,
+  selectionReferenceBodyId,
+  selectionReferenceKey,
+  serializeSelectionReference,
+  serializeSelectionState,
+  STABLE_SELECTION_KINDS,
+  SYNTHETIC_SELECTION_KINDS,
+} from "./selection";
+export type { SyntheticFace, SyntheticFaceGrouping } from "./synthetic-faces";
+export {
+  groupSyntheticFaces,
+  syntheticFaceAnchor,
+  syntheticFaceMeanNormal,
+  syntheticFaceOfTriangle,
+  SYNTHETIC_FACE_GROUPING_THRESHOLD_DEGREES,
+} from "./synthetic-faces";
