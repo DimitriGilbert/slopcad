@@ -75,7 +75,7 @@ import {
   type CadPick,
   type CadPickCategory,
 } from "@slopcad/cad-r3f";
-import { cn } from "@slopcad/ui/lib/utils";
+import { cn } from "cn";
 
 /** The user-facing strings of {@link CadViewport}. Overridable via props. */
 export interface CadViewportLabels {

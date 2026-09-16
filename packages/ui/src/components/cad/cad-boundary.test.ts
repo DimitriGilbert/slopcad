@@ -18,14 +18,17 @@ import { describe, expect, it } from "vitest";
 /**
  * What the CAD component area may import: React, the two public CAD
  * packages (the React integration layer and the R3F renderer), the
- * package's own modules (`@slopcad/ui/*` self-imports and relative
- * paths), and Node builtins. Kernels (`@slopcad/kernel-*`,
- * `@slopcad/cad-kernel*`), worker modules, and even direct three/R3F
- * imports are NOT on the list — the components compose `CadScene`, and a
- * need for anything below it is a boundary decision, not an import.
+ * shadcn-ui `cn` class-merging package (the registry-distribution import
+ * the components share with the rest of the primitives), the package's
+ * own modules (`@slopcad/ui/*` self-imports and relative paths), and Node
+ * builtins. Kernels (`@slopcad/kernel-*`, `@slopcad/cad-kernel*`), worker
+ * modules, and even direct three/R3F imports are NOT on the list — the
+ * components compose `CadScene`, and a need for anything below it is a
+ * boundary decision, not an import.
  */
 const ALLOWED_IMPORT_SOURCES: ReadonlySet<string> = new Set([
   "react",
+  "cn",
   "@slopcad/cad-react",
   "@slopcad/cad-r3f",
 ]);

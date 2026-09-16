@@ -13,6 +13,9 @@ build
 local.db
 local.db-*
 
+# Generated shadcn registry artifacts (byte-reproducible via shadcn build)
+packages/ui/public/
+
 # Environment variables
 .env
 .env*.local
