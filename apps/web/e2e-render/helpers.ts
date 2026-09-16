@@ -74,12 +74,15 @@ async function forceAnimationFrame(page: Page): Promise<void> {
  * waiting for one to arrive on its own; genuine non-settlement still
  * fails at the deadline.
  */
-export async function waitForSettledScene(page: Page): Promise<string> {
+export async function waitForSettledScene(
+  page: Page,
+  rootId = "render-root",
+): Promise<string> {
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
   let observed: string | SettleState = "the render-root element never appeared";
   while (Date.now() < deadline) {
-    const state = await page.evaluate<SettleState | null>(() => {
-      const root = document.getElementById("render-root");
+    const state = await page.evaluate<SettleState | null, string>((id) => {
+      const root = document.getElementById(id);
       if (root === null) return null;
       return {
         inFlight: root.getAttribute("data-in-flight"),
@@ -88,7 +91,7 @@ export async function waitForSettledScene(page: Page): Promise<string> {
         volume: root.getAttribute("data-volume"),
         rendered: root.getAttribute("data-cad-rendered-volume"),
       };
-    });
+    }, rootId);
     if (state !== null) {
       observed = state;
       const status = classifySettle(state);
@@ -141,9 +144,12 @@ export interface FaceAnchorSurface {
  * `<bodyId>/<faceIndex>`), the CSS-pixel anchor point relative to the
  * viewport's top-left and the face's mean normal.
  */
-export async function readFaceAnchors(page: Page): Promise<FaceAnchorSurface> {
+export async function readFaceAnchors(
+  page: Page,
+  viewportId = "render-viewport",
+): Promise<FaceAnchorSurface> {
   const raw = await page
-    .locator("#render-viewport")
+    .locator(`#${viewportId}`)
     .getAttribute("data-face-anchors");
   expect(raw, "the fixture must publish face anchors").not.toBeNull();
   if (raw === null) throw new Error("unreachable: anchors checked above");
@@ -203,15 +209,16 @@ export function bodySelectionKey(bodyId = PLATE_BODY_ID): string {
 export async function waitForSelectionFrame(
   page: Page,
   expectedKey: string,
+  rootId = "render-root",
 ): Promise<void> {
-  await page.waitForFunction((key) => {
-    const root = document.getElementById("render-root");
+  await page.waitForFunction(({ id, key: expected }) => {
+    const root = document.getElementById(id);
     return (
       root !== null &&
-      root.getAttribute("data-selection-key") === key &&
-      root.getAttribute("data-cad-selection-frame") === key
+      root.getAttribute("data-selection-key") === expected &&
+      root.getAttribute("data-cad-selection-frame") === expected
     );
-  }, expectedKey);
+  }, { id: rootId, key: expectedKey });
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
@@ -223,25 +230,36 @@ export async function waitForSelectionFrame(
 }
 
 /** The selected references as the fixture serialized them (parsed JSON). */
-export async function readSelection(page: Page): Promise<unknown[]> {
-  const raw = await page.locator("#render-root").getAttribute("data-selection");
+export async function readSelection(
+  page: Page,
+  rootId = "render-root",
+): Promise<unknown[]> {
+  const raw = await page
+    .locator(`#${rootId}`)
+    .getAttribute("data-selection");
   expect(raw, "the fixture must publish the selection JSON").not.toBeNull();
   if (raw === null) throw new Error("unreachable: selection checked above");
   return JSON.parse(raw) as unknown[];
 }
 
 /** The hovered reference's serialized JSON, or "" when nothing is hovered. */
-export async function readHover(page: Page): Promise<string> {
-  const raw = await page.locator("#render-root").getAttribute("data-hover");
+export async function readHover(
+  page: Page,
+  rootId = "render-root",
+): Promise<string> {
+  const raw = await page.locator(`#${rootId}`).getAttribute("data-hover");
   expect(raw).not.toBeNull();
   if (raw === null) throw new Error("unreachable: hover checked above");
   return raw;
 }
 
 /** The regeneration the domain selection state currently stands at. */
-export async function readSelectionRegeneration(page: Page): Promise<number> {
+export async function readSelectionRegeneration(
+  page: Page,
+  rootId = "render-root",
+): Promise<number> {
   const raw = await page
-    .locator("#render-root")
+    .locator(`#${rootId}`)
     .getAttribute("data-selection-regeneration");
   const value = Number(raw);
   expect(Number.isInteger(value) && value >= 0, `regeneration="${String(raw)}"`).toBe(true);
@@ -265,9 +283,12 @@ export interface ToolSurface {
 }
 
 /** Reads the fixture's Phase 13 tool surface. */
-export async function readToolSurface(page: Page): Promise<ToolSurface> {
+export async function readToolSurface(
+  page: Page,
+  rootId = "render-root",
+): Promise<ToolSurface> {
   const read = async (attribute: string): Promise<string> => {
-    const raw = await page.locator("#render-root").getAttribute(attribute);
+    const raw = await page.locator(`#${rootId}`).getAttribute(attribute);
     expect(raw, `${attribute} must exist`).not.toBeNull();
     return raw ?? "";
   };
@@ -285,21 +306,33 @@ export async function readToolSurface(page: Page): Promise<ToolSurface> {
 }
 
 /** Activates a tool through the fixture's tool selector and waits for it. */
-export async function activateTool(page: Page, toolId: string): Promise<void> {
+export async function activateTool(
+  page: Page,
+  toolId: string,
+  rootId = "render-root",
+): Promise<void> {
   await page.locator(`#tool-${toolId}`).click();
-  await page.waitForFunction((id) => {
-    const root = document.getElementById("render-root");
-    return (
-      root !== null &&
-      root.getAttribute("data-tool-id") === id &&
-      root.getAttribute("data-tool-phase") === "active"
-    );
-  }, toolId);
+  await page.waitForFunction(
+    ({ id, root }) => {
+      const element = document.getElementById(root);
+      return (
+        element !== null &&
+        element.getAttribute("data-tool-id") === id &&
+        element.getAttribute("data-tool-phase") === "active"
+      );
+    },
+    { id: toolId, root: rootId },
+  );
 }
 
 /** Reads the settle counter (the number of rendered projection frames). */
-export async function readRenderedFrames(page: Page): Promise<number> {
-  const raw = await page.locator("#render-root").getAttribute("data-rendered-frames");
+export async function readRenderedFrames(
+  page: Page,
+  rootId = "render-root",
+): Promise<number> {
+  const raw = await page
+    .locator(`#${rootId}`)
+    .getAttribute("data-rendered-frames");
   const value = Number(raw);
   expect(Number.isInteger(value) && value >= 0, `frames="${String(raw)}"`).toBe(true);
   return value;
@@ -309,12 +342,16 @@ export async function readRenderedFrames(page: Page): Promise<number> {
 export async function waitForRenderedFrames(
   page: Page,
   atLeast: number,
+  rootId = "render-root",
 ): Promise<void> {
-  await page.waitForFunction((count) => {
-    const root = document.getElementById("render-root");
-    const frames = Number(root?.getAttribute("data-rendered-frames") ?? "0");
-    return frames >= count;
-  }, atLeast);
+  await page.waitForFunction(
+    ({ count, root }) => {
+      const element = document.getElementById(root);
+      const frames = Number(element?.getAttribute("data-rendered-frames") ?? "0");
+      return frames >= count;
+    },
+    { count: atLeast, root: rootId },
+  );
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
@@ -332,16 +369,19 @@ export async function waitForRenderedFrames(
  * volume-invariant). Then two animation frames, so a screenshot provably
  * samples the frame after the moved geometry was drawn.
  */
-export async function waitForRenderedTranslate(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const root = document.getElementById("render-root");
+export async function waitForRenderedTranslate(
+  page: Page,
+  rootId = "render-root",
+): Promise<void> {
+  await page.waitForFunction((id) => {
+    const root = document.getElementById(id);
     return (
       root !== null &&
       root.getAttribute("data-cad-rendered-translate") !== null &&
       root.getAttribute("data-cad-rendered-translate") ===
         root.getAttribute("data-translate")
     );
-  });
+  }, rootId);
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
@@ -360,8 +400,9 @@ export async function dragFaceAnchorToFaceAnchor(
   page: Page,
   from: FaceAnchor,
   to: FaceAnchor,
+  viewportId = "render-viewport",
 ): Promise<void> {
-  const canvas = page.locator("#render-viewport canvas");
+  const canvas = page.locator(`#${viewportId} canvas`);
   const box = await canvas.boundingBox();
   expect(box, "canvas bounding box").not.toBeNull();
   if (box === null) throw new Error("unreachable: box checked above");
@@ -383,8 +424,9 @@ export async function clickFaceAnchor(
   page: Page,
   anchor: FaceAnchor,
   modifiers: readonly ClickModifier[] = [],
+  viewportId = "render-viewport",
 ): Promise<void> {
-  await page.locator("#render-viewport canvas").click({
+  await page.locator(`#${viewportId} canvas`).click({
     position: { x: anchor.point[0], y: anchor.point[1] },
     modifiers: [...modifiers],
   });
