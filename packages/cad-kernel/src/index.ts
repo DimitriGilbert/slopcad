@@ -15,6 +15,19 @@
  * - `./contract-suite` — the shared suite any conforming kernel must pass.
  * - `./core-bridge` — the cad-core feature-executor bridge that executes a
  *   document's features against a kernel.
+ * - `./worker-protocol` (and its `worker-*` siblings) — the versioned,
+ *   serializable worker message protocol (Phase 10): envelope, operation
+ *   vocabulary, ids, structured errors, and cancellation semantics.
+ * - `./worker-transport`, `./worker-server`, `./worker-client`,
+ *   `./worker-session` — the generic transport, the kernel-hosting server,
+ *   the promise-based client, and the in-memory in-process session that
+ *   wires them together (Phase 10.2).
+ * - `./revision`, `./stale-result-guard`, `./stale-result-coordinator` —
+ *   the Phase 10.4 stale-result protection: the monotonic revision identity
+ *   binding computations to document state, the atomic check-and-apply
+ *   gatekeeper that drops stale results observably, and the coordinator that
+ *   stamps, guards, and keeps the worker's solid state leak-free under rapid
+ *   updates.
  */
 
 export { KERNEL_BACKEND_IDS } from "./backend-ids";
@@ -74,3 +87,171 @@ export {
   unwrapKernelResult,
 } from "./test-utils";
 export type { TessellationValidityOptions } from "./test-utils";
+
+export {
+  isWorkerErrorCode,
+  parseWorkerError,
+  toWorkerError,
+  workerError,
+  workerParseError,
+  WORKER_PROTOCOL_ERROR_CODES,
+} from "./worker-errors";
+export type {
+  WorkerError,
+  WorkerErrorDataValue,
+  WorkerErrorCode,
+  WorkerParseError,
+} from "./worker-errors";
+
+export {
+  createWorkerIdGenerator,
+  createWorkerRequestId,
+  createWorkerSolidId,
+  parseAnyWorkerId,
+  parseWorkerRequestId,
+  parseWorkerSolidId,
+  WorkerIdGeneratorExhaustedError,
+  WorkerIdValidationError,
+  WORKER_ID_ERROR_CODES,
+  WORKER_ID_GENERATOR_ERROR_CODES,
+  WORKER_ID_KINDS,
+  WORKER_ID_MAX_PAYLOAD_LENGTH,
+  WORKER_ID_PREFIXES,
+} from "./worker-ids";
+export type {
+  ParsedWorkerId,
+  WorkerId,
+  WorkerIdGeneratorState,
+  WorkerIdErrorCode,
+  WorkerIdKind,
+  WorkerIdParseError,
+  WorkerRequestId,
+  WorkerSolidId,
+} from "./worker-ids";
+
+export {
+  isWorkerOperationId,
+  parseWorkerOperationInput,
+  parseWorkerOperationResult,
+  resultMintsSolid,
+  serializeWorkerOperationInput,
+  serializeWorkerOperationResult,
+  WORKER_OPERATION_IDS,
+} from "./worker-operations";
+export type {
+  SerializedWorkerLength,
+  SerializedWorkerOperationInput,
+  SerializedWorkerOperationInputs,
+  SerializedWorkerOperationResult,
+  SerializedWorkerOperationResults,
+  WorkerBoxInput,
+  WorkerConeInput,
+  WorkerCylinderInput,
+  WorkerDisposeResult,
+  WorkerOperationId,
+  WorkerOperationInput,
+  WorkerOperationInputs,
+  WorkerOperationResult,
+  WorkerOperationResults,
+  WorkerSolidRefInput,
+  WorkerSphereInput,
+  WorkerSubtractInput,
+  WorkerTessellationResult,
+  WorkerTransformInput,
+  WorkerTranslationVector,
+  WorkerUnionInput,
+  WorkerVolumeResult,
+  WorkerBoundsResult,
+} from "./worker-operations";
+
+export {
+  createWorkerCancel,
+  createWorkerErrorResponse,
+  createWorkerRequest,
+  createWorkerSuccessResponse,
+  decodeWorkerRequest,
+  decodeWorkerResult,
+  parseWorkerMessage,
+  WORKER_MESSAGE_KINDS,
+  WORKER_PROTOCOL_VERSION,
+} from "./worker-protocol";
+export type {
+  DecodedWorkerRequest,
+  WorkerCancelMessage,
+  WorkerErrorResponseMessage,
+  WorkerMessage,
+  WorkerMessageKind,
+  WorkerRequestMessage,
+  WorkerResponseMessage,
+  WorkerSuccessResponseMessage,
+} from "./worker-protocol";
+
+export { createWorkerCancellationLedger } from "./worker-cancellation";
+export type {
+  WorkerCancellationFinishDecision,
+  WorkerCancellationLedger,
+  WorkerCancellationRecordOutcome,
+  WorkerCancellationStartDecision,
+} from "./worker-cancellation";
+
+export { createInMemoryTransportPair } from "./worker-transport";
+export type {
+  InMemoryWorkerTransportPair,
+  WorkerTransport,
+} from "./worker-transport";
+
+export { createNodeWorkerTransport } from "./worker-node-transport";
+export type { NodeWorkerMessagePort } from "./worker-node-transport";
+
+export {
+  createWebWorkerTransport,
+  isWebWorkerMessagePort,
+} from "./worker-web-transport";
+export type { WebWorkerMessagePort } from "./worker-web-transport";
+
+export { createWorkerServer } from "./worker-server";
+export type { WorkerServer, WorkerServerOptions } from "./worker-server";
+
+export { createWorkerClient, WorkerRequestFailure } from "./worker-client";
+export type { WorkerClient, WorkerClientOptions } from "./worker-client";
+
+export { createInMemoryKernelSession } from "./worker-session";
+export type {
+  InMemoryKernelSession,
+  InMemoryKernelSessionOptions,
+} from "./worker-session";
+
+export {
+  createRevisionClock,
+  createRevisionTag,
+  REVISION_CLOCK_ERROR_CODES,
+  RevisionClockExhaustedError,
+  REVISION_ZERO,
+} from "./revision";
+export type {
+  RevisionClock,
+  RevisionClockErrorCode,
+  RevisionTag,
+} from "./revision";
+
+export { createRevisionedState } from "./stale-result-guard";
+export type {
+  RevisionedResult,
+  RevisionedState,
+  RevisionedStateOptions,
+  StaleDrop,
+  StaleDropReason,
+  StaleGuardDecision,
+} from "./stale-result-guard";
+
+export { createStaleResultCoordinator } from "./stale-result-coordinator";
+export type {
+  AppliedComputation,
+  ComputationContext,
+  ComputationOutcome,
+  ComputationRun,
+  DroppedComputation,
+  StaleResultCoordinator,
+  StaleResultCoordinatorOptions,
+  SupersededComputationPolicy,
+} from "./stale-result-coordinator";

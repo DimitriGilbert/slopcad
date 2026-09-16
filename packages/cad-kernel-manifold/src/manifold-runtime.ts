@@ -17,16 +17,17 @@
  *   `manifold-3d@3.5.3` under Node ESM.
  * - Browser bundling (the Phase 10 worker): Vite's dependency optimizer
  *   breaks `manifold.js`'s default `new URL("manifold.wasm",
- *   import.meta.url)` resolution, so the worker phase must pin the asset
- *   (`import wasmUrl from "manifold-3d/manifold.wasm?url"` plus
- *   `Module({ locateFile: () => wasmUrl })`, per the Phase 1.6 spike
- *   findings) and will carry its own thin init around this module.
+ *   import.meta.url)` resolution, so the browser worker entry pins the asset
+ *   by passing `locateFile: () => wasmUrl` here, with the URL coming from
+ *   `import wasmUrl from "manifold-3d/manifold.wasm?url"` (the Phase 1.6
+ *   spike findings — see `./manifold-worker.web`).
  *
  * The runtime is memoized per JavaScript context: the WASM module is a
  * per-realm singleton (quality settings and mesh IDs are global state), and
  * re-instantiating the heap per kernel would waste hundreds of
- * milliseconds per test. A failed initialization clears the memo so an
- * environment fix can be retried.
+ * milliseconds per test. Options apply to the first initialization only —
+ * a browser context never mixes with a Node one. A failed initialization
+ * clears the memo so an environment fix can be retried.
  */
 
 import Module from "manifold-3d";
@@ -51,6 +52,16 @@ export interface ManifoldRuntime {
   readonly [RUNTIME_BRAND]: ManifoldToplevel;
 }
 
+/** Options of {@link createManifoldRuntime}. */
+export interface ManifoldRuntimeOptions {
+  /**
+   * Overrides how the emscripten factory locates `manifold.wasm` — the
+   * browser bundling path's asset pin (see the module doc). Node needs no
+   * override.
+   */
+  readonly locateFile?: () => string;
+}
+
 let runtimePromise: Promise<ManifoldRuntime> | undefined;
 
 /**
@@ -58,9 +69,15 @@ let runtimePromise: Promise<ManifoldRuntime> | undefined;
  * context, instantiating the WASM module and running `setup()` on first
  * call. Concurrent callers await the same initialization.
  */
-export function createManifoldRuntime(): Promise<ManifoldRuntime> {
+export function createManifoldRuntime(
+  options: ManifoldRuntimeOptions = {},
+): Promise<ManifoldRuntime> {
   if (runtimePromise === undefined) {
-    runtimePromise = Module()
+    const config =
+      options.locateFile === undefined
+        ? undefined
+        : { locateFile: options.locateFile };
+    runtimePromise = Module(config)
       .then((toplevel) => {
         toplevel.setup();
         const runtime: ManifoldRuntime = { [RUNTIME_BRAND]: toplevel };

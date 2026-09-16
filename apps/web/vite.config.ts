@@ -8,6 +8,13 @@ export default defineConfig({
   server: {
     port: 3001,
   },
+  // Module workers: the kernel worker entries are ES modules with
+  // bundle-split imports (`@slopcad/cad-kernel-manifold`'s
+  // `manifold-worker.web`, hosted per its module doc), so worker bundles
+  // must stay ES — the IIFE default cannot carry them.
+  worker: {
+    format: "es",
+  },
   resolve: {
     tsconfigPaths: true,
   },

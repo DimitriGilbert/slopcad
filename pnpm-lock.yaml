@@ -141,6 +141,15 @@ importers:
       '@slopcad/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@slopcad/cad-core':
+        specifier: workspace:*
+        version: link:../../packages/cad-core
+      '@slopcad/cad-kernel':
+        specifier: workspace:*
+        version: link:../../packages/cad-kernel
+      '@slopcad/cad-kernel-manifold':
+        specifier: workspace:*
+        version: link:../../packages/cad-kernel-manifold
       '@slopcad/env':
         specifier: workspace:*
         version: link:../../packages/env
