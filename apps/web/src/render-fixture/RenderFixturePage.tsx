@@ -57,7 +57,6 @@ import {
   createSelectionState,
   createToolManager,
   createToolRuntime,
-  groupSyntheticFaces,
   measureTool,
   MEASURE_TOOL_ID,
   registerTool,
@@ -66,10 +65,7 @@ import {
   selectTool,
   SELECT_TOOL_ID,
   selectionReferenceKey,
-  serializeDimensionalValue,
   serializeSelectionReference,
-  syntheticFaceAnchor,
-  syntheticFaceMeanNormal,
   translateTool,
   TRANSLATE_TOOL_ID,
   valueIn,
@@ -83,27 +79,25 @@ import {
   type ToolRuntime,
 } from "@slopcad/cad-core";
 import {
-  createStaleResultCoordinator,
-  createWebWorkerTransport,
-  createWorkerClient,
-} from "@slopcad/cad-kernel";
-import type { WorkerClient } from "@slopcad/cad-kernel";
-import {
   CadScene,
-  renderCameraScreenPoint,
   toolKeyEvent,
   toolModifiersFromNative,
   toolPointerEvent,
 } from "@slopcad/cad-r3f";
 import type { CadPick, CadPickCategory } from "@slopcad/cad-r3f";
-import type { PlateMeasurement } from "../worker-fixture/plate-scene";
 
 import {
   appliedTranslationOffset,
   createFixtureSession,
 } from "./fixture-document";
 import {
-  computePlateRenderState,
+  bootRenderFixtureSession,
+  completionJson,
+  faceAnchorSurface,
+  selectionJson,
+  type RenderFixtureSession,
+} from "./fixture-session";
+import {
   offsetPlateRenderState,
   type PlateRenderState,
 } from "./plate-render-scene";
@@ -112,14 +106,6 @@ import {
   PLATE_HOLE_DIAMETER_MAX_MM,
   PLATE_HOLE_DIAMETER_MIN_MM,
 } from "../worker-fixture/plate-scene";
-
-/** The wired session a booted fixture exposes. */
-interface RenderFixtureSession {
-  /** Records a parameter change and dispatches its computation. */
-  dispatch(holeDiameterMm: number): void;
-  /** Settles the channel and terminates the worker. */
-  dispose(): void;
-}
 
 /** An applied computation: the render state plus its revision identity. */
 interface AppliedRenderState {
@@ -146,45 +132,6 @@ const INITIAL_TOOL_VIEW: ToolSurfaceView = {
   commandLogJson: "[]",
 };
 
-/**
- * The fixture's fixed viewport, in CSS pixels — the viewport box below is
- * authored at exactly this size (and the scene runs at dpr 1), which is
- * what makes the camera spec's screen mapping constant.
- */
-const VIEWPORT_CSS_WIDTH = 800;
-const VIEWPORT_CSS_HEIGHT = 520;
-
-function setText(id: string, text: string): void {
-  const element = document.getElementById(id);
-  if (element !== null) element.textContent = text;
-}
-
-/** Bounds rendered as extents, the fixtures' `30.000 × 20.000 × 10.000` form. */
-function formatBoundsExtents(measurement: PlateMeasurement): string {
-  const { min, max } = measurement.bounds;
-  return [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
-    .map((extent) => extent.toFixed(3))
-    .join(" × ");
-}
-
-/** One-decimal rounding for screen points (sub-pixel precision is noise). */
-function round1(value: number): number {
-  return Number(value.toFixed(1));
-}
-
-/** Three-decimal rounding for normal metadata. */
-function round3(value: number): number {
-  return Number(value.toFixed(3));
-}
-
-/**
- * Canonical JSON of a selection reference (fixed key order, so the DOM
- * surface is byte-stable across renders).
- */
-function selectionJson(reference: SelectionReference): string {
-  return JSON.stringify(serializeSelectionReference(reference));
-}
-
 /** Human-readable label of a selection reference for the fixture's list. */
 function selectionLabel(reference: SelectionReference): string {
   switch (reference.kind) {
@@ -203,171 +150,11 @@ function selectionLabel(reference: SelectionReference): string {
   }
 }
 
-/**
- * Canonical JSON of a tool completion: dimensional values and transactions
- * through their canonical serializers, so the surface is stable data.
- */
-function completionJson(completion: ToolCompletion): string {
-  const { detail } = completion;
-  return JSON.stringify({
-    toolId: completion.toolId,
-    detail:
-      detail.kind === "measurement"
-        ? {
-            kind: detail.kind,
-            distance: serializeDimensionalValue(detail.distance),
-            from: detail.from,
-            to: detail.to,
-          }
-        : detail.kind === "commands"
-          ? { kind: detail.kind, summary: detail.summary }
-          : { kind: detail.kind },
-  });
-}
-
 function sameVector(
   a: readonly [number, number, number],
   b: readonly [number, number, number],
 ): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
-}
-
-/**
- * Boots the fixture's worker session (client-only, called from an effect).
- * `onApplied` receives every render state that became the visible one —
- * in application order, newest-wins through the stale-result coordinator —
- * together with the revision identity the domain selection state must
- * stand at.
- */
-function bootRenderFixtureSession(
-  onApplied: (state: PlateRenderState, revision: number) => void,
-): RenderFixtureSession {
-  const worker = new Worker(
-    new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
-    { type: "module" },
-  );
-  const client: WorkerClient = createWorkerClient({
-    transport: createWebWorkerTransport(worker),
-  });
-  const coordinator = createStaleResultCoordinator<PlateRenderState>({
-    client,
-  });
-  const counters = { dispatched: 0, settled: 0 };
-  let errorText = "";
-
-  /** Writes the whole coordinator-driven state surface in one pass. */
-  function writeSurface(): void {
-    const visible = coordinator.visible();
-    const inFlight = counters.dispatched - counters.settled;
-    const root = document.getElementById("render-root");
-    if (root !== null) {
-      root.setAttribute("data-dispatched", String(counters.dispatched));
-      root.setAttribute("data-settled", String(counters.settled));
-      root.setAttribute("data-in-flight", String(inFlight));
-      root.setAttribute(
-        "data-current-revision",
-        String(coordinator.currentRevision()),
-      );
-      root.setAttribute(
-        "data-applied-revision",
-        visible === null ? "" : String(visible.revision),
-      );
-      root.setAttribute(
-        "data-volume",
-        visible === null ? "" : visible.state.measurement.volume.toFixed(3),
-      );
-      root.setAttribute("data-error", errorText);
-    }
-    setText("render-status", inFlight > 0 ? "computing" : "idle");
-    setText(
-      "render-volume",
-      visible === null ? "…" : visible.state.measurement.volume.toFixed(3),
-    );
-    setText(
-      "render-bounds",
-      visible === null ? "…" : formatBoundsExtents(visible.state.measurement),
-    );
-    setText(
-      "render-triangles",
-      visible === null ? "…" : String(visible.state.measurement.triangles),
-    );
-    setText(
-      "render-revisions",
-      visible === null
-        ? `—/${coordinator.currentRevision()}`
-        : `${visible.revision}/${coordinator.currentRevision()}`,
-    );
-    setText("render-error", errorText);
-  }
-
-  return {
-    dispatch(holeDiameterMm: number): void {
-      counters.dispatched += 1;
-      writeSurface();
-      coordinator
-        .update((context) => computePlateRenderState(context, holeDiameterMm))
-        .then(
-          () => {
-            counters.settled += 1;
-            writeSurface();
-            // The coordinator's visible state is the authority (a superseded
-            // computation settles without ever becoming visible).
-            const visible = coordinator.visible();
-            if (visible !== null) onApplied(visible.state, visible.revision);
-          },
-          (failure: unknown) => {
-            counters.settled += 1;
-            errorText =
-              failure instanceof Error ? failure.message : String(failure);
-            writeSurface();
-          },
-        );
-    },
-    dispose(): void {
-      client.close();
-      worker.terminate();
-    },
-  };
-}
-
-/**
- * The face-anchor map for the applied projection: per rendered object and
- * synthetic face, the CSS-pixel anchor point and the face's mean normal.
- * Pure function of the render state — deterministic, so tests can rely on
- * identical anchors across runs of the same parameters.
- */
-function faceAnchorSurface(renderState: PlateRenderState): string {
-  const anchors: Record<
-    string,
-    {
-      readonly point: readonly [number, number];
-      readonly normal: readonly [number, number, number] | null;
-    }
-  > = {};
-  for (const object of renderState.projection.objects) {
-    const grouping = groupSyntheticFaces(object);
-    for (const face of grouping.faces) {
-      const world = syntheticFaceAnchor(object, grouping, face.index);
-      // Closed curved faces (e.g. the bore wall) have no single normal —
-      // the cad-core helper reports null and the surface publishes it
-      // verbatim instead of a fabricated direction.
-      const meanNormal = syntheticFaceMeanNormal(object, grouping, face.index);
-      const screen = renderCameraScreenPoint(
-        renderState.projection.camera,
-        world,
-        VIEWPORT_CSS_WIDTH,
-        VIEWPORT_CSS_HEIGHT,
-      );
-      anchors[`${object.bodyId ?? object.id}/${String(face.index)}`] = {
-        point: [round1(screen[0]), round1(screen[1])],
-        normal:
-          meanNormal === null
-            ? null
-            : [round3(meanNormal[0]), round3(meanNormal[1]), round3(meanNormal[2])],
-      };
-    }
-  }
-  return JSON.stringify(anchors);
 }
 
 export function RenderFixturePage() {
@@ -481,13 +268,24 @@ export function RenderFixturePage() {
   useEffect(() => {
     // The host's explicit boot configuration: the SELECT tool armed.
     armTool(SELECT_TOOL_ID);
-    const session = bootRenderFixtureSession((state, revision) => {
-      setWorkerState({ state, revision });
-      // The applied revision is a NEW regeneration: synthetic references
-      // die with the old one (transience), stable references persist.
-      runtimeRef.current?.beginSelectionRegeneration(revision);
-      syncSurface();
-    });
+    const session = bootRenderFixtureSession(
+      {
+        rootId: "render-root",
+        statusId: "render-status",
+        volumeId: "render-volume",
+        boundsId: "render-bounds",
+        trianglesId: "render-triangles",
+        revisionsId: "render-revisions",
+        errorId: "render-error",
+      },
+      (state, revision) => {
+        setWorkerState({ state, revision });
+        // The applied revision is a NEW regeneration: synthetic references
+        // die with the old one (transience), stable references persist.
+        runtimeRef.current?.beginSelectionRegeneration(revision);
+        syncSurface();
+      },
+    );
     sessionRef.current = session;
     session.dispatch(PLATE_HOLE_DIAMETER_DEFAULT_MM);
     return () => {

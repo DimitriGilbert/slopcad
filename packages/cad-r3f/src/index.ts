@@ -7,6 +7,15 @@
  * renderer-neutral projection contract. React, Three.js, and R3F are
  * peer dependencies; geometry kernels and worker modules are never
  * imported here — the renderer consumes the projection as data.
+ *
+ * Phase 14 boundary decision: this package stays PROP-DRIVEN. `CadScene`
+ * (and `CadModel`) take the projection, selection, regeneration identity,
+ * and pick callbacks as explicit props and know nothing of the Phase 14
+ * `CadProvider`/hooks in `@slopcad/cad-react`; a host mirrors domain state
+ * through those hooks and feeds this renderer as props (see the app's
+ * workbench fixture). Adding provider-awareness here would duplicate the
+ * mirroring the hooks already own and couple the deterministic scene to a
+ * specific integration layer.
  */
 export { CAD_DOCUMENT_FORMAT_VERSION } from "@slopcad/cad-react";
 export {
