@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { WorkbenchFixturePage } from "@/workbench-fixture/WorkbenchFixturePage";
+import { CadWorkbenchPage } from "@/cad-workbench/CadWorkbenchPage";
 
 export const Route = createFileRoute("/workbench")({
-  component: WorkbenchFixturePage,
+  component: CadWorkbenchPage,
 });

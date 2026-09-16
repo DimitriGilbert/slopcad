@@ -582,6 +582,12 @@ importers:
       '@shadcn/react':
         specifier: ^0.2.1
         version: 0.2.1(@types/react@19.2.18)(react@19.2.8)
+      '@slopcad/cad-r3f':
+        specifier: workspace:*
+        version: link:../cad-r3f
+      '@slopcad/cad-react':
+        specifier: workspace:*
+        version: link:../cad-react
       '@tanstack/react-form':
         specifier: ^1.33.5
         version: 1.33.5(@tanstack/react-start@1.168.49(crossws@0.4.12(srvx@0.11.22))(esbuild@0.28.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rolldown@1.2.7)(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))(webpack@5.97.1(esbuild@0.28.2)))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

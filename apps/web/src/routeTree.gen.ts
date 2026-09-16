@@ -14,6 +14,7 @@ import { Route as AuthRouteRouteImport } from './routes/_auth/route'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
+import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
@@ -42,6 +43,11 @@ const RenderRoute = RenderRouteImport.update({
 const SpikeRoute = SpikeRouteImport.update({
   id: '/spike',
   path: '/spike',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UiViewportRoute = UiViewportRouteImport.update({
+  id: '/ui-viewport',
+  path: '/ui-viewport',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkbenchRoute = WorkbenchRouteImport.update({
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
+  '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/worker': typeof WorkerRoute
   '/dashboard': typeof AuthDashboardRoute
@@ -86,6 +93,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
+  '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/worker': typeof WorkerRoute
   '/dashboard': typeof AuthDashboardRoute
@@ -99,6 +107,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
+  '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/worker': typeof WorkerRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
@@ -112,6 +121,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/render'
     | '/spike'
+    | '/ui-viewport'
     | '/workbench'
     | '/worker'
     | '/dashboard'
@@ -123,6 +133,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/render'
     | '/spike'
+    | '/ui-viewport'
     | '/workbench'
     | '/worker'
     | '/dashboard'
@@ -135,6 +146,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/render'
     | '/spike'
+    | '/ui-viewport'
     | '/workbench'
     | '/worker'
     | '/_auth/dashboard'
@@ -148,6 +160,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   RenderRoute: typeof RenderRoute
   SpikeRoute: typeof SpikeRoute
+  UiViewportRoute: typeof UiViewportRoute
   WorkbenchRoute: typeof WorkbenchRoute
   WorkerRoute: typeof WorkerRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -189,6 +202,13 @@ declare module '@tanstack/react-router' {
       path: '/spike'
       fullPath: '/spike'
       preLoaderRoute: typeof SpikeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ui-viewport': {
+      id: '/ui-viewport'
+      path: '/ui-viewport'
+      fullPath: '/ui-viewport'
+      preLoaderRoute: typeof UiViewportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workbench': {
@@ -247,6 +267,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   RenderRoute: RenderRoute,
   SpikeRoute: SpikeRoute,
+  UiViewportRoute: UiViewportRoute,
   WorkbenchRoute: WorkbenchRoute,
   WorkerRoute: WorkerRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
