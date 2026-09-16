@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:render": "playwright test -c playwright.render.config.ts",
     "test:spike": "playwright test -c playwright.spike.config.ts",
     "test:worker": "playwright test -c playwright.worker.config.ts",
     "lint": "eslint ."
@@ -22,6 +23,7 @@
     "@slopcad/cad-core": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",
+    "@slopcad/cad-r3f": "workspace:*",
     "@slopcad/env": "workspace:*",
     "@slopcad/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",

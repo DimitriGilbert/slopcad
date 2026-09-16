@@ -150,6 +150,9 @@ importers:
       '@slopcad/cad-kernel-manifold':
         specifier: workspace:*
         version: link:../../packages/cad-kernel-manifold
+      '@slopcad/cad-r3f':
+        specifier: workspace:*
+        version: link:../../packages/cad-r3f
       '@slopcad/env':
         specifier: workspace:*
         version: link:../../packages/env
@@ -420,9 +423,30 @@ importers:
       '@slopcad/config':
         specifier: workspace:*
         version: link:../config
+      '@testing-library/dom':
+        specifier: 'catalog:'
+        version: 10.4.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.18
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.7(@types/react@19.2.18)
+      '@types/three':
+        specifier: 0.186.0
+        version: 0.186.0
       '@vitest/coverage-istanbul':
         specifier: 'catalog:'
         version: 4.1.11(vitest@4.1.11)
+      jsdom:
+        specifier: 'catalog:'
+        version: 30.0.1(@noble/hashes@2.4.0)
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.8(react@19.2.8)
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

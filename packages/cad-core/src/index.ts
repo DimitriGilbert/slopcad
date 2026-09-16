@@ -1,7 +1,8 @@
 /**
  * Public entry of `@slopcad/cad-core`, the kernel-neutral CAD document
- * model. This package carries no React, Three.js, DOM, or geometry-kernel
- * dependencies; every layer above it builds on the API exported here.
+ * model plus the renderer-neutral render projection. This package carries
+ * no React, Three.js, DOM, or geometry-kernel dependencies; every layer
+ * above it — kernels, renderers, workers — builds on the API exported here.
  */
 export type {
   AnyCadId,
@@ -334,4 +335,46 @@ export {
 } from "./regeneration";
 export type { ParseFailure, ParseResult } from "./result";
 export { fail, ok } from "./result";
-export { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
+export { CAD_DOCUMENT_FORMAT_VERSION, CAD_PROJECTION_FORMAT_VERSION } from "./version";
+export type {
+  KernelTessellationSource,
+  ProjectionError,
+  ProjectionErrorCode,
+  RenderBounds,
+  RenderCamera,
+  RenderObject,
+  RenderObjectId,
+  RenderProjection,
+  RenderVector3,
+  SerializedRenderBounds,
+  SerializedRenderCamera,
+  SerializedRenderObject,
+  SerializedRenderProjection,
+} from "./projection";
+export {
+  boundsFromPositions,
+  createRenderObjectId,
+  createRenderProjection,
+  parseRenderCamera,
+  parseRenderObjectId,
+  parseRenderProjection,
+  PROJECTION_ERROR_CODES,
+  projectTessellation,
+  RENDER_NORMAL_UNIT_TOLERANCE,
+  RENDER_OBJECT_ID_PREFIX,
+  renderObjectIdBodyId,
+  serializeRenderProjection,
+} from "./projection";
+export type {
+  CameraComparisonOptions,
+  RenderObjectValidityOptions,
+} from "./projection-assertions";
+export {
+  assertBoundsClose,
+  assertCameraClose,
+  assertIndicesEqual,
+  assertPositionsClose,
+  assertProjectionValid,
+  assertRenderObjectValid,
+  DEFAULT_PROJECTION_LINEAR_TOLERANCE_MM,
+} from "./projection-assertions";
