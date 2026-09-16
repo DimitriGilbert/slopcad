@@ -54,12 +54,17 @@ function classifySettle(state: SettleState): SettleStatus {
   return { settled: false, numericSettled: true };
 }
 
+/**
+ * Frame nudge for rAF starvation: a loaded headless browser can stop
+ * servicing requestAnimationFrame entirely, leaving R3F's queued demand
+ * render (and its settle stamp) unscheduled — a clipped screenshot forces
+ * the compositor through a frame, which flushes pending rAF callbacks.
+ * Settle semantics are unchanged: the stamp must still agree. Module-private:
+ * this module's settle waits (`waitForSettledScene`,
+ * `waitForTreeSelectionFrame`, `waitForImportedMeshSettled`) are its only
+ * callers.
+ */
 async function forceAnimationFrame(page: Page): Promise<void> {
-  // Frame nudge for rAF starvation: a loaded headless browser can stop
-  // servicing requestAnimationFrame entirely, leaving R3F's queued demand
-  // render (and its settle stamp) unscheduled — a clipped screenshot forces
-  // the compositor through a frame, which flushes pending rAF callbacks.
-  // Settle semantics are unchanged: the stamp must still agree.
   await page.screenshot({ clip: { x: 0, y: 0, width: 1, height: 1 } });
 }
 
@@ -510,6 +515,111 @@ export interface LocalizedPixelDiff {
   readonly unmasked: number;
   /** Bounds of the unmasked differing pixels; null when `unmasked` is 0. */
   readonly unmaskedBounds: DiffBounds | null;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 18 /io mesh import-export surface
+// ---------------------------------------------------------------------------
+
+/** One read of the /io fixture's import surface (parsed attributes). */
+export interface IoImportSurface {
+  readonly source: string;
+  readonly triangles: number | null;
+  /** The 3dp volume readout (the human-facing surface). */
+  readonly volume: string;
+  /** The full-precision volume (the semantic assertion surface). */
+  readonly volumeExact: string;
+  readonly extents: string;
+  readonly detail: string;
+  readonly error: string;
+  /** The imported scene's settle stamp (`data-cad-imported-volume`). */
+  readonly rendered: string;
+}
+
+/**
+ * Reads the /io fixture's import surface: provenance, triangle count,
+ * volume readout, extents, flavor/unit detail, error text, and the
+ * imported scene's settle stamp. Every Phase 18 semantic assertion reads
+ * from these attributes — nothing is asserted from pixels alone.
+ */
+export async function readIoImportSurface(
+  page: Page,
+  rootId = "io-root",
+): Promise<IoImportSurface> {
+  const raw = await page.evaluate((id) => {
+    const root = document.getElementById(id);
+    return {
+      source: root?.getAttribute("data-import-source") ?? null,
+      triangles: root?.getAttribute("data-import-triangles") ?? null,
+      volume: root?.getAttribute("data-import-volume") ?? null,
+      volumeExact: root?.getAttribute("data-import-volume-exact") ?? null,
+      extents: root?.getAttribute("data-import-extents") ?? null,
+      detail: root?.getAttribute("data-import-detail") ?? null,
+      error: root?.getAttribute("data-import-error") ?? null,
+      rendered: root?.getAttribute("data-cad-imported-volume") ?? null,
+    };
+  }, rootId);
+  expect(raw.source, "the /io fixture must publish the import surface").not.toBeNull();
+  const triangles = raw.triangles === null || raw.triangles === "" ? null : Number(raw.triangles);
+  return {
+    source: raw.source ?? "",
+    triangles,
+    volume: raw.volume ?? "",
+    volumeExact: raw.volumeExact ?? "",
+    extents: raw.extents ?? "",
+    detail: raw.detail ?? "",
+    error: raw.error ?? "",
+    rendered: raw.rendered ?? "",
+  };
+}
+
+/**
+ * The imported-scene settle wait for /io: a DOM-only import (button click,
+ * no pointer over either canvas) can leave the demand frame that must
+ * carry the settle stamp unscheduled under rAF starvation — the exact
+ * condition `waitForTreeSelectionFrame` handles for tree picks. So this
+ * polls the fixture's import surface on a timer (never rAF) until the
+ * volume readout is published AND the imported scene's settle stamp agrees
+ * with it, nudging a frame per poll, then samples two animation frames so
+ * a screenshot provably lands after the imported geometry was drawn.
+ */
+export async function waitForImportedMeshSettled(
+  page: Page,
+  rootId = "io-root",
+): Promise<string> {
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  for (;;) {
+    const state = await page.evaluate((id) => {
+      const root = document.getElementById(id);
+      return {
+        volume: root?.getAttribute("data-import-volume") ?? null,
+        rendered: root?.getAttribute("data-cad-imported-volume") ?? null,
+      };
+    }, rootId);
+    if (
+      state.volume !== null &&
+      state.volume !== "" &&
+      state.volume === state.rendered
+    ) {
+      break;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `The imported mesh never settled (last state: ${JSON.stringify(state)}).`,
+      );
+    }
+    await forceAnimationFrame(page);
+    await page.waitForTimeout(SETTLE_POLL_MS);
+  }
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      }),
+  );
+  return (await readIoImportSurface(page, rootId)).volume;
 }
 
 /**
