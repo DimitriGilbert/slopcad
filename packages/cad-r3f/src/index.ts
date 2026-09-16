@@ -1,9 +1,10 @@
 /**
  * Public entry of `@slopcad/cad-r3f`, the React Three Fiber renderer
  * layer: the Phase 11.2 model renderer (geometry mapping, update diff,
- * `CadModel` component) and the Phase 11.3 deterministic scene (camera
- * mapping, fixed light rig, ground furniture, `CadScene` composition) over
- * the renderer-neutral projection contract. React, Three.js, and R3F are
+ * `CadModel` component), the Phase 11.3 deterministic scene (camera
+ * mapping, fixed light rig, ground furniture, `CadScene` composition), and
+ * the Phase 12 selection layer (picking bridge, highlight passes) over the
+ * renderer-neutral projection contract. React, Three.js, and R3F are
  * peer dependencies; geometry kernels and worker modules are never
  * imported here — the renderer consumes the projection as data.
  */
@@ -25,6 +26,25 @@ export {
   type RenderGeometryController,
   type RenderGeometrySnapshot,
 } from "./geometry";
+export {
+  CAD_PICK_CATEGORIES,
+  PICK_ERROR_CODES,
+  renderCameraScreenPoint,
+  resolvePickReference,
+  type CadPick,
+  type CadPickCategory,
+  type PickError,
+  type PickErrorCode,
+  type ResolvePickInput,
+} from "./picking";
+export {
+  buildFaceHighlightGeometry,
+  CAD_BODY_SELECTION_EMISSIVE_INTENSITY,
+  CAD_FACE_HIGHLIGHT_POLYGON_OFFSET,
+  CAD_SELECTION_HIGHLIGHT_COLOR,
+  isBodySelected,
+  selectedFaceIndices,
+} from "./selection-highlight";
 export {
   applySceneCamera,
   CAD_SCENE_CAMERA_FAR_MM,

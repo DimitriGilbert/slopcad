@@ -1,7 +1,11 @@
-import { createHash } from "node:crypto";
-import type { Page } from "@playwright/test";
-import { mkdir, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+
+import {
+  readVolume,
+  saveArtifact,
+  sha256,
+  waitForSettledScene,
+} from "./helpers";
 
 /**
  * Phase 11.3 deterministic-scene e2e — the phase-level browser gate.
@@ -23,7 +27,8 @@ import { expect, test } from "@playwright/test";
  * canvas), and every pixel assertion stands beside the numeric volume
  * assertions — geometry correctness is proven by the numbers, pixels cover
  * the composed scene. Runs against the production build (see
- * playwright.render.config.ts).
+ * playwright.render.config.ts). Shared waits/artifact helpers live in
+ * `./helpers` (also used by the Phase 12 selection spec).
  */
 
 const PLATE_WIDTH_MM = 30;
@@ -46,10 +51,6 @@ const shared = {
   determinismRun1: undefined as Buffer | undefined,
 };
 
-function sha256(bytes: Buffer): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 function analyticPlateVolume(holeDiameterMm: number): number {
   return (
     PLATE_WIDTH_MM * PLATE_DEPTH_MM * PLATE_HEIGHT_MM -
@@ -57,54 +58,11 @@ function analyticPlateVolume(holeDiameterMm: number): number {
   );
 }
 
-/**
- * Waits until the fixture's state surface proves a quiescent scene whose
- * pixels provably belong to the displayed numbers: no computation in
- * flight, the visible state at the newest revision, and the scene's
- * settle stamp (`data-cad-rendered-volume`, written by `CadScene`'s
- * onSettled) equal to the settled volume (`data-volume`). Returns the
- * settled volume text.
- */
-async function waitForSettledScene(page: Page): Promise<string> {
-  const settled = await page.waitForFunction<string | null>(() => {
-    const root = document.getElementById("render-root");
-    if (root === null) return null;
-    const inFlight = root.getAttribute("data-in-flight");
-    const applied = root.getAttribute("data-applied-revision");
-    const current = root.getAttribute("data-current-revision");
-    const volume = root.getAttribute("data-volume");
-    const rendered = root.getAttribute("data-cad-rendered-volume");
-    if (inFlight !== "0") return null;
-    if (applied === null || applied === "" || applied !== current) return null;
-    if (volume === null || volume === "") return null;
-    if (rendered === null || rendered === "") return null;
-    return rendered === volume ? rendered : null;
-  });
-  const volumeText = await settled.jsonValue();
-  if (volumeText === null) {
-    throw new Error("The render fixture never settled.");
-  }
-  return volumeText;
-}
-
-async function readVolume(page: Page): Promise<number> {
-  const text = await page.locator("#render-volume").textContent();
-  const value = Number(text);
-  expect(Number.isFinite(value), `#render-volume="${text}"`).toBe(true);
-  return value;
-}
-
 function expectVolumeCloseTo(actual: number, expected: number): void {
   expect(
     Math.abs(actual - expected),
     `volume ${actual} vs analytic ${expected}`,
   ).toBeLessThanOrEqual(expected * VOLUME_REL_TOLERANCE);
-}
-
-/** Persist the exact compared bytes so artifacts never diverge from assertions. */
-async function saveArtifact(name: string, bytes: Buffer): Promise<void> {
-  await mkdir("e2e-artifacts/render", { recursive: true });
-  await writeFile(`e2e-artifacts/render/${name}`, bytes);
 }
 
 test("parameter change recomputes the projection and updates pixels and volume", async ({
