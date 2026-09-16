@@ -3,9 +3,11 @@ import type { Page } from "@playwright/test";
 import { STL_HEADER_BYTES, STL_TRIANGLE_BYTES } from "@slopcad/cad-io";
 
 import {
+  readIoGlbSurface,
   readIoImportSurface,
   saveArtifact,
   sha256,
+  waitForGlbViewerSettled,
   waitForImportedMeshSettled,
   waitForSettledScene,
 } from "./helpers";
@@ -40,6 +42,8 @@ import {
 const VOLUME_REL_TOLERANCE = 0.005;
 /** STL float32 quantization: volume agrees to ~1e-7 relative; 1e-6 is slack. */
 const STL_VOLUME_REL_TOLERANCE = 1e-6;
+/** GLB float32 positions quantize like STL's; the same 1e-6 slack applies. */
+const GLB_VOLUME_REL_TOLERANCE = 1e-6;
 
 /** The settled plate's extents under the kernel placement conventions. */
 const PLATE_EXTENTS_TEXT = "30.000 × 20.000 × 10.000";
@@ -230,6 +234,124 @@ for (const format of ["3mf", "stl"] as const) {
     await saveArtifact(`io-import-${format}-run2.png`, second.shot);
   });
 }
+
+/**
+ * One full GLB round trip on a fresh page: settle the source, export the
+ * RENDER PROJECTION to GLB, capture the bytes, load them through three's
+ * GLTFLoader (the reference viewer), settle the loaded scene, run the
+ * semantic assertions, capture the viewer screenshot.
+ */
+async function glbRoundTrip(page: Page): Promise<RoundTripCapture> {
+  await page.goto("/io");
+  await waitForSettledScene(page, "io-root");
+  const source = await readSourceSurface(page);
+
+  // Export: the held GLB appears with the source soup's triangle count.
+  await page.locator("#io-export-glb").click();
+  const root = page.locator("#io-root");
+  const bytesText = await root.getAttribute("data-export-glb-bytes");
+  expect(bytesText, "the GLB export must publish its byte count").not.toBeNull();
+  expect(Number(bytesText)).toBeGreaterThan(0);
+  const exportTriangles = await root.getAttribute("data-export-glb-triangles");
+  expect(
+    exportTriangles,
+    "the exported GLB must carry the source triangle count",
+  ).toBe(String(source.triangles));
+
+  const fileBytes = await readDownloadBytes(page, "io-download-glb");
+  expect(fileBytes.length, "download bytes must match the published size").toBe(
+    Number(bytesText),
+  );
+  // GLB container: 12-byte header — magic "glTF", version 2, total length.
+  expect(fileBytes.subarray(0, 4).toString("latin1")).toBe("glTF");
+  expect(fileBytes.readUInt32LE(4)).toBe(2);
+  expect(fileBytes.readUInt32LE(8)).toBe(fileBytes.length);
+
+  // Reference viewer: the held bytes load through three's GLTFLoader and
+  // the loaded scene settles in its own deterministic viewport.
+  await page.locator("#io-load-glb").click();
+  await waitForGlbViewerSettled(page);
+  const glb = await readIoGlbSurface(page);
+  expect(glb.error, "the GLB load must not report an error").toBe("");
+  expect(glb.status, "GLTFLoader must report the load").toBe("loaded");
+  // The loaded scene: one node named from the body id, carrying the
+  // source soup's triangle count in decoded float32 geometry.
+  const loadedNodes = JSON.parse(glb.nodes) as {
+    name: string;
+    vertices: number;
+    triangles: number;
+  }[];
+  expect(loadedNodes.length, "the loaded scene must carry exactly one mesh").toBe(1);
+  expect(loadedNodes[0]?.name, "the node name must preserve the body id").toBe(
+    "body_plate",
+  );
+  expect(
+    loadedNodes[0]?.triangles,
+    "the decoded triangle count must equal the source soup's",
+  ).toBe(source.triangles);
+  expect(
+    (loadedNodes[0]?.vertices ?? 0) > 0,
+    "the decoded mesh must have vertices",
+  ).toBe(true);
+  expect(
+    JSON.parse(glb.material),
+    "the loaded material must be the documented CadScene material",
+  ).toEqual({ colorHex: "8aadf4", metalness: 0.15, roughness: 0.55 });
+  expect(glb.extents, "the loaded bounds must be the plate's").toBe(
+    PLATE_EXTENTS_TEXT,
+  );
+
+  // Volume semantics: the decoded soup's divergence-theorem volume vs the
+  // source soup's same measure (float32 tolerance — GLB positions are
+  // float32) and vs the kernel volume (the established band).
+  const loadedVolume = Number(glb.volumeExact);
+  expect(Number.isFinite(loadedVolume), `loaded volume "${glb.volumeExact}"`).toBe(true);
+  const sourceMeshVolume = Number(source.meshVolumeText);
+  expect(Number.isFinite(sourceMeshVolume), `source mesh volume "${source.meshVolumeText}"`).toBe(true);
+  expect(
+    Math.abs(loadedVolume - sourceMeshVolume),
+    `GLB float32 drift: ${String(loadedVolume)} vs ${String(sourceMeshVolume)}`,
+  ).toBeLessThanOrEqual(sourceMeshVolume * GLB_VOLUME_REL_TOLERANCE);
+  expect(
+    Math.abs(loadedVolume - source.volume),
+    `loaded ${String(loadedVolume)} vs kernel ${String(source.volume)}`,
+  ).toBeLessThanOrEqual(source.volume * VOLUME_REL_TOLERANCE);
+
+  // Pixels: only now — the settle stamp proved the frame carried the mesh.
+  const shot = await page.locator("#io-glb-viewport canvas").screenshot();
+  return { shot, fileBytes, sourceTriangles: source.triangles, sourceVolume: source.volume };
+}
+
+test("glb round trip: export → GLTFLoader reference viewer → the loaded GLB renders and agrees semantically", async ({
+  page,
+}) => {
+  const first = await glbRoundTrip(page);
+  await saveArtifact("io-glb-viewer-run1.png", first.shot);
+  await saveArtifact("round-trip.glb", first.fileBytes);
+  await page.screenshot({
+    path: "e2e-artifacts/render/io-roundtrip-glb-fullpage.png",
+    fullPage: true,
+  });
+
+  // A full second run: fresh document load, fresh worker, fresh export and
+  // load — the same bytes and the same settled viewer scene must result.
+  const second = await glbRoundTrip(page);
+  expect(
+    second.sourceTriangles,
+    "the second run must export the same soup",
+  ).toBe(first.sourceTriangles);
+  expect(second.sourceVolume).toBe(first.sourceVolume);
+  expect(
+    second.fileBytes.equals(first.fileBytes),
+    "exported GLB bytes are deterministic",
+  ).toBe(true);
+  expect(
+    second.shot.equals(first.shot),
+    `GLB viewer run1 sha256=${sha256(first.shot)} vs run2 sha256=${sha256(second.shot)}`,
+  ).toBe(true);
+
+  await saveArtifact("io-glb-viewer-run2.png", second.shot);
+});
 
 test("the 3MF import endpoint rejects malformed bytes with a structured failure", async ({
   request,
