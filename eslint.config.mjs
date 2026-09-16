@@ -50,7 +50,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ["apps/web/**/*.{ts,tsx}", "packages/ui/**/*.{ts,tsx}"],
+    files: [
+      "apps/web/**/*.{ts,tsx}",
+      "packages/ui/**/*.{ts,tsx}",
+      "packages/cad-r3f/**/*.{ts,tsx}",
+    ],
     rules: reactHooks.configs.recommended.rules,
   },
   {

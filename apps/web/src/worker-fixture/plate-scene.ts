@@ -16,7 +16,11 @@
  */
 
 import { length } from "@slopcad/cad-core";
-import type { ComputationContext, KernelBounds } from "@slopcad/cad-kernel";
+import type {
+  ComputationContext,
+  KernelBounds,
+  Tessellation,
+} from "@slopcad/cad-kernel";
 
 /** The plate's x extent (mm): `solid.createBox` width. */
 const PLATE_WIDTH_MM = 30;
@@ -40,6 +44,13 @@ export interface PlateMeasurement {
   readonly bounds: KernelBounds;
   /** The tessellation's triangle count (`indices.length / 3`). */
   readonly triangles: number;
+  /**
+   * The tessellation itself (kernel crease-aware normals included). It
+   * already crosses the worker boundary for the triangle count; keeping the
+   * reference lets the render fixture (Phase 11.3) project the SAME soup
+   * the measurements describe, instead of asking the worker to recompute.
+   */
+  readonly tessellation: Tessellation;
 }
 
 const mm = (value: number) => length(value, "mm");
@@ -88,5 +99,6 @@ export async function computePlateWithHole(
     volume: volume.volume,
     bounds: bounds.bounds,
     triangles: tessellation.tessellation.indices.length / 3,
+    tessellation: tessellation.tessellation,
   };
 }

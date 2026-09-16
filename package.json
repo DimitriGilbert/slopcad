@@ -13,6 +13,7 @@
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
     "test:e2e": "pnpm --filter web test:e2e",
+    "test:render": "pnpm --filter web test:render",
     "test:spike": "pnpm --filter web test:spike",
     "lint": "turbo run lint",
     "format": "prettier --write .",
