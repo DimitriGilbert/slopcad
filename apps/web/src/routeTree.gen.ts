@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteRouteImport } from './routes/_auth/route'
+import { Route as IoRouteImport } from './routes/io'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
@@ -19,6 +20,7 @@ import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiIoImport3mfRouteImport } from './routes/api/io/import-3mf'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -28,6 +30,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const AuthRouteRoute = AuthRouteRouteImport.update({
   id: '/_auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IoRoute = IoRouteImport.update({
+  id: '/io',
+  path: '/io',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -70,6 +77,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiIoImport3mfRoute = ApiIoImport3mfRouteImport.update({
+  id: '/api/io/import-3mf',
+  path: '/api/io/import-3mf',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -78,6 +90,7 @@ const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
@@ -86,10 +99,12 @@ export interface FileRoutesByFullPath {
   '/worker': typeof WorkerRoute
   '/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/io/import-3mf': typeof ApiIoImport3mfRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
@@ -98,12 +113,14 @@ export interface FileRoutesByTo {
   '/worker': typeof WorkerRoute
   '/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/io/import-3mf': typeof ApiIoImport3mfRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteRouteWithChildren
+  '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
@@ -112,12 +129,14 @@ export interface FileRoutesById {
   '/worker': typeof WorkerRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/io/import-3mf': typeof ApiIoImport3mfRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/io'
     | '/login'
     | '/render'
     | '/spike'
@@ -126,10 +145,12 @@ export interface FileRouteTypes {
     | '/worker'
     | '/dashboard'
     | '/api/auth/$'
+    | '/api/io/import-3mf'
     | '/api/trpc/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/io'
     | '/login'
     | '/render'
     | '/spike'
@@ -138,11 +159,13 @@ export interface FileRouteTypes {
     | '/worker'
     | '/dashboard'
     | '/api/auth/$'
+    | '/api/io/import-3mf'
     | '/api/trpc/$'
   id:
     | '__root__'
     | '/'
     | '/_auth'
+    | '/io'
     | '/login'
     | '/render'
     | '/spike'
@@ -151,12 +174,14 @@ export interface FileRouteTypes {
     | '/worker'
     | '/_auth/dashboard'
     | '/api/auth/$'
+    | '/api/io/import-3mf'
     | '/api/trpc/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
+  IoRoute: typeof IoRoute
   LoginRoute: typeof LoginRoute
   RenderRoute: typeof RenderRoute
   SpikeRoute: typeof SpikeRoute
@@ -164,6 +189,7 @@ export interface RootRouteChildren {
   WorkbenchRoute: typeof WorkbenchRoute
   WorkerRoute: typeof WorkerRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiIoImport3mfRoute: typeof ApiIoImport3mfRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
 }
 
@@ -181,6 +207,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/io': {
+      id: '/io'
+      path: '/io'
+      fullPath: '/io'
+      preLoaderRoute: typeof IoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -239,6 +272,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/io/import-3mf': {
+      id: '/api/io/import-3mf'
+      path: '/api/io/import-3mf'
+      fullPath: '/api/io/import-3mf'
+      preLoaderRoute: typeof ApiIoImport3mfRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/trpc/$': {
       id: '/api/trpc/$'
       path: '/api/trpc/$'
@@ -264,6 +304,7 @@ const AuthRouteRouteWithChildren = AuthRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRouteRoute: AuthRouteRouteWithChildren,
+  IoRoute: IoRoute,
   LoginRoute: LoginRoute,
   RenderRoute: RenderRoute,
   SpikeRoute: SpikeRoute,
@@ -271,6 +312,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkbenchRoute: WorkbenchRoute,
   WorkerRoute: WorkerRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiIoImport3mfRoute: ApiIoImport3mfRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
 }
 export const routeTree = rootRouteImport

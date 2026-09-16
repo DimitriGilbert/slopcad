@@ -21,6 +21,7 @@
     "@slopcad/api": "workspace:*",
     "@slopcad/auth": "workspace:*",
     "@slopcad/cad-core": "workspace:*",
+    "@slopcad/cad-io": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",
     "@slopcad/cad-r3f": "workspace:*",

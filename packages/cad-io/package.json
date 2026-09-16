@@ -1,0 +1,31 @@
+{
+  "name": "@slopcad/cad-io",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@slopcad/cad-core": "workspace:*",
+    "@slopcad/cad-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@slopcad/cad-kernel-manifold": "workspace:*",
+    "@slopcad/config": "workspace:*",
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
