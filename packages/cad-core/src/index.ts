@@ -490,3 +490,39 @@ export {
   rotateTool,
   sweptAngleAboutZ,
 } from "./tool-rotate";
+export type {
+  NativeFormatMigration,
+  NativeMigrationError,
+  NativeMigrationErrorCode,
+} from "./native-migration";
+export {
+  migrateNativeCadDocument,
+  NATIVE_FORMAT_MIGRATIONS,
+  NATIVE_MIGRATION_ERROR_CODES,
+  planNativeFormatMigrations,
+  readNativeFormatVersion,
+  runNativeFormatMigrations,
+} from "./native-migration";
+export type {
+  NativeCadDocument,
+  NativeCadDocumentParseError,
+  NativeDocumentValidation,
+  NativeFormatError,
+  NativeFormatErrorCode,
+  NativeFormatIssue,
+  NativeFormatIssueCode,
+  SerializedNativeCadDocument,
+  SerializedNativeHistory,
+} from "./native-format";
+export {
+  createNativeCadDocument,
+  encodeNativeCadDocument,
+  NATIVE_FORMAT_ERROR_CODES,
+  NATIVE_FORMAT_ISSUE_CODES,
+  parseNativeCadDocument,
+  parseNativeCadDocumentFromBytes,
+  parseNativeCadDocumentFromString,
+  serializeNativeCadDocument,
+  stringifyNativeCadDocument,
+  validateNativeCadDocument,
+} from "./native-format";

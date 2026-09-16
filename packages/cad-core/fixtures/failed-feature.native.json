@@ -1,0 +1,273 @@
+{
+  "formatVersion": 1,
+  "metadata": {
+    "name": "failed-feature"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_failed_feature",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_radius",
+          "name": "radius",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 5
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_translate_x",
+          "name": "translateX",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_translate_y",
+          "name": "translateY",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_translate_z",
+          "name": "translateZ",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 2000
+          },
+          "expression": null,
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_sphere",
+        "name": "sphere"
+      },
+      {
+        "id": "body_moved",
+        "name": "movedSphere"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_sphere",
+        "kind": "sphere",
+        "inputs": [
+          {
+            "kind": "parameter",
+            "id": "param_radius"
+          }
+        ],
+        "outputs": [
+          "body_sphere"
+        ]
+      },
+      {
+        "id": "feat_translate",
+        "kind": "translate",
+        "inputs": [
+          {
+            "kind": "feature",
+            "id": "feat_sphere"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_translate_x"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_translate_y"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_translate_z"
+          }
+        ],
+        "outputs": [
+          "body_moved"
+        ]
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_failed_feature",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": [
+          {
+            "id": "param_radius",
+            "name": "radius",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 5
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_translate_x",
+            "name": "translateX",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 0
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_translate_y",
+            "name": "translateY",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 0
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_translate_z",
+            "name": "translateZ",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 2000
+            },
+            "expression": null,
+            "metadata": {}
+          }
+        ]
+      },
+      "bodies": [
+        {
+          "id": "body_sphere",
+          "name": "sphere"
+        },
+        {
+          "id": "body_moved",
+          "name": "movedSphere"
+        }
+      ],
+      "features": []
+    },
+    "transactions": [
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_sphere",
+            "kind": "sphere",
+            "inputs": [
+              {
+                "kind": "parameter",
+                "id": "param_radius"
+              }
+            ],
+            "outputs": [
+              "body_sphere"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_translate",
+            "kind": "translate",
+            "inputs": [
+              {
+                "kind": "feature",
+                "id": "feat_sphere"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_translate_x"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_translate_y"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_translate_z"
+              }
+            ],
+            "outputs": [
+              "body_moved"
+            ]
+          }
+        ]
+      }
+    ],
+    "cursor": 2
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": [
+      {
+        "id": "feat_sphere",
+        "state": "valid",
+        "diagnostics": []
+      },
+      {
+        "id": "feat_translate",
+        "state": "failed",
+        "diagnostics": [
+          {
+            "severity": "error",
+            "code": "kernel/operation-failed",
+            "message": "The translate offset exceeds the kernel's supported coordinate range.",
+            "location": {
+              "primary": "feat_translate",
+              "related": [
+                "body_moved"
+              ]
+            },
+            "data": {
+              "axis": "z",
+              "limitExceeded": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

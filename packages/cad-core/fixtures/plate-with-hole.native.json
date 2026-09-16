@@ -1,0 +1,364 @@
+{
+  "formatVersion": 1,
+  "metadata": {
+    "name": "plate-with-hole",
+    "unitSystem": "metric"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_plate_with_hole",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_width",
+          "name": "width",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 100
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_length",
+          "name": "length",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 80
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_thickness",
+          "name": "thickness",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 12
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_hole_diameter",
+          "name": "holeDiameter",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 18
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_volume_hint",
+          "name": "volumeHint",
+          "value": {
+            "dimension": "volume",
+            "unit": "mm3",
+            "value": 80
+          },
+          "expression": {
+            "kind": "binary",
+            "operator": "/",
+            "left": {
+              "kind": "binary",
+              "operator": "*",
+              "left": {
+                "kind": "binary",
+                "operator": "*",
+                "left": {
+                  "kind": "identifier",
+                  "name": "width"
+                },
+                "right": {
+                  "kind": "identifier",
+                  "name": "length"
+                }
+              },
+              "right": {
+                "kind": "identifier",
+                "name": "thickness"
+              }
+            },
+            "right": {
+              "kind": "number",
+              "value": 1000
+            }
+          },
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_plate",
+        "name": "plate"
+      },
+      {
+        "id": "body_hole",
+        "name": "bore"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_plate",
+        "kind": "box",
+        "inputs": [
+          {
+            "kind": "parameter",
+            "id": "param_width"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_length"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_thickness"
+          }
+        ],
+        "outputs": [
+          "body_plate"
+        ]
+      },
+      {
+        "id": "feat_hole",
+        "kind": "subtract",
+        "inputs": [
+          {
+            "kind": "feature",
+            "id": "feat_plate"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_hole_diameter"
+          }
+        ],
+        "outputs": [
+          "body_hole"
+        ]
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_plate_with_hole",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": [
+          {
+            "id": "param_width",
+            "name": "width",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 100
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_length",
+            "name": "length",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 80
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_thickness",
+            "name": "thickness",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 10
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_hole_diameter",
+            "name": "holeDiameter",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 15
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_volume_hint",
+            "name": "volumeHint",
+            "value": {
+              "dimension": "volume",
+              "unit": "mm3",
+              "value": 80
+            },
+            "expression": {
+              "kind": "binary",
+              "operator": "/",
+              "left": {
+                "kind": "binary",
+                "operator": "*",
+                "left": {
+                  "kind": "binary",
+                  "operator": "*",
+                  "left": {
+                    "kind": "identifier",
+                    "name": "width"
+                  },
+                  "right": {
+                    "kind": "identifier",
+                    "name": "length"
+                  }
+                },
+                "right": {
+                  "kind": "identifier",
+                  "name": "thickness"
+                }
+              },
+              "right": {
+                "kind": "number",
+                "value": 1000
+              }
+            },
+            "metadata": {}
+          }
+        ]
+      },
+      "bodies": [
+        {
+          "id": "body_plate",
+          "name": "plate"
+        },
+        {
+          "id": "body_hole",
+          "name": "bore"
+        }
+      ],
+      "features": []
+    },
+    "transactions": [
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_plate",
+            "kind": "box",
+            "inputs": [
+              {
+                "kind": "parameter",
+                "id": "param_width"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_length"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_thickness"
+              }
+            ],
+            "outputs": [
+              "body_plate"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_hole",
+            "kind": "subtract",
+            "inputs": [
+              {
+                "kind": "feature",
+                "id": "feat_plate"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_hole_diameter"
+              }
+            ],
+            "outputs": [
+              "body_hole"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "parameter.set",
+            "id": "param_thickness",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 12
+            }
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "parameter.set",
+            "id": "param_hole_diameter",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 18
+            }
+          }
+        ]
+      }
+    ],
+    "cursor": 4
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": [
+      {
+        "id": "feat_plate",
+        "state": "valid",
+        "diagnostics": []
+      },
+      {
+        "id": "feat_hole",
+        "state": "valid",
+        "diagnostics": []
+      }
+    ]
+  }
+}
