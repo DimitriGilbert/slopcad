@@ -26,6 +26,7 @@ import {
   type ProjectionError,
   type RenderCamera,
   type RenderProjection,
+  type RenderVector3,
 } from "@slopcad/cad-core";
 import type { ComputationContext } from "@slopcad/cad-kernel";
 
@@ -89,4 +90,43 @@ export async function computePlateRenderState(
   holeDiameterMm: number,
 ): Promise<PlateRenderState> {
   return plateRenderState(await computePlateWithHole(context, holeDiameterMm));
+}
+
+/**
+ * Re-derives the plate's render state translated by a world offset
+ * (canonical millimetres) — the fixture's stand-in execution of the
+ * document's translate feature (see `fixture-document.ts`). Pure and
+ * deterministic: the tessellation positions shift by exactly the offset
+ * (normals are directions and pass through unchanged), the projection
+ * re-derives through the same `projectTessellation` boundary, and a zero
+ * offset returns the input state unchanged, preserving byte-identity.
+ * The measurement (volume, kernel bounds) deliberately stays the worker's
+ * result: a translation is rigid, so volume is invariant, and the bounds
+ * readout describes the kernel computation, not the document placement.
+ */
+export function offsetPlateRenderState(
+  state: PlateRenderState,
+  offset: RenderVector3,
+): PlateRenderState {
+  if (offset[0] === 0 && offset[1] === 0 && offset[2] === 0) return state;
+  const tessellation = state.measurement.tessellation;
+  const positions: number[] = [];
+  for (let index = 0; index < tessellation.positions.length; index += 3) {
+    const x = tessellation.positions[index];
+    const y = tessellation.positions[index + 1];
+    const z = tessellation.positions[index + 2];
+    if (x === undefined || y === undefined || z === undefined) break;
+    positions.push(x + offset[0], y + offset[1], z + offset[2]);
+  }
+  const object = unwrap(
+    projectTessellation(PLATE_BODY_ID, {
+      positions,
+      indices: tessellation.indices,
+      ...(tessellation.normals !== undefined ? { normals: tessellation.normals } : {}),
+    }),
+  );
+  return {
+    measurement: state.measurement,
+    projection: unwrap(createRenderProjection([object], RENDER_FIXTURE_CAMERA)),
+  };
 }

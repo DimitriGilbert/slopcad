@@ -131,6 +131,10 @@ export interface CadModelProps {
   readonly pickCategory?: CadPickCategory;
   /** Reports a resolved pick (clicks) as a domain reference payload. */
   readonly onPick?: (pick: CadPick) => void;
+  /** Reports a resolved pick for pointer-down events (the Phase 13 drag anchor). */
+  readonly onPickDown?: (pick: CadPick) => void;
+  /** Reports a resolved pick for pointer-up events (the Phase 13 gesture commit). */
+  readonly onPickUp?: (pick: CadPick) => void;
   /**
    * Reports hover changes (pointer entering a new reference, or leaving
    * the model) — deduplicated, `null` when the pointer leaves.
@@ -142,6 +146,8 @@ export function CadModel({
   material,
   onHover,
   onPick,
+  onPickDown,
+  onPickUp,
   onSync,
   pickCategory,
   projection,
@@ -156,7 +162,11 @@ export function CadModel({
   const selectionList = selection ?? NO_SELECTION;
   const regenerationValue = regeneration ?? 0;
   const categoryValue: CadPickCategory = pickCategory ?? "face";
-  const interactive = onPick !== undefined || onHover !== undefined;
+  const interactive =
+    onPick !== undefined ||
+    onPickDown !== undefined ||
+    onPickUp !== undefined ||
+    onHover !== undefined;
 
   const renderData = useMemo(() => {
     const map = new Map<RenderObjectId, ObjectRenderData>();
@@ -195,9 +205,13 @@ export function CadModel({
   // Latest-ref pattern: callers may pass inline closures without rebinding
   // the (already registered) R3F event handlers on every render.
   const onPickRef = useRef(onPick);
+  const onPickDownRef = useRef(onPickDown);
+  const onPickUpRef = useRef(onPickUp);
   const onHoverRef = useRef(onHover);
   useEffect(() => {
     onPickRef.current = onPick;
+    onPickDownRef.current = onPickDown;
+    onPickUpRef.current = onPickUp;
     onHoverRef.current = onHover;
   });
 
@@ -247,6 +261,16 @@ export function CadModel({
                 event.stopPropagation();
                 const pick = resolveHit(data, event);
                 if (pick !== null) onPickRef.current?.(pick);
+              },
+              onPointerDown: (event: ThreeEvent<PointerEvent>) => {
+                event.stopPropagation();
+                const pick = resolveHit(data, event);
+                if (pick !== null) onPickDownRef.current?.(pick);
+              },
+              onPointerUp: (event: ThreeEvent<PointerEvent>) => {
+                event.stopPropagation();
+                const pick = resolveHit(data, event);
+                if (pick !== null) onPickUpRef.current?.(pick);
               },
               onPointerMove: (event: ThreeEvent<PointerEvent>) => {
                 event.stopPropagation();
