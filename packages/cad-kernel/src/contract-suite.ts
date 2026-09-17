@@ -33,7 +33,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { length } from "@slopcad/cad-core";
+import { angle, length } from "@slopcad/cad-core";
+import type { AngleValue } from "@slopcad/cad-core";
 import type { KernelCapabilities } from "./capabilities";
 
 import {
@@ -251,6 +252,92 @@ export function defineKernelContractSuite(
       assertTessellationValid(after, {
         bounds: { min: [5, -2, 7], max: [35, 18, 17] },
       });
+    });
+
+    it("rotates solids exactly, rotation before translation, when transformRotation is declared", () => {
+      // Rotation judgement is flag-gated: a kernel that has not declared
+      // `transformRotation` owes no rotation semantics (it must reject or
+      // ignore the field — never silently mis-apply it), so there is
+      // nothing to judge here for translation-only kernels.
+      const kernel = createKernel();
+      if (!kernel.capabilities.transformRotation) return;
+      const solid = box(kernel, 20, 10, 5);
+      const quarterTurn = unwrapKernelResult(
+        kernel.transform(solid, {
+          x: length(0),
+          y: length(0),
+          z: length(0),
+          rotation: { axis: [0, 0, 1], angle: angle(90, "deg") },
+        }),
+        "rotate",
+      );
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(quarterTurn), "rotated bounds"),
+        { min: [-10, 0, 0], max: [0, 20, 5] },
+        EXACT_BOUNDS_TOLERANCE,
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(quarterTurn), "rotated volume"),
+        20 * 10 * 5,
+        EXACT_VOLUME_TOLERANCE,
+      );
+      // The combined transform pins the application order: rotating
+      // 20×10×5 by 90° about z then translating by (5, 5, 0) spans
+      // x ∈ [-5, 5], y ∈ [5, 25] — translating first would span
+      // x ∈ [-15, -5].
+      const combined = unwrapKernelResult(
+        kernel.transform(solid, {
+          x: length(5),
+          y: length(5),
+          z: length(0),
+          rotation: { axis: [0, 0, 1], angle: angle(Math.PI / 2) },
+        }),
+        "rotate and translate",
+      );
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(combined), "combined bounds"),
+        { min: [-5, 5, 0], max: [5, 25, 5] },
+        EXACT_BOUNDS_TOLERANCE,
+      );
+      const before = unwrapKernelResult(kernel.tessellate(solid), "tessellate");
+      const after = unwrapKernelResult(
+        kernel.tessellate(quarterTurn),
+        "tessellate",
+      );
+      expect(tessellationTriangleCount(after)).toBe(
+        tessellationTriangleCount(before),
+      );
+    });
+
+    it("rejects degenerate rotations with kernel/invalid-rotation when transformRotation is declared", () => {
+      const kernel = createKernel();
+      if (!kernel.capabilities.transformRotation) return;
+      const solid = box(kernel, 10, 10, 10);
+      expectKernelFailure(
+        kernel.transform(solid, {
+          x: length(0),
+          y: length(0),
+          z: length(0),
+          rotation: { axis: [0, 0, 0], angle: angle(1) },
+        }),
+        KERNEL_ERROR_CODES.invalidRotation,
+        "zero axis rotation",
+      );
+      const nanAngle: AngleValue = {
+        dimension: "angle",
+        unit: "rad",
+        value: Number.NaN,
+      };
+      expectKernelFailure(
+        kernel.transform(solid, {
+          x: length(0),
+          y: length(0),
+          z: length(0),
+          rotation: { axis: [0, 0, 1], angle: nanAngle },
+        }),
+        KERNEL_ERROR_CODES.invalidRotation,
+        "NaN angle rotation",
+      );
     });
 
     it("subtracts an interior cylinder from a box (plate with hole) with correct semantics", () => {

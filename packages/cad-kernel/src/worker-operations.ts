@@ -32,16 +32,91 @@
  * ## Determinism
  *
  * Serialization emits the canonical form in a fixed key order, with every
- * length normalized to canonical millimetres by cad-core's dimensional-value
- * serializer; parsing accepts any unit of the right dimension. Two equal
- * quantities therefore always produce identical bytes regardless of the units
- * they were built with. Parsing is strict on known fields and tolerant of
- * unknown fields, so newer payload versions deserialize without corruption.
+ * length normalized to canonical millimetres and every angle normalized to
+ * canonical radians by cad-core's dimensional-value serializer; parsing
+ * accepts any unit of the right dimension. Two equal quantities therefore
+ * always produce identical bytes regardless of the units they were built
+ * with. Parsing is strict on known fields and tolerant of unknown fields, so
+ * newer payload versions deserialize without corruption.
+ *
+ * ## The transform's rotation extension (Phase 21.2)
+ *
+ * `solid.transform` carries the contract's optional rotation (Phase 21.1)
+ * as an optional `rotation` field — axis + angle — serialized after the
+ * translation in the fixed key order and normalized like every other
+ * dimensional value. The field is optional on the wire exactly as in the
+ * contract: a payload without it parses as translation-only, so every
+ * message formed before the extension keeps its meaning unchanged.
+ *
+ * ## The STEP import extension (Phase 21.3) — a disclosed vocabulary group
+ *
+ * `step.import` is the first operation in the vocabulary that is NOT a
+ * translation of a {@link GeometryKernel} method: file import is a
+ * kernel-backend capability (OCCT's STEP translator), not a contract
+ * operation, so there is nothing on the `GeometryKernel` interface to
+ * translate. The vocabulary carries it as data all the same — the table is
+ * the protocol's whole truth — and the kernel-neutral server dispatches it
+ * through an optional *step-import extension* the hosting side injects
+ * (see `WorkerStepImporter` and `createWorkerServer`): a host without a
+ * STEP-capable kernel answers `step.import` with the structured
+ * `step-import/unsupported` failure instead of pretending. The geometry
+ * that crosses back is ordinary session-solid addressing — one minted
+ * {@link WorkerSolidId} per imported solid, usable with every `solid.*`
+ * operation thereafter — so nothing downstream needs to know the solids
+ * came from a file.
+ *
+ * What the wire result makes explicit is provenance: every imported solid
+ * rides a `{ solid, origin: "imported-step" }` ref whose literal origin is
+ * the data-level marker separating imported geometry from feature-built
+ * solids (the cad-io no-fabrication discipline, at the protocol layer). An
+ * import mints geometry ONLY — no features, no parameters, no construction
+ * history exist on the wire result or anywhere behind it.
+ *
+ * The input carries the file's raw bytes. JSON has no byte type, so the
+ * serialized form is the strict RFC 4648 base64 text (`./worker-base64`):
+ * canonical padding, no whitespace, no tolerance — a corrupted payload
+ * fails with `worker/malformed-payload` before any kernel runs. Unit and
+ * metadata semantics are the importing kernel's business; the protocol is
+ * a pure carrier of bytes and provenance-marked solid refs.
+ *
+ * ## The STEP export extension (Phase 21.4) — the twin disclosed group
+ *
+ * `step.export` is the mirror operation: session-solid ids in, STEP file
+ * bytes out. Like `step.import` it is a kernel-backend capability (OCCT's
+ * STEP writer), not a contract operation, so it executes through an
+ * optional hosting extension (`WorkerStepExporter`) and a host without one
+ * answers with the structured `step-export/unsupported` failure. The input
+ * addresses solids by {@link WorkerSolidId} (the vocabulary's universal
+ * solid addressing) and carries optional `unit`/`schema` strings — the
+ * codec checks structure only (they are plain strings); which units and
+ * schemas a kernel's writer accepts is its semantic call, returned as a
+ * structured `step-export/*` kernel code. The result is the file's bytes in
+ * the same strict base64 wire form as the import's input, so an
+ * export→import round trip crosses the channel as plain text twice. The
+ * result mints NO session solids: exported geometry stays addressed by the
+ * ids the caller passed in, which the session still owns.
+ *
+ * ## The BREP extension pair (Phase 21.5) — the third disclosed group
+ *
+ * `brep.import`/`brep.export` are the STEP pair's twins over OCCT's native
+ * BREP form, wired for exactly one reason — parity: the browser /io flow
+ * speaks BREP through the same worker channel it speaks STEP through, so
+ * the two exchange paths stay symmetric (same bytes-in-base64 wire form,
+ * same provenance-marked solid refs out, same optional-extension hosting,
+ * same unsupported codes when a host lacks the capability). The one
+ * deliberate asymmetry is the settings field: BREP exchange has NO unit or
+ * schema options (the form's native unit IS the kernel's canonical
+ * millimetre, and there is no schema to select), so `brep.export`'s input
+ * carries solids and nothing else. The result provenance literal is
+ * `"imported-brep"` — the same data-level no-fabrication marker as the STEP
+ * twin, distinguishing imported geometry from feature-built solids.
  */
 
 import {
+  type AngleValue,
   type AnyDimensionalValue,
   type LengthValue,
+  type ParseFailure,
   type ParseResult,
   type SerializedDimensionalValue,
   fail,
@@ -49,8 +124,9 @@ import {
   parseDimensionalValue,
   serializeDimensionalValue,
 } from "@slopcad/cad-core";
-import type { KernelBounds, Tessellation } from "./contract";
+import type { KernelBounds, KernelSolid, Tessellation } from "./contract";
 
+import { decodeBase64Strict, encodeBase64 } from "./worker-base64";
 import {
   WORKER_PROTOCOL_ERROR_CODES,
   type WorkerParseError,
@@ -76,6 +152,10 @@ export const WORKER_OPERATION_IDS = [
   "solid.volume",
   "solid.tessellate",
   "solid.dispose",
+  "step.import",
+  "step.export",
+  "brep.import",
+  "brep.export",
 ] as const;
 
 /** An operation the worker protocol knows how to carry. */
@@ -138,10 +218,27 @@ export interface WorkerTranslationVector {
   readonly z: LengthValue;
 }
 
-/** Input of `solid.transform`: the solid and the translation to apply. */
+/**
+ * A rotation of `solid.transform` (the Phase 21.2 wire twin of the
+ * contract's Phase 21.1 `RotationInput`): a dimensionless direction in the
+ * canonical right-handed millimetre space plus an {@link AngleValue} in any
+ * angle unit. Semantic rules — the axis must be normalizable, the angle
+ * finite — stay in the kernel contract; the codec checks structure only.
+ */
+export interface WorkerRotationInput {
+  readonly axis: readonly [number, number, number];
+  readonly angle: AngleValue;
+}
+
+/**
+ * Input of `solid.transform`: the solid, the translation to apply, and the
+ * optional rotation applied first (about the world-origin axis), exactly as
+ * the contract's `TransformInput` orders the two.
+ */
 export interface WorkerTransformInput {
   readonly solid: WorkerSolidId;
   readonly translation: WorkerTranslationVector;
+  readonly rotation?: WorkerRotationInput;
 }
 
 /**
@@ -151,6 +248,204 @@ export interface WorkerTransformInput {
 export interface WorkerSolidRefInput {
   readonly solid: WorkerSolidId;
 }
+
+/**
+ * Input of `step.import`: the raw bytes of the STEP file to import. The
+ * typed form carries the bytes themselves; the serialized form is their
+ * strict canonical base64 text (see `./worker-base64`). Whether the bytes
+ * are a real STEP document is the importing kernel's semantic call — the
+ * codec checks structure only.
+ */
+export interface WorkerStepImportInput {
+  readonly data: Uint8Array;
+}
+
+/**
+ * One imported solid of a `step.import` result: the minted session-solid id
+ * plus its data-level provenance. The literal origin is the contract that
+ * separates imported geometry from feature-built solids at the data level —
+ * a consumer holding these refs knows the geometry has no parametric
+ * history behind it, because the protocol result carries none.
+ */
+export interface WorkerImportedSolidRef {
+  readonly solid: WorkerSolidId;
+  readonly origin: "imported-step";
+}
+
+/**
+ * The provenance literal of a wire imported-solid ref: the file format the
+ * geometry came from. Each literal is the data-level no-fabrication marker
+ * of its exchange path.
+ */
+export type WorkerImportedOrigin = "imported-step" | "imported-brep";
+
+/**
+ * Result of `step.import`: one provenance-marked ref per imported solid, in
+ * file order. A multi-solid STEP file mints multiple session solids; the
+ * geometry is canonical millimetres and pure BREP — no feature, parameter,
+ * or history payload exists anywhere on the result.
+ */
+export interface WorkerStepImportResult {
+  readonly solids: readonly WorkerImportedSolidRef[];
+}
+
+/**
+ * The structured kernel-side failure of a `step.import` execution: exactly
+ * the cad-core {@link ParseFailure} shape — a stable `step-import/*` cause
+ * code, a message, and the rejected input retained for in-process
+ * diagnostics. Only the code and message reach the wire (the server drops
+ * the retained input, whose bytes the sender already holds).
+ */
+export type WorkerStepImportFailure = ParseFailure;
+
+/**
+ * The server's optional STEP-import extension (the Phase 21.3 vocabulary
+ * extension's execution surface): turns raw STEP bytes into session solids.
+ * A host whose kernel cannot import STEP omits it and answers
+ * `step.import` with {@link STEP_IMPORT_UNSUPPORTED_CODE}.
+ */
+export type WorkerStepImporter = (
+  bytes: Uint8Array,
+) => ParseResult<readonly KernelSolid[], WorkerStepImportFailure>;
+
+/**
+ * The `step-import/*` failure code a server WITHOUT a STEP importer answers
+ * `step.import` with (in `data.kernelCode` of the structured
+ * `worker/operation-failed` response). The importing kernel's own failure
+ * codes are its own registry (e.g. `STEP_IMPORT_ERROR_CODES` in the OCCT
+ * package); this one belongs to the protocol, because the absence it names
+ * is a hosting fact, not a parse outcome.
+ */
+export const STEP_IMPORT_UNSUPPORTED_CODE = "step-import/unsupported";
+
+/**
+ * Input of `step.export`: the session solids to write into ONE STEP file,
+ * plus the optional exporter settings. `unit`/`schema` are plain strings on
+ * the wire — structure only; the exporting kernel validates them against
+ * its writer's accepted sets and answers structured `step-export/*`
+ * failures for the rest.
+ */
+export interface WorkerStepExportInput {
+  readonly solids: readonly WorkerSolidId[];
+  readonly unit?: string;
+  readonly schema?: string;
+}
+
+/**
+ * The exporter settings the wire carries, separated from the input's solid
+ * addressing: exactly the optional `unit`/`schema` pair.
+ */
+export interface WorkerStepExportSettings {
+  readonly unit?: string;
+  readonly schema?: string;
+}
+
+/** Result of `step.export`: the STEP file's bytes. */
+export interface WorkerStepExportResult {
+  readonly data: Uint8Array;
+}
+
+/**
+ * The server's optional STEP-export extension (the Phase 21.4 vocabulary
+ * extension's execution surface): resolves to the file bytes for the given
+ * owned kernel solids. A host whose kernel cannot export STEP omits it and
+ * answers `step.export` with {@link STEP_EXPORT_UNSUPPORTED_CODE}.
+ */
+export type WorkerStepExporter = (
+  solids: readonly KernelSolid[],
+  settings: WorkerStepExportSettings,
+) => ParseResult<Uint8Array, ParseFailure>;
+
+/**
+ * The `step-export/*` failure code a server WITHOUT a STEP exporter answers
+ * `step.export` with (in `data.kernelCode` of the structured
+ * `worker/operation-failed` response) — the import twin's twin: the absence
+ * it names is a hosting fact, not an export outcome.
+ */
+export const STEP_EXPORT_UNSUPPORTED_CODE = "step-export/unsupported";
+
+/**
+ * Input of `brep.import`: the raw bytes of the OCCT BREP file to import,
+ * in the same strict base64 wire form as `step.import`'s data. Whether the
+ * bytes are a real BREP document is the importing kernel's semantic call —
+ * the codec checks structure only.
+ */
+export interface WorkerBrepImportInput {
+  readonly data: Uint8Array;
+}
+
+/**
+ * One imported solid of a `brep.import` result: the minted session-solid id
+ * plus the BREP provenance literal — the same data-level no-fabrication
+ * contract as the STEP twin's ref.
+ */
+export interface WorkerImportedBrepSolidRef {
+  readonly solid: WorkerSolidId;
+  readonly origin: "imported-brep";
+}
+
+/**
+ * Result of `brep.import`: one provenance-marked ref per imported solid, in
+ * file order — pure geometry, no feature/parameter/history payload
+ * anywhere on the result.
+ */
+export interface WorkerBrepImportResult {
+  readonly solids: readonly WorkerImportedBrepSolidRef[];
+}
+
+/**
+ * The structured kernel-side failure of a `brep.import` execution: the
+ * cad-core {@link ParseFailure} shape, exactly the STEP twin's discipline.
+ */
+export type WorkerBrepImportFailure = ParseFailure;
+
+/**
+ * The server's optional BREP-import extension (the Phase 21.5 vocabulary
+ * extension's execution surface). A host whose kernel cannot import BREP
+ * omits it and answers `brep.import` with
+ * {@link BREP_IMPORT_UNSUPPORTED_CODE}.
+ */
+export type WorkerBrepImporter = (
+  bytes: Uint8Array,
+) => ParseResult<readonly KernelSolid[], WorkerBrepImportFailure>;
+
+/**
+ * The `brep-import/*` failure code a server WITHOUT a BREP importer answers
+ * `brep.import` with — the STEP twin's twin: the absence it names is a
+ * hosting fact, not a parse outcome.
+ */
+export const BREP_IMPORT_UNSUPPORTED_CODE = "brep-import/unsupported";
+
+/**
+ * Input of `brep.export`: the session solids to write into ONE BREP file.
+ * There are no settings fields — the BREP form has no unit or schema
+ * selection (its native unit is the kernel's canonical millimetre), so the
+ * solids list is the whole input.
+ */
+export interface WorkerBrepExportInput {
+  readonly solids: readonly WorkerSolidId[];
+}
+
+/** Result of `brep.export`: the BREP file's bytes. */
+export interface WorkerBrepExportResult {
+  readonly data: Uint8Array;
+}
+
+/**
+ * The server's optional BREP-export extension (the Phase 21.5 vocabulary
+ * extension's execution surface): resolves to the file bytes for the given
+ * owned kernel solids. A host whose kernel cannot export BREP omits it and
+ * answers `brep.export` with {@link BREP_EXPORT_UNSUPPORTED_CODE}.
+ */
+export type WorkerBrepExporter = (
+  solids: readonly KernelSolid[],
+) => ParseResult<Uint8Array, ParseFailure>;
+
+/**
+ * The `brep-export/*` failure code a server WITHOUT a BREP exporter answers
+ * `brep.export` with.
+ */
+export const BREP_EXPORT_UNSUPPORTED_CODE = "brep-export/unsupported";
 
 /** Result of every solid-producing operation: the minted solid's id. */
 export interface WorkerSolidResult {
@@ -189,6 +484,10 @@ export interface WorkerOperationInputs {
   readonly "solid.volume": WorkerSolidRefInput;
   readonly "solid.tessellate": WorkerSolidRefInput;
   readonly "solid.dispose": WorkerSolidRefInput;
+  readonly "step.import": WorkerStepImportInput;
+  readonly "step.export": WorkerStepExportInput;
+  readonly "brep.import": WorkerBrepImportInput;
+  readonly "brep.export": WorkerBrepExportInput;
 }
 
 /** The typed input of an operation, keyed by operation id. */
@@ -210,6 +509,10 @@ export interface WorkerOperationResults {
   readonly "solid.volume": WorkerVolumeResult;
   readonly "solid.tessellate": WorkerTessellationResult;
   readonly "solid.dispose": WorkerDisposeResult;
+  readonly "step.import": WorkerStepImportResult;
+  readonly "step.export": WorkerStepExportResult;
+  readonly "brep.import": WorkerBrepImportResult;
+  readonly "brep.export": WorkerBrepExportResult;
 }
 
 /** The typed result of an operation, keyed by operation id. */
@@ -219,6 +522,9 @@ export type WorkerOperationResult<
 
 /** Serialized lengths are cad-core dimensional values in canonical mm. */
 export type SerializedWorkerLength = SerializedDimensionalValue;
+
+/** Serialized angles are cad-core dimensional values in canonical radians. */
+export type SerializedWorkerAngle = SerializedDimensionalValue;
 
 /**
  * The canonical JSON input form of each operation, in a fixed key order.
@@ -259,6 +565,15 @@ export interface SerializedWorkerOperationInputs {
       readonly y: SerializedWorkerLength;
       readonly z: SerializedWorkerLength;
     };
+    /**
+     * The optional rotation, present exactly when the typed input carried
+     * one (see the module doc's rotation-extension section). Axis first,
+     * canonical-radian angle second.
+     */
+    readonly rotation?: {
+      readonly axis: readonly [number, number, number];
+      readonly angle: SerializedWorkerAngle;
+    };
   };
   readonly "solid.bounds": {
     readonly solid: string;
@@ -271,6 +586,20 @@ export interface SerializedWorkerOperationInputs {
   };
   readonly "solid.dispose": {
     readonly solid: string;
+  };
+  readonly "step.import": {
+    readonly data: string;
+  };
+  readonly "step.export": {
+    readonly solids: readonly string[];
+    readonly unit?: string;
+    readonly schema?: string;
+  };
+  readonly "brep.import": {
+    readonly data: string;
+  };
+  readonly "brep.export": {
+    readonly solids: readonly string[];
   };
 }
 
@@ -322,6 +651,24 @@ export interface SerializedWorkerOperationResults {
     };
   };
   readonly "solid.dispose": null;
+  readonly "step.import": {
+    readonly solids: readonly {
+      readonly solid: string;
+      readonly origin: "imported-step";
+    }[];
+  };
+  readonly "step.export": {
+    readonly data: string;
+  };
+  readonly "brep.import": {
+    readonly solids: readonly {
+      readonly solid: string;
+      readonly origin: "imported-brep";
+    }[];
+  };
+  readonly "brep.export": {
+    readonly data: string;
+  };
 }
 
 /** The canonical JSON result form of an operation, keyed by operation id. */
@@ -368,6 +715,11 @@ function isLengthValue(value: AnyDimensionalValue): value is LengthValue {
   return value.dimension === "length";
 }
 
+/** Type guard narrowing a parsed dimensional value to an angle. */
+function isAngleValue(value: AnyDimensionalValue): value is AngleValue {
+  return value.dimension === "angle";
+}
+
 function requireLengthField(
   operation: WorkerOperationId,
   field: string,
@@ -387,6 +739,64 @@ function requireLengthField(
     );
   }
   return ok(parsed.value);
+}
+
+function requireAngleField(
+  operation: WorkerOperationId,
+  field: string,
+  input: unknown,
+): ParseResult<AngleValue, WorkerParseError> {
+  const parsed = parseDimensionalValue(input);
+  if (!parsed.ok) {
+    return payloadError(
+      `The "${operation}" field "${field}" must be a serialized angle value: ${parsed.error.message}`,
+      input,
+    );
+  }
+  if (!isAngleValue(parsed.value)) {
+    return payloadError(
+      `The "${operation}" field "${field}" must be an angle; it is a ${parsed.value.dimension}.`,
+      input,
+    );
+  }
+  return ok(parsed.value);
+}
+
+/**
+ * Parses a rotation axis: exactly three finite numbers. Structure only —
+ * whether the vector is non-zero and normalizable is the kernel contract's
+ * semantic call (`kernel/invalid-rotation`), not the protocol's.
+ */
+function requireAxisField(
+  operation: WorkerOperationId,
+  field: string,
+  input: unknown,
+): ParseResult<readonly [number, number, number], WorkerParseError> {
+  if (!Array.isArray(input) || input.length !== 3) {
+    return payloadError(
+      `The "${operation}" field "${field}" must be an array of exactly three finite numbers.`,
+      input,
+    );
+  }
+  const entries: readonly unknown[] = input;
+  const values: number[] = [];
+  for (const entry of entries) {
+    if (!isFiniteNumber(entry)) {
+      return payloadError(
+        `The "${operation}" field "${field}" must be an array of exactly three finite numbers.`,
+        input,
+      );
+    }
+    values.push(entry);
+  }
+  const [x, y, z] = values;
+  if (x === undefined || y === undefined || z === undefined) {
+    return payloadError(
+      `The "${operation}" field "${field}" must be an array of exactly three finite numbers.`,
+      input,
+    );
+  }
+  return ok([x, y, z]);
 }
 
 function requireSolidIdField(
@@ -608,12 +1018,22 @@ function parseSubtractInput(
 function serializeTransformInput(
   input: WorkerTransformInput,
 ): SerializedWorkerOperationInput<"solid.transform"> {
+  const translation = {
+    x: serializeDimensionalValue(input.translation.x),
+    y: serializeDimensionalValue(input.translation.y),
+    z: serializeDimensionalValue(input.translation.z),
+  };
+  // The rotation rides last in the fixed key order, exactly when present —
+  // a translation-only input serializes to the pre-extension byte shape.
+  if (input.rotation === undefined) {
+    return { solid: input.solid, translation };
+  }
   return {
     solid: input.solid,
-    translation: {
-      x: serializeDimensionalValue(input.translation.x),
-      y: serializeDimensionalValue(input.translation.y),
-      z: serializeDimensionalValue(input.translation.z),
+    translation,
+    rotation: {
+      axis: [...input.rotation.axis],
+      angle: serializeDimensionalValue(input.rotation.angle),
     },
   };
 }
@@ -653,9 +1073,36 @@ function parseTransformInput(
     record.value.translation.z,
   );
   if (!z.ok) return z;
+  // Backward compatibility: a payload without the rotation field is a
+  // translation-only transform, byte-compatible with the pre-extension wire.
+  if (record.value.rotation === undefined) {
+    return ok({
+      solid: solid.value,
+      translation: { x: x.value, y: y.value, z: z.value },
+    });
+  }
+  if (!isPlainRecord(record.value.rotation)) {
+    return payloadError(
+      'The "solid.transform" field "rotation" must be a plain object with axis and angle fields.',
+      record.value.rotation,
+    );
+  }
+  const axis = requireAxisField(
+    "solid.transform",
+    "rotation.axis",
+    record.value.rotation.axis,
+  );
+  if (!axis.ok) return axis;
+  const angle = requireAngleField(
+    "solid.transform",
+    "rotation.angle",
+    record.value.rotation.angle,
+  );
+  if (!angle.ok) return angle;
   return ok({
     solid: solid.value,
     translation: { x: x.value, y: y.value, z: z.value },
+    rotation: { axis: axis.value, angle: angle.value },
   });
 }
 
@@ -675,6 +1122,272 @@ function parseSolidRefInput(
   const solid = requireSolidIdField(operation, "solid", record.value.solid);
   if (!solid.ok) return solid;
   return ok({ solid: solid.value });
+}
+
+function serializeStepImportInput(
+  input: WorkerStepImportInput,
+): SerializedWorkerOperationInput<"step.import"> {
+  return { data: encodeBase64(input.data) };
+}
+
+/**
+ * Parses a file-bytes input field shared by `step.import` and `brep.import`:
+ * strict canonical base64 text or `worker/malformed-payload`.
+ */
+function parseFileBytesInput(
+  operation: "step.import" | "brep.import",
+  payload: unknown,
+): ParseResult<{ readonly data: Uint8Array }, WorkerParseError> {
+  const record = requirePayloadRecord(operation, payload);
+  if (!record.ok) return record;
+  const { data } = record.value;
+  if (typeof data !== "string") {
+    return payloadError(
+      `The "${operation}" field "data" must be the file's canonical base64 text.`,
+      data,
+    );
+  }
+  const bytes = decodeBase64Strict(data);
+  if (bytes === null) {
+    return payloadError(
+      `The "${operation}" field "data" must be strict canonical base64: standard alphabet, padded, no whitespace.`,
+      data,
+    );
+  }
+  return ok({ data: bytes });
+}
+
+function parseStepImportInput(
+  payload: unknown,
+): ParseResult<WorkerStepImportInput, WorkerParseError> {
+  return parseFileBytesInput("step.import", payload);
+}
+
+/** Parses an optional plain-string settings field (`unit`/`schema`). */
+function requireOptionalStringField(
+  operation: WorkerOperationId,
+  field: string,
+  input: unknown,
+): ParseResult<string | undefined, WorkerParseError> {
+  if (input === undefined) return ok(undefined);
+  if (typeof input !== "string") {
+    return payloadError(
+      `The "${operation}" field "${field}" must be a string when present.`,
+      input,
+    );
+  }
+  return ok(input);
+}
+
+function serializeStepExportInput(
+  input: WorkerStepExportInput,
+): SerializedWorkerOperationInput<"step.export"> {
+  // The settings ride after the solid list in the fixed key order, exactly
+  // when present — a solids-only input serializes to the minimal form.
+  if (input.unit === undefined && input.schema === undefined) {
+    return { solids: [...input.solids] };
+  }
+  return {
+    solids: [...input.solids],
+    ...(input.unit === undefined ? {} : { unit: input.unit }),
+    ...(input.schema === undefined ? {} : { schema: input.schema }),
+  };
+}
+
+function parseStepExportInput(
+  payload: unknown,
+): ParseResult<WorkerStepExportInput, WorkerParseError> {
+  const record = requirePayloadRecord("step.export", payload);
+  if (!record.ok) return record;
+  const solids = requireSolidIdArrayField(
+    "step.export",
+    "solids",
+    record.value.solids,
+  );
+  if (!solids.ok) return solids;
+  const unit = requireOptionalStringField(
+    "step.export",
+    "unit",
+    record.value.unit,
+  );
+  if (!unit.ok) return unit;
+  const schema = requireOptionalStringField(
+    "step.export",
+    "schema",
+    record.value.schema,
+  );
+  if (!schema.ok) return schema;
+  if (unit.value === undefined && schema.value === undefined) {
+    return ok({ solids: solids.value });
+  }
+  return ok({
+    solids: solids.value,
+    ...(unit.value === undefined ? {} : { unit: unit.value }),
+    ...(schema.value === undefined ? {} : { schema: schema.value }),
+  });
+}
+
+function serializeStepExportResult(
+  result: WorkerStepExportResult,
+): SerializedWorkerOperationResult<"step.export"> {
+  return { data: encodeBase64(result.data) };
+}
+
+function parseStepExportResult(
+  payload: unknown,
+): ParseResult<WorkerStepExportResult, WorkerParseError> {
+  const record = requirePayloadRecord("step.export", payload);
+  if (!record.ok) return record;
+  const { data } = record.value;
+  if (typeof data !== "string") {
+    return payloadError(
+      'The "step.export" result field "data" must be the file\'s canonical base64 text.',
+      data,
+    );
+  }
+  const bytes = decodeBase64Strict(data);
+  if (bytes === null) {
+    return payloadError(
+      'The "step.export" result field "data" must be strict canonical base64: standard alphabet, padded, no whitespace.',
+      data,
+    );
+  }
+  return ok({ data: bytes });
+}
+
+function serializeBrepImportInput(
+  input: WorkerBrepImportInput,
+): SerializedWorkerOperationInput<"brep.import"> {
+  return { data: encodeBase64(input.data) };
+}
+
+function parseBrepImportInput(
+  payload: unknown,
+): ParseResult<WorkerBrepImportInput, WorkerParseError> {
+  return parseFileBytesInput("brep.import", payload);
+}
+
+function serializeBrepExportInput(
+  input: WorkerBrepExportInput,
+): SerializedWorkerOperationInput<"brep.export"> {
+  return { solids: [...input.solids] };
+}
+
+function parseBrepExportInput(
+  payload: unknown,
+): ParseResult<WorkerBrepExportInput, WorkerParseError> {
+  const record = requirePayloadRecord("brep.export", payload);
+  if (!record.ok) return record;
+  const solids = requireSolidIdArrayField(
+    "brep.export",
+    "solids",
+    record.value.solids,
+  );
+  if (!solids.ok) return solids;
+  return ok({ solids: solids.value });
+}
+
+function serializeBrepImportResult(
+  result: WorkerBrepImportResult,
+): SerializedWorkerOperationResult<"brep.import"> {
+  return {
+    solids: result.solids.map((ref) => ({
+      solid: ref.solid,
+      origin: ref.origin,
+    })),
+  };
+}
+
+/**
+ * Parses an imported-solid-refs result shared by `step.import` and
+ * `brep.import`: an array of `{solid, origin}` refs whose origin must be
+ * the operation's own provenance literal, with the caller building each
+ * typed ref from a validated solid id.
+ */
+function parseImportedSolidsResult<R>(
+  operation: "step.import" | "brep.import",
+  origin: WorkerImportedOrigin,
+  makeRef: (solid: WorkerSolidId) => R,
+  payload: unknown,
+): ParseResult<{ readonly solids: readonly R[] }, WorkerParseError> {
+  const record = requirePayloadRecord(operation, payload);
+  if (!record.ok) return record;
+  const solids = record.value.solids;
+  if (!Array.isArray(solids)) {
+    return payloadError(
+      `The "${operation}" result field "solids" must be an array of imported-solid refs.`,
+      solids,
+    );
+  }
+  const refs: R[] = [];
+  for (const entry of solids) {
+    if (!isPlainRecord(entry)) {
+      return payloadError(
+        `Each "${operation}" solid ref must be a plain object with "solid" and "origin".`,
+        entry,
+      );
+    }
+    const solid = requireSolidIdField(operation, "solids[].solid", entry.solid);
+    if (!solid.ok) return solid;
+    if (entry.origin !== origin) {
+      return payloadError(
+        `The "${operation}" solid ref "origin" must be the literal "${origin}".`,
+        entry.origin,
+      );
+    }
+    refs.push(makeRef(solid.value));
+  }
+  return ok({ solids: refs });
+}
+
+function parseStepImportResult(
+  payload: unknown,
+): ParseResult<WorkerStepImportResult, WorkerParseError> {
+  return parseImportedSolidsResult(
+    "step.import",
+    "imported-step",
+    (solid): WorkerImportedSolidRef => ({ solid, origin: "imported-step" }),
+    payload,
+  );
+}
+
+function parseBrepImportResult(
+  payload: unknown,
+): ParseResult<WorkerBrepImportResult, WorkerParseError> {
+  return parseImportedSolidsResult(
+    "brep.import",
+    "imported-brep",
+    (solid): WorkerImportedBrepSolidRef => ({ solid, origin: "imported-brep" }),
+    payload,
+  );
+}
+
+function serializeBrepExportResult(
+  result: WorkerBrepExportResult,
+): SerializedWorkerOperationResult<"brep.export"> {
+  return { data: encodeBase64(result.data) };
+}
+
+function parseBrepExportResult(
+  payload: unknown,
+): ParseResult<WorkerBrepExportResult, WorkerParseError> {
+  const record = requirePayloadRecord("brep.export", payload);
+  if (!record.ok) return record;
+  const { data } = record.value;
+  if (typeof data !== "string") {
+    return payloadError(
+      'The "brep.export" result field "data" must be the file\'s canonical base64 text.',
+      data,
+    );
+  }
+  const bytes = decodeBase64Strict(data);
+  if (bytes === null) {
+    return payloadError(
+      'The "brep.export" result field "data" must be strict canonical base64: standard alphabet, padded, no whitespace.',
+      data,
+    );
+  }
+  return ok({ data: bytes });
 }
 
 /**
@@ -699,6 +1412,10 @@ const INPUT_SERIALIZERS: {
   "solid.volume": serializeSolidRefInput,
   "solid.tessellate": serializeSolidRefInput,
   "solid.dispose": serializeSolidRefInput,
+  "step.import": serializeStepImportInput,
+  "step.export": serializeStepExportInput,
+  "brep.import": serializeBrepImportInput,
+  "brep.export": serializeBrepExportInput,
 };
 
 const INPUT_PARSERS: {
@@ -720,6 +1437,10 @@ const INPUT_PARSERS: {
   "solid.tessellate": (payload) =>
     parseSolidRefInput("solid.tessellate", payload),
   "solid.dispose": (payload) => parseSolidRefInput("solid.dispose", payload),
+  "step.import": parseStepImportInput,
+  "step.export": parseStepExportInput,
+  "brep.import": parseBrepImportInput,
+  "brep.export": parseBrepExportInput,
 };
 
 /**
@@ -972,6 +1693,17 @@ function parseDisposeResult(
   return ok(null);
 }
 
+function serializeStepImportResult(
+  result: WorkerStepImportResult,
+): SerializedWorkerOperationResult<"step.import"> {
+  return {
+    solids: result.solids.map((ref) => ({
+      solid: ref.solid,
+      origin: ref.origin,
+    })),
+  };
+}
+
 /**
  * The result codec table, the input table's twin: one serializer and one
  * parser per operation.
@@ -993,6 +1725,10 @@ const RESULT_SERIALIZERS: {
   "solid.volume": serializeVolumeResult,
   "solid.tessellate": serializeTessellationResult,
   "solid.dispose": serializeDisposeResult,
+  "step.import": serializeStepImportResult,
+  "step.export": serializeStepExportResult,
+  "brep.import": serializeBrepImportResult,
+  "brep.export": serializeBrepExportResult,
 };
 
 const RESULT_PARSERS: {
@@ -1015,6 +1751,10 @@ const RESULT_PARSERS: {
   "solid.volume": parseVolumeResult,
   "solid.tessellate": parseTessellationResult,
   "solid.dispose": parseDisposeResult,
+  "step.import": parseStepImportResult,
+  "step.export": parseStepExportResult,
+  "brep.import": parseBrepImportResult,
+  "brep.export": parseBrepExportResult,
 };
 
 /**
@@ -1043,41 +1783,47 @@ export function parseWorkerOperationResult<O extends WorkerOperationId>(
 }
 
 /**
- * The mint-extraction table: for each operation, the solid its result mints —
- * exactly the solid-producing operations' results carry a
- * {@link WorkerSolidId}; every measurement/tessellation/disposal result owns
- * no session solid. Registered like the codec tables above, so adding an
- * operation forces a decision here at compile time.
+ * The mint-extraction table: for each operation, the session solids its
+ * result mints — the single-solid producers' results carry exactly one
+ * {@link WorkerSolidId}, `step.import` carries one per imported solid, and
+ * every measurement/tessellation/disposal result owns none. Registered like
+ * the codec tables above, so adding an operation forces a decision here at
+ * compile time.
  */
 const RESULT_MINTS: {
   readonly [O in WorkerOperationId]: (
     result: WorkerOperationResult<O>,
-  ) => WorkerSolidId | undefined;
+  ) => readonly WorkerSolidId[];
 } = {
-  "solid.createBox": (result) => result.solid,
-  "solid.createSphere": (result) => result.solid,
-  "solid.createCylinder": (result) => result.solid,
-  "solid.createCone": (result) => result.solid,
-  "solid.union": (result) => result.solid,
-  "solid.subtract": (result) => result.solid,
-  "solid.intersect": (result) => result.solid,
-  "solid.transform": (result) => result.solid,
-  "solid.bounds": () => undefined,
-  "solid.volume": () => undefined,
-  "solid.tessellate": () => undefined,
-  "solid.dispose": () => undefined,
+  "solid.createBox": (result) => [result.solid],
+  "solid.createSphere": (result) => [result.solid],
+  "solid.createCylinder": (result) => [result.solid],
+  "solid.createCone": (result) => [result.solid],
+  "solid.union": (result) => [result.solid],
+  "solid.subtract": (result) => [result.solid],
+  "solid.intersect": (result) => [result.solid],
+  "solid.transform": (result) => [result.solid],
+  "solid.bounds": () => [],
+  "solid.volume": () => [],
+  "solid.tessellate": () => [],
+  "solid.dispose": () => [],
+  "step.import": (result) => result.solids.map((ref) => ref.solid),
+  "step.export": () => [],
+  "brep.import": (result) => result.solids.map((ref) => ref.solid),
+  "brep.export": () => [],
 };
 
 /**
- * The session solid `operation`'s `result` minted, or `undefined` when the
- * result owns no solid. This is the codec-table answer to "does this result
- * carry a solid id" — the single source of truth, so callers (the stale-result
- * coordinator recording mints, the worker client releasing a voided request's
- * orphaned mint) never re-derive it by probing result shapes.
+ * The session solids `operation`'s `result` minted, in mint order — empty
+ * when the result owns no solid. This is the codec-table answer to "which
+ * solid ids does this result carry" — the single source of truth, so callers
+ * (the stale-result coordinator recording mints, the worker client releasing
+ * a voided request's orphaned mints) never re-derive it by probing result
+ * shapes.
  */
-export function resultMintsSolid<O extends WorkerOperationId>(
+export function resultMintsSolids<O extends WorkerOperationId>(
   operation: O,
   result: WorkerOperationResult<O>,
-): WorkerSolidId | undefined {
+): readonly WorkerSolidId[] {
   return RESULT_MINTS[operation](result);
 }

@@ -18,6 +18,7 @@ import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkerRouteImport } from './routes/worker'
+import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiIoImport3mfRouteImport } from './routes/api/io/import-3mf'
@@ -67,6 +68,11 @@ const WorkerRoute = WorkerRouteImport.update({
   path: '/worker',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkerOcctRoute = WorkerOcctRouteImport.update({
+  id: '/worker-occt',
+  path: '/worker-occt',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthDashboardRoute = AuthDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -97,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/worker': typeof WorkerRoute
+  '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
@@ -111,6 +118,7 @@ export interface FileRoutesByTo {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/worker': typeof WorkerRoute
+  '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
@@ -127,6 +135,7 @@ export interface FileRoutesById {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/worker': typeof WorkerRoute
+  '/worker-occt': typeof WorkerOcctRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
@@ -143,6 +152,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/worker'
+    | '/worker-occt'
     | '/dashboard'
     | '/api/auth/$'
     | '/api/io/import-3mf'
@@ -157,6 +167,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/worker'
+    | '/worker-occt'
     | '/dashboard'
     | '/api/auth/$'
     | '/api/io/import-3mf'
@@ -172,6 +183,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/worker'
+    | '/worker-occt'
     | '/_auth/dashboard'
     | '/api/auth/$'
     | '/api/io/import-3mf'
@@ -188,6 +200,7 @@ export interface RootRouteChildren {
   UiViewportRoute: typeof UiViewportRoute
   WorkbenchRoute: typeof WorkbenchRoute
   WorkerRoute: typeof WorkerRoute
+  WorkerOcctRoute: typeof WorkerOcctRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiIoImport3mfRoute: typeof ApiIoImport3mfRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
@@ -258,6 +271,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/worker-occt': {
+      id: '/worker-occt'
+      path: '/worker-occt'
+      fullPath: '/worker-occt'
+      preLoaderRoute: typeof WorkerOcctRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_auth/dashboard': {
       id: '/_auth/dashboard'
       path: '/dashboard'
@@ -311,6 +331,7 @@ const rootRouteChildren: RootRouteChildren = {
   UiViewportRoute: UiViewportRoute,
   WorkbenchRoute: WorkbenchRoute,
   WorkerRoute: WorkerRoute,
+  WorkerOcctRoute: WorkerOcctRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiIoImport3mfRoute: ApiIoImport3mfRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,

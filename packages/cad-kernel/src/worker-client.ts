@@ -73,7 +73,7 @@ import {
   WORKER_PROTOCOL_ERROR_CODES,
 } from "./worker-errors";
 import { createWorkerIdGenerator, parseWorkerRequestId } from "./worker-ids";
-import { resultMintsSolid } from "./worker-operations";
+import { resultMintsSolids } from "./worker-operations";
 import {
   createWorkerCancel,
   createWorkerErrorResponse,
@@ -83,7 +83,6 @@ import {
   type WorkerResponseMessage,
   type WorkerSuccessResponseMessage,
 } from "./worker-protocol";
-
 
 /**
  * The structured failure a request promise rejects with: the wire
@@ -194,37 +193,42 @@ export function createWorkerClient(options: WorkerClientOptions): WorkerClient {
 
   /**
    * Hygiene for a straggling success of a request this client voided: the
-   * pinned rule discards the message (it settles nothing), and if its result
-   * minted a session solid, that solid is an orphan nobody else will ever
-   * dispose — so it is disposed best-effort, right at the discard site.
-   * Successes for foreign or normally settled ids are untouched: their
-   * solids (when real) belong to whoever settled them.
+   * pinned rule discards the message (it settles nothing), and any session
+   * solids its result minted are orphans nobody else will ever dispose —
+   * so they are disposed best-effort, right at the discard site. Successes
+   * for foreign or normally settled ids are untouched: their solids (when
+   * real) belong to whoever settled them.
    */
   function discardVoidedSuccess(message: WorkerSuccessResponseMessage): void {
     const operation = voided.get(message.requestId);
     if (operation === undefined) return; // not ours to void: "ignored".
     // One straggler per voided id: later duplicates stay plain drops, and
-    // the derived disposal id below is issued at most once.
+    // the derived disposal ids below are issued at most once.
     voided.delete(message.requestId);
     const decoded = decodeWorkerResult(message, operation);
-    if (!decoded.ok) return; // no trustworthy mint to release.
-    const mint = resultMintsSolid(operation, decoded.value);
-    if (mint === undefined) return; // the result owns no session solid.
+    if (!decoded.ok) return; // no trustworthy mints to release.
+    const mints = resultMintsSolids(operation, decoded.value);
+    if (mints.length === 0) return; // the result owns no session solid.
     // The disposal id is derived from the voided id: single-use discipline
-    // makes that id unique and spent, and only one straggler is processed,
-    // so `<voided>.disposal` cannot collide with a generator-minted id
-    // (numeric payloads) — the disposal speaks for the request whose orphan
-    // it releases, whatever generators the callers layered on this client.
-    const disposalId = parseWorkerRequestId(`${message.requestId}.disposal`);
-    if (!disposalId.ok) return; // pathological id length: skip the hygiene.
-    void issue("solid.dispose", { solid: mint }, disposalId.value).then(
-      undefined,
-      () => {
-        // Best-effort by contract: the voided request's caller is gone, so a
-        // refusal has nobody to inform. Dropped after the attempt — the
-        // alternative is a permanently owned invisible solid.
-      },
-    );
+    // makes each id unique and spent — for a multi-mint result, `.disposal`
+    // plus the mint's ordinal — so they cannot collide with generator-minted
+    // ids (numeric payloads). The disposals speak for the request whose
+    // orphans they release, whatever generators the callers layered on this
+    // client.
+    mints.forEach((mint, ordinal) => {
+      const suffix =
+        mints.length === 1 ? "disposal" : `disposal.${String(ordinal)}`;
+      const disposalId = parseWorkerRequestId(`${message.requestId}.${suffix}`);
+      if (!disposalId.ok) return; // pathological id length: skip the hygiene.
+      void issue("solid.dispose", { solid: mint }, disposalId.value).then(
+        undefined,
+        () => {
+          // Best-effort by contract: the voided request's caller is gone, so
+          // a refusal has nobody to inform. Dropped after the attempt — the
+          // alternative is a permanently owned invisible solid.
+        },
+      );
+    });
   }
 
   function handleMessage(data: unknown): void {

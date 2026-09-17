@@ -24,6 +24,7 @@
     "@slopcad/cad-io": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",
+    "@slopcad/cad-kernel-occt": "workspace:*",
     "@slopcad/cad-r3f": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
     "@slopcad/env": "workspace:*",

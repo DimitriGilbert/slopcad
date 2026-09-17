@@ -79,7 +79,7 @@ import {
   type KernelSolid,
   type SphereInput,
   type Tessellation,
-  type TranslationInput,
+  type TransformInput,
 } from "./contract";
 import { createSolidTag } from "./opaque";
 
@@ -93,10 +93,12 @@ export const FAKE_KERNEL_TESSELLATION_SEGMENTS = 16;
 export const FAKE_KERNEL_TESSELLATION_RINGS = 8;
 
 /**
- * Capabilities of the fake kernel: full Phase 8 contract support with
- * translation-only transforms; primitive volumes analytic; boolean volumes
- * voxel-quantized; boolean bounds conservative outside unions; no
- * persistent topology (that arrives with the OpenCascade backend).
+ * Capabilities of the fake kernel: full contract support with
+ * translation-only transforms (a rotation input is rejected outright, not
+ * silently dropped — the axis-aligned shape model cannot honour it);
+ * primitive volumes analytic; boolean volumes voxel-quantized; boolean
+ * bounds conservative outside unions; no persistent topology (that arrives
+ * with the OpenCascade backend).
  */
 export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -830,14 +832,22 @@ export function createFakeKernel(): GeometryKernel {
 
     transform(
       solid: KernelSolid,
-      translation: TranslationInput,
+      input: TransformInput,
     ): KernelResult<KernelSolid> {
       const shape = shapeOf(solid, "transform");
       if (!shape.ok) return fail(shape.error);
+      if (input.rotation !== undefined) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidRotation,
+            "transform rejected a rotation: the fake kernel's axis-aligned shape model cannot honour rotations (transformRotation is false).",
+          ),
+        );
+      }
       const offset: Vec3 = [
-        valueIn(translation.x, "mm"),
-        valueIn(translation.y, "mm"),
-        valueIn(translation.z, "mm"),
+        valueIn(input.x, "mm"),
+        valueIn(input.y, "mm"),
+        valueIn(input.z, "mm"),
       ];
       return ok(tag.wrap({ kind: "translate", source: shape.value, offset }));
     },

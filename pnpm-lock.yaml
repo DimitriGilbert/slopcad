@@ -153,6 +153,9 @@ importers:
       '@slopcad/cad-kernel-manifold':
         specifier: workspace:*
         version: link:../../packages/cad-kernel-manifold
+      '@slopcad/cad-kernel-occt':
+        specifier: workspace:*
+        version: link:../../packages/cad-kernel-occt
       '@slopcad/cad-r3f':
         specifier: workspace:*
         version: link:../../packages/cad-r3f
@@ -420,6 +423,37 @@ importers:
         specifier: 3.5.3
         version: 3.5.3(@gltf-transform/core@4.5.0)(@gltf-transform/extensions@4.5.0)(@gltf-transform/functions@4.5.0(@types/node@26.4.1))(esbuild-wasm@0.27.7)
     devDependencies:
+      '@slopcad/config':
+        specifier: workspace:*
+        version: link:../config
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.11(vitest@4.1.11)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.1)(@vitest/coverage-istanbul@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  packages/cad-kernel-occt:
+    dependencies:
+      '@slopcad/cad-core':
+        specifier: workspace:*
+        version: link:../cad-core
+      '@slopcad/cad-kernel':
+        specifier: workspace:*
+        version: link:../cad-kernel
+      occt-import-js:
+        specifier: 0.0.23
+        version: 0.0.23
+      replicad-opencascadejs:
+        specifier: 1.1.0
+        version: 1.1.0
+    devDependencies:
+      '@slopcad/cad-kernel-manifold':
+        specifier: workspace:*
+        version: link:../cad-kernel-manifold
       '@slopcad/config':
         specifier: workspace:*
         version: link:../config
@@ -5488,6 +5522,9 @@ packages:
   ocache@0.1.5:
     resolution: {integrity: sha512-kNNnkkVQup/QDvmTz8Q84wc2ntiyoVHDxa6eHWKt5qdGAmFRBIxy83rxgCYEjW0x06UJ9E3P6VgM2yY4rOBH4w==}
 
+  occt-import-js@0.0.23:
+    resolution: {integrity: sha512-RFfYQXYFX5C1mB1Aywm0ShcUKzXOr/VzTnlzhBSDJOR6YCAPt1HYCzeXWg1vwwjn/cUxwqRNhhtf1dlewoZYCQ==}
+
   ofetch@2.0.0-alpha.3:
     resolution: {integrity: sha512-zpYTCs2byOuft65vI3z43Dd6iSdFbOZZLb9/d21aCpx2rGastVU9dOCv0lu4ykc1Ur1anAYjDi3SUvR0vq50JA==}
 
@@ -5859,6 +5896,9 @@ packages:
   repeat-string@1.6.1:
     resolution: {integrity: sha512-PV0dzCYDNfRi1jCDbJzpW7jNNDRuCOG/jI5ctQcGKt/clZD+YcPS3yIlWuTJMmESC8aevCFmWJy5wjAFgNqN6w==}
     engines: {node: '>=0.10'}
+
+  replicad-opencascadejs@1.1.0:
+    resolution: {integrity: sha512-s0KHR5V+ivsOE4nZXfuoW70lW0/rldkb3ZDY34LpXOQRFLQN5qVydQm3BRo7boZPdFkkAZBERJ+NzB0DYxrivw==}
 
   require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
@@ -11706,6 +11746,8 @@ snapshots:
     dependencies:
       ohash: 2.0.12
 
+  occt-import-js@0.0.23: {}
+
   ofetch@2.0.0-alpha.3: {}
 
   ohash@2.0.12: {}
@@ -12119,6 +12161,8 @@ snapshots:
       set-function-name: 2.0.2
 
   repeat-string@1.6.1: {}
+
+  replicad-opencascadejs@1.1.0: {}
 
   require-from-string@2.0.2: {}
 

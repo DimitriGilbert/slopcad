@@ -50,13 +50,51 @@
  * rendered-frame counter `data-glb-frames`. GLB load failures share the
  * page's error surface (`data-import-error` / the error paragraph).
  *
+ * The Phase 21.3 STEP path extends the import side instead: a `.step`/
+ * `.stp` upload feeds the file's raw bytes to the REAL OpenCascade worker
+ * through the worker protocol — `step.import`, then `solid.tessellate` and
+ * `solid.dispose` per imported solid (see `./io-step`). The OCCT worker
+ * boots lazily on the first STEP import and is terminated with the page.
+ * The imported geometry-only solids share the imported-mesh viewport and
+ * its whole `data-import-*` surface, with `data-import-source="step"` and
+ * `data-import-detail` carrying the provenance JSON
+ * (`{"origin":"imported-step","solids":n,"unit":"mm"}`) — imported STEP
+ * solids are BREP bodies in canonical millimetres, no names/colors/history
+ * (the binding's XCAF layer is unbound), never a parametric feature.
+ *
+ * The Phase 21.4 STEP export extends the export side with one honest
+ * caveat: STEP export is OpenCascade-ONLY, and the source plate is
+ * Manifold-built — a Manifold solid cannot cross into the OCCT worker. The
+ * Export STEP button therefore REBUILDS the same plate on the OCCT worker
+ * through the worker protocol's own operations and exports it with
+ * `step.export` (see `./io-step`'s design decision); the held bytes are a
+ * real deterministic STEP file offered as a `plate.step` download, and
+ * Import held STEP round-trips them through the same import flow as an
+ * upload — a full OCCT export→import cycle through the browser. Machine
+ * surface: `data-export-step-bytes` / `data-export-step-solids`; failures
+ * share the page's error readout.
+ *
+ * The Phase 21.5 BREP paths keep full parity with their STEP twins over
+ * OCCT's native form (see `./io-brep`): Export BREP rebuilds the plate on
+ * the same lazily-booted OCCT worker and exports it with `brep.export`
+ * (machine surface `data-export-brep-bytes` / `data-export-brep-solids`,
+ * held as a `plate.brep` download); a `.brep` upload and Import held BREP
+ * run `brep.import` → tessellate → dispose through the same channel, with
+ * `data-import-source="brep"` and the `{"origin":"imported-brep",…}`
+ * provenance JSON. The Phase 21.5 IGES path is deliberately NOT the worker
+ * path: `occt-import-js` (the plan's fallback engine) reads IGES to MESHES,
+ * not solids, so the import runs on the main thread like STL (see
+ * `./io-iges`) — a lazily-booted ~7.3 MB wasm, mesh-level provenance
+ * (`{"origin":"imported-iges","meshes":n,"unit":"mm"}`), never a kernel
+ * solid or a parametric feature.
+ *
  * ## Machine-readable surface (`#io-root`)
  *
  * The source session's settle attributes (written by the shared fixture
  * session: `data-in-flight`, `data-applied-revision`,
  * `data-current-revision`, `data-volume`, `data-error`, and the source
- * viewport's `data-cad-rendered-volume`), the export surface
- * (`data-export-stl-bytes` / `data-export-3mf-bytes` byte counts plus
+ * viewport's `data-cad-rendered-volume`), the export
+ * surface (`data-export-stl-bytes` / `data-export-3mf-bytes` byte counts plus
  * `data-export-stl-triangles` / `data-export-3mf-triangles`, each export
  * offered to humans as a real `download` anchor), the source soup's
  * machine-precision mesh volume (`data-source-mesh-volume` — the same
@@ -68,7 +106,9 @@
  * flavor for STL, declared unit and title for 3MF — and `data-import-error`),
  * the imported scene's settle stamp `data-cad-imported-volume` and its
  * rendered-frame counter `data-imported-frames` (the settle-surface pair
- * every fixture publishes).
+ * every fixture publishes), and the STEP and BREP export surfaces
+ * (`data-export-step-bytes` / `data-export-step-solids` and
+ * `data-export-brep-bytes` / `data-export-brep-solids` of the held files).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -83,6 +123,12 @@ import type { ImportedThreeMfMesh } from "@slopcad/cad-io/three-mf-import";
 import { exportStlBinary } from "@slopcad/cad-io/stl-export";
 import { importStl } from "@slopcad/cad-io/stl-import";
 import type { ImportedStlMesh } from "@slopcad/cad-io/stl-import";
+import {
+  createWebWorkerTransport,
+  createWorkerClient,
+  WorkerRequestFailure,
+} from "@slopcad/cad-kernel";
+import type { WorkerClient } from "@slopcad/cad-kernel";
 import { CadScene } from "@slopcad/cad-r3f";
 import { Button } from "@slopcad/ui/components/button";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
@@ -100,6 +146,19 @@ import {
   type ImportedMeshState,
 } from "./io-mesh";
 import { loadGlbViewerState } from "./io-glb";
+import {
+  buildImportedStepState,
+  exportPlateStepOverWorker,
+  importStepBytesOverWorker,
+  type ImportedStepState,
+} from "./io-step";
+import {
+  buildImportedBrepState,
+  exportPlateBrepOverWorker,
+  importBrepBytesOverWorker,
+  type ImportedBrepState,
+} from "./io-brep";
+import { importIgesBytes, type ImportedIgesState } from "./io-iges";
 
 /** One held export: the exact bytes plus the triangle count they encode. */
 interface HeldExport {
@@ -109,14 +168,45 @@ interface HeldExport {
   readonly downloadUrl: string;
 }
 
+/**
+ * One held STEP export: the deterministic file bytes plus the exported
+ * solid count (STEP carries BREP, not triangles — the count is the honest
+ * readout) and the download affordance.
+ */
+interface HeldStepExport {
+  readonly bytes: Uint8Array;
+  readonly solids: number;
+  readonly downloadUrl: string;
+}
+
+/**
+ * One held BREP export: the deterministic file bytes plus the exported
+ * solid count — the STEP twin's shape over OCCT's native form.
+ */
+interface HeldBrepExport {
+  readonly bytes: Uint8Array;
+  readonly solids: number;
+  readonly downloadUrl: string;
+}
+
+/** The imported mesh, STEP/BREP solid, or IGES mesh state — the mesh-side readouts. */
+type ImportedState =
+  ImportedMeshState | ImportedStepState | ImportedBrepState | ImportedIgesState;
+
 /** What the import surface shows once a mesh is in. */
 interface ImportView {
   /** Which format the mesh arrived through — the honest provenance. */
-  readonly source: "stl" | "3mf";
-  /** Flavor (STL) or declared unit + title (3MF), as stable JSON. */
+  readonly source: "stl" | "3mf" | "step" | "brep" | "iges";
+  /** Flavor (STL), declared unit + title (3MF), or provenance + count + unit (STEP/BREP/IGES), as stable JSON. */
   readonly detailJson: string;
   /** The validated, renderable imported mesh. */
-  readonly mesh: ImportedMeshState;
+  readonly mesh: ImportedState;
+}
+
+/** The lazily-booted OCCT worker session behind the STEP and BREP paths. */
+interface OcctWorkerSession {
+  readonly worker: Worker;
+  readonly client: WorkerClient;
 }
 
 /** The 3MF document title the exporter stamps (round-trips the import). */
@@ -142,6 +232,10 @@ export function MeshIoPage(): ReactElement {
   const [heldStl, setHeldStl] = useState<HeldExport | null>(null);
   const [held3Mf, setHeld3Mf] = useState<HeldExport | null>(null);
   const [heldGlb, setHeldGlb] = useState<HeldExport | null>(null);
+  const [heldStep, setHeldStep] = useState<HeldStepExport | null>(null);
+  const [stepExportPending, setStepExportPending] = useState(false);
+  const [heldBrep, setHeldBrep] = useState<HeldBrepExport | null>(null);
+  const [brepExportPending, setBrepExportPending] = useState(false);
   const [importView, setImportView] = useState<ImportView | null>(null);
   const [importError, setImportError] = useState("");
   const [importPending, setImportPending] = useState(false);
@@ -150,6 +244,7 @@ export function MeshIoPage(): ReactElement {
   const [glbPending, setGlbPending] = useState(false);
   const [glbFrames, setGlbFrames] = useState(0);
   const sessionRef = useRef<RenderFixtureSession | null>(null);
+  const occtWorkerRef = useRef<OcctWorkerSession | null>(null);
 
   useEffect(() => {
     const session = bootRenderFixtureSession(
@@ -169,8 +264,31 @@ export function MeshIoPage(): ReactElement {
     return () => {
       sessionRef.current = null;
       session.dispose();
+      // The lazily-booted OCCT worker dies with the page.
+      occtWorkerRef.current?.worker.terminate();
+      occtWorkerRef.current = null;
     };
   }, []);
+
+  /**
+   * Boots the OCCT worker on the FIRST STEP or BREP exchange — the ~22 MB
+   * kernel is not paid by pages that never use it — and reuses it
+   * afterwards for both formats. The worker entry buffers requests that
+   * race its WASM boot, so no readiness handshake is needed.
+   */
+  const bootOcctWorker = (): WorkerClient => {
+    const existing = occtWorkerRef.current;
+    if (existing !== null) return existing.client;
+    const worker = new Worker(
+      new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
+      { type: "module" },
+    );
+    const client = createWorkerClient({
+      transport: createWebWorkerTransport(worker),
+    });
+    occtWorkerRef.current = { worker, client };
+    return client;
+  };
 
   /** Exports the settled source soup; returns null when it cannot. */
   const exportHeld = (format: "stl" | "3mf" | "glb"): HeldExport | null => {
@@ -193,7 +311,9 @@ export function MeshIoPage(): ReactElement {
     return {
       bytes: result.value,
       triangles,
-      downloadUrl: URL.createObjectURL(new Blob([new Uint8Array(result.value)])),
+      downloadUrl: URL.createObjectURL(
+        new Blob([new Uint8Array(result.value)]),
+      ),
     };
   };
 
@@ -219,6 +339,43 @@ export function MeshIoPage(): ReactElement {
   };
 
   /**
+   * The Phase 21.4 path: rebuild the source plate's geometry on the OCCT
+   * worker (STEP export is OpenCascade-only; the Manifold source cannot
+   * cross kernels) and hold the exported deterministic STEP bytes.
+   */
+  const exportStepBytes = (): void => {
+    if (stepExportPending) return;
+    setStepExportPending(true);
+    exportPlateStepOverWorker(bootOcctWorker())
+      .then((bytes) => {
+        if (heldStep !== null) URL.revokeObjectURL(heldStep.downloadUrl);
+        setHeldStep({
+          bytes,
+          solids: 1,
+          downloadUrl: URL.createObjectURL(new Blob([new Uint8Array(bytes)])),
+        });
+        setImportError("");
+      })
+      .catch((error: unknown) => {
+        if (error instanceof WorkerRequestFailure) {
+          const kernelCode = error.error.data?.kernelCode;
+          setImportError(
+            kernelCode === undefined
+              ? `${error.error.code}: ${error.error.message}`
+              : `${error.error.code} [${String(kernelCode)}]: ${error.error.message}`,
+          );
+        } else {
+          setImportError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      })
+      .finally(() => {
+        setStepExportPending(false);
+      });
+  };
+
+  /**
    * Loads the held GLB bytes through three's GLTFLoader (the reference
    * viewer) and adopts the loaded scene as the viewer render state.
    */
@@ -231,9 +388,7 @@ export function MeshIoPage(): ReactElement {
         setImportError("");
       })
       .catch((error: unknown) => {
-        setImportError(
-          error instanceof Error ? error.message : String(error),
-        );
+        setImportError(error instanceof Error ? error.message : String(error));
       })
       .finally(() => {
         setGlbPending(false);
@@ -244,7 +399,7 @@ export function MeshIoPage(): ReactElement {
   const adoptMesh = (
     source: ImportView["source"],
     detailJson: string,
-    mesh: ImportedMeshState,
+    mesh: ImportedState,
   ): void => {
     setImportError("");
     setImportView({ source, detailJson, mesh });
@@ -257,7 +412,11 @@ export function MeshIoPage(): ReactElement {
       return;
     }
     const mesh: ImportedStlMesh = result.value;
-    adoptMesh("stl", JSON.stringify({ flavor: mesh.flavor }), buildImportedMeshState(mesh.tessellation));
+    adoptMesh(
+      "stl",
+      JSON.stringify({ flavor: mesh.flavor }),
+      buildImportedMeshState(mesh.tessellation),
+    );
   };
 
   const import3MfBytes = async (bytes: Uint8Array): Promise<void> => {
@@ -273,7 +432,10 @@ export function MeshIoPage(): ReactElement {
         return;
       }
       const mesh: ImportedThreeMfMesh = {
-        tessellation: { positions: payload.positions, indices: payload.indices },
+        tessellation: {
+          positions: payload.positions,
+          indices: payload.indices,
+        },
         units: payload.units,
         metadata: payload.metadata,
       };
@@ -284,6 +446,44 @@ export function MeshIoPage(): ReactElement {
       );
     } catch (error) {
       setImportError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImportPending(false);
+    }
+  };
+
+  /**
+   * The Phase 21.3 path: STEP bytes import through the real OpenCascade
+   * worker (`step.import` → tessellate → dispose each solid), and the
+   * imported geometry-only solids render through the same projection as
+   * every mesh import. Failures surface the channel's stable codes.
+   */
+  const importStepBytes = async (bytes: Uint8Array): Promise<void> => {
+    setImportPending(true);
+    try {
+      const flow = await importStepBytesOverWorker(bootOcctWorker(), bytes);
+      adoptMesh(
+        "step",
+        JSON.stringify({
+          origin: "imported-step",
+          solids: flow.refs.length,
+          unit: "mm",
+        }),
+        buildImportedStepState(flow.soups),
+      );
+    } catch (error) {
+      if (error instanceof WorkerRequestFailure) {
+        // The kernel-side cause (e.g. `step-import/malformed`) rides the
+        // error's data — surfaced verbatim next to the protocol code, so
+        // the readout names the real failure, not just the envelope's.
+        const kernelCode = error.error.data?.kernelCode;
+        setImportError(
+          kernelCode === undefined
+            ? `${error.error.code}: ${error.error.message}`
+            : `${error.error.code} [${String(kernelCode)}]: ${error.error.message}`,
+        );
+      } else {
+        setImportError(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       setImportPending(false);
     }
@@ -301,9 +501,122 @@ export function MeshIoPage(): ReactElement {
     }
   };
 
+  /** Round-trips the held STEP bytes through the import flow (21.4). */
+  const importHeldStep = (): void => {
+    if (heldStep === null || importPending) return;
+    importStepBytes(heldStep.bytes).catch((error: unknown) => {
+      setImportError(error instanceof Error ? error.message : String(error));
+    });
+  };
+
+  /**
+   * The Phase 21.5 BREP export: the STEP twin's honest rebuild over OCCT's
+   * native form — same plate, same worker session, `brep.export`.
+   */
+  const exportBrepBytes = (): void => {
+    if (brepExportPending) return;
+    setBrepExportPending(true);
+    exportPlateBrepOverWorker(bootOcctWorker())
+      .then((bytes) => {
+        if (heldBrep !== null) URL.revokeObjectURL(heldBrep.downloadUrl);
+        setHeldBrep({
+          bytes,
+          solids: 1,
+          downloadUrl: URL.createObjectURL(new Blob([new Uint8Array(bytes)])),
+        });
+        setImportError("");
+      })
+      .catch((error: unknown) => {
+        if (error instanceof WorkerRequestFailure) {
+          const kernelCode = error.error.data?.kernelCode;
+          setImportError(
+            kernelCode === undefined
+              ? `${error.error.code}: ${error.error.message}`
+              : `${error.error.code} [${String(kernelCode)}]: ${error.error.message}`,
+          );
+        } else {
+          setImportError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      })
+      .finally(() => {
+        setBrepExportPending(false);
+      });
+  };
+
+  /**
+   * The Phase 21.5 BREP import: bytes through the real OpenCascade worker
+   * (`brep.import` → tessellate → dispose each solid), rendered through the
+   * same projection as every import — the STEP path's twin.
+   */
+  const importBrepBytes = async (bytes: Uint8Array): Promise<void> => {
+    setImportPending(true);
+    try {
+      const flow = await importBrepBytesOverWorker(bootOcctWorker(), bytes);
+      adoptMesh(
+        "brep",
+        JSON.stringify({
+          origin: "imported-brep",
+          solids: flow.refs.length,
+          unit: "mm",
+        }),
+        buildImportedBrepState(flow.soups),
+      );
+    } catch (error) {
+      if (error instanceof WorkerRequestFailure) {
+        const kernelCode = error.error.data?.kernelCode;
+        setImportError(
+          kernelCode === undefined
+            ? `${error.error.code}: ${error.error.message}`
+            : `${error.error.code} [${String(kernelCode)}]: ${error.error.message}`,
+        );
+      } else {
+        setImportError(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      setImportPending(false);
+    }
+  };
+
+  /** Round-trips the held BREP bytes through the import flow (21.5). */
+  const importHeldBrep = (): void => {
+    if (heldBrep === null || importPending) return;
+    importBrepBytes(heldBrep.bytes).catch((error: unknown) => {
+      setImportError(error instanceof Error ? error.message : String(error));
+    });
+  };
+
+  /**
+   * The Phase 21.5 IGES import: a MESH body read on the main thread by the
+   * plan's fallback engine (`occt-import-js`, lazily booted — see
+   * `./io-iges`), with the cad-io mesh-import provenance. Failures surface
+   * the importer's structured `iges-import/*` codes verbatim.
+   */
+  const importIgesFileBytes = async (bytes: Uint8Array): Promise<void> => {
+    setImportPending(true);
+    try {
+      const flow = await importIgesBytes(bytes);
+      adoptMesh("iges", JSON.stringify(flow.detail), flow.state);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImportPending(false);
+    }
+  };
+
   const importFile = (file: File): void => {
     const name = file.name.toLowerCase();
-    if (!name.endsWith(".stl") && !name.endsWith(".3mf")) {
+    const isStep = name.endsWith(".step") || name.endsWith(".stp");
+    const isBrep = name.endsWith(".brep");
+    const isIges = name.endsWith(".igs") || name.endsWith(".iges");
+    if (
+      !name.endsWith(".stl") &&
+      !name.endsWith(".3mf") &&
+      !isStep &&
+      !isBrep &&
+      !isIges
+    ) {
       setImportError(`unsupported file type: ${file.name}`);
       return;
     }
@@ -313,6 +626,12 @@ export function MeshIoPage(): ReactElement {
         const bytes = new Uint8Array(buffer);
         if (name.endsWith(".stl")) {
           importStlBytes(bytes);
+        } else if (isStep) {
+          return importStepBytes(bytes);
+        } else if (isBrep) {
+          return importBrepBytes(bytes);
+        } else if (isIges) {
+          return importIgesFileBytes(bytes);
         } else {
           return import3MfBytes(bytes);
         }
@@ -326,25 +645,59 @@ export function MeshIoPage(): ReactElement {
     <div
       id="io-root"
       className="mx-auto w-full max-w-[1240px] space-y-4 p-4"
-      data-export-stl-bytes={heldStl === null ? "" : String(heldStl.bytes.length)}
-      data-export-stl-triangles={heldStl === null ? "" : String(heldStl.triangles)}
-      data-export-3mf-bytes={held3Mf === null ? "" : String(held3Mf.bytes.length)}
-      data-export-3mf-triangles={held3Mf === null ? "" : String(held3Mf.triangles)}
-      data-export-glb-bytes={heldGlb === null ? "" : String(heldGlb.bytes.length)}
-      data-export-glb-triangles={heldGlb === null ? "" : String(heldGlb.triangles)}
+      data-export-stl-bytes={
+        heldStl === null ? "" : String(heldStl.bytes.length)
+      }
+      data-export-stl-triangles={
+        heldStl === null ? "" : String(heldStl.triangles)
+      }
+      data-export-3mf-bytes={
+        held3Mf === null ? "" : String(held3Mf.bytes.length)
+      }
+      data-export-3mf-triangles={
+        held3Mf === null ? "" : String(held3Mf.triangles)
+      }
+      data-export-glb-bytes={
+        heldGlb === null ? "" : String(heldGlb.bytes.length)
+      }
+      data-export-glb-triangles={
+        heldGlb === null ? "" : String(heldGlb.triangles)
+      }
+      data-export-step-bytes={
+        heldStep === null ? "" : String(heldStep.bytes.length)
+      }
+      data-export-step-solids={heldStep === null ? "" : String(heldStep.solids)}
+      data-export-brep-bytes={
+        heldBrep === null ? "" : String(heldBrep.bytes.length)
+      }
+      data-export-brep-solids={heldBrep === null ? "" : String(heldBrep.solids)}
       data-glb-status={glbView === null ? "" : "loaded"}
       data-glb-nodes={glbView === null ? "" : JSON.stringify(glbView.meshes)}
-      data-glb-material={glbView === null ? "" : JSON.stringify(glbView.material)}
+      data-glb-material={
+        glbView === null ? "" : JSON.stringify(glbView.material)
+      }
       data-glb-volume-exact={glbView === null ? "" : String(glbView.volume)}
       data-glb-extents={glbView === null ? "" : extentsText(glbView.bounds)}
       data-cad-glb-volume=""
       data-glb-frames={String(glbFrames)}
       data-import-source={importView === null ? "" : importView.source}
-      data-import-triangles={importView === null ? "" : String(importView.mesh.triangles)}
-      data-import-volume={importView === null ? "" : importView.mesh.volume.toFixed(3)}
-      data-import-volume-exact={importView === null ? "" : String(importView.mesh.volume)}
-      data-source-mesh-volume={applied === null ? "" : String(meshSignedVolume(applied.measurement.tessellation))}
-      data-import-extents={importView === null ? "" : extentsText(importView.mesh.bounds)}
+      data-import-triangles={
+        importView === null ? "" : String(importView.mesh.triangles)
+      }
+      data-import-volume={
+        importView === null ? "" : importView.mesh.volume.toFixed(3)
+      }
+      data-import-volume-exact={
+        importView === null ? "" : String(importView.mesh.volume)
+      }
+      data-source-mesh-volume={
+        applied === null
+          ? ""
+          : String(meshSignedVolume(applied.measurement.tessellation))
+      }
+      data-import-extents={
+        importView === null ? "" : extentsText(importView.mesh.bounds)
+      }
       data-import-detail={importView === null ? "" : importView.detailJson}
       data-import-error={importError}
       data-cad-imported-volume=""
@@ -356,14 +709,27 @@ export function MeshIoPage(): ReactElement {
           Mesh I/O fixture (deterministic round trip)
         </h1>
         <p className="text-muted-foreground text-sm">
-          Export the settled source solid to STL and 3MF, import the bytes
-          back, render the imported mesh. STL import runs in the browser; 3MF
-          import parses on the app server (the 18.4 importer is
-          Node-targeted) and the mesh renders locally. An imported mesh is a
-          mesh body — triangle soup, no parametric history. The GLB path
-          (Phase 19) exports the source projection and loads the bytes back
-          through three's GLTFLoader — the reference viewer — rendering the
-          loaded geometry below.
+          Export the settled source solid to STL and 3MF, import the bytes back,
+          render the imported mesh. STL import runs in the browser; 3MF import
+          parses on the app server (the 18.4 importer is Node-targeted) and the
+          mesh renders locally. An imported mesh is a mesh body — triangle soup,
+          no parametric history. The GLB path (Phase 19) exports the source
+          projection and loads the bytes back through three's GLTFLoader — the
+          reference viewer — rendering the loaded geometry below. The STEP path
+          (Phase 21.3) uploads a STEP file to the real OpenCascade worker — the
+          ~22 MB kernel boots on first use — which imports it as geometry-only
+          BREP solids in canonical millimetres; the solids tessellate over the
+          worker protocol and render below like any mesh body (no names, colors,
+          or history survive — the binding carries geometry and units only).
+          STEP export (Phase 21.4) is OpenCascade-only, so the button rebuilds
+          the source plate on the OCCT worker and exports it there — the held
+          plate.step is that rebuild's deterministic file, importable below. The
+          Phase 21.5 paths keep parity: Export BREP rebuilds the same plate and
+          exports OCCT's native form (`brep.export`), and a `.brep` file imports
+          through the same worker as BREP solids. IGES imports too — read to
+          mesh bodies on the main thread by the plan's fallback engine
+          (`occt-import-js`, lazily booted), the same class of import as STL: a
+          triangle soup with a name, no kernel solid, no history.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-6">
@@ -454,6 +820,70 @@ export function MeshIoPage(): ReactElement {
                 </>
               )}
             </span>
+            <Button
+              id="io-export-step"
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={stepExportPending}
+              onClick={exportStepBytes}
+            >
+              Export STEP
+            </Button>
+            <span className="font-mono text-xs" id="io-export-step-readout">
+              {heldStep === null ? (
+                stepExportPending ? (
+                  "exporting…"
+                ) : (
+                  "—"
+                )
+              ) : (
+                <>
+                  {`${String(heldStep.bytes.length)} B`}
+                  {"\u00A0"}
+                  <a
+                    id="io-download-step"
+                    href={heldStep.downloadUrl}
+                    download="plate.step"
+                    className="text-foreground underline underline-offset-2"
+                  >
+                    download
+                  </a>
+                </>
+              )}
+            </span>
+            <Button
+              id="io-export-brep"
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={brepExportPending}
+              onClick={exportBrepBytes}
+            >
+              Export BREP
+            </Button>
+            <span className="font-mono text-xs" id="io-export-brep-readout">
+              {heldBrep === null ? (
+                brepExportPending ? (
+                  "exporting…"
+                ) : (
+                  "—"
+                )
+              ) : (
+                <>
+                  {`${String(heldBrep.bytes.length)} B`}
+                  {"\u00A0"}
+                  <a
+                    id="io-download-brep"
+                    href={heldBrep.downloadUrl}
+                    download="plate.brep"
+                    className="text-foreground underline underline-offset-2"
+                  >
+                    download
+                  </a>
+                </>
+              )}
+            </span>
           </div>
         </fieldset>
         <fieldset className="space-y-1 text-sm">
@@ -464,7 +894,7 @@ export function MeshIoPage(): ReactElement {
               aria-label="Import mesh file"
               className="border-input bg-background file:bg-background file:text-foreground w-56 rounded border px-2 py-1 text-xs"
               type="file"
-              accept=".stl,.3mf"
+              accept=".stl,.3mf,.step,.stp,.brep,.igs,.iges"
               disabled={importPending}
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -505,6 +935,26 @@ export function MeshIoPage(): ReactElement {
             >
               Load held GLB
             </Button>
+            <Button
+              id="io-import-step"
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={heldStep === null || importPending}
+              onClick={importHeldStep}
+            >
+              Import held STEP
+            </Button>
+            <Button
+              id="io-import-brep"
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={heldBrep === null || importPending}
+              onClick={importHeldBrep}
+            >
+              Import held BREP
+            </Button>
           </div>
         </fieldset>
         <p
@@ -518,21 +968,26 @@ export function MeshIoPage(): ReactElement {
         <li>
           source = <span id="io-source-status">boot</span>, volume ={" "}
           <span id="io-source-volume">…</span>
-          {"\u00A0"}mm³, triangles ={" "}
-          <span id="io-source-triangles">…</span>
+          {"\u00A0"}mm³, triangles = <span id="io-source-triangles">…</span>
         </li>
         <li data-testid="io-import-readout">
           {importView === null ? (
             <span className="text-muted-foreground">no mesh imported</span>
           ) : (
             <>
-              imported = <span id="io-import-source">{importView.source}</span>
-              , triangles ={" "}
-              <span id="io-import-triangles">{String(importView.mesh.triangles)}</span>
+              imported = <span id="io-import-source">{importView.source}</span>,
+              triangles ={" "}
+              <span id="io-import-triangles">
+                {String(importView.mesh.triangles)}
+              </span>
               , volume ={" "}
-              <span id="io-import-volume">{importView.mesh.volume.toFixed(3)}</span>
+              <span id="io-import-volume">
+                {importView.mesh.volume.toFixed(3)}
+              </span>
               {"\u00A0"}mm³, extents ={" "}
-              <span id="io-import-extents">{extentsText(importView.mesh.bounds)}</span>
+              <span id="io-import-extents">
+                {extentsText(importView.mesh.bounds)}
+              </span>
               {"\u00A0"}mm,{" "}
               <span id="io-import-detail">{importView.detailJson}</span>
             </>
@@ -544,9 +999,11 @@ export function MeshIoPage(): ReactElement {
           ) : (
             <>
               GLB ={" "}
-              <span id="io-glb-nodes">{JSON.stringify(glbView.meshes)}</span>
-              , material ={" "}
-              <span id="io-glb-material">{JSON.stringify(glbView.material)}</span>
+              <span id="io-glb-nodes">{JSON.stringify(glbView.meshes)}</span>,
+              material ={" "}
+              <span id="io-glb-material">
+                {JSON.stringify(glbView.material)}
+              </span>
               , volume ={" "}
               <span id="io-glb-volume">{glbView.volume.toFixed(3)}</span>
               {"\u00A0"}mm³, extents ={" "}

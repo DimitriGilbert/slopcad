@@ -1,0 +1,35 @@
+{
+  "name": "@slopcad/cad-kernel-occt",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "write-step-fixture": "node scripts/write-step-fixture.ts",
+    "write-brep-fixture": "node scripts/write-brep-fixture.ts"
+  },
+  "dependencies": {
+    "@slopcad/cad-core": "workspace:*",
+    "@slopcad/cad-kernel": "workspace:*",
+    "replicad-opencascadejs": "1.1.0",
+    "occt-import-js": "0.0.23"
+  },
+  "devDependencies": {
+    "@slopcad/cad-kernel-manifold": "workspace:*",
+    "@slopcad/config": "workspace:*",
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,6 +1,10 @@
 {
   "extends": "@slopcad/config/tsconfig.base.json",
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../../packages/cad-kernel-occt/src/occt-import-js.d.ts"
+  ],
   "exclude": ["node_modules", "dist", ".output"],
   "compilerOptions": {
     "target": "ES2022",
