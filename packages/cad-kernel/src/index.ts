@@ -223,6 +223,16 @@ export { createNodeWorkerTransport } from "./worker-node-transport";
 export type { NodeWorkerMessagePort } from "./worker-node-transport";
 
 export {
+  createNodeWorkerChannel,
+  nodeWorkerThreadEcho,
+} from "./node-worker-channel";
+export type {
+  NodeWorkerChannel,
+  NodeWorkerChannelExit,
+  NodeWorkerChannelOptions,
+} from "./node-worker-channel";
+
+export {
   createWebWorkerTransport,
   isWebWorkerMessagePort,
 } from "./worker-web-transport";

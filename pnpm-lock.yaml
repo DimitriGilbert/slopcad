@@ -392,6 +392,31 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@26.4.1)(@vitest/coverage-istanbul@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
 
+  packages/cad-jscad:
+    dependencies:
+      '@jscad/modeling':
+        specifier: 2.13.0
+        version: 2.13.0
+      '@slopcad/cad-core':
+        specifier: workspace:*
+        version: link:../cad-core
+      '@slopcad/cad-kernel':
+        specifier: workspace:*
+        version: link:../cad-kernel
+    devDependencies:
+      '@slopcad/config':
+        specifier: workspace:*
+        version: link:../config
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.11(vitest@4.1.11)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.1)(@vitest/coverage-istanbul@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
+
   packages/cad-kernel:
     dependencies:
       '@slopcad/cad-core':
@@ -451,6 +476,9 @@ importers:
         specifier: 1.1.0
         version: 1.1.0
     devDependencies:
+      '@slopcad/cad-jscad':
+        specifier: workspace:*
+        version: link:../cad-jscad
       '@slopcad/cad-kernel-manifold':
         specifier: workspace:*
         version: link:../cad-kernel-manifold
@@ -1851,6 +1879,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@jscad/modeling@2.13.0':
+    resolution: {integrity: sha512-Thv/JJZZOMzQ9rfhP+75PbgrNbBTZduRL+ClaGfGFts9+JdIXcUueqRL3NtZZ/v/hyZCUBkPSRxHIi4icz04tQ==}
 
   '@jscadui/3mf-export@0.5.0':
     resolution: {integrity: sha512-y5vZktqCjyi7wA38zqNlLIdZUIRZoOO9vCjLzwmL4bR0hk7B/Zm1IeffzJPFe1vFc0C1IEv3hm8caDv3doRk9g==}
@@ -7923,6 +7954,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@jscad/modeling@2.13.0': {}
 
   '@jscadui/3mf-export@0.5.0': {}
 
