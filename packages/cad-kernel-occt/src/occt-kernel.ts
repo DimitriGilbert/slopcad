@@ -131,9 +131,26 @@
  * the compound multi-shape carrier, and the structured `brep-*` failure
  * taxonomy — live in `./occt-brep`; this layer resolves handles and wraps
  * extracted shapes exactly like the STEP pair.
+ *
+ * ## Topology snapshots (Phase 22)
+ *
+ * `topologySnapshot` is the persistent-reference resolution protocol's
+ * execution backend: one owned solid in, a kernel-neutral
+ * `TopologySnapshot` out (identity payloads, body-relative measures,
+ * occurrence-collapsed ordinals). The exploration and measurement mechanics
+ * — and the identity-stability experiments that shaped them — live in
+ * `./occt-topology`; this layer resolves the handle and validates the
+ * options, exactly like the exchange extensions.
  */
 
-import type { AngleValue, LengthValue, ParseResult } from "@slopcad/cad-core";
+import type {
+  AngleValue,
+  BodyId,
+  LengthValue,
+  ParseResult,
+  TopologyReferenceKind,
+  TopologySnapshot,
+} from "@slopcad/cad-core";
 import { fail, ok, valueIn } from "@slopcad/cad-core";
 import type { TopoDS_Edge, TopoDS_Shape } from "replicad-opencascadejs";
 import {
@@ -168,6 +185,11 @@ import {
   type OcctRuntime,
   RUNTIME_BRAND,
 } from "./occt-runtime";
+import {
+  OCCT_TOPOLOGY_DEFAULT_KINDS,
+  OCCT_TOPOLOGY_IDENTITY_SCHEMA,
+  occtShapeTopology,
+} from "./occt-topology";
 import {
   exportStepShapes,
   STEP_EXPORT_ERROR_CODES,
@@ -287,12 +309,42 @@ export interface ImportedBrepModel {
 }
 
 /**
+ * Options of the kernel's `topologySnapshot` operation (see
+ * `./occt-topology` — the producing module and the measured facts behind
+ * its design).
+ */
+export interface OcctTopologySnapshotOptions {
+  /** The document body whose regeneration topology is being reported. */
+  readonly bodyId: BodyId;
+  /** The regeneration the snapshot stands for (a non-negative integer). */
+  readonly regeneration: number;
+  /** The kinds to report; defaults to faces, edges, and vertices. */
+  readonly kinds?: readonly TopologyReferenceKind[];
+}
+
+/**
  * The OpenCascade kernel's own surface: the full kernel contract plus the
  * STEP and BREP exchange extensions (`step.import`/`step.export` and
- * `brep.import`/`brep.export`'s execution backends). OCCT types stay
- * inside; the extensions' results are kernel-neutral.
+ * `brep.import`/`brep.export`'s execution backends) and the Phase 22
+ * `topologySnapshot` extension that backs cad-core's persistent-reference
+ * resolution protocol. OCCT types stay inside; the extensions' results are
+ * kernel-neutral.
  */
 export interface OcctKernel extends GeometryKernel {
+  /**
+   * Reports one owned solid's current topology as a kernel-neutral
+   * {@link TopologySnapshot}: identity payloads (the shape hash — a
+   * within-regeneration identity by the Phase 22 experiments' finding),
+   * body-relative geometric descriptors, occurrence-collapsed ordinals. A
+   * foreign or disposed handle fails with the kernel's universal
+   * `kernel/solid-not-owned`; an invalid regeneration fails with
+   * `kernel/invalid-operands`; nothing throws.
+   */
+  topologySnapshot(
+    solid: KernelSolid,
+    options: OcctTopologySnapshotOptions,
+  ): ParseResult<TopologySnapshot, KernelError>;
+
   /**
    * Imports raw STEP file bytes into provenance-marked geometry-only
    * solids. Structured `step-import/*` failures on every rejection — no
@@ -959,6 +1011,51 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       if (payload === undefined || payload.shape === null) return;
       payload.shape.delete();
       payload.shape = null;
+    },
+
+    topologySnapshot(
+      solid: KernelSolid,
+      options: OcctTopologySnapshotOptions,
+    ): ParseResult<TopologySnapshot, KernelError> {
+      // Same no-throw discipline as every operation: handle resolution and
+      // option validation first, the topology exploration inside the
+      // boundary, and anything unexpected normalized into the structured
+      // kernel-failure code.
+      if (
+        !Number.isInteger(options.regeneration) ||
+        options.regeneration < 0
+      ) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `topologySnapshot rejected regeneration ${String(options.regeneration)}: it must be a non-negative integer.`,
+          ),
+        );
+      }
+      try {
+        const shape = shapeOf(solid, "topologySnapshot");
+        if (!shape.ok) return fail(shape.error);
+        return ok({
+          kernelId: OCCT_BACKEND_ID,
+          persistentTopology: true,
+          identitySchemas: [OCCT_TOPOLOGY_IDENTITY_SCHEMA],
+          bodyId: options.bodyId,
+          regeneration: options.regeneration,
+          entities: occtShapeTopology(
+            oc,
+            shape.value,
+            options.kinds ?? OCCT_TOPOLOGY_DEFAULT_KINDS,
+          ),
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `topologySnapshot failed inside the OpenCascade kernel boundary: ${detail}`,
+          ),
+        );
+      }
     },
 
     importStep(
