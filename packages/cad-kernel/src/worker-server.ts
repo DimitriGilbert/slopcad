@@ -61,6 +61,7 @@ import {
   type GeometryKernel,
   type KernelError,
   type KernelSolid,
+  type TransformInput,
 } from "./contract";
 import { createWorkerCancellationLedger } from "./worker-cancellation";
 import {
@@ -76,7 +77,18 @@ import {
   decodeWorkerRequest,
   parseWorkerMessage,
 } from "./worker-protocol";
-
+import {
+  BREP_EXPORT_UNSUPPORTED_CODE,
+  BREP_IMPORT_UNSUPPORTED_CODE,
+  STEP_EXPORT_UNSUPPORTED_CODE,
+  STEP_IMPORT_UNSUPPORTED_CODE,
+  type WorkerBrepExporter,
+  type WorkerBrepImporter,
+  type WorkerImportedBrepSolidRef,
+  type WorkerImportedSolidRef,
+  type WorkerStepExporter,
+  type WorkerStepImporter,
+} from "./worker-operations";
 
 /** The operations whose success mints a new session solid. */
 type SolidProducingOperation =
@@ -96,8 +108,23 @@ type ExecutionOutcome =
       readonly operation: SolidProducingOperation;
       readonly handle: KernelSolid;
     }
-  | { readonly status: "value"; readonly response: WorkerSuccessResponseMessage }
+  | {
+      readonly status: "solids";
+      /**
+       * The import operation whose result these solids are — the response's
+       * operation and provenance literal derive from it.
+       */
+      readonly operation: ImportOperation;
+      readonly handles: readonly KernelSolid[];
+    }
+  | {
+      readonly status: "value";
+      readonly response: WorkerSuccessResponseMessage;
+    }
   | { readonly status: "failed"; readonly error: WorkerError };
+
+/** The file-import operations whose results mint provenance-marked solids. */
+type ImportOperation = "step.import" | "brep.import";
 
 /** Options of {@link createWorkerServer}. */
 export interface WorkerServerOptions {
@@ -112,6 +139,35 @@ export interface WorkerServerOptions {
   readonly ids?: WorkerIdGenerator;
   /** The responder-side cancellation ledger. Defaults to a fresh one. */
   readonly ledger?: WorkerCancellationLedger;
+  /**
+   * The optional `step.import` execution surface (the Phase 21.3 vocabulary
+   * extension): file bytes in, kernel solids out. Only hosts whose kernel
+   * actually imports STEP provide one — a server without the extension
+   * answers `step.import` with the structured `step-import/unsupported`
+   * failure instead of misdirecting the kernel.
+   */
+  readonly stepImport?: WorkerStepImporter;
+  /**
+   * The optional `step.export` execution surface (the Phase 21.4 vocabulary
+   * extension): owned kernel solids plus optional unit/schema settings in,
+   * STEP file bytes out. A server without the extension answers
+   * `step.export` with the structured `step-export/unsupported` failure.
+   */
+  readonly stepExport?: WorkerStepExporter;
+  /**
+   * The optional `brep.import` execution surface (the Phase 21.5 vocabulary
+   * extension): BREP file bytes in, kernel solids out. A server without the
+   * extension answers `brep.import` with the structured
+   * `brep-import/unsupported` failure.
+   */
+  readonly brepImport?: WorkerBrepImporter;
+  /**
+   * The optional `brep.export` execution surface (the Phase 21.5 vocabulary
+   * extension): owned kernel solids in, BREP file bytes out. A server
+   * without the extension answers `brep.export` with the structured
+   * `brep-export/unsupported` failure.
+   */
+  readonly brepExport?: WorkerBrepExporter;
 }
 
 /** A hosted kernel: subscribed to its transport until closed. */
@@ -122,7 +178,8 @@ export interface WorkerServer {
 
 /** Hosts `options.kernel` as a worker-protocol responder on its transport. */
 export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
-  const { kernel, transport } = options;
+  const { kernel, transport, stepImport, stepExport, brepImport, brepExport } =
+    options;
   const ids = options.ids ?? createWorkerIdGenerator();
   const ledger = options.ledger ?? createWorkerCancellationLedger();
   const solids = new Map<WorkerSolidId, KernelSolid>();
@@ -197,14 +254,28 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
         case "solid.createBox": {
           const result = kernel.createBox(request.input);
           return result.ok
-            ? { status: "solid", operation: "solid.createBox", handle: result.value }
-            : { status: "failed", error: kernelFailure("solid.createBox", result.error) };
+            ? {
+                status: "solid",
+                operation: "solid.createBox",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.createBox", result.error),
+              };
         }
         case "solid.createSphere": {
           const result = kernel.createSphere(request.input);
           return result.ok
-            ? { status: "solid", operation: "solid.createSphere", handle: result.value }
-            : { status: "failed", error: kernelFailure("solid.createSphere", result.error) };
+            ? {
+                status: "solid",
+                operation: "solid.createSphere",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.createSphere", result.error),
+              };
         }
         case "solid.createCylinder": {
           const result = kernel.createCylinder(request.input);
@@ -222,8 +293,15 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
         case "solid.createCone": {
           const result = kernel.createCone(request.input);
           return result.ok
-            ? { status: "solid", operation: "solid.createCone", handle: result.value }
-            : { status: "failed", error: kernelFailure("solid.createCone", result.error) };
+            ? {
+                status: "solid",
+                operation: "solid.createCone",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.createCone", result.error),
+              };
         }
         case "solid.union": {
           const operands: KernelSolid[] = [];
@@ -236,8 +314,15 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
           }
           const result = kernel.union(operands);
           return result.ok
-            ? { status: "solid", operation: "solid.union", handle: result.value }
-            : { status: "failed", error: kernelFailure("solid.union", result.error) };
+            ? {
+                status: "solid",
+                operation: "solid.union",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.union", result.error),
+              };
         }
         case "solid.subtract": {
           const target = ownedSolid("solid.subtract", request.input.target);
@@ -254,8 +339,15 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
           }
           const result = kernel.subtract(target.handle, tools);
           return result.ok
-            ? { status: "solid", operation: "solid.subtract", handle: result.value }
-            : { status: "failed", error: kernelFailure("solid.subtract", result.error) };
+            ? {
+                status: "solid",
+                operation: "solid.subtract",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.subtract", result.error),
+              };
         }
         case "solid.intersect": {
           const operands: KernelSolid[] = [];
@@ -268,15 +360,39 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
           }
           const result = kernel.intersect(operands);
           return result.ok
-            ? { status: "solid", operation: "solid.intersect", handle: result.value }
-            : { status: "failed", error: kernelFailure("solid.intersect", result.error) };
+            ? {
+                status: "solid",
+                operation: "solid.intersect",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.intersect", result.error),
+              };
         }
         case "solid.transform": {
           const solid = ownedSolid("solid.transform", request.input.solid);
           if (solid.status === "failed") {
             return { status: "failed", error: solid.error };
           }
-          const result = kernel.transform(solid.handle, request.input.translation);
+          // The full placement crosses into the kernel: translation plus
+          // the optional rotation (Phase 21.2 wire extension), applied in
+          // the contract's order — rotation first, translation second.
+          const translation = request.input.translation;
+          const input: TransformInput =
+            request.input.rotation === undefined
+              ? {
+                  x: translation.x,
+                  y: translation.y,
+                  z: translation.z,
+                }
+              : {
+                  x: translation.x,
+                  y: translation.y,
+                  z: translation.z,
+                  rotation: request.input.rotation,
+                };
+          const result = kernel.transform(solid.handle, input);
           return result.ok
             ? {
                 status: "solid",
@@ -297,11 +413,18 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
           return result.ok
             ? {
                 status: "value",
-                response: createWorkerSuccessResponse(requestId, "solid.bounds", {
-                  bounds: result.value,
-                }),
+                response: createWorkerSuccessResponse(
+                  requestId,
+                  "solid.bounds",
+                  {
+                    bounds: result.value,
+                  },
+                ),
               }
-            : { status: "failed", error: kernelFailure("solid.bounds", result.error) };
+            : {
+                status: "failed",
+                error: kernelFailure("solid.bounds", result.error),
+              };
         }
         case "solid.volume": {
           const solid = ownedSolid("solid.volume", request.input.solid);
@@ -312,11 +435,18 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
           return result.ok
             ? {
                 status: "value",
-                response: createWorkerSuccessResponse(requestId, "solid.volume", {
-                  volume: result.value,
-                }),
+                response: createWorkerSuccessResponse(
+                  requestId,
+                  "solid.volume",
+                  {
+                    volume: result.value,
+                  },
+                ),
               }
-            : { status: "failed", error: kernelFailure("solid.volume", result.error) };
+            : {
+                status: "failed",
+                error: kernelFailure("solid.volume", result.error),
+              };
         }
         case "solid.tessellate": {
           const solid = ownedSolid("solid.tessellate", request.input.solid);
@@ -327,9 +457,13 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
           return result.ok
             ? {
                 status: "value",
-                response: createWorkerSuccessResponse(requestId, "solid.tessellate", {
-                  tessellation: result.value,
-                }),
+                response: createWorkerSuccessResponse(
+                  requestId,
+                  "solid.tessellate",
+                  {
+                    tessellation: result.value,
+                  },
+                ),
               }
             : {
                 status: "failed",
@@ -345,12 +479,167 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
           solids.delete(request.input.solid);
           return {
             status: "value",
-            response: createWorkerSuccessResponse(requestId, "solid.dispose", null),
+            response: createWorkerSuccessResponse(
+              requestId,
+              "solid.dispose",
+              null,
+            ),
+          };
+        }
+        case "step.import": {
+          // The vocabulary's first extension operation: not a kernel-contract
+          // method, so it executes through the hosting extension — and a
+          // host without one says so structurally, never by throwing.
+          if (stepImport === undefined) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                'The "step.import" operation has no importer on this hosted kernel; STEP import is an optional backend capability.',
+                { kernelCode: STEP_IMPORT_UNSUPPORTED_CODE },
+              ),
+            };
+          }
+          const imported = stepImport(request.input.data);
+          if (!imported.ok) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                `The "step.import" operation failed: ${imported.error.message}`,
+                { kernelCode: imported.error.code },
+              ),
+            };
+          }
+          return {
+            status: "solids",
+            operation: "step.import",
+            handles: imported.value,
+          };
+        }
+        case "step.export": {
+          // The export twin of the vocabulary extension: session solids in,
+          // file bytes out — through the hosting extension when one exists,
+          // and structurally unsupported otherwise. The input's solids
+          // resolve against the session map exactly like boolean operands.
+          if (stepExport === undefined) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                'The "step.export" operation has no exporter on this hosted kernel; STEP export is an optional backend capability.',
+                { kernelCode: STEP_EXPORT_UNSUPPORTED_CODE },
+              ),
+            };
+          }
+          const handles: KernelSolid[] = [];
+          for (const id of request.input.solids) {
+            const lookup = ownedSolid("step.export", id);
+            if (lookup.status === "failed") {
+              return { status: "failed", error: lookup.error };
+            }
+            handles.push(lookup.handle);
+          }
+          const exported = stepExport(handles, {
+            unit: request.input.unit,
+            schema: request.input.schema,
+          });
+          if (!exported.ok) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                `The "step.export" operation failed: ${exported.error.message}`,
+                { kernelCode: exported.error.code },
+              ),
+            };
+          }
+          // The result owns no solids: the exported geometry stays addressed
+          // by the input ids the session still holds.
+          return {
+            status: "value",
+            response: createWorkerSuccessResponse(requestId, "step.export", {
+              data: exported.value,
+            }),
+          };
+        }
+        case "brep.import": {
+          // The Phase 21.5 twin of the STEP import extension: identical
+          // discipline — an optional hosting extension executes it, and a
+          // host without one says so structurally.
+          if (brepImport === undefined) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                'The "brep.import" operation has no importer on this hosted kernel; BREP import is an optional backend capability.',
+                { kernelCode: BREP_IMPORT_UNSUPPORTED_CODE },
+              ),
+            };
+          }
+          const imported = brepImport(request.input.data);
+          if (!imported.ok) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                `The "brep.import" operation failed: ${imported.error.message}`,
+                { kernelCode: imported.error.code },
+              ),
+            };
+          }
+          return {
+            status: "solids",
+            operation: "brep.import",
+            handles: imported.value,
+          };
+        }
+        case "brep.export": {
+          // The STEP export twin without settings: session solids in, BREP
+          // file bytes out, through the hosting extension when one exists.
+          if (brepExport === undefined) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                'The "brep.export" operation has no exporter on this hosted kernel; BREP export is an optional backend capability.',
+                { kernelCode: BREP_EXPORT_UNSUPPORTED_CODE },
+              ),
+            };
+          }
+          const handles: KernelSolid[] = [];
+          for (const id of request.input.solids) {
+            const lookup = ownedSolid("brep.export", id);
+            if (lookup.status === "failed") {
+              return { status: "failed", error: lookup.error };
+            }
+            handles.push(lookup.handle);
+          }
+          const exported = brepExport(handles);
+          if (!exported.ok) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                `The "brep.export" operation failed: ${exported.error.message}`,
+                { kernelCode: exported.error.code },
+              ),
+            };
+          }
+          // Like step.export, the result owns no solids.
+          return {
+            status: "value",
+            response: createWorkerSuccessResponse(requestId, "brep.export", {
+              data: exported.value,
+            }),
           };
         }
       }
     } catch (error) {
-      return { status: "failed", error: unexpectedThrow(request.operation, error) };
+      return {
+        status: "failed",
+        error: unexpectedThrow(request.operation, error),
+      };
     }
   }
 
@@ -360,10 +649,13 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
   ): void {
     const decision = ledger.finish(requestId);
     if (decision === "suppress") {
-      // Cancellation wins ties: drop the computed outcome. A computed solid
-      // that will never be addressed is released, so nothing leaks past the
-      // void request — and no id is minted for it.
+      // Cancellation wins ties: drop the computed outcome. Computed solids
+      // that will never be addressed are released, so nothing leaks past the
+      // void request — and no ids are minted for them.
       if (outcome.status === "solid") kernel.dispose(outcome.handle);
+      if (outcome.status === "solids") {
+        for (const handle of outcome.handles) kernel.dispose(handle);
+      }
       transport.send(cancelledAck(requestId, "while the request was running"));
       return;
     }
@@ -371,7 +663,45 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
       const id = ids.nextSolidId();
       solids.set(id, outcome.handle);
       transport.send(
-        createWorkerSuccessResponse(requestId, outcome.operation, { solid: id }),
+        createWorkerSuccessResponse(requestId, outcome.operation, {
+          solid: id,
+        }),
+      );
+      return;
+    }
+    if (outcome.status === "solids") {
+      // One id per imported solid, minted in file order; every ref carries
+      // its import's provenance literal, the data-level marker that these
+      // are geometry-only bodies with no parametric history behind them.
+      const mint = (handle: KernelSolid): WorkerSolidId => {
+        const id = ids.nextSolidId();
+        solids.set(id, handle);
+        return id;
+      };
+      if (outcome.operation === "step.import") {
+        const refs: WorkerImportedSolidRef[] = outcome.handles.map(
+          (handle): WorkerImportedSolidRef => ({
+            solid: mint(handle),
+            origin: "imported-step",
+          }),
+        );
+        transport.send(
+          createWorkerSuccessResponse(requestId, "step.import", {
+            solids: refs,
+          }),
+        );
+        return;
+      }
+      const refs: WorkerImportedBrepSolidRef[] = outcome.handles.map(
+        (handle): WorkerImportedBrepSolidRef => ({
+          solid: mint(handle),
+          origin: "imported-brep",
+        }),
+      );
+      transport.send(
+        createWorkerSuccessResponse(requestId, "brep.import", {
+          solids: refs,
+        }),
       );
       return;
     }
@@ -397,7 +727,9 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
     if (!parsed.ok) {
       // Correlation is impossible for an unparseable message: answer with a
       // null request id so the sender can only log, never mis-correlate.
-      transport.send(createWorkerErrorResponse(null, toWorkerError(parsed.error)));
+      transport.send(
+        createWorkerErrorResponse(null, toWorkerError(parsed.error)),
+      );
       return;
     }
     const message = parsed.value;

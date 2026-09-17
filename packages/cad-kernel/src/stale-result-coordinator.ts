@@ -95,7 +95,7 @@ import type {
 import { createDiagnosticLog } from "./diagnostic-log";
 import { WorkerRequestFailure } from "./worker-client";
 import { createWorkerIdGenerator } from "./worker-ids";
-import { resultMintsSolid } from "./worker-operations";
+import { resultMintsSolids } from "./worker-operations";
 import { createRevisionClock } from "./revision";
 import { createRevisionedState } from "./stale-result-guard";
 
@@ -248,7 +248,9 @@ export function createStaleResultCoordinator<S>(
    * recorded in `disposalFailures` (observable); anything else rethrows —
    * it is channel corruption, not a disposal outcome.
    */
-  async function releaseMints(mints: ReadonlySet<WorkerSolidId>): Promise<void> {
+  async function releaseMints(
+    mints: ReadonlySet<WorkerSolidId>,
+  ): Promise<void> {
     const disposals: Array<Promise<void>> = [];
     for (const solid of mints) {
       disposals.push(
@@ -318,8 +320,9 @@ export function createStaleResultCoordinator<S>(
           const id = ids.nextRequestId();
           computation.requestIds.add(id);
           return client.request(operation, input, id).then((result) => {
-            const mint = resultMintsSolid(operation, result);
-            if (mint !== undefined) recordMint(computation, mint);
+            for (const mint of resultMintsSolids(operation, result)) {
+              recordMint(computation, mint);
+            }
             return result;
           });
         },

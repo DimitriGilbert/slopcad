@@ -6,16 +6,20 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { length, type ParseResult } from "@slopcad/cad-core";
+import { angle, length, type ParseResult } from "@slopcad/cad-core";
 
+import { decodeBase64Strict, encodeBase64 } from "./worker-base64";
 import {
   isWorkerOperationId,
   parseWorkerOperationInput,
   parseWorkerOperationResult,
+  resultMintsSolids,
   serializeWorkerOperationInput,
   serializeWorkerOperationResult,
+  type WorkerBrepImportResult,
   type WorkerOperationId,
   type WorkerOperationInput,
+  type WorkerStepImportResult,
   WORKER_OPERATION_IDS,
 } from "./worker-operations";
 import {
@@ -41,7 +45,7 @@ const solidC = createWorkerSolidId("wsol_000003");
 const mm = (value: number) => length(value, "mm");
 
 describe("operation vocabulary", () => {
-  it("covers exactly the kernel contract operations as data", () => {
+  it("covers exactly the kernel contract operations as data plus the disclosed step and brep extension groups", () => {
     expect(WORKER_OPERATION_IDS).toEqual([
       "solid.createBox",
       "solid.createSphere",
@@ -55,6 +59,10 @@ describe("operation vocabulary", () => {
       "solid.volume",
       "solid.tessellate",
       "solid.dispose",
+      "step.import",
+      "step.export",
+      "brep.import",
+      "brep.export",
     ]);
   });
 
@@ -111,6 +119,22 @@ describe("operation input round-trips", () => {
     expectInputRoundTrip("solid.dispose", { solid: solidA });
   });
 
+  it("round-trips a transform carrying the rotation extension", () => {
+    // A non-unit axis survives verbatim; the angle rides canonical radians
+    // (the same convention the mm lengths follow — non-canonical units are
+    // the canonicalization test's business below).
+    expectInputRoundTrip("solid.transform", {
+      solid: solidA,
+      translation: { x: mm(1), y: mm(-2), z: mm(3) },
+      rotation: { axis: [0, 0, 7], angle: angle(Math.PI / 2) },
+    });
+    expectInputRoundTrip("solid.transform", {
+      solid: solidB,
+      translation: { x: mm(0), y: mm(0), z: mm(0) },
+      rotation: { axis: [-0.3, 0.4, Math.SQRT2], angle: angle(1) },
+    });
+  });
+
   it("serializes lengths in the canonical key order and unit", () => {
     const wire = serializeWorkerOperationInput("solid.createSphere", {
       radius: length(2, "cm"),
@@ -140,6 +164,70 @@ describe("operation input round-trips", () => {
     });
     expect(Object.keys(transformWire)).toEqual(["solid", "translation"]);
     expect(Object.keys(transformWire.translation)).toEqual(["x", "y", "z"]);
+  });
+
+  it("serializes the rotation canonically, in the fixed key order, after the translation", () => {
+    const wire = serializeWorkerOperationInput("solid.transform", {
+      solid: solidA,
+      translation: { x: mm(1), y: mm(2), z: mm(3) },
+      rotation: { axis: [0, 0, 2], angle: angle(90, "deg") },
+    });
+    expect(Object.keys(wire)).toEqual(["solid", "translation", "rotation"]);
+    expect(wire.rotation).toEqual({
+      axis: [0, 0, 2],
+      // 90 deg canonicalizes to π/2 rad — the angle twin of the length
+      // serializer's cm→mm normalization.
+      angle: { dimension: "angle", unit: "rad", value: Math.PI / 2 },
+    });
+  });
+
+  it("serializes a rotation-less transform to the pre-extension wire shape", () => {
+    const wire = serializeWorkerOperationInput("solid.transform", {
+      solid: solidA,
+      translation: { x: mm(1), y: mm(2), z: mm(3) },
+    });
+    expect("rotation" in wire).toBe(false);
+  });
+
+  it("parses a pre-extension transform payload as translation-only (backward compatibility)", () => {
+    const parsed = parseWorkerOperationInput("solid.transform", {
+      solid: solidA,
+      translation: {
+        x: { dimension: "length", unit: "mm", value: 1 },
+        y: { dimension: "length", unit: "mm", value: 2 },
+        z: { dimension: "length", unit: "mm", value: 3 },
+      },
+    });
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        solid: solidA,
+        translation: { x: mm(1), y: mm(2), z: mm(3) },
+      },
+    });
+  });
+
+  it("parses any angle unit into the typed dimensional value", () => {
+    const parsed = parseWorkerOperationInput("solid.transform", {
+      solid: solidA,
+      translation: {
+        x: { dimension: "length", unit: "mm", value: 0 },
+        y: { dimension: "length", unit: "mm", value: 0 },
+        z: { dimension: "length", unit: "mm", value: 0 },
+      },
+      rotation: {
+        axis: [1, 0, 0],
+        angle: { dimension: "angle", unit: "deg", value: 180 },
+      },
+    });
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        solid: solidA,
+        translation: { x: mm(0), y: mm(0), z: mm(0) },
+        rotation: { axis: [1, 0, 0], angle: angle(180, "deg") },
+      },
+    });
   });
 });
 
@@ -226,6 +314,81 @@ describe("operation input validation", () => {
     ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
   });
 
+  it("rejects malformed transform rotations", () => {
+    const translation = { x: mm(0), y: mm(0), z: mm(0) };
+    // A non-record rotation (null included) is malformed — only the field's
+    // ABSENCE means translation-only.
+    expect(
+      failureOf(
+        parseWorkerOperationInput("solid.transform", {
+          solid: solidA,
+          translation,
+          rotation: null,
+        }),
+      ).code,
+    ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    // Axis: not an array, wrong length, non-number, non-finite entries.
+    for (const axis of ["z", [0, 0], [0, 0, 1, 0], [0, 0, "1"], [0, 0, null]]) {
+      expect(
+        failureOf(
+          parseWorkerOperationInput("solid.transform", {
+            solid: solidA,
+            translation,
+            rotation: {
+              axis,
+              angle: { dimension: "angle", unit: "rad", value: 1 },
+            },
+          }),
+        ).code,
+        `axis ${JSON.stringify(axis)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+    // JSON cannot carry NaN, but the parse boundary must still reject it if
+    // it ever arrives through a structured clone.
+    expect(
+      failureOf(
+        parseWorkerOperationInput("solid.transform", {
+          solid: solidA,
+          translation,
+          rotation: {
+            axis: [0, Number.NaN, 0],
+            angle: { dimension: "angle", unit: "rad", value: 1 },
+          },
+        }),
+      ).code,
+    ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    // Angle: not a dimensional value, or the wrong dimension.
+    for (const badAngle of [
+      90,
+      { dimension: "angle", unit: "grad", value: 1 },
+      { dimension: "length", unit: "mm", value: 1 },
+      { dimension: "angle", unit: "rad", value: "quarter turn" },
+    ]) {
+      expect(
+        failureOf(
+          parseWorkerOperationInput("solid.transform", {
+            solid: solidA,
+            translation,
+            rotation: { axis: [0, 0, 1], angle: badAngle },
+          }),
+        ).code,
+        `angle ${JSON.stringify(badAngle)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+
+  it("is structurally tolerant of a zero rotation axis (the kernel decides semantics)", () => {
+    const parsed = parseWorkerOperationInput("solid.transform", {
+      solid: solidA,
+      translation: { x: mm(0), y: mm(0), z: mm(0) },
+      rotation: {
+        axis: [0, 0, 0],
+        angle: { dimension: "angle", unit: "rad", value: 1 },
+      },
+    });
+    expect(parsed.ok).toBe(true);
+  });
+
   it("is structurally tolerant: zero operands and negative lengths parse (kernel semantics decide)", () => {
     expect(parseWorkerOperationInput("solid.union", { operands: [] }).ok).toBe(
       true,
@@ -266,6 +429,10 @@ describe("operation input validation", () => {
       "solid.volume": {},
       "solid.tessellate": { solid: "wsol_" },
       "solid.dispose": { solid: [] },
+      "step.import": { data: "not!!!valid!!!base64" },
+      "step.export": { solids: [solidA, "not-an-id"] },
+      "brep.import": { data: 42 },
+      "brep.export": { solids: "many" },
     };
     for (const operation of WORKER_OPERATION_IDS) {
       expect(
@@ -392,6 +559,28 @@ describe("operation result round-trips", () => {
       value: null,
     });
   });
+
+  it("round-trips a step.import result and keeps the provenance literal", () => {
+    const result: WorkerStepImportResult = {
+      solids: [
+        { solid: solidA, origin: "imported-step" },
+        { solid: solidB, origin: "imported-step" },
+      ],
+    };
+    const wire = serializeWorkerOperationResult("step.import", result);
+    expect(wire).toEqual({
+      solids: [
+        { solid: solidA, origin: "imported-step" },
+        { solid: solidB, origin: "imported-step" },
+      ],
+    });
+    expect(
+      parseWorkerOperationResult("step.import", jsonRoundTrip(wire)),
+    ).toEqual({
+      ok: true,
+      value: result,
+    });
+  });
 });
 
 describe("operation result validation", () => {
@@ -472,6 +661,358 @@ describe("operation result validation", () => {
       failureOf(parseWorkerOperationResult("solid.dispose", { disposed: true }))
         .code,
     ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+  });
+
+  it("rejects step.import results with broken solid refs or foreign origins", () => {
+    const broken: readonly unknown[] = [
+      { solids: "many" },
+      { solids: [42] },
+      { solids: [{ solid: solidA }] },
+      { solids: [{ solid: solidA, origin: "feature-built" }] },
+      { solids: [{ solid: 42, origin: "imported-step" }] },
+    ];
+    for (const payload of broken) {
+      expect(
+        failureOf(parseWorkerOperationResult("step.import", payload)).code,
+        `payload ${JSON.stringify(payload)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+});
+
+describe("the step.import extension (Phase 21.3)", () => {
+  const fileBytes = new Uint8Array([0x49, 0x53, 0x4f, 0x2d, 0, 0xff, 0x0a]);
+
+  it("round-trips file bytes through the canonical base64 wire form", () => {
+    const wire = serializeWorkerOperationInput("step.import", {
+      data: fileBytes,
+    });
+    expect(wire).toEqual({ data: encodeBase64(fileBytes) });
+    const parsed = parseWorkerOperationInput(
+      "step.import",
+      jsonRoundTrip(wire),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect([...parsed.value.data]).toEqual([...fileBytes]);
+  });
+
+  it("carries the empty file as the empty byte string (kernel semantics decide emptiness)", () => {
+    const parsed = parseWorkerOperationInput("step.import", { data: "" });
+    expect(parsed).toEqual({ ok: true, value: { data: new Uint8Array(0) } });
+  });
+
+  it("rejects non-string and non-canonical base64 payloads", () => {
+    for (const data of [
+      undefined,
+      42,
+      null,
+      "short",
+      "with space",
+      "AB=C",
+      "!!!!",
+    ]) {
+      expect(
+        failureOf(parseWorkerOperationInput("step.import", { data })).code,
+        `data ${JSON.stringify(data)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+
+  it("is tolerant of unknown fields like every other input", () => {
+    const wire = serializeWorkerOperationInput("step.import", {
+      data: fileBytes,
+    });
+    const parsed = parseWorkerOperationInput("step.import", {
+      ...wire,
+      fileName: "plate.step",
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect([...parsed.value.data]).toEqual([...fileBytes]);
+  });
+
+  it("mints every ref's solid in order and nothing for empty results", () => {
+    const result: WorkerStepImportResult = {
+      solids: [
+        { solid: solidC, origin: "imported-step" },
+        { solid: solidA, origin: "imported-step" },
+      ],
+    };
+    expect(resultMintsSolids("step.import", result)).toEqual([solidC, solidA]);
+    expect(resultMintsSolids("step.import", { solids: [] })).toEqual([]);
+    // The single-solid producers still mint exactly one.
+    expect(resultMintsSolids("solid.createBox", { solid: solidB })).toEqual([
+      solidB,
+    ]);
+    // The measurements own none.
+    expect(resultMintsSolids("solid.volume", { volume: 5 })).toEqual([]);
+  });
+});
+
+describe("the step.export extension (Phase 21.4)", () => {
+  const fileBytes = new Uint8Array([
+    0x49, 0x53, 0x4f, 0x2d, 0x31, 0x30, 0x33, 0x30, 0x33, 0x2d, 0x32, 0x31,
+    0x3b, 0x0a,
+  ]);
+
+  it("round-trips solid ids and settings through the canonical wire form", () => {
+    const wire = serializeWorkerOperationInput("step.export", {
+      solids: [solidA, solidB],
+    });
+    expect(wire).toEqual({ solids: [solidA, solidB] });
+    const withSettings = serializeWorkerOperationInput("step.export", {
+      solids: [solidC],
+      unit: "INCH",
+      schema: "AP203",
+    });
+    expect(withSettings).toEqual({
+      solids: [solidC],
+      unit: "INCH",
+      schema: "AP203",
+    });
+    expect(
+      parseWorkerOperationInput("step.export", jsonRoundTrip(withSettings)),
+    ).toEqual({
+      ok: true,
+      value: { solids: [solidC], unit: "INCH", schema: "AP203" },
+    });
+  });
+
+  it("carries the empty solid list as structurally valid (kernel semantics decide emptiness)", () => {
+    const parsed = parseWorkerOperationInput("step.export", { solids: [] });
+    expect(parsed).toEqual({ ok: true, value: { solids: [] } });
+  });
+
+  it("rejects non-array solids and non-string settings", () => {
+    for (const payload of [
+      { solids: "many" },
+      { solids: [42] },
+      { solids: [solidA], unit: 3 },
+      { solids: [solidA], schema: null },
+    ]) {
+      expect(
+        failureOf(parseWorkerOperationInput("step.export", payload)).code,
+        `payload ${JSON.stringify(payload)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+
+  it("round-trips the result bytes through the canonical base64 wire form", () => {
+    const wire = serializeWorkerOperationResult("step.export", {
+      data: fileBytes,
+    });
+    expect(wire).toEqual({ data: encodeBase64(fileBytes) });
+    const parsed = parseWorkerOperationResult(
+      "step.export",
+      jsonRoundTrip(wire),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect([...parsed.value.data]).toEqual([...fileBytes]);
+  });
+
+  it("rejects result payloads that are not canonical base64 text", () => {
+    for (const data of [undefined, 42, null, "with space", "!!!!", "short"]) {
+      expect(
+        failureOf(parseWorkerOperationResult("step.export", { data })).code,
+        `data ${JSON.stringify(data)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+
+  it("is tolerant of unknown fields like every other input", () => {
+    const parsed = parseWorkerOperationInput("step.export", {
+      solids: [solidA],
+      fileName: "plate.step",
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.solids).toEqual([solidA]);
+  });
+
+  it("mints no session solids (the exported geometry keeps its input ids)", () => {
+    expect(resultMintsSolids("step.export", { data: fileBytes })).toEqual([]);
+  });
+});
+
+describe("the brep.import extension (Phase 21.5)", () => {
+  const fileBytes = new Uint8Array([
+    0x0a, 0x43, 0x41, 0x53, 0x43, 0x41, 0x44, 0x45, 0x20, 0x54, 0x6f, 0x70,
+    0x6f, 0x6c, 0x6f, 0x67, 0x79, 0x20, 0x56, 0x33, 0x0a,
+  ]);
+
+  it("round-trips file bytes through the canonical base64 wire form", () => {
+    const wire = serializeWorkerOperationInput("brep.import", {
+      data: fileBytes,
+    });
+    expect(wire).toEqual({ data: encodeBase64(fileBytes) });
+    const parsed = parseWorkerOperationInput(
+      "brep.import",
+      jsonRoundTrip(wire),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect([...parsed.value.data]).toEqual([...fileBytes]);
+  });
+
+  it("carries the empty file as the empty byte string (kernel semantics decide emptiness)", () => {
+    const parsed = parseWorkerOperationInput("brep.import", { data: "" });
+    expect(parsed).toEqual({ ok: true, value: { data: new Uint8Array(0) } });
+  });
+
+  it("rejects non-string and non-canonical base64 payloads", () => {
+    for (const data of [undefined, 42, null, "with space", "AB=C", "!!!!"]) {
+      expect(
+        failureOf(parseWorkerOperationInput("brep.import", { data })).code,
+        `data ${JSON.stringify(data)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+
+  it("round-trips the result refs with the imported-brep provenance literal", () => {
+    const wire = serializeWorkerOperationResult("brep.import", {
+      solids: [{ solid: solidA, origin: "imported-brep" }],
+    });
+    expect(wire).toEqual({
+      solids: [{ solid: solidA, origin: "imported-brep" }],
+    });
+    const parsed = parseWorkerOperationResult(
+      "brep.import",
+      jsonRoundTrip(wire),
+    );
+    expect(parsed).toEqual({
+      ok: true,
+      value: { solids: [{ solid: solidA, origin: "imported-brep" }] },
+    });
+  });
+
+  it("rejects brep.import results with broken refs or foreign origins", () => {
+    const broken: readonly unknown[] = [
+      { solids: "many" },
+      { solids: [42] },
+      { solids: [{ solid: solidA }] },
+      { solids: [{ solid: solidA, origin: "imported-step" }] },
+      { solids: [{ solid: 42, origin: "imported-brep" }] },
+    ];
+    for (const payload of broken) {
+      expect(
+        failureOf(parseWorkerOperationResult("brep.import", payload)).code,
+        `payload ${JSON.stringify(payload)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+
+  it("mints every ref's solid in order and nothing for empty results", () => {
+    const result: WorkerBrepImportResult = {
+      solids: [
+        { solid: solidC, origin: "imported-brep" },
+        { solid: solidA, origin: "imported-brep" },
+      ],
+    };
+    expect(resultMintsSolids("brep.import", result)).toEqual([solidC, solidA]);
+    expect(resultMintsSolids("brep.import", { solids: [] })).toEqual([]);
+  });
+});
+
+describe("the brep.export extension (Phase 21.5)", () => {
+  const fileBytes = new Uint8Array([
+    0x0a, 0x43, 0x41, 0x53, 0x43, 0x2d, 0x56, 0x33,
+  ]);
+
+  it("round-trips solid ids through the canonical wire form (no settings fields exist)", () => {
+    const wire = serializeWorkerOperationInput("brep.export", {
+      solids: [solidA, solidB],
+    });
+    expect(wire).toEqual({ solids: [solidA, solidB] });
+    expect(
+      parseWorkerOperationInput("brep.export", jsonRoundTrip(wire)),
+    ).toEqual({ ok: true, value: { solids: [solidA, solidB] } });
+  });
+
+  it("carries the empty solid list as structurally valid (kernel semantics decide emptiness)", () => {
+    const parsed = parseWorkerOperationInput("brep.export", { solids: [] });
+    expect(parsed).toEqual({ ok: true, value: { solids: [] } });
+  });
+
+  it("rejects non-array solids and ignores unknown fields like every other input", () => {
+    for (const payload of [
+      { solids: "many" },
+      { solids: [42] },
+      { solids: 3 },
+    ]) {
+      expect(
+        failureOf(parseWorkerOperationInput("brep.export", payload)).code,
+        `payload ${JSON.stringify(payload)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+    const parsed = parseWorkerOperationInput("brep.export", {
+      solids: [solidA],
+      unit: "MM",
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.solids).toEqual([solidA]);
+  });
+
+  it("round-trips the result bytes through the canonical base64 wire form", () => {
+    const wire = serializeWorkerOperationResult("brep.export", {
+      data: fileBytes,
+    });
+    expect(wire).toEqual({ data: encodeBase64(fileBytes) });
+    const parsed = parseWorkerOperationResult(
+      "brep.export",
+      jsonRoundTrip(wire),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect([...parsed.value.data]).toEqual([...fileBytes]);
+  });
+
+  it("rejects result payloads that are not canonical base64 text", () => {
+    for (const data of [undefined, 42, null, "with space", "!!!!", "short"]) {
+      expect(
+        failureOf(parseWorkerOperationResult("brep.export", { data })).code,
+        `data ${JSON.stringify(data)}`,
+      ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    }
+  });
+
+  it("mints no session solids (the exported geometry keeps its input ids)", () => {
+    expect(resultMintsSolids("brep.export", { data: fileBytes })).toEqual([]);
+  });
+});
+
+describe("the base64 wire codec", () => {
+  it("matches the RFC 4648 test vectors", () => {
+    const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+    expect(encodeBase64(utf8(""))).toBe("");
+    expect(encodeBase64(utf8("f"))).toBe("Zg==");
+    expect(encodeBase64(utf8("fo"))).toBe("Zm8=");
+    expect(encodeBase64(utf8("foo"))).toBe("Zm9v");
+    expect(encodeBase64(utf8("foob"))).toBe("Zm9vYg==");
+    expect(encodeBase64(utf8("fooba"))).toBe("Zm9vYmE=");
+    expect(encodeBase64(utf8("foobar"))).toBe("Zm9vYmFy");
+  });
+
+  it("decodes every canonical padding form and rejects the rest", () => {
+    expect(decodeBase64Strict("Zg==")).toEqual(new Uint8Array([0x66]));
+    expect(decodeBase64Strict("Zm8=")).toEqual(new Uint8Array([0x66, 0x6f]));
+    expect(decodeBase64Strict("")).toEqual(new Uint8Array(0));
+    for (const bad of [
+      "Zg=",
+      "Zg===",
+      "Z g=",
+      "Zm8\n",
+      "Zg===",
+      "A",
+      "AB=C",
+      "====",
+    ]) {
+      expect(decodeBase64Strict(bad), `bad text "${bad}"`).toBeNull();
+    }
+  });
+
+  it("round-trips arbitrary byte strings, empty included", () => {
+    const bytes = new Uint8Array(256);
+    for (let i = 0; i < 256; i += 1) bytes[i] = i;
+    expect(decodeBase64Strict(encodeBase64(bytes))).toEqual(bytes);
+    expect(decodeBase64Strict(encodeBase64(new Uint8Array(0)))).toEqual(
+      new Uint8Array(0),
+    );
   });
 });
 

@@ -34,7 +34,10 @@
  * bounds read straight off its inputs and placing one inside an assembly is
  * a plain `transform` offset — no `width/2` half-extent bookkeeping at every
  * call site — which keeps bounds semantics and regeneration placements
- * composable from parameters alone.
+ * composable from parameters alone. `transform`'s optional rotation (Phase
+ * 21.1) turns a solid about an axis through the world origin before the
+ * translation applies, so placements compose rigidly: parametric offsets
+ * stay translations, and orientation changes are an explicit rotation.
  *
  * ## Solid semantics
  *
@@ -49,7 +52,7 @@
  * never a throw, never `NaN`/`Infinity` in outputs.
  */
 
-import type { LengthValue, ParseFailure, ParseResult } from "@slopcad/cad-core";
+import type { AngleValue, LengthValue, ParseFailure, ParseResult } from "@slopcad/cad-core";
 import type { KernelBackendId } from "./backend-ids";
 import type { KernelCapabilities } from "./capabilities";
 import type { KernelSolid } from "./opaque";
@@ -59,6 +62,12 @@ export type { KernelSolid } from "./opaque";
 export const KERNEL_ERROR_CODES = {
   /** A length input was non-positive (or a cone's top radius negative). */
   invalidLength: "kernel/invalid-length",
+  /**
+   * A rotation input was degenerate: a zero or non-finite axis vector, or a
+   * non-finite angle. Also the structured rejection a non-rotation-capable
+   * kernel may use when `transform` carries a rotation.
+   */
+  invalidRotation: "kernel/invalid-rotation",
   /** A boolean operand list was malformed (wrong operand count). */
   invalidOperands: "kernel/invalid-operands",
   /** A handle was not minted by this kernel instance (foreign or forged). */
@@ -117,6 +126,39 @@ export interface TranslationInput {
   readonly x: LengthValue;
   readonly y: LengthValue;
   readonly z: LengthValue;
+}
+
+/**
+ * Input of `transform`'s optional rotation (the Phase 21.1 contract
+ * extension that the `transformRotation` capability flag has gated since
+ * Phase 8): a rotation about an axis through the world origin.
+ *
+ * Representation is axis + angle (not Euler angles) because it maps onto
+ * every kernel's rigid-transform primitive directly and carries none of
+ * Euler's ordering/gimbal ambiguities: `axis` is a dimensionless direction
+ * in the canonical right-handed millimetre space — any non-zero finite
+ * vector, normalized by the kernel, so callers never pre-normalize — and
+ * `angle` is an {@link AngleValue} in any angle unit (canonical radian,
+ * positive by the right-hand rule about the axis).
+ */
+export interface RotationInput {
+  readonly axis: readonly [number, number, number];
+  readonly angle: AngleValue;
+}
+
+/**
+ * The full input of `transform`: a translation vector plus an optional
+ * rotation. Application order is fixed by the contract: the rotation is
+ * applied first, about the world-origin axis, and the translation second,
+ * in world space — so the two never interact and each is independently
+ * observable in the result's bounds. Rotation is meaningful only for
+ * kernels that declare `transformRotation: true`; a kernel that has not
+ * declared it must never silently mis-apply a rotation — it rejects the
+ * input with `kernel/invalid-rotation` or ignores the field outright
+ * (the suite judges rotation only where the flag is set).
+ */
+export interface TransformInput extends TranslationInput {
+  readonly rotation?: RotationInput;
 }
 
 /**
@@ -194,10 +236,15 @@ export interface GeometryKernel {
   /** Intersects two or more solids; disjoint operands produce an empty solid. */
   intersect(operands: readonly KernelSolid[]): KernelResult<KernelSolid>;
 
-  /** Translates a solid by the given vector (the Phase 8 transform). */
+  /**
+   * Places a solid: rotates it first (about the world-origin axis of the
+   * optional `rotation`, right-handed) and translates it second, in world
+   * space. Rotation requires the `transformRotation` capability (Phase 8
+   * transform, Phase 21.1 extension).
+   */
   transform(
     solid: KernelSolid,
-    translation: TranslationInput,
+    input: TransformInput,
   ): KernelResult<KernelSolid>;
 
   /**

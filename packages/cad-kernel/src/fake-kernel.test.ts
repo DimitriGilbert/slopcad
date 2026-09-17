@@ -5,9 +5,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { length } from "@slopcad/cad-core";
+import { angle, length } from "@slopcad/cad-core";
 
-import { type KernelSolid, tessellationTriangleCount } from "./contract";
+import {
+  KERNEL_ERROR_CODES,
+  type KernelSolid,
+  tessellationTriangleCount,
+} from "./contract";
 import {
   createFakeKernel,
   FAKE_BOX_TRIANGLE_COUNT,
@@ -20,6 +24,7 @@ import {
   assertBoundsEqual,
   assertTessellationValid,
   assertVolumeClose,
+  expectKernelFailure,
   unwrapKernelResult,
 } from "./test-utils";
 
@@ -55,6 +60,35 @@ describe("fake kernel identity and capabilities", () => {
       tightBooleanBounds: false,
       persistentTopology: false,
     });
+  });
+
+  it("rejects rotation inputs with kernel/invalid-rotation (never silently drops them)", () => {
+    // The behavioral pin of transformRotation: false — the contract allows a
+    // non-rotating kernel to reject OR ignore a rotation, and the fake
+    // kernel documents the stricter choice: the axis-aligned shape model
+    // cannot honour rotations, so a rotation-bearing input fails outright
+    // with the structured code instead of degrading to translation-only.
+    // The shared contract suite judges rotation only where the flag is set,
+    // so this rejection is proven here and nowhere else.
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: length(10),
+        depth: length(10),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    expectKernelFailure(
+      kernel.transform(solid, {
+        x: length(0),
+        y: length(0),
+        z: length(0),
+        rotation: { axis: [0, 0, 1], angle: angle(90, "deg") },
+      }),
+      KERNEL_ERROR_CODES.invalidRotation,
+      "rotation input to the fake kernel",
+    );
   });
 });
 
