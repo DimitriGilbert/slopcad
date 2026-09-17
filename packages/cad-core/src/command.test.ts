@@ -33,6 +33,7 @@ const widthId = createParameterId("param_width");
 const bodySolidId = createBodyId("body_solid");
 const featSketchId = createFeatureId("feat_sketch");
 const featPadId = createFeatureId("feat_pad");
+const featFreeId = createFeatureId("feat_free");
 
 function unwrap<T, F extends ParseFailure>(
   result: ParseResult<T, F>,
@@ -480,5 +481,135 @@ describe("command replay determinism", () => {
     );
     const directId = direct.features.at(-1)?.id;
     expect(replayed.features.at(-1)?.id).toBe(directId);
+  });
+});
+
+describe("feature.reorder (Phase 20)", () => {
+  const reorderFree = (afterFeatureId: FeatureId | null): CadCommand => ({
+    type: "feature.reorder",
+    id: featFreeId,
+    afterFeatureId,
+  });
+
+  function documentWithFreeFeature(): CadDocument {
+    return unwrap(
+      applyCommand(sampleDocument(), {
+        type: "feature.create",
+        id: featFreeId,
+        kind: "datum",
+        inputs: [],
+        outputs: [],
+      }),
+      "feature.create(datum)",
+    );
+  }
+
+  it("moves the feature to immediately after the anchor", () => {
+    const document = documentWithFreeFeature();
+    const applied = unwrap(
+      applyCommand(document, reorderFree(featSketchId)),
+      "feature.reorder",
+    );
+    expect(applied.features.map((feature) => feature.id)).toEqual([
+      featSketchId,
+      featFreeId,
+      featPadId,
+    ]);
+  });
+
+  it("moves the feature to the front with a null anchor", () => {
+    const document = documentWithFreeFeature();
+    const applied = unwrap(
+      applyCommand(document, reorderFree(null)),
+      "feature.reorder",
+    );
+    expect(applied.features.map((feature) => feature.id)).toEqual([
+      featFreeId,
+      featSketchId,
+      featPadId,
+    ]);
+  });
+
+  it("is deterministic and pure: the same command applies identically, input untouched", () => {
+    const document = documentWithFreeFeature();
+    const first = unwrap(
+      applyCommand(document, reorderFree(featSketchId)),
+      "feature.reorder",
+    );
+    const second = unwrap(
+      applyCommand(document, reorderFree(featSketchId)),
+      "feature.reorder",
+    );
+    expect(serializeCadDocument(first)).toEqual(serializeCadDocument(second));
+    expect(document.features.map((feature) => feature.id)).toEqual([
+      featSketchId,
+      featPadId,
+      featFreeId,
+    ]);
+  });
+
+  it("replays through document parse: a reordered list round-trips in order", () => {
+    const document = documentWithFreeFeature();
+    const applied = unwrap(
+      applyCommand(document, reorderFree(null)),
+      "feature.reorder",
+    );
+    const reparsed = unwrap(parseCadDocument(serializeCadDocument(applied)), "parse");
+    expect(reparsed.features.map((feature) => feature.id)).toEqual(
+      applied.features.map((feature) => feature.id),
+    );
+  });
+
+  it("rejects unknown features, self anchors, and order violations, structurally", () => {
+    const document = documentWithFreeFeature();
+    expectError(
+      applyCommand(document, {
+        type: "feature.reorder",
+        id: createFeatureId("feat_ghost"),
+        afterFeatureId: null,
+      }),
+      DOCUMENT_ERROR_CODES.notFound,
+    );
+    expectError(
+      applyCommand(document, {
+        type: "feature.reorder",
+        id: featFreeId,
+        afterFeatureId: featFreeId,
+      }),
+      DOCUMENT_ERROR_CODES.reorderInvalid,
+    );
+    expectError(
+      applyCommand(document, {
+        type: "feature.reorder",
+        id: featSketchId,
+        afterFeatureId: featPadId,
+      }),
+      DOCUMENT_ERROR_CODES.reorderInvalid,
+    );
+    expectError(
+      applyCommand(document, reorderFree(createFeatureId("feat_ghost"))),
+      DOCUMENT_ERROR_CODES.reorderInvalid,
+    );
+  });
+
+  it("serializes to a fixed shape and round-trips, anchor and null alike", () => {
+    const anchored = roundTripCommand(reorderFree(featPadId));
+    expect(anchored).toEqual({
+      type: "feature.reorder",
+      id: featFreeId,
+      afterFeatureId: featPadId,
+    });
+    expect(Object.keys(serializeCommand(reorderFree(featPadId)))).toEqual([
+      "formatVersion",
+      "type",
+      "id",
+      "afterFeatureId",
+    ]);
+    const toFront = roundTripCommand(reorderFree(null));
+    expect(toFront).toEqual({
+      type: "feature.reorder",
+      id: featFreeId,
+      afterFeatureId: null,
+    });
   });
 });

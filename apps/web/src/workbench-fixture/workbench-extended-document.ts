@@ -102,6 +102,19 @@ function executeWorkbenchFeature(
 }
 
 /**
+ * The executor stand-in for feature regeneration, bound to a document:
+ * decides per feature from the DOCUMENT's data (see the module doc). This is
+ * the fixture's executor seam the Phase 20 robust regeneration loop runs —
+ * parameter edits, rollback, suppression, and failure recovery all drive it
+ * through `regenerate`.
+ */
+export function workbenchExecutor(
+  document: CadDocument,
+): (feature: FeatureRecord) => FeatureExecutionOutcome {
+  return (feature) => executeWorkbenchFeature(feature, document);
+}
+
+/**
  * Derives the model tree's regeneration states from the document through
  * the domain's own orchestration: one pass of `regenerate` over the feature
  * list starting from the initial (stale) states.
@@ -114,7 +127,7 @@ export function deriveWorkbenchRegenerationStates(
     features: document.features,
     states: initial,
     suppressed: [],
-    execute: (feature) => executeWorkbenchFeature(feature, document),
+    execute: workbenchExecutor(document),
   });
   return run.ok ? run.value.states : initial;
 }

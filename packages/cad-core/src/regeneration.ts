@@ -58,24 +58,62 @@
  * keep the states they already earned — a later failure can never rewrite an
  * earlier feature's result.
  *
+ * ## The executor-results registry (last-known-valid state)
+ *
+ * Alongside the state map, a run carries a RESULTS REGISTRY — per feature,
+ * the record of its most recent execution attempt: success (with the
+ * executor's optional result payload, plain {@link DiagnosticDataValue}
+ * data — no kernel, geometry results are modeled as the data the executor
+ * reports) or failure (with its diagnostics). The registry is threaded
+ * BETWEEN runs via the input's `results`: a feature that does not execute
+ * this run keeps its prior record — so when a downstream feature fails, the
+ * upstream features that executed before it refresh their records and the
+ * gated features retain their last-known-valid ones, exactly the plan's
+ * "preserve last-known-valid upstream state where possible". Suppressed
+ * features drop their records (the model has excluded their contribution);
+ * parked features (below) retain theirs — their last execution is still the
+ * last thing that happened to them. The registry is RUN state: it is
+ * deliberately not persisted (the native format persists states, and a
+ * future kernel's result payloads are derived kernel data that must never
+ * become canonical), and the next run overwrites the entries it owns.
+ *
+ * ## The rollback point
+ *
+ * The optional `rollbackPoint` input is the Phase 20 marker between
+ * features (see `feature-history.ts`): regeneration executes only the
+ * features UP TO the marker — the boundary rule is
+ * {@link rollbackZoneBoundary}, shared with the timeline view — and the
+ * features after it are PARKED: never executed, never gating, their next
+ * state `stale` (from any prior state, diagnostics cleared — parking is
+ * exclusion from the run's scope, not an outcome; the module doc in
+ * `feature-history.ts` records why this is deliberately NOT a fifth state
+ * and how it differs from suppression, which wins when both apply). A
+ * marker naming a feature the list does not have is rejected with
+ * `regeneration/rollback-unknown-feature`. A parked feature keeps its prior
+ * results-registry entry, so un-rolling finds the last-known-valid record
+ * exactly where parking left it.
+ *
  * ## Recovery
  *
  * Recovery needs no special path: a failed feature is simply due on the next
  * run (failed ≠ valid), so once the executor's outcome changes to success the
  * feature returns to valid with diagnostics cleared, and because it executed,
- * its dependents are marked due and re-evaluate per the graph.
+ * its dependents are marked due and re-evaluate per the graph. A parked
+ * feature is equally due (stale ≠ valid): moving the marker past it
+ * re-executes it on the next run.
  *
  * ## Determinism and serialization
  *
- * The same inputs always yield the same resulting state map. Produced maps
- * are keyed in the document insertion order of the feature list — the
- * canonical order — and {@link serializeRegenerationStates} emits a
- * fixed-shape entry list in that order. {@link parseRegenerationStates}
- * validates untrusted maps strictly (every diagnostic re-validated through
- * `parseDiagnostic`) and round-trips serialization output exactly.
+ * The same inputs always yield the same resulting state map, executed
+ * sequence, and results registry. Produced maps are keyed in the document
+ * insertion order of the feature list — the canonical order — and
+ * {@link serializeRegenerationStates} emits a fixed-shape entry list in that
+ * order. {@link parseRegenerationStates} validates untrusted maps strictly
+ * (every diagnostic re-validated through `parseDiagnostic`) and round-trips
+ * serialization output exactly.
  */
 
-import { type Diagnostic, parseDiagnostic } from "./diagnostics";
+import { type Diagnostic, type DiagnosticDataValue, parseDiagnostic } from "./diagnostics";
 import { type FeatureRecord } from "./document";
 import {
   affectedFeatures,
@@ -83,6 +121,10 @@ import {
   type FeatureGraphError,
   type FeatureGraphNodeId,
 } from "./feature-graph";
+import {
+  rollbackZoneBoundary,
+  type FeatureRollbackPoint,
+} from "./feature-history";
 import { type FeatureId, parseFeatureId } from "./ids";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
@@ -132,6 +174,7 @@ export const REGENERATION_ERROR_CODES = {
   malformed: "regeneration/malformed",
   versionUnsupported: "regeneration/version-unsupported",
   executorMalformed: "regeneration/executor-malformed",
+  rollbackUnknownFeature: "regeneration/rollback-unknown-feature",
 } as const;
 
 export type RegenerationErrorCode =
@@ -139,8 +182,9 @@ export type RegenerationErrorCode =
 
 /**
  * Structured failure describing why regeneration input was rejected: a
- * malformed serialized state map, an unsupported format version, or an
- * executor that violated its contract. Like `diagnostic/malformed`, these
+ * malformed serialized state map, an unsupported format version, an
+ * executor that violated its contract, or a rollback point naming a
+ * feature the list does not have. Like `diagnostic/malformed`, these
  * codes stay out of `DIAGNOSTIC_CODES` because this module imports the
  * diagnostics parser (a one-way dependency that keeps the module graph
  * acyclic).
@@ -237,10 +281,27 @@ export function markStale(
   return result;
 }
 
-/** What the executor concluded about one feature: success, or failure with diagnostics. */
+/**
+ * What the executor concluded about one feature: success — with an optional
+ * plain-data result payload (the geometry result as data; {@link DiagnosticDataValue}
+ * keeps it JSON-safe and kernel-free) — or failure with diagnostics.
+ */
 export type FeatureExecutionOutcome =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly result?: DiagnosticDataValue }
   | { readonly ok: false; readonly diagnostics: readonly Diagnostic[] };
+
+/**
+ * The executor-results registry's record of one feature's most recent
+ * execution attempt: success (carrying the executor's result payload, or
+ * `null` when the executor reported none) or failure (carrying the
+ * attempt's diagnostics). See the module doc for the threading rules.
+ */
+export type FeatureExecutionRecord =
+  | { readonly ok: true; readonly result: DiagnosticDataValue | null }
+  | { readonly ok: false; readonly diagnostics: readonly Diagnostic[] };
+
+/** The executor-results registry: last attempt records, keyed by feature id. */
+export type RegenerationResultMap = ReadonlyMap<FeatureId, FeatureExecutionRecord>;
 
 /**
  * The caller-supplied, deterministic rebuild decider: given a feature, return
@@ -264,6 +325,19 @@ export interface RegenerateInput {
   readonly suppressed: readonly FeatureId[];
   /** The deterministic executor that decides each feature's outcome. */
   readonly execute: FeatureExecutor;
+  /**
+   * The Phase 20 rollback marker, or `null`/`undefined` for none: features
+   * after the marker are parked (never executed, next state stale). A
+   * marker naming a feature the list does not have fails the run with
+   * `regeneration/rollback-unknown-feature`.
+   */
+  readonly rollbackPoint?: FeatureRollbackPoint | null;
+  /**
+   * The prior executor-results registry; missing entries are treated as
+   * absent. Features that do not execute keep their prior record (see the
+   * module doc's threading rules).
+   */
+  readonly results?: RegenerationResultMap;
 }
 
 /** Result of a regeneration run: the next state map and what actually executed. */
@@ -272,6 +346,13 @@ export interface RegenerationRun {
   readonly states: RegenerationStateMap;
   /** The features the executor was invoked for, in evaluation order. */
   readonly executed: readonly FeatureId[];
+  /**
+   * The next executor-results registry, keyed in document insertion order:
+   * refreshed for every feature that executed, retained (last-known-valid)
+   * for every feature that did not — except suppressed features, which drop
+   * their records.
+   */
+  readonly results: RegenerationResultMap;
 }
 
 /**
@@ -281,11 +362,16 @@ export interface RegenerationRun {
  * is executed exactly once, in {@link featureEvaluationOrder} order; a
  * failing feature is marked failed with its diagnostics and gates its
  * dependents stale; suppression skips without gating; valid features with an
- * unchanged upstream keep their state untouched. A cyclic graph is rejected
- * with the graph module's structured `graph/cycle` failure, and an executor
+ * unchanged upstream keep their state untouched; and the optional rollback
+ * point parks every feature after the marker — never executed, next state
+ * stale, prior result retained. The executor-results registry is threaded
+ * through: refreshed entries for what executed, retained entries for what
+ * did not (dropped only by suppression). A cyclic graph is rejected
+ * with the graph module's structured `graph/cycle` failure, an executor
  * failing a feature without at least one valid diagnostic is rejected with
- * `regeneration/executor-malformed` — both leave the caller's inputs
- * untouched.
+ * `regeneration/executor-malformed`, and a rollback point naming an absent
+ * feature with `regeneration/rollback-unknown-feature` — all leave the
+ * caller's inputs untouched.
  */
 export function regenerate(
   input: RegenerateInput,
@@ -294,11 +380,27 @@ export function regenerate(
   const order = featureEvaluationOrder(features);
   if (!order.ok) return order;
 
+  const boundary = rollbackZoneBoundary(features, input.rollbackPoint ?? null);
+  if (!boundary.ok) {
+    return fail(
+      regenerationError(
+        REGENERATION_ERROR_CODES.rollbackUnknownFeature,
+        boundary.error.message,
+        input.rollbackPoint,
+      ),
+    );
+  }
+
   const byId = new Map<FeatureId, FeatureRecord>(
     features.map((feature) => [feature.id, feature]),
   );
+  const documentIndex = new Map<FeatureId, number>(
+    features.map((feature, index) => [feature.id, index]),
+  );
   const suppressedSet = new Set<FeatureId>(suppressed);
+  const priorResults: RegenerationResultMap = input.results ?? new Map();
   const evaluated = new Map<FeatureId, FeatureRegenerationStatus>();
+  const evaluatedResults = new Map<FeatureId, FeatureExecutionRecord>();
   // Features whose contribution changed this run: they executed, or they just
   // became suppressed (the model lost their outputs). Drives downstream due.
   const changed = new Set<FeatureId>();
@@ -315,6 +417,17 @@ export function regenerate(
       );
     }
     const prior = states.get(id) ?? STALE_STATUS;
+    const parked = (documentIndex.get(id) ?? features.length) >= boundary.value;
+
+    if (parked && !suppressedSet.has(id)) {
+      // Parked: beyond the rollback marker. Never executed, never gating;
+      // the durable state is stale (due) from any prior state, diagnostics
+      // cleared, and the last execution record is retained verbatim.
+      evaluated.set(id, STALE_STATUS);
+      const priorRecord = priorResults.get(id);
+      if (priorRecord !== undefined) evaluatedResults.set(id, priorRecord);
+      continue;
+    }
 
     if (suppressedSet.has(id)) {
       evaluated.set(id, SUPPRESSED_STATUS);
@@ -327,6 +440,8 @@ export function regenerate(
     ) {
       evaluated.set(id, STALE_STATUS);
       blocked.add(id);
+      const priorRecord = priorResults.get(id);
+      if (priorRecord !== undefined) evaluatedResults.set(id, priorRecord);
       continue;
     }
 
@@ -337,6 +452,8 @@ export function regenerate(
       );
     if (!due) {
       evaluated.set(id, prior);
+      const priorRecord = priorResults.get(id);
+      if (priorRecord !== undefined) evaluatedResults.set(id, priorRecord);
       continue;
     }
 
@@ -344,6 +461,10 @@ export function regenerate(
     if (outcome.ok) {
       evaluated.set(id, VALID_STATUS);
       changed.add(id);
+      evaluatedResults.set(
+        id,
+        Object.freeze({ ok: true, result: outcome.result ?? null }),
+      );
     } else {
       if (outcome.diagnostics.length === 0) {
         return fail(
@@ -368,17 +489,29 @@ export function regenerate(
         }
         diagnostics.push(parsed.value);
       }
-      evaluated.set(id, failedStatus(diagnostics));
+      const frozen = Object.freeze(diagnostics);
+      evaluated.set(id, failedStatus(frozen));
       blocked.add(id);
+      evaluatedResults.set(
+        id,
+        Object.freeze({ ok: false, diagnostics: frozen }),
+      );
     }
     executed.push(id);
   }
 
   const result = new Map<FeatureId, FeatureRegenerationStatus>();
+  const results = new Map<FeatureId, FeatureExecutionRecord>();
   for (const feature of features) {
     result.set(feature.id, evaluated.get(feature.id) ?? STALE_STATUS);
+    const record = evaluatedResults.get(feature.id);
+    if (record !== undefined) results.set(feature.id, record);
   }
-  return ok({ states: result, executed: Object.freeze(executed) });
+  return ok({
+    states: result,
+    executed: Object.freeze(executed),
+    results,
+  });
 }
 
 /** Canonical JSON form of one feature's regeneration status. */

@@ -63,7 +63,11 @@ function parameterValue(document: CadDocument, name: string): number {
   return parameter.value.value;
 }
 
-for (const name of ["plate-with-hole.native.json", "failed-feature.native.json"]) {
+for (const name of [
+  "plate-with-hole.native.json",
+  "failed-feature.native.json",
+  "rolled-back.native.json",
+]) {
   describe(`the ${name} golden fixture`, () => {
     it("loads and validates structurally", async () => {
       const text = await readFixture(name);
@@ -206,5 +210,56 @@ describe("the failed-feature fixture", () => {
     expect(diagnostic?.data).toEqual({ axis: "z", limitExceeded: true });
     expect(native.history.entries).toHaveLength(2);
     expect(native.history.cursor).toBe(2);
+  });
+});
+
+describe("the rolled-back fixture", () => {
+  const load = async (): Promise<NativeCadDocument> =>
+    requireOk(
+      parseNativeCadDocumentFromString(
+        await readFixture("rolled-back.native.json"),
+      ),
+      "parsing the rolled-back fixture",
+    );
+
+  it("persists the rollback marker as an optional envelope field", async () => {
+    const text = await readFixture("rolled-back.native.json");
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    // The field is present, last in key order, and carries the marker shape.
+    expect(Object.keys(parsed)).toEqual([
+      "formatVersion",
+      "metadata",
+      "document",
+      "history",
+      "regeneration",
+      "rollback",
+    ]);
+    expect(parsed.rollback).toEqual({ afterFeatureId: "feat_box" });
+    const native = await load();
+    expect(native.rollback).toEqual({ afterFeatureId: "feat_box" });
+  });
+
+  it("keeps the parked feature's persisted state in the four-state vocabulary", async () => {
+    const native = await load();
+    expect(native.regeneration.get(createFeatureId("feat_box"))?.state).toBe(
+      "valid",
+    );
+    // Beyond the marker, the durable state is plain stale — parking is
+    // positional and derived from the marker, never a stored state.
+    expect(native.regeneration.get(createFeatureId("feat_hole"))?.state).toBe(
+      "stale",
+    );
+  });
+
+  it("restores the marker on a fresh parse with byte-identical round trip", async () => {
+    const native = await load();
+    const again = requireOk(
+      parseNativeCadDocumentFromBytes(encodeNativeCadDocument(native)),
+      "the byte round trip",
+    );
+    expect(again.rollback).toEqual(native.rollback);
+    expect(stringifyNativeCadDocument(serializeNativeCadDocument(again))).toBe(
+      await readFixture("rolled-back.native.json"),
+    );
   });
 });

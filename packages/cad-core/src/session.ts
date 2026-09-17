@@ -1,9 +1,10 @@
 /**
- * Session (Phase 7.4): the supported mutation surface — a CAD document
- * composed with its undo/redo history. The four Phase 7 operations
- * (`parameter.set`, `feature.create`, `feature.update`, `feature.delete`)
- * are expressed as commands, wrapped in transactions, and applied through
- * {@link applySessionTransaction} / {@link applySessionCommand}; every
+ * Session (Phase 7): the supported mutation surface — a CAD document
+ * composed with its undo/redo history. The mutation vocabulary
+ * (`parameter.set`, `feature.create`, `feature.update`, `feature.delete`,
+ * and the Phase 20 `feature.reorder`) is expressed as commands, wrapped in
+ * transactions, and applied through {@link applySessionTransaction} /
+ * {@link applySessionCommand}; every
  * other method here is read-only or a history move ({@link undoSession},
  * {@link redoSession}).
  *

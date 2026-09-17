@@ -1,11 +1,15 @@
 /**
  * The composed workbench's document: the plate body, the through-bore
- * diameter the parameter panel edits, the rotate-about-+Z feature (with its
- * angle parameter), and the expression-driven `volumeHint`. A lean, real
- * product document — every tool the workbench's toolbar registers resolves
- * against it, and every parameter it carries is one the operator edits.
- * (The Phase 15.1–15.4 component fixture keeps the wider four-tool document
- * for component testing; see `workbench-fixture`.)
+ * diameter the parameter panel edits, the translate-about-the-plate feature
+ * (three length-component parameters), the rotate-about-+Z feature
+ * downstream of the translate feature, and the expression-driven
+ * `volumeHint`. A lean, real product document with a two-feature timeline —
+ * the Phase 20 history surface (rollback, suppression, failure recovery)
+ * needs an upstream/downstream pair to act on, so the rotate feature
+ * declares the translate feature as an input. Every tool the workbench's
+ * toolbar registers resolves against it: rotate resolves the rotate feature
+ * (body + exactly one angle parameter), translate resolves the translate
+ * feature (body + three length parameters).
  *
  * Deterministic (explicit ids), so the workbench boots identically every
  * run. The hole parameter keeps the shared fixture id, so the established
@@ -25,7 +29,9 @@ import {
   createSession,
   length,
   parseExpression,
+  type BodyId,
   type CadSession,
+  type FeatureId,
   type ParameterId,
 } from "@slopcad/cad-react";
 
@@ -33,13 +39,23 @@ import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
 import { requireDocumentOk } from "../workbench-fixture/workbench-document";
 
 /** The stable plate body id (same body the projection carries). */
-const PLATE_BODY_ID = createBodyId("body_plate");
+const PLATE_BODY_ID: BodyId = createBodyId("body_plate");
 
 /** The rotate-about-+Z angle parameter id. */
 const ROTATE_PARAMETER: ParameterId = createParameterId("param_rotate_z");
 
-/** The rotate feature id (the tree's feature group). */
-const ROTATE_FEATURE = createFeatureId("feat_rotate_plate");
+/** The translate component parameter ids, in x, y, z order. */
+const TRANSLATE_PARAMETERS: readonly [ParameterId, ParameterId, ParameterId] = [
+  createParameterId("param_translate_x"),
+  createParameterId("param_translate_y"),
+  createParameterId("param_translate_z"),
+];
+
+/** The translate feature id (the timeline's upstream feature). */
+const TRANSLATE_FEATURE: FeatureId = createFeatureId("feat_translate_plate");
+
+/** The rotate feature id (the timeline's downstream feature). */
+const ROTATE_FEATURE: FeatureId = createFeatureId("feat_rotate_plate");
 
 /** The volumeHint parameter id (stable across boots). */
 const VOLUME_HINT_PARAMETER = createParameterId("param_volume_hint");
@@ -49,8 +65,9 @@ const HOLE_PARAMETER = createParameterId("param_hole_diameter");
 
 /**
  * Builds the workbench session: the plate at the scene's default bore,
- * `holeDiameter` and `rotate_z` at identity, and `volumeHint` defined as
- * `holeDiameter * 2`, cached at the matching value.
+ * `holeDiameter`, the translate components, and `rotate_z` at identity,
+ * and `volumeHint` defined as `holeDiameter * 2`, cached at the matching
+ * value. Feature order: translate first, rotate second (downstream).
  */
 export function createCadWorkbenchSession(): CadSession {
   const parsed = parseExpression("holeDiameter * 2");
@@ -70,6 +87,16 @@ export function createCadWorkbenchSession(): CadSession {
     }),
     "the hole diameter parameter",
   );
+  for (const [id, name] of [
+    [TRANSLATE_PARAMETERS[0], "translate_x"],
+    [TRANSLATE_PARAMETERS[1], "translate_y"],
+    [TRANSLATE_PARAMETERS[2], "translate_z"],
+  ] as const) {
+    document = requireDocumentOk(
+      addDocumentParameter(document, { id, name, value: length(0) }),
+      `parameter ${name}`,
+    );
+  }
   document = requireDocumentOk(
     addDocumentParameter(document, {
       id: ROTATE_PARAMETER,
@@ -87,10 +114,25 @@ export function createCadWorkbenchSession(): CadSession {
   document = requireDocumentOk(hinted, "the volumeHint parameter");
   document = requireDocumentOk(
     addFeature(document, {
+      id: TRANSLATE_FEATURE,
+      kind: "translate",
+      inputs: [
+        { kind: "body", id: PLATE_BODY_ID },
+        { kind: "parameter", id: TRANSLATE_PARAMETERS[0] },
+        { kind: "parameter", id: TRANSLATE_PARAMETERS[1] },
+        { kind: "parameter", id: TRANSLATE_PARAMETERS[2] },
+      ],
+      outputs: [PLATE_BODY_ID],
+    }),
+    "the translate feature",
+  );
+  document = requireDocumentOk(
+    addFeature(document, {
       id: ROTATE_FEATURE,
       kind: "rotate",
       inputs: [
         { kind: "body", id: PLATE_BODY_ID },
+        { kind: "feature", id: TRANSLATE_FEATURE },
         { kind: "parameter", id: ROTATE_PARAMETER },
       ],
       outputs: [PLATE_BODY_ID],
