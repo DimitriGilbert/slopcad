@@ -113,6 +113,7 @@ import {
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { createCadWorkbenchSession } from "./session";
+import { SketchMode } from "./SketchMode";
 
 /** An applied computation: the render state plus its revision identity. */
 interface AppliedRenderState {
@@ -182,7 +183,14 @@ const TIMELINE_STATUS_LABELS: Readonly<
   "beyond-rollback": "Parked",
 });
 
+/** The workbench's top-level modes: the 3D model workspace or the sketch. */
+type WorkbenchMode = "model" | "sketch";
+
 export function CadWorkbenchPage(): ReactElement {
+  // The workbench mode is page-level authoring state: the model workspace
+  // keeps its worker session alive across switches (hidden, not unmounted).
+  const [mode, setMode] = useState<WorkbenchMode>("model");
+
   // The store is composed ONCE from the workbench's domain instances; the
   // provider hands it to the hooks and to every CAD component below.
   const [store] = useState(() =>
@@ -198,12 +206,21 @@ export function CadWorkbenchPage(): ReactElement {
 
   return (
     <CadProvider store={store}>
-      <CadWorkbenchBody />
+      <CadWorkbenchBody
+        mode={mode}
+        onModeChange={setMode}
+      />
     </CadProvider>
   );
 }
 
-function CadWorkbenchBody(): ReactElement {
+function CadWorkbenchBody({
+  mode,
+  onModeChange,
+}: {
+  readonly mode: WorkbenchMode;
+  readonly onModeChange: (mode: WorkbenchMode) => void;
+}): ReactElement {
   const store = useCadStore("CadWorkbenchPage");
   const documentApi = useCadDocument();
   const selectionApi = useCadSelection();
@@ -417,13 +434,22 @@ function CadWorkbenchBody(): ReactElement {
         depth: historyApi.depth,
       })}
       data-feature-timeline={timelineJson}
+      data-sketch-mode={mode}
     >
       {/* Tool row: the component's tool strip; the feature timeline (the
           Phase 20 history surface) sits beside it behind a divider, and the
           undo/redo pair on the right — the page-level surfaces of concerns
           no component owns. One dense row keeps the docked palettes inside
-          the workbench frame at the fixture's fixed viewport. */}
-      <div className="border-border bg-background flex h-10 shrink-0 items-center gap-2 border-b px-2">
+          the workbench frame at the fixture's fixed viewport. In sketch
+          mode the row (and the whole model workspace) yields to the sketch
+          editor, which carries its own command row; the model surfaces stay
+          MOUNTED but hidden so the worker session's surface writer keeps
+          their ids. */}
+      <div
+        className={`border-border bg-background h-10 shrink-0 items-center gap-2 border-b px-2 ${
+          mode === "sketch" ? "hidden" : "flex"
+        }`}
+      >
         {/* Provider-driven toolbar: no props — it mirrors the registry,
             presses the live tool, and arms through the store's arm op. The
             row it sits in carries the divider, so the strip drops its own
@@ -481,12 +507,29 @@ function CadWorkbenchBody(): ReactElement {
             Redo
           </Button>
         </div>
+        <Button
+          data-testid="workbench-mode-toggle"
+          onClick={() => {
+            onModeChange("sketch");
+          }}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          Sketch
+        </Button>
       </div>
+      {mode === "sketch" ? <SketchMode onExit={() => { onModeChange("model"); }} /> : null}
       {/* The workspace: tree palette left, viewport dominant, parameter
           palette right — the components' own sizes are the layout's sizes.
           The row is centered as a group so the leftover workspace frames
-          the composition symmetrically instead of pooling below it. */}
-      <div className="flex min-h-0 flex-1 items-center justify-center p-3">
+          the composition symmetrically instead of pooling below it. Hidden
+          (not unmounted) in sketch mode: the model keeps living. */}
+      <div
+        className={`min-h-0 flex-1 items-center justify-center p-3 ${
+          mode === "sketch" ? "hidden" : "flex"
+        }`}
+      >
         <div className="flex max-h-full min-h-0 items-start gap-3">
           <div className="flex w-48 shrink-0 flex-col gap-3">
             {/* Provider-driven tree with one explicit prop: the regeneration
@@ -563,8 +606,14 @@ function CadWorkbenchBody(): ReactElement {
       </div>
       {/* Status bar: the settled numbers the operator works against. The
           status and volume spans are written by the worker session's
-          surface writer (the fixture pattern); the rest mirror the store. */}
-      <div className="border-border bg-background text-muted-foreground flex h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs">
+          surface writer (the fixture pattern); the rest mirror the store.
+          Hidden in sketch mode — the sketch editor carries its own status
+          line — but MOUNTED, so the writer's ids keep existing. */}
+      <div
+        className={`border-border bg-background text-muted-foreground h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs ${
+          mode === "sketch" ? "hidden" : "flex"
+        }`}
+      >
         <span>
           status ={" "}
           <span id="workbench-status" data-testid="workbench-status">

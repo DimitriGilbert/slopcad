@@ -162,6 +162,9 @@ importers:
       '@slopcad/cad-react':
         specifier: workspace:*
         version: link:../../packages/cad-react
+      '@slopcad/cad-sketch':
+        specifier: workspace:*
+        version: link:../../packages/cad-sketch
       '@slopcad/env':
         specifier: workspace:*
         version: link:../../packages/env

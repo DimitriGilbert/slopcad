@@ -145,6 +145,44 @@ export {
 export type { SerializedSketch, Sketch, SketchError } from "./sketch";
 
 export {
+  DIMENSIONAL_CONSTRAINT_KINDS,
+  SKETCH_COMMAND_ERROR_CODES,
+  SKETCH_COMMAND_TYPES,
+  applySketchCommand,
+  applySketchTransaction,
+  isDimensionalConstraint,
+  isDimensionalConstraintKind,
+  isSketchCommandType,
+  parseSketchCommand,
+  serializeSketchCommand,
+} from "./commands";
+export type {
+  DimensionalConstraint,
+  DimensionalConstraintKind,
+  SerializedSketchCommand,
+  SketchCommand,
+  SketchCommandError,
+  SketchCommandErrorCode,
+  SketchCommandType,
+  SketchTransaction,
+} from "./commands";
+
+export {
+  applySketchSessionTransaction,
+  canRedoSketch,
+  canUndoSketch,
+  createSketchSession,
+  redoSketchSession,
+  undoSketchSession,
+} from "./sketch-session";
+export type {
+  SketchHistory,
+  SketchHistoryEntry,
+  SketchHistoryMove,
+  SketchSession,
+} from "./sketch-session";
+
+export {
   REFERENCE_SKETCH_SOLVER_ID,
   REFERENCE_SOLVER_CONVERGENCE_TOLERANCE,
   REFERENCE_SOLVER_MAX_BACKTRACK,
