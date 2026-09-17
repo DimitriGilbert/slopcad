@@ -31,6 +31,7 @@
     "replicad-opencascadejs",
     "three",
     "@types/three",
-    "@react-three/fiber"
+    "@react-three/fiber",
+    "@jscad/modeling"
   ]
 }
