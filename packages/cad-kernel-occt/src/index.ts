@@ -24,7 +24,19 @@ export type {
   ImportedStepModel,
   ImportedStepSolid,
   OcctKernel,
+  OcctTopologySnapshotOptions,
 } from "./occt-kernel";
+
+export {
+  OCCT_SHAPE_HASH_UPPER_BOUND,
+  OCCT_TOPOLOGY_DEFAULT_KINDS,
+  OCCT_TOPOLOGY_IDENTITY_SCHEMAS,
+  OCCT_TOPOLOGY_IDENTITY_SCHEMA,
+  occtTopologyView,
+} from "./occt-topology";
+export type {
+  OcctTopologyViewOptions,
+} from "./occt-topology";
 
 export { BREP_EXPORT_ERROR_CODES, BREP_IMPORT_ERROR_CODES } from "./occt-brep";
 export type {
