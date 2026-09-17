@@ -1,8 +1,8 @@
 /**
- * Serializable commands (Phase 7.1): the mutation vocabulary of the CAD
+ * Serializable commands (Phase 7): the mutation vocabulary of the CAD
  * document. A {@link CadCommand} is pure data describing ONE supported
- * mutation — set a parameter's value, create, update, or delete a feature
- * record — and {@link applyCommand} is its sole interpreter: a pure,
+ * mutation — set a parameter's value, create, update, delete, or reorder a
+ * feature record — and {@link applyCommand} is its sole interpreter: a pure,
  * deterministic function of (document, command) → next document, or a
  * structured failure carrying the substrate's stable `document/*` and
  * `parameter/*` codes. Nothing here mutates inputs, consults the clock or
@@ -10,12 +10,23 @@
  * applying the same command to the same document state always yields the
  * same next state.
  *
- * This module is the supported mutation surface for those four operations —
+ * This module is the supported mutation surface for those operations —
  * layers above cad-core should express changes as commands (wrapped in
  * transactions and applied through a session) rather than calling the
  * Phase 6 document functions directly. Those functions remain exported as
  * the substrate the command layer orchestrates (and as the raw material for
  * the kernel/worker phases); nothing is hidden or removed.
+ *
+ * ## The Phase 20 `feature.reorder` extension (disclosed)
+ *
+ * Reordering a feature in the timeline is a first-class command (see
+ * `feature-history.ts` for the composition decision): it is the only form
+ * of reorder that is undoable and replayable, because the Phase 7 history
+ * records transactions. The disclosure: the vocabulary grew from four
+ * command types to five, so a persisted LOG carrying `feature.reorder` is
+ * written only by this version and parsed only by parsers that know the
+ * type (the strict `command/type-unknown` rule); every file written before
+ * the extension carries none and parses exactly as before.
  *
  * ## Determinism of generated ids
  *
@@ -53,6 +64,7 @@ import {
   parseFeatureInputRef,
   parseFeatureKind,
   removeFeature,
+  reorderFeature,
   type SerializedFeatureInputRef,
   updateFeature,
 } from "./document";
@@ -68,12 +80,13 @@ import { type ParameterError, updateParameterValue } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
-/** The command types of the initial Phase 7 vocabulary. */
+/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder). */
 export const CAD_COMMAND_TYPES = [
   "parameter.set",
   "feature.create",
   "feature.update",
   "feature.delete",
+  "feature.reorder",
 ] as const;
 
 export type CadCommandType = (typeof CAD_COMMAND_TYPES)[number];
@@ -92,7 +105,11 @@ export function isCadCommandType(input: unknown): input is CadCommandType {
  * `feature.create` adds a record ({@link addFeature}); `feature.update`
  * wholesale-replaces a record's mutable fields — kind, inputs, outputs —
  * with referential integrity enforced ({@link updateFeature});
- * `feature.delete` removes a record ({@link removeFeature}).
+ * `feature.delete` removes a record ({@link removeFeature}); and
+ * `feature.reorder` moves a record to a new timeline position, immediately
+ * after `afterFeatureId` (or to the front when `afterFeatureId` is `null`),
+ * with the input-order replayability rule enforced on the result
+ * ({@link reorderFeature}).
  */
 export type CadCommand =
   | {
@@ -117,6 +134,12 @@ export type CadCommand =
   | {
       readonly type: "feature.delete";
       readonly id: FeatureId;
+    }
+  | {
+      readonly type: "feature.reorder";
+      readonly id: FeatureId;
+      /** The feature to sit after; `null` moves the feature to the front. */
+      readonly afterFeatureId: FeatureId | null;
     };
 
 /** Stable failure codes produced when command input is rejected. */
@@ -188,6 +211,8 @@ export function applyCommand(
     }
     case "feature.delete":
       return removeFeature(document, command.id);
+    case "feature.reorder":
+      return reorderFeature(document, command.id, command.afterFeatureId);
     default:
       return fail(
         commandError(
@@ -227,6 +252,12 @@ export type SerializedCadCommand =
       readonly formatVersion: number;
       readonly type: "feature.delete";
       readonly id: string;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "feature.reorder";
+      readonly id: string;
+      readonly afterFeatureId: string | null;
     };
 
 function serializeInputRef(ref: FeatureInputRef): SerializedFeatureInputRef {
@@ -276,6 +307,13 @@ export function serializeCommand(
         formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
         type: command.type,
         id: command.id,
+      };
+    case "feature.reorder":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+        afterFeatureId: command.afterFeatureId,
       };
     default:
       throw new Error(
@@ -485,6 +523,44 @@ export function parseCommand(
       const fields = parseFeatureCommandFields(input);
       if (!fields.ok) return fields;
       return ok(Object.freeze({ type, id: parsedId.value, ...fields.value }));
+    }
+    case "feature.reorder": {
+      const parsedId = parseFeatureId(input.id);
+      if (!parsedId.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A feature.reorder command needs a valid feature id: ${parsedId.error.message}`,
+            input.id,
+          ),
+        );
+      }
+      if (input.afterFeatureId === null) {
+        return ok(
+          Object.freeze({
+            type,
+            id: parsedId.value,
+            afterFeatureId: null,
+          }),
+        );
+      }
+      const parsedAnchor = parseFeatureId(input.afterFeatureId);
+      if (!parsedAnchor.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A feature.reorder command's afterFeatureId must be null or a valid feature id: ${parsedAnchor.error.message}`,
+            input.afterFeatureId,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze({
+          type,
+          id: parsedId.value,
+          afterFeatureId: parsedAnchor.value,
+        }),
+      );
     }
     default: {
       const parsedId = parseFeatureId(input.id);

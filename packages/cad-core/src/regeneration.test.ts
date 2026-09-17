@@ -18,6 +18,7 @@ import {
   markStale,
   parseRegenerationStates,
   REGENERATION_ERROR_CODES,
+  type RegenerationResultMap,
   type RegenerationStateMap,
   regenerate,
   serializeRegenerationStates,
@@ -90,12 +91,16 @@ function runRegeneration(input: {
   readonly states: RegenerationStateMap;
   readonly suppressed?: readonly FeatureId[];
   readonly execute: FeatureExecutor;
+  readonly rollbackPoint?: { readonly afterFeatureId: FeatureId | null } | null;
+  readonly results?: RegenerationResultMap;
 }) {
   const result = regenerate({
     features: input.features,
     states: input.states,
     suppressed: input.suppressed ?? [],
     execute: input.execute,
+    rollbackPoint: input.rollbackPoint ?? null,
+    results: input.results,
   });
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
@@ -661,5 +666,270 @@ describe("regeneration serialization", () => {
       expect(parsed.error.code).toBe(expectedCode);
       expect(parsed.error.message.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("regenerate: rollback point (Phase 20)", () => {
+  it("executes only the features up to the marker; parked features are stale and never executed", () => {
+    const { calls, executor } = recorder(() => ({ ok: true }));
+    const run = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: executor,
+      rollbackPoint: { afterFeatureId: fPad },
+    });
+    expect(calls).toEqual([fSketch, fPad]);
+    expect(run.executed).toEqual([fSketch, fPad]);
+    expect(run.states.get(fSketch)).toEqual(VALID);
+    expect(run.states.get(fPad)).toEqual(VALID);
+    expect(run.states.get(fBore)).toEqual(STALE);
+    expect(run.states.get(fShell)).toEqual(STALE);
+  });
+
+  it("parks every feature when the marker sits at the very start", () => {
+    const { calls, executor } = recorder(() => ({ ok: true }));
+    const run = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: executor,
+      rollbackPoint: { afterFeatureId: null },
+    });
+    expect(calls).toEqual([]);
+    expect(run.executed).toEqual([]);
+    for (const status of run.states.values()) {
+      expect(status).toEqual(STALE);
+    }
+  });
+
+  it("clears a parked feature's prior failure diagnostics (parking is not an outcome)", () => {
+    const prior = new Map(allValid(branched));
+    prior.set(fBore, {
+      state: "failed",
+      diagnostics: [diagnosticOn(fBore, "stale failure")],
+    });
+    const run = runRegeneration({
+      features: branched,
+      states: prior,
+      execute: succeed,
+      rollbackPoint: { afterFeatureId: fPad },
+    });
+    expect(run.states.get(fBore)).toEqual(STALE);
+  });
+
+  it("keeps suppression winning over parking; un-parking reveals the suppression", () => {
+    const { calls, executor } = recorder(() => ({ ok: true }));
+    const run = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      suppressed: [fShell],
+      execute: executor,
+      rollbackPoint: { afterFeatureId: fSketch },
+    });
+    expect(run.states.get(fPad)).toEqual(STALE);
+    expect(run.states.get(fShell)).toEqual({
+      state: "suppressed",
+      diagnostics: [],
+    });
+    expect(calls).toEqual([fSketch]);
+  });
+
+  it("un-rolling re-executes the parked features (stale is due)", () => {
+    const rolled = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: succeed,
+      rollbackPoint: { afterFeatureId: fPad },
+    });
+    const unrolled = runRegeneration({
+      features: branched,
+      states: rolled.states,
+      execute: succeed,
+      rollbackPoint: null,
+    });
+    // The executed prefix stayed valid and is not due; the formerly parked
+    // features are stale, so un-rolling re-executes exactly them.
+    expect(unrolled.executed).toEqual([fBore, fShell]);
+    expect(unrolled.states.get(fBore)).toEqual(VALID);
+    expect(unrolled.states.get(fShell)).toEqual(VALID);
+  });
+
+  it("rejects a marker naming an absent feature, structurally", () => {
+    const result = regenerate({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      suppressed: [],
+      execute: succeed,
+      rollbackPoint: { afterFeatureId: createFeatureId("feat_ghost") },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected a rollback rejection");
+    expect(result.error.code).toBe(
+      REGENERATION_ERROR_CODES.rollbackUnknownFeature,
+    );
+    expect(result.error.message).toContain("feat_ghost");
+  });
+
+  it("behaves identically to a marker-free run when the marker is last", () => {
+    const rolledRecorder = recorder(() => ({ ok: true }));
+    const rolled = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: rolledRecorder.executor,
+      rollbackPoint: { afterFeatureId: fShell },
+    });
+    const free = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: succeed,
+    });
+    expect(rolled.states).toEqual(free.states);
+    expect(rolled.executed).toEqual(free.executed);
+    expect(rolledRecorder.calls).toEqual([fSketch, fPad, fBore, fShell]);
+  });
+});
+
+describe("regenerate: executor-results registry (Phase 20)", () => {
+  it("records success payloads for what executed and failures with diagnostics", () => {
+    const decide = (id: FeatureId): FeatureExecutionOutcome =>
+      id === fBore
+        ? { ok: false, diagnostics: [diagnosticOn(fBore)] }
+        : { ok: true, result: `result:${id}` };
+    const run = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: (candidate) => decide(candidate.id),
+    });
+    expect(run.results.get(fSketch)).toEqual({
+      ok: true,
+      result: `result:${fSketch}`,
+    });
+    expect(run.results.get(fPad)).toEqual({
+      ok: true,
+      result: `result:${fPad}`,
+    });
+    expect(run.results.get(fBore)).toEqual({
+      ok: false,
+      diagnostics: [diagnosticOn(fBore)],
+    });
+    // The shell branch consumes only the base body: the bore's failure does
+    // not gate it, it executed, and its record is present.
+    expect(run.results.get(fShell)).toEqual({
+      ok: true,
+      result: `result:${fShell}`,
+    });
+  });
+
+  it("retains last-known-valid records upstream of a failure and for gated features", () => {
+    const first = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: (candidate) => ({ ok: true, result: `result:${candidate.id}` }),
+    });
+    expect(first.results.size).toBe(4);
+    const prior = markStale(branched, first.states, [pWidth]);
+    const second = runRegeneration({
+      features: branched,
+      states: prior,
+      execute: (candidate) =>
+        candidate.id === fPad
+          ? { ok: false, diagnostics: [diagnosticOn(fPad)] }
+          : { ok: true, result: `result:${candidate.id}` },
+      results: first.results,
+    });
+    // Sketch re-executed and refreshed; pad failed with its diagnostics; the
+    // gated bore keeps the LAST-KNOWN-VALID record from the earlier run.
+    expect(second.results.get(fSketch)).toEqual({
+      ok: true,
+      result: `result:${fSketch}`,
+    });
+    expect(second.results.get(fPad)).toEqual({
+      ok: false,
+      diagnostics: [diagnosticOn(fPad)],
+    });
+    expect(second.results.get(fBore)).toEqual({
+      ok: true,
+      result: `result:${fBore}`,
+    });
+    // The shell branch was not due: its record survives untouched.
+    expect(second.results.get(fShell)).toEqual({
+      ok: true,
+      result: `result:${fShell}`,
+    });
+  });
+
+  it("parked features retain their prior records; suppressed features drop theirs", () => {
+    const first = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: (candidate) => ({ ok: true, result: `result:${candidate.id}` }),
+    });
+    const rolled = runRegeneration({
+      features: branched,
+      states: first.states,
+      suppressed: [fPad],
+      execute: succeed,
+      rollbackPoint: { afterFeatureId: fSketch },
+      results: first.results,
+    });
+    // Sketch re-executed (was due), pad is suppressed AND parked: the
+    // suppression drops its record; bore and shell park and retain theirs.
+    expect(rolled.results.get(fSketch)).toEqual({
+      ok: true,
+      result: `result:${fSketch}`,
+    });
+    expect(rolled.results.has(fPad)).toBe(false);
+    expect(rolled.results.get(fBore)).toEqual({
+      ok: true,
+      result: `result:${fBore}`,
+    });
+    expect(rolled.results.get(fShell)).toEqual({
+      ok: true,
+      result: `result:${fShell}`,
+    });
+  });
+
+  it("reports an empty registry when nothing has ever executed", () => {
+    const run = runRegeneration({
+      features: branched,
+      states: initialRegenerationStates(branched),
+      execute: succeed,
+      rollbackPoint: { afterFeatureId: null },
+    });
+    expect(run.results.size).toBe(0);
+  });
+});
+
+describe("regenerate: deterministic downstream regeneration (Phase 20 pin)", () => {
+  it("applies the same upstream change twice to identical outcome sequences", () => {
+    const decide = (id: FeatureId): FeatureExecutionOutcome => ({
+      ok: true,
+      result: `result:${id}`,
+    });
+    const applyChange = (
+      states: RegenerationStateMap,
+      results: RegenerationResultMap | undefined,
+    ) => {
+      const marked = markStale(branched, states, [pWidth]);
+      return runRegeneration({
+        features: branched,
+        states: marked,
+        execute: (candidate) => decide(candidate.id),
+        results,
+      });
+    };
+    const allValidStates = allValid(branched);
+    const firstRun = runRegeneration({
+      features: branched,
+      states: allValidStates,
+      execute: (candidate) => ({ ok: true, result: `result:${candidate.id}` }),
+    });
+    const firstChange = applyChange(allValidStates, firstRun.results);
+    const secondChange = applyChange(allValidStates, firstRun.results);
+    expect(secondChange.executed).toEqual(firstChange.executed);
+    expect(secondChange.states).toEqual(firstChange.states);
+    expect(secondChange.results).toEqual(firstChange.results);
+    expect(Array.from(secondChange.results.keys())).toEqual(
+      Array.from(firstChange.results.keys()),
+    );
   });
 });

@@ -269,6 +269,25 @@ export {
   findFeatureCycle,
 } from "./feature-graph";
 export type {
+  FeatureHistoryError,
+  FeatureHistoryErrorCode,
+  FeatureRollbackPoint,
+  FeatureTimelineEntry,
+  FeatureTimelineEntryDiagnostic,
+  FeatureTimelineInput,
+  FeatureTimelineStatus,
+} from "./feature-history";
+export {
+  documentChangeInvalidations,
+  FEATURE_HISTORY_ERROR_CODES,
+  FEATURE_TIMELINE_STATUSES,
+  featureTimeline,
+  isFeatureTimelineStatus,
+  parseFeatureRollbackShape,
+  reorderFeatureRecords,
+  rollbackZoneBoundary,
+} from "./feature-history";
+export type {
   Body,
   BodyAddResult,
   BodyInput,
@@ -307,17 +326,20 @@ export {
   removeBody,
   removeDocumentParameter,
   removeFeature,
+  reorderFeature,
   serializeCadDocument,
   updateFeature,
 } from "./document";
 export type {
   FeatureExecutionOutcome,
+  FeatureExecutionRecord,
   FeatureExecutor,
   FeatureRegenerationState,
   FeatureRegenerationStatus,
   RegenerateInput,
   RegenerationError,
   RegenerationErrorCode,
+  RegenerationResultMap,
   RegenerationRun,
   RegenerationStateMap,
   SerializedFeatureRegenerationStatus,
@@ -335,7 +357,11 @@ export {
 } from "./regeneration";
 export type { ParseFailure, ParseResult } from "./result";
 export { fail, ok } from "./result";
-export { CAD_DOCUMENT_FORMAT_VERSION, CAD_PROJECTION_FORMAT_VERSION } from "./version";
+export {
+  CAD_DOCUMENT_FORMAT_VERSION,
+  CAD_NATIVE_FORMAT_VERSION,
+  CAD_PROJECTION_FORMAT_VERSION,
+} from "./version";
 export type {
   KernelTessellationSource,
   ProjectionError,
@@ -511,6 +537,7 @@ export type {
   NativeFormatErrorCode,
   NativeFormatIssue,
   NativeFormatIssueCode,
+  SerializedFeatureRollbackPoint,
   SerializedNativeCadDocument,
   SerializedNativeHistory,
 } from "./native-format";

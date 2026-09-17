@@ -45,6 +45,10 @@
  */
 
 import {
+  FEATURE_HISTORY_ERROR_CODES,
+  reorderFeatureRecords,
+} from "./feature-history";
+import {
   type AnyCadId,
   type BodyId,
   CAD_ID_KINDS,
@@ -190,6 +194,7 @@ export const DOCUMENT_ERROR_CODES = {
   outputUnknown: "document/output-unknown",
   notFound: "document/not-found",
   inUse: "document/in-use",
+  reorderInvalid: "document/reorder-invalid",
 } as const;
 
 export type DocumentErrorCode =
@@ -888,6 +893,35 @@ export function updateFeature(
     }),
     feature,
   });
+}
+
+/**
+ * Moves the feature `id` to immediately after `afterFeatureId` (or to the
+ * front when the anchor is `null`) — the Phase 20 reorder as a document
+ * substrate operation. The move and its validation are the pure
+ * {@link reorderFeatureRecords} rule (the input-order replayability rule is
+ * enforced on the RESULT), with failures remapped to this module's stable
+ * codes: an unknown moved feature is `document/not-found`; an invalid
+ * anchor or an order-rule violation is `document/reorder-invalid`. Like
+ * every substrate operation it is pure: the input document is untouched,
+ * records keep their identities, and the id generator state is unchanged.
+ */
+export function reorderFeature(
+  document: CadDocument,
+  id: FeatureId,
+  afterFeatureId: FeatureId | null,
+): ParseResult<CadDocument, DocumentError> {
+  const reordered = reorderFeatureRecords(document.features, id, afterFeatureId);
+  if (!reordered.ok) {
+    const code =
+      reordered.error.code === FEATURE_HISTORY_ERROR_CODES.reorderUnknownFeature
+        ? DOCUMENT_ERROR_CODES.notFound
+        : DOCUMENT_ERROR_CODES.reorderInvalid;
+    return fail(docError(code, reordered.error.message, reordered.error.input));
+  }
+  return ok(
+    Object.freeze({ ...document, features: reordered.value }),
+  );
 }
 
 /**

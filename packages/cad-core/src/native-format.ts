@@ -19,6 +19,7 @@
  *     cursor: number,                           // entries current at save time
  *   },
  *   regeneration: SerializedRegenerationStateMap,
+ *   rollback?: { afterFeatureId: string | null }, // Phase 20, optional — see below
  * }
  * ```
  *
@@ -52,7 +53,26 @@
  *   executing geometry before the document is even visible — exactly what a
  *   persistence format must not require. States and their failure
  *   diagnostics are lightweight domain data and round-trip verbatim; the
- *   next regeneration run overwrites them as usual.
+ *   next regeneration run overwrites them as usual. A PARKED feature (Phase
+ *   20 rollback) persists as plain `stale` — parking is positional, derived
+ *   from the marker below, never a stored state, so the regeneration
+ *   section keeps its Phase 6.3 four-state vocabulary and files saved with
+ *   an active rollback load in readers that predate the marker.
+ *
+ * - **The rollback point: an optional envelope field, additive-optional.**
+ *   The Phase 20 rollback marker is document-level state, so it persists —
+ *   as an OPTIONAL `rollback` envelope field (`{ afterFeatureId: string |
+ *   null }`, omitted entirely when no marker is set, keeping every pre-
+ *   Phase 20 file and serializer byte-identical). Version 1 is retained:
+ *   the field is additive-optional in both directions — an old reader (per
+ *   the envelope's unknown-field tolerance) ignores it and loads the
+ *   document, losing only the marker; a new reader of an old file finds it
+ *   absent and treats the document as un-rolled. The field must name a
+ *   feature the document section declares (`native-format/rollback-unknown-feature`
+ *   otherwise) — the same membership cross-check the regeneration section
+ *   has. The marker deliberately persists OUTSIDE the transaction log:
+ *   it gates execution, not the document, so there is no command to replay
+ *   (see `feature-history.ts`).
  *
  * - **References: stable ones persist, synthetic ones are structurally
  *   absent.** Feature input references (parameters, features, bodies — all
@@ -105,6 +125,11 @@ import {
   isExpressionIdentifierName,
   parseExpressionAst,
 } from "./expression";
+import {
+  type FeatureRollbackPoint,
+  parseFeatureRollbackShape,
+  rollbackZoneBoundary,
+} from "./feature-history";
 import {
   type DocumentHistory,
   type HistoryEntry,
@@ -173,6 +198,12 @@ export interface NativeCadDocument {
   readonly regeneration: RegenerationStateMap;
   /** JSON-safe document-level metadata; serialized with sorted keys. */
   readonly metadata: Readonly<Record<string, ParameterMetadataValue>>;
+  /**
+   * The Phase 20 rollback marker over the document's feature timeline, or
+   * `null` for none. Persisted as the optional envelope `rollback` field
+   * (see module docs); parking is derived from it, never stored in states.
+   */
+  readonly rollback: FeatureRollbackPoint | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,9 +223,18 @@ export interface SerializedNativeHistory {
   readonly cursor: number;
 }
 
+/** Canonical JSON form of the optional Phase 20 rollback field. */
+export interface SerializedFeatureRollbackPoint {
+  /** The feature the marker sits after; `null` places it at the very start. */
+  readonly afterFeatureId: string | null;
+}
+
 /**
  * Canonical JSON form of a native document, in fixed key order:
- * `formatVersion`, `metadata`, `document`, `history`, `regeneration`.
+ * `formatVersion`, `metadata`, `document`, `history`, `regeneration`, and —
+ * only when a rollback marker is set — `rollback`. Omitting the field when
+ * no marker is set keeps every pre-Phase 20 document's serialization
+ * byte-identical.
  */
 export interface SerializedNativeCadDocument {
   /** The native envelope's own version stamp ({@link CAD_NATIVE_FORMAT_VERSION}). */
@@ -207,6 +247,8 @@ export interface SerializedNativeCadDocument {
   readonly history: SerializedNativeHistory;
   /** Regeneration state per feature (substrate-serialized). */
   readonly regeneration: SerializedRegenerationStateMap;
+  /** The rollback marker; present exactly when one is set. */
+  readonly rollback?: SerializedFeatureRollbackPoint;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +268,8 @@ export const NATIVE_FORMAT_ERROR_CODES = {
   historyMismatch: "native-format/history-mismatch",
   /** A regeneration state entry names a feature the document does not have. */
   regenerationUnknownFeature: "native-format/regeneration-unknown-feature",
+  /** The optional rollback field names a feature the document does not have. */
+  rollbackUnknownFeature: "native-format/rollback-unknown-feature",
   /** Document-level metadata was not a plain object of JSON-safe scalars. */
   metadataInvalid: "native-format/metadata-invalid",
 } as const;
@@ -336,7 +380,8 @@ function parseNativeMetadata(
 /**
  * Starts a native document over the given CAD document: an empty history
  * (the document is its own base), no regeneration states (nothing has
- * executed), and the given metadata (validated like parameter metadata).
+ * executed), no rollback marker, and the given metadata (validated like
+ * parameter metadata).
  */
 export function createNativeCadDocument(
   document: CadDocument,
@@ -354,6 +399,7 @@ export function createNativeCadDocument(
       }),
       regeneration: new Map(),
       metadata: parsedMetadata.value,
+      rollback: null,
     }),
   );
 }
@@ -380,7 +426,9 @@ function canonicalMetadata(
  * Serializes a native document to its canonical, deterministic JSON form:
  * fixed key order at every level (inherited from the substrate serializers,
  * plus sorted metadata keys), canonical dimensional values, and stable id
- * rendering — the same document always produces the identical value.
+ * rendering — the same document always produces the identical value. The
+ * optional `rollback` field is emitted (last) exactly when a marker is set,
+ * so a marker-free document serializes to the pre-Phase 20 byte form.
  */
 export function serializeNativeCadDocument(
   native: NativeCadDocument,
@@ -397,6 +445,13 @@ export function serializeNativeCadDocument(
       cursor: native.history.cursor,
     },
     regeneration: serializeRegenerationStates(native.regeneration),
+    ...(native.rollback === null
+      ? {}
+      : {
+          rollback: {
+            afterFeatureId: native.rollback.afterFeatureId,
+          },
+        }),
   };
 }
 
@@ -533,12 +588,42 @@ function parseCurrentNativeCadDocument(
     }
   }
 
+  // The optional Phase 20 rollback field: absent means no marker (every
+  // pre-Phase 20 file lands here); present, it must parse as a rollback
+  // point and name a feature the document at the cursor declares — the same
+  // membership cross-check the regeneration section carries.
+  let rollback: FeatureRollbackPoint | null = null;
+  if (input.rollback !== undefined && input.rollback !== null) {
+    const shape = parseFeatureRollbackShape(input.rollback);
+    if (!shape.ok) {
+      return fail(
+        nativeError(
+          NATIVE_FORMAT_ERROR_CODES.malformed,
+          `The native document's rollback field is invalid: ${shape.error.message}`,
+          input.rollback,
+        ),
+      );
+    }
+    const boundary = rollbackZoneBoundary(atCursor.features, shape.value);
+    if (!boundary.ok) {
+      return fail(
+        nativeError(
+          NATIVE_FORMAT_ERROR_CODES.rollbackUnknownFeature,
+          `The native document's rollback field names feature "${String(shape.value.afterFeatureId)}", which the document does not have.`,
+          input.rollback,
+        ),
+      );
+    }
+    rollback = shape.value;
+  }
+
   return ok(
     Object.freeze({
       document: atCursor,
       history,
       regeneration: regeneration.value,
       metadata: metadata.value,
+      rollback,
     }),
   );
 }
@@ -656,6 +741,8 @@ export const NATIVE_FORMAT_ISSUE_CODES = {
   fieldInvalid: "native-format/field-invalid",
   /** A regeneration state entry names a feature the document section lacks. */
   regenerationUnknownFeature: "native-format/regeneration-unknown-feature",
+  /** The rollback field names a feature the document section lacks. */
+  rollbackUnknownFeature: "native-format/rollback-unknown-feature",
 } as const;
 
 export type NativeFormatIssueCode =
@@ -1051,6 +1138,28 @@ function validateCommandShape(
     }
     return;
   }
+  if (type === "feature.reorder") {
+    if (!parseFeatureId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A feature.reorder command needs a valid feature id.",
+      );
+    }
+    if (
+      input.afterFeatureId !== null &&
+      !parseFeatureId(input.afterFeatureId).ok
+    ) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.afterFeatureId`,
+        "A feature.reorder command's afterFeatureId must be null or a valid feature id.",
+      );
+    }
+    return;
+  }
   if (input.id === undefined) {
     if (type === "feature.update") {
       issue(
@@ -1325,16 +1434,52 @@ function collectFeatureIds(input: unknown): ReadonlySet<string> {
 }
 
 /**
+ * Validates the optional Phase 20 rollback field's shape: absent or null
+ * means no marker (pre-Phase 20 files carry neither); otherwise the field
+ * must parse as a rollback point (plain object, `afterFeatureId` null or a
+ * valid feature id — the same shape the history module parses) and, when
+ * the document section's shape allows reading its features, must name one
+ * of them (the membership cross-check).
+ */
+function validateRollbackShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+  featureIds: ReadonlySet<string>,
+): void {
+  if (input === undefined || input === null) return;
+  const shape = parseFeatureRollbackShape(input);
+  if (!shape.ok) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      `The rollback field must be a plain object whose afterFeatureId is null or a valid feature id: ${shape.error.message}`,
+    );
+    return;
+  }
+  const anchor = shape.value.afterFeatureId;
+  if (anchor !== null && !featureIds.has(anchor)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.rollbackUnknownFeature,
+      `${path}.afterFeatureId`,
+      `The rollback field names feature "${anchor}", which the document section does not have.`,
+    );
+  }
+}
+
+/**
  * Validates untrusted input against the native format's structure — fast
  * fail on malformed input, WITHOUT replaying the document. Every check is a
  * pure per-field shape validation through the substrate's own value parsers
  * (ids, kinds, dimensional values, expression ASTs, diagnostics), plus one
- * set-membership cross-check (regeneration entries must name features the
- * document section declares). Inter-entity integrity — references
- * resolving, duplicate ids, the log replaying, the state matching the
- * replay — is the full parse's job, deliberately out of scope here. Unlike
- * the parser's fail-fast single error, the validator collects every issue
- * it finds, each carrying a failure-class code and a JSON path.
+ * set-membership cross-check (regeneration entries and the rollback field
+ * must name features the document section declares). Inter-entity integrity
+ * — references resolving, duplicate ids, the log replaying, the state
+ * matching the replay — is the full parse's job, deliberately out of scope
+ * here. Unlike the parser's fail-fast single error, the validator collects
+ * every issue it finds, each carrying a failure-class code and a JSON path.
  *
  * Version gating: a readable but non-current version stops the pass with a
  * single `native-format/version-unsupported` issue — the structure of a
@@ -1382,6 +1527,12 @@ export function validateNativeCadDocument(
   validateRegenerationShape(
     input.regeneration,
     "regeneration",
+    issues,
+    collectFeatureIds(input.document),
+  );
+  validateRollbackShape(
+    input.rollback,
+    "rollback",
     issues,
     collectFeatureIds(input.document),
   );

@@ -1,0 +1,157 @@
+{
+  "formatVersion": 1,
+  "metadata": {
+    "name": "rolled-back-plate",
+    "unitSystem": "metric"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_rolled_back",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_width",
+          "name": "width",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 40
+          },
+          "expression": null,
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_plate",
+        "name": "plate"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_box",
+        "kind": "box",
+        "inputs": [
+          {
+            "kind": "parameter",
+            "id": "param_width"
+          }
+        ],
+        "outputs": [
+          "body_plate"
+        ]
+      },
+      {
+        "id": "feat_hole",
+        "kind": "subtract",
+        "inputs": [
+          {
+            "kind": "feature",
+            "id": "feat_box"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_width"
+          }
+        ],
+        "outputs": [
+          "body_plate"
+        ]
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_rolled_back",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": [
+          {
+            "id": "param_width",
+            "name": "width",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 40
+            },
+            "expression": null,
+            "metadata": {}
+          }
+        ]
+      },
+      "bodies": [
+        {
+          "id": "body_plate",
+          "name": "plate"
+        }
+      ],
+      "features": [
+        {
+          "id": "feat_box",
+          "kind": "box",
+          "inputs": [
+            {
+              "kind": "parameter",
+              "id": "param_width"
+            }
+          ],
+          "outputs": [
+            "body_plate"
+          ]
+        },
+        {
+          "id": "feat_hole",
+          "kind": "subtract",
+          "inputs": [
+            {
+              "kind": "feature",
+              "id": "feat_box"
+            },
+            {
+              "kind": "parameter",
+              "id": "param_width"
+            }
+          ],
+          "outputs": [
+            "body_plate"
+          ]
+        }
+      ]
+    },
+    "transactions": [],
+    "cursor": 0
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": [
+      {
+        "id": "feat_box",
+        "state": "valid",
+        "diagnostics": []
+      },
+      {
+        "id": "feat_hole",
+        "state": "stale",
+        "diagnostics": []
+      }
+    ]
+  },
+  "rollback": {
+    "afterFeatureId": "feat_box"
+  }
+}

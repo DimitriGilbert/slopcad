@@ -21,6 +21,7 @@ import {
   createNativeCadDocument,
   createParameterId,
   createSession,
+  CAD_NATIVE_FORMAT_VERSION,
   encodeNativeCadDocument,
   initialRegenerationStates,
   length,
@@ -145,6 +146,7 @@ function buildNative(): NativeCadDocument {
     history: session.history,
     regeneration: run.states,
     metadata: { zeta: "last", alpha: "first" },
+    rollback: null,
   };
 }
 
@@ -540,6 +542,7 @@ describe("regeneration state persists as loadable data", () => {
       history: session.history,
       regeneration: run.states,
       metadata: {},
+      rollback: null,
     };
   }
 
@@ -966,5 +969,105 @@ describe("derived kernel objects never become canonical", () => {
     expect(text).not.toContain("faceIndex");
     expect(text).not.toContain("edgeIndex");
     expect(text).not.toContain("vertexIndex");
+  });
+});
+
+describe("the optional rollback field (Phase 20)", () => {
+  it("round-trips a set marker byte-stably and omits the field entirely when null", () => {
+    const rolled: NativeCadDocument = {
+      ...buildNative(),
+      rollback: { afterFeatureId: PLATE_FEATURE },
+    };
+    const text = nativeText(rolled);
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "parsing the rolled-back native document",
+    );
+    expect(parsed.rollback).toEqual({ afterFeatureId: PLATE_FEATURE });
+    expect(nativeText(parsed)).toBe(text);
+
+    // Marker-free documents carry NO rollback key: the pre-Phase 20 byte
+    // form is unchanged.
+    const plain = buildNative();
+    const plainText = nativeText(plain);
+    const plainJson = JSON.parse(plainText) as Record<string, unknown>;
+    expect(Object.keys(plainJson)).not.toContain("rollback");
+    expect(plain.rollback).toBeNull();
+    const parsedPlain = requireOk(
+      parseNativeCadDocumentFromString(plainText),
+      "parsing the marker-free native document",
+    );
+    expect(parsedPlain.rollback).toBeNull();
+  });
+
+  it("parses old-shaped files (no rollback key) as un-rolled", () => {
+    const revived = JSON.parse(nativeText()) as Record<string, unknown>;
+    expect(revived.rollback).toBeUndefined();
+    const parsed = requireOk(
+      parseNativeCadDocument(revived),
+      "parsing a pre-Phase 20 native document",
+    );
+    expect(parsed.rollback).toBeNull();
+  });
+
+  it("tolerates unknown envelope fields — the mechanism old readers apply to rollback", () => {
+    const revived = JSON.parse(nativeText()) as Record<string, unknown>;
+    revived.someFutureField = { nested: true };
+    const parsed = requireOk(
+      parseNativeCadDocument(revived),
+      "parsing a native document with an unknown envelope field",
+    );
+    expect(parsed.document.id).toBe(DOC_ID);
+  });
+
+  it("rejects a marker naming a feature the document does not have", () => {
+    const ghost = createFeatureId("feat_ghost");
+    const rolled: NativeCadDocument = {
+      ...buildNative(),
+      rollback: { afterFeatureId: ghost },
+    };
+    const parsed = parseNativeCadDocumentFromString(nativeText(rolled));
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error("expected a rejection");
+    expect(parsed.error.code).toBe(
+      NATIVE_FORMAT_ERROR_CODES.rollbackUnknownFeature,
+    );
+  });
+
+  it("rejects a mis-shaped rollback field, structurally", () => {
+    const revived = JSON.parse(nativeText()) as Record<string, unknown>;
+    revived.rollback = { afterFeatureId: 42 };
+    const parsed = parseNativeCadDocument(revived);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error("expected a rejection");
+    expect(parsed.error.code).toBe(NATIVE_FORMAT_ERROR_CODES.malformed);
+  });
+
+  it("validates the field's shape and membership without replay", () => {
+    const rolled: NativeCadDocument = {
+      ...buildNative(),
+      rollback: { afterFeatureId: PLATE_FEATURE },
+    };
+    expect(validateNativeCadDocument(JSON.parse(nativeText(rolled)))).toEqual({
+      valid: true,
+      formatVersion: CAD_NATIVE_FORMAT_VERSION,
+      issues: [],
+    });
+    const ghost = JSON.parse(nativeText()) as Record<string, unknown>;
+    ghost.rollback = { afterFeatureId: "feat_ghost" };
+    const validation = validateNativeCadDocument(ghost);
+    expect(validation.valid).toBe(false);
+    expect(validation.issues.map((entry) => entry.code)).toContain(
+      NATIVE_FORMAT_ISSUE_CODES.rollbackUnknownFeature,
+    );
+    const misShaped = JSON.parse(nativeText()) as Record<string, unknown>;
+    misShaped.rollback = "rollback";
+    const misShapedValidation = validateNativeCadDocument(misShaped);
+    expect(misShapedValidation.valid).toBe(false);
+    expect(
+      misShapedValidation.issues.some(
+        (entry) => entry.path === "rollback" && entry.code === "native-format/field-invalid",
+      ),
+    ).toBe(true);
   });
 });
