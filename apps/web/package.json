@@ -27,6 +27,7 @@
     "@slopcad/cad-kernel-occt": "workspace:*",
     "@slopcad/cad-r3f": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
+    "@slopcad/cad-sketch": "workspace:*",
     "@slopcad/env": "workspace:*",
     "@slopcad/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
