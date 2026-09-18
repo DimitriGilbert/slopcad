@@ -302,7 +302,7 @@ export function CadSketchInspector({
                     type="button"
                     aria-pressed={selected}
                     className={cn(
-                      "flex w-full cursor-pointer items-center gap-2 px-1 py-0.5 text-left text-xs hover:bg-muted/60",
+                      "flex w-full cursor-pointer items-center gap-2 px-1 py-0.5 text-left text-xs outline-none hover:bg-muted/60 focus-visible:ring-1 focus-visible:ring-ring/50",
                       selected && "bg-muted",
                     )}
                     data-sketch-constraint-id={constraint.id}

@@ -8,7 +8,12 @@
  * span, a `volume` span (with the canonical unit), and an `error` span —
  * the ids a worker session's surface writer updates in place, so the bar
  * composes with the established settle protocol without owning it. The
- * session writer owns the VALUES; the bar owns the layout.
+ * session writer owns the VALUES; the bar owns the layout — and the
+ * ANNOUNCEMENT of them: the status span is a polite live region and the
+ * error span an assertive alert, so the writer's out-of-React
+ * `textContent` writes still reach assistive technology (the volume span
+ * deliberately stays quiet — it re-stamps on every settle, and reading
+ * each restamp aloud would drown the operator in retelling).
  *
  * ## State: two documented input modes, props first
  *
@@ -190,7 +195,15 @@ export function CadStatusBar({
     >
       {surfaceIds?.statusId !== undefined ? (
         <StatusField label={labels.status}>
-          <span data-testid="cad-status-bar-status" id={surfaceIds.statusId} />
+          {/* The host's session writer replaces this span's text outside
+              React, so the live region makes each worker status change
+              audible without React knowing it happened (polite: status is
+              ambient, never an alarm). */}
+          <span
+            aria-live="polite"
+            data-testid="cad-status-bar-status"
+            id={surfaceIds.statusId}
+          />
         </StatusField>
       ) : null}
       {surfaceIds?.volumeId !== undefined ? (
@@ -215,8 +228,16 @@ export function CadStatusBar({
           {String(commandCount)}
         </StatusField>
       ) : null}
+      {/* The error span is a live alert region: the session writer's
+          out-of-React textContent writes are announced immediately, and
+          the destructive color never carries the message alone. */}
       {surfaceIds?.errorId !== undefined ? (
-        <span className="text-destructive" data-testid="cad-status-bar-error">
+        <span
+          aria-live="assertive"
+          className="text-destructive"
+          data-testid="cad-status-bar-error"
+          role="alert"
+        >
           <span id={surfaceIds.errorId} />
         </span>
       ) : null}

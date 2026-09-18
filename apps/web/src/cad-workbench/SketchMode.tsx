@@ -729,6 +729,7 @@ export function SketchMode({
         data-testid="sketch-status"
       >
         <span
+          aria-live="polite"
           className={
             editor.status.severity === "error" ? "text-destructive" : undefined
           }
