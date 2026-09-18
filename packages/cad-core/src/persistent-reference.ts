@@ -194,13 +194,23 @@ export type ReferenceVector3 = readonly [number, number, number];
  *   pairs; the heuristic accepts a candidate whose position matches
  *   EITHER anchoring within its bound, and a candidate matching neither is
  *   not that entity.
+ * - `cylinderRadiusMm` (optional, faces only) — the face's cylindrical
+ *   surface radius, recorded ONLY by a producer that types the face's
+ *   surface (the OCCT producer probes `BRepAdaptor_Surface` and, on
+ *   `GeomAbs_Cylinder`, stores `gp_Cylinder.Radius()` exactly); a kernel
+ *   without surface typing omits it. It rides the same every-recorded-field-
+ *   must-match repair rule as the primary measures — it narrows candidates
+ *   when recorded and constrains nothing when absent. It is NOT a primary
+ *   key: identity and area/length/position remain the mint/repair basis.
  *
- * Fields present per kind: faces carry `areaMm2` + centroid pair, edges
+ * Fields present per kind: faces carry `areaMm2` + centroid pair (plus
+ * `cylinderRadiusMm` when the surface types as a cylinder), edges
  * `lengthMm` + centroid pair, vertices a point pair.
  */
 export interface TopologyGeometryDescriptor {
   readonly areaMm2?: number;
   readonly lengthMm?: number;
+  readonly cylinderRadiusMm?: number;
   readonly centroidAbsoluteMm?: ReferenceVector3;
   readonly centroidRelativeMm?: ReferenceVector3;
   readonly pointAbsoluteMm?: ReferenceVector3;
@@ -349,6 +359,12 @@ export function topologyGeometryMatches(
     if (candidate.lengthMm === undefined) return false;
     if (!measureClose(reference.lengthMm, candidate.lengthMm)) return false;
   }
+  if (reference.cylinderRadiusMm !== undefined) {
+    if (candidate.cylinderRadiusMm === undefined) return false;
+    if (!measureClose(reference.cylinderRadiusMm, candidate.cylinderRadiusMm)) {
+      return false;
+    }
+  }
   return positionMatches(reference, candidate);
 }
 
@@ -413,7 +429,7 @@ function narrowGeometryCandidates(
   candidates: readonly TopologyEntitySnapshot[],
 ): readonly TopologyEntitySnapshot[] {
   let narrowed = candidates;
-  const { areaMm2, lengthMm } = reference;
+  const { areaMm2, lengthMm, cylinderRadiusMm } = reference;
   if (areaMm2 !== undefined) {
     narrowed = narrowed.filter(
       (entity) =>
@@ -426,6 +442,13 @@ function narrowGeometryCandidates(
       (entity) =>
         entity.geometry.lengthMm !== undefined &&
         measureClose(lengthMm, entity.geometry.lengthMm),
+    );
+  }
+  if (cylinderRadiusMm !== undefined) {
+    narrowed = narrowed.filter(
+      (entity) =>
+        entity.geometry.cylinderRadiusMm !== undefined &&
+        measureClose(cylinderRadiusMm, entity.geometry.cylinderRadiusMm),
     );
   }
   return narrowed.filter((entity) =>
@@ -1367,6 +1390,9 @@ function serializeGeometry(
   return {
     ...(geometry.areaMm2 !== undefined ? { areaMm2: geometry.areaMm2 } : {}),
     ...(geometry.lengthMm !== undefined ? { lengthMm: geometry.lengthMm } : {}),
+    ...(geometry.cylinderRadiusMm !== undefined
+      ? { cylinderRadiusMm: geometry.cylinderRadiusMm }
+      : {}),
     ...(geometry.centroidAbsoluteMm !== undefined
       ? { centroidAbsoluteMm: serializeVector(geometry.centroidAbsoluteMm) }
       : {}),
@@ -1405,6 +1431,7 @@ function serializeAnchor(anchor: ReferenceAnchor): SerializedReferenceAnchor {
 export interface SerializedTopologyGeometryDescriptor {
   readonly areaMm2?: number;
   readonly lengthMm?: number;
+  readonly cylinderRadiusMm?: number;
   readonly centroidAbsoluteMm?: readonly [number, number, number];
   readonly centroidRelativeMm?: readonly [number, number, number];
   readonly pointAbsoluteMm?: readonly [number, number, number];
@@ -1545,6 +1572,7 @@ function parseGeometry(
   const geometry: {
     areaMm2?: number;
     lengthMm?: number;
+    cylinderRadiusMm?: number;
     centroidAbsoluteMm?: ReferenceVector3;
     centroidRelativeMm?: ReferenceVector3;
     pointAbsoluteMm?: ReferenceVector3;
@@ -1573,6 +1601,18 @@ function parseGeometry(
       );
     }
     geometry.lengthMm = input.lengthMm;
+  }
+  if (input.cylinderRadiusMm !== undefined) {
+    if (!isFiniteNumber(input.cylinderRadiusMm)) {
+      return fail(
+        referenceError(
+          REFERENCE_ERROR_CODES.fieldInvalid,
+          "A reference's cylinderRadiusMm must be a finite number.",
+          input.cylinderRadiusMm,
+        ),
+      );
+    }
+    geometry.cylinderRadiusMm = input.cylinderRadiusMm;
   }
   if (input.centroidAbsoluteMm !== undefined) {
     const parsed = parseVector3(input.centroidAbsoluteMm, "centroidAbsoluteMm");

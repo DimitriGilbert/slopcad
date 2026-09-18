@@ -64,6 +64,12 @@ export interface PlateWithHoleFixture {
   readonly result: KernelSolid;
   /** Analytic plate volume minus the analytic cylinder, mm³. */
   readonly analyticVolumeMm3: number;
+  /**
+   * The analytic plate surface area (Phase 27.4): the box faces minus the
+   * two bore-circle openings plus the cylinder wall — `2(wd+dh+wh) − 2πr²
+   * + 2πrh`, mm² (curved band for the polygonal bore's facet boundary).
+   */
+  readonly analyticAreaMm2: number;
   /** The true tight bounds of the drilled plate. */
   readonly tightBounds: KernelBounds;
 }
@@ -108,6 +114,10 @@ export function buildPlateWithHole(
     result,
     analyticVolumeMm3:
       widthMm * depthMm * heightMm - Math.PI * boreRadiusMm ** 2 * heightMm,
+    analyticAreaMm2:
+      2 * (widthMm * depthMm + widthMm * heightMm + depthMm * heightMm) -
+      2 * Math.PI * boreRadiusMm ** 2 +
+      2 * Math.PI * boreRadiusMm * heightMm,
     tightBounds: {
       min: [0, 0, 0],
       max: [widthMm, depthMm, heightMm],

@@ -624,3 +624,50 @@ export {
   stringifyNativeCadDocument,
   validateNativeCadDocument,
 } from "./native-format";
+export {
+  boundsExtents,
+  formatBoundsExtents,
+  selectedBoundsBody,
+} from "./bounds";
+export type { MassProperties } from "./mass-properties";
+export {
+  formatMassProperties,
+  formatSurfaceArea,
+  formatVolume,
+  massPropertiesOf,
+} from "./mass-properties";
+export type {
+  DistanceError,
+  DistanceErrorCode,
+  MeasureEntity,
+} from "./distance";
+export {
+  DISTANCE_ERROR_CODES,
+  edgeEntity,
+  formatMeasureDistance,
+  measureDistance,
+  measureEntityOfReference,
+  measureEntityOfSnapshotEntity,
+  measureSurfaceOfSyntheticFace,
+  pointEntity,
+  selectionDistance,
+  surfaceEntity,
+  surfaceOfRenderObject,
+  vertexEntity,
+} from "./distance";
+export type {
+  RadiusError,
+  RadiusErrorCode,
+  RadiusFitDetails,
+  RadiusMeasure,
+  RadiusPrecision,
+} from "./radius";
+export {
+  fitCylindricalRadius,
+  formatRadiusMeasure,
+  RADIUS_ERROR_CODES,
+  RADIUS_FIT_MAX_RESIDUAL_MM,
+  selectionRadius,
+  snapshotEntityRadius,
+  storedRadius,
+} from "./radius";

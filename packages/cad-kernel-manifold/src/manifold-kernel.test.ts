@@ -13,6 +13,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { type LengthValue, length } from "@slopcad/cad-core";
 import {
+  assertAreaClose,
   assertBoundsEqual,
   assertTessellationValid,
   assertVolumeClose,
@@ -107,6 +108,7 @@ describe("manifold kernel identity and capabilities", () => {
       chamfer: false,
       shell: false,
       mirror: true,
+      surfaceArea: true,
     });
   });
 
@@ -197,6 +199,27 @@ describe("manifold semantic fixtures", () => {
       "plate tessellation",
     );
     assertTessellationValid(soup, { bounds: fixture.tightBounds });
+  });
+
+  it("measures surface area: exact box, plate-with-bore within the boundary band", () => {
+    // Phase 27.4: `area` is the engine's own `Manifold.surfaceArea()` —
+    // exact over the exact boundary mesh, so the box measures its closed
+    // form to float precision and the engine's 28-chord default bore
+    // (at r = 4) lands in the same inscribed band its volume documents
+    // (probed +0.0134% over the analytic 2 200 + 48π mm²).
+    const kernel = makeKernel();
+    const solid = box(kernel, 30, 20, 10);
+    assertAreaClose(
+      unwrapKernelResult(kernel.area(solid), "box area"),
+      2 * (30 * 20 + 30 * 10 + 20 * 10),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    const fixture = buildPlateWithHole(kernel);
+    assertAreaClose(
+      unwrapKernelResult(kernel.area(fixture.result), "plate area"),
+      fixture.analyticAreaMm2,
+      CURVED_VOLUME_TOLERANCE,
+    );
   });
 
   it("evaluates the boolean chain: exact union, curved cut and trim, tight bounds", () => {
@@ -471,6 +494,13 @@ describe("manifold empty-solid semantics", () => {
     );
     expect(tessellationTriangleCount(soup)).toBe(0);
     expect(soup.normals).toBeUndefined();
+    // Phase 27.4: the surface-area measurement follows the volume's
+    // empty-solid rule — an empty set has no boundary to measure.
+    assertAreaClose(
+      unwrapKernelResult(kernel.area(empty), "empty area"),
+      0,
+      EXACT_VOLUME_TOLERANCE,
+    );
   });
 });
 

@@ -147,6 +147,7 @@ export type {
 } from "./core-bridge";
 
 export {
+  assertAreaClose,
   assertBoundsContain,
   assertBoundsEqual,
   assertTessellationValid,

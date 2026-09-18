@@ -14,6 +14,7 @@ import {
 } from "./contract";
 import {
   createFakeKernel,
+  FAKE_BOX_EDGE_TABLE,
   FAKE_BOX_TRIANGLE_COUNT,
   FAKE_KERNEL_CAPABILITIES,
   FAKE_KERNEL_ID,
@@ -65,6 +66,7 @@ describe("fake kernel identity and capabilities", () => {
       chamfer: true,
       shell: true,
       mirror: true,
+      surfaceArea: true,
     });
   });
 
@@ -203,6 +205,160 @@ describe("fake kernel analytic semantics", () => {
       unwrapKernelResult(kernel.volume(cut), "box-cut volume"),
       20 ** 3 - 15 ** 3,
       1e-9,
+    );
+  });
+});
+
+describe("fake kernel surface area (Phase 27.4)", () => {
+  /** The closed-form surface area of one frustum (lateral + both caps). */
+  function frustumArea(
+    bottomRadius: number,
+    topRadius: number,
+    height: number,
+  ): number {
+    const slant = Math.hypot(bottomRadius - topRadius, height);
+    return (
+      Math.PI * (bottomRadius + topRadius) * slant +
+      Math.PI * bottomRadius ** 2 +
+      Math.PI * topRadius ** 2
+    );
+  }
+
+  it("measures the exact analytic box area 2(wd + dh + wh)", () => {
+    const { kernel, solid } = box(30, 20, 10);
+    expect(unwrapKernelResult(kernel.area(solid), "box area")).toBeCloseTo(
+      2 * (30 * 20 + 30 * 10 + 20 * 10),
+      9,
+    );
+  });
+
+  it("measures the exact analytic sphere area 4πr²", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createSphere({ radius: length(5) }),
+      "createSphere",
+    );
+    expect(unwrapKernelResult(kernel.area(solid), "sphere area")).toBeCloseTo(
+      4 * Math.PI * 25,
+      9,
+    );
+  });
+
+  it("measures the exact analytic cylinder area 2πr(r + h)", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createCylinder({ radius: length(4), height: length(10) }),
+      "createCylinder",
+    );
+    expect(unwrapKernelResult(kernel.area(solid), "cylinder area")).toBeCloseTo(
+      2 * Math.PI * 4 * (4 + 10),
+      9,
+    );
+  });
+
+  it("measures the exact analytic frustum area (lateral + both caps)", () => {
+    const kernel = createFakeKernel();
+    const sharp = unwrapKernelResult(
+      kernel.createCone({
+        bottomRadius: length(4),
+        topRadius: length(0),
+        height: length(10),
+      }),
+      "createCone",
+    );
+    expect(
+      unwrapKernelResult(kernel.area(sharp), "sharp cone area"),
+    ).toBeCloseTo(frustumArea(4, 0, 10), 9);
+    const frustum = unwrapKernelResult(
+      kernel.createCone({
+        bottomRadius: length(4),
+        topRadius: length(2),
+        height: length(10),
+      }),
+      "createCone",
+    );
+    expect(
+      unwrapKernelResult(kernel.area(frustum), "frustum area"),
+    ).toBeCloseTo(frustumArea(4, 2, 10), 9);
+  });
+
+  it("delegates through translate and mirror isometries exactly", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createCylinder({ radius: length(4), height: length(10) }),
+      "createCylinder",
+    );
+    const analytic = 2 * Math.PI * 4 * (4 + 10);
+    const moved = unwrapKernelResult(
+      kernel.transform(solid, { x: length(7), y: length(-3), z: length(2) }),
+      "transform",
+    );
+    expect(unwrapKernelResult(kernel.area(moved), "translated area")).toBe(
+      unwrapKernelResult(kernel.area(solid), "source area"),
+    );
+    expect(
+      unwrapKernelResult(kernel.area(moved), "translated area"),
+    ).toBeCloseTo(analytic, 9);
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(solid, { axis: "x", offset: length(3) }),
+      "mirror",
+    );
+    expect(unwrapKernelResult(kernel.area(mirrored), "mirrored area")).toBe(
+      unwrapKernelResult(kernel.area(solid), "source area"),
+    );
+  });
+
+  it("declines boolean nodes with kernel/unsupported-operation, naming the analytic subset", () => {
+    const kernel = createFakeKernel();
+    const plate = unwrapKernelResult(
+      kernel.createBox({
+        width: length(30),
+        depth: length(20),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const bore = unwrapKernelResult(
+      kernel.createCylinder({ radius: length(4), height: length(10) }),
+      "createCylinder",
+    );
+    const drilled = unwrapKernelResult(
+      kernel.transform(bore, { x: length(15), y: length(10), z: length(0) }),
+      "transform",
+    );
+    const result = unwrapKernelResult(
+      kernel.subtract(plate, [drilled]),
+      "subtract",
+    );
+    expectKernelFailure(
+      kernel.area(result),
+      KERNEL_ERROR_CODES.unsupportedOperation,
+      "surface area of a fake-kernel boolean",
+    );
+  });
+
+  it("declines modelled repair shapes (fillet) with kernel/unsupported-operation", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: length(30),
+        depth: length(20),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const filleted = unwrapKernelResult(
+      kernel.fillet({
+        target: solid,
+        edges: [FAKE_BOX_EDGE_TABLE.length - 1],
+        radius: length(2),
+      }),
+      "fillet",
+    );
+    expectKernelFailure(
+      kernel.area(filleted),
+      KERNEL_ERROR_CODES.unsupportedOperation,
+      "surface area of a fake-kernel fillet node",
     );
   });
 });

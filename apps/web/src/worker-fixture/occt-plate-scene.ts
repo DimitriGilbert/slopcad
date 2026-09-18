@@ -8,8 +8,8 @@
  * characteristics on display: a primitive pair (`solid.createBox`,
  * `solid.createCylinder`), twelve placement transforms, twelve exact BREP
  * subtracts, one rotation+translation transform (the Phase 21.2 wire
- * extension), and the measurements (`solid.volume`, `solid.bounds`,
- * `solid.tessellate`). Every quantity is analytic: the plate minus twelve
+ * extension), and the measurements (`solid.volume`, `solid.area`,
+ * `solid.bounds`, `solid.tessellate`). Every quantity is analytic: the plate minus twelve
  * cylinders integrates exactly under OCCT's BREP volume computation, and
  * the rigid placement preserves it — the fixture's exactness assertions are
  * the point (Manifold's fixture tolerates its mesh divergence; this one
@@ -58,6 +58,8 @@ const TRANSLATION_X_MM = 60;
 export interface OcctPlateMeasurement {
   /** The placed plate's volume in mm³, measured by `solid.volume`. */
   readonly volume: number;
+  /** The placed plate's surface area in mm², measured by `solid.area` (Phase 27.4). */
+  readonly area: number;
   /** The placed plate's axis-aligned bounds in mm, measured by `solid.bounds`. */
   readonly bounds: KernelBounds;
   /** The tessellation's triangle count (`indices.length / 3`). */
@@ -130,6 +132,9 @@ export async function computeOcctDrilledPlate(
   const volume = await context.request("solid.volume", {
     solid: placed.solid,
   });
+  const area = await context.request("solid.area", {
+    solid: placed.solid,
+  });
   const bounds = await context.request("solid.bounds", {
     solid: placed.solid,
   });
@@ -138,6 +143,7 @@ export async function computeOcctDrilledPlate(
   });
   return {
     volume: volume.volume,
+    area: area.area,
     bounds: bounds.bounds,
     triangles: tessellation.tessellation.indices.length / 3,
     tessellation: tessellation.tessellation,

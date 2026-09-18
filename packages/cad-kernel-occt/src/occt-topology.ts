@@ -37,7 +37,6 @@ import type {
   BodyId,
   ReferenceVector3,
   TopologyEntitySnapshot,
-  TopologyGeometryDescriptor,
   TopologyIdentityPayload,
   TopologyReferenceKind,
   TopologySnapshot,
@@ -162,6 +161,38 @@ function exploreKind(
   return entities;
 }
 
+/**
+ * Probes one face's surface geometry through `BRepAdaptor_Surface`: on
+ * `GeomAbs_Cylinder` the exact `gp_Cylinder.Radius()` — the kernel's own
+ * analytic radius, in canonical millimetres — is returned for the
+ * descriptor's `cylinderRadiusMm` field (the Phase 27.3 radius measurement's
+ * exact persistent path); any other surface type, or an adaptor that cannot
+ * answer, reports `undefined` and the descriptor simply omits the field.
+ * Every constructed wrapper is freed.
+ */
+function cylindricalRadiusOf(
+  oc: OpenCascadeInstance,
+  occurrence: TopoDS_Shape,
+): number | undefined {
+  const face = oc.TopoDS.Face(occurrence);
+  const adaptor = new oc.BRepAdaptor_Surface(face, true);
+  try {
+    if (adaptor.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_Cylinder) {
+      return undefined;
+    }
+    const cylinder = adaptor.Cylinder();
+    try {
+      const radius = cylinder.Radius();
+      return Number.isFinite(radius) && radius > 0 ? radius : undefined;
+    } finally {
+      cylinder.delete();
+    }
+  } finally {
+    adaptor.delete();
+    face.delete();
+  }
+}
+
 /** Measures one occurrence into an entity snapshot, exactly and freed. */
 function measureOf(
   oc: OpenCascadeInstance,
@@ -221,19 +252,33 @@ function measureOf(
         com.Y() - bodyCentroid.y,
         com.Z() - bodyCentroid.z,
       ]);
-      const geometry: TopologyGeometryDescriptor =
-        kind === "face"
-          ? Object.freeze({
-              areaMm2: props.Mass(),
-              centroidAbsoluteMm: absolute,
-              centroidRelativeMm: relative,
-            })
-          : Object.freeze({
-              lengthMm: props.Mass(),
-              centroidAbsoluteMm: absolute,
-              centroidRelativeMm: relative,
-            });
-      return Object.freeze({ kind, ordinal, identity, geometry });
+      if (kind === "face") {
+        // The surface-typing probe rides the face measure: a cylindrical
+        // face carries its exact analytic radius alongside the summary
+        // measures (see cylindricalRadiusOf).
+        const cylinderRadiusMm = cylindricalRadiusOf(oc, occurrence);
+        return Object.freeze({
+          kind,
+          ordinal,
+          identity,
+          geometry: Object.freeze({
+            areaMm2: props.Mass(),
+            centroidAbsoluteMm: absolute,
+            centroidRelativeMm: relative,
+            ...(cylinderRadiusMm === undefined ? {} : { cylinderRadiusMm }),
+          }),
+        });
+      }
+      return Object.freeze({
+        kind,
+        ordinal,
+        identity,
+        geometry: Object.freeze({
+          lengthMm: props.Mass(),
+          centroidAbsoluteMm: absolute,
+          centroidRelativeMm: relative,
+        }),
+      });
     } finally {
       com.delete();
     }

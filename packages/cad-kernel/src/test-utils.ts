@@ -222,6 +222,26 @@ export function assertVolumeClose(
 }
 
 /**
+ * Asserts a surface area (mm²) matches an expectation within a relative
+ * tolerance: the same band discipline `assertVolumeClose` applies to
+ * volumes, over the Phase 27.4 area measurement (exact for analytic
+ * primitives and BREP integration; banded where the kernel's boundary
+ * representation discretizes curvature).
+ */
+export function assertAreaClose(
+  actualMm2: number,
+  expectedMm2: number,
+  relativeTolerance: number,
+): void {
+  const allowance = Math.max(relativeTolerance * Math.abs(expectedMm2), 1e-9);
+  if (Math.abs(actualMm2 - expectedMm2) > allowance) {
+    throw new Error(
+      `Surface area ${actualMm2} mm² is not within ${relativeTolerance * 100}% of the expected ${expectedMm2} mm² (allowance ±${allowance}).`,
+    );
+  }
+}
+
+/**
  * Asserts an ordering relation between volumes (mm³): `lesser < greater`.
  * Callers must ensure the fixtures differ by a meaningful margin (boolean
  * gaps, not float noise) — the relation is strict.

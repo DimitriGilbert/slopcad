@@ -64,6 +64,7 @@ describe("operation vocabulary", () => {
       "solid.transform",
       "solid.bounds",
       "solid.volume",
+      "solid.area",
       "solid.tessellate",
       "solid.dispose",
       "solid.fillet",
@@ -562,6 +563,7 @@ describe("operation input validation", () => {
       },
       "solid.bounds": { solid: 42 },
       "solid.volume": {},
+      "solid.area": {},
       "solid.tessellate": { solid: "wsol_" },
       "solid.dispose": { solid: [] },
       "solid.fillet": { target: solidA, edges: "edges", radius: 2 },
@@ -652,6 +654,17 @@ describe("operation result round-trips", () => {
         ),
       ),
     ).toEqual({ ok: true, value: { volume: 8000 } });
+  });
+
+  it("round-trips an area result (Phase 27.4)", () => {
+    expect(
+      parseWorkerOperationResult(
+        "solid.area",
+        jsonRoundTrip(
+          serializeWorkerOperationResult("solid.area", { area: 2200 }),
+        ),
+      ),
+    ).toEqual({ ok: true, value: { area: 2200 } });
   });
 
   it("round-trips a tessellation result, with and without normals", () => {
@@ -767,6 +780,18 @@ describe("operation result validation", () => {
       failureOf(parseWorkerOperationResult("solid.volume", { volume: NaN }))
         .code,
     ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+  });
+
+  it("rejects non-finite or negative areas (Phase 27.4)", () => {
+    expect(
+      failureOf(parseWorkerOperationResult("solid.area", { area: -1 })).code,
+    ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    expect(
+      failureOf(parseWorkerOperationResult("solid.area", { area: NaN })).code,
+    ).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
+    expect(failureOf(parseWorkerOperationResult("solid.area", {})).code).toBe(
+      WORKER_PROTOCOL_ERROR_CODES.malformedPayload,
+    );
   });
 
   it("rejects tessellations that violate the contract's structural guarantees", () => {

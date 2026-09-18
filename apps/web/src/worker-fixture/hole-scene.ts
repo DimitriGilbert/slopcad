@@ -7,7 +7,7 @@
  * orientation rides the extrude placement every kernel implements), then
  * one `solid.subtract` of every tool from the base, then the same
  * measurements the plate and extrude scenes return (`solid.volume`,
- * `solid.bounds`, `solid.tessellate`).
+ * `solid.area`, `solid.bounds`, `solid.tessellate`).
  *
  * The worker stays a pure carrier of the operation matrix, exactly like
  * every other scene; the through/blind semantic, the in-plane position
@@ -121,6 +121,9 @@ export async function computeHoleScene(
       `The hole removed no material: Ø${String(request.holes[0]?.diameterMm ?? 0)} × ${String(request.holes[0]?.depthMm ?? 0)} mm at in-plane (${String(request.holes[0]?.positionXMm ?? 0)}, ${String(request.holes[0]?.positionYMm ?? 0)}) misses the solid (bounds [${measured.bounds.min.join(", ")}] → [${measured.bounds.max.join(", ")}]). Move holeX/holeY onto the solid or grow the diameter — the subtract would otherwise silently return it unchanged.`,
     );
   }
+  const area = await context.request("solid.area", {
+    solid: cut.solid,
+  });
   const bounds = await context.request("solid.bounds", {
     solid: cut.solid,
   });
@@ -129,6 +132,7 @@ export async function computeHoleScene(
   });
   return {
     volume: volume.volume,
+    area: area.area,
     bounds: bounds.bounds,
     triangles: tessellation.tessellation.indices.length / 3,
     tessellation: tessellation.tessellation,

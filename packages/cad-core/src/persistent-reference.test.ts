@@ -4,7 +4,9 @@
  * (valid / missing / ambiguous / invalid with each structural reason, the
  * transient-kernel honest report), the validity-transition table, the two
  * bounded repair strategies and their refusals, explicit disambiguation,
- * the Phase 12 transient bridge, and serialization round-trips.
+ * the Phase 12 transient bridge, serialization round-trips, and the
+ * surface-typed `cylinderRadiusMm` field's round-trip, parse guard, and
+ * repair narrowing.
  *
  * Snapshots here are kernel-neutral DATA (hand-built in the shapes the
  * cad-kernel-occt experiments measured real kernels producing); the OCCT
@@ -107,6 +109,7 @@ interface EntityInput {
   hash: number;
   areaMm2?: number;
   lengthMm?: number;
+  cylinderRadiusMm?: number;
   centroidAbsoluteMm?: readonly [number, number, number];
   centroidRelativeMm?: readonly [number, number, number];
   pointAbsoluteMm?: readonly [number, number, number];
@@ -117,6 +120,7 @@ function entityOf(input: EntityInput): TopologySnapshot["entities"][number] {
   const geometry: {
     areaMm2?: number;
     lengthMm?: number;
+    cylinderRadiusMm?: number;
     centroidAbsoluteMm?: readonly [number, number, number];
     centroidRelativeMm?: readonly [number, number, number];
     pointAbsoluteMm?: readonly [number, number, number];
@@ -124,6 +128,8 @@ function entityOf(input: EntityInput): TopologySnapshot["entities"][number] {
   } = {};
   if (input.areaMm2 !== undefined) geometry.areaMm2 = input.areaMm2;
   if (input.lengthMm !== undefined) geometry.lengthMm = input.lengthMm;
+  if (input.cylinderRadiusMm !== undefined)
+    geometry.cylinderRadiusMm = input.cylinderRadiusMm;
   if (input.centroidAbsoluteMm !== undefined)
     geometry.centroidAbsoluteMm = input.centroidAbsoluteMm;
   if (input.centroidRelativeMm !== undefined)
@@ -221,6 +227,32 @@ function plateEntities(): TopologySnapshot["entities"] {
       areaMm2: 251.32,
       centroidAbsoluteMm: [15, 10, 5],
       centroidRelativeMm: [0, 0, 0],
+    }),
+  ];
+}
+
+/**
+ * A surface-typed cylindrical wall face (the Phase 27 producer's shape): the
+ * bore wall of radius 7.3 mm and height 10 mm at face ordinal 6, with the
+ * wall's exact area `2πrh`. `cylinderRadiusMm` is the field under test, so
+ * the area and both centroids always stay the 7.3 wall's — a candidate of
+ * radius 9.9 carrying the SAME area and centroids isolates the radius as
+ * the only distinguishing field. `undefined` types the face with summary
+ * measures only (a producer without surface typing).
+ */
+function cylindricalWallEntities(
+  cylinderRadiusMm: number | undefined,
+  hash: number,
+): TopologySnapshot["entities"] {
+  return [
+    entityOf({
+      kind: "face",
+      ordinal: 6,
+      hash,
+      areaMm2: 2 * Math.PI * 7.3 * 10,
+      centroidAbsoluteMm: [7.3, 0, 5],
+      centroidRelativeMm: [0, 0, 0],
+      cylinderRadiusMm,
     }),
   ];
 }
@@ -1229,6 +1261,84 @@ describe("serialization", () => {
     expect(badData.ok).toBe(false);
     if (!badData.ok)
       expect(badData.error.code).toBe(REFERENCE_ERROR_CODES.fieldInvalid);
+  });
+});
+
+describe("cylinderRadiusMm — the surface-typed face field", () => {
+  it("round-trips the recorded radius through serialize → parse unchanged", () => {
+    const minted = mintedReference(6, cylindricalWallEntities(7.3, 107));
+    if (!minted.ok) throw new Error(minted.error.message);
+    expect(minted.value.geometry.cylinderRadiusMm).toBe(7.3);
+    const serialized = serializeTopologyReference(minted.value);
+    expect(serialized.geometry.cylinderRadiusMm).toBe(7.3);
+    const parsed = parseTopologyReference(serialized);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.geometry.cylinderRadiusMm).toBe(7.3);
+    expect(parsed.value).toEqual(minted.value);
+    expect(serializeTopologyReference(parsed.value)).toEqual(serialized);
+  });
+
+  it("refuses a non-finite cylinderRadiusMm at parse", () => {
+    const minted = mintedReference(6, cylindricalWallEntities(7.3, 107));
+    if (!minted.ok) throw new Error(minted.error.message);
+    const serialized = serializeTopologyReference(minted.value);
+    for (const invalid of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+    ]) {
+      const declined = parseTopologyReference({
+        ...serialized,
+        geometry: { ...serialized.geometry, cylinderRadiusMm: invalid },
+      });
+      expect(declined.ok).toBe(false);
+      if (!declined.ok) {
+        expect(declined.error.code).toBe(REFERENCE_ERROR_CODES.fieldInvalid);
+      }
+    }
+  });
+
+  it("repair narrowing: a recorded radius refuses a same-area candidate of another radius and re-attaches only on a match", () => {
+    const minted = mintedReference(6, cylindricalWallEntities(7.3, 107));
+    if (!minted.ok) throw new Error(minted.error.message);
+    const missing: TopologyEntityReference = {
+      ...minted.value,
+      validity: { state: "missing", regeneration: 1 },
+    };
+    // Fresh identity, same area, same centroids, radius 9.9: the recorded
+    // 7.3 narrows the candidate away — repair refuses, never re-anchors.
+    const reradiused = snapshotOf(cylindricalWallEntities(9.9, 2107), {
+      regeneration: 2,
+    });
+    const refused = repairTopologyReference(missing, reradiused);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.error.code).toBe(REFERENCE_ERROR_CODES.repairNoCandidate);
+    }
+    // A candidate without surface typing at all is narrowed away the same
+    // way: summary measures cannot stand in for the recorded radius.
+    const untyped = snapshotOf(cylindricalWallEntities(undefined, 2108), {
+      regeneration: 2,
+    });
+    const untypedRefusal = repairTopologyReference(missing, untyped);
+    expect(untypedRefusal.ok).toBe(false);
+    if (!untypedRefusal.ok) {
+      expect(untypedRefusal.error.code).toBe(
+        REFERENCE_ERROR_CODES.repairNoCandidate,
+      );
+    }
+    // Matching radius (fresh identity): the geometric heuristic re-anchors,
+    // and the repaired reference carries the candidate's radius forward.
+    const rebuilt = snapshotOf(cylindricalWallEntities(7.3, 2109), {
+      regeneration: 2,
+    });
+    const repaired = repairTopologyReference(missing, rebuilt);
+    expect(repaired.ok).toBe(true);
+    if (!repaired.ok) return;
+    expect(repaired.value.validity.state).toBe("repaired");
+    expect(repaired.value.validity.repair?.strategy).toBe("geometric-reattach");
+    expect(repaired.value.geometry.cylinderRadiusMm).toBe(7.3);
   });
 });
 

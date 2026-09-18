@@ -83,6 +83,21 @@
  *   `transform`, JSCAD's `mat4.isMirroring` vertex reversal, and the fake
  *   kernel's pointwise model), so all four adapters declare `true` and the
  *   flag gates the suite's mirror fixtures uniformly anyway.
+ * - `surfaceArea`: the contract's whole-solid surface-area measurement
+ *   (Phase 27.4) is implemented honestly — the first MEASUREMENT flag (its
+ *   siblings gate producers; `area` measures). Every engine provides its
+ *   own area measure (probed — OCCT's `BRepGProp.SurfaceProperties` exact
+ *   BREP surface integration, delta 0 from the analytic plate-with-bore
+ *   value; Manifold's `Manifold.surfaceArea()` and JSCAD's
+ *   `measureArea`, both exact over each kernel's own boundary
+ *   representation; the fake kernel's analytic primitive subset), so all
+ *   four declare `true`. A kernel whose engine exposed no area measure
+ *   would declare `false` and answer every call with the structured
+ *   `kernel/unsupported-operation` — never a silently wrong number. The
+ *   flag's DECLARATION does not promise universal coverage: a kernel may
+ *   still decline shapes outside its own measured model per shape (the
+ *   fake kernel's boolean nodes do exactly that), the same per-shape
+ *   honesty its `fillet`/`chamfer`/`shell` domains already practise.
  */
 export interface KernelCapabilities {
   readonly booleans: boolean;
@@ -99,4 +114,5 @@ export interface KernelCapabilities {
   readonly chamfer: boolean;
   readonly shell: boolean;
   readonly mirror: boolean;
+  readonly surfaceArea: boolean;
 }

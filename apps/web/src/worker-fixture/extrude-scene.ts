@@ -3,7 +3,8 @@
  * the document's extrude feature inside the browser worker — one
  * `solid.extrude` request with the sketch-resolved profile loop, the signed
  * distance, and the workplane placement, then the same measurements the
- * plate scene returns (`solid.volume`, `solid.bounds`, `solid.tessellate`).
+ * plate scene returns (`solid.volume`, `solid.area`, `solid.bounds`,
+ * `solid.tessellate`).
  *
  * The placement rotation is pre-converted to an axis-angle pair the kernel
  * contract expects (cad-sketch's `workplaneToPlacement` supplies the values
@@ -46,6 +47,9 @@ export async function computeExtrudeScene(
   const volume = await context.request("solid.volume", {
     solid: extruded.solid,
   });
+  const area = await context.request("solid.area", {
+    solid: extruded.solid,
+  });
   const bounds = await context.request("solid.bounds", {
     solid: extruded.solid,
   });
@@ -54,6 +58,7 @@ export async function computeExtrudeScene(
   });
   return {
     volume: volume.volume,
+    area: area.area,
     bounds: bounds.bounds,
     triangles: tessellation.tessellation.indices.length / 3,
     tessellation: tessellation.tessellation,

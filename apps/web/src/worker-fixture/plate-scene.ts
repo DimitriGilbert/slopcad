@@ -8,7 +8,7 @@
  * demands of a browser round trip: a primitive (`solid.createBox`,
  * `solid.createCylinder`), the placement transform, a boolean
  * (`solid.subtract`), and the measurements (`solid.volume`,
- * `solid.bounds`, `solid.tessellate`). Under the kernel contract's
+ * `solid.area`, `solid.bounds`, `solid.tessellate`). Under the kernel contract's
  * placement conventions the box occupies `[0,30] × [0,20] × [0,10]` and the
  * cylinder rests on `z = 0` centred on the z axis, so the bore is
  * translated to the plate's centre and spans the plate's full height — a
@@ -40,6 +40,11 @@ export const PLATE_HOLE_DIAMETER_DEFAULT_MM = 8;
 export interface PlateMeasurement {
   /** The plate's volume in mm³, measured by `solid.volume`. */
   readonly volume: number;
+  /**
+   * The plate's total surface area in mm², measured by `solid.area`
+   * (Phase 27.4) with the booted kernel's own semantics.
+   */
+  readonly area: number;
   /** The plate's axis-aligned bounds in mm, measured by `solid.bounds`. */
   readonly bounds: KernelBounds;
   /** The tessellation's triangle count (`indices.length / 3`). */
@@ -89,6 +94,9 @@ export async function computePlateWithHole(
   const volume = await context.request("solid.volume", {
     solid: drilled.solid,
   });
+  const area = await context.request("solid.area", {
+    solid: drilled.solid,
+  });
   const bounds = await context.request("solid.bounds", {
     solid: drilled.solid,
   });
@@ -97,6 +105,7 @@ export async function computePlateWithHole(
   });
   return {
     volume: volume.volume,
+    area: area.area,
     bounds: bounds.bounds,
     triangles: tessellation.tessellation.indices.length / 3,
     tessellation: tessellation.tessellation,
