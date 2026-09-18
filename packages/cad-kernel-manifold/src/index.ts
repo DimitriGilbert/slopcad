@@ -29,3 +29,6 @@ export type {
 
 export { createManifoldRuntime } from "./manifold-runtime";
 export type { ManifoldRuntime } from "./manifold-runtime";
+
+export { manifoldWorkerBootReport } from "./manifold-worker-boot-report";
+export type { ManifoldWorkerBootReport } from "./manifold-worker-boot-report";

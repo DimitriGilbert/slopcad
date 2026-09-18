@@ -38,6 +38,17 @@
  * promise — an unhandled rejection on the worker scope (browser console
  * and error reporting) with a channel that will never answer; requests
  * dispatched to the dead channel simply never settle on their own.
+ * ## The boot report
+ *
+ * Phase 29's performance baselines made Manifold's boot cost a documented,
+ * load-bearing number (the WASM-startup baseline and budget), so the entry
+ * measures its own initialization — from module evaluation to runtime
+ * ready — and posts it together with the bundler-pinned URL of the asset it
+ * fetched as the boot report (see `./manifold-worker-boot-report`, the twin
+ * of the OCCT entry's report) before hosting starts, so hosting surfaces
+ * (the `/perf` fixture) can read honest numbers instead of hiding the
+ * cost. The report is one plain non-protocol message; every protocol
+ * endpoint's parse boundary drops it.
  */
 
 import wasmUrl from "manifold-3d/manifold.wasm?url";
@@ -45,6 +56,10 @@ import type { WorkerTransport } from "@slopcad/cad-kernel";
 import { isWebWorkerMessagePort } from "@slopcad/cad-kernel";
 
 import { hostManifoldWorker } from "./manifold-worker";
+import {
+  MANIFOLD_WORKER_BOOT_REPORT_KEY,
+  MANIFOLD_WORKER_BOOT_WASM_URL_KEY,
+} from "./manifold-worker-boot-report";
 import { createManifoldRuntime } from "./manifold-runtime";
 
 const scope: unknown = globalThis;
@@ -93,7 +108,19 @@ scope.addEventListener("message", (event: { readonly data: unknown }) => {
 // loop stays free for the WASM boot, while early requests buffer above. A
 // hosting failure remains visible — the rejected promise reports as an
 // unhandled rejection on the worker scope, and the channel never answers.
+const bootStartedAt = performance.now();
 void hostManifoldWorker({
   transport,
-  createRuntime: () => createManifoldRuntime({ locateFile: () => wasmUrl }),
+  createRuntime: async () => {
+    const runtime = await createManifoldRuntime({ locateFile: () => wasmUrl });
+    // The boot report rides before any protocol response can: the hosted
+    // server has not subscribed yet, and the report is plain non-protocol
+    // data for every protocol endpoint downstream. The asset URL rides
+    // along because only this side of the channel knows it.
+    transport.send({
+      [MANIFOLD_WORKER_BOOT_REPORT_KEY]: performance.now() - bootStartedAt,
+      [MANIFOLD_WORKER_BOOT_WASM_URL_KEY]: wasmUrl,
+    });
+    return runtime;
+  },
 });

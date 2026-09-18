@@ -15,6 +15,7 @@
     "test:e2e": "pnpm --filter web test:e2e",
     "test:render": "pnpm --filter web test:render",
     "test:spike": "pnpm --filter web test:spike",
+    "test:perf": "pnpm --filter web test:perf",
     "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
