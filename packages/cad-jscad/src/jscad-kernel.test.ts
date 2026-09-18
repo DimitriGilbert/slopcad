@@ -21,13 +21,14 @@ import {
   expectKernelFailure,
   unwrapKernelResult,
 } from "@slopcad/cad-kernel";
-import { CURVED_VOLUME_TOLERANCE } from "@slopcad/cad-kernel/contract-suite";
+import {
+  CURVED_VOLUME_TOLERANCE,
+  EXACT_VOLUME_TOLERANCE as EXACT_TOLERANCE,
+  signedSoupVolume,
+} from "@slopcad/cad-kernel/contract-suite";
 
 import { buildBooleanChain, buildPlateWithHole } from "./jscad-fixtures";
-import {
-  createJscadKernel,
-  JSCAD_KERNEL_CAPABILITIES,
-} from "./jscad-kernel";
+import { createJscadKernel, JSCAD_KERNEL_CAPABILITIES } from "./jscad-kernel";
 
 const mm = (value: number) => length(value, "mm");
 
@@ -39,7 +40,8 @@ describe("createJscadKernel", () => {
     expect(kernel.capabilities).toEqual(JSCAD_KERNEL_CAPABILITIES);
     // The honesty matrix, pinned: full modeling surface, exact primitives
     // and tight bounds w.r.t. its own polygon sets, BSP-estimated boolean
-    // volumes (the fake kernel's declaration discipline), no BREP topology.
+    // volumes (the fake kernel's declaration discipline), no BREP topology,
+    // and the Phase 26.3 station-loft sweep.
     expect(kernel.capabilities).toEqual({
       booleans: true,
       transformTranslation: true,
@@ -49,6 +51,12 @@ describe("createJscadKernel", () => {
       exactBooleanVolumes: false,
       tightBooleanBounds: true,
       persistentTopology: false,
+      sweep: true,
+      loft: true,
+      fillet: false,
+      chamfer: false,
+      shell: false,
+      mirror: true,
     });
   });
 
@@ -279,5 +287,121 @@ describe("createJscadKernel", () => {
     assertTessellationValid(soup, {
       bounds: { min: [-2, -2, 0], max: [2, 2, 5] },
     });
+  });
+});
+
+describe("jscad kernel mirror (Phase 26.9)", () => {
+  it("keeps the reflected polygon set outward through poly3's mirroring reversal", () => {
+    const kernel = createJscadKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: mm(30),
+        depth: mm(20),
+        height: mm(10),
+      }),
+      "createBox",
+    );
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(solid, { axis: "x", offset: mm(5) }),
+      "mirror",
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored volume"),
+      6000,
+      EXACT_TOLERANCE,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored bounds"),
+      { min: [-20, 0, 0], max: [10, 20, 10] },
+    );
+    // measureVolume sums SIGNED polygon volumes: it can only stay positive
+    // if poly3.transform reversed the vertex order under mat4.isMirroring
+    // — the library's own winding correction, applied lazily here.
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored signed volume"),
+      6000,
+      EXACT_TOLERANCE,
+    );
+    const soup = unwrapKernelResult(kernel.tessellate(mirrored), "soup");
+    assertTessellationValid(soup, {
+      bounds: { min: [-20, 0, 0], max: [10, 20, 10] },
+    });
+    expect(signedSoupVolume(soup)).toBeGreaterThan(3000);
+  });
+
+  it("mirrors a boolean result within the BSP band and reflects the bounds exactly", () => {
+    const kernel = createJscadKernel();
+    const plate = buildPlateWithHole(kernel).result;
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(plate, { axis: "z", offset: mm(-4) }),
+      "mirror",
+    );
+    const plateVolume = unwrapKernelResult(
+      kernel.volume(plate),
+      "plate volume",
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored plate volume"),
+      plateVolume,
+      CURVED_VOLUME_TOLERANCE,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored plate bounds"),
+      { min: [0, 0, -18], max: [30, 20, -8] },
+    );
+  });
+
+  it("composes mirror after rotation through the shared transform vocabulary", () => {
+    const kernel = createJscadKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: mm(20),
+        depth: mm(10),
+        height: mm(5),
+      }),
+      "createBox",
+    );
+    const rotated = unwrapKernelResult(
+      kernel.transform(solid, {
+        x: mm(0),
+        y: mm(0),
+        z: mm(0),
+        rotation: { axis: [0, 0, 1], angle: angle(90, "deg") },
+      }),
+      "rotate",
+    );
+    // x ∈ [-10, 0] through the x = 0 plane flips to [0, 10]; y and z keep
+    // their rotated intervals — the reflection of the rotated result.
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(rotated, { axis: "x", offset: mm(0) }),
+      "mirror",
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "rotated-mirrored bounds"),
+      { min: [0, 0, 0], max: [10, 20, 5] },
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "rotated-mirrored volume"),
+      1000,
+      EXACT_TOLERANCE,
+    );
+  });
+
+  it("rejects a non-finite offset with kernel/invalid-length inside the no-throw boundary", () => {
+    const kernel = createJscadKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({ width: mm(10), depth: mm(10), height: mm(10) }),
+      "createBox",
+    );
+    const nanOffset: LengthValue = {
+      dimension: "length",
+      unit: "mm",
+      value: Number.NaN,
+    };
+    expectKernelFailure(
+      kernel.mirror(solid, { axis: "y", offset: nanOffset }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "NaN offset",
+    );
   });
 });

@@ -64,13 +64,19 @@ export const FIXTURE_TRANSLATE_PARAMETERS: readonly [
 ];
 
 /** The rotate-about-+Z angle parameter id. */
-export const FIXTURE_ROTATE_PARAMETER: ParameterId = createParameterId(
-  "param_rotate_z",
-);
+export const FIXTURE_ROTATE_PARAMETER: ParameterId =
+  createParameterId("param_rotate_z");
 
-function requireOk<T>(result: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { message: string } }, what: string): T {
+function requireOk<T>(
+  result:
+    | { readonly ok: true; readonly value: T }
+    | { readonly ok: false; readonly error: { message: string } },
+  what: string,
+): T {
   if (!result.ok) {
-    throw new Error(`Fixture document rejected ${what}: ${result.error.message}`);
+    throw new Error(
+      `Fixture document rejected ${what}: ${result.error.message}`,
+    );
   }
   return result.value;
 }

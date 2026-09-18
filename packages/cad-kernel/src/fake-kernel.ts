@@ -55,7 +55,10 @@
  * candidate soup that is contract-valid (indexed, finite, inside bounds)
  * but not the exact boolean surface — semantic truth for booleans lives in
  * `volume`/`bounds`, never in the soup. Translations shift triangles (and
- * their unchanged normals) exactly.
+ * their unchanged normals) exactly; mirrors (Phase 26.9) reflect triangle
+ * corners and SWAP each triangle's winding — the reflection inverts
+ * orientation, so the swap restores the outward-facing facet order and the
+ * per-facet normals come out reflected-and-negated, outward.
  *
  * Volume is memoized per handle (WeakMap), so repeated `volume` calls are
  * cheap; `tessellate` recomputes from the tree on every call, which
@@ -68,8 +71,10 @@ import type { KernelCapabilities } from "./capabilities";
 import { type KernelBackendId } from "./backend-ids";
 import {
   type BoxInput,
+  type ChamferInput,
   type ConeInput,
   type CylinderInput,
+  type FilletInput,
   type GeometryKernel,
   type KernelBounds,
   type KernelError,
@@ -77,11 +82,47 @@ import {
   type KernelResult,
   KERNEL_ERROR_CODES,
   type KernelSolid,
+  type MirrorInput,
+  type ProfileExtrudeInput,
+  type ProfileLoftInput,
+  type ProfileRevolveInput,
+  type ProfileSweepInput,
+  type ShellInput,
   type SphereInput,
   type Tessellation,
   type TransformInput,
 } from "./contract";
 import { createSolidTag } from "./opaque";
+import {
+  applyMatrix3,
+  axisAngleMatrix,
+  decomposeSweepPath,
+  loftAnalyticVolume,
+  loftSectionPolygons,
+  loftSectionsProblem,
+  loftStations,
+  morphPolygons,
+  normalizeRevolveAxis,
+  type ProfilePoint2,
+  pointInPolygon,
+  polygonSignedArea,
+  PROFILE_MAX_SEGMENT_ANGLE_RAD,
+  profileLoopProblem,
+  revolveCrossesAxis,
+  revolvePappusVolume,
+  revolveSignedExtremes,
+  sweepAnalyticVolume,
+  type SweepPiece,
+  sweepPathClosed,
+  sweepPathProblem,
+  sweepPathSelfIntersects,
+  sweepPieceStations,
+  sweepProfileArcAxisCrossing,
+  type SweepStation,
+  tessellateProfileLoop,
+  tessellateRevolveProfile,
+  transpose3,
+} from "./profile-geometry";
 
 /** Voxel-quadrature resolution (samples per axis) for boolean volumes. */
 export const FAKE_KERNEL_VOLUME_RESOLUTION = 64;
@@ -98,7 +139,27 @@ export const FAKE_KERNEL_TESSELLATION_RINGS = 8;
  * silently dropped — the axis-aligned shape model cannot honour it);
  * primitive volumes analytic; boolean volumes voxel-quantized; boolean
  * bounds conservative outside unions; no persistent topology (that arrives
- * with the OpenCascade backend).
+ * with the OpenCascade backend); the Phase 26.3 sweep — the analytic
+ * Pappus decomposition is exact over the chord polygon, the reference
+ * implementation the real kernels are judged against; the Phase 26.4
+ * loft — the Simpson/prismoidal decomposition over the CCW chord polygons,
+ * exact for the linear morph model, the reference the loftring kernels are
+ * judged against; and the Phase 26.5 fillet — the analytic corner-fillet
+ * model over its documented box-edge subset (a pristine box leaf, one
+ * parallel edge group, disjoint removed quadrants), exact volume,
+ * membership, and bounds, with everything outside the subset declined
+ * structurally — plus the Phase 26.6 chamfer, the same subset discipline
+ * over the corner-PRISM model (the right-isoceles `d²/2` cross-section the
+ * symmetric distance cuts), exact everywhere it accepts — and the Phase
+ * 26.7 shell, the analytic open-box model over its documented single-face
+ * subset (a pristine box leaf with exactly ONE face removed: the inset
+ * cavity `cross × (openExtent − t)` is exact for uniform thickness),
+ * exact volume, membership, bounds, and a fully planar canonical mesh,
+ * everything outside the subset declined structurally; and the Phase
+ * 26.9 mirror — the pointwise reflection model (classify at the
+ * reflected query, reflect the interval bounds, delegate the volume,
+ * reflect the triangles and swap each winding), exact over EVERY shape
+ * the tree can hold, no subset needed.
  */
 export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -109,6 +170,12 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   exactBooleanVolumes: false,
   tightBooleanBounds: false,
   persistentTopology: false,
+  sweep: true,
+  loft: true,
+  fillet: true,
+  chamfer: true,
+  shell: true,
+  mirror: true,
 });
 
 /** The fake kernel's backend id. */
@@ -176,7 +243,226 @@ type FakeShape =
       readonly kind: "translate";
       readonly source: FakeShape;
       readonly offset: Vec3;
+    }
+  | {
+      /**
+       * The Phase 26.9 mirror node: the reflection of `source` through
+       * the world axis plane `coordinate = planeOffset` on `axis`. Unlike
+       * every other node, this one CANNOT be folded into a placement or
+       * an offset — a reflection composes with rotations into orthogonal
+       * transforms of negative determinant, which no rotation+translation
+       * pair expresses — so it stands alone and every consumer (bounds,
+       * volume, membership, tessellation) answers pointwise through it.
+       */
+      readonly kind: "mirror";
+      readonly source: FakeShape;
+      /** The reflected axis (0 = x, 1 = y, 2 = z). */
+      readonly axis: Axis;
+      /** The plane's signed position along the axis (mm). */
+      readonly planeOffset: number;
+    }
+  | {
+      readonly kind: "extrusion";
+      /** The loop's chord polygon in the LOCAL workplane frame (mm). */
+      readonly polygon: readonly ProfilePoint2[];
+      /** Strictly positive extrusion length (mm). */
+      readonly height: number;
+      /** Local z of the base face: 0 for +1, −height for −1. */
+      readonly baseZ: number;
+      /** World placement: rotation (row-major) applied first, then translation. */
+      readonly rotation: readonly (readonly [number, number, number])[];
+      readonly translation: Vec3;
+    }
+  | {
+      readonly kind: "revolution";
+      /**
+       * The loop's chord polygon in AXIS coordinates — x = axial, y =
+       * signed radial — normalized CCW (mm). The profile never crosses
+       * s = 0 (the crossing rejection precedes construction).
+       */
+      readonly polygon: readonly ProfilePoint2[];
+      /** Sweep angle in radians, in (0, 2π]. */
+      readonly sweep: number;
+      /** Whether the profile sits on the +v side (its sweep starts at angle 0, not π). */
+      readonly positiveSide: boolean;
+      /** The axis frame in LOCAL coordinates: origin point, unit axial u, unit radial v (w = local +z). */
+      readonly origin: Vec3;
+      readonly u: Vec3;
+      readonly v: Vec3;
+      /** World placement: rotation (row-major) applied first, then translation. */
+      readonly rotation: readonly (readonly [number, number, number])[];
+      readonly translation: Vec3;
+    }
+  | {
+      readonly kind: "sweep";
+      /**
+       * The loop's chord polygon in the profile's OWN (u, v) frame,
+       * normalized CCW (mm) — its coordinates are invariant under the
+       * fixed-binormal transport, so every piece addresses the profile
+       * through this one polygon.
+       */
+      readonly polygon: readonly ProfilePoint2[];
+      /** The validated path, decomposed into its transport pieces. */
+      readonly pieces: readonly SweepPiece[];
+      /** Whether the path closes on itself (a ring: the mesh has no caps). */
+      readonly closed: boolean;
+      /** World placement: rotation (row-major) applied first, then translation. */
+      readonly rotation: readonly (readonly [number, number, number])[];
+      readonly translation: Vec3;
+    }
+  | {
+      readonly kind: "loft";
+      /**
+       * The sections' CCW chord polygons (mm), in list order — the
+       * validated collection carries equal vertex counts, so the morph's
+       * index correspondence pairs polygon j's vertex i with polygon
+       * j+1's vertex i.
+       */
+      readonly polygons: readonly (readonly ProfilePoint2[])[];
+      /** The strictly increasing station z values (mm), in list order. */
+      readonly stations: readonly number[];
+      /** World placement: rotation (row-major) applied first, then translation. */
+      readonly rotation: readonly (readonly [number, number, number])[];
+      readonly translation: Vec3;
+    }
+  | {
+      readonly kind: "fillet";
+      /**
+       * The filleted box's extents (mm) — the fillet node's domain is a
+       * pristine box leaf (the analytic corner-fillet model's honest
+       * subset; anything else the operation declines structurally).
+       */
+      readonly size: Vec3;
+      /** The resolved selected edges, in the call's ordinal order. */
+      readonly edges: readonly FakeBoxEdge[];
+      /** The shared strictly positive radius (mm), validated to fit. */
+      readonly radius: number;
+    }
+  | {
+      readonly kind: "chamfer";
+      /**
+       * The chamfered box's extents (mm) — the chamfer node's domain is the
+       * fillet subset verbatim: a pristine box leaf (the analytic
+       * corner-prism model's honest subset; anything else the operation
+       * declines structurally).
+       */
+      readonly size: Vec3;
+      /** The resolved selected edges, in the call's ordinal order. */
+      readonly edges: readonly FakeBoxEdge[];
+      /** The shared strictly positive distance (mm), validated to fit. */
+      readonly distance: number;
+    }
+  | {
+      readonly kind: "shell";
+      /**
+       * The shelled box's extents (mm) — the shell node's domain is a
+       * pristine box leaf with exactly ONE face removed (the analytic
+       * open-box model's honest subset; anything else the operation
+       * declines structurally).
+       */
+      readonly size: Vec3;
+      /** The one removed face, resolved from the call's single ordinal. */
+      readonly face: FakeBoxFace;
+      /** The uniform strictly positive wall thickness (mm), validated to fit. */
+      readonly thickness: number;
     };
+
+/**
+ * One box edge of the fake kernel's fillet/chamfer subset: its direction
+ * axis and the box corner it passes through (the other two components
+ * locate the edge; the `axis` component's coordinate is irrelevant to
+ * identity and recorded as 0).
+ */
+interface FakeBoxEdge {
+  /** The edge's direction axis (0 = x, 1 = y, 2 = z). */
+  readonly axis: Axis;
+  /** The box corner the edge passes through (mm; axis component 0). */
+  readonly corner: Vec3;
+}
+
+/**
+ * The fake kernel's box-edge ordinal table — its own documented,
+ * deterministic edge numbering, the equivalent of a topology snapshot's
+ * `(kind: "edge", ordinal)` addresses for the only solid the fillet and
+ * chamfer subsets accept (a box). Ordinals 0-3 run along x, 4-7 along y,
+ * 8-11 along z; within each axis group the two non-axis coordinates
+ * enumerate in (low, high) order per axis: x-edges by (y, z), y-edges by
+ * (x, z), z-edges by (x, y). This table is the fake kernel's OWN
+ * convention — the OCCT snapshot's box ordinals differ (its exploration
+ * order is the engine's); cross-kernel ordinal transport is meaningless by
+ * design, exactly like every other within-regeneration address.
+ */
+export const FAKE_BOX_EDGE_TABLE: readonly {
+  readonly axis: Axis;
+  readonly corner: readonly [number, number, number];
+}[] = Object.freeze([
+  { axis: 0, corner: [0, 0, 0] },
+  { axis: 0, corner: [0, 1, 0] },
+  { axis: 0, corner: [0, 0, 1] },
+  { axis: 0, corner: [0, 1, 1] },
+  { axis: 1, corner: [0, 0, 0] },
+  { axis: 1, corner: [1, 0, 0] },
+  { axis: 1, corner: [0, 0, 1] },
+  { axis: 1, corner: [1, 0, 1] },
+  { axis: 2, corner: [0, 0, 0] },
+  { axis: 2, corner: [1, 0, 0] },
+  { axis: 2, corner: [0, 1, 0] },
+  { axis: 2, corner: [1, 1, 0] },
+]);
+
+/**
+ * One axis-aligned face of the fake kernel's box shell subset: its normal
+ * `axis` and which side of the box it caps (`high` false = the low face at
+ * coordinate 0, true = the high face at coordinate `size`).
+ */
+interface FakeBoxFace {
+  /** The face's normal axis (0 = x, 1 = y, 2 = z). */
+  readonly axis: Axis;
+  /** Whether the face caps the box's high side along its axis. */
+  readonly high: boolean;
+}
+
+/**
+ * The fake kernel's box-face ordinal table — its own documented,
+ * deterministic face numbering for the only solid the shell subset accepts
+ * (a box): ordinals 0-5 enumerate the faces grouped by normal axis (x, y,
+ * z), low side before high within each group, so ordinal 5 is the box's
+ * top (the z-high face). This table is the fake kernel's OWN convention —
+ * the OCCT snapshot's box face ordinals differ (its exploration order is
+ * the engine's, probed: the top face lands at ordinal 5 there too, by
+ * coincidence of exploration, not by contract); cross-kernel ordinal
+ * transport is meaningless by design, exactly like the edge addresses.
+ */
+export const FAKE_BOX_FACE_TABLE: readonly {
+  readonly axis: 0 | 1 | 2;
+  readonly high: boolean;
+}[] = Object.freeze([
+  { axis: 0, high: false },
+  { axis: 0, high: true },
+  { axis: 1, high: false },
+  { axis: 1, high: true },
+  { axis: 2, high: false },
+  { axis: 2, high: true },
+]);
+
+/**
+ * Resolves one entry of {@link FAKE_BOX_EDGE_TABLE} against a box's actual
+ * extents: the 0/1 flags in the table's corners select the low or high
+ * face per axis (a corner at the high face carries `size`, at the low face
+ * `0`), and the edge's own axis coordinate is pinned to 0.
+ */
+function boxEdgeAt(size: Vec3, ordinal: number): FakeBoxEdge {
+  const entry = FAKE_BOX_EDGE_TABLE[ordinal];
+  if (entry === undefined) {
+    throw new Error(
+      "Invariant violation: fillet ordinals are validated against the table's length before resolution.",
+    );
+  }
+  const { axis } = entry;
+  const coordinate = (i: 0 | 1 | 2): number =>
+    i === axis ? 0 : entry.corner[i] === 0 ? 0 : at(size, i);
+  return { axis, corner: [coordinate(0), coordinate(1), coordinate(2)] };
+}
 
 /** A triangle of three canonical-space corners. */
 type Triangle = readonly [Vec3, Vec3, Vec3];
@@ -227,6 +513,19 @@ function shapeBounds(shape: FakeShape): KernelBounds {
   switch (shape.kind) {
     case "box":
       return boundsOf([0, 0, 0], shape.size);
+    case "fillet":
+      // The fillet removes corner material only: the rounded box's tight
+      // AABB is exactly the box's.
+      return boundsOf([0, 0, 0], shape.size);
+    case "chamfer":
+      // The chamfer removes corner material only, like the fillet: the
+      // beveled box's tight AABB is exactly the box's.
+      return boundsOf([0, 0, 0], shape.size);
+    case "shell":
+      // The shell keeps the box's full footprint (the walls own the outer
+      // boundary; only interior material became the cavity): the shelled
+      // box's tight AABB is exactly the box's.
+      return boundsOf([0, 0, 0], shape.size);
     case "sphere":
       return boundsOf(
         [-shape.radius, -shape.radius, -shape.radius],
@@ -262,7 +561,313 @@ function shapeBounds(shape: FakeShape): KernelBounds {
         ],
       );
     }
+    case "mirror": {
+      // The reflected interval: [min, max] maps to [2o − max, 2o − min] on
+      // the plane's axis, the other two components unchanged — the exact
+      // reflection of the source bounds, hand-derivable from them alone.
+      const source = shapeBounds(shape.source);
+      const o = shape.planeOffset;
+      const flipMin = (axis: Axis): number =>
+        axis === shape.axis
+          ? 2 * o - boundsAt(source, "max", axis)
+          : boundsAt(source, "min", axis);
+      const flipMax = (axis: Axis): number =>
+        axis === shape.axis
+          ? 2 * o - boundsAt(source, "min", axis)
+          : boundsAt(source, "max", axis);
+      return boundsOf(
+        [flipMin(0), flipMin(1), flipMin(2)],
+        [flipMax(0), flipMax(1), flipMax(2)],
+      );
+    }
+    case "extrusion":
+      return extrusionBounds(shape);
+    case "revolution":
+      return revolutionBounds(shape);
+    case "sweep":
+      return sweepBounds(shape);
+    case "loft":
+      return loftBounds(shape);
   }
+}
+
+/**
+ * The placed extrusion's exact AABB: the prism's extreme points are its cap
+ * vertices, so hulling the rotated+translated cap polygon vertices is tight.
+ */
+function extrusionBounds(shape: ExtrusionNode): KernelBounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const vertex of shape.polygon) {
+    for (const localZ of [shape.baseZ, shape.baseZ + shape.height]) {
+      const world = applyMatrix3(shape.rotation, [vertex.x, vertex.y, localZ]);
+      const x = world[0] + at(shape.translation, 0);
+      const y = world[1] + at(shape.translation, 1);
+      const z = world[2] + at(shape.translation, 2);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxZ = Math.max(maxZ, z);
+    }
+  }
+  return boundsOf([minX, minY, minZ], [maxX, maxY, maxZ]);
+}
+
+/** The revolution leaf node type. */
+type RevolutionNode = Extract<FakeShape, { kind: "revolution" }>;
+
+/**
+ * The exact support of the swept polygon along one axis-frame direction:
+ * every profile vertex (a, s) sweeps the angular interval starting at its
+ * own side (0 for s ≥ 0, π for s < 0) spanning the sweep; the support along
+ * direction ψ is the vertex radius weighted by the cosine of the angular
+ * distance from ψ to that vertex's swept interval.
+ */
+function revolutionSupport(shape: RevolutionNode, psi: number): number {
+  let max = -Infinity;
+  const tau = Math.PI * 2;
+  for (const vertex of shape.polygon) {
+    const radius = Math.abs(vertex.y);
+    const base = vertex.y >= 0 ? 0 : Math.PI;
+    const relative = (((psi - base) % tau) + tau) % tau;
+    const distance =
+      relative <= shape.sweep
+        ? 0
+        : Math.min(relative - shape.sweep, tau - relative);
+    max = Math.max(max, radius * Math.cos(distance));
+  }
+  return max;
+}
+
+/**
+ * The revolution's bounds: EXACT in the axis frame (the support extremes
+ * above are the true per-axis maxima of the swept polygon, and the axial
+ * extent is the polygon's), then hulling the eight axis-frame box corners
+ * mapped through the frame and the placement — tight whenever that
+ * composition is axis-aligned (the workplane-axis revolves), a conservative
+ * container for oblique placements (the fake kernel declares
+ * `tightBooleanBounds: false` on the same honesty).
+ */
+function revolutionBounds(shape: RevolutionNode): KernelBounds {
+  let aMin = Infinity;
+  let aMax = -Infinity;
+  for (const vertex of shape.polygon) {
+    aMin = Math.min(aMin, vertex.x);
+    aMax = Math.max(aMax, vertex.x);
+  }
+  const vMax = revolutionSupport(shape, 0);
+  const vMin = -revolutionSupport(shape, Math.PI);
+  const wMax = revolutionSupport(shape, Math.PI / 2);
+  const wMin = -revolutionSupport(shape, (3 * Math.PI) / 2);
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (const a of [aMin, aMax]) {
+    for (const s of [vMin, vMax]) {
+      for (const h of [wMin, wMax]) {
+        // Axis coords (a, s, h) → local: origin + a·u + s·v + h·(local z).
+        const local: Vec3 = [
+          at(shape.origin, 0) + a * at(shape.u, 0) + s * at(shape.v, 0),
+          at(shape.origin, 1) + a * at(shape.u, 1) + s * at(shape.v, 1),
+          at(shape.origin, 2) + h,
+        ];
+        const world = applyMatrix3(shape.rotation, local);
+        const x = world[0] + at(shape.translation, 0);
+        const y = world[1] + at(shape.translation, 1);
+        const z = world[2] + at(shape.translation, 2);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        minZ = Math.min(minZ, z);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+        maxZ = Math.max(maxZ, z);
+      }
+    }
+  }
+  return boundsOf([minX, minY, minZ], [maxX, maxY, maxZ]);
+}
+
+/** The sweep leaf node type. */
+type SweepNode = Extract<FakeShape, { kind: "sweep" }>;
+
+/** The loft leaf node type. */
+type LoftNode = Extract<FakeShape, { kind: "loft" }>;
+
+/** The local-frame position of a profile vertex (u, v) at a station. */
+function sweepStationVertex(station: SweepStation, u: number, v: number): Vec3 {
+  return [
+    station.position.x + u * station.e1.x,
+    v,
+    station.position.z + u * station.e1.z,
+  ];
+}
+
+/**
+ * The maximum of `cos(angle − target)` over the angular interval a signed
+ * sweep covers from `start` (both in radians): `1` when the interval
+ * contains the target angle, else the cosine of the nearer endpoint. A
+ * full-turn interval contains every angle. The interval-cosine extreme the
+ * arc pieces' support bounds need — the same structure
+ * `revolutionSupport` computes for revolutions, generalized to a signed
+ * sweep and an arbitrary start angle.
+ */
+function maxCosOverSignedInterval(
+  start: number,
+  sweep: number,
+  target: number,
+): number {
+  const tau = Math.PI * 2;
+  if (Math.abs(sweep) >= tau - 1e-12) return 1;
+  const low = sweep > 0 ? start : start + sweep;
+  const span = Math.abs(sweep);
+  const relative = (((target - low) % tau) + tau) % tau;
+  if (relative <= span) return 1;
+  return Math.max(Math.cos(target - low), Math.cos(target - (low + span)));
+}
+
+/**
+ * The EXACT support (max dot product) of one line piece's swept solid
+ * along a unit local-frame direction `d`: the prism's extreme points are
+ * its cap polygons, so the vertex×{start,end} hull is tight.
+ */
+function sweepLinePieceSupport(
+  piece: Extract<SweepPiece, { kind: "line" }>,
+  polygon: readonly ProfilePoint2[],
+  d: Vec3,
+): number {
+  const tangentX = -piece.e1.z;
+  const tangentZ = piece.e1.x;
+  let max = -Infinity;
+  for (const vertex of polygon) {
+    for (const w of [0, piece.length]) {
+      const x = piece.from.x + w * tangentX + vertex.x * piece.e1.x;
+      const z = piece.from.z + w * tangentZ + vertex.x * piece.e1.z;
+      max = Math.max(max, x * at(d, 0) + vertex.y * at(d, 1) + z * at(d, 2));
+    }
+  }
+  return max;
+}
+
+/**
+ * The EXACT support of one arc piece along a unit local-frame direction
+ * `d`: the piece is a partial revolution about its centre axis (along y),
+ * and every profile vertex i sweeps its angular interval at constant
+ * signed radius `sᵢ = R + sign(θ)·uᵢ`, contributing
+ * `⟨C,d⟩ + vᵢ·d_y + ρ_d·sᵢ·cos(β − β_d)` — the interval-cosine extreme
+ * above, with the negative-radius branch answered by the antipodal target.
+ */
+function sweepArcPieceSupport(
+  piece: Extract<SweepPiece, { kind: "arc" }>,
+  polygon: readonly ProfilePoint2[],
+  d: Vec3,
+): number {
+  const radialReach = Math.hypot(at(d, 0), at(d, 2));
+  const betaD = Math.atan2(at(d, 2), at(d, 0));
+  const sign = piece.sweep > 0 ? 1 : -1;
+  let max = -Infinity;
+  for (const vertex of polygon) {
+    const s = piece.radius + sign * vertex.x;
+    const cosTerm =
+      s >= 0
+        ? s * maxCosOverSignedInterval(piece.startAngle, piece.sweep, betaD)
+        : -s *
+          maxCosOverSignedInterval(
+            piece.startAngle,
+            piece.sweep,
+            betaD + Math.PI,
+          );
+    const dot =
+      piece.center.x * at(d, 0) +
+      piece.center.z * at(d, 2) +
+      vertex.y * at(d, 1) +
+      radialReach * cosTerm;
+    max = Math.max(max, dot);
+  }
+  return max;
+}
+
+/**
+ * The placed sweep's exact AABB: per world axis, the support along the
+ * placement rotation's matching row direction is maximized over the
+ * pieces' exact supports — tight, the same honesty as the extrusion and
+ * revolution leaves.
+ */
+function sweepBounds(shape: SweepNode): KernelBounds {
+  const mins = [Infinity, Infinity, Infinity];
+  const maxs = [-Infinity, -Infinity, -Infinity];
+  for (let axis = 0 as 0 | 1 | 2; axis < 3; axis += 1) {
+    for (const sign of [1, -1] as const) {
+      const direction: Vec3 = [
+        sign * (shape.rotation[0]?.[axis] ?? 0),
+        sign * (shape.rotation[1]?.[axis] ?? 0),
+        sign * (shape.rotation[2]?.[axis] ?? 0),
+      ];
+      let support = -Infinity;
+      for (const piece of shape.pieces) {
+        const pieceSupport =
+          piece.kind === "line"
+            ? sweepLinePieceSupport(piece, shape.polygon, direction)
+            : sweepArcPieceSupport(piece, shape.polygon, direction);
+        support = Math.max(support, pieceSupport);
+      }
+      const value = support + sign * at(shape.translation, axis);
+      if (sign > 0) {
+        maxs[axis] = value;
+      } else {
+        mins[axis] = -value;
+      }
+    }
+  }
+  return boundsOf(
+    [mins[0] ?? 0, mins[1] ?? 0, mins[2] ?? 0],
+    [maxs[0] ?? 0, maxs[1] ?? 0, maxs[2] ?? 0],
+  );
+}
+
+/**
+ * The placed loft's exact AABB: a linear morph's support along any fixed
+ * direction is the max of LINEAR per-vertex functions, whose extreme over
+ * a span sits at a span endpoint — so hulling every station polygon's
+ * vertices is tight (the same argument the extrusion's cap hull uses).
+ */
+function loftBounds(shape: LoftNode): KernelBounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (let s = 0; s < shape.polygons.length; s += 1) {
+    const polygon = shape.polygons[s];
+    const stationZ = shape.stations[s] ?? 0;
+    if (polygon === undefined) continue;
+    for (const vertex of polygon) {
+      const world = applyMatrix3(shape.rotation, [
+        vertex.x,
+        vertex.y,
+        stationZ,
+      ]);
+      const x = world[0] + at(shape.translation, 0);
+      const y = world[1] + at(shape.translation, 1);
+      const z = world[2] + at(shape.translation, 2);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxZ = Math.max(maxZ, z);
+    }
+  }
+  return boundsOf([minX, minY, minZ], [maxX, maxY, maxZ]);
 }
 
 /** Exact point-in-shape classification (inclusive primitive boundaries). */
@@ -277,6 +882,12 @@ function contains(shape: FakeShape, x: number, y: number, z: number): boolean {
         z >= 0 &&
         z <= at(shape.size, 2)
       );
+    case "fillet":
+      return filletContains(shape, x, y, z);
+    case "chamfer":
+      return chamferContains(shape, x, y, z);
+    case "shell":
+      return shellContains(shape, x, y, z);
     case "sphere":
       return x * x + y * y + z * z <= shape.radius * shape.radius;
     case "cylinder":
@@ -308,7 +919,1066 @@ function contains(shape: FakeShape, x: number, y: number, z: number): boolean {
         y - at(shape.offset, 1),
         z - at(shape.offset, 2),
       );
+    case "mirror": {
+      // The mirrored solid contains p iff the source contains the
+      // reflected p — reflection is its own inverse, so the same flip
+      // maps query points down and geometry results up.
+      const qx = shape.axis === 0 ? 2 * shape.planeOffset - x : x;
+      const qy = shape.axis === 1 ? 2 * shape.planeOffset - y : y;
+      const qz = shape.axis === 2 ? 2 * shape.planeOffset - z : z;
+      return contains(shape.source, qx, qy, qz);
+    }
+    case "extrusion": {
+      // Classify in the LOCAL frame: undo the translation, then apply the
+      // rotation's inverse (its transpose).
+      const local = applyMatrix3(transpose3(shape.rotation), [
+        x - at(shape.translation, 0),
+        y - at(shape.translation, 1),
+        z - at(shape.translation, 2),
+      ]);
+      const lz = local[2];
+      if (lz === undefined) return false;
+      if (lz < shape.baseZ || lz > shape.baseZ + shape.height) return false;
+      return pointInPolygon(
+        { x: local[0] ?? 0, y: local[1] ?? 0 },
+        shape.polygon,
+      );
+    }
+    case "revolution":
+      return revolutionContains(shape, x, y, z);
+    case "sweep":
+      return sweepContains(shape, x, y, z);
+    case "loft":
+      return loftContains(shape, x, y, z);
   }
+}
+
+/**
+ * Linear slack (mm) of the sweep classification: prism lengths and station
+ * planes accept queries up to this far outside, mirroring the inclusive
+ * boundary rule of the point-in-polygon test.
+ */
+const SWEEP_LINEAR_EPSILON_MM = 1e-9;
+
+/**
+ * Angular slack (radians) of the arc-piece span classification: query
+ * station angles within this of a piece's travel span count as inside,
+ * mirroring the partial-revolve cap rule.
+ */
+const SWEEP_ANGULAR_EPSILON_RAD = 1e-9;
+
+/**
+ * Whether a normalized angle `[0, 2π)` lies in a piece's travel span: the
+ * signed sweep `ψ` covers `[0, ψ]` (ψ > 0) or `[2π + ψ, 2π)` (ψ < 0); a
+ * full-turn sweep covers every angle.
+ */
+function angleInSweepSpan(angle: number, sweep: number): boolean {
+  if (Math.abs(sweep) >= Math.PI * 2 - 1e-12) return true;
+  if (sweep > 0) return angle <= sweep + SWEEP_ANGULAR_EPSILON_RAD;
+  return angle >= Math.PI * 2 + sweep - SWEEP_ANGULAR_EPSILON_RAD;
+}
+
+/**
+ * Exact point-in-sweep classification. The query is un-placed into the
+ * local frame, then each piece answers in its own coordinates: a line
+ * piece is a prism (project onto the piece's frame — the along-length
+ * coordinate must lie in `[0, L]` and the section in the polygon); an arc
+ * piece is a partial revolution about its centre axis — the query's radial
+ * direction picks its station plane(s) (the atan2 of the radial vector in
+ * the piece's start frame), and the angular span test plus the
+ * positive/negative-radius branch (the full revolution's mirror) mirror
+ * `revolutionContains`.
+ */
+function sweepContains(
+  shape: SweepNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const local = applyMatrix3(transpose3(shape.rotation), [
+    x - at(shape.translation, 0),
+    y - at(shape.translation, 1),
+    z - at(shape.translation, 2),
+  ]);
+  const lx = local[0] ?? 0;
+  const ly = local[1] ?? 0;
+  const lz = local[2] ?? 0;
+  for (const piece of shape.pieces) {
+    if (piece.kind === "line") {
+      const tangentX = -piece.e1.z;
+      const tangentZ = piece.e1.x;
+      const rx = lx - piece.from.x;
+      const rz = lz - piece.from.z;
+      const along = rx * tangentX + rz * tangentZ;
+      if (
+        along < -SWEEP_LINEAR_EPSILON_MM ||
+        along > piece.length + SWEEP_LINEAR_EPSILON_MM
+      ) {
+        continue;
+      }
+      const u = rx * piece.e1.x + rz * piece.e1.z;
+      if (pointInPolygon({ x: u, y: ly }, shape.polygon)) return true;
+      continue;
+    }
+    const sign = piece.sweep > 0 ? 1 : -1;
+    const e0x = sign * Math.cos(piece.startAngle);
+    const e0z = sign * Math.sin(piece.startAngle);
+    const t0x = -sign * Math.sin(piece.startAngle);
+    const t0z = sign * Math.cos(piece.startAngle);
+    const rx = lx - piece.center.x;
+    const rz = lz - piece.center.z;
+    const p0 = rx * e0x + rz * e0z;
+    const q0 = rx * t0x + rz * t0z;
+    const radius = Math.hypot(p0, q0);
+    const tau = Math.PI * 2;
+    const phi = ((Math.atan2(q0, p0) % tau) + tau) % tau;
+    const branches: readonly { readonly angle: number; readonly u: number }[] =
+      [
+        { angle: phi, u: radius },
+        { angle: (((phi + Math.PI) % tau) + tau) % tau, u: -radius },
+      ];
+    for (const branch of branches) {
+      if (!angleInSweepSpan(branch.angle, piece.sweep)) continue;
+      if (pointInPolygon({ x: branch.u, y: ly }, shape.polygon)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Exact point-in-loft classification. The query is un-placed into the
+ * local frame, located in its span by z (stations are strictly
+ * increasing, so the span is unique; the caps' z planes accept queries up
+ * to the sweep leaf's linear slack), and classified against the span's
+ * morph polygon at the exact span parameter — the same linear-morph model
+ * the volume integrates and the mesh walls.
+ */
+function loftContains(
+  shape: LoftNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const local = applyMatrix3(transpose3(shape.rotation), [
+    x - at(shape.translation, 0),
+    y - at(shape.translation, 1),
+    z - at(shape.translation, 2),
+  ]);
+  const lx = local[0] ?? 0;
+  const ly = local[1] ?? 0;
+  const lz = local[2] ?? 0;
+  const first = shape.stations[0];
+  const last = shape.stations[shape.stations.length - 1];
+  if (first === undefined || last === undefined) return false;
+  if (
+    lz < first - SWEEP_LINEAR_EPSILON_MM ||
+    lz > last + SWEEP_LINEAR_EPSILON_MM
+  ) {
+    return false;
+  }
+  for (let j = 0; j + 1 < shape.stations.length; j += 1) {
+    const zNext = shape.stations[j + 1];
+    if (zNext === undefined || lz > zNext + SWEEP_LINEAR_EPSILON_MM) {
+      continue; // above this span's ceiling — keep scanning
+    }
+    const zHere = shape.stations[j];
+    const here = shape.polygons[j];
+    const next = shape.polygons[j + 1];
+    if (zHere === undefined || here === undefined || next === undefined) {
+      continue;
+    }
+    // The first span whose ceiling covers the query owns it; clamp onto it
+    // so cap-plane slack classifies at the cap polygon exactly.
+    const clamped = Math.min(Math.max(lz, zHere), zNext);
+    const t = (clamped - zHere) / (zNext - zHere);
+    return pointInPolygon({ x: lx, y: ly }, morphPolygons(here, next, t));
+  }
+  return false;
+}
+
+/**
+ * Angular slack (radians) of the partial-revolve classification: query
+ * angles within this of a cap plane count as inside, mirroring the
+ * inclusive boundary rule of the point-in-polygon test.
+ */
+const REVOLVE_ANGULAR_EPSILON_RAD = 1e-9; /**
+ * Exact point-in-revolution classification. The query is transformed into
+ * the axis frame (axial a, signed radial s, height h), and the swept solid
+ * is the profile region rotated about the axis: a FULL sweep contains the
+ * query when either radial branch (±ρ) of the profile covers (a, ρ); a
+ * PARTIAL sweep additionally requires the query angle to sit inside the
+ * swept arc, which starts at the profile's own side (0 or π).
+ */
+function revolutionContains(
+  shape: RevolutionNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const local = applyMatrix3(transpose3(shape.rotation), [
+    x - at(shape.translation, 0),
+    y - at(shape.translation, 1),
+    z - at(shape.translation, 2),
+  ]);
+  const lx = local[0] ?? 0;
+  const ly = local[1] ?? 0;
+  const lz = local[2] ?? 0;
+  const dx = lx - at(shape.origin, 0);
+  const dy = ly - at(shape.origin, 1);
+  const a = dx * at(shape.u, 0) + dy * at(shape.u, 1);
+  const s = dx * at(shape.v, 0) + dy * at(shape.v, 1);
+  const h = lz - at(shape.origin, 2);
+  const radius = Math.hypot(s, h);
+  const full = shape.sweep >= Math.PI * 2;
+  if (!full) {
+    const tau = Math.PI * 2;
+    const base = shape.positiveSide ? 0 : Math.PI;
+    const offset = (((Math.atan2(h, s) - base) % tau) + tau) % tau;
+    if (offset > shape.sweep + REVOLVE_ANGULAR_EPSILON_RAD) return false;
+  }
+  // The profile branch that sweeps to this angle: the +v side's branch
+  // carries signed radial +ρ; the −v side's carries −ρ. A full sweep
+  // covers both branches' circles, so either may contain the query.
+  const branches = full
+    ? [radius, -radius]
+    : [shape.positiveSide ? radius : -radius];
+  return branches.some((branch) =>
+    pointInPolygon({ x: a, y: branch }, shape.polygon),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The fillet node (Phase 26.5): the analytic corner-fillet model
+// ---------------------------------------------------------------------------
+
+/** The fillet leaf node type. */
+type FilletNode = Extract<FakeShape, { kind: "fillet" }>;
+
+/**
+ * The removed prism-quadrant of one filleted box edge, as an exact
+ * membership test: the region is the edge's corner quadrant (the two cross
+ * axes' bands of width `radius` toward the corner, the full edge length
+ * along the edge axis) MINUS the quarter cylinder of the same radius
+ * centred where the bands' inner edges cross. A query inside the quadrant
+ * and strictly beyond the cylinder is corner material the fillet removed;
+ * the cylinder's arc itself is the fillet surface and stays.
+ */
+function filletEdgeRemoves(
+  node: FilletNode,
+  edge: FakeBoxEdge,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const point: Vec3 = [x, y, z];
+  const u = edge.axis;
+  const a = u === 0 ? 1 : 0;
+  const b = u === 2 ? 1 : 2;
+  const sizeU = at(node.size, u);
+  const sizeA = at(node.size, a);
+  const sizeB = at(node.size, b);
+  const along = at(point, u);
+  if (along < 0 || along > sizeU) return false;
+  const cornerA = at(edge.corner, a);
+  const cornerB = at(edge.corner, b);
+  const band = (value: number, cornerValue: number, size: number): boolean =>
+    cornerValue === 0 ? value <= node.radius : value >= size - node.radius;
+  const valueA = at(point, a);
+  const valueB = at(point, b);
+  if (!band(valueA, cornerA, sizeA) || !band(valueB, cornerB, sizeB)) {
+    return false;
+  }
+  const centerA = cornerA === 0 ? node.radius : cornerA - node.radius;
+  const centerB = cornerB === 0 ? node.radius : cornerB - node.radius;
+  const dx = valueA - centerA;
+  const dy = valueB - centerB;
+  return dx * dx + dy * dy > node.radius * node.radius;
+}
+
+/** Exact point-in-fillet classification: the box minus every removed quadrant. */
+function filletContains(
+  shape: FilletNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const insideBox =
+    x >= 0 &&
+    x <= at(shape.size, 0) &&
+    y >= 0 &&
+    y <= at(shape.size, 1) &&
+    z >= 0 &&
+    z <= at(shape.size, 2);
+  if (!insideBox) return false;
+  return !shape.edges.some((edge) => filletEdgeRemoves(shape, edge, x, y, z));
+}
+
+/**
+ * The analytic corner-fillet volume: the box volume minus each edge's
+ * removed prism — cross-section `r²(1 − π/4)` (the quadrant square minus
+ * its quarter disc) times the edge length — exact because the selected
+ * edges' removed regions were validated pairwise disjoint before the node
+ * was built.
+ */
+function filletAnalyticVolume(shape: FilletNode): number {
+  const boxVolume = at(shape.size, 0) * at(shape.size, 1) * at(shape.size, 2);
+  const removed = shape.edges.reduce((sum, edge) => {
+    const length = at(shape.size, edge.axis);
+    return sum + shape.radius ** 2 * (1 - Math.PI / 4) * length;
+  }, 0);
+  return boxVolume - removed;
+}
+
+/**
+ * Permutation parity of the canonical cross-axis order: the mesh maps
+ * `(a, b)` planar coordinates onto xyz with the edge axis third, and the
+ * only odd permutation of `(x, y, z)` in that construction is the y axis
+ * (`(x, z, y)`), which flips what "CCW in the plane" means for winding.
+ */
+function orientationSign(u: Axis): 1 | -1 {
+  return u === 1 ? -1 : 1;
+}
+
+/**
+ * The filleted box's canonical mesh: every planar piece exact (the kept
+ * face rectangles and cap cells), every fillet arc chorded at the shared
+ * curved-mesh convention ({@link FAKE_KERNEL_TESSELLATION_SEGMENTS} per
+ * full circle — 4 chords per quarter arc), the same fidelity class as the
+ * canonical sphere/cylinder meshes. Winding is CCW seen from outside,
+ * verified from each facet's actual normal against the face's outward
+ * direction, never assumed from the construction order.
+ */
+function filletTriangles(shape: FilletNode): readonly Triangle[] {
+  const r = shape.radius;
+  const triangles: Triangle[] = [];
+  const u: Axis = shape.edges[0]?.axis ?? 2;
+  const a: Axis = u === 0 ? 1 : 0;
+  const b: Axis = u === 2 ? 1 : 2;
+  const sizeU = at(shape.size, u);
+  const sizeA = at(shape.size, a);
+  const sizeB = at(shape.size, b);
+  const parity = orientationSign(u);
+
+  /** Maps (aValue, bValue, uValue) onto the canonical xyz triple. */
+  const to3 = (aValue: number, bValue: number, uValue: number): Vec3 => {
+    const point: [number, number, number] = [0, 0, 0];
+    const set = (axis: Axis, value: number): void => {
+      point[axis] = value;
+    };
+    set(a, aValue);
+    set(b, bValue);
+    set(u, uValue);
+    return point;
+  };
+
+  /**
+   * Emits one quad as two triangles wound so the facet normal points along
+   * `outward` (checked from the actual cross product, never assumed).
+   */
+  const emitQuad = (
+    p1: Vec3,
+    p2: Vec3,
+    p3: Vec3,
+    p4: Vec3,
+    outward: Vec3,
+  ): void => {
+    const e1: Vec3 = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]];
+    const e2: Vec3 = [p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2]];
+    const cross: Vec3 = [
+      e1[1] * e2[2] - e1[2] * e2[1],
+      e1[2] * e2[0] - e1[0] * e2[2],
+      e1[0] * e2[1] - e1[1] * e2[0],
+    ];
+    const dot =
+      cross[0] * outward[0] + cross[1] * outward[1] + cross[2] * outward[2];
+    if (dot >= 0) {
+      triangles.push([p1, p2, p3], [p1, p3, p4]);
+    } else {
+      triangles.push([p1, p4, p3], [p1, p3, p2]);
+    }
+  };
+
+  /** True when the selected edges' corner sits on face `side` of `axis`. */
+  const cornerOn = (edge: FakeBoxEdge, axis: Axis, side: number): boolean =>
+    at(edge.corner, axis) === side;
+  const bandLowOf = (cornerValue: number, size: number): number =>
+    cornerValue === 0 ? 0 : size - r;
+
+  // --- side faces (one per cross-axis side): kept rectangles between the
+  // fillet strips. A face ⟂ axis `cross` at coordinate `side` loses, for
+  // every selected edge whose corner sits on it, the strip
+  // band(corner[other]) across the face's `other` extent.
+  for (const cross of [a, b] as const) {
+    const other: Axis = cross === a ? b : a;
+    const sizeCross = cross === a ? sizeA : sizeB;
+    const sizeOther = cross === a ? sizeB : sizeA;
+    for (const side of [0, sizeCross] as const) {
+      const outward: Vec3 = to3(
+        cross === a ? (side === 0 ? -1 : 1) : 0,
+        cross === b ? (side === 0 ? -1 : 1) : 0,
+        0,
+      );
+      const strips = shape.edges
+        .filter((edge) => cornerOn(edge, cross, side))
+        .map((edge) => {
+          const low = bandLowOf(at(edge.corner, other), sizeOther);
+          return { low, high: low + r };
+        })
+        .sort((p, q) => p.low - q.low);
+      const cuts = new Set<number>([0, sizeOther]);
+      for (const strip of strips) {
+        cuts.add(strip.low);
+        cuts.add(strip.high);
+      }
+      const ordered = [...cuts].sort((p, q) => p - q);
+      for (let i = 0; i + 1 < ordered.length; i += 1) {
+        const low = ordered[i];
+        const high = ordered[i + 1];
+        if (low === undefined || high === undefined || high - low <= 0) {
+          continue;
+        }
+        const mid = (low + high) / 2;
+        const insideStrip = strips.some(
+          (strip) => mid > strip.low && mid < strip.high,
+        );
+        if (insideStrip) continue;
+        // The kept rectangle runs `low..high` along `other`, sits in the
+        // face's plane coordinate `side` along `cross`, and spans the full
+        // edge-axis extent along `u`.
+        const lowA = cross === a ? side : low;
+        const lowB = cross === a ? low : side;
+        const highA = cross === a ? side : high;
+        const highB = cross === a ? high : side;
+        emitQuad(
+          to3(lowA, lowB, 0),
+          to3(highA, highB, 0),
+          to3(highA, highB, sizeU),
+          to3(lowA, lowB, sizeU),
+          outward,
+        );
+      }
+    }
+  }
+
+  // --- caps (⟂ the edge axis): the section is the square minus each
+  // removed corner quadrant's square, plus each edge's quarter-disc sector.
+  for (const cap of [0, sizeU] as const) {
+    const outward = to3(0, 0, cap === 0 ? -1 : 1);
+    // Grid decomposition of the square minus quadrant squares: every
+    // quadrant square is a union of grid cells (its band endpoints are
+    // cuts), so cell-midpoint containment decides each cell.
+    const cutA = new Set<number>([0, sizeA]);
+    const cutB = new Set<number>([0, sizeB]);
+    const quadrantBounds = shape.edges.map((edge) => {
+      const lowA = bandLowOf(at(edge.corner, a), sizeA);
+      const lowB = bandLowOf(at(edge.corner, b), sizeB);
+      cutA.add(lowA);
+      cutA.add(lowA + r);
+      cutB.add(lowB);
+      cutB.add(lowB + r);
+      return { lowA, highA: lowA + r, lowB, highB: lowB + r };
+    });
+    const sortedA = [...cutA].sort((p, q) => p - q);
+    const sortedB = [...cutB].sort((p, q) => p - q);
+    for (let i = 0; i + 1 < sortedA.length; i += 1) {
+      const lowA = sortedA[i];
+      const highA = sortedA[i + 1];
+      if (lowA === undefined || highA === undefined || highA - lowA <= 0) {
+        continue;
+      }
+      for (let j = 0; j + 1 < sortedB.length; j += 1) {
+        const lowB = sortedB[j];
+        const highB = sortedB[j + 1];
+        if (lowB === undefined || highB === undefined || highB - lowB <= 0) {
+          continue;
+        }
+        const midA = (lowA + highA) / 2;
+        const midB = (lowB + highB) / 2;
+        const insideQuadrant = quadrantBounds.some(
+          (q) =>
+            midA > q.lowA && midA < q.highA && midB > q.lowB && midB < q.highB,
+        );
+        if (insideQuadrant) continue;
+        emitQuad(
+          to3(lowA, lowB, cap),
+          to3(highA, lowB, cap),
+          to3(highA, highB, cap),
+          to3(lowA, highB, cap),
+          outward,
+        );
+      }
+    }
+    // Quarter-disc sectors: a 4-chord fan per selected edge, wound with
+    // the cap (the sector lies in the cap's plane, centred on the cylinder
+    // axis point, which is kept material).
+    const steps = Math.max(
+      1,
+      Math.round(FAKE_KERNEL_TESSELLATION_SEGMENTS / 4),
+    );
+    for (const edge of shape.edges) {
+      const ca = at(edge.corner, a) === 0 ? r : sizeA - r;
+      const cb = at(edge.corner, b) === 0 ? r : sizeB - r;
+      const bisector = Math.atan2(
+        at(edge.corner, b) === 0 ? 1 : -1,
+        at(edge.corner, a) === 0 ? 1 : -1,
+      );
+      const sign = cap === 0 ? -parity : parity;
+      const center = to3(ca, cb, cap);
+      for (let i = 0; i < steps; i += 1) {
+        const t0 = bisector + ((i / steps - 0.5) * Math.PI) / 2;
+        const t1 = bisector + (((i + 1) / steps - 0.5) * Math.PI) / 2;
+        const p0 = to3(ca + r * Math.cos(t0), cb + r * Math.sin(t0), cap);
+        const p1 = to3(ca + r * Math.cos(t1), cb + r * Math.sin(t1), cap);
+        if (sign > 0) triangles.push([center, p0, p1]);
+        else triangles.push([center, p1, p0]);
+      }
+    }
+  }
+
+  // --- fillet walls: one quarter-cylinder strip per edge, 4 chord quads,
+  // each wound so the facet normal leaves the cylinder's axis.
+  const steps = Math.max(1, Math.round(FAKE_KERNEL_TESSELLATION_SEGMENTS / 4));
+  for (const edge of shape.edges) {
+    const ca = at(edge.corner, a) === 0 ? r : sizeA - r;
+    const cb = at(edge.corner, b) === 0 ? r : sizeB - r;
+    const bisector = Math.atan2(
+      at(edge.corner, b) === 0 ? 1 : -1,
+      at(edge.corner, a) === 0 ? 1 : -1,
+    );
+    for (let i = 0; i < steps; i += 1) {
+      const t0 = bisector + ((i / steps - 0.5) * Math.PI) / 2;
+      const t1 = bisector + (((i + 1) / steps - 0.5) * Math.PI) / 2;
+      const p0 = to3(ca + r * Math.cos(t0), cb + r * Math.sin(t0), 0);
+      const p1 = to3(ca + r * Math.cos(t1), cb + r * Math.sin(t1), 0);
+      const q0 = to3(ca + r * Math.cos(t0), cb + r * Math.sin(t0), sizeU);
+      const q1 = to3(ca + r * Math.cos(t1), cb + r * Math.sin(t1), sizeU);
+      const midT = (t0 + t1) / 2;
+      const outwardMid = to3(
+        ca + r * Math.cos(midT),
+        cb + r * Math.sin(midT),
+        sizeU / 2,
+      );
+      const center = to3(ca, cb, sizeU / 2);
+      const e1: Vec3 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+      const e2: Vec3 = [q0[0] - p0[0], q0[1] - p0[1], q0[2] - p0[2]];
+      const cross: Vec3 = [
+        e1[1] * e2[2] - e1[2] * e2[1],
+        e1[2] * e2[0] - e1[0] * e2[2],
+        e1[0] * e2[1] - e1[1] * e2[0],
+      ];
+      const ref: Vec3 = [
+        outwardMid[0] - center[0],
+        outwardMid[1] - center[1],
+        outwardMid[2] - center[2],
+      ];
+      const dot = cross[0] * ref[0] + cross[1] * ref[1] + cross[2] * ref[2];
+      if (dot >= 0) triangles.push([p0, p1, q1], [p0, q1, q0]);
+      else triangles.push([p0, q1, p1], [p0, q0, q1]);
+    }
+  }
+  return triangles;
+}
+
+// ---------------------------------------------------------------------------
+// The chamfer node (Phase 26.6): the analytic corner-prism model
+// ---------------------------------------------------------------------------
+
+/** The chamfer leaf node type. */
+type ChamferNode = Extract<FakeShape, { kind: "chamfer" }>;
+
+/**
+ * The removed corner prism of one chamfered box edge, as an exact
+ * membership test: the region is the right-isoceles triangle with legs
+ * `distance` in the two cross axes, extruded the full edge length — the
+ * symmetric chamfer plane cuts `distance` from the edge along both
+ * adjacent faces, so a query strictly inside the diagonal `da + db <
+ * distance` (measured from the edge's corner along the cross axes) is
+ * corner material the chamfer removed; the diagonal itself is the chamfer
+ * surface and stays.
+ */
+function chamferEdgeRemoves(
+  node: ChamferNode,
+  edge: FakeBoxEdge,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const point: Vec3 = [x, y, z];
+  const u = edge.axis;
+  const along = at(point, u);
+  if (along < 0 || along > at(node.size, u)) return false;
+  const a = u === 0 ? 1 : 0;
+  const b = u === 2 ? 1 : 2;
+  const da =
+    at(edge.corner, a) === 0 ? at(point, a) : at(node.size, a) - at(point, a);
+  const db =
+    at(edge.corner, b) === 0 ? at(point, b) : at(node.size, b) - at(point, b);
+  return da + db < node.distance;
+}
+
+/** Exact point-in-chamfer classification: the box minus every removed prism. */
+function chamferContains(
+  shape: ChamferNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const insideBox =
+    x >= 0 &&
+    x <= at(shape.size, 0) &&
+    y >= 0 &&
+    y <= at(shape.size, 1) &&
+    z >= 0 &&
+    z <= at(shape.size, 2);
+  if (!insideBox) return false;
+  return !shape.edges.some((edge) => chamferEdgeRemoves(shape, edge, x, y, z));
+}
+
+/**
+ * The analytic corner-chamfer volume: the box volume minus each edge's
+ * removed corner prism — cross-section `d²/2` (the right-isoceles triangle
+ * the symmetric distance cuts) times the edge length — exact because the
+ * selected edges' removed prisms were validated pairwise disjoint before
+ * the node was built. Holds for a distance past the edge's own length too
+ * (probed against OCCT): the prism cross-section lives in the cross plane,
+ * so the edge length bounds nothing.
+ */
+function chamferAnalyticVolume(shape: ChamferNode): number {
+  const boxVolume = at(shape.size, 0) * at(shape.size, 1) * at(shape.size, 2);
+  const removed = shape.edges.reduce((sum, edge) => {
+    const length = at(shape.size, edge.axis);
+    return sum + (shape.distance ** 2 / 2) * length;
+  }, 0);
+  return boxVolume - removed;
+}
+
+/**
+ * The chamfered box's canonical mesh: FULLY planar — the kept face
+ * rectangles, the caps (the box section polygon with each chamfered corner
+ * replaced by its two tangent points, fanned from vertex 0 — convex, since
+ * cutting a rectangle's corners cannot concave it), and one flat chamfer
+ * quad per edge. Every facet is exact geometry (no chording anywhere, the
+ * fillet mesh's curved-piece class has no chamfer member), wound CCW seen
+ * from outside via the actual-facet-normal check, never the construction
+ * order.
+ */
+function chamferTriangles(shape: ChamferNode): readonly Triangle[] {
+  const d = shape.distance;
+  const triangles: Triangle[] = [];
+  const u: Axis = shape.edges[0]?.axis ?? 2;
+  const a: Axis = u === 0 ? 1 : 0;
+  const b: Axis = u === 2 ? 1 : 2;
+  const sizeU = at(shape.size, u);
+  const sizeA = at(shape.size, a);
+  const sizeB = at(shape.size, b);
+  const parity = orientationSign(u);
+
+  /** Maps (aValue, bValue, uValue) onto the canonical xyz triple. */
+  const to3 = (aValue: number, bValue: number, uValue: number): Vec3 => {
+    const point: [number, number, number] = [0, 0, 0];
+    const set = (axis: Axis, value: number): void => {
+      point[axis] = value;
+    };
+    set(a, aValue);
+    set(b, bValue);
+    set(u, uValue);
+    return point;
+  };
+
+  /**
+   * Emits one quad as two triangles wound so the facet normal points along
+   * `outward` (checked from the actual cross product, never assumed).
+   */
+  const emitQuad = (
+    p1: Vec3,
+    p2: Vec3,
+    p3: Vec3,
+    p4: Vec3,
+    outward: Vec3,
+  ): void => {
+    const e1: Vec3 = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]];
+    const e2: Vec3 = [p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2]];
+    const cross: Vec3 = [
+      e1[1] * e2[2] - e1[2] * e2[1],
+      e1[2] * e2[0] - e1[0] * e2[2],
+      e1[0] * e2[1] - e1[1] * e2[0],
+    ];
+    const dot =
+      cross[0] * outward[0] + cross[1] * outward[1] + cross[2] * outward[2];
+    if (dot >= 0) {
+      triangles.push([p1, p2, p3], [p1, p3, p4]);
+    } else {
+      triangles.push([p1, p4, p3], [p1, p3, p2]);
+    }
+  };
+
+  /** True when the selected edges' corner sits on face `side` of `axis`. */
+  const cornerOn = (edge: FakeBoxEdge, axis: Axis, side: number): boolean =>
+    at(edge.corner, axis) === side;
+  const bandLowOf = (cornerValue: number, size: number): number =>
+    cornerValue === 0 ? 0 : size - d;
+
+  // --- side faces (one per cross-axis side): kept rectangles between the
+  // chamfer strips. A face ⟂ axis `cross` at coordinate `side` loses, for
+  // every selected edge whose corner sits on it, the full strip of width
+  // `distance` along the face's `other` extent (on the face itself the
+  // chamfer plane's cut lands exactly at the tangent point) — the fillet
+  // mesh's strip logic with the chamfer distance in the radius's place.
+  for (const cross of [a, b] as const) {
+    const other: Axis = cross === a ? b : a;
+    const sizeCross = cross === a ? sizeA : sizeB;
+    const sizeOther = cross === a ? sizeB : sizeA;
+    for (const side of [0, sizeCross] as const) {
+      const outward: Vec3 = to3(
+        cross === a ? (side === 0 ? -1 : 1) : 0,
+        cross === b ? (side === 0 ? -1 : 1) : 0,
+        0,
+      );
+      const strips = shape.edges
+        .filter((edge) => cornerOn(edge, cross, side))
+        .map((edge) => {
+          const low = bandLowOf(at(edge.corner, other), sizeOther);
+          return { low, high: low + d };
+        })
+        .sort((p, q) => p.low - q.low);
+      const cuts = new Set<number>([0, sizeOther]);
+      for (const strip of strips) {
+        cuts.add(strip.low);
+        cuts.add(strip.high);
+      }
+      const ordered = [...cuts].sort((p, q) => p - q);
+      for (let i = 0; i + 1 < ordered.length; i += 1) {
+        const low = ordered[i];
+        const high = ordered[i + 1];
+        if (low === undefined || high === undefined || high - low <= 0) {
+          continue;
+        }
+        const mid = (low + high) / 2;
+        const insideStrip = strips.some(
+          (strip) => mid > strip.low && mid < strip.high,
+        );
+        if (insideStrip) continue;
+        const lowA = cross === a ? side : low;
+        const lowB = cross === a ? low : side;
+        const highA = cross === a ? side : high;
+        const highB = cross === a ? high : side;
+        emitQuad(
+          to3(lowA, lowB, 0),
+          to3(highA, highB, 0),
+          to3(highA, highB, sizeU),
+          to3(lowA, lowB, sizeU),
+          outward,
+        );
+      }
+    }
+  }
+
+  // --- caps (⟂ the edge axis): the box section with each chamfered corner
+  // replaced by its two tangent points — a convex polygon in the (a, b)
+  // plane, fanned from vertex 0 with the cap's outward winding.
+  for (const cap of [0, sizeU] as const) {
+    // The rectangle's corners CCW in (a, b), each with the corner-tangent
+    // pair that replaces it when a selected edge sits there: first the
+    // tangent on the incoming side, then the one on the outgoing side.
+    const section: { readonly a: number; readonly b: number }[] = [];
+    const cornerCut = (
+      aFlag: 0 | 1,
+      bFlag: 0 | 1,
+    ): readonly { a: number; b: number }[] => {
+      const cornerA = aFlag === 0 ? 0 : sizeA;
+      const cornerB = bFlag === 0 ? 0 : sizeB;
+      const chamfered = shape.edges.some(
+        (edge) =>
+          (at(edge.corner, a) === 0 ? 0 : 1) === aFlag &&
+          (at(edge.corner, b) === 0 ? 0 : 1) === bFlag,
+      );
+      if (!chamfered) return [{ a: cornerA, b: cornerB }];
+      // Incoming side is the b-axis edge for corners reached along +a, the
+      // a-axis edge otherwise — the CCW rectangle order below fixes which.
+      const onB = { a: cornerA, b: bFlag === 0 ? d : sizeB - d };
+      const onA = { a: aFlag === 0 ? d : sizeA - d, b: cornerB };
+      const ccwFromB = aFlag === 0 ? bFlag === 0 : bFlag === 1;
+      return ccwFromB ? [onB, onA] : [onA, onB];
+    };
+    section.push(...cornerCut(0, 0));
+    section.push(...cornerCut(1, 0));
+    section.push(...cornerCut(1, 1));
+    section.push(...cornerCut(0, 1));
+    const anchor = section[0];
+    if (anchor === undefined) {
+      throw new Error(
+        "Invariant violation: the chamfered section polygon always has vertices.",
+      );
+    }
+    const sign = cap === 0 ? -parity : parity;
+    for (let i = 1; i + 1 < section.length; i += 1) {
+      const first = section[i];
+      const second = section[i + 1];
+      if (first === undefined || second === undefined) continue;
+      const p1 = to3(anchor.a, anchor.b, cap);
+      const p2 = to3(first.a, first.b, cap);
+      const p3 = to3(second.a, second.b, cap);
+      if (sign > 0) triangles.push([p1, p2, p3]);
+      else triangles.push([p1, p3, p2]);
+    }
+  }
+
+  // --- chamfer walls: ONE flat quad per edge, from tangent point to
+  // tangent point along the full edge, wound toward the cut corner.
+  for (const edge of shape.edges) {
+    const cornerA = at(edge.corner, a);
+    const cornerB = at(edge.corner, b);
+    const tangentOnA = { a: cornerA === 0 ? d : sizeA - d, b: cornerB };
+    const tangentOnB = { a: cornerA, b: cornerB === 0 ? d : sizeB - d };
+    const outward = to3(cornerA === 0 ? -1 : 1, cornerB === 0 ? -1 : 1, 0);
+    emitQuad(
+      to3(tangentOnA.a, tangentOnA.b, 0),
+      to3(tangentOnB.a, tangentOnB.b, 0),
+      to3(tangentOnB.a, tangentOnB.b, sizeU),
+      to3(tangentOnA.a, tangentOnA.b, sizeU),
+      outward,
+    );
+  }
+  return triangles;
+}
+
+// ---------------------------------------------------------------------------
+// The shell node (Phase 26.7): the analytic open-box model
+// ---------------------------------------------------------------------------
+
+/** The shell leaf node type. */
+type ShellNode = Extract<FakeShape, { kind: "shell" }>;
+
+/**
+ * Exact point-in-shell classification: the box minus the inset cavity open
+ * at the removed face. The cavity runs `[t, size−t]` along both cross axes
+ * and stops one wall short of the removed side along the face's own axis —
+ * a point on a cavity wall or the cavity floor belongs to the solid (the
+ * inclusive-boundary convention every leaf here follows), a point strictly
+ * inside the cavity does not.
+ */
+function shellContains(
+  shape: ShellNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const insideBox =
+    x >= 0 &&
+    x <= at(shape.size, 0) &&
+    y >= 0 &&
+    y <= at(shape.size, 1) &&
+    z >= 0 &&
+    z <= at(shape.size, 2);
+  if (!insideBox) return false;
+  const u = shape.face.axis;
+  const a = u === 0 ? 1 : 0;
+  const b = u === 2 ? 1 : 2;
+  const t = shape.thickness;
+  const point: Vec3 = [x, y, z];
+  const inCavityCross =
+    at(point, a) >= t &&
+    at(point, a) <= at(shape.size, a) - t &&
+    at(point, b) >= t &&
+    at(point, b) <= at(shape.size, b) - t;
+  if (!inCavityCross) return true;
+  const inCavityAlong = shape.face.high
+    ? at(point, u) >= t
+    : at(point, u) <= at(shape.size, u) - t;
+  return !inCavityAlong;
+}
+
+/**
+ * The analytic open-box volume: the box volume minus the inset cavity —
+ * cross-section `(sizeA−2t)(sizeB−2t)` over the two cross axes, depth
+ * `sizeU−t` along the removed face's own axis (one wall at the far side,
+ * open at the removed side) — exact by the fit battery's validated
+ * non-degeneracy.
+ */
+function shellAnalyticVolume(shape: ShellNode): number {
+  const u = shape.face.axis;
+  const a = u === 0 ? 1 : 0;
+  const b = u === 2 ? 1 : 2;
+  const t = shape.thickness;
+  const boxVolume = at(shape.size, 0) * at(shape.size, 1) * at(shape.size, 2);
+  const cavity =
+    (at(shape.size, a) - 2 * t) *
+    (at(shape.size, b) - 2 * t) *
+    (at(shape.size, u) - t);
+  return boxVolume - cavity;
+}
+
+/**
+ * The shelled box's canonical mesh: FULLY planar — the five kept outer
+ * faces of the box, the rim frame around the opening at the removed
+ * face's plane, the four inner cavity walls, and the cavity floor — every
+ * quad wound so its facet normal points away from the wall material
+ * (checked from the actual cross product, never assumed from the
+ * construction order, the same discipline as the fillet mesh). No curved
+ * piece exists anywhere in the subset.
+ */
+function shellTriangles(shape: ShellNode): readonly Triangle[] {
+  const t = shape.thickness;
+  const u = shape.face.axis;
+  const a: Axis = u === 0 ? 1 : 0;
+  const b: Axis = u === 2 ? 1 : 2;
+  const sizeU = at(shape.size, u);
+  const sizeA = at(shape.size, a);
+  const sizeB = at(shape.size, b);
+  const triangles: Triangle[] = [];
+
+  /** Maps components onto the canonical xyz triple by axis. */
+  const to3 = (
+    axisA: Axis,
+    valueA: number,
+    axisB: Axis,
+    valueB: number,
+    axisC: Axis,
+    valueC: number,
+  ): Vec3 => {
+    const point: [number, number, number] = [0, 0, 0];
+    point[axisA] = valueA;
+    point[axisB] = valueB;
+    point[axisC] = valueC;
+    return point;
+  };
+
+  /** Emits one quad as two triangles wound so the facet normal points along `outward`. */
+  const emitQuad = (
+    p1: Vec3,
+    p2: Vec3,
+    p3: Vec3,
+    p4: Vec3,
+    outward: Vec3,
+  ): void => {
+    const e1: Vec3 = [p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]];
+    const e2: Vec3 = [p3[0] - p1[0], p3[1] - p1[1], p3[2] - p1[2]];
+    const cross: Vec3 = [
+      e1[1] * e2[2] - e1[2] * e2[1],
+      e1[2] * e2[0] - e1[0] * e2[2],
+      e1[0] * e2[1] - e1[1] * e2[0],
+    ];
+    const dot =
+      cross[0] * outward[0] + cross[1] * outward[1] + cross[2] * outward[2];
+    if (dot >= 0) {
+      triangles.push([p1, p2, p3], [p1, p3, p4]);
+    } else {
+      triangles.push([p1, p4, p3], [p1, p3, p2]);
+    }
+  };
+
+  /**
+   * Emits one axis-aligned rectangle in the plane ⟂ `axis` at `coord`,
+   * spanning `[o1Low, o1High] × [o2Low, o2High]` over the two non-`axis`
+   * axes in their fixed (o1, o2) order.
+   */
+  const emitAxisRect = (
+    axis: Axis,
+    coord: number,
+    o1Low: number,
+    o1High: number,
+    o2Low: number,
+    o2High: number,
+    outward: Vec3,
+  ): void => {
+    const o1: Axis = axis === 0 ? 1 : 0;
+    const o2: Axis = axis === 2 ? 1 : 2;
+    emitQuad(
+      to3(o1, o1Low, o2, o2Low, axis, coord),
+      to3(o1, o1High, o2, o2Low, axis, coord),
+      to3(o1, o1High, o2, o2High, axis, coord),
+      to3(o1, o1Low, o2, o2High, axis, coord),
+      outward,
+    );
+  };
+
+  /** The ±unit vector along `axis` toward `sign`. */
+  const unit = (axis: Axis, sign: 1 | -1): Vec3 =>
+    to3(axis, sign, axis, 0, axis, 0);
+
+  // --- kept outer faces: the box's five faces minus the removed one.
+  for (const axis of [0, 1, 2] as const) {
+    for (const high of [false, true] as const) {
+      if (axis === u && high === shape.face.high) continue;
+      const o1: Axis = axis === 0 ? 1 : 0;
+      const o2: Axis = axis === 2 ? 1 : 2;
+      emitAxisRect(
+        axis,
+        high ? at(shape.size, axis) : 0,
+        0,
+        at(shape.size, o1),
+        0,
+        at(shape.size, o2),
+        unit(axis, high ? 1 : -1),
+      );
+    }
+  }
+
+  // --- rim frame at the removed face's plane: the face's rectangle minus
+  // the cavity opening, as four coplanar strips in the (a, b) frame —
+  // all facing away from the wall material behind the plane.
+  const openCoord = shape.face.high ? sizeU : 0;
+  const openOutward = unit(u, shape.face.high ? 1 : -1);
+  const rimStrips = [
+    [
+      [0, sizeA],
+      [0, t],
+    ],
+    [
+      [0, sizeA],
+      [sizeB - t, sizeB],
+    ],
+    [
+      [0, t],
+      [t, sizeB - t],
+    ],
+    [
+      [sizeA - t, sizeA],
+      [t, sizeB - t],
+    ],
+  ] as const;
+  for (const [[aLow, aHigh], [bLow, bHigh]] of rimStrips) {
+    emitQuad(
+      to3(a, aLow, b, bLow, u, openCoord),
+      to3(a, aHigh, b, bLow, u, openCoord),
+      to3(a, aHigh, b, bHigh, u, openCoord),
+      to3(a, aLow, b, bHigh, u, openCoord),
+      openOutward,
+    );
+  }
+
+  // --- cavity walls: four rectangles ⟂ the cross axes, each spanning the
+  // cavity's u-range and the cavity's extent along the other cross axis,
+  // facing INTO the cavity (away from the surrounding wall material).
+  const floorU = shape.face.high ? t : 0;
+  const ceilU = shape.face.high ? sizeU : sizeU - t;
+  const cavityWall = (axis: Axis, coord: number, sign: 1 | -1): void => {
+    const other: Axis = axis === a ? b : a;
+    const otherHigh = (axis === a ? sizeB : sizeA) - t;
+    emitQuad(
+      to3(axis, coord, other, t, u, floorU),
+      to3(axis, coord, other, otherHigh, u, floorU),
+      to3(axis, coord, other, otherHigh, u, ceilU),
+      to3(axis, coord, other, t, u, ceilU),
+      unit(axis, sign),
+    );
+  };
+  cavityWall(a, t, 1);
+  cavityWall(a, sizeA - t, -1);
+  cavityWall(b, t, 1);
+  cavityWall(b, sizeB - t, -1);
+
+  // --- cavity floor: the cavity's closed end (one wall short of the
+  // removed side), facing into the cavity.
+  const floorCoord = shape.face.high ? t : sizeU - t;
+  emitQuad(
+    to3(a, t, b, t, u, floorCoord),
+    to3(a, sizeA - t, b, t, u, floorCoord),
+    to3(a, sizeA - t, b, sizeB - t, u, floorCoord),
+    to3(a, t, b, sizeB - t, u, floorCoord),
+    unit(u, shape.face.high ? 1 : -1),
+  );
+  return triangles;
 }
 
 /** Analytic volume of a primitive or translated primitive chain, else `undefined`. */
@@ -331,6 +2001,43 @@ function analyticVolume(shape: FakeShape): number | undefined {
       );
     case "translate":
       return analyticVolume(shape.source);
+    case "mirror":
+      // A reflection is an isometry: the mirrored volume IS the source
+      // volume, exactly, for every source (the delegation keeps a voxel-
+      // quantized boolean mirrored at its own quantized value, never
+      // double-quantized).
+      return shapeVolume(shape.source);
+    case "extrusion":
+      return Math.abs(polygonSignedArea(shape.polygon)) * shape.height;
+    case "revolution":
+      // Pappus's centroid theorem over the chord polygon — the EXACT swept
+      // volume of the represented solid, no quadrature anywhere.
+      return revolvePappusVolume(shape.polygon, shape.sweep);
+    case "sweep":
+      // The Pappus decomposition the contract documents: line pieces by
+      // Cavalieri, arc pieces by Pappus about their centre axes — exact
+      // over the chord polygon, no quadrature anywhere.
+      return sweepAnalyticVolume(shape.polygon, shape.pieces);
+    case "loft":
+      // The Simpson/prismoidal decomposition the contract documents: the
+      // morph's cross-section area is quadratic in the span parameter, so
+      // each span integrates exactly — no quadrature anywhere.
+      return loftAnalyticVolume(shape.polygons, shape.stations);
+    case "fillet":
+      // The analytic corner-fillet decomposition the contract documents:
+      // the box minus each edge's validated-disjoint prism quadrant — no
+      // quadrature anywhere.
+      return filletAnalyticVolume(shape);
+    case "chamfer":
+      // The analytic corner-prism decomposition the contract documents: the
+      // box minus each edge's validated-disjoint corner prism — no
+      // quadrature anywhere.
+      return chamferAnalyticVolume(shape);
+    case "shell":
+      // The analytic open-box decomposition the contract documents: the
+      // box minus the single validated non-degenerate inset cavity — no
+      // quadrature anywhere.
+      return shellAnalyticVolume(shape);
     default:
       return undefined;
   }
@@ -471,7 +2178,17 @@ function coneTriangles(
   return triangles;
 }
 
-function primitiveTriangles(shape: Primitive): readonly Triangle[] {
+function primitiveTriangles(
+  shape:
+    | Primitive
+    | ExtrusionNode
+    | RevolutionNode
+    | SweepNode
+    | LoftNode
+    | FilletNode
+    | ChamferNode
+    | ShellNode,
+): readonly Triangle[] {
   switch (shape.kind) {
     case "box":
       return boxTriangles(
@@ -485,35 +2202,525 @@ function primitiveTriangles(shape: Primitive): readonly Triangle[] {
       return cylinderTriangles(shape.radius, shape.height);
     case "cone":
       return coneTriangles(shape.bottomRadius, shape.topRadius, shape.height);
+    case "extrusion":
+      return extrusionTriangles(shape);
+    case "revolution":
+      return revolutionTriangles(shape);
+    case "sweep":
+      return sweepTriangles(shape);
+    case "loft":
+      return loftTriangles(shape);
+    case "fillet":
+      return filletTriangles(shape);
+    case "chamfer":
+      return chamferTriangles(shape);
+    case "shell":
+      return shellTriangles(shape);
   }
 }
 
-/** A primitive leaf paired with the accumulated translation along its path. */
-interface Leaf {
-  readonly primitive: Primitive;
-  readonly offset: Vec3;
+/**
+ * The placed prism's canonical mesh: the chord polygon's caps fanned from
+ * vertex 0 and one quad wall per polygon edge, all vertices placed by the
+ * rotation-then-translation placement. Winding is normalized to a CCW
+ * polygon at construction, so every facet's outward normal follows from the
+ * winding (the shared per-facet normal computation reads it off).
+ */
+function extrusionTriangles(shape: ExtrusionNode): readonly Triangle[] {
+  const zBase = shape.baseZ;
+  const zTop = shape.baseZ + shape.height;
+  const world = (vertex: ProfilePoint2, z: number): Vec3 => {
+    const rotated = applyMatrix3(shape.rotation, [vertex.x, vertex.y, z]);
+    return [
+      rotated[0] + at(shape.translation, 0),
+      rotated[1] + at(shape.translation, 1),
+      rotated[2] + at(shape.translation, 2),
+    ];
+  };
+  const polygon = shape.polygon;
+  const count = polygon.length;
+  const triangles: Triangle[] = [];
+  for (let i = 1; i < count - 1; i += 1) {
+    const a = polygon[i];
+    const b = polygon[i + 1];
+    if (a === undefined || b === undefined) continue;
+    triangles.push([
+      world(polygon[0] ?? a, zTop),
+      world(a, zTop),
+      world(b, zTop),
+    ]);
+    triangles.push([
+      world(polygon[0] ?? a, zBase),
+      world(b, zBase),
+      world(a, zBase),
+    ]);
+  }
+  for (let i = 0; i < count; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % count];
+    if (a === undefined || b === undefined) continue;
+    const aBase = world(a, zBase);
+    const bBase = world(b, zBase);
+    const bTop = world(b, zTop);
+    const aTop = world(a, zTop);
+    triangles.push([aBase, bBase, bTop], [aBase, bTop, aTop]);
+  }
+  return triangles;
 }
 
-function collectLeaves(shape: FakeShape, offset: Vec3, out: Leaf[]): void {
+/**
+ * The placed revolution's canonical mesh: the axis-frame chord polygon
+ * revolved at the shared angular deflection (rings every
+ * {@link PROFILE_MAX_SEGMENT_ANGLE_RAD} or finer), one wall quad per
+ * polygon edge and ring pair, and — partial sweeps only — a fan cap per
+ * end plane. Vertices on the axis degenerate some wall triangles to zero
+ * area (an on-axis edge sweeps to a line, not a surface); those are
+ * skipped, exactly the cone's apex-fan honesty in reverse. Winding: the
+ * polygon is CCW in (axial, signed-radial); walls on the +radial branch
+ * and both caps then wind outward directly, walls on the −radial branch
+ * flip (the sweep embeds that branch with reversed orientation).
+ */
+function revolutionTriangles(shape: RevolutionNode): readonly Triangle[] {
+  const sweep = shape.sweep;
+  const full = sweep >= Math.PI * 2;
+  const steps = Math.max(1, Math.ceil(sweep / PROFILE_MAX_SEGMENT_ANGLE_RAD));
+  const delta = sweep / steps;
+  const polygon = shape.polygon;
+  const count = polygon.length;
+
+  /** Local point (axial a, signed radial s) swept to angle phi, then placed. */
+  const world = (a: number, s: number, phi: number): Vec3 => {
+    const cos = Math.cos(phi);
+    const sin = Math.sin(phi);
+    // Axis frame in local coordinates: (a·u) + (s·cosφ)·v + (s·sinφ)·ẑ —
+    // the sweep starts in the profile plane (φ = 0) toward local +z.
+    const local: Vec3 = [
+      at(shape.origin, 0) + a * at(shape.u, 0) + s * cos * at(shape.v, 0),
+      at(shape.origin, 1) + a * at(shape.u, 1) + s * cos * at(shape.v, 1),
+      at(shape.origin, 2) + s * sin,
+    ];
+    const rotated = applyMatrix3(shape.rotation, local);
+    return [
+      rotated[0] + at(shape.translation, 0),
+      rotated[1] + at(shape.translation, 1),
+      rotated[2] + at(shape.translation, 2),
+    ];
+  };
+  /** Ring `r`'s world vertices (ring 0 replayed for the full sweep's wrap). */
+  const ringAt = (r: number): readonly Vec3[] => {
+    const phi = r === steps ? (full ? 0 : sweep) : r * delta;
+    return polygon.map((vertex) => world(vertex.x, vertex.y, phi));
+  };
+
+  const distinct = (triangle: Triangle): boolean => {
+    for (let i = 0; i < 3; i += 1) {
+      const p = triangle[i];
+      const q = triangle[(i + 1) % 3];
+      if (
+        p === undefined ||
+        q === undefined ||
+        (at(p, 0) === at(q, 0) &&
+          at(p, 1) === at(q, 1) &&
+          at(p, 2) === at(q, 2))
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const triangles: Triangle[] = [];
+  // An edge lies on the −radial branch exactly when its vertices do (the
+  // crossing rejection forbids straddling; a touching vertex at s = 0
+  // belongs to the + side, where the direct winding is already outward).
+  const flippedEdge: boolean[] = polygon.map((vertex) => vertex.y < 0);
+  for (let r = 0; r < steps; r += 1) {
+    const ringA = ringAt(r);
+    const ringB = ringAt(r + 1);
+    for (let i = 0; i < count; i += 1) {
+      const indexB = (i + 1) % count;
+      const a = ringA[i];
+      const b = ringA[indexB];
+      const bNext = ringB[indexB];
+      const aNext = ringB[i];
+      if (
+        a === undefined ||
+        b === undefined ||
+        bNext === undefined ||
+        aNext === undefined
+      ) {
+        continue;
+      }
+      // The sweep moves +phi; on the −radial branch that direction reads
+      // reversed, so the quad's winding flips to stay outward.
+      const flip = flippedEdge[i] || flippedEdge[indexB];
+      const quad: readonly Triangle[] = flip
+        ? [
+            [a, bNext, b],
+            [a, aNext, bNext],
+          ]
+        : [
+            [a, b, bNext],
+            [a, bNext, aNext],
+          ];
+      for (const triangle of quad) {
+        if (distinct(triangle)) triangles.push(triangle);
+      }
+    }
+  }
+  if (!full) {
+    const start = ringAt(0);
+    const end = ringAt(steps);
+    for (let i = 1; i < count - 1; i += 1) {
+      const a = polygon[i];
+      const b = polygon[i + 1];
+      if (a === undefined || b === undefined) continue;
+      const first = start[0];
+      const endA = end[i];
+      const endB = end[i + 1];
+      const startA = start[i];
+      const startB = start[i + 1];
+      if (
+        first === undefined ||
+        endA === undefined ||
+        endB === undefined ||
+        startA === undefined ||
+        startB === undefined
+      ) {
+        continue;
+      }
+      const endCap: Triangle = [first, endA, endB];
+      const startCap: Triangle = [first, startB, startA];
+      for (const triangle of [endCap, startCap]) {
+        if (distinct(triangle)) triangles.push(triangle);
+      }
+    }
+  }
+  return triangles;
+}
+
+/**
+ * The placed sweep's canonical mesh: every piece's stations at the shared
+ * angular deflection, one wall quad per polygon edge and station pair
+ * (line pieces are the prism walls of `extrusionTriangles`; arc pieces the
+ * revolution walls of `revolutionTriangles` with the same
+ * negative-radius-branch flip — direction-independent, since a vertex at
+ * positive signed radius advances along +t between stations in either
+ * sweep direction), and — OPEN paths only — a fan cap at each chain end.
+ * Degenerate quads (an on-axis vertex pair sweeping to a line, or a
+ * station pair collapsing at a joint) are skipped exactly like the
+ * revolution's. Closed rings carry no caps: the tube closes on itself.
+ */
+function sweepTriangles(shape: SweepNode): readonly Triangle[] {
+  const triangles: Triangle[] = [];
+
+  const world = (station: SweepStation, u: number, v: number): Vec3 => {
+    const rotated = applyMatrix3(
+      shape.rotation,
+      sweepStationVertex(station, u, v),
+    );
+    return [
+      rotated[0] + at(shape.translation, 0),
+      rotated[1] + at(shape.translation, 1),
+      rotated[2] + at(shape.translation, 2),
+    ];
+  };
+
+  const distinct = (triangle: Triangle): boolean => {
+    for (let i = 0; i < 3; i += 1) {
+      const p = triangle[i];
+      const q = triangle[(i + 1) % 3];
+      if (
+        p === undefined ||
+        q === undefined ||
+        (at(p, 0) === at(q, 0) &&
+          at(p, 1) === at(q, 1) &&
+          at(p, 2) === at(q, 2))
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  for (const piece of shape.pieces) {
+    const stations = sweepPieceStations(piece);
+    for (let s = 0; s + 1 < stations.length; s += 1) {
+      const here = stations[s];
+      const next = stations[s + 1];
+      if (here === undefined || next === undefined) continue;
+      const count = shape.polygon.length;
+      for (let i = 0; i < count; i += 1) {
+        const a = shape.polygon[i];
+        const b = shape.polygon[(i + 1) % count];
+        if (a === undefined || b === undefined) continue;
+        const aHere = world(here, a.x, a.y);
+        const bHere = world(here, b.x, b.y);
+        const bNext = world(next, b.x, b.y);
+        const aNext = world(next, a.x, a.y);
+        // A vertex at positive signed radius s = R + sign(θ)·u advances
+        // along +t between consecutive stations in EITHER sweep
+        // direction (the station frame is right-handed and rigid), so
+        // the direct prism/revolution winding is outward for s > 0 in
+        // both; only an edge on the negative-radius branch (s < 0, the
+        // mirror side of the axis) embeds reversed — the revolution's
+        // flip, direction-independent (verified numerically on both
+        // bend directions).
+        const flip =
+          piece.kind === "arc" &&
+          (piece.radius + (piece.sweep > 0 ? 1 : -1) * a.x < 0 ||
+            piece.radius + (piece.sweep > 0 ? 1 : -1) * b.x < 0);
+        const quad: readonly Triangle[] = flip
+          ? [
+              [aHere, bNext, bHere],
+              [aHere, aNext, bNext],
+            ]
+          : [
+              [aHere, bHere, bNext],
+              [aHere, bNext, aNext],
+            ];
+        for (const triangle of quad) {
+          if (distinct(triangle)) triangles.push(triangle);
+        }
+      }
+    }
+  }
+
+  if (!shape.closed && shape.pieces.length > 0) {
+    const firstPiece = shape.pieces[0];
+    const lastPiece = shape.pieces[shape.pieces.length - 1];
+    if (firstPiece !== undefined && lastPiece !== undefined) {
+      const startStation = sweepPieceStations(firstPiece)[0];
+      const lastStations = sweepPieceStations(lastPiece);
+      const endStation = lastStations[lastStations.length - 1];
+      if (startStation !== undefined && endStation !== undefined) {
+        const count = shape.polygon.length;
+        const apex = shape.polygon[0];
+        if (apex !== undefined) {
+          for (let i = 1; i < count - 1; i += 1) {
+            const a = shape.polygon[i];
+            const b = shape.polygon[i + 1];
+            if (a === undefined || b === undefined) continue;
+            const startApex = world(startStation, apex.x, apex.y);
+            const endApex = world(endStation, apex.x, apex.y);
+            // The start cap faces back along the path, the end cap forward
+            // — the same polygon-vertex-0 fan pair `extrusionTriangles`
+            // builds at its caps (never the frame origin: an off-origin
+            // profile would fan outside its boundary).
+            const startCap: Triangle = [
+              startApex,
+              world(startStation, b.x, b.y),
+              world(startStation, a.x, a.y),
+            ];
+            const endCap: Triangle = [
+              endApex,
+              world(endStation, a.x, a.y),
+              world(endStation, b.x, b.y),
+            ];
+            for (const triangle of [startCap, endCap]) {
+              if (distinct(triangle)) triangles.push(triangle);
+            }
+          }
+        }
+      }
+    }
+  }
+  return triangles;
+}
+
+/**
+ * The placed loft's canonical mesh: per span, one wall quad per polygon
+ * edge pair (station polygon j's edge i against station polygon j+1's
+ * edge i — both CCW, so the direct prism winding is outward,
+ * triangulated into two flat triangles), and fan caps on the FIRST and
+ * LAST polygons only (the intermediate stations are interior).
+ * Degenerate triangles (a wall collapsing when corresponding vertices
+ * coincide) are skipped exactly like the extrusion's. Honesty: flat
+ * triangles represent a ruled wall EXACTLY only where the wall is planar
+ * (every untwisted loft); a SKEW (twisted) wall's bilinear patch carries
+ * the flat pair as a candidate triangulation — the boolean-soup honesty
+ * applied to a leaf, with the semantic truth in `volume`/`bounds` (which
+ * measure the ruled model exactly).
+ */
+function loftTriangles(shape: LoftNode): readonly Triangle[] {
+  const triangles: Triangle[] = [];
+
+  const world = (vertex: ProfilePoint2, z: number): Vec3 => {
+    const rotated = applyMatrix3(shape.rotation, [vertex.x, vertex.y, z]);
+    return [
+      rotated[0] + at(shape.translation, 0),
+      rotated[1] + at(shape.translation, 1),
+      rotated[2] + at(shape.translation, 2),
+    ];
+  };
+
+  const distinct = (triangle: Triangle): boolean => {
+    for (let i = 0; i < 3; i += 1) {
+      const p = triangle[i];
+      const q = triangle[(i + 1) % 3];
+      if (
+        p === undefined ||
+        q === undefined ||
+        (at(p, 0) === at(q, 0) &&
+          at(p, 1) === at(q, 1) &&
+          at(p, 2) === at(q, 2))
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  for (let s = 0; s + 1 < shape.polygons.length; s += 1) {
+    const here = shape.polygons[s];
+    const next = shape.polygons[s + 1];
+    const zHere = shape.stations[s];
+    const zNext = shape.stations[s + 1];
+    if (
+      here === undefined ||
+      next === undefined ||
+      zHere === undefined ||
+      zNext === undefined
+    ) {
+      continue;
+    }
+    const count = here.length;
+    for (let i = 0; i < count; i += 1) {
+      const a = here[i];
+      const b = here[(i + 1) % count];
+      const aNext = next[i];
+      const bNext = next[(i + 1) % count];
+      if (
+        a === undefined ||
+        b === undefined ||
+        aNext === undefined ||
+        bNext === undefined
+      ) {
+        continue;
+      }
+      const aHere = world(a, zHere);
+      const bHere = world(b, zHere);
+      const bTop = world(bNext, zNext);
+      const aTop = world(aNext, zNext);
+      const quad: readonly Triangle[] = [
+        [aHere, bHere, bTop],
+        [aHere, bTop, aTop],
+      ];
+      for (const triangle of quad) {
+        if (distinct(triangle)) triangles.push(triangle);
+      }
+    }
+  }
+
+  const first = shape.polygons[0];
+  const last = shape.polygons[shape.polygons.length - 1];
+  const zFirst = shape.stations[0];
+  const zLast = shape.stations[shape.stations.length - 1];
+  if (
+    first !== undefined &&
+    last !== undefined &&
+    zFirst !== undefined &&
+    zLast !== undefined
+  ) {
+    for (const [polygon, z, flip] of [
+      [first, zFirst, true],
+      [last, zLast, false],
+    ] as const) {
+      const count = polygon.length;
+      for (let i = 1; i < count - 1; i += 1) {
+        const a = polygon[i];
+        const b = polygon[i + 1];
+        if (a === undefined || b === undefined) continue;
+        const apex = world(polygon[0] ?? a, z);
+        const fan: Triangle = flip
+          ? [apex, world(b, z), world(a, z)]
+          : [apex, world(a, z), world(b, z)];
+        if (distinct(fan)) triangles.push(fan);
+      }
+    }
+  }
+  return triangles;
+}
+
+/**
+ * One affine step on a leaf's path from its primitive mesh to world space:
+ * a translation (the `translate` node's) or a reflection (the Phase 26.9
+ * `mirror` node's). Translations alone commute, so they once folded into a
+ * single offset vector; a reflection composes with them ORDER-SENSITIVELY,
+ * so the leaf now carries its steps as an ordered chain, applied
+ * innermost-first (the array is ordered outermost-first, exactly the
+ * encounter order of the walk that built it).
+ */
+type LeafStep =
+  | { readonly kind: "shift"; readonly offset: Vec3 }
+  | {
+      readonly kind: "reflect";
+      readonly axis: Axis;
+      readonly planeOffset: number;
+    };
+
+/** A primitive leaf paired with the affine chain accumulated along its path. */
+interface Leaf {
+  readonly primitive:
+    | Primitive
+    | ExtrusionNode
+    | RevolutionNode
+    | SweepNode
+    | LoftNode
+    | FilletNode
+    | ChamferNode
+    | ShellNode;
+  readonly steps: readonly LeafStep[];
+}
+
+/** The extrusion leaf node type. */
+type ExtrusionNode = Extract<FakeShape, { kind: "extrusion" }>;
+
+function collectLeaves(
+  shape: FakeShape,
+  steps: readonly LeafStep[],
+  out: Leaf[],
+): void {
   switch (shape.kind) {
     case "box":
     case "sphere":
     case "cylinder":
     case "cone":
-      out.push({ primitive: shape, offset });
+    case "extrusion":
+    case "revolution":
+    case "sweep":
+    case "loft":
+    case "fillet":
+    case "chamfer":
+    case "shell":
+      out.push({ primitive: shape, steps });
       return;
     case "union":
-      for (const operand of shape.operands) collectLeaves(operand, offset, out);
+      for (const operand of shape.operands) collectLeaves(operand, steps, out);
       return;
     case "subtract":
-      collectLeaves(shape.target, offset, out);
-      for (const tool of shape.tools) collectLeaves(tool, offset, out);
+      collectLeaves(shape.target, steps, out);
+      for (const tool of shape.tools) collectLeaves(tool, steps, out);
       return;
     case "intersect":
-      for (const operand of shape.operands) collectLeaves(operand, offset, out);
+      for (const operand of shape.operands) collectLeaves(operand, steps, out);
       return;
     case "translate":
-      collectLeaves(shape.source, shifted(offset, shape.offset), out);
+      collectLeaves(
+        shape.source,
+        [...steps, { kind: "shift", offset: shape.offset }],
+        out,
+      );
+      return;
+    case "mirror":
+      collectLeaves(
+        shape.source,
+        [
+          ...steps,
+          { kind: "reflect", axis: shape.axis, planeOffset: shape.planeOffset },
+        ],
+        out,
+      );
       return;
   }
 }
@@ -552,9 +2759,34 @@ function shiftedTriangle(triangle: Triangle, offset: Vec3): Triangle {
 }
 
 /**
+ * The reflected triangle: corners flip on the plane's axis
+ * (`c → 2·planeOffset − c`) and the winding SWAPS — a reflection inverts
+ * orientation, so restoring the corner order restores the outward-facing
+ * winding (and with it the per-facet normal, which the tessellation
+ * derives from the winding).
+ */
+function reflectedTriangle(
+  triangle: Triangle,
+  axis: Axis,
+  planeOffset: number,
+): Triangle {
+  const flip = (point: Vec3): Vec3 => [
+    axis === 0 ? 2 * planeOffset - at(point, 0) : at(point, 0),
+    axis === 1 ? 2 * planeOffset - at(point, 1) : at(point, 1),
+    axis === 2 ? 2 * planeOffset - at(point, 2) : at(point, 2),
+  ];
+  return [
+    flip(cornerOf(triangle, 0)),
+    flip(cornerOf(triangle, 2)),
+    flip(cornerOf(triangle, 1)),
+  ];
+}
+
+/**
  * The final triangle list of a shape's tessellation: canonical primitive
- * meshes, exactly shifted by translations, and for booleans the filtered
- * leaf concatenation (empty when the boolean quantifies as empty).
+ * meshes, exactly shifted by translations and reflected by mirrors, and
+ * for booleans the filtered leaf concatenation (empty when the boolean
+ * quantifies as empty).
  */
 function renderTriangles(shape: FakeShape): readonly Triangle[] {
   switch (shape.kind) {
@@ -563,9 +2795,27 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
     case "cylinder":
     case "cone":
       return primitiveTriangles(shape);
+    case "extrusion":
+      return extrusionTriangles(shape);
+    case "revolution":
+      return revolutionTriangles(shape);
+    case "sweep":
+      return sweepTriangles(shape);
+    case "loft":
+      return loftTriangles(shape);
+    case "fillet":
+      return filletTriangles(shape);
+    case "chamfer":
+      return chamferTriangles(shape);
+    case "shell":
+      return shellTriangles(shape);
     case "translate":
       return renderTriangles(shape.source).map((triangle) =>
         shiftedTriangle(triangle, shape.offset),
+      );
+    case "mirror":
+      return renderTriangles(shape.source).map((triangle) =>
+        reflectedTriangle(triangle, shape.axis, shape.planeOffset),
       );
     default:
       break;
@@ -573,11 +2823,21 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
   if (voxelVolume(shape) === 0) return [];
   const bounds = shapeBounds(shape);
   const leaves: Leaf[] = [];
-  collectLeaves(shape, [0, 0, 0], leaves);
+  collectLeaves(shape, [], leaves);
   const kept: Triangle[] = [];
   for (const leaf of leaves) {
     for (const triangle of primitiveTriangles(leaf.primitive)) {
-      const candidate = shiftedTriangle(triangle, leaf.offset);
+      // Apply the leaf's affine chain innermost-first: the steps array is
+      // ordered outermost-first (the walk's encounter order), so reverse it.
+      let candidate = triangle;
+      for (let i = leaf.steps.length - 1; i >= 0; i -= 1) {
+        const step = leaf.steps[i];
+        if (step === undefined) continue;
+        candidate =
+          step.kind === "shift"
+            ? shiftedTriangle(candidate, step.offset)
+            : reflectedTriangle(candidate, step.axis, step.planeOffset);
+      }
       if (candidate.every((corner) => pointWithinBox(corner, bounds))) {
         kept.push(candidate);
       }
@@ -715,6 +2975,389 @@ export function createFakeKernel(): GeometryKernel {
     return ok(mm);
   };
 
+  /**
+   * Builds the fillet node (Phase 26.5): the documented subset, validated
+   * BEFORE anything is constructed — the target must be a pristine box
+   * leaf (the analytic corner-fillet model's honest domain; a filleted
+   * fillet, a boolean, or any other node shape declines structurally
+   * rather than approximating); the radius strictly positive; the edge
+   * list well formed and resolvable against the fake's own box-edge table;
+   * the selected edges parallel; the radius within every edge's adjacent
+   * faces; and the removed prism-quadrants pairwise disjoint. Anything
+   * past this battery is exact by construction.
+   */
+  const buildFillet = (input: FilletInput): KernelResult<KernelSolid> => {
+    const target = shapeOf(input.target, "fillet");
+    if (!target.ok) return fail(target.error);
+    if (target.value.kind !== "box") {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          `fillet rejected the target: the fake kernel's fillet domain is a pristine box leaf (the analytic corner-fillet model); this solid is a "${target.value.kind}". The general fillet reference kernel is the OpenCascade backend.`,
+        ),
+      );
+    }
+    const radius = positiveLength(input.radius, "radius", "fillet");
+    if (!radius.ok) return fail(radius.error);
+    const r = radius.value;
+    if (input.edges.length === 0) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.invalidOperands,
+          "fillet rejected the edge list: at least one edge ordinal is required.",
+        ),
+      );
+    }
+    const seen = new Set<number>();
+    for (const ordinal of input.edges) {
+      if (!Number.isInteger(ordinal) || ordinal < 0) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `fillet rejected edge ordinal ${String(ordinal)}: ordinals are non-negative integers (the kernel's box-edge table addresses).`,
+          ),
+        );
+      }
+      if (seen.has(ordinal)) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `fillet rejected the edge list: ordinal ${String(ordinal)} appears more than once.`,
+          ),
+        );
+      }
+      seen.add(ordinal);
+    }
+    const size = target.value.size;
+    const resolved = input.edges.map((ordinal) => {
+      const entry = FAKE_BOX_EDGE_TABLE[ordinal];
+      if (entry === undefined) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.filletEdgeUnknown,
+            `fillet rejected edge ordinal ${String(ordinal)}: it addresses no edge of the box (the fake kernel's box-edge table has ${String(FAKE_BOX_EDGE_TABLE.length)} entries).`,
+          ),
+        );
+      }
+      return ok(boxEdgeAt(size, ordinal));
+    });
+    if (resolved.some((edge) => !edge.ok)) {
+      const failure = resolved.find((edge) => !edge.ok);
+      if (failure !== undefined && !failure.ok) return failure;
+    }
+    const edges = resolved.flatMap((edge) => (edge.ok ? [edge.value] : []));
+    const axes = new Set(edges.map((edge) => edge.axis));
+    if (axes.size > 1) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "fillet rejected the edge selection: the fake kernel's fillet subset rounds one PARALLEL edge group per call; select edges that share their direction axis.",
+        ),
+      );
+    }
+    const u = edges[0]?.axis;
+    if (u === undefined) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.invalidOperands,
+          "Invariant violation: a non-empty validated edge list always carries an axis.",
+        ),
+      );
+    }
+    const a: Axis = u === 0 ? 1 : 0;
+    const b: Axis = u === 2 ? 1 : 2;
+    const sizeA = at(size, a);
+    const sizeB = at(size, b);
+    // Radius fit: on a box, every edge of a parallel group shares the same
+    // two cross-section extents, so one check covers the group.
+    if (r >= sizeA || r >= sizeB) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.filletFailed,
+          `fillet rejected radius ${String(r)} mm: it outruns a face adjacent to the selected edge (the cross-section extents are ${String(sizeA)} mm and ${String(sizeB)} mm). Reduce the radius.`,
+        ),
+      );
+    }
+    // Pairwise disjointness of the removed regions: every removed region
+    // lies inside its quadrant box (the two cross bands times the edge
+    // length), so disjoint quadrant boxes prove disjoint removals — and
+    // overlapping ones MAY still be disjoint but are refused rather than
+    // analysed (the OCCT reference fails interfering fillets the same way,
+    // probed as IsDone = false).
+    for (let i = 0; i < edges.length; i += 1) {
+      for (let j = i + 1; j < edges.length; j += 1) {
+        const first = edges[i];
+        const second = edges[j];
+        if (first === undefined || second === undefined) continue;
+        const bandOverlaps = (axis: Axis): boolean => {
+          const firstLow =
+            at(first.corner, axis) === 0 ? 0 : at(size, axis) - r;
+          const secondLow =
+            at(second.corner, axis) === 0 ? 0 : at(size, axis) - r;
+          return (
+            Math.min(firstLow + r, secondLow + r) -
+              Math.max(firstLow, secondLow) >
+            0
+          );
+        };
+        if (bandOverlaps(a) && bandOverlaps(b)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.filletFailed,
+              "fillet rejected the edge selection: two fillets' corner quadrants overlap (both cross-axis bands intersect), so the removed regions may interfere. Reduce the radius or select non-interfering edges.",
+            ),
+          );
+        }
+      }
+    }
+    return ok(tag.wrap({ kind: "fillet", size, edges, radius: r }));
+  };
+
+  /**
+   * Builds the chamfer node (Phase 26.6): the fillet subset's battery,
+   * verbatim, with the distance in the radius's place — the target must be
+   * a pristine box leaf (the analytic corner-prism model's honest domain; a
+   * chamfered chamfer, a boolean, or any other node shape declines
+   * structurally rather than approximating); the distance strictly
+   * positive; the edge list well formed and resolvable against the fake's
+   * own box-edge table; the selected edges parallel; the distance within
+   * every edge's adjacent faces; and the removed corner prisms pairwise
+   * disjoint. Anything past this battery is exact by construction.
+   */
+  const buildChamfer = (input: ChamferInput): KernelResult<KernelSolid> => {
+    const target = shapeOf(input.target, "chamfer");
+    if (!target.ok) return fail(target.error);
+    if (target.value.kind !== "box") {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          `chamfer rejected the target: the fake kernel's chamfer domain is a pristine box leaf (the analytic corner-prism model); this solid is a "${target.value.kind}". The general chamfer reference kernel is the OpenCascade backend.`,
+        ),
+      );
+    }
+    const distance = positiveLength(input.distance, "distance", "chamfer");
+    if (!distance.ok) return fail(distance.error);
+    const d = distance.value;
+    if (input.edges.length === 0) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.invalidOperands,
+          "chamfer rejected the edge list: at least one edge ordinal is required.",
+        ),
+      );
+    }
+    const seen = new Set<number>();
+    for (const ordinal of input.edges) {
+      if (!Number.isInteger(ordinal) || ordinal < 0) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `chamfer rejected edge ordinal ${String(ordinal)}: ordinals are non-negative integers (the kernel's box-edge table addresses).`,
+          ),
+        );
+      }
+      if (seen.has(ordinal)) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `chamfer rejected the edge list: ordinal ${String(ordinal)} appears more than once.`,
+          ),
+        );
+      }
+      seen.add(ordinal);
+    }
+    const size = target.value.size;
+    const resolved = input.edges.map((ordinal) => {
+      const entry = FAKE_BOX_EDGE_TABLE[ordinal];
+      if (entry === undefined) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.chamferEdgeUnknown,
+            `chamfer rejected edge ordinal ${String(ordinal)}: it addresses no edge of the box (the fake kernel's box-edge table has ${String(FAKE_BOX_EDGE_TABLE.length)} entries).`,
+          ),
+        );
+      }
+      return ok(boxEdgeAt(size, ordinal));
+    });
+    if (resolved.some((edge) => !edge.ok)) {
+      const failure = resolved.find((edge) => !edge.ok);
+      if (failure !== undefined && !failure.ok) return failure;
+    }
+    const edges = resolved.flatMap((edge) => (edge.ok ? [edge.value] : []));
+    const axes = new Set(edges.map((edge) => edge.axis));
+    if (axes.size > 1) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "chamfer rejected the edge selection: the fake kernel's chamfer subset bevels one PARALLEL edge group per call; select edges that share their direction axis.",
+        ),
+      );
+    }
+    const u = edges[0]?.axis;
+    if (u === undefined) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.invalidOperands,
+          "Invariant violation: a non-empty validated edge list always carries an axis.",
+        ),
+      );
+    }
+    const a: Axis = u === 0 ? 1 : 0;
+    const b: Axis = u === 2 ? 1 : 2;
+    const sizeA = at(size, a);
+    const sizeB = at(size, b);
+    // Distance fit: on a box, every edge of a parallel group shares the same
+    // two cross-section extents, so one check covers the group — and the
+    // edge's own length bounds nothing (probed against OCCT: a distance
+    // past the edge length still measures the exact corner prism).
+    if (d >= sizeA || d >= sizeB) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.chamferFailed,
+          `chamfer rejected distance ${String(d)} mm: it outruns a face adjacent to the selected edge (the cross-section extents are ${String(sizeA)} mm and ${String(sizeB)} mm). Reduce the distance.`,
+        ),
+      );
+    }
+    // Pairwise disjointness of the removed regions, the fillet rule with
+    // the prism's own containment box (the two cross bands times the edge
+    // length): disjoint band boxes prove disjoint removals — overlapping
+    // ones MAY still be disjoint but are refused rather than analysed (the
+    // OCCT reference declines interfering chamfers the same way, probed as
+    // IsDone = false).
+    for (let i = 0; i < edges.length; i += 1) {
+      for (let j = i + 1; j < edges.length; j += 1) {
+        const first = edges[i];
+        const second = edges[j];
+        if (first === undefined || second === undefined) continue;
+        const bandOverlaps = (axis: Axis): boolean => {
+          const firstLow =
+            at(first.corner, axis) === 0 ? 0 : at(size, axis) - d;
+          const secondLow =
+            at(second.corner, axis) === 0 ? 0 : at(size, axis) - d;
+          return (
+            Math.min(firstLow + d, secondLow + d) -
+              Math.max(firstLow, secondLow) >
+            0
+          );
+        };
+        if (bandOverlaps(a) && bandOverlaps(b)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.chamferFailed,
+              "chamfer rejected the edge selection: two chamfers' corner prisms overlap (both cross-axis bands intersect), so the removed regions may interfere. Reduce the distance or select non-interfering edges.",
+            ),
+          );
+        }
+      }
+    }
+    return ok(tag.wrap({ kind: "chamfer", size, edges, distance: d }));
+  };
+
+  /**
+   * Builds the shell node (Phase 26.7): the documented single-face subset,
+   * validated BEFORE anything is constructed — the target must be a
+   * pristine box leaf (the analytic open-box model's honest domain; a
+   * shelled shell, a boolean, or any other node shape declines
+   * structurally rather than approximating); the thickness strictly
+   * positive; the face list well formed and carrying EXACTLY ONE ordinal
+   * resolvable against the fake's own box-face table (the two-face cavity
+   * of the general operation declines with the structured unsupported
+   * code — the reference kernel for it is the OpenCascade backend); and
+   * the cavity non-degenerate (the thickness clears both cross extents by
+   * a factor of two and the open axis by one). Anything past this battery
+   * is exact by construction.
+   */
+  const buildShell = (input: ShellInput): KernelResult<KernelSolid> => {
+    const target = shapeOf(input.target, "shell");
+    if (!target.ok) return fail(target.error);
+    if (target.value.kind !== "box") {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          `shell rejected the target: the fake kernel's shell domain is a pristine box leaf (the analytic open-box model); this solid is a "${target.value.kind}". The general shell reference kernel is the OpenCascade backend.`,
+        ),
+      );
+    }
+    const thickness = positiveLength(input.thickness, "thickness", "shell");
+    if (!thickness.ok) return fail(thickness.error);
+    const t = thickness.value;
+    for (const ordinal of input.faces) {
+      if (!Number.isInteger(ordinal) || ordinal < 0) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `shell rejected face ordinal ${String(ordinal)}: ordinals are non-negative integers (the kernel's box-face table addresses).`,
+          ),
+        );
+      }
+    }
+    const seenFaces = new Set<number>();
+    for (const ordinal of input.faces) {
+      if (seenFaces.has(ordinal)) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidOperands,
+            `shell rejected the face list: ordinal ${String(ordinal)} appears more than once.`,
+          ),
+        );
+      }
+      seenFaces.add(ordinal);
+    }
+    if (input.faces.length === 0) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.invalidOperands,
+          "shell rejected the face list: at least one face ordinal is required (the open hollow shell; the fully closed hollow is out of contract scope).",
+        ),
+      );
+    }
+    if (input.faces.length > 1) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "shell rejected the face selection: the fake kernel's shell subset opens ONE face per call; the general multi-face shell reference kernel is the OpenCascade backend.",
+        ),
+      );
+    }
+    const ordinal = input.faces[0];
+    const entry =
+      ordinal === undefined ? undefined : FAKE_BOX_FACE_TABLE[ordinal];
+    if (entry === undefined) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.shellFaceUnknown,
+          `shell rejected face ordinal ${String(ordinal)}: it addresses no face of the box (the fake kernel's box-face table has ${String(FAKE_BOX_FACE_TABLE.length)} entries).`,
+        ),
+      );
+    }
+    const size = target.value.size;
+    const u = entry.axis;
+    const a: Axis = u === 0 ? 1 : 0;
+    const b: Axis = u === 2 ? 1 : 2;
+    // Cavity fit: the inset cavity must be non-degenerate — strictly
+    // inside both cross extents (walls of thickness t on BOTH sides) and
+    // strictly short of the removed side along its own axis. At or past
+    // either boundary the walls meet and the hollow is gone, the same
+    // structured refusal the OCCT reference's post-condition gives its
+    // engine's silently-degenerate answers.
+    if (2 * t >= at(size, a) || 2 * t >= at(size, b) || t >= at(size, u)) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.shellFailed,
+          `shell rejected thickness ${String(t)} mm: the walls meet or cross before the removed face is reached (the cross extents are ${String(at(size, a))} mm and ${String(at(size, b))} mm, the open axis extent ${String(at(size, u))} mm). Reduce the thickness.`,
+        ),
+      );
+    }
+    return ok(
+      tag.wrap({
+        kind: "shell",
+        size,
+        face: { axis: u, high: entry.high },
+        thickness: t,
+      }),
+    );
+  };
+
   const operandsOf = (
     solids: readonly KernelSolid[],
     minimum: number,
@@ -830,6 +3473,506 @@ export function createFakeKernel(): GeometryKernel {
       return ok(tag.wrap({ kind: "intersect", operands: shapes.value }));
     },
 
+    extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
+      // The whole construction runs inside the no-throw boundary: validation
+      // failures return structured codes, and a dynamically-parsed
+      // non-finite value (which makes valueIn throw) normalizes into
+      // kernel/invalid-profile like any other degenerate profile input.
+      try {
+        const height = valueIn(input.height, "mm");
+        if (!(height > 0)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              `extrude rejected height ${height} mm: it must be strictly positive.`,
+            ),
+          );
+        }
+        const angle = valueIn(input.placement.rotation.angle, "rad");
+        if (!Number.isFinite(angle)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "extrude rejected the placement rotation: its angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const axis = input.placement.rotation.axis;
+        const axisSquared =
+          axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+        if (
+          !Number.isFinite(axisSquared) ||
+          axisSquared === 0 ||
+          !Number.isFinite(axis[0]) ||
+          !Number.isFinite(axis[1]) ||
+          !Number.isFinite(axis[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `extrude rejected a rotation about [${String(axis[0])}, ${String(axis[1])}, ${String(axis[2])}]: the axis must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const translation: Vec3 = [
+          valueIn(input.placement.translation.x, "mm"),
+          valueIn(input.placement.translation.y, "mm"),
+          valueIn(input.placement.translation.z, "mm"),
+        ];
+        if (
+          !translation.every((component) => Number.isFinite(component)) ||
+          !Number.isFinite(angle)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "extrude rejected the placement translation: components must be finite lengths.",
+            ),
+          );
+        }
+        // Per-segment degeneracy checks plus pairwise closure: the shared
+        // contract-scope validator (the same probe the Manifold, JSCAD, and
+        // OCCT adapters run before their geometry), not a local
+        // re-implementation — empty loop, zero-length lines, non-positive
+        // radii, zero-sweep arcs, non-finite fields, and consecutive
+        // segment (and last-to-first) endpoint gaps.
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `extrude rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        const polygon = tessellateProfileLoop(input.loop);
+        if (polygon.length < 3) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "extrude rejected the profile loop: a face needs at least three distinct boundary vertices.",
+            ),
+          );
+        }
+        const area = polygonSignedArea(polygon);
+        if (!(Math.abs(area) > 1e-9)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "extrude rejected the profile loop: its boundary encloses no area.",
+            ),
+          );
+        }
+        const ccw = area > 0 ? polygon : [...polygon].reverse();
+        const rotation = axisAngleMatrix(axis, angle);
+        return ok(
+          tag.wrap({
+            kind: "extrusion",
+            polygon: ccw,
+            height,
+            baseZ: input.direction === -1 ? -height : 0,
+            rotation,
+            translation,
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidProfile,
+            `extrude rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    revolve(input: ProfileRevolveInput): KernelResult<KernelSolid> {
+      // The same no-throw discipline as extrude: structured codes for every
+      // degenerate input, shared validators before any shape is built.
+      try {
+        const sweep = valueIn(input.angle, "rad");
+        if (!Number.isFinite(sweep)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "revolve rejected the sweep angle: its magnitude is not a finite number.",
+            ),
+          );
+        }
+        if (!(sweep > 0) || sweep > Math.PI * 2) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidSweepAngle,
+              `revolve rejected sweep angle ${String(sweep)} rad: the domain is (0, 2π] — zero sweeps no material, beyond a full turn double-covers it.`,
+            ),
+          );
+        }
+        const frame = normalizeRevolveAxis(input.axis);
+        if (frame === null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `revolve rejected an axis through [${String(input.axis.point[0])}, ${String(input.axis.point[1])}] along [${String(input.axis.direction[0])}, ${String(input.axis.direction[1])}]: the direction must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const angle = valueIn(input.placement.rotation.angle, "rad");
+        if (!Number.isFinite(angle)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "revolve rejected the placement rotation: its angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const axis = input.placement.rotation.axis;
+        const axisSquared =
+          axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+        if (
+          !Number.isFinite(axisSquared) ||
+          axisSquared === 0 ||
+          !Number.isFinite(axis[0]) ||
+          !Number.isFinite(axis[1]) ||
+          !Number.isFinite(axis[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `revolve rejected a rotation about [${String(axis[0])}, ${String(axis[1])}, ${String(axis[2])}]: the axis must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const translation: Vec3 = [
+          valueIn(input.placement.translation.x, "mm"),
+          valueIn(input.placement.translation.y, "mm"),
+          valueIn(input.placement.translation.z, "mm"),
+        ];
+        if (!translation.every((component) => Number.isFinite(component))) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "revolve rejected the placement translation: components must be finite lengths.",
+            ),
+          );
+        }
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `revolve rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        // The axis-validation core (Phase 26.2): the profile must not CROSS
+        // the revolve axis — material strictly on both sides is rejected
+        // with the structured crossing code before any geometry exists
+        // (touching is legal and documented; the mesh engines would
+        // otherwise silently clip or cap the far side).
+        if (revolveCrossesAxis(input.loop, frame)) {
+          const extremes = revolveSignedExtremes(input.loop, frame);
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.profileAxisCrossing,
+              `revolve rejected the profile loop: it crosses the revolve axis (signed distances span [${extremes.min}, ${extremes.max}] mm). Move the profile fully to one side; touching the axis is allowed.`,
+            ),
+          );
+        }
+        const polygon = tessellateRevolveProfile(input.loop, frame);
+        if (polygon.length < 3) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "revolve rejected the profile loop: a face needs at least three distinct boundary vertices.",
+            ),
+          );
+        }
+        if (!(Math.abs(polygonSignedArea(polygon)) > 1e-9)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "revolve rejected the profile loop: its boundary encloses no area.",
+            ),
+          );
+        }
+        // Normalize the polygon CCW so the mesh winding is uniform.
+        const ccw =
+          polygonSignedArea(polygon) > 0 ? polygon : [...polygon].reverse();
+        const volume = revolvePappusVolume(ccw, sweep);
+        if (!(volume > 1e-9)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "revolve rejected the profile loop: it encloses no material away from the axis, so the sweep has zero volume.",
+            ),
+          );
+        }
+        const positiveSide = Math.min(...ccw.map((vertex) => vertex.y)) >= 0;
+        return ok(
+          tag.wrap({
+            kind: "revolution",
+            polygon: ccw,
+            sweep,
+            positiveSide,
+            origin: [frame.origin.x, frame.origin.y, 0],
+            u: [frame.u.x, frame.u.y, 0],
+            v: [frame.v.x, frame.v.y, 0],
+            rotation: axisAngleMatrix(axis, angle),
+            translation,
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidProfile,
+            `revolve rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {
+      // The same no-throw discipline as extrude and revolve: shared
+      // validators before any geometry, structured codes for every
+      // degenerate input.
+      try {
+        const angle = valueIn(input.placement.rotation.angle, "rad");
+        if (!Number.isFinite(angle)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "sweep rejected the placement rotation: its angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const rotationAxis = input.placement.rotation.axis;
+        const axisSquared =
+          rotationAxis[0] * rotationAxis[0] +
+          rotationAxis[1] * rotationAxis[1] +
+          rotationAxis[2] * rotationAxis[2];
+        if (
+          !Number.isFinite(axisSquared) ||
+          axisSquared === 0 ||
+          !Number.isFinite(rotationAxis[0]) ||
+          !Number.isFinite(rotationAxis[1]) ||
+          !Number.isFinite(rotationAxis[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `sweep rejected a rotation about [${String(rotationAxis[0])}, ${String(rotationAxis[1])}, ${String(rotationAxis[2])}]: the axis must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const translation: Vec3 = [
+          valueIn(input.placement.translation.x, "mm"),
+          valueIn(input.placement.translation.y, "mm"),
+          valueIn(input.placement.translation.z, "mm"),
+        ];
+        if (!translation.every((component) => Number.isFinite(component))) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "sweep rejected the placement translation: components must be finite lengths.",
+            ),
+          );
+        }
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweep rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        const polygon = tessellateProfileLoop(input.loop);
+        const area = polygonSignedArea(polygon);
+        if (polygon.length < 3 || !(Math.abs(area) > 1e-9)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "sweep rejected the profile loop: it is degenerate (fewer than three distinct boundary vertices or no enclosed area).",
+            ),
+          );
+        }
+        // The 26.3 path battery, before any geometry: structure (start at
+        // the origin, perpendicular attachment, G1 joints), then the
+        // chord-polyline self-intersection, then the per-arc axis
+        // crossing — the cheap exact detections the contract promises.
+        const pathProblem = sweepPathProblem(input.path);
+        if (pathProblem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidPath,
+              `sweep rejected the path: ${pathProblem}.`,
+            ),
+          );
+        }
+        if (sweepPathSelfIntersects(input.path)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.pathSelfIntersecting,
+              "sweep rejected the path: it crosses itself (detected on the path's chord polyline). A self-crossing spine sweeps an undefined solid.",
+            ),
+          );
+        }
+        const crossing = sweepProfileArcAxisCrossing(input.loop, input.path);
+        if (crossing !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sweepSelfIntersecting,
+              `sweep rejected the input: the profile crosses an arc segment's centre axis at u = ${String(crossing.uAxis)} mm (signed distances span [${String(crossing.min)}, ${String(crossing.max)}]) — the tube would pinch through the bend. Move the profile fully to one side of every bend axis; touching is allowed.`,
+            ),
+          );
+        }
+        const ccw = area > 0 ? polygon : [...polygon].reverse();
+        return ok(
+          tag.wrap({
+            kind: "sweep",
+            polygon: ccw,
+            pieces: decomposeSweepPath(input.path),
+            closed: sweepPathClosed(input.path),
+            rotation: axisAngleMatrix(rotationAxis, angle),
+            translation,
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidProfile,
+            `sweep rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    loft(input: ProfileLoftInput): KernelResult<KernelSolid> {
+      // The same no-throw discipline as the other profile ops: placement
+      // validation, then the shared 26.4 collection battery — member
+      // validity, station ordering, vertex-count compatibility — before
+      // any shape is built.
+      try {
+        const angle = valueIn(input.placement.rotation.angle, "rad");
+        if (!Number.isFinite(angle)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "loft rejected the placement rotation: its angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const rotationAxis = input.placement.rotation.axis;
+        const axisSquared =
+          rotationAxis[0] * rotationAxis[0] +
+          rotationAxis[1] * rotationAxis[1] +
+          rotationAxis[2] * rotationAxis[2];
+        if (
+          !Number.isFinite(axisSquared) ||
+          axisSquared === 0 ||
+          !Number.isFinite(rotationAxis[0]) ||
+          !Number.isFinite(rotationAxis[1]) ||
+          !Number.isFinite(rotationAxis[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `loft rejected a rotation about [${String(rotationAxis[0])}, ${String(rotationAxis[1])}, ${String(rotationAxis[2])}]: the axis must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const translation: Vec3 = [
+          valueIn(input.placement.translation.x, "mm"),
+          valueIn(input.placement.translation.y, "mm"),
+          valueIn(input.placement.translation.z, "mm"),
+        ];
+        if (!translation.every((component) => Number.isFinite(component))) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "loft rejected the placement translation: components must be finite lengths.",
+            ),
+          );
+        }
+        const problem = loftSectionsProblem(input.sections);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              problem.code,
+              `loft rejected the section collection: ${problem.message}.`,
+            ),
+          );
+        }
+        return ok(
+          tag.wrap({
+            kind: "loft",
+            polygons: loftSectionPolygons(input.sections),
+            stations: loftStations(input.sections),
+            rotation: axisAngleMatrix(rotationAxis, angle),
+            translation,
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidProfile,
+            `loft rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    fillet(input: FilletInput): KernelResult<KernelSolid> {
+      // The throwing seam is only the radius's valueIn parse (non-finite
+      // magnitudes); everything else returns structured failures.
+      try {
+        return buildFillet(input);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `fillet rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    chamfer(input: ChamferInput): KernelResult<KernelSolid> {
+      // The throwing seam is only the distance's valueIn parse (non-finite
+      // magnitudes); everything else returns structured failures.
+      try {
+        return buildChamfer(input);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `chamfer rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    shell(input: ShellInput): KernelResult<KernelSolid> {
+      // The throwing seam is only the thickness's valueIn parse (non-finite
+      // magnitudes); everything else returns structured failures.
+      try {
+        return buildShell(input);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `shell rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
     transform(
       solid: KernelSolid,
       input: TransformInput,
@@ -850,6 +3993,35 @@ export function createFakeKernel(): GeometryKernel {
         valueIn(input.z, "mm"),
       ];
       return ok(tag.wrap({ kind: "translate", source: shape.value, offset }));
+    },
+
+    mirror(solid: KernelSolid, input: MirrorInput): KernelResult<KernelSolid> {
+      // The same discipline as transform: the throwing seam is only the
+      // offset's valueIn parse (non-finite magnitudes), normalized into
+      // the invalid-length failure every degenerate mirror input shares.
+      // Unlike transform's translation, EVERY finite offset is a legal
+      // plane position — zero and negative offsets are good mirrors.
+      try {
+        const shape = shapeOf(solid, "mirror");
+        if (!shape.ok) return fail(shape.error);
+        const planeOffset = valueIn(input.offset, "mm");
+        return ok(
+          tag.wrap({
+            kind: "mirror",
+            source: shape.value,
+            axis: input.axis === "x" ? 0 : input.axis === "y" ? 1 : 2,
+            planeOffset,
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `mirror rejected its input: ${detail}`,
+          ),
+        );
+      }
     },
 
     bounds(solid: KernelSolid): KernelResult<KernelBounds> {

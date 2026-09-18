@@ -82,12 +82,14 @@ import {
   BREP_IMPORT_UNSUPPORTED_CODE,
   STEP_EXPORT_UNSUPPORTED_CODE,
   STEP_IMPORT_UNSUPPORTED_CODE,
+  TOPOLOGY_UNSUPPORTED_CODE,
   type WorkerBrepExporter,
   type WorkerBrepImporter,
   type WorkerImportedBrepSolidRef,
   type WorkerImportedSolidRef,
   type WorkerStepExporter,
   type WorkerStepImporter,
+  type WorkerTopologyReporter,
 } from "./worker-operations";
 
 /** The operations whose success mints a new session solid. */
@@ -96,10 +98,16 @@ type SolidProducingOperation =
   | "solid.createSphere"
   | "solid.createCylinder"
   | "solid.createCone"
+  | "solid.extrude"
+  | "solid.revolve"
   | "solid.union"
   | "solid.subtract"
   | "solid.intersect"
-  | "solid.transform";
+  | "solid.transform"
+  | "solid.fillet"
+  | "solid.chamfer"
+  | "solid.shell"
+  | "solid.mirror";
 
 /** What executing a request produced, before the ledger decides delivery. */
 type ExecutionOutcome =
@@ -168,6 +176,14 @@ export interface WorkerServerOptions {
    * `brep-export/unsupported` failure.
    */
   readonly brepExport?: WorkerBrepExporter;
+  /**
+   * The optional `solid.topology` execution surface (the Phase 26.5
+   * vocabulary extension): one owned kernel solid plus its labeling context
+   * in, the kernel-neutral topology snapshot out — the edge-picking layer's
+   * data source. A server without the extension answers `solid.topology`
+   * with the structured `topology/unsupported` failure.
+   */
+  readonly topology?: WorkerTopologyReporter;
 }
 
 /** A hosted kernel: subscribed to its transport until closed. */
@@ -178,8 +194,15 @@ export interface WorkerServer {
 
 /** Hosts `options.kernel` as a worker-protocol responder on its transport. */
 export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
-  const { kernel, transport, stepImport, stepExport, brepImport, brepExport } =
-    options;
+  const {
+    kernel,
+    transport,
+    stepImport,
+    stepExport,
+    brepImport,
+    brepExport,
+    topology,
+  } = options;
   const ids = options.ids ?? createWorkerIdGenerator();
   const ledger = options.ledger ?? createWorkerCancellationLedger();
   const solids = new Map<WorkerSolidId, KernelSolid>();
@@ -301,6 +324,32 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             : {
                 status: "failed",
                 error: kernelFailure("solid.createCone", result.error),
+              };
+        }
+        case "solid.extrude": {
+          const result = kernel.extrude(request.input);
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.extrude",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.extrude", result.error),
+              };
+        }
+        case "solid.revolve": {
+          const result = kernel.revolve(request.input);
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.revolve",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.revolve", result.error),
               };
         }
         case "solid.union": {
@@ -484,6 +533,151 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
               "solid.dispose",
               null,
             ),
+          };
+        }
+        case "solid.fillet": {
+          // The Phase 26.5 contract op, translated like its siblings: the
+          // target resolves against the session map, the edges ride as
+          // snapshot ordinals, and the kernel's own structured codes
+          // (unknown ordinal, radius failure, unsupported engine) cross
+          // back as `worker/operation-failed` data.
+          const solid = ownedSolid("solid.fillet", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.fillet({
+            target: solid.handle,
+            edges: request.input.edges,
+            radius: request.input.radius,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.fillet",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.fillet", result.error),
+              };
+        }
+        case "solid.chamfer": {
+          // The Phase 26.6 contract op — the fillet dispatch verbatim, with
+          // the symmetric distance in the radius's place: the kernel's own
+          // structured codes (unknown ordinal, distance failure,
+          // unsupported engine) cross back as `worker/operation-failed`
+          // data.
+          const solid = ownedSolid("solid.chamfer", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.chamfer({
+            target: solid.handle,
+            edges: request.input.edges,
+            distance: request.input.distance,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.chamfer",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.chamfer", result.error),
+              };
+        }
+        case "solid.shell": {
+          // The Phase 26.7 contract op — the edge-cut dispatch on the FACE
+          // address: the target resolves against the session map, the
+          // faces ride as snapshot ordinals, and the kernel's own
+          // structured codes (unknown ordinal, thickness failure,
+          // unsupported engine) cross back as `worker/operation-failed`
+          // data.
+          const solid = ownedSolid("solid.shell", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.shell({
+            target: solid.handle,
+            faces: request.input.faces,
+            thickness: request.input.thickness,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.shell",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.shell", result.error),
+              };
+        }
+        case "solid.mirror": {
+          // The Phase 26.9 contract op — the transform dispatch's
+          // reflection sibling: the target resolves against the session
+          // map, the world axis plane rides as its normal-axis literal
+          // plus offset, and the kernel's own structured codes (foreign
+          // handle, non-finite offset, unsupported engine) cross back as
+          // `worker/operation-failed` data.
+          const solid = ownedSolid("solid.mirror", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.mirror(solid.handle, {
+            axis: request.input.axis,
+            offset: request.input.offset,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.mirror",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.mirror", result.error),
+              };
+        }
+        case "solid.topology": {
+          // The vocabulary's topology extension: executed through the
+          // hosting extension when one exists (only a persistent-topology
+          // kernel can report snapshots), and structurally unsupported
+          // otherwise — the same honesty as the exchange extensions above.
+          if (topology === undefined) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                'The "solid.topology" operation has no topology reporter on this hosted kernel; topology snapshots are an optional backend capability.',
+                { kernelCode: TOPOLOGY_UNSUPPORTED_CODE },
+              ),
+            };
+          }
+          const solid = ownedSolid("solid.topology", request.input.solid);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const reported = topology(solid.handle, {
+            bodyId: request.input.bodyId,
+            regeneration: request.input.regeneration,
+          });
+          if (!reported.ok) {
+            return {
+              status: "failed",
+              error: workerError(
+                WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                `The "solid.topology" operation failed: ${reported.error.message}`,
+                { kernelCode: reported.error.code },
+              ),
+            };
+          }
+          return {
+            status: "value",
+            response: createWorkerSuccessResponse(requestId, "solid.topology", {
+              snapshot: reported.value,
+            }),
           };
         }
         case "step.import": {

@@ -82,7 +82,10 @@ async function readStepExportSurface(page: Page): Promise<StepExportSurface> {
 /** Fetches the held export's download blob — the exact exported bytes. */
 async function fetchHeldStepBytes(page: Page): Promise<Buffer> {
   const href = await page.locator("#io-download-step").getAttribute("href");
-  expect(href, "the held STEP export must expose its download anchor").toBeTruthy();
+  expect(
+    href,
+    "the held STEP export must expose its download anchor",
+  ).toBeTruthy();
   return Buffer.from(
     await page.evaluate(async (url) => {
       const response = await fetch(url);
@@ -111,7 +114,8 @@ async function exportRoundTrip(
   await page.waitForFunction(() => {
     const root = document.getElementById("io-root");
     return (
-      root !== null && (root.getAttribute("data-export-step-bytes") ?? "") !== ""
+      root !== null &&
+      (root.getAttribute("data-export-step-bytes") ?? "") !== ""
     );
   });
   const exportSurface = await readStepExportSurface(page);

@@ -22,5 +22,27 @@ describe("occt kernel contract", () => {
     runtime = await createOcctRuntime();
   });
 
-  defineKernelContractSuite(() => occtKernelFromRuntime(runtime), "opencascade");
+  defineKernelContractSuite(
+    () => occtKernelFromRuntime(runtime),
+    "opencascade",
+    {
+      // OCCT's box-edge snapshot ordinals (probed against the kernel's own
+      // exploration): ordinals 0 and 2 are disjoint vertical edges of the
+      // fixture box (corners (0,0) and (0,20) — their removed regions do not
+      // interact) — the pair fillet/chamfer measures the analytic disjoint
+      // sum.
+      fillet: {
+        cornerEdge: [0],
+        oppositeEdges: [0, 2],
+      },
+      chamfer: {
+        cornerEdge: [0],
+        oppositeEdges: [0, 2],
+      },
+      // OCCT's box-face snapshot ordinals (probed against the kernel's own
+      // exploration): ordinal 5 is the fixture box's top face — the z-high
+      // 10 mm-extent opening the shell fixtures require.
+      shell: { openFace: 5 },
+    },
+  );
 });

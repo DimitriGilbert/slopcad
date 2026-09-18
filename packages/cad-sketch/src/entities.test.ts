@@ -42,21 +42,40 @@ describe("entity builders", () => {
   });
 
   it("builds a line, circle, and arc with options", () => {
-    const line = createLineEntity(id("skent_l"), { x: 0, y: 0 }, { x: 1, y: 1 }, {
-      construction: true,
-    });
+    const line = createLineEntity(
+      id("skent_l"),
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      {
+        construction: true,
+      },
+    );
     expect(line.construction).toBe(true);
     expect(line.fixed).toBe(false);
-    const circle = createCircleEntity(id("skent_c"), { x: 3, y: 4 }, 5, { fixed: true });
+    const circle = createCircleEntity(id("skent_c"), { x: 3, y: 4 }, 5, {
+      fixed: true,
+    });
     expect(circle.fixed).toBe(true);
-    const arc = createArcEntity(id("skent_a"), { x: 0, y: 0 }, 2, Math.PI / 2, Math.PI);
+    const arc = createArcEntity(
+      id("skent_a"),
+      { x: 0, y: 0 },
+      2,
+      Math.PI / 2,
+      Math.PI,
+    );
     expect(arc.startAngle).toBeCloseTo(Math.PI / 2, 15);
     expect(arc.endAngle).toBeCloseTo(Math.PI, 15);
     expect(arcSweep(arc)).toBeCloseTo(Math.PI / 2, 15);
   });
 
   it("canonicalizes arc angles into [0, 2π) and wraps negative sweeps", () => {
-    const arc = createArcEntity(id("skent_a"), { x: 0, y: 0 }, 1, -Math.PI / 2, Math.PI / 2);
+    const arc = createArcEntity(
+      id("skent_a"),
+      { x: 0, y: 0 },
+      1,
+      -Math.PI / 2,
+      Math.PI / 2,
+    );
     expect(arc.startAngle).toBeCloseTo((3 * Math.PI) / 2, 15);
     expect(arc.endAngle).toBeCloseTo(Math.PI / 2, 15);
     expect(arcSweep(arc)).toBeCloseTo(Math.PI, 15);
@@ -91,7 +110,13 @@ describe("entity builders", () => {
 
   it("rejects a zero/full-turn arc sweep", () => {
     expect(() =>
-      createArcEntity(id("skent_a"), { x: 0, y: 0 }, 1, 0.75, 0.75 + 2 * Math.PI),
+      createArcEntity(
+        id("skent_a"),
+        { x: 0, y: 0 },
+        1,
+        0.75,
+        0.75 + 2 * Math.PI,
+      ),
     ).toThrow(SketchEntityValidationError);
   });
 
@@ -103,7 +128,13 @@ describe("entity builders", () => {
   });
 
   it("exposes the entity kind list and type guard", () => {
-    expect(SKETCH_ENTITY_KINDS).toEqual(["point", "line", "circle", "arc", "rectangle"]);
+    expect(SKETCH_ENTITY_KINDS).toEqual([
+      "point",
+      "line",
+      "circle",
+      "arc",
+      "rectangle",
+    ]);
     expect(isSketchEntityKind("arc")).toBe(true);
     expect(isSketchEntityKind("ellipse")).toBe(false);
   });
@@ -118,32 +149,48 @@ describe("entity serialization", () => {
     );
     expectRoundTrip(createPointEntity(id("skent_p"), { x: 1.5, y: -2 }));
     expectRoundTrip(
-      createLineEntity(id("skent_l"), { x: 0, y: 0 }, { x: 4, y: 3 }, { fixed: true }),
+      createLineEntity(
+        id("skent_l"),
+        { x: 0, y: 0 },
+        { x: 4, y: 3 },
+        { fixed: true },
+      ),
     );
     expectRoundTrip(createCircleEntity(id("skent_c"), { x: -1, y: 2 }, 7.5));
     expectRoundTrip(
-      createArcEntity(id("skent_a"), { x: 2, y: 2 }, 3, 0.5, 2.5, { construction: true }),
+      createArcEntity(id("skent_a"), { x: 2, y: 2 }, 3, 0.5, 2.5, {
+        construction: true,
+      }),
     );
     expectRoundTrip(rect);
   });
 
   it("emits fixed key order per kind", () => {
-    expect(Object.keys(serializeSketchEntity(createPointEntity(id("skent_p"), { x: 0, y: 0 })))).toEqual([
-      "id",
-      "kind",
-      "construction",
-      "fixed",
-      "x",
-      "y",
-    ]);
     expect(
-      Object.keys(serializeSketchEntity(createLineEntity(id("skent_l"), { x: 0, y: 0 }, { x: 1, y: 1 }))),
+      Object.keys(
+        serializeSketchEntity(createPointEntity(id("skent_p"), { x: 0, y: 0 })),
+      ),
+    ).toEqual(["id", "kind", "construction", "fixed", "x", "y"]);
+    expect(
+      Object.keys(
+        serializeSketchEntity(
+          createLineEntity(id("skent_l"), { x: 0, y: 0 }, { x: 1, y: 1 }),
+        ),
+      ),
     ).toEqual(["id", "kind", "construction", "fixed", "x1", "y1", "x2", "y2"]);
     expect(
-      Object.keys(serializeSketchEntity(createCircleEntity(id("skent_c"), { x: 0, y: 0 }, 1))),
+      Object.keys(
+        serializeSketchEntity(
+          createCircleEntity(id("skent_c"), { x: 0, y: 0 }, 1),
+        ),
+      ),
     ).toEqual(["id", "kind", "construction", "fixed", "cx", "cy", "radius"]);
     expect(
-      Object.keys(serializeSketchEntity(createArcEntity(id("skent_a"), { x: 0, y: 0 }, 1, 0, 1))),
+      Object.keys(
+        serializeSketchEntity(
+          createArcEntity(id("skent_a"), { x: 0, y: 0 }, 1, 0, 1),
+        ),
+      ),
     ).toEqual([
       "id",
       "kind",
@@ -162,10 +209,20 @@ describe("entity serialization", () => {
     expect(!unknownKind.ok && unknownKind.error.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.entityUnknownKind,
     );
-    expect(!parseSketchEntity({ id: "nope", kind: "point", x: 0, y: 0 }).ok).toBe(true);
-    expect(!parseSketchEntity({ id: "skent_p", kind: "point", x: "3", y: 0 }).ok).toBe(true);
     expect(
-      !parseSketchEntity({ id: "skent_c", kind: "circle", cx: 0, cy: 0, radius: -1 }).ok,
+      !parseSketchEntity({ id: "nope", kind: "point", x: 0, y: 0 }).ok,
+    ).toBe(true);
+    expect(
+      !parseSketchEntity({ id: "skent_p", kind: "point", x: "3", y: 0 }).ok,
+    ).toBe(true);
+    expect(
+      !parseSketchEntity({
+        id: "skent_c",
+        kind: "circle",
+        cx: 0,
+        cy: 0,
+        radius: -1,
+      }).ok,
     ).toBe(true);
     expect(
       !parseSketchEntity({
@@ -176,8 +233,15 @@ describe("entity serialization", () => {
     ).toBe(true);
     expect(!parseSketchEntity(null).ok).toBe(true);
     expect(
-      !parseSketchEntity({ id: "skent_a", kind: "arc", cx: 0, cy: 0, radius: 1, startAngle: 1, endAngle: 1 })
-        .ok,
+      !parseSketchEntity({
+        id: "skent_a",
+        kind: "arc",
+        cx: 0,
+        cy: 0,
+        radius: 1,
+        startAngle: 1,
+        endAngle: 1,
+      }).ok,
     ).toBe(true);
   });
 
@@ -191,9 +255,15 @@ describe("entity serialization", () => {
     });
     expect(parsed.ok && parsed.value.construction).toBe(false);
     expect(parsed.ok && parsed.value.fixed).toBe(false);
-    expect(!parseSketchEntity({ id: "skent_p", kind: "point", x: 1, y: 2, fixed: "yes" }).ok).toBe(
-      true,
-    );
+    expect(
+      !parseSketchEntity({
+        id: "skent_p",
+        kind: "point",
+        x: 1,
+        y: 2,
+        fixed: "yes",
+      }).ok,
+    ).toBe(true);
   });
 
   it("adopts stored arc angles verbatim so round-trips stay exact", () => {
@@ -209,6 +279,8 @@ describe("entity serialization", () => {
     expect(
       parsed.ok && parsed.value.kind === "arc" && parsed.value.startAngle,
     ).toBe(4.5);
-    expect(parsed.ok && parsed.value.kind === "arc" && parsed.value.endAngle).toBe(6.0);
+    expect(
+      parsed.ok && parsed.value.kind === "arc" && parsed.value.endAngle,
+    ).toBe(6.0);
   });
 });

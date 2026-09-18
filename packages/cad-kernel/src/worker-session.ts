@@ -21,7 +21,6 @@ import { createWorkerIdGenerator } from "./worker-ids";
 import { createWorkerServer } from "./worker-server";
 import { createInMemoryTransportPair } from "./worker-transport";
 
-
 /** Options of {@link createInMemoryKernelSession}. */
 export interface InMemoryKernelSessionOptions {
   /**

@@ -17,7 +17,9 @@ import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
+import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
 import { Route as WorkerRouteImport } from './routes/worker'
+import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -63,9 +65,19 @@ const WorkbenchRoute = WorkbenchRouteImport.update({
   path: '/workbench',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkbenchChainRoute = WorkbenchChainRouteImport.update({
+  id: '/workbench-chain',
+  path: '/workbench-chain',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkerRoute = WorkerRouteImport.update({
   id: '/worker',
   path: '/worker',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkerFilletRoute = WorkerFilletRouteImport.update({
+  id: '/worker-fillet',
+  path: '/worker-fillet',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkerOcctRoute = WorkerOcctRouteImport.update({
@@ -102,7 +114,9 @@ export interface FileRoutesByFullPath {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-chain': typeof WorkbenchChainRoute
   '/worker': typeof WorkerRoute
+  '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -117,7 +131,9 @@ export interface FileRoutesByTo {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-chain': typeof WorkbenchChainRoute
   '/worker': typeof WorkerRoute
+  '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -134,7 +150,9 @@ export interface FileRoutesById {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-chain': typeof WorkbenchChainRoute
   '/worker': typeof WorkerRoute
+  '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -151,7 +169,9 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-chain'
     | '/worker'
+    | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
     | '/api/auth/$'
@@ -166,7 +186,9 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-chain'
     | '/worker'
+    | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
     | '/api/auth/$'
@@ -182,7 +204,9 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-chain'
     | '/worker'
+    | '/worker-fillet'
     | '/worker-occt'
     | '/_auth/dashboard'
     | '/api/auth/$'
@@ -199,7 +223,9 @@ export interface RootRouteChildren {
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
   WorkbenchRoute: typeof WorkbenchRoute
+  WorkbenchChainRoute: typeof WorkbenchChainRoute
   WorkerRoute: typeof WorkerRoute
+  WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiIoImport3mfRoute: typeof ApiIoImport3mfRoute
@@ -264,11 +290,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkbenchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workbench-chain': {
+      id: '/workbench-chain'
+      path: '/workbench-chain'
+      fullPath: '/workbench-chain'
+      preLoaderRoute: typeof WorkbenchChainRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/worker': {
       id: '/worker'
       path: '/worker'
       fullPath: '/worker'
       preLoaderRoute: typeof WorkerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/worker-fillet': {
+      id: '/worker-fillet'
+      path: '/worker-fillet'
+      fullPath: '/worker-fillet'
+      preLoaderRoute: typeof WorkerFilletRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/worker-occt': {
@@ -330,7 +370,9 @@ const rootRouteChildren: RootRouteChildren = {
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
   WorkbenchRoute: WorkbenchRoute,
+  WorkbenchChainRoute: WorkbenchChainRoute,
   WorkerRoute: WorkerRoute,
+  WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiIoImport3mfRoute: ApiIoImport3mfRoute,

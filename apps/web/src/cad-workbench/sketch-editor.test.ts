@@ -48,7 +48,11 @@ function sketchWithLines(): Sketch {
 describe("sketch editor drawing gestures", () => {
   it("draws a line in two picks as one entity.create transaction", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "line", type: "activate-tool" }, sketchWithLines()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "line", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
     const first = sketchEditorReducer(
       state,
       { point: { x: 10, y: 10 }, entityId: null, type: "canvas-pick" },
@@ -74,7 +78,11 @@ describe("sketch editor drawing gestures", () => {
 
   it("refuses zero-length lines and lets Escape cancel a gesture", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "line", type: "activate-tool" }, sketchWithLines()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "line", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
     state = sketchEditorReducer(
       state,
       { point: { x: 10, y: 10 }, entityId: null, type: "canvas-pick" },
@@ -97,7 +105,11 @@ describe("sketch editor drawing gestures", () => {
 
   it("creates a rectangle as five entities in one atomic transaction", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "rectangle", type: "activate-tool" }, createWorkbenchSketch()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "rectangle", type: "activate-tool" },
+      createWorkbenchSketch(),
+    ).state;
     state = sketchEditorReducer(
       state,
       { point: { x: 0, y: 0 }, entityId: null, type: "canvas-pick" },
@@ -121,7 +133,11 @@ describe("sketch editor drawing gestures", () => {
 describe("sketch editor constraint tools", () => {
   it("applies a horizontal constraint after one line pick", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "horizontal", type: "activate-tool" }, sketchWithLines()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "horizontal", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
     const applied = sketchEditorReducer(
       state,
       { point: { x: 30, y: 0 }, entityId: "skent_a", type: "canvas-pick" },
@@ -136,7 +152,11 @@ describe("sketch editor constraint tools", () => {
 
   it("refuses a radius pick on a line before it accumulates", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "radius", type: "activate-tool" }, sketchWithLines()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "radius", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
     const refused = sketchEditorReducer(
       state,
       { point: { x: 30, y: 0 }, entityId: "skent_a", type: "canvas-pick" },
@@ -153,14 +173,22 @@ describe("sketch editor constraint tools", () => {
     const sketch = createSketch(
       xyWorkplane(),
       [
-        createLineEntity(createSketchEntityId("skent_a"), { x: 0, y: 0 }, { x: 10, y: 0 }),
+        createLineEntity(
+          createSketchEntityId("skent_a"),
+          { x: 0, y: 0 },
+          { x: 10, y: 0 },
+        ),
         createCircleEntity(circle, { x: 30, y: 30 }, 12),
       ],
       [],
     );
     if (!sketch.ok) throw new Error(sketch.error.message);
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "radius", type: "activate-tool" }, sketch.value).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "radius", type: "activate-tool" },
+      sketch.value,
+    ).state;
     const refused = sketchEditorReducer(
       state,
       { point: { x: 5, y: 0 }, entityId: "skent_a", type: "canvas-pick" },
@@ -176,9 +204,7 @@ describe("sketch editor constraint tools", () => {
     expect(applied.transaction?.commands[0]).toMatchObject({
       type: "sketch.constraint.create",
     });
-    if (
-      applied.transaction?.commands[0]?.type === "sketch.constraint.create"
-    ) {
+    if (applied.transaction?.commands[0]?.type === "sketch.constraint.create") {
       expect(applied.transaction.commands[0].constraint).toMatchObject({
         kind: "radius",
         value: { value: 12 },
@@ -188,7 +214,11 @@ describe("sketch editor constraint tools", () => {
 
   it("measures a distance dimension from current geometry at commit", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "distance", type: "activate-tool" }, sketchWithLines()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "distance", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
     state = sketchEditorReducer(
       state,
       { point: { x: 0, y: 0 }, entityId: "skent_a", type: "canvas-pick" },
@@ -214,7 +244,11 @@ describe("sketch editor constraint tools", () => {
 describe("sketch editor trim, construction, delete", () => {
   it("trims a line's clicked end to the nearest intersection", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "trim", type: "activate-tool" }, sketchWithLines()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "trim", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
     // Click skent_b near its bottom end (30, -20); it crosses skent_a at
     // (30, 0). The bottom end moves to the intersection.
     const trimmed = sketchEditorReducer(
@@ -249,7 +283,11 @@ describe("sketch editor trim, construction, delete", () => {
     );
     if (!sketch.ok) throw new Error(sketch.error.message);
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "trim", type: "activate-tool" }, sketch.value).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "trim", type: "activate-tool" },
+      sketch.value,
+    ).state;
     // Click skent_b near its bottom end: the nearest intersection is that
     // endpoint itself, so the trim must refuse, not commit a zero move.
     const refused = sketchEditorReducer(
@@ -264,7 +302,11 @@ describe("sketch editor trim, construction, delete", () => {
 
   it("toggles construction geometry via entity.update", () => {
     let state = createSketchEditorState();
-    state = sketchEditorReducer(state, { tool: "construction", type: "activate-tool" }, sketchWithLines()).state;
+    state = sketchEditorReducer(
+      state,
+      { tool: "construction", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
     const toggled = sketchEditorReducer(
       state,
       { point: { x: 30, y: 0 }, entityId: "skent_a", type: "canvas-pick" },
@@ -292,7 +334,9 @@ describe("sketch editor trim, construction, delete", () => {
     const result = deleteEntityCommands(sketch.value, a);
     if (!("commands" in result)) throw new Error("expected commands");
     expect(result.commands).toHaveLength(2);
-    expect(result.commands[0]).toMatchObject({ type: "sketch.constraint.delete" });
+    expect(result.commands[0]).toMatchObject({
+      type: "sketch.constraint.delete",
+    });
     expect(result.commands[1]).toMatchObject({ type: "sketch.entity.delete" });
   });
 
@@ -328,19 +372,14 @@ describe("sketch editor trim, construction, delete", () => {
 describe("sketch view model", () => {
   it("styles entities by selection, construction, and diagnostics", () => {
     const sketch = sketchWithLines();
-    const view = sketchViewModel(
-      sketch,
-      null,
-      { entityIds: ["skent_a"] },
-      [
-        {
-          code: "sketch/constraints-conflicting",
-          location: { primary: createSketchEntityId("skent_b") },
-          message: "conflict",
-          severity: "error",
-        },
-      ],
-    );
+    const view = sketchViewModel(sketch, null, { entityIds: ["skent_a"] }, [
+      {
+        code: "sketch/constraints-conflicting",
+        location: { primary: createSketchEntityId("skent_b") },
+        message: "conflict",
+        severity: "error",
+      },
+    ]);
     const a = view.entities.find((entity) => entity.id === "skent_a");
     const b = view.entities.find((entity) => entity.id === "skent_b");
     expect(a).toMatchObject({ selected: true, diagnostic: "none" });

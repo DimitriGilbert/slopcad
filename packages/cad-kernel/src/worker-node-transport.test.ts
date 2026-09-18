@@ -71,7 +71,9 @@ describe("createNodeWorkerTransport", () => {
         fixture.b.onMessage((data) => resolve(data));
       });
       fixture.a.send("dropped for the unsubscribed listener");
-      expect(await afterUnsubscribe).toBe("dropped for the unsubscribed listener");
+      expect(await afterUnsubscribe).toBe(
+        "dropped for the unsubscribed listener",
+      );
 
       fixture.b.send("b to a");
       expect(await fromBtoA).toBe("b to a");

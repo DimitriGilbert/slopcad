@@ -105,12 +105,18 @@ function bootWorkerFixtureSession(): WorkerFixtureSession {
       root.setAttribute("data-error", errorText);
     }
     setText("worker-status", inFlight > 0 ? "computing" : "idle");
-    setText("worker-volume", visible === null ? "…" : visible.state.volume.toFixed(3));
+    setText(
+      "worker-volume",
+      visible === null ? "…" : visible.state.volume.toFixed(3),
+    );
     setText(
       "worker-bounds",
       visible === null ? "…" : formatBoundsExtents(visible.state),
     );
-    setText("worker-triangles", visible === null ? "…" : String(visible.state.triangles));
+    setText(
+      "worker-triangles",
+      visible === null ? "…" : String(visible.state.triangles),
+    );
     setText("worker-in-flight", String(inFlight));
     setText("worker-drops", String(coordinator.drops().length));
     setText(
@@ -152,7 +158,8 @@ function bootWorkerFixtureSession(): WorkerFixtureSession {
           },
           (failure: unknown) => {
             counters.settled += 1;
-            errorText = failure instanceof Error ? failure.message : String(failure);
+            errorText =
+              failure instanceof Error ? failure.message : String(failure);
             writeSurface();
           },
         );
@@ -236,10 +243,12 @@ export function WorkerFixturePage() {
           status = <span id="worker-status">boot</span>
         </li>
         <li>
-          volume = <span id="worker-volume">…</span>{"\u00A0"}mm³
+          volume = <span id="worker-volume">…</span>
+          {"\u00A0"}mm³
         </li>
         <li>
-          bounds = <span id="worker-bounds">…</span>{"\u00A0"}mm
+          bounds = <span id="worker-bounds">…</span>
+          {"\u00A0"}mm
         </li>
         <li>
           triangles = <span id="worker-triangles">…</span>
@@ -254,8 +263,8 @@ export function WorkerFixturePage() {
           stale drops = <span id="worker-drops">0</span>
         </li>
         <li>
-          main-thread frames = <span id="worker-ticks">0</span> (during
-          compute: <span id="worker-compute-frames">0</span>)
+          main-thread frames = <span id="worker-ticks">0</span> (during compute:{" "}
+          <span id="worker-compute-frames">0</span>)
         </li>
         <li data-testid="worker-error" className="text-red-500">
           <span id="worker-error" />

@@ -29,15 +29,13 @@ import {
   createPointEntity,
   createRectangleEntity,
 } from "./entities";
-import {
-  createSketchConstraintId,
-  createSketchEntityId,
-} from "./sketch-ids";
+import { createSketchConstraintId, createSketchEntityId } from "./sketch-ids";
 import { createSketch } from "./sketch";
 import { xyWorkplane } from "./workplane";
 
 function requireSketch(sketch: ReturnType<typeof createSketch>): Sketch {
-  if (!sketch.ok) throw new Error(`Fixture sketch is invalid: ${sketch.error.message}`);
+  if (!sketch.ok)
+    throw new Error(`Fixture sketch is invalid: ${sketch.error.message}`);
   return sketch.value;
 }
 
@@ -53,7 +51,11 @@ export function fullyConstrainedTriangleSketch(): Sketch {
   const bc = createSketchEntityId("skent_triangle-bc");
   const ca = createSketchEntityId("skent_triangle-ca");
   const entities: SketchEntity[] = [
-    createPointEntity(anchor, { x: 0, y: 0 }, { construction: true, fixed: true }),
+    createPointEntity(
+      anchor,
+      { x: 0, y: 0 },
+      { construction: true, fixed: true },
+    ),
     createLineEntity(ab, { x: 0, y: 0 }, { x: 48, y: 6 }),
     createLineEntity(bc, { x: 48, y: 6 }, { x: 9, y: 33 }),
     createLineEntity(ca, { x: 9, y: 33 }, { x: 0, y: 0 }),
@@ -61,7 +63,11 @@ export function fullyConstrainedTriangleSketch(): Sketch {
   const c = (raw: string) => createSketchConstraintId(raw);
   const start = pointTarget(ab, "start");
   const constraints: SketchConstraint[] = [
-    createCoincidentConstraint(c("skcon_anchor-a"), start, pointTarget(anchor, "center")),
+    createCoincidentConstraint(
+      c("skcon_anchor-a"),
+      start,
+      pointTarget(anchor, "center"),
+    ),
     createCoincidentConstraint(
       c("skcon_a-b"),
       pointTarget(ab, "end"),
@@ -115,7 +121,11 @@ export function dimensionedRectangleSketch(): Sketch {
   const left = createSketchEntityId("skent_rect-left");
   const rect = createSketchEntityId("skent_rect-frame");
   const entities: SketchEntity[] = [
-    createPointEntity(anchor, { x: 0, y: 0 }, { construction: true, fixed: true }),
+    createPointEntity(
+      anchor,
+      { x: 0, y: 0 },
+      { construction: true, fixed: true },
+    ),
     createLineEntity(bottom, { x: 0, y: 0 }, { x: 57, y: 2 }),
     createLineEntity(right, { x: 57, y: 2 }, { x: 55, y: 41 }),
     createLineEntity(top, { x: 55, y: 41 }, { x: -2, y: 39 }),
@@ -160,7 +170,11 @@ export function tangentChainSketch(): Sketch {
   const large = createSketchEntityId("skent_tan-large");
   const tangent = createSketchEntityId("skent_tan-line");
   const entities: SketchEntity[] = [
-    createPointEntity(anchor, { x: 0, y: 0 }, { construction: true, fixed: true }),
+    createPointEntity(
+      anchor,
+      { x: 0, y: 0 },
+      { construction: true, fixed: true },
+    ),
     createCircleEntity(small, { x: 0, y: 0 }, 20),
     createCircleEntity(large, { x: 52, y: 3 }, 28),
     createLineEntity(tangent, { x: 12, y: 21 }, { x: 107, y: 44 }),
@@ -205,8 +219,17 @@ export function symmetricPatternSketch(): Sketch {
   const left = createSketchEntityId("skent_sym-left");
   const right = createSketchEntityId("skent_sym-right");
   const entities: SketchEntity[] = [
-    createLineEntity(axis, { x: 0, y: 0 }, { x: 0, y: 90 }, { construction: true, fixed: true }),
-    createPointEntity(pin, { x: -25, y: 50 }, { construction: true, fixed: true }),
+    createLineEntity(
+      axis,
+      { x: 0, y: 0 },
+      { x: 0, y: 90 },
+      { construction: true, fixed: true },
+    ),
+    createPointEntity(
+      pin,
+      { x: -25, y: 50 },
+      { construction: true, fixed: true },
+    ),
     createCircleEntity(left, { x: -23, y: 47 }, 9),
     createCircleEntity(right, { x: 23, y: 47 }, 9),
   ];
@@ -275,8 +298,16 @@ export function unsatisfiableChainSketch(): Sketch {
   ];
   const c = (raw: string) => createSketchConstraintId(raw);
   const constraints: SketchConstraint[] = [
-    createCoincidentConstraint(c("skcon_unsat-12"), pointTarget(p1, "center"), pointTarget(p2, "center")),
-    createCoincidentConstraint(c("skcon_unsat-13"), pointTarget(p1, "center"), pointTarget(p3, "center")),
+    createCoincidentConstraint(
+      c("skcon_unsat-12"),
+      pointTarget(p1, "center"),
+      pointTarget(p2, "center"),
+    ),
+    createCoincidentConstraint(
+      c("skcon_unsat-13"),
+      pointTarget(p1, "center"),
+      pointTarget(p3, "center"),
+    ),
     createDistanceConstraint(
       c("skcon_unsat-d12"),
       pointTarget(p1, "center"),
@@ -328,7 +359,11 @@ export function arcChainSketch(): Sketch {
   const line = createSketchEntityId("skent_arc-line");
   const arc = createSketchEntityId("skent_arc-arc");
   const entities: SketchEntity[] = [
-    createPointEntity(anchor, { x: 0, y: 0 }, { construction: true, fixed: true }),
+    createPointEntity(
+      anchor,
+      { x: 0, y: 0 },
+      { construction: true, fixed: true },
+    ),
     createLineEntity(line, { x: 0, y: 0 }, { x: 24, y: 0.4 }),
     createArcEntity(arc, { x: 28.7, y: 9.0 }, 9.7, 4.4, 5.9),
   ];

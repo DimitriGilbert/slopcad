@@ -60,7 +60,12 @@ export {
   workplaneToWorld,
   xyWorkplane,
 } from "./workplane";
-export type { SerializedWorkplane, Vec3, Workplane, WorkplaneError } from "./workplane";
+export type {
+  SerializedWorkplane,
+  Vec3,
+  Workplane,
+  WorkplaneError,
+} from "./workplane";
 
 export {
   SKETCH_ENTITY_KINDS,
@@ -211,3 +216,25 @@ export {
   tangentChainSketch,
   unsatisfiableChainSketch,
 } from "./sketch-fixtures";
+
+export {
+  PROFILE_ENDPOINT_TOLERANCE_MM,
+  PROFILE_MIN_AREA_MM2,
+  profileLoopSignedArea,
+  profileSegmentSweep,
+  resolveExtrudeProfile,
+  resolveProfileLoops,
+} from "./profile";
+export type {
+  ProfileError,
+  ProfileLoop,
+  ProfilePoint,
+  ProfileSegment,
+  ResolvedProfile,
+} from "./profile";
+export { workplaneToPlacement } from "./workplane-placement";
+export type {
+  PlacementAxis,
+  WorkplanePlacement,
+  WorkplanePlacementRotation,
+} from "./workplane-placement";

@@ -113,284 +113,256 @@ async function buildChainScene(): Promise<{
 }
 
 describe("the manifold worker over a real node worker channel", () => {
-  it(
-    "executes the full operation matrix with kernel-neutral results",
-    async () => {
-      const { blockEdgeMm, boreRadiusMm } = BOOLEAN_CHAIN;
-      const scene = await buildChainScene();
+  it("executes the full operation matrix with kernel-neutral results", async () => {
+    const { blockEdgeMm, boreRadiusMm } = BOOLEAN_CHAIN;
+    const scene = await buildChainScene();
 
-      // Measurement of a boolean union: axis-aligned, so exact (two 10³
-      // blocks).
-      const unionVolume = await client.request("solid.volume", {
-        solid: scene.union,
-      });
-      expect(unionVolume.volume).toBeCloseTo(2 * blockEdgeMm ** 3, 9);
+    // Measurement of a boolean union: axis-aligned, so exact (two 10³
+    // blocks).
+    const unionVolume = await client.request("solid.volume", {
+      solid: scene.union,
+    });
+    expect(unionVolume.volume).toBeCloseTo(2 * blockEdgeMm ** 3, 9);
 
-      // Measurement of a drilled, trimmed boolean: curved bore, so within
-      // the curved tolerance of the analytic value.
-      const trimmedVolume = await client.request("solid.volume", {
-        solid: scene.trimmed,
-      });
-      const analytic =
-        blockEdgeMm ** 3 - Math.PI * boreRadiusMm ** 2 * blockEdgeMm;
-      expect(
-        Math.abs(trimmedVolume.volume - analytic) / analytic,
-      ).toBeLessThan(CURVED_VOLUME_TOLERANCE);
+    // Measurement of a drilled, trimmed boolean: curved bore, so within
+    // the curved tolerance of the analytic value.
+    const trimmedVolume = await client.request("solid.volume", {
+      solid: scene.trimmed,
+    });
+    const analytic =
+      blockEdgeMm ** 3 - Math.PI * boreRadiusMm ** 2 * blockEdgeMm;
+    expect(Math.abs(trimmedVolume.volume - analytic) / analytic).toBeLessThan(
+      CURVED_VOLUME_TOLERANCE,
+    );
 
-      // Tight bounds of the trimmed result: every face lies on the clip or
-      // block faces, so exact.
-      const trimmedBounds = await client.request("solid.bounds", {
-        solid: scene.trimmed,
-      });
-      expect(trimmedBounds.bounds).toEqual({
-        min: [0, 0, 0],
-        max: [blockEdgeMm, blockEdgeMm, blockEdgeMm],
-      });
+    // Tight bounds of the trimmed result: every face lies on the clip or
+    // block faces, so exact.
+    const trimmedBounds = await client.request("solid.bounds", {
+      solid: scene.trimmed,
+    });
+    expect(trimmedBounds.bounds).toEqual({
+      min: [0, 0, 0],
+      max: [blockEdgeMm, blockEdgeMm, blockEdgeMm],
+    });
 
-      // Tessellation crosses as plain arrays with kernel-computed unit
-      // normals paired index-for-index with the positions.
-      const { tessellation } = await client.request("solid.tessellate", {
-        solid: scene.trimmed,
-      });
-      expect(tessellation.indices.length).toBeGreaterThan(0);
-      expect(tessellation.normals).toBeDefined();
-      const { positions, normals } = tessellation;
-      if (normals === undefined) throw new Error("normals must be present");
-      expect(normals.length).toBe(positions.length);
-      for (let vertex = 0; vertex < normals.length; vertex += 3) {
-        const magnitude = Math.hypot(
-          normals[vertex] ?? Number.NaN,
-          normals[vertex + 1] ?? Number.NaN,
-          normals[vertex + 2] ?? Number.NaN,
-        );
-        expect(magnitude).toBeCloseTo(1, 6);
-      }
-    },
-    60_000,
-  );
-
-  it(
-    "runs the disposal lifecycle: dispose resolves null, and use-after-dispose fails with the kernel's solid-not-owned code",
-    async () => {
-      const box = await createBox(1, 1, 1);
-      const disposed = await client.request("solid.dispose", { solid: box });
-      expect(disposed).toBeNull();
-
-      await expect(client.request("solid.volume", { solid: box })).rejects.toMatchObject(
-        {
-          name: "WorkerRequestFailure",
-          error: {
-            code: WORKER_PROTOCOL_ERROR_CODES.operationFailed,
-            data: { kernelCode: KERNEL_ERROR_CODES.solidNotOwned },
-          },
-        },
+    // Tessellation crosses as plain arrays with kernel-computed unit
+    // normals paired index-for-index with the positions.
+    const { tessellation } = await client.request("solid.tessellate", {
+      solid: scene.trimmed,
+    });
+    expect(tessellation.indices.length).toBeGreaterThan(0);
+    expect(tessellation.normals).toBeDefined();
+    const { positions, normals } = tessellation;
+    if (normals === undefined) throw new Error("normals must be present");
+    expect(normals.length).toBe(positions.length);
+    for (let vertex = 0; vertex < normals.length; vertex += 3) {
+      const magnitude = Math.hypot(
+        normals[vertex] ?? Number.NaN,
+        normals[vertex + 1] ?? Number.NaN,
+        normals[vertex + 2] ?? Number.NaN,
       );
-      // The channel stays healthy after a structured failure.
-      const sphere = await client.request("solid.createSphere", {
-        radius: mm(1),
-      });
-      expect(typeof sphere.solid).toBe("string");
-    },
-    60_000,
-  );
+      expect(magnitude).toBeCloseTo(1, 6);
+    }
+  }, 60_000);
 
-  it(
-    "carries kernel validation failures over the wire as structured operation failures with the kernel code",
-    async () => {
-      // Invalid primitive lengths are rejected by the kernel inside the
-      // worker and reach the caller as worker/operation-failed with the
-      // kernel's invalid-length code.
-      await expect(
-        client.request("solid.createBox", {
-          width: mm(0),
-          depth: mm(1),
-          height: mm(1),
-        }),
-      ).rejects.toMatchObject({
-        error: {
-          code: WORKER_PROTOCOL_ERROR_CODES.operationFailed,
-          data: { kernelCode: KERNEL_ERROR_CODES.invalidLength },
-        },
-      });
+  it("runs the disposal lifecycle: dispose resolves null, and use-after-dispose fails with the kernel's solid-not-owned code", async () => {
+    const box = await createBox(1, 1, 1);
+    const disposed = await client.request("solid.dispose", { solid: box });
+    expect(disposed).toBeNull();
 
-      // A boolean with too few operands is the kernel's invalid-operands.
-      const box = await createBox(2, 2, 2);
-      await expect(
-        client.request("solid.union", { operands: [box] }),
-      ).rejects.toMatchObject({
-        error: {
-          code: WORKER_PROTOCOL_ERROR_CODES.operationFailed,
-          data: { kernelCode: KERNEL_ERROR_CODES.invalidOperands },
-        },
-      });
-    },
-    60_000,
-  );
+    await expect(
+      client.request("solid.volume", { solid: box }),
+    ).rejects.toMatchObject({
+      name: "WorkerRequestFailure",
+      error: {
+        code: WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+        data: { kernelCode: KERNEL_ERROR_CODES.solidNotOwned },
+      },
+    });
+    // The channel stays healthy after a structured failure.
+    const sphere = await client.request("solid.createSphere", {
+      radius: mm(1),
+    });
+    expect(typeof sphere.solid).toBe("string");
+  }, 60_000);
+
+  it("carries kernel validation failures over the wire as structured operation failures with the kernel code", async () => {
+    // Invalid primitive lengths are rejected by the kernel inside the
+    // worker and reach the caller as worker/operation-failed with the
+    // kernel's invalid-length code.
+    await expect(
+      client.request("solid.createBox", {
+        width: mm(0),
+        depth: mm(1),
+        height: mm(1),
+      }),
+    ).rejects.toMatchObject({
+      error: {
+        code: WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+        data: { kernelCode: KERNEL_ERROR_CODES.invalidLength },
+      },
+    });
+
+    // A boolean with too few operands is the kernel's invalid-operands.
+    const box = await createBox(2, 2, 2);
+    await expect(
+      client.request("solid.union", { operands: [box] }),
+    ).rejects.toMatchObject({
+      error: {
+        code: WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+        data: { kernelCode: KERNEL_ERROR_CODES.invalidOperands },
+      },
+    });
+  }, 60_000);
 
   describe("cancellation over the real channel", () => {
-    it(
-      "voids a request the moment the caller cancels it, without damaging the channel",
-      async () => {
-        const id = createWorkerRequestId("req_caller-voided");
-        const pending = client.request(
-          "solid.createBox",
-          {
-            width: mm(2),
-            depth: mm(2),
-            height: mm(2),
+    it("voids a request the moment the caller cancels it, without damaging the channel", async () => {
+      const id = createWorkerRequestId("req_caller-voided");
+      const pending = client.request(
+        "solid.createBox",
+        {
+          width: mm(2),
+          depth: mm(2),
+          height: mm(2),
+        },
+        id,
+      );
+      // Attach the rejection handler before voiding, so the synchronous
+      // settlement never observes an unhandled rejection.
+      const settled = expect(pending).rejects.toMatchObject({
+        error: { code: WORKER_PROTOCOL_ERROR_CODES.cancelled },
+      });
+
+      client.cancel(id);
+
+      await settled;
+      // The worker is still fully usable — the void request left no damage,
+      // whatever became of it responder-side.
+      const after = await client.request("solid.createSphere", {
+        radius: mm(1),
+      });
+      expect(typeof after.solid).toBe("string");
+    }, 60_000);
+
+    it("acknowledges a cancel that overtook its request (the server-side pre-arrival window)", async () => {
+      const id = createWorkerRequestId("req_pre-arrival-cancel");
+      // Raw wire injection: the cancel reaches the responder first and is
+      // recorded before the request bearing the same id arrives — the one
+      // server-side cancellation window observable deterministically on a
+      // real channel.
+      channel.transport.send(createWorkerCancel(id));
+
+      const failure = await client
+        .request("solid.createSphere", { radius: mm(1) }, id)
+        .then(
+          () => {
+            throw new Error("The pre-cancelled request must not succeed.");
           },
-          id,
-        );
-        // Attach the rejection handler before voiding, so the synchronous
-        // settlement never observes an unhandled rejection.
-        const settled = expect(pending).rejects.toMatchObject({
-          error: { code: WORKER_PROTOCOL_ERROR_CODES.cancelled },
-        });
-
-        client.cancel(id);
-
-        await settled;
-        // The worker is still fully usable — the void request left no damage,
-        // whatever became of it responder-side.
-        const after = await client.request("solid.createSphere", {
-          radius: mm(1),
-        });
-        expect(typeof after.solid).toBe("string");
-      },
-      60_000,
-    );
-
-    it(
-      "acknowledges a cancel that overtook its request (the server-side pre-arrival window)",
-      async () => {
-        const id = createWorkerRequestId("req_pre-arrival-cancel");
-        // Raw wire injection: the cancel reaches the responder first and is
-        // recorded before the request bearing the same id arrives — the one
-        // server-side cancellation window observable deterministically on a
-        // real channel.
-        channel.transport.send(createWorkerCancel(id));
-
-        const failure = await client
-          .request("solid.createSphere", { radius: mm(1) }, id)
-          .then(
-            () => {
-              throw new Error("The pre-cancelled request must not succeed.");
-            },
-            (error: unknown) => error,
-          );
-
-        expect(failure).toBeInstanceOf(WorkerRequestFailure);
-        if (!(failure instanceof WorkerRequestFailure)) {
-          throw new Error("Expected a WorkerRequestFailure.");
-        }
-        expect(failure.error.code).toBe(WORKER_PROTOCOL_ERROR_CODES.cancelled);
-        // This acknowledgement came from the responder ("before the request
-        // arrived"), not from the client's own cancel path.
-        expect(failure.error.message).toContain("before the request arrived");
-      },
-      60_000,
-    );
-
-    it(
-      "is a no-op to cancel an already-settled request, which cannot be unsettled",
-      async () => {
-        const id = createWorkerRequestId("req_settled-cancel");
-        const box = await client.request(
-          "solid.createBox",
-          { width: mm(1), depth: mm(1), height: mm(1) },
-          id,
+          (error: unknown) => error,
         );
 
-        client.cancel(id);
+      expect(failure).toBeInstanceOf(WorkerRequestFailure);
+      if (!(failure instanceof WorkerRequestFailure)) {
+        throw new Error("Expected a WorkerRequestFailure.");
+      }
+      expect(failure.error.code).toBe(WORKER_PROTOCOL_ERROR_CODES.cancelled);
+      // This acknowledgement came from the responder ("before the request
+      // arrived"), not from the client's own cancel path.
+      expect(failure.error.message).toContain("before the request arrived");
+    }, 60_000);
 
-        const volume = await client.request("solid.volume", {
-          solid: box.solid,
-        });
-        expect(volume.volume).toBeCloseTo(1, 9);
-      },
-      60_000,
-    );
+    it("is a no-op to cancel an already-settled request, which cannot be unsettled", async () => {
+      const id = createWorkerRequestId("req_settled-cancel");
+      const box = await client.request(
+        "solid.createBox",
+        { width: mm(1), depth: mm(1), height: mm(1) },
+        id,
+      );
+
+      client.cancel(id);
+
+      const volume = await client.request("solid.volume", {
+        solid: box.solid,
+      });
+      expect(volume.volume).toBeCloseTo(1, 9);
+    }, 60_000);
   });
 
-  it(
-    "produces identical results for identical sequences over fresh workers",
-    async () => {
-      const runScene = async (): Promise<{
-        readonly solids: readonly WorkerSolidId[];
-        readonly volume: number;
-        readonly bounds: unknown;
-        readonly positions: readonly number[];
-        readonly indices: readonly number[];
-        readonly normals: readonly number[];
-      }> => {
-        const fresh = createNodeManifoldWorkerChannel();
-        try {
-          const solids: WorkerSolidId[] = [];
-          const plate = await fresh.client.request("solid.createBox", {
-            width: mm(30),
-            depth: mm(20),
-            height: mm(10),
-          });
-          solids.push(plate.solid);
-          const boreAtOrigin = await fresh.client.request(
-            "solid.createCylinder",
-            { radius: mm(4), height: mm(10) },
-          );
-          solids.push(boreAtOrigin.solid);
-          const bore = await fresh.client.request("solid.transform", {
-            solid: boreAtOrigin.solid,
-            translation: { x: mm(15), y: mm(10), z: mm(0) },
-          });
-          solids.push(bore.solid);
-          const result = await fresh.client.request("solid.subtract", {
-            target: plate.solid,
-            tools: [bore.solid],
-          });
-          solids.push(result.solid);
-          const volume = await fresh.client.request("solid.volume", {
-            solid: result.solid,
-          });
-          const bounds = await fresh.client.request("solid.bounds", {
-            solid: result.solid,
-          });
-          const tessellated = await fresh.client.request("solid.tessellate", {
-            solid: result.solid,
-          });
-          const tessellation = tessellated.tessellation;
-          if (tessellation.normals === undefined) {
-            throw new Error("The drilled plate must carry kernel normals.");
-          }
-          return {
-            solids,
-            volume: volume.volume,
-            bounds: bounds.bounds,
-            positions: tessellation.positions,
-            indices: tessellation.indices,
-            normals: tessellation.normals,
-          };
-        } finally {
-          await fresh.close();
+  it("produces identical results for identical sequences over fresh workers", async () => {
+    const runScene = async (): Promise<{
+      readonly solids: readonly WorkerSolidId[];
+      readonly volume: number;
+      readonly bounds: unknown;
+      readonly positions: readonly number[];
+      readonly indices: readonly number[];
+      readonly normals: readonly number[];
+    }> => {
+      const fresh = createNodeManifoldWorkerChannel();
+      try {
+        const solids: WorkerSolidId[] = [];
+        const plate = await fresh.client.request("solid.createBox", {
+          width: mm(30),
+          depth: mm(20),
+          height: mm(10),
+        });
+        solids.push(plate.solid);
+        const boreAtOrigin = await fresh.client.request(
+          "solid.createCylinder",
+          { radius: mm(4), height: mm(10) },
+        );
+        solids.push(boreAtOrigin.solid);
+        const bore = await fresh.client.request("solid.transform", {
+          solid: boreAtOrigin.solid,
+          translation: { x: mm(15), y: mm(10), z: mm(0) },
+        });
+        solids.push(bore.solid);
+        const result = await fresh.client.request("solid.subtract", {
+          target: plate.solid,
+          tools: [bore.solid],
+        });
+        solids.push(result.solid);
+        const volume = await fresh.client.request("solid.volume", {
+          solid: result.solid,
+        });
+        const bounds = await fresh.client.request("solid.bounds", {
+          solid: result.solid,
+        });
+        const tessellated = await fresh.client.request("solid.tessellate", {
+          solid: result.solid,
+        });
+        const tessellation = tessellated.tessellation;
+        if (tessellation.normals === undefined) {
+          throw new Error("The drilled plate must carry kernel normals.");
         }
-      };
+        return {
+          solids,
+          volume: volume.volume,
+          bounds: bounds.bounds,
+          positions: tessellation.positions,
+          indices: tessellation.indices,
+          normals: tessellation.normals,
+        };
+      } finally {
+        await fresh.close();
+      }
+    };
 
-      const first = await runScene();
-      const second = await runScene();
+    const first = await runScene();
+    const second = await runScene();
 
-      // Deterministic id minting: the same sequence over a fresh session
-      // assigns the same solid ids, in delivery order.
-      expect(second.solids).toEqual(first.solids);
-      // The engine is single-threaded and input-deterministic: identical
-      // scenes produce bit-identical numbers and meshes.
-      expect(second.volume).toBe(first.volume);
-      const analyticPlateVolume = 30 * 20 * 10 - Math.PI * 4 ** 2 * 10;
-      expect(
-        Math.abs(second.volume - analyticPlateVolume) / analyticPlateVolume,
-      ).toBeLessThan(CURVED_VOLUME_TOLERANCE);
-      expect(second.bounds).toEqual(first.bounds);
-      expect(second.positions).toEqual(first.positions);
-      expect(second.indices).toEqual(first.indices);
-      expect(second.normals).toEqual(first.normals);
-    },
-    60_000,
-  );
+    // Deterministic id minting: the same sequence over a fresh session
+    // assigns the same solid ids, in delivery order.
+    expect(second.solids).toEqual(first.solids);
+    // The engine is single-threaded and input-deterministic: identical
+    // scenes produce bit-identical numbers and meshes.
+    expect(second.volume).toBe(first.volume);
+    const analyticPlateVolume = 30 * 20 * 10 - Math.PI * 4 ** 2 * 10;
+    expect(
+      Math.abs(second.volume - analyticPlateVolume) / analyticPlateVolume,
+    ).toBeLessThan(CURVED_VOLUME_TOLERANCE);
+    expect(second.bounds).toEqual(first.bounds);
+    expect(second.positions).toEqual(first.positions);
+    expect(second.indices).toEqual(first.indices);
+    expect(second.normals).toEqual(first.normals);
+  }, 60_000);
 });

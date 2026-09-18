@@ -47,7 +47,12 @@ describe("in-memory transport dispatch", () => {
     pair.client.send("c3");
     await flush();
 
-    expect(events).toEqual(["server:c1", "server:c2", "client:s1", "server:c3"]);
+    expect(events).toEqual([
+      "server:c1",
+      "server:c2",
+      "client:s1",
+      "server:c3",
+    ]);
   });
 
   it("moves arbitrary payloads without inspecting them", async () => {
@@ -69,7 +74,9 @@ describe("in-memory transport dispatch", () => {
     const pair = createInMemoryTransportPair();
     const unsubscribed: unknown[] = [];
     const retained: unknown[] = [];
-    const unsubscribe = pair.server.onMessage((data) => unsubscribed.push(data));
+    const unsubscribe = pair.server.onMessage((data) =>
+      unsubscribed.push(data),
+    );
     pair.server.onMessage((data) => retained.push(data));
 
     unsubscribe();

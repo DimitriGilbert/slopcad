@@ -105,9 +105,7 @@ export function nodeWorkerThreadEcho(
 ): number | null {
   if (!isPlainRecord(data)) return null;
   const echoed = data[key];
-  return typeof echoed === "number" && Number.isInteger(echoed)
-    ? echoed
-    : null;
+  return typeof echoed === "number" && Number.isInteger(echoed) ? echoed : null;
 }
 
 /**

@@ -47,6 +47,8 @@ import { topologyIdentityPayloadEqual } from "@slopcad/cad-core";
 import type { KernelSolid } from "@slopcad/cad-kernel";
 import type {
   OpenCascadeInstance,
+  TopoDS_Edge,
+  TopoDS_Face,
   TopoDS_Shape,
 } from "replicad-opencascadejs";
 import type { OcctKernel } from "./occt-kernel";
@@ -70,9 +72,9 @@ export const OCCT_TOPOLOGY_IDENTITY_SCHEMA = "occt-shape-hash-v1";
 export const OCCT_SHAPE_HASH_UPPER_BOUND = 2147483647;
 
 /** The identity schemas this producer understands (one: its own). */
-export const OCCT_TOPOLOGY_IDENTITY_SCHEMAS: readonly string[] = Object.freeze(
-  [OCCT_TOPOLOGY_IDENTITY_SCHEMA],
-);
+export const OCCT_TOPOLOGY_IDENTITY_SCHEMAS: readonly string[] = Object.freeze([
+  OCCT_TOPOLOGY_IDENTITY_SCHEMA,
+]);
 
 /** The kinds a snapshot reports by default: faces, edges, and vertices. */
 export const OCCT_TOPOLOGY_DEFAULT_KINDS: readonly TopologyReferenceKind[] =
@@ -92,7 +94,10 @@ function identityOf(
 }
 
 /** The solid's centre of mass — the body-relative origin of all measures. */
-function bodyCentroidOf(oc: OpenCascadeInstance, shape: TopoDS_Shape): {
+function bodyCentroidOf(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+): {
   readonly x: number;
   readonly y: number;
   readonly z: number;
@@ -144,7 +149,9 @@ function exploreKind(
           topologyIdentityPayloadEqual(existing.identity, identity),
       );
       if (!duplicate) {
-        entities.push(measureOf(oc, current, kind, ordinal, identity, bodyCentroid));
+        entities.push(
+          measureOf(oc, current, kind, ordinal, identity, bodyCentroid),
+        );
       }
       ordinal += 1;
       explorer.Next();
@@ -252,6 +259,129 @@ export function occtShapeTopology(
     entities.push(...exploreKind(oc, shape, kind, bodyCentroid));
   }
   return Object.freeze(entities);
+}
+
+/**
+ * Resolves topology-snapshot ordinals to the shape's sub-shapes of one kind
+ * (Phase 26.5 — the `fillet` operation's edge addressing, reused by the
+ * Phase 26.6 `chamfer` and generalized to the Phase 26.7 `shell`'s FACE
+ * addresses): the walk and the occurrence collapse are EXACTLY
+ * `exploreKind`'s for the requested kind, so a `(kind, ordinal)` address a
+ * snapshot reported names the same physical entity here — the guarantee
+ * that makes snapshot ordinals safe kernel-side fillet/chamfer/shell
+ * addresses. Returns the resolved occurrences in the requested order
+ * (caller-owned: the caller deletes each after its last use, the module's
+ * handle discipline) plus every requested ordinal the shape's collapsed
+ * numbering does not carry — the stale-reference signature the kernel
+ * surfaces as `kernel/fillet-edge-unknown` (the chamfer's and shell's own
+ * kind-specific twins). A throw inside the WASM boundary is the caller's
+ * no-throw boundary's concern, like the producer above.
+ */
+function occtEntitiesAtOrdinals<T extends TopoDS_Shape>(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  kind: TopologyReferenceKind,
+  ordinals: readonly number[],
+  cast: (occurrence: TopoDS_Shape) => T,
+): {
+  readonly occurrences: T[];
+  readonly missing: readonly number[];
+} {
+  const toFind =
+    kind === "face"
+      ? oc.TopAbs_ShapeEnum.TopAbs_FACE
+      : kind === "edge"
+        ? oc.TopAbs_ShapeEnum.TopAbs_EDGE
+        : oc.TopAbs_ShapeEnum.TopAbs_VERTEX;
+  const requested = new Set<number>(ordinals);
+  const found = new Map<number, T>();
+  /** Identity payload per collapsed ordinal, for occurrence deduplication. */
+  const collapsed: TopologyIdentityPayload[] = [];
+  const explorer = new oc.TopExp_Explorer(shape, toFind);
+  try {
+    let ordinal = 0;
+    while (explorer.More()) {
+      const current = explorer.Value();
+      const identity = identityOf(oc, current);
+      const duplicate = collapsed.some((existing) =>
+        topologyIdentityPayloadEqual(existing, identity),
+      );
+      if (!duplicate) {
+        if (requested.has(ordinal)) {
+          found.set(ordinal, cast(current));
+        }
+        collapsed.push(identity);
+      }
+      ordinal += 1;
+      explorer.Next();
+    }
+  } finally {
+    explorer.delete();
+  }
+  const occurrences: T[] = [];
+  const missing: number[] = [];
+  for (const ordinal of ordinals) {
+    const occurrence = found.get(ordinal);
+    if (occurrence === undefined) {
+      missing.push(ordinal);
+      continue;
+    }
+    occurrences.push(occurrence);
+  }
+  return { occurrences, missing };
+}
+
+/**
+ * Resolves topology-snapshot EDGE ordinals to the shape's `TopoDS_Edge`s
+ * (Phase 26.5): the shared per-kind resolver over the `"edge"` kind,
+ * returning typed edges for the fillet/chamfer builders. The returned
+ * wrappers are caller-owned (each deleted after its last use); the
+ * `missing` list is the stale-reference signature.
+ */
+export function occtEdgesAtOrdinals(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  ordinals: readonly number[],
+): {
+  readonly edges: TopoDS_Edge[];
+  readonly missing: readonly number[];
+} {
+  const resolved = occtEntitiesAtOrdinals(
+    oc,
+    shape,
+    "edge",
+    ordinals,
+    (occurrence) => oc.TopoDS.Edge(occurrence),
+  );
+  return { edges: resolved.occurrences, missing: resolved.missing };
+}
+
+/**
+ * Resolves topology-snapshot FACE ordinals to the shape's `TopoDS_Face`s
+ * (Phase 26.7 — the `shell` operation's face addressing): the shared
+ * per-kind resolver over the `"face"` kind, the exact machinery
+ * `occtEdgesAtOrdinals` runs for edges — an `(kind: "face", ordinal)`
+ * address a snapshot reported names the same physical face here. The
+ * returned wrappers are caller-owned (each deleted after its last use);
+ * the `missing` list is the stale-reference signature the kernel surfaces
+ * as `kernel/shell-face-unknown`.
+ */
+export function occtFacesAtOrdinals(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  ordinals: readonly number[],
+): {
+  readonly faces: TopoDS_Face[];
+  readonly missing: readonly number[];
+} {
+  const resolved = occtEntitiesAtOrdinals(
+    oc,
+    shape,
+    "face",
+    ordinals,
+    (occurrence) => oc.TopoDS.Face(occurrence),
+  );
+  return { faces: resolved.occurrences, missing: resolved.missing };
 }
 
 /** Options of {@link occtTopologyView}. */

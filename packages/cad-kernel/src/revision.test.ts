@@ -61,7 +61,9 @@ describe("revision clock", () => {
   });
 
   it("refuses to cross the exact-integer limit, leaving the counter intact", () => {
-    const clock = createRevisionClock(createRevisionTag(Number.MAX_SAFE_INTEGER - 1));
+    const clock = createRevisionClock(
+      createRevisionTag(Number.MAX_SAFE_INTEGER - 1),
+    );
     expect(clock.bump()).toBe(Number.MAX_SAFE_INTEGER);
     expect(() => clock.bump()).toThrow(RevisionClockExhaustedError);
     try {

@@ -130,7 +130,9 @@ export function unpackSolvedParameters(
       }
       const value = parameters[global];
       if (value === undefined) {
-        throw new RangeError(`Missing parameter value for entity ${entity.id}.`);
+        throw new RangeError(
+          `Missing parameter value for entity ${entity.id}.`,
+        );
       }
       return value;
     };
@@ -233,19 +235,26 @@ interface LineGeom {
   readonly dLength: ReadonlyMap<number, number>;
 }
 
-function lineGeom(
-  parameters: readonly number[],
-  slots: EntitySlots,
-): LineGeom {
+function lineGeom(parameters: readonly number[], slots: EntitySlots): LineGeom {
   const [x1s, y1s, x2s, y2s] = slots.offsets;
-  if (x1s === undefined || y1s === undefined || x2s === undefined || y2s === undefined) {
+  if (
+    x1s === undefined ||
+    y1s === undefined ||
+    x2s === undefined ||
+    y2s === undefined
+  ) {
     throw new RangeError("Line entity is missing parameter slots.");
   }
   const x1 = parameters[x1s];
   const y1 = parameters[y1s];
   const x2 = parameters[x2s];
   const y2 = parameters[y2s];
-  if (x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
+  if (
+    x1 === undefined ||
+    y1 === undefined ||
+    x2 === undefined ||
+    y2 === undefined
+  ) {
     throw new RangeError("Line entity is missing parameter values.");
   }
   const dx = x2 - x1;
@@ -262,7 +271,8 @@ function lineGeom(
   const dLength = new Map<number, number>();
   if (length > 0) {
     for (const [slot, coeff] of ddx) dLength.set(slot, (dx / length) * coeff);
-    for (const [slot, coeff] of ddy) dLength.set(slot, (dLength.get(slot) ?? 0) + (dy / length) * coeff);
+    for (const [slot, coeff] of ddy)
+      dLength.set(slot, (dLength.get(slot) ?? 0) + (dy / length) * coeff);
   }
   return { dx, dy, length, ddx, ddy, dLength };
 }
@@ -275,8 +285,10 @@ function chain(
   dv: ReadonlyMap<number, number>,
 ): Map<number, number> {
   const grad = new Map<number, number>();
-  for (const [slot, coeff] of du) grad.set(slot, (grad.get(slot) ?? 0) + a * coeff);
-  for (const [slot, coeff] of dv) grad.set(slot, (grad.get(slot) ?? 0) + b * coeff);
+  for (const [slot, coeff] of du)
+    grad.set(slot, (grad.get(slot) ?? 0) + a * coeff);
+  for (const [slot, coeff] of dv)
+    grad.set(slot, (grad.get(slot) ?? 0) + b * coeff);
   return grad;
 }
 
@@ -308,28 +320,38 @@ function pointExpr(
 ): LinExpr {
   const slots = context.layout.slotsOf(target.entity);
   if (slots === undefined) {
-    throw new RangeError(`Point target references unknown entity ${target.entity}.`);
+    throw new RangeError(
+      `Point target references unknown entity ${target.entity}.`,
+    );
   }
   const value = (localIndex: number): number => {
     const global = slots.offsets[localIndex];
     if (global === undefined) {
-      throw new RangeError(`Entity ${target.entity} is missing a parameter slot.`);
+      throw new RangeError(
+        `Entity ${target.entity} is missing a parameter slot.`,
+      );
     }
     const v = parameters[global];
     if (v === undefined) {
-      throw new RangeError(`Entity ${target.entity} is missing a parameter value.`);
+      throw new RangeError(
+        `Entity ${target.entity} is missing a parameter value.`,
+      );
     }
     return v;
   };
   const slot = (localIndex: number): number => {
     const global = slots.offsets[localIndex];
     if (global === undefined) {
-      throw new RangeError(`Entity ${target.entity} is missing a parameter slot.`);
+      throw new RangeError(
+        `Entity ${target.entity} is missing a parameter slot.`,
+      );
     }
     return global;
   };
-  const slotGrad = (localIndex: number, coefficient: number): Map<number, number> =>
-    new Map([[slot(localIndex), coefficient]]);
+  const slotGrad = (
+    localIndex: number,
+    coefficient: number,
+  ): Map<number, number> => new Map([[slot(localIndex), coefficient]]);
   switch (slots.kind) {
     case "point": {
       const local = axis === "x" ? 0 : 1;
@@ -445,7 +467,12 @@ function distanceRow(
       if (distance === 0) {
         return { value: -target, grad: new Map() };
       }
-      const grad = chain(dxExpr.value / distance, dxExpr.grad, dyExpr.value / distance, dyExpr.grad);
+      const grad = chain(
+        dxExpr.value / distance,
+        dxExpr.grad,
+        dyExpr.value / distance,
+        dyExpr.grad,
+      );
       return { value: distance - target, grad };
     },
   };
@@ -559,7 +586,12 @@ function angleRow(
       addInto(dCross, g2.ddy, g1.dx);
       addInto(dCross, g2.ddx, -g1.dy);
       const dN = chain(sin, dDot, -cos, dCross);
-      const dLengthProduct = chain(g2.length, g1.dLength, g1.length, g2.dLength);
+      const dLengthProduct = chain(
+        g2.length,
+        g1.dLength,
+        g1.length,
+        g2.dLength,
+      );
       for (const slot of new Set([...dN.keys(), ...dLengthProduct.keys()])) {
         const dn = dN.get(slot) ?? 0;
         const dl = dLengthProduct.get(slot) ?? 0;
@@ -667,7 +699,11 @@ function tangentRows(
         const cXSlot = circular.offsets[0];
         const cYSlot = circular.offsets[1];
         const rSlot = circular.offsets[2];
-        if (cXSlot === undefined || cYSlot === undefined || rSlot === undefined) {
+        if (
+          cXSlot === undefined ||
+          cYSlot === undefined ||
+          rSlot === undefined
+        ) {
           throw new RangeError("Tangent circle operand is missing slots.");
         }
         const cx = parameters[cXSlot];
@@ -733,16 +769,19 @@ function tangentRows(
       const by = parameters[sb.cyA];
       const br = parameters[sb.rA];
       if (
-        ax === undefined || ay === undefined || ar === undefined ||
-        bx === undefined || by === undefined || br === undefined
+        ax === undefined ||
+        ay === undefined ||
+        ar === undefined ||
+        bx === undefined ||
+        by === undefined ||
+        br === undefined
       ) {
         throw new RangeError("Tangent circle operands are missing values.");
       }
       const ux = ax - bx;
       const uy = ay - by;
       const distance = Math.hypot(ux, uy);
-      const separation =
-        variant === "external" ? ar + br : Math.abs(ar - br);
+      const separation = variant === "external" ? ar + br : Math.abs(ar - br);
       if (distance === 0) {
         return { value: -separation, grad: new Map() };
       }
@@ -929,14 +968,22 @@ export function compileConstraintSystem(
         );
         break;
       case "horizontal":
-        rows.push(horizontalRow("horizontal", origin, constraint.entity, context));
+        rows.push(
+          horizontalRow("horizontal", origin, constraint.entity, context),
+        );
         break;
       case "vertical":
         rows.push(verticalRow("vertical", origin, constraint.entity, context));
         break;
       case "parallel":
         rows.push(
-          parallelRow("parallel", origin, constraint.first, constraint.second, context),
+          parallelRow(
+            "parallel",
+            origin,
+            constraint.first,
+            constraint.second,
+            context,
+          ),
         );
         break;
       case "perpendicular":
@@ -999,7 +1046,15 @@ export function compileConstraintSystem(
         );
         break;
       case "equal":
-        rows.push(equalRow("equal", origin, constraint.first, constraint.second, context));
+        rows.push(
+          equalRow(
+            "equal",
+            origin,
+            constraint.first,
+            constraint.second,
+            context,
+          ),
+        );
         break;
       case "tangent":
         rows.push(
@@ -1041,15 +1096,44 @@ export function compileConstraintSystem(
   for (const entity of entities) {
     if (entity.kind !== "rectangle") continue;
     const [e0, e1, e2, e3] = entity.edges;
-    if (e0 === undefined || e1 === undefined || e2 === undefined || e3 === undefined) {
+    if (
+      e0 === undefined ||
+      e1 === undefined ||
+      e2 === undefined ||
+      e3 === undefined
+    ) {
       continue;
     }
     const origin: ResidualOrigin = { type: "implicit", id: entity.id };
     rows.push(
-      ...coincidentRows("rectangle/chain-0", origin, { entity: e0, point: "end" }, { entity: e1, point: "start" }, context),
-      ...coincidentRows("rectangle/chain-1", origin, { entity: e1, point: "end" }, { entity: e2, point: "start" }, context),
-      ...coincidentRows("rectangle/chain-2", origin, { entity: e2, point: "end" }, { entity: e3, point: "start" }, context),
-      ...coincidentRows("rectangle/chain-3", origin, { entity: e3, point: "end" }, { entity: e0, point: "start" }, context),
+      ...coincidentRows(
+        "rectangle/chain-0",
+        origin,
+        { entity: e0, point: "end" },
+        { entity: e1, point: "start" },
+        context,
+      ),
+      ...coincidentRows(
+        "rectangle/chain-1",
+        origin,
+        { entity: e1, point: "end" },
+        { entity: e2, point: "start" },
+        context,
+      ),
+      ...coincidentRows(
+        "rectangle/chain-2",
+        origin,
+        { entity: e2, point: "end" },
+        { entity: e3, point: "start" },
+        context,
+      ),
+      ...coincidentRows(
+        "rectangle/chain-3",
+        origin,
+        { entity: e3, point: "end" },
+        { entity: e0, point: "start" },
+        context,
+      ),
       parallelRow("rectangle/parallel-0-2", origin, e0, e2, context),
       parallelRow("rectangle/parallel-1-3", origin, e1, e3, context),
       perpendicularRow("rectangle/perpendicular-0-1", origin, e0, e1, context),

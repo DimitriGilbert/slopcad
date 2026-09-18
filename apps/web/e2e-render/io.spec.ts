@@ -64,8 +64,13 @@ async function readSourceSurface(page: Page): Promise<{
 }> {
   const volumeText = await page.locator("#io-source-volume").textContent();
   const volume = Number(volumeText);
-  expect(Number.isFinite(volume), `#io-source-volume="${String(volumeText)}"`).toBe(true);
-  const trianglesText = await page.locator("#io-source-triangles").textContent();
+  expect(
+    Number.isFinite(volume),
+    `#io-source-volume="${String(volumeText)}"`,
+  ).toBe(true);
+  const trianglesText = await page
+    .locator("#io-source-triangles")
+    .textContent();
   const triangles = Number(trianglesText);
   expect(
     Number.isInteger(triangles) && triangles > 0,
@@ -74,7 +79,10 @@ async function readSourceSurface(page: Page): Promise<{
   const meshVolumeText = await page
     .locator("#io-root")
     .getAttribute("data-source-mesh-volume");
-  expect(meshVolumeText, "the source mesh volume must be published").not.toBeNull();
+  expect(
+    meshVolumeText,
+    "the source mesh volume must be published",
+  ).not.toBeNull();
   return { volume, triangles, meshVolumeText: meshVolumeText ?? "" };
 }
 
@@ -83,7 +91,10 @@ async function readSourceSurface(page: Page): Promise<{
  * URL the anchor serves is fetched IN THE PAGE (the same bytes a human
  * downloading the file gets) and returned as base64.
  */
-async function readDownloadBytes(page: Page, anchorId: string): Promise<Buffer> {
+async function readDownloadBytes(
+  page: Page,
+  anchorId: string,
+): Promise<Buffer> {
   const base64 = await page.evaluate((id) => {
     const anchor = document.getElementById(id);
     if (anchor === null || !(anchor instanceof HTMLAnchorElement)) {
@@ -97,7 +108,9 @@ async function readDownloadBytes(page: Page, anchorId: string): Promise<Buffer> 
         // Chunked conversion: String.fromCharCode's argument count cap.
         const chunkSize = 0x8000;
         for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-          binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+          binary += String.fromCharCode(
+            ...bytes.subarray(offset, offset + chunkSize),
+          );
         }
         return btoa(binary);
       });
@@ -119,8 +132,9 @@ async function roundTrip(
   const source = await readSourceSurface(page);
 
   // Export: the held bytes appear with the source soup's triangle count.
-  const exportButton = page
-    .locator(format === "stl" ? "#io-export-stl" : "#io-export-3mf");
+  const exportButton = page.locator(
+    format === "stl" ? "#io-export-stl" : "#io-export-3mf",
+  );
   await exportButton.click();
   const root = page.locator("#io-root");
   const bytesText = await root.getAttribute(
@@ -129,7 +143,9 @@ async function roundTrip(
   expect(bytesText, "the export must publish its byte count").not.toBeNull();
   expect(Number(bytesText)).toBeGreaterThan(0);
   const exportTriangles = await root.getAttribute(
-    format === "stl" ? "data-export-stl-triangles" : "data-export-3mf-triangles",
+    format === "stl"
+      ? "data-export-stl-triangles"
+      : "data-export-3mf-triangles",
   );
   expect(
     exportTriangles,
@@ -178,9 +194,15 @@ async function roundTrip(
   // source soup's same measure (exact for 3MF's lossless f64 text, float32
   // tolerance for STL) and vs the kernel volume (the established band).
   const importedVolume = Number(surface.volumeExact);
-  expect(Number.isFinite(importedVolume), `imported volume "${surface.volumeExact}"`).toBe(true);
+  expect(
+    Number.isFinite(importedVolume),
+    `imported volume "${surface.volumeExact}"`,
+  ).toBe(true);
   const sourceMeshVolume = Number(source.meshVolumeText);
-  expect(Number.isFinite(sourceMeshVolume), `source mesh volume "${source.meshVolumeText}"`).toBe(true);
+  expect(
+    Number.isFinite(sourceMeshVolume),
+    `source mesh volume "${source.meshVolumeText}"`,
+  ).toBe(true);
   if (format === "3mf") {
     expect(
       surface.volumeExact,
@@ -199,7 +221,12 @@ async function roundTrip(
 
   // Pixels: only now — the settle stamp proved the frame carried the mesh.
   const shot = await page.locator("#io-import-viewport canvas").screenshot();
-  return { shot, fileBytes, sourceTriangles: source.triangles, sourceVolume: source.volume };
+  return {
+    shot,
+    fileBytes,
+    sourceTriangles: source.triangles,
+    sourceVolume: source.volume,
+  };
 }
 
 for (const format of ["3mf", "stl"] as const) {
@@ -250,7 +277,10 @@ async function glbRoundTrip(page: Page): Promise<RoundTripCapture> {
   await page.locator("#io-export-glb").click();
   const root = page.locator("#io-root");
   const bytesText = await root.getAttribute("data-export-glb-bytes");
-  expect(bytesText, "the GLB export must publish its byte count").not.toBeNull();
+  expect(
+    bytesText,
+    "the GLB export must publish its byte count",
+  ).not.toBeNull();
   expect(Number(bytesText)).toBeGreaterThan(0);
   const exportTriangles = await root.getAttribute("data-export-glb-triangles");
   expect(
@@ -281,7 +311,10 @@ async function glbRoundTrip(page: Page): Promise<RoundTripCapture> {
     vertices: number;
     triangles: number;
   }[];
-  expect(loadedNodes.length, "the loaded scene must carry exactly one mesh").toBe(1);
+  expect(
+    loadedNodes.length,
+    "the loaded scene must carry exactly one mesh",
+  ).toBe(1);
   expect(loadedNodes[0]?.name, "the node name must preserve the body id").toBe(
     "body_plate",
   );
@@ -305,9 +338,15 @@ async function glbRoundTrip(page: Page): Promise<RoundTripCapture> {
   // source soup's same measure (float32 tolerance — GLB positions are
   // float32) and vs the kernel volume (the established band).
   const loadedVolume = Number(glb.volumeExact);
-  expect(Number.isFinite(loadedVolume), `loaded volume "${glb.volumeExact}"`).toBe(true);
+  expect(
+    Number.isFinite(loadedVolume),
+    `loaded volume "${glb.volumeExact}"`,
+  ).toBe(true);
   const sourceMeshVolume = Number(source.meshVolumeText);
-  expect(Number.isFinite(sourceMeshVolume), `source mesh volume "${source.meshVolumeText}"`).toBe(true);
+  expect(
+    Number.isFinite(sourceMeshVolume),
+    `source mesh volume "${source.meshVolumeText}"`,
+  ).toBe(true);
   expect(
     Math.abs(loadedVolume - sourceMeshVolume),
     `GLB float32 drift: ${String(loadedVolume)} vs ${String(sourceMeshVolume)}`,
@@ -319,7 +358,12 @@ async function glbRoundTrip(page: Page): Promise<RoundTripCapture> {
 
   // Pixels: only now — the settle stamp proved the frame carried the mesh.
   const shot = await page.locator("#io-glb-viewport canvas").screenshot();
-  return { shot, fileBytes, sourceTriangles: source.triangles, sourceVolume: source.volume };
+  return {
+    shot,
+    fileBytes,
+    sourceTriangles: source.triangles,
+    sourceVolume: source.volume,
+  };
 }
 
 test("glb round trip: export → GLTFLoader reference viewer → the loaded GLB renders and agrees semantically", async ({

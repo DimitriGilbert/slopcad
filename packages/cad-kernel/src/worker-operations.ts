@@ -115,16 +115,27 @@
 import {
   type AngleValue,
   type AnyDimensionalValue,
+  type BodyId,
   type LengthValue,
   type ParseFailure,
   type ParseResult,
   type SerializedDimensionalValue,
+  type TopologyEntitySnapshot,
+  type TopologySnapshot,
   fail,
   ok,
+  parseBodyId,
   parseDimensionalValue,
   serializeDimensionalValue,
 } from "@slopcad/cad-core";
-import type { KernelBounds, KernelSolid, Tessellation } from "./contract";
+import type {
+  KernelBounds,
+  KernelSolid,
+  MirrorPlaneAxis,
+  ProfilePlacementInput,
+  ProfileSegmentInput,
+  Tessellation,
+} from "./contract";
 
 import { decodeBase64Strict, encodeBase64 } from "./worker-base64";
 import {
@@ -144,6 +155,8 @@ export const WORKER_OPERATION_IDS = [
   "solid.createSphere",
   "solid.createCylinder",
   "solid.createCone",
+  "solid.extrude",
+  "solid.revolve",
   "solid.union",
   "solid.subtract",
   "solid.intersect",
@@ -152,6 +165,11 @@ export const WORKER_OPERATION_IDS = [
   "solid.volume",
   "solid.tessellate",
   "solid.dispose",
+  "solid.fillet",
+  "solid.chamfer",
+  "solid.shell",
+  "solid.mirror",
+  "solid.topology",
   "step.import",
   "step.export",
   "brep.import",
@@ -193,6 +211,43 @@ export interface WorkerConeInput {
   readonly bottomRadius: LengthValue;
   readonly topRadius: LengthValue;
   readonly height: LengthValue;
+}
+
+/**
+ * Input of `solid.extrude` (Phase 26.1): the closed profile loop, the
+ * strictly positive height, the direction sign along the profile plane's
+ * normal, and the placement rotation+translation — the contract's
+ * `ProfileExtrudeInput` carried across the wire.
+ */
+export interface WorkerExtrudeInput {
+  readonly loop: readonly ProfileSegmentInput[];
+  readonly height: LengthValue;
+  readonly direction: 1 | -1;
+  readonly placement: ProfilePlacementInput;
+}
+
+/**
+ * The revolve axis of `solid.revolve` (Phase 26.2): a line in the profile's
+ * local plane — a point (local millimetres) and a direction (dimensionless).
+ * Whether the direction is normalizable is the kernel contract's semantic
+ * call; the codec checks structure only.
+ */
+export interface WorkerRevolveAxisInput {
+  readonly point: readonly [number, number];
+  readonly direction: readonly [number, number];
+}
+
+/**
+ * Input of `solid.revolve` (Phase 26.2): the closed profile loop, the
+ * in-plane axis line, the sweep angle (contract domain `(0, 2π]`), and the
+ * placement rotation+translation — the contract's `ProfileRevolveInput`
+ * carried across the wire.
+ */
+export interface WorkerRevolveInput {
+  readonly loop: readonly ProfileSegmentInput[];
+  readonly axis: WorkerRevolveAxisInput;
+  readonly angle: AngleValue;
+  readonly placement: ProfilePlacementInput;
 }
 
 /** Input of `solid.union`: the operands to unite. */
@@ -247,6 +302,95 @@ export interface WorkerTransformInput {
  */
 export interface WorkerSolidRefInput {
   readonly solid: WorkerSolidId;
+}
+
+/**
+ * Input of `solid.fillet` (Phase 26.5): the target solid, the edges to
+ * round as the target's topology-snapshot edge ordinals (the contract's
+ * `(kind: "edge", ordinal)` addresses — a caller resolves its persistent
+ * edge references against the CURRENT snapshot and passes the resolved
+ * ordinals), and the shared radius. Whether an ordinal names an edge, and
+ * whether the radius fits, is the kernel contract's semantic call
+ * (`kernel/fillet-edge-unknown`, `kernel/fillet-failed`); the codec checks
+ * structure only.
+ */
+export interface WorkerFilletInput {
+  readonly target: WorkerSolidId;
+  readonly edges: readonly number[];
+  readonly radius: LengthValue;
+}
+
+/**
+ * Input of `solid.chamfer` (Phase 26.6): the fillet input's shape with the
+ * symmetric distance in the radius's place — the target solid, the edges to
+ * bevel as the target's topology-snapshot edge ordinals, and the shared
+ * distance. Whether an ordinal names an edge, and whether the distance
+ * fits, is the kernel contract's semantic call
+ * (`kernel/chamfer-edge-unknown`, `kernel/chamfer-failed`); the codec
+ * checks structure only.
+ */
+export interface WorkerChamferInput {
+  readonly target: WorkerSolidId;
+  readonly edges: readonly number[];
+  readonly distance: LengthValue;
+}
+
+/**
+ * Input of `solid.shell` (Phase 26.7): the target solid, the faces to
+ * remove as the target's topology-snapshot FACE ordinals (the contract's
+ * `(kind: "face", ordinal)` addresses — a caller resolves its persistent
+ * face references against the CURRENT snapshot and passes the resolved
+ * ordinals; at least one, the open hollow shell), and the uniform wall
+ * thickness. Whether an ordinal names a face, and whether the thickness
+ * fits, is the kernel contract's semantic call
+ * (`kernel/shell-face-unknown`, `kernel/shell-failed`); the codec checks
+ * structure only.
+ */
+export interface WorkerShellInput {
+  readonly target: WorkerSolidId;
+  readonly faces: readonly number[];
+  readonly thickness: LengthValue;
+}
+
+/**
+ * Input of `solid.mirror` (Phase 26.9): the target solid and the world
+ * axis plane it reflects through — `axis` names the plane's normal axis,
+ * `offset` the plane's signed position along it — the contract's
+ * `MirrorInput` carried across the wire. Whether the offset magnitude is
+ * finite is the kernel contract's semantic call
+ * (`kernel/invalid-length`); the codec checks structure only.
+ */
+export interface WorkerMirrorInput {
+  readonly target: WorkerSolidId;
+  readonly axis: MirrorPlaneAxis;
+  readonly offset: LengthValue;
+}
+
+/**
+ * Input of `solid.topology` (Phase 26.5): the solid to report plus the
+ * labeling context the kernel-neutral snapshot carries — the document body
+ * the solid stands for and the regeneration the snapshot stands at. Both
+ * are structure on the wire (a `body_…` id and a non-negative integer);
+ * what the snapshot's entities mean is the Phase 22 protocol's business.
+ */
+export interface WorkerTopologyInput {
+  readonly solid: WorkerSolidId;
+  /** The labeled owning body — a parsed `body_…` id (structure only). */
+  readonly bodyId: BodyId;
+  readonly regeneration: number;
+}
+
+/**
+ * Result of `solid.topology`: the kernel-neutral {@link TopologySnapshot}
+ * verbatim — identity payloads, occurrence-collapsed ordinals, and
+ * body-relative measures for every reported entity. This is the edge-
+ * picking layer's data source: edge ordinals feed `solid.fillet` (and the
+ * Phase 26.6 `solid.chamfer`), face ordinals feed the Phase 26.7
+ * `solid.shell`, edge centroids project to the picking
+ * surface.
+ */
+export interface WorkerTopologyResult {
+  readonly snapshot: TopologySnapshot;
 }
 
 /**
@@ -317,6 +461,29 @@ export type WorkerStepImporter = (
  * is a hosting fact, not a parse outcome.
  */
 export const STEP_IMPORT_UNSUPPORTED_CODE = "step-import/unsupported";
+
+/**
+ * The server's optional `solid.topology` execution surface (the Phase 26.5
+ * vocabulary extension): one owned kernel solid plus its labeling context
+ * in, the kernel-neutral {@link TopologySnapshot} out. Only hosts whose
+ * kernel reports topology (the OpenCascade backend's `topologySnapshot`)
+ * provide one — a server without the extension answers `solid.topology`
+ * with {@link TOPOLOGY_UNSUPPORTED_CODE}. This is the edge-picking layer's
+ * data source: the browser never imports kernel types, it picks from the
+ * snapshot's entities and addresses `solid.fillet`/`solid.chamfer` (and
+ * the Phase 26.7 `solid.shell`, by face ordinals) by the
+ * same ordinals.
+ */
+export type WorkerTopologyReporter = (
+  solid: KernelSolid,
+  options: { readonly bodyId: BodyId; readonly regeneration: number },
+) => ParseResult<TopologySnapshot, ParseFailure>;
+
+/**
+ * The failure code a server WITHOUT a topology reporter answers
+ * `solid.topology` with — a hosting fact, like its STEP/BREP siblings.
+ */
+export const TOPOLOGY_UNSUPPORTED_CODE = "topology/unsupported";
 
 /**
  * Input of `step.export`: the session solids to write into ONE STEP file,
@@ -476,6 +643,8 @@ export interface WorkerOperationInputs {
   readonly "solid.createSphere": WorkerSphereInput;
   readonly "solid.createCylinder": WorkerCylinderInput;
   readonly "solid.createCone": WorkerConeInput;
+  readonly "solid.extrude": WorkerExtrudeInput;
+  readonly "solid.revolve": WorkerRevolveInput;
   readonly "solid.union": WorkerUnionInput;
   readonly "solid.subtract": WorkerSubtractInput;
   readonly "solid.intersect": WorkerIntersectInput;
@@ -484,6 +653,11 @@ export interface WorkerOperationInputs {
   readonly "solid.volume": WorkerSolidRefInput;
   readonly "solid.tessellate": WorkerSolidRefInput;
   readonly "solid.dispose": WorkerSolidRefInput;
+  readonly "solid.fillet": WorkerFilletInput;
+  readonly "solid.chamfer": WorkerChamferInput;
+  readonly "solid.shell": WorkerShellInput;
+  readonly "solid.mirror": WorkerMirrorInput;
+  readonly "solid.topology": WorkerTopologyInput;
   readonly "step.import": WorkerStepImportInput;
   readonly "step.export": WorkerStepExportInput;
   readonly "brep.import": WorkerBrepImportInput;
@@ -501,6 +675,8 @@ export interface WorkerOperationResults {
   readonly "solid.createSphere": WorkerSolidResult;
   readonly "solid.createCylinder": WorkerSolidResult;
   readonly "solid.createCone": WorkerSolidResult;
+  readonly "solid.extrude": WorkerSolidResult;
+  readonly "solid.revolve": WorkerSolidResult;
   readonly "solid.union": WorkerSolidResult;
   readonly "solid.subtract": WorkerSolidResult;
   readonly "solid.intersect": WorkerSolidResult;
@@ -509,6 +685,11 @@ export interface WorkerOperationResults {
   readonly "solid.volume": WorkerVolumeResult;
   readonly "solid.tessellate": WorkerTessellationResult;
   readonly "solid.dispose": WorkerDisposeResult;
+  readonly "solid.fillet": WorkerSolidResult;
+  readonly "solid.chamfer": WorkerSolidResult;
+  readonly "solid.shell": WorkerSolidResult;
+  readonly "solid.mirror": WorkerSolidResult;
+  readonly "solid.topology": WorkerTopologyResult;
   readonly "step.import": WorkerStepImportResult;
   readonly "step.export": WorkerStepExportResult;
   readonly "brep.import": WorkerBrepImportResult;
@@ -547,6 +728,41 @@ export interface SerializedWorkerOperationInputs {
     readonly bottomRadius: SerializedWorkerLength;
     readonly topRadius: SerializedWorkerLength;
     readonly height: SerializedWorkerLength;
+  };
+  readonly "solid.extrude": {
+    readonly loop: readonly SerializedProfileSegment[];
+    readonly height: SerializedWorkerLength;
+    readonly direction: 1 | -1;
+    readonly placement: {
+      readonly rotation: {
+        readonly axis: readonly [number, number, number];
+        readonly angle: SerializedWorkerAngle;
+      };
+      readonly translation: {
+        readonly x: SerializedWorkerLength;
+        readonly y: SerializedWorkerLength;
+        readonly z: SerializedWorkerLength;
+      };
+    };
+  };
+  readonly "solid.revolve": {
+    readonly loop: readonly SerializedProfileSegment[];
+    readonly axis: {
+      readonly point: readonly [number, number];
+      readonly direction: readonly [number, number];
+    };
+    readonly angle: SerializedWorkerAngle;
+    readonly placement: {
+      readonly rotation: {
+        readonly axis: readonly [number, number, number];
+        readonly angle: SerializedWorkerAngle;
+      };
+      readonly translation: {
+        readonly x: SerializedWorkerLength;
+        readonly y: SerializedWorkerLength;
+        readonly z: SerializedWorkerLength;
+      };
+    };
   };
   readonly "solid.union": {
     readonly operands: readonly string[];
@@ -587,6 +803,31 @@ export interface SerializedWorkerOperationInputs {
   readonly "solid.dispose": {
     readonly solid: string;
   };
+  readonly "solid.fillet": {
+    readonly target: string;
+    readonly edges: readonly number[];
+    readonly radius: SerializedWorkerLength;
+  };
+  readonly "solid.chamfer": {
+    readonly target: string;
+    readonly edges: readonly number[];
+    readonly distance: SerializedWorkerLength;
+  };
+  readonly "solid.shell": {
+    readonly target: string;
+    readonly faces: readonly number[];
+    readonly thickness: SerializedWorkerLength;
+  };
+  readonly "solid.mirror": {
+    readonly target: string;
+    readonly axis: MirrorPlaneAxis;
+    readonly offset: SerializedWorkerLength;
+  };
+  readonly "solid.topology": {
+    readonly solid: string;
+    readonly bodyId: string;
+    readonly regeneration: number;
+  };
   readonly "step.import": {
     readonly data: string;
   };
@@ -622,6 +863,12 @@ export interface SerializedWorkerOperationResults {
   readonly "solid.createCone": {
     readonly solid: string;
   };
+  readonly "solid.extrude": {
+    readonly solid: string;
+  };
+  readonly "solid.revolve": {
+    readonly solid: string;
+  };
   readonly "solid.union": {
     readonly solid: string;
   };
@@ -651,6 +898,25 @@ export interface SerializedWorkerOperationResults {
     };
   };
   readonly "solid.dispose": null;
+  readonly "solid.fillet": {
+    readonly solid: string;
+  };
+  readonly "solid.chamfer": {
+    readonly solid: string;
+  };
+  readonly "solid.shell": {
+    readonly solid: string;
+  };
+  readonly "solid.mirror": {
+    readonly solid: string;
+  };
+  /**
+   * The snapshot is already plain kernel-neutral data (the Phase 22
+   * protocol's serializable evidence), so its wire form is the type itself:
+   * fixed key order comes from the producer, and the result parser
+   * re-validates the structure at the trust boundary.
+   */
+  readonly "solid.topology": TopologySnapshot;
   readonly "step.import": {
     readonly solids: readonly {
       readonly solid: string;
@@ -834,6 +1100,160 @@ function requireSolidIdArrayField(
   return ok(solids);
 }
 
+/**
+ * The canonical JSON form of a profile segment (fixed key order by kind).
+ * Angles serialize as canonical radians through the shared dimensional
+ * serializer, exactly like every other angle on the wire.
+ */
+export type SerializedProfileSegment =
+  | {
+      readonly kind: "line";
+      readonly start: readonly [number, number];
+      readonly end: readonly [number, number];
+    }
+  | {
+      readonly kind: "arc";
+      readonly center: readonly [number, number];
+      readonly radius: number;
+      readonly startAngle: SerializedWorkerAngle;
+      readonly endAngle: SerializedWorkerAngle;
+    }
+  | {
+      readonly kind: "circle";
+      readonly center: readonly [number, number];
+      readonly radius: number;
+    };
+
+/** Serializes one profile segment to its canonical wire form. */
+function serializeProfileSegment(
+  segment: ProfileSegmentInput,
+): SerializedProfileSegment {
+  if (segment.kind === "line") {
+    return {
+      kind: "line",
+      start: [...segment.start],
+      end: [...segment.end],
+    };
+  }
+  if (segment.kind === "arc") {
+    return {
+      kind: "arc",
+      center: [...segment.center],
+      radius: segment.radius,
+      startAngle: serializeDimensionalValue(segment.startAngle),
+      endAngle: serializeDimensionalValue(segment.endAngle),
+    };
+  }
+  return {
+    kind: "circle",
+    center: [...segment.center],
+    radius: segment.radius,
+  };
+}
+
+function parseProfilePoint2(
+  operation: WorkerOperationId,
+  field: string,
+  input: unknown,
+): ParseResult<readonly [number, number], WorkerParseError> {
+  const values = finiteNumberArray(input);
+  if (values === undefined || values.length !== 2) {
+    return payloadError(
+      `The "${operation}" field "${field}" must be an array of exactly two finite numbers.`,
+      input,
+    );
+  }
+  const x = values[0];
+  const y = values[1];
+  if (x === undefined || y === undefined) {
+    return payloadError(
+      `The "${operation}" field "${field}" must be an array of exactly two finite numbers.`,
+      input,
+    );
+  }
+  return ok([x, y]);
+}
+
+/** Parses one profile segment from untrusted wire input. */
+function parseProfileSegment(
+  operation: WorkerOperationId,
+  input: unknown,
+): ParseResult<ProfileSegmentInput, WorkerParseError> {
+  if (!isPlainRecord(input)) {
+    return payloadError(
+      `The "${operation}" profile segment must be a plain object.`,
+      input,
+    );
+  }
+  if (input.kind === "line") {
+    const start = parseProfilePoint2(operation, "line.start", input.start);
+    if (!start.ok) return start;
+    const end = parseProfilePoint2(operation, "line.end", input.end);
+    if (!end.ok) return end;
+    return ok({ kind: "line", start: start.value, end: end.value });
+  }
+  if (input.kind === "arc" || input.kind === "circle") {
+    const center = parseProfilePoint2(
+      operation,
+      `${input.kind}.center`,
+      input.center,
+    );
+    if (!center.ok) return center;
+    const radius = input.radius;
+    if (!isFiniteNumber(radius) || radius <= 0) {
+      return payloadError(
+        `The "${operation}" ${input.kind} radius must be a positive finite number.`,
+        radius,
+      );
+    }
+    if (input.kind === "circle") {
+      return ok({ kind: "circle", center: center.value, radius });
+    }
+    const startAngle = requireAngleField(
+      operation,
+      "arc.startAngle",
+      input.startAngle,
+    );
+    if (!startAngle.ok) return startAngle;
+    const endAngle = requireAngleField(
+      operation,
+      "arc.endAngle",
+      input.endAngle,
+    );
+    if (!endAngle.ok) return endAngle;
+    return ok({
+      kind: "arc",
+      center: center.value,
+      radius,
+      startAngle: startAngle.value,
+      endAngle: endAngle.value,
+    });
+  }
+  return payloadError(
+    `The "${operation}" profile segment kind must be "line", "arc", or "circle".`,
+    input.kind,
+  );
+}
+
+function parseProfileLoop(
+  operation: WorkerOperationId,
+  input: unknown,
+): ParseResult<readonly ProfileSegmentInput[], WorkerParseError> {
+  if (!Array.isArray(input) || input.length === 0) {
+    return payloadError(
+      `The "${operation}" field "loop" must be a non-empty array of profile segments.`,
+      input,
+    );
+  }
+  const segments: ProfileSegmentInput[] = [];
+  for (const entry of input) {
+    const parsed = parseProfileSegment(operation, entry);
+    if (!parsed.ok) return parsed;
+    segments.push(parsed.value);
+  }
+  return ok(segments);
+}
+
 // ---------------------------------------------------------------------------
 // Per-operation input codecs
 // ---------------------------------------------------------------------------
@@ -960,6 +1380,219 @@ function parseConeInput(
     bottomRadius: bottomRadius.value,
     topRadius: topRadius.value,
     height: height.value,
+  });
+}
+
+function serializeExtrudeInput(
+  input: WorkerExtrudeInput,
+): SerializedWorkerOperationInput<"solid.extrude"> {
+  return {
+    loop: input.loop.map(serializeProfileSegment),
+    height: serializeDimensionalValue(input.height),
+    direction: input.direction,
+    placement: {
+      rotation: {
+        axis: [...input.placement.rotation.axis],
+        angle: serializeDimensionalValue(input.placement.rotation.angle),
+      },
+      translation: {
+        x: serializeDimensionalValue(input.placement.translation.x),
+        y: serializeDimensionalValue(input.placement.translation.y),
+        z: serializeDimensionalValue(input.placement.translation.z),
+      },
+    },
+  };
+}
+
+function parseExtrudeInput(
+  payload: unknown,
+): ParseResult<WorkerExtrudeInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.extrude", payload);
+  if (!record.ok) return record;
+  const loop = parseProfileLoop("solid.extrude", record.value.loop);
+  if (!loop.ok) return loop;
+  const height = requireLengthField(
+    "solid.extrude",
+    "height",
+    record.value.height,
+  );
+  if (!height.ok) return height;
+  const direction = record.value.direction;
+  if (direction !== 1 && direction !== -1) {
+    return payloadError(
+      'The "solid.extrude" field "direction" must be 1 or -1.',
+      direction,
+    );
+  }
+  const placement = record.value.placement;
+  if (!isPlainRecord(placement)) {
+    return payloadError(
+      'The "solid.extrude" field "placement" must be a plain object with rotation and translation.',
+      placement,
+    );
+  }
+  const rotation = placement.rotation;
+  if (!isPlainRecord(rotation)) {
+    return payloadError(
+      'The "solid.extrude" placement "rotation" must be a plain object with axis and angle.',
+      rotation,
+    );
+  }
+  const axis = requireAxisField(
+    "solid.extrude",
+    "placement.rotation.axis",
+    rotation.axis,
+  );
+  if (!axis.ok) return axis;
+  const angle = requireAngleField(
+    "solid.extrude",
+    "placement.rotation.angle",
+    rotation.angle,
+  );
+  if (!angle.ok) return angle;
+  const translation = placement.translation;
+  if (!isPlainRecord(translation)) {
+    return payloadError(
+      'The "solid.extrude" placement "translation" must be a plain object with x, y, z length fields.',
+      translation,
+    );
+  }
+  const x = requireLengthField(
+    "solid.extrude",
+    "placement.translation.x",
+    translation.x,
+  );
+  if (!x.ok) return x;
+  const y = requireLengthField(
+    "solid.extrude",
+    "placement.translation.y",
+    translation.y,
+  );
+  if (!y.ok) return y;
+  const z = requireLengthField(
+    "solid.extrude",
+    "placement.translation.z",
+    translation.z,
+  );
+  if (!z.ok) return z;
+  return ok({
+    loop: loop.value,
+    height: height.value,
+    direction,
+    placement: {
+      rotation: { axis: axis.value, angle: angle.value },
+      translation: { x: x.value, y: y.value, z: z.value },
+    },
+  });
+}
+
+function serializeRevolveInput(
+  input: WorkerRevolveInput,
+): SerializedWorkerOperationInput<"solid.revolve"> {
+  return {
+    loop: input.loop.map(serializeProfileSegment),
+    axis: {
+      point: [...input.axis.point],
+      direction: [...input.axis.direction],
+    },
+    angle: serializeDimensionalValue(input.angle),
+    placement: {
+      rotation: {
+        axis: [...input.placement.rotation.axis],
+        angle: serializeDimensionalValue(input.placement.rotation.angle),
+      },
+      translation: {
+        x: serializeDimensionalValue(input.placement.translation.x),
+        y: serializeDimensionalValue(input.placement.translation.y),
+        z: serializeDimensionalValue(input.placement.translation.z),
+      },
+    },
+  };
+}
+
+function parseRevolveInput(
+  payload: unknown,
+): ParseResult<WorkerRevolveInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.revolve", payload);
+  if (!record.ok) return record;
+  const loop = parseProfileLoop("solid.revolve", record.value.loop);
+  if (!loop.ok) return loop;
+  const axis = record.value.axis;
+  if (!isPlainRecord(axis)) {
+    return payloadError(
+      'The "solid.revolve" field "axis" must be a plain object with point and direction.',
+      axis,
+    );
+  }
+  const point = parseProfilePoint2("solid.revolve", "axis.point", axis.point);
+  if (!point.ok) return point;
+  const direction = parseProfilePoint2(
+    "solid.revolve",
+    "axis.direction",
+    axis.direction,
+  );
+  if (!direction.ok) return direction;
+  const angle = requireAngleField("solid.revolve", "angle", record.value.angle);
+  if (!angle.ok) return angle;
+  const placement = record.value.placement;
+  if (!isPlainRecord(placement)) {
+    return payloadError(
+      'The "solid.revolve" field "placement" must be a plain object with rotation and translation.',
+      placement,
+    );
+  }
+  const rotation = placement.rotation;
+  if (!isPlainRecord(rotation)) {
+    return payloadError(
+      'The "solid.revolve" placement "rotation" must be a plain object with axis and angle.',
+      rotation,
+    );
+  }
+  const rotationAxis = requireAxisField(
+    "solid.revolve",
+    "placement.rotation.axis",
+    rotation.axis,
+  );
+  if (!rotationAxis.ok) return rotationAxis;
+  const rotationAngle = requireAngleField(
+    "solid.revolve",
+    "placement.rotation.angle",
+    rotation.angle,
+  );
+  if (!rotationAngle.ok) return rotationAngle;
+  const translation = placement.translation;
+  if (!isPlainRecord(translation)) {
+    return payloadError(
+      'The "solid.revolve" placement "translation" must be a plain object with x, y, z length fields.',
+      translation,
+    );
+  }
+  const x = requireLengthField(
+    "solid.revolve",
+    "placement.translation.x",
+    translation.x,
+  );
+  if (!x.ok) return x;
+  const y = requireLengthField(
+    "solid.revolve",
+    "placement.translation.y",
+    translation.y,
+  );
+  if (!y.ok) return y;
+  const z = requireLengthField(
+    "solid.revolve",
+    "placement.translation.z",
+    translation.z,
+  );
+  if (!z.ok) return z;
+  return ok({
+    loop: loop.value,
+    axis: { point: point.value, direction: direction.value },
+    angle: angle.value,
+    placement: {
+      rotation: { axis: rotationAxis.value, angle: rotationAngle.value },
+      translation: { x: x.value, y: y.value, z: z.value },
+    },
   });
 }
 
@@ -1390,6 +2023,494 @@ function parseBrepExportResult(
   return ok({ data: bytes });
 }
 
+function serializeFilletInput(
+  input: WorkerFilletInput,
+): SerializedWorkerOperationInput<"solid.fillet"> {
+  return {
+    target: input.target,
+    edges: [...input.edges],
+    radius: serializeDimensionalValue(input.radius),
+  };
+}
+
+function parseFilletInput(
+  payload: unknown,
+): ParseResult<WorkerFilletInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.fillet", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.fillet",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const edges = nonNegativeIntegerArray(record.value.edges);
+  if (edges === undefined) {
+    return payloadError(
+      'The "solid.fillet" field "edges" must be an array of non-negative integer ordinals.',
+      record.value.edges,
+    );
+  }
+  const radius = requireLengthField(
+    "solid.fillet",
+    "radius",
+    record.value.radius,
+  );
+  if (!radius.ok) return radius;
+  return ok({ target: target.value, edges, radius: radius.value });
+}
+
+function serializeChamferInput(
+  input: WorkerChamferInput,
+): SerializedWorkerOperationInput<"solid.chamfer"> {
+  return {
+    target: input.target,
+    edges: [...input.edges],
+    distance: serializeDimensionalValue(input.distance),
+  };
+}
+
+function parseChamferInput(
+  payload: unknown,
+): ParseResult<WorkerChamferInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.chamfer", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.chamfer",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const edges = nonNegativeIntegerArray(record.value.edges);
+  if (edges === undefined) {
+    return payloadError(
+      'The "solid.chamfer" field "edges" must be an array of non-negative integer ordinals.',
+      record.value.edges,
+    );
+  }
+  const distance = requireLengthField(
+    "solid.chamfer",
+    "distance",
+    record.value.distance,
+  );
+  if (!distance.ok) return distance;
+  return ok({ target: target.value, edges, distance: distance.value });
+}
+
+function serializeShellInput(
+  input: WorkerShellInput,
+): SerializedWorkerOperationInput<"solid.shell"> {
+  return {
+    target: input.target,
+    faces: [...input.faces],
+    thickness: serializeDimensionalValue(input.thickness),
+  };
+}
+
+function parseShellInput(
+  payload: unknown,
+): ParseResult<WorkerShellInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.shell", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.shell",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const faces = nonNegativeIntegerArray(record.value.faces);
+  if (faces === undefined) {
+    return payloadError(
+      'The "solid.shell" field "faces" must be an array of non-negative integer ordinals.',
+      record.value.faces,
+    );
+  }
+  const thickness = requireLengthField(
+    "solid.shell",
+    "thickness",
+    record.value.thickness,
+  );
+  if (!thickness.ok) return thickness;
+  return ok({ target: target.value, faces, thickness: thickness.value });
+}
+
+function serializeMirrorInput(
+  input: WorkerMirrorInput,
+): SerializedWorkerOperationInput<"solid.mirror"> {
+  return {
+    target: input.target,
+    axis: input.axis,
+    offset: serializeDimensionalValue(input.offset),
+  };
+}
+
+function parseMirrorInput(
+  payload: unknown,
+): ParseResult<WorkerMirrorInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.mirror", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.mirror",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const axis: unknown = record.value.axis;
+  if (axis !== "x" && axis !== "y" && axis !== "z") {
+    return payloadError(
+      'The "solid.mirror" field "axis" must be one of "x", "y", "z" (the plane\'s normal axis).',
+      axis,
+    );
+  }
+  const offset = requireLengthField(
+    "solid.mirror",
+    "offset",
+    record.value.offset,
+  );
+  if (!offset.ok) return offset;
+  return ok({ target: target.value, axis, offset: offset.value });
+}
+
+function serializeTopologyInput(
+  input: WorkerTopologyInput,
+): SerializedWorkerOperationInput<"solid.topology"> {
+  return {
+    solid: input.solid,
+    bodyId: input.bodyId,
+    regeneration: input.regeneration,
+  };
+}
+
+function parseTopologyInput(
+  payload: unknown,
+): ParseResult<WorkerTopologyInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.topology", payload);
+  if (!record.ok) return record;
+  const solid = requireSolidIdField(
+    "solid.topology",
+    "solid",
+    record.value.solid,
+  );
+  if (!solid.ok) return solid;
+  const bodyId = parseBodyId(record.value.bodyId);
+  if (!bodyId.ok) {
+    return payloadError(
+      'The "solid.topology" field "bodyId" must be a valid body id.',
+      record.value.bodyId,
+    );
+  }
+  const regeneration = record.value.regeneration;
+  if (
+    !isFiniteNumber(regeneration) ||
+    !Number.isInteger(regeneration) ||
+    regeneration < 0
+  ) {
+    return payloadError(
+      'The "solid.topology" field "regeneration" must be a non-negative integer.',
+      record.value.regeneration,
+    );
+  }
+  return ok({
+    solid: solid.value,
+    bodyId: bodyId.value,
+    regeneration,
+  });
+}
+
+/**
+ * Structural validation of a topology snapshot crossing the wire back: the
+ * protocol checks the Phase 22 payload's SHAPE (identity schemas present,
+ * entity records well formed, ordinals non-negative integers) — what the
+ * entities MEAN stays the reference-resolution protocol's business.
+ */
+function parseTopologySnapshot(
+  input: unknown,
+): ParseResult<TopologySnapshot, WorkerParseError> {
+  const record = requirePayloadRecord("solid.topology", input);
+  if (!record.ok) return record;
+  const value = record.value;
+  const {
+    kernelId,
+    persistentTopology,
+    identitySchemas,
+    bodyId,
+    regeneration,
+    entities,
+  } = value;
+  if (typeof kernelId !== "string" || kernelId.length === 0) {
+    return payloadError(
+      'The "solid.topology" snapshot field "kernelId" must be a non-empty string.',
+      kernelId,
+    );
+  }
+  if (typeof persistentTopology !== "boolean") {
+    return payloadError(
+      'The "solid.topology" snapshot field "persistentTopology" must be a boolean.',
+      persistentTopology,
+    );
+  }
+  if (
+    !Array.isArray(identitySchemas) ||
+    !identitySchemas.every((schema) => typeof schema === "string")
+  ) {
+    return payloadError(
+      'The "solid.topology" snapshot field "identitySchemas" must be an array of strings.',
+      identitySchemas,
+    );
+  }
+  if (typeof bodyId !== "string") {
+    return payloadError(
+      'The "solid.topology" snapshot field "bodyId" must be a string.',
+      bodyId,
+    );
+  }
+  if (
+    !isFiniteNumber(regeneration) ||
+    !Number.isInteger(regeneration) ||
+    regeneration < 0
+  ) {
+    return payloadError(
+      'The "solid.topology" snapshot field "regeneration" must be a non-negative integer.',
+      regeneration,
+    );
+  }
+  if (!Array.isArray(entities)) {
+    return payloadError(
+      'The "solid.topology" snapshot field "entities" must be an array.',
+      entities,
+    );
+  }
+  const parsedEntities: TopologyEntitySnapshot[] = [];
+  for (const entry of entities) {
+    if (!isPlainRecord(entry)) {
+      return payloadError(
+        'Each "solid.topology" snapshot entity must be a plain object.',
+        entry,
+      );
+    }
+    const { kind, ordinal, identity, geometry } = entry;
+    if (kind !== "face" && kind !== "edge" && kind !== "vertex") {
+      return payloadError(
+        'A "solid.topology" snapshot entity "kind" must be "face", "edge", or "vertex".',
+        kind,
+      );
+    }
+    if (!isFiniteNumber(ordinal) || !Number.isInteger(ordinal) || ordinal < 0) {
+      return payloadError(
+        'A "solid.topology" snapshot entity "ordinal" must be a non-negative integer.',
+        ordinal,
+      );
+    }
+    let parsedIdentity: TopologySnapshot["entities"][number]["identity"] = null;
+    if (identity !== null) {
+      if (!isPlainRecord(identity)) {
+        return payloadError(
+          'A "solid.topology" snapshot entity "identity" must be null or a plain object.',
+          identity,
+        );
+      }
+      const { kernelId: identityKernelId, schema, data } = identity;
+      if (
+        typeof identityKernelId !== "string" ||
+        identityKernelId.length === 0 ||
+        typeof schema !== "string" ||
+        schema.length === 0 ||
+        !isPlainRecord(data)
+      ) {
+        return payloadError(
+          'A "solid.topology" snapshot entity identity must carry a non-empty kernelId, a schema, and a data record.',
+          identity,
+        );
+      }
+      const dataRecord: Record<string, string | number | boolean> = {};
+      for (const [key, value] of Object.entries(data)) {
+        if (
+          typeof value !== "string" &&
+          typeof value !== "number" &&
+          typeof value !== "boolean"
+        ) {
+          return payloadError(
+            'A "solid.topology" snapshot entity identity data values must be primitives.',
+            value,
+          );
+        }
+        dataRecord[key] = value;
+      }
+      parsedIdentity = {
+        kernelId: identityKernelId,
+        schema,
+        data: dataRecord,
+      };
+    }
+    const parsedGeometry = parseSnapshotGeometry(geometry);
+    if (!parsedGeometry.ok) return parsedGeometry;
+    parsedEntities.push({
+      kind,
+      ordinal,
+      identity: parsedIdentity,
+      geometry: parsedGeometry.value,
+    });
+  }
+  const parsedBodyId = parseBodyId(record.value.bodyId);
+  if (!parsedBodyId.ok) {
+    return payloadError(
+      'The "solid.topology" snapshot field "bodyId" must be a valid body id.',
+      record.value.bodyId,
+    );
+  }
+  return ok({
+    kernelId,
+    persistentTopology,
+    identitySchemas: [...identitySchemas],
+    bodyId: parsedBodyId.value,
+    regeneration,
+    entities: parsedEntities,
+  });
+}
+
+/**
+ * Structural validation of one snapshot entity's geometry descriptor: every
+ * present field must carry the right shape (a finite measure or a
+ * three-number position); absent fields stay absent.
+ */
+function parseSnapshotGeometry(
+  input: unknown,
+): ParseResult<
+  TopologySnapshot["entities"][number]["geometry"],
+  WorkerParseError
+> {
+  if (!isPlainRecord(input)) {
+    return payloadError(
+      'A "solid.topology" snapshot entity "geometry" must be a plain object.',
+      input,
+    );
+  }
+  const measure = (
+    field: string,
+  ): ParseResult<number | undefined, WorkerParseError> => {
+    const value = input[field];
+    if (value === undefined) return ok(undefined);
+    if (!isFiniteNumber(value)) {
+      return payloadError(
+        `A "solid.topology" snapshot geometry "${field}" must be a finite number.`,
+        value,
+      );
+    }
+    return ok(value);
+  };
+  const areaMm2 = measure("areaMm2");
+  if (!areaMm2.ok) return areaMm2;
+  const lengthMm = measure("lengthMm");
+  if (!lengthMm.ok) return lengthMm;
+  const positions: Partial<Record<string, readonly [number, number, number]>> =
+    {};
+  for (const field of [
+    "centroidAbsoluteMm",
+    "centroidRelativeMm",
+    "pointAbsoluteMm",
+    "pointRelativeMm",
+  ]) {
+    const value = input[field];
+    if (value === undefined) continue;
+    const vector = finiteNumberArray(value);
+    if (vector === undefined || vector.length !== 3) {
+      return payloadError(
+        `A "solid.topology" snapshot geometry "${field}" must be an array of exactly three finite numbers.`,
+        value,
+      );
+    }
+    const [x, y, z] = vector;
+    if (x === undefined || y === undefined || z === undefined) {
+      return payloadError(
+        `A "solid.topology" snapshot geometry "${field}" must be dense.`,
+        value,
+      );
+    }
+    positions[field] = [x, y, z];
+  }
+  return ok({
+    ...(areaMm2.value !== undefined ? { areaMm2: areaMm2.value } : {}),
+    ...(lengthMm.value !== undefined ? { lengthMm: lengthMm.value } : {}),
+    ...(positions.centroidAbsoluteMm !== undefined
+      ? { centroidAbsoluteMm: positions.centroidAbsoluteMm }
+      : {}),
+    ...(positions.centroidRelativeMm !== undefined
+      ? { centroidRelativeMm: positions.centroidRelativeMm }
+      : {}),
+    ...(positions.pointAbsoluteMm !== undefined
+      ? { pointAbsoluteMm: positions.pointAbsoluteMm }
+      : {}),
+    ...(positions.pointRelativeMm !== undefined
+      ? { pointRelativeMm: positions.pointRelativeMm }
+      : {}),
+  });
+}
+
+function serializeTopologyResult(
+  result: WorkerTopologyResult,
+): SerializedWorkerOperationResult<"solid.topology"> {
+  const { snapshot } = result;
+  return {
+    kernelId: snapshot.kernelId,
+    persistentTopology: snapshot.persistentTopology,
+    identitySchemas: [...snapshot.identitySchemas],
+    bodyId: snapshot.bodyId,
+    regeneration: snapshot.regeneration,
+    entities: snapshot.entities.map((entity) => ({
+      kind: entity.kind,
+      ordinal: entity.ordinal,
+      identity:
+        entity.identity === null
+          ? null
+          : {
+              kernelId: entity.identity.kernelId,
+              schema: entity.identity.schema,
+              data: { ...entity.identity.data },
+            },
+      geometry:
+        entity.geometry.areaMm2 !== undefined ||
+        entity.geometry.lengthMm !== undefined ||
+        entity.geometry.centroidAbsoluteMm !== undefined ||
+        entity.geometry.centroidRelativeMm !== undefined ||
+        entity.geometry.pointAbsoluteMm !== undefined ||
+        entity.geometry.pointRelativeMm !== undefined
+          ? {
+              ...(entity.geometry.areaMm2 !== undefined
+                ? { areaMm2: entity.geometry.areaMm2 }
+                : {}),
+              ...(entity.geometry.lengthMm !== undefined
+                ? { lengthMm: entity.geometry.lengthMm }
+                : {}),
+              ...(entity.geometry.centroidAbsoluteMm !== undefined
+                ? {
+                    centroidAbsoluteMm: [...entity.geometry.centroidAbsoluteMm],
+                  }
+                : {}),
+              ...(entity.geometry.centroidRelativeMm !== undefined
+                ? {
+                    centroidRelativeMm: [...entity.geometry.centroidRelativeMm],
+                  }
+                : {}),
+              ...(entity.geometry.pointAbsoluteMm !== undefined
+                ? { pointAbsoluteMm: [...entity.geometry.pointAbsoluteMm] }
+                : {}),
+              ...(entity.geometry.pointRelativeMm !== undefined
+                ? { pointRelativeMm: [...entity.geometry.pointRelativeMm] }
+                : {}),
+            }
+          : {},
+    })),
+  };
+}
+
+function parseTopologyResult(
+  payload: unknown,
+): ParseResult<WorkerTopologyResult, WorkerParseError> {
+  const snapshot = parseTopologySnapshot(payload);
+  if (!snapshot.ok) return snapshot;
+  return ok({ snapshot: snapshot.value });
+}
+
 /**
  * The input codec table: one serializer and one parser per operation. This
  * registry is the operation vocabulary as data — adding an operation without
@@ -1404,6 +2525,8 @@ const INPUT_SERIALIZERS: {
   "solid.createSphere": serializeSphereInput,
   "solid.createCylinder": serializeCylinderInput,
   "solid.createCone": serializeConeInput,
+  "solid.extrude": serializeExtrudeInput,
+  "solid.revolve": serializeRevolveInput,
   "solid.union": serializeOperandsInput,
   "solid.subtract": serializeSubtractInput,
   "solid.intersect": serializeOperandsInput,
@@ -1412,6 +2535,11 @@ const INPUT_SERIALIZERS: {
   "solid.volume": serializeSolidRefInput,
   "solid.tessellate": serializeSolidRefInput,
   "solid.dispose": serializeSolidRefInput,
+  "solid.fillet": serializeFilletInput,
+  "solid.chamfer": serializeChamferInput,
+  "solid.shell": serializeShellInput,
+  "solid.mirror": serializeMirrorInput,
+  "solid.topology": serializeTopologyInput,
   "step.import": serializeStepImportInput,
   "step.export": serializeStepExportInput,
   "brep.import": serializeBrepImportInput,
@@ -1427,6 +2555,8 @@ const INPUT_PARSERS: {
   "solid.createSphere": parseSphereInput,
   "solid.createCylinder": parseCylinderInput,
   "solid.createCone": parseConeInput,
+  "solid.extrude": parseExtrudeInput,
+  "solid.revolve": parseRevolveInput,
   "solid.union": (payload) => parseOperandsInput("solid.union", payload),
   "solid.subtract": parseSubtractInput,
   "solid.intersect": (payload) =>
@@ -1437,6 +2567,11 @@ const INPUT_PARSERS: {
   "solid.tessellate": (payload) =>
     parseSolidRefInput("solid.tessellate", payload),
   "solid.dispose": (payload) => parseSolidRefInput("solid.dispose", payload),
+  "solid.fillet": parseFilletInput,
+  "solid.chamfer": parseChamferInput,
+  "solid.shell": parseShellInput,
+  "solid.mirror": parseMirrorInput,
+  "solid.topology": parseTopologyInput,
   "step.import": parseStepImportInput,
   "step.export": parseStepExportInput,
   "brep.import": parseBrepImportInput,
@@ -1717,6 +2852,8 @@ const RESULT_SERIALIZERS: {
   "solid.createSphere": serializeSolidResult,
   "solid.createCylinder": serializeSolidResult,
   "solid.createCone": serializeSolidResult,
+  "solid.extrude": serializeSolidResult,
+  "solid.revolve": serializeSolidResult,
   "solid.union": serializeSolidResult,
   "solid.subtract": serializeSolidResult,
   "solid.intersect": serializeSolidResult,
@@ -1725,6 +2862,11 @@ const RESULT_SERIALIZERS: {
   "solid.volume": serializeVolumeResult,
   "solid.tessellate": serializeTessellationResult,
   "solid.dispose": serializeDisposeResult,
+  "solid.fillet": serializeSolidResult,
+  "solid.chamfer": serializeSolidResult,
+  "solid.shell": serializeSolidResult,
+  "solid.mirror": serializeSolidResult,
+  "solid.topology": serializeTopologyResult,
   "step.import": serializeStepImportResult,
   "step.export": serializeStepExportResult,
   "brep.import": serializeBrepImportResult,
@@ -1743,6 +2885,8 @@ const RESULT_PARSERS: {
     parseSolidResult("solid.createCylinder", payload),
   "solid.createCone": (payload) =>
     parseSolidResult("solid.createCone", payload),
+  "solid.extrude": (payload) => parseSolidResult("solid.extrude", payload),
+  "solid.revolve": (payload) => parseSolidResult("solid.revolve", payload),
   "solid.union": (payload) => parseSolidResult("solid.union", payload),
   "solid.subtract": (payload) => parseSolidResult("solid.subtract", payload),
   "solid.intersect": (payload) => parseSolidResult("solid.intersect", payload),
@@ -1751,6 +2895,11 @@ const RESULT_PARSERS: {
   "solid.volume": parseVolumeResult,
   "solid.tessellate": parseTessellationResult,
   "solid.dispose": parseDisposeResult,
+  "solid.fillet": (payload) => parseSolidResult("solid.fillet", payload),
+  "solid.chamfer": (payload) => parseSolidResult("solid.chamfer", payload),
+  "solid.shell": (payload) => parseSolidResult("solid.shell", payload),
+  "solid.mirror": (payload) => parseSolidResult("solid.mirror", payload),
+  "solid.topology": parseTopologyResult,
   "step.import": parseStepImportResult,
   "step.export": parseStepExportResult,
   "brep.import": parseBrepImportResult,
@@ -1799,6 +2948,8 @@ const RESULT_MINTS: {
   "solid.createSphere": (result) => [result.solid],
   "solid.createCylinder": (result) => [result.solid],
   "solid.createCone": (result) => [result.solid],
+  "solid.extrude": (result) => [result.solid],
+  "solid.revolve": (result) => [result.solid],
   "solid.union": (result) => [result.solid],
   "solid.subtract": (result) => [result.solid],
   "solid.intersect": (result) => [result.solid],
@@ -1807,6 +2958,11 @@ const RESULT_MINTS: {
   "solid.volume": () => [],
   "solid.tessellate": () => [],
   "solid.dispose": () => [],
+  "solid.fillet": (result) => [result.solid],
+  "solid.chamfer": (result) => [result.solid],
+  "solid.shell": (result) => [result.solid],
+  "solid.mirror": (result) => [result.solid],
+  "solid.topology": () => [],
   "step.import": (result) => result.solids.map((ref) => ref.solid),
   "step.export": () => [],
   "brep.import": (result) => result.solids.map((ref) => ref.solid),

@@ -72,10 +72,7 @@ const mm = (value: number) => length(value, "mm");
 export function analyticOcctPlateVolume(holeDiameterMm: number): number {
   return (
     PLATE_WIDTH_MM * PLATE_DEPTH_MM * PLATE_HEIGHT_MM -
-    OCCT_BORE_COUNT *
-      Math.PI *
-      (holeDiameterMm / 2) ** 2 *
-      PLATE_HEIGHT_MM
+    OCCT_BORE_COUNT * Math.PI * (holeDiameterMm / 2) ** 2 * PLATE_HEIGHT_MM
   );
 }
 

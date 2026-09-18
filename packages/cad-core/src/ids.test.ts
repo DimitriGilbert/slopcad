@@ -17,6 +17,7 @@ import {
   parseFeatureId,
   parseParameterId,
   parseReferenceId,
+  parseSketchDocumentId,
   type DocumentId,
   type FeatureId,
   type IdGeneratorState,
@@ -61,12 +62,14 @@ describe("id wire format parsing", () => {
       feature: "feat",
       body: "body",
       reference: "ref",
+      sketch: "skd",
     });
     expect(parseDocumentId("doc_a").ok).toBe(true);
     expect(parseParameterId("param_a").ok).toBe(true);
     expect(parseFeatureId("feat_a").ok).toBe(true);
     expect(parseBodyId("body_a").ok).toBe(true);
     expect(parseReferenceId("ref_a").ok).toBe(true);
+    expect(parseSketchDocumentId("skd_a").ok).toBe(true);
   });
 
   it("rejects non-string input with id/not-a-string", () => {
@@ -202,7 +205,9 @@ describe("createIdGenerator", () => {
     const original = createIdGenerator();
     original.nextFeatureId();
     original.nextFeatureId();
-    const state = JSON.parse(JSON.stringify(original.state())) as IdGeneratorState;
+    const state = JSON.parse(
+      JSON.stringify(original.state()),
+    ) as IdGeneratorState;
     const resumed = createIdGenerator(state);
     expect(resumed.nextFeatureId()).toBe("feat_000003");
   });
@@ -217,15 +222,30 @@ describe("createIdGenerator", () => {
       feature: 0,
       body: 1,
       reference: 0,
+      sketch: 0,
     });
   });
 
   it("rejects generator state with invalid counts", () => {
     expect(() =>
-      createIdGenerator({ document: 0, parameter: 0, feature: -1, body: 0, reference: 0 }),
+      createIdGenerator({
+        document: 0,
+        parameter: 0,
+        feature: -1,
+        body: 0,
+        reference: 0,
+        sketch: 0,
+      }),
     ).toThrow(RangeError);
     expect(() =>
-      createIdGenerator({ document: 0, parameter: Number.NaN, feature: 0, body: 0, reference: 0 }),
+      createIdGenerator({
+        document: 0,
+        parameter: Number.NaN,
+        feature: 0,
+        body: 0,
+        reference: 0,
+        sketch: 0,
+      }),
     ).toThrow(RangeError);
   });
 
@@ -236,6 +256,7 @@ describe("createIdGenerator", () => {
       feature: 0,
       body: Number.MAX_SAFE_INTEGER,
       reference: 0,
+      sketch: 0,
     });
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);
     try {
@@ -260,6 +281,7 @@ describe("createIdGenerator", () => {
       feature: 0,
       body: Number.MAX_SAFE_INTEGER - 1,
       reference: 0,
+      sketch: 0,
     });
     expect(generator.nextBodyId()).toBe("body_9007199254740991");
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);

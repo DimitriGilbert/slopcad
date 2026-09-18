@@ -163,7 +163,13 @@ export function parseAnySketchId(
     );
   }
   if (input.length === 0) {
-    return fail(idError(SKETCH_ID_ERROR_CODES.empty, "A sketch id must not be empty.", input));
+    return fail(
+      idError(
+        SKETCH_ID_ERROR_CODES.empty,
+        "A sketch id must not be empty.",
+        input,
+      ),
+    );
   }
   const separator = input.indexOf("_");
   if (separator <= 0) {
@@ -190,7 +196,9 @@ export function parseAnySketchId(
     );
   }
   const parsed =
-    kind === "entity" ? parseSketchEntityId(input) : parseSketchConstraintId(input);
+    kind === "entity"
+      ? parseSketchEntityId(input)
+      : parseSketchConstraintId(input);
   if (!parsed.ok) return parsed;
   return ok({ kind, id: parsed.value });
 }

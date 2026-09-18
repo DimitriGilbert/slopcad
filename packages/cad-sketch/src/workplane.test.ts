@@ -30,11 +30,12 @@ describe("workplane orthonormalization", () => {
     expect(Math.hypot(yAxis.x, yAxis.y, yAxis.z)).toBeCloseTo(1, 12);
     expect(Math.hypot(normal.x, normal.y, normal.z)).toBeCloseTo(1, 12);
     // Mutual orthogonality.
-    expect(xAxis.x * yAxis.x + xAxis.y * yAxis.y + xAxis.z * yAxis.z).toBeCloseTo(0, 12);
-    expect(xAxis.x * normal.x + xAxis.y * normal.y + xAxis.z * normal.z).toBeCloseTo(
-      0,
-      12,
-    );
+    expect(
+      xAxis.x * yAxis.x + xAxis.y * yAxis.y + xAxis.z * yAxis.z,
+    ).toBeCloseTo(0, 12);
+    expect(
+      xAxis.x * normal.x + xAxis.y * normal.y + xAxis.z * normal.z,
+    ).toBeCloseTo(0, 12);
     // xAxis keeps its in-plane direction: mostly +x after projection.
     expect(xAxis.x).toBeGreaterThan(0.9);
     // Right-handed: normal = xAxis × yAxis.
@@ -77,7 +78,10 @@ describe("workplane orthonormalization", () => {
   });
 
   it("rejects a zero xAxis (no in-plane direction)", () => {
-    const result = orthonormalizeWorkplane({ x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: 0 });
+    const result = orthonormalizeWorkplane(
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: 0, z: 0 },
+    );
     expect(!result.ok && result.error.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.workplaneDegenerate,
     );
@@ -106,7 +110,9 @@ describe("workplane orthonormalization", () => {
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
-    expect(serializeWorkplane(first.value)).toEqual(serializeWorkplane(second.value));
+    expect(serializeWorkplane(first.value)).toEqual(
+      serializeWorkplane(second.value),
+    );
   });
 });
 
@@ -203,7 +209,11 @@ describe("workplane serialization", () => {
     expect(!parseWorkplane(null).ok).toBe(true);
     expect(!parseWorkplane(3).ok).toBe(true);
     expect(
-      !parseWorkplane({ origin: { x: 0, y: 0 }, normal: { x: 0, y: 0, z: 1 }, xAxis: { x: 1, y: 0, z: 0 } }).ok,
+      !parseWorkplane({
+        origin: { x: 0, y: 0 },
+        normal: { x: 0, y: 0, z: 1 },
+        xAxis: { x: 1, y: 0, z: 0 },
+      }).ok,
     ).toBe(true);
     expect(
       !parseWorkplane({

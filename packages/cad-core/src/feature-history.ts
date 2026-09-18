@@ -101,10 +101,7 @@ import type {
 
 import { type CadDocument, type FeatureRecord } from "./document";
 import { type FeatureGraphNodeId } from "./feature-graph";
-import {
-  type FeatureId,
-  parseFeatureId,
-} from "./ids";
+import { type FeatureId, parseFeatureId } from "./ids";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 
 // ---------------------------------------------------------------------------
@@ -251,7 +248,9 @@ export function reorderFeatureRecords(
   if (afterFeatureId === null) {
     insertion = 0;
   } else {
-    const anchorIndex = rest.findIndex((feature) => feature.id === afterFeatureId);
+    const anchorIndex = rest.findIndex(
+      (feature) => feature.id === afterFeatureId,
+    );
     if (anchorIndex < 0) {
       throw new Error(
         "Invariant violation: a validated anchor is always present in the filtered list.",
@@ -259,7 +258,11 @@ export function reorderFeatureRecords(
     }
     insertion = anchorIndex + 1;
   }
-  const reordered = [...rest.slice(0, insertion), moved, ...rest.slice(insertion)];
+  const reordered = [
+    ...rest.slice(0, insertion),
+    moved,
+    ...rest.slice(insertion),
+  ];
   for (const [at, feature] of reordered.entries()) {
     for (const ref of feature.inputs) {
       if (ref.kind !== "feature") continue;
@@ -298,8 +301,7 @@ export const FEATURE_TIMELINE_STATUSES = [
   "beyond-rollback",
 ] as const;
 
-export type FeatureTimelineStatus =
-  (typeof FEATURE_TIMELINE_STATUSES)[number];
+export type FeatureTimelineStatus = (typeof FEATURE_TIMELINE_STATUSES)[number];
 
 const TIMELINE_STATUS_SET: ReadonlySet<string> = new Set(
   FEATURE_TIMELINE_STATUSES,
@@ -425,14 +427,19 @@ export function documentChangeInvalidations(
 ): readonly FeatureGraphNodeId[] {
   const nodes: FeatureGraphNodeId[] = [];
   const previousParameters = new Map(
-    previous.parameters.parameters.map((parameter) => [parameter.id, parameter]),
+    previous.parameters.parameters.map((parameter) => [
+      parameter.id,
+      parameter,
+    ]),
   );
   for (const parameter of next.parameters.parameters) {
     if (previousParameters.get(parameter.id) !== parameter) {
       nodes.push(parameter.id);
     }
   }
-  const previousBodies = new Map(previous.bodies.map((body) => [body.id, body]));
+  const previousBodies = new Map(
+    previous.bodies.map((body) => [body.id, body]),
+  );
   for (const body of next.bodies) {
     if (previousBodies.get(body.id) !== body) {
       nodes.push(body.id);
@@ -447,7 +454,28 @@ export function documentChangeInvalidations(
     }
   }
   for (const id of previousFeatures.keys()) {
-    if (!next.features.some((feature) => feature.id === id) && !nodes.includes(id)) {
+    if (
+      !next.features.some((feature) => feature.id === id) &&
+      !nodes.includes(id)
+    ) {
+      nodes.push(id);
+    }
+  }
+  // Reference records are graph sources too: a replaced record (a re-picked
+  // edge, a re-resolution) invalidates its consuming features.
+  const previousReferences = new Map(
+    previous.references.map((reference) => [reference.id, reference]),
+  );
+  for (const reference of next.references) {
+    if (previousReferences.get(reference.id) !== reference) {
+      nodes.push(reference.id);
+    }
+  }
+  for (const id of previousReferences.keys()) {
+    if (
+      !next.references.some((reference) => reference.id === id) &&
+      !nodes.includes(id)
+    ) {
       nodes.push(id);
     }
   }

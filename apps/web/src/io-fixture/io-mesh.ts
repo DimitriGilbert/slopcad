@@ -170,7 +170,9 @@ function unwrapProjection(
   result: ParseResult<RenderProjection, ProjectionError>,
 ): RenderProjection {
   if (!result.ok) {
-    throw new Error(`Imported mesh projection rejected: ${result.error.message}`);
+    throw new Error(
+      `Imported mesh projection rejected: ${result.error.message}`,
+    );
   }
   return result.value;
 }
@@ -190,7 +192,10 @@ export function buildImportedMeshState(
     throw new Error(`Imported mesh rejected: ${objectResult.error.message}`);
   }
   const projection = unwrapProjection(
-    createRenderProjection([objectResult.value], fitCameraToBounds(meshBounds(tessellation))),
+    createRenderProjection(
+      [objectResult.value],
+      fitCameraToBounds(meshBounds(tessellation)),
+    ),
   );
   return {
     projection,

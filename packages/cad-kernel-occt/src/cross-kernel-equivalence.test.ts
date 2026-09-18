@@ -60,10 +60,12 @@ import {
   assertVolumeClose,
   type GeometryKernel,
   KERNEL_BACKEND_IDS,
+  KERNEL_ERROR_CODES,
   type KernelSolid,
   tessellationTriangleCount,
   type Tessellation,
   unwrapKernelResult,
+  expectKernelFailure,
 } from "@slopcad/cad-kernel";
 import {
   CURVED_VOLUME_TOLERANCE,
@@ -252,13 +254,146 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     // Documented divergences: rotation is declared by OCCT and JSCAD but
     // not Manifold, which scopes cross-kernel equivalence to the
     // translation-only common ops between the pairs that include Manifold;
-    // persistent topology is OCCT-only (Phase 22's concern).
+    // persistent topology is OCCT-only (Phase 22's concern); the Phase
+    // 26.3 sweep is implemented by OCCT (exact pipe) and JSCAD (station
+    // loft) but honestly declined by Manifold (no sweep or loft primitive
+    // in the engine, probed) — the first operation whose coverage matrix
+    // is not universal; and the Phase 26.4 loft follows the same matrix
+    // (OCCT exact ruled ThruSections, JSCAD slice loft, Manifold
+    // declined — no multi-section constructor in the engine, probed).
     expect(manifold.capabilities.transformRotation).toBe(false);
     expect(occt.capabilities.transformRotation).toBe(true);
     expect(jscad.capabilities.transformRotation).toBe(true);
     expect(manifold.capabilities.persistentTopology).toBe(false);
     expect(occt.capabilities.persistentTopology).toBe(true);
     expect(jscad.capabilities.persistentTopology).toBe(false);
+    expect(manifold.capabilities.sweep).toBe(false);
+    expect(occt.capabilities.sweep).toBe(true);
+    expect(jscad.capabilities.sweep).toBe(true);
+    expect(manifold.capabilities.loft).toBe(false);
+    expect(occt.capabilities.loft).toBe(true);
+    expect(jscad.capabilities.loft).toBe(true);
+  });
+
+  it("lofts agree across kernels where walls are planar, and Manifold declines honestly", () => {
+    // The Phase 26.4 cross-kernel band discipline: planar-wall lofts
+    // (every untwisted fixture) agree exactly-to-exactly — OCCT's ruled
+    // surfaces and JSCAD's flat walls represent the same boundary over
+    // the same chord vertices; curved members carry the documented chord
+    // band (measured −0.166% on the frustum); and a skew wall (the
+    // twisted square) diverges by construction — ruled surfaces vs flat
+    // triangles, probed and documented per kernel, never compared here.
+    const occt = makeOcct();
+    const jscad = makeJscad();
+    const manifold = makeManifold();
+    const square = (side: number, z: number) => {
+      const h = side / 2;
+      return {
+        loop: [
+          {
+            kind: "line" as const,
+            start: [-h, -h] as [number, number],
+            end: [h, -h] as [number, number],
+          },
+          {
+            kind: "line" as const,
+            start: [h, -h] as [number, number],
+            end: [h, h] as [number, number],
+          },
+          {
+            kind: "line" as const,
+            start: [h, h] as [number, number],
+            end: [-h, h] as [number, number],
+          },
+          {
+            kind: "line" as const,
+            start: [-h, h] as [number, number],
+            end: [-h, -h] as [number, number],
+          },
+        ],
+        z: length(z),
+      };
+    };
+    const multiLoft = (kernel: GeometryKernel): KernelSolid =>
+      unwrapKernelResult(
+        kernel.loft({
+          sections: [square(10, 0), square(10, 10), square(5, 20)],
+          placement: {
+            rotation: { axis: [0, 0, 1], angle: angle(0) },
+            translation: { x: length(0), y: length(0), z: length(0) },
+          },
+        }),
+        "multi-station loft",
+      );
+    // Planar walls: both loftring kernels reach the piecewise analytic sum
+    // exactly and agree with each other at the exact band (measured
+    // 1e-12 relative).
+    const piecewise = 100 * 10 + (10 / 6) * (100 + 4 * 56.25 + 25);
+    const occtMulti = volumeOf(occt, multiLoft(occt), "occt multi volume");
+    const jscadMulti = volumeOf(jscad, multiLoft(jscad), "jscad multi volume");
+    assertVolumeClose(occtMulti, piecewise, EXACT_VOLUME_TOLERANCE);
+    assertVolumeClose(jscadMulti, piecewise, EXACT_VOLUME_TOLERANCE);
+    assertVolumeClose(jscadMulti, occtMulti, EXACT_VOLUME_TOLERANCE);
+    // The curved member (concentric circles → conical frustum): OCCT exact
+    // against the analytic frustum (probed −3e-16), JSCAD inside the
+    // chord band (probed −0.166%), cross-agreement in the same band.
+    const frustumLoft = (kernel: GeometryKernel): KernelSolid =>
+      unwrapKernelResult(
+        kernel.loft({
+          sections: [
+            {
+              loop: [{ kind: "circle", center: [0, 0], radius: 6 }],
+              z: length(0),
+            },
+            {
+              loop: [{ kind: "circle", center: [0, 0], radius: 3 }],
+              z: length(10),
+            },
+          ],
+          placement: {
+            rotation: { axis: [0, 0, 1], angle: angle(0) },
+            translation: { x: length(0), y: length(0), z: length(0) },
+          },
+        }),
+        "frustum loft",
+      );
+    const analyticFrustum = (Math.PI * 10 * (36 + 18 + 9)) / 3;
+    const occtFrustum = volumeOf(
+      occt,
+      frustumLoft(occt),
+      "occt frustum volume",
+    );
+    const jscadFrustum = volumeOf(
+      jscad,
+      frustumLoft(jscad),
+      "jscad frustum volume",
+    );
+    assertVolumeClose(occtFrustum, analyticFrustum, EXACT_VOLUME_TOLERANCE);
+    assertVolumeClose(jscadFrustum, analyticFrustum, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(jscadFrustum, occtFrustum, CURVED_VOLUME_TOLERANCE);
+    // Bounds agree within the chord band: OCCT's are the exact circle's
+    // (±6, with its 1e-7 AddOptimal margin), JSCAD's are its chord
+    // polygon's (vertices ON the circle at the axis crossings, extremes
+    // between them — measured 0.0075 mm short on the far side), the same
+    // inscribed-chord class every curved mesh member carries.
+    assertBoundsEqual(
+      boundsOf(jscad, frustumLoft(jscad), "jscad frustum bounds"),
+      boundsOf(occt, frustumLoft(occt), "occt frustum bounds"),
+      0.05,
+    );
+    // And the honesty pin: Manifold's structured decline, even for the
+    // perfectly valid collection above.
+    expectKernelFailure(
+      manifold.loft({
+        sections: [square(10, 0), square(5, 10)],
+        placement: {
+          rotation: { axis: [0, 0, 1], angle: angle(0) },
+          translation: { x: length(0), y: length(0), z: length(0) },
+        },
+      }),
+      KERNEL_ERROR_CODES.unsupportedOperation,
+      "loft on Manifold",
+    );
   });
 
   it("builds the plate-with-hole on all three kernels: exact bounds, curved-band volumes, non-empty meshes", () => {
@@ -268,7 +403,11 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     const m = buildPlateWithHole(manifold);
     const o = buildPlateWithHole(occt);
     const j = buildPlateWithHole(jscad);
-    const manifoldVolume = volumeOf(manifold, m.result, "manifold plate volume");
+    const manifoldVolume = volumeOf(
+      manifold,
+      m.result,
+      "manifold plate volume",
+    );
     const occtVolume = volumeOf(occt, o.result, "occt plate volume");
     const jscadVolume = volumeOf(jscad, j.result, "jscad plate volume");
     // OCCT integrates the true curved bore: exact against the analytic value
@@ -277,10 +416,18 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     // Manifold is exact for its own polygonal-bore representation, so its
     // measure sits inside the documented curved band of the analytic value
     // (measured +0.077%, the pre-spike's mesh-divergence number).
-    assertVolumeClose(manifoldVolume, m.analyticVolumeMm3, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(
+      manifoldVolume,
+      m.analyticVolumeMm3,
+      CURVED_VOLUME_TOLERANCE,
+    );
     // JSCAD's BSP bore is its own polygonal approximation: same banded tier
     // (measured +0.059% vs analytic).
-    assertVolumeClose(jscadVolume, j.analyticVolumeMm3, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(
+      jscadVolume,
+      j.analyticVolumeMm3,
+      CURVED_VOLUME_TOLERANCE,
+    );
     // Cross-kernel agreement carries the same documented band (measured
     // JSCAD vs OCCT 0.059%, JSCAD vs Manifold 0.018%).
     assertVolumeClose(manifoldVolume, occtVolume, CURVED_VOLUME_TOLERANCE);
@@ -288,7 +435,11 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     assertVolumeClose(jscadVolume, manifoldVolume, CURVED_VOLUME_TOLERANCE);
     // Bounds: all three kernels declare tight boolean bounds and every face
     // of the true result lies on the plate's box — exact three-way equality.
-    const manifoldBounds = boundsOf(manifold, m.result, "manifold plate bounds");
+    const manifoldBounds = boundsOf(
+      manifold,
+      m.result,
+      "manifold plate bounds",
+    );
     const occtBounds = boundsOf(occt, o.result, "occt plate bounds");
     const jscadBounds = boundsOf(jscad, j.result, "jscad plate bounds");
     assertBoundsEqual(manifoldBounds, m.tightBounds, EXACT_BOUNDS_TOLERANCE);
@@ -357,7 +508,11 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     );
     // JSCAD joins the banded tier for boolean volumes (measured 1.1e-16).
     assertVolumeClose(jscadUnion.volume, 2000, CURVED_VOLUME_TOLERANCE);
-    assertVolumeClose(jscadUnion.volume, occtUnion.volume, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(
+      jscadUnion.volume,
+      occtUnion.volume,
+      CURVED_VOLUME_TOLERANCE,
+    );
     assertVolumeClose(
       jscadUnion.volume,
       manifoldUnion.volume,
@@ -491,7 +646,11 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
       "manifold plate tessellation",
     );
     const occtMesh = tessellationOf(occt, o.result, "occt plate tessellation");
-    const jscadMesh = tessellationOf(jscad, j.result, "jscad plate tessellation");
+    const jscadMesh = tessellationOf(
+      jscad,
+      j.result,
+      "jscad plate tessellation",
+    );
     // Divergence-theorem volume of each soup vs its own kernel's measure:
     // Manifold's and JSCAD's soups ARE their representations (float noise
     // bands), OCCT's is a 0.1 mm-deflection discretization of an
@@ -564,11 +723,7 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
       "manifold translated bounds",
     );
     const occtBounds = boundsOf(occt, occtMoved, "occt translated bounds");
-    const jscadBounds = boundsOf(
-      jscad,
-      jscadMoved,
-      "jscad translated bounds",
-    );
+    const jscadBounds = boundsOf(jscad, jscadMoved, "jscad translated bounds");
     assertBoundsEqual(manifoldBounds, shifted, EXACT_BOUNDS_TOLERANCE);
     assertBoundsEqual(occtBounds, shifted, EXACT_BOUNDS_TOLERANCE);
     assertBoundsEqual(jscadBounds, shifted, EXACT_BOUNDS_TOLERANCE);
@@ -671,6 +826,161 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
       volumeOf(manifold, m.result, "manifold plate volume"),
       CURVED_VOLUME_TOLERANCE,
     );
-    assertVolumeClose(occtRotatedVolume, jscadRotatedVolume, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(
+      occtRotatedVolume,
+      jscadRotatedVolume,
+      CURVED_VOLUME_TOLERANCE,
+    );
+  });
+
+  it("sweeps the quarter torus equivalently on the implementing kernels, with Manifold declining honestly", () => {
+    const occt = makeOcct();
+    const jscad = makeJscad();
+    const manifold = makeManifold();
+    // The shared fixture: the 6×4 section carried around a radius-30
+    // quarter bend — Pappus gives (π/2)·30·24.
+    const analytic = (Math.PI / 2) * 30 * 24;
+    const sweepInput = {
+      loop: [
+        { kind: "line", start: [-3, -2], end: [3, -2] },
+        { kind: "line", start: [3, -2], end: [3, 2] },
+        { kind: "line", start: [3, 2], end: [-3, 2] },
+        { kind: "line", start: [-3, 2], end: [-3, -2] },
+      ],
+      path: [
+        {
+          kind: "arc",
+          center: [-30, 0],
+          radius: 30,
+          startAngle: angle(0),
+          endAngle: angle(Math.PI / 2),
+        },
+      ],
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: length(0), y: length(0), z: length(0) },
+      },
+    } as const;
+    // OCCT pipes the exact analytic geometry: the exact Pappus value.
+    const occtSolid = unwrapKernelResult(occt.sweep(sweepInput), "occt sweep");
+    assertVolumeClose(
+      volumeOf(occt, occtSolid, "occt sweep volume"),
+      analytic,
+      EXACT_VOLUME_TOLERANCE,
+    );
+    // JSCAD lofts the transported stations: the documented band of the
+    // same value, and of OCCT's exact measure.
+    const jscadSolid = unwrapKernelResult(
+      jscad.sweep(sweepInput),
+      "jscad sweep",
+    );
+    const jscadVolume = volumeOf(jscad, jscadSolid, "jscad sweep volume");
+    assertVolumeClose(jscadVolume, analytic, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(
+      jscadVolume,
+      volumeOf(occt, occtSolid, "occt sweep volume"),
+      CURVED_VOLUME_TOLERANCE,
+    );
+    // Bounds agree inside the station/chord band on both implementing
+    // kernels.
+    const sweepBounds = {
+      min: [-30, -2, 0] as const,
+      max: [3, 2, 33] as const,
+    };
+    assertBoundsEqual(
+      boundsOf(occt, occtSolid, "occt sweep bounds"),
+      sweepBounds,
+      EXACT_BOUNDS_TOLERANCE,
+    );
+    assertBoundsEqual(
+      boundsOf(jscad, jscadSolid, "jscad sweep bounds"),
+      sweepBounds,
+      0.05,
+    );
+    // Manifold's answer is the structured unsupported operation — the
+    // honest divergence the capability matrix declares, not a failure to
+    // agree.
+    const declined = manifold.sweep(sweepInput);
+    expect(declined.ok).toBe(false);
+    if (!declined.ok) {
+      expect(declined.error.code).toBe(KERNEL_ERROR_CODES.unsupportedOperation);
+    }
+  });
+
+  it("mirrors the plate equivalently on all three kernels (the first Phase 26 op with full coverage)", () => {
+    const manifold = makeManifold();
+    const occt = makeOcct();
+    const jscad = makeJscad();
+    const m = buildPlateWithHole(manifold);
+    const o = buildPlateWithHole(occt);
+    const j = buildPlateWithHole(jscad);
+    // Unlike sweep/loft/fillet/chamfer/shell (each declined by some
+    // engine), every kernel implements mirror honestly — the capability
+    // the three assertions below walk through.
+    expect(manifold.capabilities.mirror).toBe(true);
+    expect(occt.capabilities.mirror).toBe(true);
+    expect(jscad.capabilities.mirror).toBe(true);
+    const plane = { axis: "x" as const, offset: length(-10) };
+    const manifoldMirrored = unwrapKernelResult(
+      manifold.mirror(m.result, plane),
+      "manifold mirror",
+    );
+    const occtMirrored = unwrapKernelResult(
+      occt.mirror(o.result, plane),
+      "occt mirror",
+    );
+    const jscadMirrored = unwrapKernelResult(
+      jscad.mirror(j.result, plane),
+      "jscad mirror",
+    );
+    // x ∈ [0, 30] through the plane x = −10 flips to [−50, −20]; y and z
+    // keep their intervals — every kernel declares tight bounds, so the
+    // three reflected bounds agree exactly with each other and with the
+    // hand-derived flip.
+    const reflectedBounds = { min: [-50, 0, 0], max: [-20, 20, 10] } as const;
+    assertBoundsEqual(
+      boundsOf(manifold, manifoldMirrored, "manifold mirrored bounds"),
+      reflectedBounds,
+      EXACT_BOUNDS_TOLERANCE,
+    );
+    assertBoundsEqual(
+      boundsOf(occt, occtMirrored, "occt mirrored bounds"),
+      reflectedBounds,
+      EXACT_BOUNDS_TOLERANCE,
+    );
+    assertBoundsEqual(
+      boundsOf(jscad, jscadMirrored, "jscad mirrored bounds"),
+      reflectedBounds,
+      EXACT_BOUNDS_TOLERANCE,
+    );
+    // Each kernel preserves its own measure exactly (an isometry; measured
+    // 0 delta on all three)...
+    assertVolumeClose(
+      volumeOf(manifold, manifoldMirrored, "manifold mirrored volume"),
+      volumeOf(manifold, m.result, "manifold plate volume"),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertVolumeClose(
+      volumeOf(occt, occtMirrored, "occt mirrored volume"),
+      volumeOf(occt, o.result, "occt plate volume"),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertVolumeClose(
+      volumeOf(jscad, jscadMirrored, "jscad mirrored volume"),
+      volumeOf(jscad, j.result, "jscad plate volume"),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    // ...and the mirror-invariant measures still agree cross-kernel inside
+    // the curved band, exactly as the unmirrored ones do.
+    assertVolumeClose(
+      volumeOf(manifold, manifoldMirrored, "manifold mirrored volume"),
+      volumeOf(occt, occtMirrored, "occt mirrored volume"),
+      CURVED_VOLUME_TOLERANCE,
+    );
+    assertVolumeClose(
+      volumeOf(jscad, jscadMirrored, "jscad mirrored volume"),
+      volumeOf(occt, occtMirrored, "occt mirrored volume"),
+      CURVED_VOLUME_TOLERANCE,
+    );
   });
 });

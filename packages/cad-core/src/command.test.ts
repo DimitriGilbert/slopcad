@@ -5,6 +5,7 @@ import {
   addDocumentParameter,
   addFeature,
   applyCommand,
+  applyTransaction,
   type CadCommand,
   type CadDocument,
   COMMAND_ERROR_CODES,
@@ -13,10 +14,12 @@ import {
   createDocumentId,
   createFeatureId,
   createParameterId,
+  createReferenceId,
   type DocumentId,
   DOCUMENT_ERROR_CODES,
   type FeatureId,
   getDocumentParameter,
+  getDocumentReference,
   getFeature,
   length,
   parseCadDocument,
@@ -26,6 +29,7 @@ import {
   PARAMETER_ERROR_CODES,
   serializeCadDocument,
   serializeCommand,
+  TRANSACTION_ERROR_CODES,
 } from "./index";
 
 const docId: DocumentId = createDocumentId("doc_root");
@@ -148,7 +152,10 @@ describe("applyCommand", () => {
       id: createParameterId("param_missing"),
       value: length(1, "mm"),
     };
-    expectError(applyCommand(sampleDocument(), command), PARAMETER_ERROR_CODES.notFound);
+    expectError(
+      applyCommand(sampleDocument(), command),
+      PARAMETER_ERROR_CODES.notFound,
+    );
   });
 
   it("fails parameter.set with parameter/invalid-value on a non-finite value", () => {
@@ -171,14 +178,25 @@ describe("applyCommand", () => {
       inputs: [{ kind: "feature", id: featPadId }],
       outputs: [],
     };
-    const applied = unwrap(applyCommand(sampleDocument(), command), "applyCommand");
+    const applied = unwrap(
+      applyCommand(sampleDocument(), command),
+      "applyCommand",
+    );
     expect(applied.features.length).toBe(3);
-    expect(getFeature(applied, createFeatureId("feat_fillet"))?.kind).toBe("fillet");
+    expect(getFeature(applied, createFeatureId("feat_fillet"))?.kind).toBe(
+      "fillet",
+    );
   });
 
   it("generates deterministic feature ids: the same command on the same state makes the same id", () => {
-    const first = unwrap(applyCommand(sampleDocument(), createFillet), "applyCommand");
-    const second = unwrap(applyCommand(sampleDocument(), createFillet), "applyCommand");
+    const first = unwrap(
+      applyCommand(sampleDocument(), createFillet),
+      "applyCommand",
+    );
+    const second = unwrap(
+      applyCommand(sampleDocument(), createFillet),
+      "applyCommand",
+    );
     const firstId: FeatureId | undefined = first.features.at(-1)?.id;
     expect(firstId).toBeDefined();
     expect(second.features.at(-1)?.id).toBe(firstId);
@@ -268,12 +286,18 @@ describe("applyCommand", () => {
       inputs: [{ kind: "parameter", id: createParameterId("param_missing") }],
       outputs: [bodySolidId],
     };
-    expectError(applyCommand(document, unresolvable), DOCUMENT_ERROR_CODES.inputUnknown);
+    expectError(
+      applyCommand(document, unresolvable),
+      DOCUMENT_ERROR_CODES.inputUnknown,
+    );
   });
 
   it("applies feature.delete and propagates in-use and not-found failures", () => {
     const document = sampleDocument();
-    expectError(applyCommand(document, deleteSketch), DOCUMENT_ERROR_CODES.inUse);
+    expectError(
+      applyCommand(document, deleteSketch),
+      DOCUMENT_ERROR_CODES.inUse,
+    );
     const applied = unwrap(
       applyCommand(document, { type: "feature.delete", id: featPadId }),
       "applyCommand",
@@ -283,7 +307,10 @@ describe("applyCommand", () => {
       applyCommand(applied, { type: "feature.delete", id: featPadId }),
       DOCUMENT_ERROR_CODES.notFound,
     );
-    const withoutPad = unwrap(applyCommand(applied, deleteSketch), "applyCommand");
+    const withoutPad = unwrap(
+      applyCommand(applied, deleteSketch),
+      "applyCommand",
+    );
     expect(withoutPad.features.length).toBe(0);
   });
 
@@ -298,10 +325,13 @@ describe("applyCommand", () => {
 
   it("rejects an object whose type is not a command with command/type-unknown", () => {
     const smuggled = {
-      type: "body.create",
+      type: "body.delete",
       id: bodySolidId,
     } as unknown as CadCommand;
-    expectError(applyCommand(sampleDocument(), smuggled), COMMAND_ERROR_CODES.typeUnknown);
+    expectError(
+      applyCommand(sampleDocument(), smuggled),
+      COMMAND_ERROR_CODES.typeUnknown,
+    );
     expect(() => serializeCommand(smuggled)).toThrow(
       "Invariant violation: a serialized command must carry a known command type.",
     );
@@ -350,12 +380,17 @@ describe("serializeCommand / parseCommand", () => {
       unit: "mm",
       value: 25.4,
     });
-    const direct = unwrap(applyCommand(sampleDocument(), command), "applyCommand");
+    const direct = unwrap(
+      applyCommand(sampleDocument(), command),
+      "applyCommand",
+    );
     const replayed = unwrap(
       applyCommand(sampleDocument(), roundTripCommand(command)),
       "applyCommand",
     );
-    expect(serializeCadDocument(replayed)).toEqual(serializeCadDocument(direct));
+    expect(serializeCadDocument(replayed)).toEqual(
+      serializeCadDocument(direct),
+    );
   });
 });
 
@@ -372,14 +407,18 @@ describe("parseCommand rejects malformed input", () => {
       COMMAND_ERROR_CODES.versionUnsupported,
     );
     expectError(
-      parseCommand({ formatVersion: 2, type: "feature.delete", id: featSketchId }),
+      parseCommand({
+        formatVersion: 2,
+        type: "feature.delete",
+        id: featSketchId,
+      }),
       COMMAND_ERROR_CODES.versionUnsupported,
     );
   });
 
   it("rejects an unknown type with command/type-unknown", () => {
     expectError(
-      parseCommand({ formatVersion: 1, type: "body.create", id: "body_x" }),
+      parseCommand({ formatVersion: 1, type: "body.delete", id: "body_x" }),
       COMMAND_ERROR_CODES.typeUnknown,
     );
     expectError(
@@ -390,16 +429,78 @@ describe("parseCommand rejects malformed input", () => {
 
   it("rejects malformed payloads with command/malformed", () => {
     const badPayloads: readonly unknown[] = [
-      { formatVersion: 1, type: "parameter.set", id: "width", value: { dimension: "length", unit: "mm", value: 1 } },
-      { formatVersion: 1, type: "parameter.set", id: "param_width", value: { dimension: "length", unit: "mm", value: "1" } },
-      { formatVersion: 1, type: "feature.create", id: "feat_x!", kind: "sketch", inputs: [], outputs: [] },
-      { formatVersion: 1, type: "feature.create", id: "feat_x", kind: "1sketch", inputs: [], outputs: [] },
-      { formatVersion: 1, type: "feature.create", kind: "sketch", inputs: {}, outputs: [] },
-      { formatVersion: 1, type: "feature.create", kind: "sketch", inputs: [{ kind: "body", id: "param_width" }], outputs: [] },
-      { formatVersion: 1, type: "feature.create", kind: "sketch", inputs: [], outputs: "body_solid" },
-      { formatVersion: 1, type: "feature.create", kind: "sketch", inputs: [], outputs: ["body_!"] },
-      { formatVersion: 1, type: "feature.update", id: "body_solid", kind: "sketch", inputs: [], outputs: [] },
-      { formatVersion: 1, type: "feature.update", id: "feat_x", kind: "1sketch", inputs: [], outputs: [] },
+      {
+        formatVersion: 1,
+        type: "parameter.set",
+        id: "width",
+        value: { dimension: "length", unit: "mm", value: 1 },
+      },
+      {
+        formatVersion: 1,
+        type: "parameter.set",
+        id: "param_width",
+        value: { dimension: "length", unit: "mm", value: "1" },
+      },
+      {
+        formatVersion: 1,
+        type: "feature.create",
+        id: "feat_x!",
+        kind: "sketch",
+        inputs: [],
+        outputs: [],
+      },
+      {
+        formatVersion: 1,
+        type: "feature.create",
+        id: "feat_x",
+        kind: "1sketch",
+        inputs: [],
+        outputs: [],
+      },
+      {
+        formatVersion: 1,
+        type: "feature.create",
+        kind: "sketch",
+        inputs: {},
+        outputs: [],
+      },
+      {
+        formatVersion: 1,
+        type: "feature.create",
+        kind: "sketch",
+        inputs: [{ kind: "body", id: "param_width" }],
+        outputs: [],
+      },
+      {
+        formatVersion: 1,
+        type: "feature.create",
+        kind: "sketch",
+        inputs: [],
+        outputs: "body_solid",
+      },
+      {
+        formatVersion: 1,
+        type: "feature.create",
+        kind: "sketch",
+        inputs: [],
+        outputs: ["body_!"],
+      },
+      {
+        formatVersion: 1,
+        type: "feature.update",
+        id: "body_solid",
+        kind: "sketch",
+        inputs: [],
+        outputs: [],
+      },
+      {
+        formatVersion: 1,
+        type: "feature.update",
+        id: "feat_x",
+        kind: "1sketch",
+        inputs: [],
+        outputs: [],
+      },
       { formatVersion: 1, type: "feature.delete", id: "feat_" },
     ];
     for (const input of badPayloads) {
@@ -422,10 +523,21 @@ describe("parseCommand rejects malformed input", () => {
 
   it("parses feature.create with and without an explicit id", () => {
     const generated = unwrap(
-      parseCommand({ formatVersion: 1, type: "feature.create", kind: "sketch", inputs: [], outputs: [] }),
+      parseCommand({
+        formatVersion: 1,
+        type: "feature.create",
+        kind: "sketch",
+        inputs: [],
+        outputs: [],
+      }),
       "parseCommand",
     );
-    expect(generated).toEqual({ type: "feature.create", kind: "sketch", inputs: [], outputs: [] });
+    expect(generated).toEqual({
+      type: "feature.create",
+      kind: "sketch",
+      inputs: [],
+      outputs: [],
+    });
     const explicit = unwrap(
       parseCommand({
         formatVersion: 1,
@@ -463,12 +575,20 @@ describe("command replay determinism", () => {
         applyCommand(rebuilt, roundTripCommand(command)),
         "applyCommand",
       );
-      expect(serializeCadDocument(replayed)).toEqual(serializeCadDocument(direct));
+      expect(serializeCadDocument(replayed)).toEqual(
+        serializeCadDocument(direct),
+      );
       // The replayed document itself still round-trips exactly.
-      expect(serializeCadDocument(unwrap(
-        parseCadDocument(JSON.parse(JSON.stringify(serializeCadDocument(replayed)))),
-        "re-reparse",
-      ))).toEqual(serializeCadDocument(replayed));
+      expect(
+        serializeCadDocument(
+          unwrap(
+            parseCadDocument(
+              JSON.parse(JSON.stringify(serializeCadDocument(replayed))),
+            ),
+            "re-reparse",
+          ),
+        ),
+      ).toEqual(serializeCadDocument(replayed));
     }
   });
 
@@ -554,7 +674,10 @@ describe("feature.reorder (Phase 20)", () => {
       applyCommand(document, reorderFree(null)),
       "feature.reorder",
     );
-    const reparsed = unwrap(parseCadDocument(serializeCadDocument(applied)), "parse");
+    const reparsed = unwrap(
+      parseCadDocument(serializeCadDocument(applied)),
+      "parse",
+    );
     expect(reparsed.features.map((feature) => feature.id)).toEqual(
       applied.features.map((feature) => feature.id),
     );
@@ -611,5 +734,167 @@ describe("feature.reorder (Phase 20)", () => {
       id: featFreeId,
       afterFeatureId: null,
     });
+  });
+});
+
+describe("reference.create (Phase 26.5)", () => {
+  /**
+   * A canonical serialized persistent-reference payload — the form
+   * `serializeTopologyReference` emits for an edge reference (pinned
+   * parseable by the persistent-reference module's own tests). Its schema
+   * is this module's neighbour's, validated there on use; the command and
+   * document layers carry it verbatim.
+   */
+  const referencePayload = Object.freeze({
+    id: "ref_edge_seam",
+    kind: "edge",
+    bodyId: "body_solid",
+    provenance: Object.freeze({
+      bodyId: "body_solid",
+      featurePath: Object.freeze(["feat_sketch", "feat_pad"]),
+    }),
+    identity: Object.freeze({
+      kernelId: "opencascade",
+      schema: "occt-shape-hash-v1",
+      data: Object.freeze({ hash: 123456789 }),
+    }),
+    geometry: Object.freeze({
+      lengthMm: 10,
+      centroidAbsoluteMm: Object.freeze([0, 5, 5]),
+      centroidRelativeMm: Object.freeze([0, 5, 0]),
+    }),
+    validity: Object.freeze({ state: "valid", regeneration: 3, ordinal: 1 }),
+  });
+
+  const referenceId = createReferenceId("ref_edge_seam");
+  const createReference: CadCommand = {
+    type: "reference.create",
+    id: referenceId,
+    name: "seam edge",
+    reference: referencePayload,
+  };
+
+  it("adds the reference record through the command layer, payload verbatim", () => {
+    const applied = unwrap(
+      applyCommand(sampleDocument(), createReference),
+      "applyCommand",
+    );
+    expect(applied.references.length).toBe(1);
+    const stored = getDocumentReference(applied, referenceId);
+    expect(stored?.name).toBe("seam edge");
+    expect(stored?.reference).toEqual(referencePayload);
+  });
+
+  it("round-trips reference.create through serialize → JSON → parse", () => {
+    const once = serializeCommand(createReference);
+    expect(Object.keys(once)).toEqual([
+      "formatVersion",
+      "type",
+      "id",
+      "name",
+      "reference",
+    ]);
+    const revived = roundTripCommand(createReference);
+    expect(revived).toEqual(createReference);
+    expect(serializeCommand(revived)).toEqual(once);
+    // The replayed command applies to the identical stored record.
+    const applied = unwrap(
+      applyCommand(sampleDocument(), revived),
+      "applyCommand",
+    );
+    expect(getDocumentReference(applied, referenceId)?.reference).toEqual(
+      referencePayload,
+    );
+  });
+
+  it("commits [reference.create, feature.create] atomically: a mid-transaction failure leaves the base untouched", () => {
+    const consumeReference: CadCommand = {
+      type: "feature.create",
+      id: createFeatureId("feat_fillet"),
+      kind: "fillet",
+      inputs: [{ kind: "reference", id: referenceId }],
+      outputs: [],
+    };
+    const base = sampleDocument();
+    const committed = unwrap(
+      applyTransaction(base, {
+        commands: [createReference, consumeReference],
+      }),
+      "applyTransaction",
+    );
+    expect(committed.references.length).toBe(1);
+    expect(committed.features.at(-1)?.inputs).toEqual([
+      { kind: "reference", id: referenceId },
+    ]);
+
+    // The same transaction with a colliding feature id fails at the second
+    // command — and the reference the fold had already added to its private
+    // intermediate state is nowhere in the caller's document: a failed
+    // transaction is a never-happened transaction.
+    const conflicting: CadCommand = { ...consumeReference, id: featSketchId };
+    const before = JSON.stringify(serializeCadDocument(base));
+    const failed = applyTransaction(base, {
+      commands: [createReference, conflicting],
+    });
+    expectError(failed, TRANSACTION_ERROR_CODES.commandFailed);
+    if (failed.ok) return;
+    expect(failed.error.index).toBe(1);
+    expect(failed.error.cause?.code).toBe(DOCUMENT_ERROR_CODES.idConflict);
+    expect(JSON.stringify(serializeCadDocument(base))).toBe(before);
+  });
+
+  it("rejects an invalid reference payload or name at both layers, structurally", () => {
+    // The parse layer: structure only — a plain-object payload, a valid id,
+    // a non-empty name.
+    expectError(
+      parseCommand({
+        formatVersion: 1,
+        type: "reference.create",
+        name: "bad",
+        reference: 42,
+      }),
+      COMMAND_ERROR_CODES.malformed,
+    );
+    expectError(
+      parseCommand({
+        formatVersion: 1,
+        type: "reference.create",
+        id: "reference_x",
+        name: "x",
+        reference: {},
+      }),
+      COMMAND_ERROR_CODES.malformed,
+    );
+    expectError(
+      parseCommand({
+        formatVersion: 1,
+        type: "reference.create",
+        name: "",
+        reference: {},
+      }),
+      COMMAND_ERROR_CODES.malformed,
+    );
+    // The apply layer re-validates smuggled input at the substrate: the
+    // document codes, not a corrupted record.
+    const smuggledName = {
+      type: "reference.create",
+      id: referenceId,
+      name: "",
+      reference: referencePayload,
+    } as unknown as CadCommand;
+    expectError(
+      applyCommand(sampleDocument(), smuggledName),
+      DOCUMENT_ERROR_CODES.referenceNameInvalid,
+    );
+    const smuggledPayload = {
+      type: "reference.create",
+      id: referenceId,
+      name: "ok",
+      reference: [1, 2, 3],
+    } as unknown as CadCommand;
+    expectError(
+      applyCommand(sampleDocument(), smuggledPayload),
+      DOCUMENT_ERROR_CODES.referencePayloadInvalid,
+    );
   });
 });

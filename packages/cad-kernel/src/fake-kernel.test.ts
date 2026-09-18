@@ -59,6 +59,12 @@ describe("fake kernel identity and capabilities", () => {
       exactBooleanVolumes: false,
       tightBooleanBounds: false,
       persistentTopology: false,
+      sweep: true,
+      fillet: true,
+      loft: true,
+      chamfer: true,
+      shell: true,
+      mirror: true,
     });
   });
 
@@ -415,7 +421,9 @@ describe("fake kernel normals", () => {
         cz /= 3;
         const normalCorner = corners[0];
         if (normalCorner === undefined) {
-          throw new Error("Invariant violation: corner list always has three entries.");
+          throw new Error(
+            "Invariant violation: corner list always has three entries.",
+          );
         }
         const dot =
           flatAt(normals, normalCorner * 3) * (cx - interior[0]) +
@@ -462,7 +470,11 @@ describe("fake kernel normals", () => {
   it("omits normals for empty solids alongside the empty soup", () => {
     const kernel = createFakeKernel();
     const solid = unwrapKernelResult(
-      kernel.createBox({ width: length(10), depth: length(10), height: length(10) }),
+      kernel.createBox({
+        width: length(10),
+        depth: length(10),
+        height: length(10),
+      }),
       "createBox",
     );
     const empty = unwrapKernelResult(
@@ -574,6 +586,237 @@ describe("fake kernel determinism", () => {
       unwrapKernelResult(kernel.volume(result), "plate volume"),
       30 * 20 * 10 - Math.PI * 16 * 10,
       0.02,
+    );
+  });
+});
+
+describe("fake kernel mirror (Phase 26.9)", () => {
+  it("mirrors a box leaf to reflected bounds, identical volume, and outward-reflected normals", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: length(30),
+        depth: length(20),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(solid, { axis: "x", offset: length(5) }),
+      "mirror",
+    );
+    // x ∈ [0, 30] through the plane x = 5 flips to [2·5 − 30, 2·5 − 0].
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored bounds"),
+      { min: [-20, 0, 0], max: [10, 20, 10] },
+      1e-9,
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored volume"),
+      6000,
+      1e-9,
+    );
+    // The reflected mesh's normals are the reflected normals: the face at
+    // x = −20 carries exactly (−1, 0, 0) — the winding swap restores the
+    // facet orientation a bare vertex reflection would invert.
+    const soup = unwrapKernelResult(kernel.tessellate(mirrored), "soup");
+    expect(soup.normals).toBeDefined();
+    let foundOutward = false;
+    for (let v = 0; v < soup.positions.length / 3; v += 1) {
+      if ((soup.positions[v * 3] ?? 0) < -19.999) {
+        const nx = soup.normals?.[v * 3] ?? 0;
+        const ny = soup.normals?.[v * 3 + 1] ?? 0;
+        const nz = soup.normals?.[v * 3 + 2] ?? 0;
+        if (nx < -0.99 && Math.abs(ny) < 0.01 && Math.abs(nz) < 0.01) {
+          foundOutward = true;
+        }
+      }
+    }
+    expect(foundOutward).toBe(true);
+  });
+
+  it("classifies membership through the reflection pointwise (mirrored query)", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createSphere({ radius: length(5) }),
+      "createSphere",
+    );
+    // The mirrored sphere centred at (10, 0, 0)... the source sphere at
+    // (−10, 0, 0) is mirrored through x = 0; both classify the same points.
+    const placed = unwrapKernelResult(
+      kernel.transform(solid, { x: length(-10), y: length(0), z: length(0) }),
+      "transform",
+    );
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(placed, { axis: "x", offset: length(0) }),
+      "mirror",
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored sphere bounds"),
+      { min: [5, -5, -5], max: [15, 5, 5] },
+      1e-9,
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored sphere volume"),
+      (4 / 3) * Math.PI * 125,
+      1e-9,
+    );
+  });
+
+  it("mirrors a boolean tree to the same quantized volume and reflected container", () => {
+    const kernel = createFakeKernel();
+    const plate = unwrapKernelResult(
+      kernel.createBox({
+        width: length(30),
+        depth: length(20),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const bore = unwrapKernelResult(
+      kernel.createCylinder({ radius: length(4), height: length(10) }),
+      "createCylinder",
+    );
+    const drilled = unwrapKernelResult(
+      kernel.subtract(plate, [
+        unwrapKernelResult(
+          kernel.transform(bore, {
+            x: length(15),
+            y: length(10),
+            z: length(0),
+          }),
+          "transform",
+        ),
+      ]),
+      "subtract",
+    );
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(drilled, { axis: "y", offset: length(0) }),
+      "mirror",
+    );
+    // Isometry by delegation: the mirrored boolean measures exactly the
+    // boolean's own (voxel-quantized) volume, never double-quantized.
+    expect(unwrapKernelResult(kernel.volume(mirrored), "volume")).toBe(
+      unwrapKernelResult(kernel.volume(drilled), "volume"),
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored bounds"),
+      { min: [0, -20, 0], max: [30, 0, 10] },
+      1e-9,
+    );
+  });
+
+  it("tessellates a boolean whose operand is a mirror (the ordered leaf-step chain)", () => {
+    const kernel = createFakeKernel();
+    const left = unwrapKernelResult(
+      kernel.createBox({
+        width: length(10),
+        depth: length(10),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const mirroredRight = unwrapKernelResult(
+      kernel.mirror(left, { axis: "x", offset: length(25) }),
+      "mirror",
+    );
+    const union = unwrapKernelResult(
+      kernel.union([left, mirroredRight]),
+      "union",
+    );
+    // x ∈ [0, 10] through x = 25 flips to [40, 50]: disjoint union volume
+    // doubles and the bounds hull spans both — the leaf under the mirror
+    // reaches the soup through its reflected affine chain, exact. Volume
+    // rides the fake kernel's voxel band (union volumes are quantized,
+    // exactBooleanVolumes: false).
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(union), "union volume"),
+      2000,
+      0.05,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(union), "union bounds"),
+      { min: [0, 0, 0], max: [50, 10, 10] },
+      1e-9,
+    );
+    const soup = unwrapKernelResult(kernel.tessellate(union), "union soup");
+    assertTessellationValid(soup, {
+      bounds: { min: [0, 0, 0], max: [50, 10, 10] },
+    });
+    // Every kept triangle of the mirrored leaf sits in the mirrored half.
+    for (let i = 0; i < soup.indices.length / 3; i += 1) {
+      const i0 = soup.indices[i * 3];
+      const i1 = soup.indices[i * 3 + 1];
+      const i2 = soup.indices[i * 3 + 2];
+      if (i0 === undefined || i1 === undefined || i2 === undefined) continue;
+      const xs = [i0, i1, i2].map((index) => soup.positions[index * 3] ?? 0);
+      expect(xs.every((x) => x >= 39.999) || xs.every((x) => x <= 10.001)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("mirrors a placed extrusion to the reflected placement bounds (rotation interaction)", () => {
+    const kernel = createFakeKernel();
+    // A rectangle extruded under a 90° z placement spans x ∈ [−25, −10],
+    // y ∈ [10, 30], z ∈ [0, 10]; mirroring through x = 0 flips x to
+    // [10, 25] and leaves y, z alone — the mirror composes with the
+    // rotation's transform, no folding into a placement.
+    const extruded = unwrapKernelResult(
+      kernel.extrude({
+        loop: [
+          { kind: "line", start: [10, 10], end: [30, 10] },
+          { kind: "line", start: [30, 10], end: [30, 25] },
+          { kind: "line", start: [30, 25], end: [10, 25] },
+          { kind: "line", start: [10, 25], end: [10, 10] },
+        ],
+        height: length(10),
+        direction: 1,
+        placement: {
+          rotation: { axis: [0, 0, 1], angle: angle(Math.PI / 2) },
+          translation: { x: length(0), y: length(0), z: length(0) },
+        },
+      }),
+      "extrude",
+    );
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(extruded, { axis: "x", offset: length(0) }),
+      "mirror",
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored bounds"),
+      { min: [10, 10, 0], max: [25, 30, 10] },
+      1e-9,
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored volume"),
+      20 * 15 * 10,
+      1e-9,
+    );
+  });
+
+  it("is an involution: the same mirror twice restores the source bounds exactly", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: length(30),
+        depth: length(20),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const once = unwrapKernelResult(
+      kernel.mirror(solid, { axis: "z", offset: length(-3) }),
+      "mirror",
+    );
+    const twice = unwrapKernelResult(
+      kernel.mirror(once, { axis: "z", offset: length(-3) }),
+      "mirror",
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(twice), "twice-mirrored bounds"),
+      { min: [0, 0, 0], max: [30, 20, 10] },
+      1e-9,
     );
   });
 });

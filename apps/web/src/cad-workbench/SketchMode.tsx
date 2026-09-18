@@ -39,7 +39,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
-import { angle as angleValue, length as lengthValue, valueIn } from "@slopcad/cad-core";
+import {
+  angle,
+  angle as angleValue,
+  length,
+  length as lengthValue,
+  valueIn,
+} from "@slopcad/cad-core";
 import {
   applySolvedParameters,
   applySketchSessionTransaction,
@@ -49,12 +55,17 @@ import {
   createSketchSession,
   isDimensionalConstraint,
   redoSketchSession,
+  resolveExtrudeProfile,
+  serializeSketch,
   serializeSketchCommand,
   undoSketchSession,
+  workplaneToPlacement,
   type SketchCommand,
   type SketchDiagnostic,
+  type SerializedSketch,
   type SerializedSketchCommand,
 } from "@slopcad/cad-sketch";
+import type { ProfileExtrudeInput } from "@slopcad/cad-kernel";
 import { Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
@@ -84,6 +95,12 @@ import {
   type SketchEditorEvent,
   type SketchEditorState,
 } from "./sketch-editor";
+import {
+  resolveRevolveSubmission,
+  REVOLVE_AXIS_X_RAD,
+  REVOLVE_AXIS_Y_RAD,
+  type SketchRevolveSubmission,
+} from "./revolve";
 
 /** The solve loop's derived state (last-known-good geometry included). */
 interface SketchSolveState {
@@ -102,14 +119,65 @@ const TOOLBAR_GROUPS = [
   { id: "constraints", label: "Constraints", toolIds: SKETCH_CONSTRAINT_TOOLS },
 ];
 
+/** The resolved extrusion the action hands to the host. */
+export interface SketchExtrudeSubmission {
+  /** The canonical serialized sketch (stored as the document sketch record). */
+  readonly sketch: SerializedSketch;
+  /** The resolved profile loop in kernel-contract form. */
+  readonly loop: ProfileExtrudeInput["loop"];
+  /** The workplane placement in kernel-contract form. */
+  readonly placement: ProfileExtrudeInput["placement"];
+}
+
 /** Props of {@link SketchMode}. */
 export interface SketchModeProps {
   /** Exits sketch mode (the host's mode switch, e.g. back to the model). */
   readonly onExit: () => void;
+  /**
+   * The Phase 26.1 extrude action: the host commits the sketch as a
+   * document record, creates the extrude feature, and dispatches the real
+   * kernel execution to the worker. Called only with a RESOLVED profile;
+   * resolution failures stay here as structured statuses.
+   */
+  readonly onExtrude: (submission: SketchExtrudeSubmission) => void;
+  /**
+   * The Phase 26.2 revolve action: the host commits the sketch as a
+   * document record, creates the sweep and axis parameters plus the revolve
+   * feature, and dispatches the real kernel execution to the worker. Called
+   * only with a RESOLVED, axis-valid profile; failures stay here. Optional:
+   * a host whose document vocabulary carries no revolve (the Phase 26
+   * chain workbench) omits it, and the revolve controls stay hidden instead
+   * of dead.
+   */
+  readonly onRevolve?: (submission: SketchRevolveSubmission) => void;
 }
 
+/** The default extrusion depth the action creates the parameter with (mm). */
+export const EXTRUDE_DEFAULT_DEPTH_MM = 10;
+
+/** The machine-surface outcome of the last extrude attempt. */
+export interface SketchExtrudeOutcome {
+  readonly status: "resolved" | "failed";
+  readonly code?: string;
+  readonly message?: string;
+}
+
+/** The machine-surface outcome of the last revolve attempt. */
+export interface SketchRevolveOutcome {
+  readonly status: "resolved" | "failed";
+  readonly code?: string;
+  readonly message?: string;
+}
+
+/** The revolve axis the selector pins: a workplane axis (X or Y). */
+export type RevolveAxisId = "x" | "y";
+
 /** The full sketch workspace: toolbar, canvas, inspector, status line. */
-export function SketchMode({ onExit }: SketchModeProps): ReactElement {
+export function SketchMode({
+  onExit,
+  onExtrude,
+  onRevolve,
+}: SketchModeProps): ReactElement {
   const [session, setSession] = useState(() =>
     createSketchSession(createWorkbenchSketch()),
   );
@@ -126,6 +194,14 @@ export function SketchMode({ onExit }: SketchModeProps): ReactElement {
     readonly SerializedSketchCommand[]
   >([]);
   const [pointer, setPointer] = useState<CadSketchPoint | null>(null);
+  // The Phase 26.1 extrude action's machine surface (the last attempt).
+  const [extrudeOutcome, setExtrudeOutcome] =
+    useState<SketchExtrudeOutcome | null>(null);
+  // The Phase 26.2 revolve action: the pinned axis (a workplane axis) and
+  // the last attempt's machine surface.
+  const [revolveAxis, setRevolveAxis] = useState<RevolveAxisId>("x");
+  const [revolveOutcome, setRevolveOutcome] =
+    useState<SketchRevolveOutcome | null>(null);
 
   // The solve loop: every authored change re-derives; a failure keeps the
   // last-known-good geometry and surfaces the structured diagnostics.
@@ -188,13 +264,118 @@ export function SketchMode({ onExit }: SketchModeProps): ReactElement {
     if (moved.ok) setSession(moved.value.session);
   }, [session]);
 
+  // The Phase 26.1 extrude action: resolve the CURRENT sketch (solved
+  // geometry when available, authored otherwise) into one closed profile
+  // loop. A resolution failure stays here — structured code on the status
+  // line and the machine surface — and never reaches the document; a
+  // resolved profile hands the serialized sketch plus the kernel-vocabulary
+  // loop and placement to the host.
+  const extrude = useCallback((): void => {
+    const sketch = solveState.solved ?? session.sketch;
+    const profile = resolveExtrudeProfile(sketch.entities);
+    if (!profile.ok) {
+      setExtrudeOutcome({
+        status: "failed",
+        code: profile.error.code,
+        message: profile.error.message,
+      });
+      setEditor((current) => ({
+        ...current,
+        status: {
+          code: profile.error.code,
+          message: profile.error.message,
+          severity: "error",
+        },
+      }));
+      return;
+    }
+    const placement = workplaneToPlacement(sketch.workplane);
+    setExtrudeOutcome({ status: "resolved" });
+    onExtrude({
+      sketch: serializeSketch(sketch),
+      loop: profile.value.segments.map((segment) => {
+        if (segment.kind === "line") {
+          return {
+            kind: "line" as const,
+            start: [segment.start.x, segment.start.y] as const,
+            end: [segment.end.x, segment.end.y] as const,
+          };
+        }
+        if (segment.kind === "arc") {
+          return {
+            kind: "arc" as const,
+            center: [segment.center.x, segment.center.y] as const,
+            radius: segment.radius,
+            startAngle: angle(segment.startAngle, "rad"),
+            endAngle: angle(segment.endAngle, "rad"),
+          };
+        }
+        return {
+          kind: "circle" as const,
+          center: [segment.center.x, segment.center.y] as const,
+          radius: segment.radius,
+        };
+      }),
+      placement: {
+        rotation: {
+          axis: placement.rotation.axis,
+          angle: angle(placement.rotation.angleRad, "rad"),
+        },
+        translation: {
+          x: length(placement.translation.x),
+          y: length(placement.translation.y),
+          z: length(placement.translation.z),
+        },
+      },
+    });
+  }, [onExtrude, session.sketch, solveState.solved]);
+
+  // The Phase 26.2 revolve action: resolve the CURRENT sketch exactly like
+  // the extrude action, then run the kernel's axis validation (crossing
+  // refuses with the structured code before anything is committed) and hand
+  // the serialized sketch plus the kernel-vocabulary loop, placement, and
+  // axis to the host.
+  const revolve = useCallback((): void => {
+    const sketch = solveState.solved ?? session.sketch;
+    const resolution = resolveRevolveSubmission({
+      sketch: serializeSketch(sketch),
+      entities: sketch.entities,
+      workplane: sketch.workplane,
+      axisDirectionRad:
+        revolveAxis === "x" ? REVOLVE_AXIS_X_RAD : REVOLVE_AXIS_Y_RAD,
+    });
+    if (!resolution.ok) {
+      setRevolveOutcome({
+        status: "failed",
+        code: resolution.code,
+        message: resolution.message,
+      });
+      setEditor((current) => ({
+        ...current,
+        status: {
+          code: resolution.code,
+          message: resolution.message,
+          severity: "error",
+        },
+      }));
+      return;
+    }
+    setRevolveOutcome({ status: "resolved" });
+    if (onRevolve === undefined) return;
+    onRevolve(resolution.value);
+  }, [onRevolve, revolveAxis, session.sketch, solveState.solved]);
+
   // The dimension apply surface: the one write path for dimension edits.
   const editDimension = useCallback(
     (constraintId: string, value: number) => {
       const constraint = session.sketch.constraints.find(
         (candidate) => candidate.id === constraintId,
       );
-      if (constraint === null || constraint === undefined || !isDimensionalConstraint(constraint)) {
+      if (
+        constraint === null ||
+        constraint === undefined ||
+        !isDimensionalConstraint(constraint)
+      ) {
         return {
           error: {
             code: "sketch-command/constraint-unknown",
@@ -240,31 +421,28 @@ export function SketchMode({ onExit }: SketchModeProps): ReactElement {
     return map;
   }, [diagnostics]);
 
-  const inspectorConstraints: readonly CadSketchInspectorConstraint[] =
-    useMemo(
-      () =>
-        session.sketch.constraints.map((constraint) => {
-          const diagnostic = diagnosticById.get(constraint.id);
-          return {
-            entityIds: constraintOperandIds(constraint),
-            id: constraint.id,
-            kind: constraint.kind,
-            label: constraintLabel(constraint),
-            message: diagnostic?.message,
-            status:
-              diagnostic === undefined
-                ? "ok"
-                : diagnostic.severity === "error"
-                  ? "error"
-                  : "warning",
-          };
-        }),
-      [session.sketch.constraints, diagnosticById],
-    );
+  const inspectorConstraints: readonly CadSketchInspectorConstraint[] = useMemo(
+    () =>
+      session.sketch.constraints.map((constraint) => {
+        const diagnostic = diagnosticById.get(constraint.id);
+        return {
+          entityIds: constraintOperandIds(constraint),
+          id: constraint.id,
+          kind: constraint.kind,
+          label: constraintLabel(constraint),
+          message: diagnostic?.message,
+          status:
+            diagnostic === undefined
+              ? "ok"
+              : diagnostic.severity === "error"
+                ? "error"
+                : "warning",
+        };
+      }),
+    [session.sketch.constraints, diagnosticById],
+  );
 
-  const selectedDimension:
-    | CadSketchInspectorDimension
-    | null = useMemo(() => {
+  const selectedDimension: CadSketchInspectorDimension | null = useMemo(() => {
     const selected = session.sketch.constraints.find(
       (constraint) => constraint.id === editor.selectedConstraintId,
     );
@@ -343,6 +521,13 @@ export function SketchMode({ onExit }: SketchModeProps): ReactElement {
       aria-label="Sketch workspace"
       className="flex min-h-0 flex-1 flex-col"
       data-sketch-commands={JSON.stringify(commandLog)}
+      data-sketch-extrude={
+        extrudeOutcome === null ? "" : JSON.stringify(extrudeOutcome)
+      }
+      data-sketch-revolve={
+        revolveOutcome === null ? "" : JSON.stringify(revolveOutcome)
+      }
+      data-sketch-revolve-axis={revolveAxis}
       data-sketch-constraints={JSON.stringify(authoredSurface.constraints)}
       data-sketch-diagnostics={JSON.stringify(
         diagnostics.map((diagnostic) => ({
@@ -351,7 +536,8 @@ export function SketchMode({ onExit }: SketchModeProps): ReactElement {
           severity: diagnostic.severity,
         })),
       )}
-      data-sketch-entities={JSON.stringify(authoredSurface.entities)}      data-sketch-gesture={editor.gesture.kind}
+      data-sketch-entities={JSON.stringify(authoredSurface.entities)}
+      data-sketch-gesture={editor.gesture.kind}
       data-sketch-history={JSON.stringify({
         canRedo: canRedoSketch(session),
         canUndo: canUndoSketch(session),
@@ -389,6 +575,65 @@ export function SketchMode({ onExit }: SketchModeProps): ReactElement {
         >
           Model
         </Button>
+        <Button
+          data-testid="sketch-extrude"
+          onClick={extrude}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          Extrude
+        </Button>
+        {/* The revolve action: the axis selector (a workplane axis — the
+            axis line runs through the workplane origin along it) pinned as
+            authoring state, then the action button. The selected axis is
+            machine-visible through data-sketch-revolve-axis. Rendered only
+            when the host carries the action — a host without it shows no
+            dead controls. */}
+        {onRevolve === undefined ? null : (
+          <>
+            <div
+              aria-label="Revolve axis"
+              className="flex items-center gap-1"
+              role="group"
+            >
+              <span className="text-muted-foreground pl-1 text-xs">axis</span>
+              <Button
+                aria-pressed={revolveAxis === "x"}
+                data-testid="revolve-axis-x"
+                onClick={() => {
+                  setRevolveAxis("x");
+                }}
+                size="xs"
+                type="button"
+                variant={revolveAxis === "x" ? "default" : "outline"}
+              >
+                X
+              </Button>
+              <Button
+                aria-pressed={revolveAxis === "y"}
+                data-testid="revolve-axis-y"
+                onClick={() => {
+                  setRevolveAxis("y");
+                }}
+                size="xs"
+                type="button"
+                variant={revolveAxis === "y" ? "default" : "outline"}
+              >
+                Y
+              </Button>
+            </div>
+            <Button
+              data-testid="sketch-revolve"
+              onClick={revolve}
+              size="xs"
+              type="button"
+              variant="outline"
+            >
+              Revolve
+            </Button>
+          </>
+        )}
         <CadSketchToolbar
           activeToolId={editor.tool}
           className="border-0 bg-transparent p-0"
@@ -400,7 +645,11 @@ export function SketchMode({ onExit }: SketchModeProps): ReactElement {
           }}
         />
         <div className="flex-1" />
-        <div aria-label="Sketch history" className="flex items-center gap-1" role="group">
+        <div
+          aria-label="Sketch history"
+          className="flex items-center gap-1"
+          role="group"
+        >
           <Button
             data-testid="sketch-undo"
             disabled={!canUndoSketch(session)}

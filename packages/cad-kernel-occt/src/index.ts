@@ -34,9 +34,7 @@ export {
   OCCT_TOPOLOGY_IDENTITY_SCHEMA,
   occtTopologyView,
 } from "./occt-topology";
-export type {
-  OcctTopologyViewOptions,
-} from "./occt-topology";
+export type { OcctTopologyViewOptions } from "./occt-topology";
 
 export { BREP_EXPORT_ERROR_CODES, BREP_IMPORT_ERROR_CODES } from "./occt-brep";
 export type {

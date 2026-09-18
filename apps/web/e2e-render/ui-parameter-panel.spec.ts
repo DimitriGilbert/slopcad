@@ -70,7 +70,9 @@ interface SerializedCommandLogEntry {
 }
 
 /** Reads the fixture root's canonical command log. */
-async function readCommandLog(page: Page): Promise<SerializedCommandLogEntry[]> {
+async function readCommandLog(
+  page: Page,
+): Promise<SerializedCommandLogEntry[]> {
   const raw = await page.locator(ROOT).getAttribute("data-command-log");
   expect(raw, "data-command-log must exist").not.toBeNull();
   return JSON.parse(raw ?? "[]") as SerializedCommandLogEntry[];

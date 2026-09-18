@@ -76,7 +76,6 @@ import {
   featureTimeline,
   type FeatureRollbackPoint,
   type FeatureTimelineEntry,
-  type FeatureTimelineStatus,
   initialRegenerationStates,
   markStale,
   measureTool,
@@ -96,7 +95,16 @@ import {
   useCadTools,
   valueIn,
 } from "@slopcad/cad-react";
-import { Eye, EyeOff, Redo2, Undo2 } from "lucide-react";
+import {
+  angle,
+  createBodyId,
+  createFeatureId,
+  createParameterId,
+  createSketchDocumentId,
+  dimensionless,
+  length,
+} from "@slopcad/cad-core";
+import { Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import { CadModelTree } from "@slopcad/ui/components/cad/cad-model-tree";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
@@ -113,7 +121,26 @@ import {
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { createCadWorkbenchSession } from "./session";
-import { SketchMode } from "./SketchMode";
+import { documentExtrudeRequest, type ExtrudeSceneRequest } from "./extrude";
+import {
+  defaultHolePosition,
+  documentHoleSceneRequest,
+  holeBaseFeatureOf,
+  HOLE_DEFAULT_AXIS,
+  HOLE_DEFAULT_DEPTH_MM,
+  HOLE_DEFAULT_DIAMETER_MM,
+} from "./hole";
+import {
+  documentRevolveRequest,
+  type RevolveSceneRequest,
+  type SketchRevolveSubmission,
+} from "./revolve";
+import {
+  EXTRUDE_DEFAULT_DEPTH_MM,
+  SketchMode,
+  type SketchExtrudeSubmission,
+} from "./SketchMode";
+import { FeatureTimelineStrip } from "./feature-timeline-strip";
 
 /** An applied computation: the render state plus its revision identity. */
 interface AppliedRenderState {
@@ -136,52 +163,6 @@ interface DerivationPrevious {
   readonly states: RegenerationStateMap;
   readonly results: RegenerationResultMap;
 }
-
-/** Visual presentation of one joined timeline status. */
-const TIMELINE_STATUS_PRESENTATION: Readonly<
-  Record<
-    FeatureTimelineStatus,
-    { readonly dot: string; readonly text: string; readonly chip: string }
-  >
-> = Object.freeze({
-  // The healthy state stays quiet; failures are the only loud chip.
-  valid: Object.freeze({
-    dot: "bg-muted-foreground/40",
-    text: "text-muted-foreground",
-    chip: "border-border",
-  }),
-  stale: Object.freeze({
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
-    chip: "border-border",
-  }),
-  failed: Object.freeze({
-    dot: "bg-destructive",
-    text: "text-destructive font-medium",
-    chip: "border-destructive/60",
-  }),
-  suppressed: Object.freeze({
-    dot: "border border-muted-foreground/60 bg-transparent",
-    text: "text-muted-foreground italic",
-    chip: "border-dashed border-border",
-  }),
-  "beyond-rollback": Object.freeze({
-    dot: "bg-sky-500",
-    text: "text-sky-600 dark:text-sky-400",
-    chip: "border-dashed border-sky-500/60",
-  }),
-});
-
-/** The joined-status labels the timeline chip renders. */
-const TIMELINE_STATUS_LABELS: Readonly<
-  Record<FeatureTimelineStatus, string>
-> = Object.freeze({
-  valid: "Valid",
-  stale: "Stale",
-  failed: "Failed",
-  suppressed: "Suppressed",
-  "beyond-rollback": "Parked",
-});
 
 /** The workbench's top-level modes: the 3D model workspace or the sketch. */
 type WorkbenchMode = "model" | "sketch";
@@ -206,10 +187,7 @@ export function CadWorkbenchPage(): ReactElement {
 
   return (
     <CadProvider store={store}>
-      <CadWorkbenchBody
-        mode={mode}
-        onModeChange={setMode}
-      />
+      <CadWorkbenchBody mode={mode} onModeChange={setMode} />
     </CadProvider>
   );
 }
@@ -251,6 +229,17 @@ function CadWorkbenchBody({
     null,
   );
   const previousRef = useRef<DerivationPrevious | null>(null);
+
+  // The Phase 26.1/26.2/26.10 scene state: the plate computation until the
+  // first solid action commits a feature; afterwards the worker executes
+  // the document's extrude, revolve, or hole composition (parameter edits
+  // re-dispatch).
+  const [activeScene, setActiveScene] = useState<
+    "plate" | "extrude" | "revolve" | "hole"
+  >("plate");
+  const [extrudeCount, setExtrudeCount] = useState(0);
+  const [revolveCount, setRevolveCount] = useState(0);
+  const [holeCount, setHoleCount] = useState(0);
 
   const workbenchDocument = documentApi.document;
   const suppressedKey = useMemo(
@@ -310,6 +299,189 @@ function CadWorkbenchBody({
     };
   }, [workbenchDocument, suppressed, suppressedKey, rollback, rollbackKey]);
 
+  // The Phase 26.1 extrude action (the sketch → solid UX bridge): commit
+  // the sketch record, the distance parameter, the output body, and the
+  // extrude feature in ONE atomic transaction, then switch the scene to the
+  // worker-executed extrusion and return to the model workspace. A refused
+  // transaction keeps everything unchanged.
+  const handleExtrude = (submission: SketchExtrudeSubmission): void => {
+    const n = extrudeCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const sketchId = createSketchDocumentId(`skd_extrude${suffix}`);
+    const parameterId = createParameterId(`param_extrude_depth${suffix}`);
+    const bodyId = createBodyId(`body_extrude${suffix}`);
+    const featureId = createFeatureId(`feat_extrude${suffix}`);
+    const applied = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "sketch.create",
+          id: sketchId,
+          name: `extrude sketch ${String(n)}`,
+          sketch: submission.sketch as unknown as Record<string, unknown>,
+        },
+        {
+          type: "parameter.create",
+          id: parameterId,
+          name: `extrudeDepth${suffix}`,
+          value: length(EXTRUDE_DEFAULT_DEPTH_MM),
+        },
+        { type: "body.create", id: bodyId, name: `pad ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "extrude",
+          inputs: [
+            { kind: "sketch", id: sketchId },
+            { kind: "parameter", id: parameterId },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!applied.ok) return;
+    setExtrudeCount(n);
+    setActiveScene("extrude");
+    onModeChange("model");
+  };
+
+  // The Phase 26.2 revolve action (the sketch → solid UX bridge): commit
+  // the sketch record, the SWEEP and AXIS angle parameters, the output
+  // body, and the revolve feature in ONE atomic transaction, then switch
+  // the scene to the worker-executed revolution and return to the model
+  // workspace. A refused transaction keeps everything unchanged. The axis
+  // is a line through the workplane origin along the direction angle the
+  // sketch mode's selector pinned (see ./revolve).
+  const handleRevolve = (submission: SketchRevolveSubmission): void => {
+    const n = revolveCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const sketchId = createSketchDocumentId(`skd_revolve${suffix}`);
+    const sweepId = createParameterId(`param_revolve_sweep${suffix}`);
+    const axisId = createParameterId(`param_revolve_axis${suffix}`);
+    const bodyId = createBodyId(`body_revolve${suffix}`);
+    const featureId = createFeatureId(`feat_revolve${suffix}`);
+    const applied = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "sketch.create",
+          id: sketchId,
+          name: `revolve sketch ${String(n)}`,
+          sketch: submission.sketch as unknown as Record<string, unknown>,
+        },
+        {
+          type: "parameter.create",
+          id: sweepId,
+          name: `revolveSweep${suffix}`,
+          value: angle(submission.sweepRad, "rad"),
+        },
+        {
+          type: "parameter.create",
+          id: axisId,
+          name: `revolveAxis${suffix}`,
+          value: angle(submission.axisDirectionRad, "rad"),
+        },
+        { type: "body.create", id: bodyId, name: `revolved ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "revolve",
+          inputs: [
+            { kind: "sketch", id: sketchId },
+            { kind: "parameter", id: sweepId },
+            { kind: "parameter", id: axisId },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!applied.ok) return;
+    setRevolveCount(n);
+    setActiveScene("revolve");
+    onModeChange("model");
+  };
+
+  // The Phase 26.10 hole action (the solid → hole UX bridge): commit the
+  // five hole parameters (diameter, depth, position x/y, axis — the
+  // bridge's parameter roles in declared order) and the hole feature in ONE
+  // atomic transaction, targeting the document's LAST extrude feature (the
+  // scene composition's base). The position defaults to the rendered top
+  // face's center — parameter-panel-driven authoring; every dimension is
+  // then a `parameter.set` away (the plan's regeneration criterion). A
+  // refused transaction keeps everything unchanged.
+  const holeBase = useMemo(
+    () => holeBaseFeatureOf(workbenchDocument),
+    [workbenchDocument],
+  );
+  const handleHole = (): void => {
+    const bounds = applied?.state.measurement.bounds;
+    if (holeBase === undefined || bounds === undefined) return;
+    const n = holeCount + 1;
+    // Unlike extrude/revolve, the FIRST hole's parameters carry their index
+    // too: the Phase 15 plate fixture document already owns the unsuffixed
+    // `holeDiameter` parameter name, and a name conflict would refuse the
+    // whole transaction.
+    const suffix = String(n);
+    const position = defaultHolePosition(bounds);
+    const diameterId = createParameterId(`param_hole_diameter${suffix}`);
+    const depthId = createParameterId(`param_hole_depth${suffix}`);
+    const xId = createParameterId(`param_hole_x${suffix}`);
+    const yId = createParameterId(`param_hole_y${suffix}`);
+    const axisId = createParameterId(`param_hole_axis${suffix}`);
+    const bodyId = createBodyId(`body_hole${suffix}`);
+    const featureId = createFeatureId(`feat_hole${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: diameterId,
+          name: `holeDiameter${suffix}`,
+          value: length(HOLE_DEFAULT_DIAMETER_MM),
+        },
+        {
+          type: "parameter.create",
+          id: depthId,
+          name: `holeDepth${suffix}`,
+          value: length(HOLE_DEFAULT_DEPTH_MM),
+        },
+        {
+          type: "parameter.create",
+          id: xId,
+          name: `holeX${suffix}`,
+          value: length(position.x),
+        },
+        {
+          type: "parameter.create",
+          id: yId,
+          name: `holeY${suffix}`,
+          value: length(position.y),
+        },
+        {
+          type: "parameter.create",
+          id: axisId,
+          name: `holeAxis${suffix}`,
+          value: dimensionless(HOLE_DEFAULT_AXIS),
+        },
+        { type: "body.create", id: bodyId, name: `holed ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "hole",
+          inputs: [
+            { kind: "feature", id: holeBase.id },
+            { kind: "parameter", id: diameterId },
+            { kind: "parameter", id: depthId },
+            { kind: "parameter", id: xId },
+            { kind: "parameter", id: yId },
+            { kind: "parameter", id: axisId },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) return;
+    setHoleCount(n);
+    setActiveScene("hole");
+  };
+
   const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {
     if (runState === null) return null;
     const joined = featureTimeline({
@@ -364,10 +536,50 @@ function CadWorkbenchBody({
     // session boots exactly once.
   }, [arm, beginRegeneration]);
 
+  // The scene dispatch: whichever computation the active scene names follows
+  // the DOCUMENT (the parameter edit → regenerate criterion) — the plate
+  // scene follows the hole diameter, the extrude scene re-reads the
+  // document's extrude feature through the profile resolver, the hole scene
+  // re-reads the hole composition (base extrusion + every hole's five
+  // parameters). Declared AFTER the boot effect above so the mount pass
+  // runs with the session already in sessionRef — the initial plate
+  // dispatch fires, and later action re-triggers (extrudeCount, revolveCount,
+  // holeCount) re-dispatch the current scene.
   useEffect(() => {
-    if (storedHole === null) return;
-    sessionRef.current?.dispatch(storedHole);
-  }, [storedHole]);
+    if (activeScene === "extrude") {
+      const request: ExtrudeSceneRequest | null =
+        documentExtrudeRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchExtrude(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "revolve") {
+      const request: RevolveSceneRequest | null =
+        documentRevolveRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchRevolve(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "hole") {
+      const derived = documentHoleSceneRequest(workbenchDocument);
+      if (derived !== null) {
+        sessionRef.current?.dispatchHole(derived.request, derived.bodyId);
+      }
+      return;
+    }
+    if (storedHole !== null) {
+      sessionRef.current?.dispatch(storedHole);
+    }
+  }, [
+    activeScene,
+    workbenchDocument,
+    storedHole,
+    extrudeCount,
+    revolveCount,
+    holeCount,
+  ]);
 
   // The host pushes the CURRENT projection into the store — the projection
   // access the active tool reads. Host-side state push, not mirrored state.
@@ -435,6 +647,29 @@ function CadWorkbenchBody({
       })}
       data-feature-timeline={timelineJson}
       data-sketch-mode={mode}
+      data-scene-kind={activeScene}
+      data-scene-extents={
+        applied === null
+          ? ""
+          : (() => {
+              const { min, max } = applied.state.measurement.bounds;
+              return [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
+                .map((extent) => extent.toFixed(3))
+                .join(" × ");
+            })()
+      }
+      data-scene-bounds={
+        applied === null
+          ? ""
+          : JSON.stringify({
+              min: applied.state.measurement.bounds.min.map((v) =>
+                Number(v.toFixed(3)),
+              ),
+              max: applied.state.measurement.bounds.max.map((v) =>
+                Number(v.toFixed(3)),
+              ),
+            })
+      }
     >
       {/* Tool row: the component's tool strip; the feature timeline (the
           Phase 20 history surface) sits beside it behind a divider, and the
@@ -479,7 +714,11 @@ function CadWorkbenchBody({
           )}
         </div>
         <div className="flex-1" />
-        <div aria-label="History" className="flex items-center gap-1" role="group">
+        <div
+          aria-label="History"
+          className="flex items-center gap-1"
+          role="group"
+        >
           <Button
             id="history-undo"
             type="button"
@@ -507,6 +746,28 @@ function CadWorkbenchBody({
             Redo
           </Button>
         </div>
+        {/* The Phase 26.10 hole action: cuts the document's last extrusion
+            with parameter-panel-driven defaults (the hole feature's five
+            parameters land in the right dock, each a parameter.set away
+            from a regeneration). Needs a solid first — the button states
+            that instead of pretending. */}
+        <Button
+          data-testid="workbench-hole"
+          title={
+            holeBase === undefined
+              ? "Sketch and extrude a profile first — a hole cuts an existing solid."
+              : "Cut a hole into the latest extrusion (defaults on the top face's center; edit holeDiameter/holeDepth/holeX/holeY in the parameter panel)."
+          }
+          disabled={holeBase === undefined}
+          onClick={() => {
+            handleHole();
+          }}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          Hole
+        </Button>
         <Button
           data-testid="workbench-mode-toggle"
           onClick={() => {
@@ -519,7 +780,15 @@ function CadWorkbenchBody({
           Sketch
         </Button>
       </div>
-      {mode === "sketch" ? <SketchMode onExit={() => { onModeChange("model"); }} /> : null}
+      {mode === "sketch" ? (
+        <SketchMode
+          onExit={() => {
+            onModeChange("model");
+          }}
+          onExtrude={handleExtrude}
+          onRevolve={handleRevolve}
+        />
+      ) : null}
       {/* The workspace: tree palette left, viewport dominant, parameter
           palette right — the components' own sizes are the layout's sizes.
           The row is centered as a group so the leftover workspace frames
@@ -634,206 +903,5 @@ function CadWorkbenchBody({
         </span>
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The timeline strip
-// ---------------------------------------------------------------------------
-
-interface FeatureTimelineStripProps {
-  readonly entries: readonly FeatureTimelineEntry[];
-  readonly rollback: FeatureRollbackPoint | null;
-  readonly executed: readonly FeatureId[];
-  readonly onRollback: (rollback: FeatureRollbackPoint | null) => void;
-  readonly onToggleSuppressed: (id: FeatureId) => void;
-}
-
-/**
- * The chips and gaps of the feature timeline: one gap before each chip and
- * one after the last, each a named rollback target; the gap the marker
- * currently occupies renders the marker and clears it when clicked. The
- * right-aligned summary names the marker's position and the last run's
- * executed/parked counts.
- */
-function FeatureTimelineStrip({
-  entries,
-  rollback,
-  executed,
-  onRollback,
-  onToggleSuppressed,
-}: FeatureTimelineStripProps): ReactElement {
-  const parkedCount = entries.filter(
-    (entry) => entry.status === "beyond-rollback",
-  ).length;
-  const activeIndex =
-    rollback === null
-      ? null
-      : rollback.afterFeatureId === null
-        ? 0
-        : entries.findIndex((entry) => entry.id === rollback.afterFeatureId) + 1;
-  const lastEntry = entries[entries.length - 1];
-  return (
-    <>
-      {entries.map((entry, index) => {
-        const before = entries[index - 1];
-        return (
-          <TimelineFragment
-            key={entry.id}
-            entry={entry}
-            gapAnchorId={before?.id ?? null}
-            gapLabel={
-              before === undefined
-                ? `Roll back before ${entry.kind}`
-                : `Roll back after ${before.kind}`
-            }
-            activeGap={activeIndex === index}
-            onSetRollback={(anchorId) => {
-              onRollback({ afterFeatureId: anchorId });
-            }}
-            onClearRollback={() => {
-              onRollback(null);
-            }}
-            onToggleSuppressed={onToggleSuppressed}
-          />
-        );
-      })}
-      <TimelineGap
-        label={`Roll back after ${lastEntry?.kind ?? ""}`}
-        active={activeIndex !== null && activeIndex >= entries.length}
-        onSet={() => {
-          if (lastEntry !== undefined) {
-            onRollback({ afterFeatureId: lastEntry.id });
-          }
-        }}
-        onClear={() => {
-          onRollback(null);
-        }}
-      />
-      <span
-        className="text-muted-foreground ml-auto shrink-0 pl-3 font-mono text-[11px]"
-        data-testid="timeline-summary"
-      >
-        {rollback === null ? "" : "rollback · "}
-        {` ${String(executed.length)} executed`}
-        {parkedCount > 0 ? ` · ${String(parkedCount)} parked` : ""}
-      </span>
-    </>
-  );
-}
-
-interface TimelineFragmentProps {
-  readonly entry: FeatureTimelineEntry;
-  /** The feature id the gap before this chip sits after (`null` = start). */
-  readonly gapAnchorId: FeatureId | null;
-  readonly gapLabel: string;
-  readonly activeGap: boolean;
-  readonly onSetRollback: (anchorId: FeatureId | null) => void;
-  readonly onClearRollback: () => void;
-  readonly onToggleSuppressed: (id: FeatureId) => void;
-}
-
-/** One chip plus the rollback gap before it. */
-function TimelineFragment({
-  entry,
-  gapAnchorId,
-  gapLabel,
-  activeGap,
-  onSetRollback,
-  onClearRollback,
-  onToggleSuppressed,
-}: TimelineFragmentProps): ReactElement {
-  const presentation = TIMELINE_STATUS_PRESENTATION[entry.status];
-  const suppressed = entry.status === "suppressed";
-  return (
-    <>
-      <TimelineGap
-        label={gapLabel}
-        active={activeGap}
-        onSet={() => {
-          onSetRollback(gapAnchorId);
-        }}
-        onClear={onClearRollback}
-      />
-      <span
-        className={`flex shrink-0 items-center gap-1.5 border px-2 py-1 text-xs ${presentation.chip}`}
-        data-testid="timeline-chip"
-        data-timeline-id={entry.id}
-        data-timeline-status={entry.status}
-        title={
-          entry.diagnostics.length === 0
-            ? `${entry.kind} (${String(entry.id)})`
-            : entry.diagnostics
-                .map((diagnostic) => diagnostic.message)
-                .join("\n")
-        }
-      >
-        <span
-          aria-hidden="true"
-          className={`size-1.5 shrink-0 rounded-full ${presentation.dot}`}
-        />
-        <span className={presentation.text}>{entry.kind}</span>
-        <span className={`text-[11px] leading-none ${presentation.text}`}>
-          {TIMELINE_STATUS_LABELS[entry.status]}
-        </span>
-        <button
-          type="button"
-          aria-label={suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`}
-          aria-pressed={suppressed}
-          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center"
-          title={suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`}
-          onClick={() => {
-            onToggleSuppressed(entry.id);
-          }}
-        >
-          {suppressed ? (
-            <Eye aria-hidden="true" className="size-3" />
-          ) : (
-            <EyeOff aria-hidden="true" className="size-3" />
-          )}
-        </button>
-      </span>
-    </>
-  );
-}
-
-/**
- * The rollback gap between two chips (or before the first / after the
- * last): a narrow named button. When the marker occupies this gap, the gap
- * renders the amber marker bar and clicking removes it.
- */
-function TimelineGap({
-  label,
-  active,
-  onSet,
-  onClear,
-}: {
-  readonly label: string;
-  readonly active: boolean;
-  readonly onSet: () => void;
-  readonly onClear: () => void;
-}): ReactElement {
-  return (
-    <button
-      type="button"
-      aria-label={active ? `Remove rollback point — ${label}` : label}
-      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer"
-      title={active ? `Remove rollback point — ${label}` : label}
-      onClick={() => {
-        if (active) {
-          onClear();
-        } else {
-          onSet();
-        }
-      }}
-    >
-      {active ? (
-        <span
-          aria-hidden="true"
-          className="bg-amber-500 absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2"
-          data-testid="rollback-marker"
-        />
-      ) : null}
-    </button>
   );
 }

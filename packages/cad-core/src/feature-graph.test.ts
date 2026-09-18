@@ -65,13 +65,15 @@ describe("featureDependencyEdges", () => {
     ]);
     expect(edges.size).toBe(2);
     expect(edges.get(fSketch)).toEqual([]);
-    expect(edges.get(fPad)).toEqual([param(pWidth), body(bBase), feat(fSketch)]);
+    expect(edges.get(fPad)).toEqual([
+      param(pWidth),
+      body(bBase),
+      feat(fSketch),
+    ]);
   });
 
   it("drops feature inputs that reference an absent feature", () => {
-    const edges = featureDependencyEdges([
-      feature(fPad, [feat(fSketch)]),
-    ]);
+    const edges = featureDependencyEdges([feature(fPad, [feat(fSketch)])]);
     expect(edges.get(fPad)).toEqual([]);
   });
 
@@ -284,7 +286,12 @@ describe("feature graph over a CadDocument", () => {
       [fShell, [feat(fPad), body(bBase)]],
     ];
     for (const [id, inputs] of steps) {
-      const added = addFeature(document, { id, kind: "solid", inputs, outputs: [] });
+      const added = addFeature(document, {
+        id,
+        kind: "solid",
+        inputs,
+        outputs: [],
+      });
       if (!added.ok) throw new Error(added.error.message);
       document = added.value.document;
     }

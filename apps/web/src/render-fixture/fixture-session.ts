@@ -6,9 +6,7 @@
  * workbench can reuse the same pipeline without duplicating it.
  */
 
-import type {
-  SelectionReference,
-} from "@slopcad/cad-core";
+import type { SelectionReference } from "@slopcad/cad-core";
 import {
   groupSyntheticFaces,
   serializeDimensionalValue,
@@ -24,12 +22,21 @@ import {
 } from "@slopcad/cad-kernel";
 import type { WorkerClient } from "@slopcad/cad-kernel";
 import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
-import type { PlateMeasurement } from "../worker-fixture/plate-scene";
+import type {
+  ExtrudeSceneRequest,
+  HoleSceneRequest,
+  PlateMeasurement,
+  RevolveSceneRequest,
+} from "../worker-fixture/plate-scene-extra";
 
 import {
   computePlateRenderState,
+  extrudeRenderState,
   type PlateRenderState,
 } from "./plate-render-scene";
+import { computeExtrudeScene } from "../worker-fixture/extrude-scene";
+import { computeRevolveScene } from "../worker-fixture/revolve-scene";
+import { computeHoleScene } from "../worker-fixture/hole-scene";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
  * authored for exactly this size (and the scene runs at dpr 1), which is
@@ -39,8 +46,28 @@ const VIEWPORT_CSS_HEIGHT = 520;
 
 /** The wired session a booted fixture exposes. */
 export interface RenderFixtureSession {
-  /** Records a parameter change and dispatches its computation. */
+  /** Records a parameter change and dispatches the plate computation. */
   dispatch(holeDiameterMm: number): void;
+  /**
+   * Dispatches the Phase 26.1 extrude computation: the REAL kernel executes
+   * `solid.extrude` on the sketch-resolved profile in the worker, and the
+   * settled solid's measurement + projection become the visible scene.
+   */
+  dispatchExtrude(request: ExtrudeSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 26.2 revolve computation: the REAL kernel executes
+   * `solid.revolve` on the sketch-resolved profile about the pinned axis in
+   * the worker, and the settled solid's measurement + projection become the
+   * visible scene (the same bounds-derived camera the extrude scene uses).
+   */
+  dispatchRevolve(request: RevolveSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 26.10 hole computation: the REAL kernel composes
+   * the base extrusion, one planned tool per hole, and the subtract in the
+   * worker, and the settled solid's measurement + projection become the
+   * visible scene (the same bounds-derived camera the extrude scene uses).
+   */
+  dispatchHole(request: HoleSceneRequest, bodyId: string): void;
   /** Settles the channel and terminates the worker. */
   dispose(): void;
 }
@@ -139,7 +166,11 @@ export function faceAnchorSurface(renderState: PlateRenderState): string {
         normal:
           meanNormal === null
             ? null
-            : [round3(meanNormal[0]), round3(meanNormal[1]), round3(meanNormal[2])],
+            : [
+                round3(meanNormal[0]),
+                round3(meanNormal[1]),
+                round3(meanNormal[2]),
+              ],
       };
     }
   }
@@ -201,9 +232,7 @@ export function bootRenderFixtureSession(
     if (targets.boundsId !== undefined) {
       setText(
         targets.boundsId,
-        visible === null
-          ? "…"
-          : formatBoundsExtents(visible.state.measurement),
+        visible === null ? "…" : formatBoundsExtents(visible.state.measurement),
       );
     }
     if (targets.trianglesId !== undefined) {
@@ -223,28 +252,76 @@ export function bootRenderFixtureSession(
     if (targets.errorId !== undefined) setText(targets.errorId, errorText);
   }
 
+  /** Shared settle path of both dispatch forms. */
+  function settle(): void {
+    counters.settled += 1;
+    writeSurface();
+    // The coordinator's visible state is the authority (a superseded
+    // computation settles without ever becoming visible).
+    const visible = coordinator.visible();
+    if (visible !== null) onApplied(visible.state, visible.revision);
+  }
+
   return {
     dispatch(holeDiameterMm: number): void {
       counters.dispatched += 1;
       writeSurface();
       coordinator
         .update((context) => computePlateRenderState(context, holeDiameterMm))
-        .then(
-          () => {
-            counters.settled += 1;
-            writeSurface();
-            // The coordinator's visible state is the authority (a superseded
-            // computation settles without ever becoming visible).
-            const visible = coordinator.visible();
-            if (visible !== null) onApplied(visible.state, visible.revision);
-          },
-          (failure: unknown) => {
-            counters.settled += 1;
-            errorText =
-              failure instanceof Error ? failure.message : String(failure);
-            writeSurface();
-          },
-        );
+        .then(settle, (failure: unknown) => {
+          counters.settled += 1;
+          errorText =
+            failure instanceof Error ? failure.message : String(failure);
+          writeSurface();
+        });
+    },
+    dispatchExtrude(request: ExtrudeSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computeExtrudeScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(settle, (failure: unknown) => {
+          counters.settled += 1;
+          errorText =
+            failure instanceof Error ? failure.message : String(failure);
+          writeSurface();
+        });
+    },
+    dispatchRevolve(request: RevolveSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computeRevolveScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(settle, (failure: unknown) => {
+          counters.settled += 1;
+          errorText =
+            failure instanceof Error ? failure.message : String(failure);
+          writeSurface();
+        });
+    },
+    dispatchHole(request: HoleSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computeHoleScene(context, request), bodyId),
+        )
+        .then(settle, (failure: unknown) => {
+          counters.settled += 1;
+          errorText =
+            failure instanceof Error ? failure.message : String(failure);
+          writeSurface();
+        });
     },
     dispose(): void {
       client.close();

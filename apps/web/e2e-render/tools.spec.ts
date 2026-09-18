@@ -72,10 +72,7 @@ interface CommandLogEntry {
 }
 
 /** Waits for the tool to reach a given phase (and the surface to say so). */
-async function waitForToolPhase(
-  page: Page,
-  phase: string,
-): Promise<void> {
+async function waitForToolPhase(page: Page, phase: string): Promise<void> {
   await page.waitForFunction((expected) => {
     const root = document.getElementById("render-root");
     return root !== null && root.getAttribute("data-tool-phase") === expected;
@@ -175,7 +172,10 @@ test("the measure tool completes with a dimensional distance and unit readout", 
   );
   await expect(page.locator("#measure-readout")).toHaveText(surface.measure);
   // Full-page evidence: the readout lives in the fixture's panel.
-  await saveArtifact("tool-measure-readout-fullpage.png", await page.screenshot());
+  await saveArtifact(
+    "tool-measure-readout-fullpage.png",
+    await page.screenshot(),
+  );
 });
 
 test("the translate tool commits one atomic transaction and visibly moves the plate", async ({
@@ -202,7 +202,8 @@ test("the translate tool commits one atomic transaction and visibly moves the pl
   expect(log).toHaveLength(1);
   const transaction = log[0];
   expect(transaction === undefined).toBe(false);
-  if (transaction === undefined) throw new Error("unreachable: log checked above");
+  if (transaction === undefined)
+    throw new Error("unreachable: log checked above");
   expect(transaction.commands.map((command) => command.type)).toEqual([
     "parameter.set",
     "parameter.set",
@@ -220,7 +221,9 @@ test("the translate tool commits one atomic transaction and visibly moves the pl
   }
   // The applied offset equals the committed components and is non-degenerate.
   const [tx, ty, tz] = surface.translate as readonly number[];
-  expect([tx, ty, tz]).toEqual(transaction.commands.map((command) => command.value.value));
+  expect([tx, ty, tz]).toEqual(
+    transaction.commands.map((command) => command.value.value),
+  );
   expect(tx !== 0 || ty !== 0 || tz !== 0).toBe(true);
 
   // The executor stand-in re-rendered the moved plate: a NEW frame.
@@ -261,7 +264,8 @@ test("the rotate tool commits the angle command and honestly moves nothing", asy
   expect(log).toHaveLength(1);
   const transaction = log[0];
   expect(transaction === undefined).toBe(false);
-  if (transaction === undefined) throw new Error("unreachable: log checked above");
+  if (transaction === undefined)
+    throw new Error("unreachable: log checked above");
   const [command] = transaction.commands;
   expect(command?.type).toBe("parameter.set");
   expect(command?.id).toBe("param_rotate_z");
@@ -296,7 +300,10 @@ test("Escape cancels a live drag and emits nothing (atomicity rule)", async ({
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
   if (box === null) throw new Error("unreachable: box checked above");
-  await page.mouse.move(box.x + top.anchor.point[0], box.y + top.anchor.point[1]);
+  await page.mouse.move(
+    box.x + top.anchor.point[0],
+    box.y + top.anchor.point[1],
+  );
   await page.mouse.down();
   await page.mouse.move(
     box.x + right.anchor.point[0],
@@ -305,9 +312,9 @@ test("Escape cancels a live drag and emits nothing (atomicity rule)", async ({
   );
   // The in-flight vector is visible tool state and NOTHING has been issued.
   let surface = await readToolSurface(page);
-  expect(
-    (surface.toolState as { readonly stage: string }).stage,
-  ).toBe("dragging");
+  expect((surface.toolState as { readonly stage: string }).stage).toBe(
+    "dragging",
+  );
   expect(surface.commandLog).toEqual([]);
 
   await page.keyboard.press("Escape");
@@ -344,7 +351,10 @@ test("only one tool is active: switching mid-gesture discards the in-flight stat
   const box = await canvas.boundingBox();
   expect(box).not.toBeNull();
   if (box === null) throw new Error("unreachable: box checked above");
-  await page.mouse.move(box.x + top.anchor.point[0], box.y + top.anchor.point[1]);
+  await page.mouse.move(
+    box.x + top.anchor.point[0],
+    box.y + top.anchor.point[1],
+  );
   await page.mouse.down();
   await page.mouse.move(
     box.x + right.anchor.point[0],
@@ -352,9 +362,11 @@ test("only one tool is active: switching mid-gesture discards the in-flight stat
     { steps: 3 },
   );
   expect(
-    (await readToolSurface(page).then((s) => s.toolState) as {
-      readonly stage: string;
-    }).stage,
+    (
+      (await readToolSurface(page).then((s) => s.toolState)) as {
+        readonly stage: string;
+      }
+    ).stage,
   ).toBe("dragging");
 
   // Mid-drag switch: cancel + reset + activate, still nothing emitted.

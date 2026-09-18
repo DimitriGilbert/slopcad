@@ -38,6 +38,4 @@ export interface ThreeMfImportFailure {
 }
 
 /** Everything the endpoint returns. */
-export type ThreeMfImportResponse =
-  | ThreeMfImportSuccess
-  | ThreeMfImportFailure;
+export type ThreeMfImportResponse = ThreeMfImportSuccess | ThreeMfImportFailure;

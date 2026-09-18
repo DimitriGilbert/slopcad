@@ -26,10 +26,7 @@ import {
   pointTarget,
 } from "./index";
 import { createSketch } from "./sketch";
-import {
-  createSketchConstraintId,
-  createSketchEntityId,
-} from "./sketch-ids";
+import { createSketchConstraintId, createSketchEntityId } from "./sketch-ids";
 import { xyWorkplane } from "./workplane";
 import {
   applySketchSessionTransaction,
@@ -46,7 +43,11 @@ const horizontalId = createSketchConstraintId("skcon_horizontal");
 
 function baseSketch() {
   const entities = [
-    createPointEntity(anchorId, { x: 0, y: 0 }, { fixed: true, construction: true }),
+    createPointEntity(
+      anchorId,
+      { x: 0, y: 0 },
+      { fixed: true, construction: true },
+    ),
     createLineEntity(lineId, { x: 0, y: 0 }, { x: 60, y: 0 }),
     createLineEntity(otherId, { x: 0, y: 40 }, { x: 60, y: 40 }),
   ];
@@ -106,7 +107,10 @@ describe("sketch command application", () => {
     }
     const unknown = applySketchCommand(baseSketch(), {
       type: "sketch.entity.update",
-      entity: createPointEntity(createSketchEntityId("skent_ghost"), { x: 0, y: 0 }),
+      entity: createPointEntity(createSketchEntityId("skent_ghost"), {
+        x: 0,
+        y: 0,
+      }),
     });
     expect(unknown).toMatchObject({
       ok: false,
@@ -200,7 +204,9 @@ describe("sketch command application", () => {
     });
     expect(applied.ok).toBe(true);
     if (applied.ok) {
-      expect(applied.value.constraints.map((c) => c.id)).toEqual([horizontalId]);
+      expect(applied.value.constraints.map((c) => c.id)).toEqual([
+        horizontalId,
+      ]);
     }
   });
 
@@ -215,7 +221,10 @@ describe("sketch command application", () => {
       const distance = applied.value.constraints.find(
         (constraint) => constraint.id === distanceId,
       );
-      expect(distance).toMatchObject({ kind: "distance", value: { value: 80 } });
+      expect(distance).toMatchObject({
+        kind: "distance",
+        value: { value: 80 },
+      });
     }
 
     const notDimensional = applySketchCommand(baseSketch(), {
@@ -270,7 +279,10 @@ describe("sketch transactions", () => {
       commands: [
         {
           type: "sketch.entity.create",
-          entity: createPointEntity(createSketchEntityId("skent_tmp"), { x: 9, y: 9 }),
+          entity: createPointEntity(createSketchEntityId("skent_tmp"), {
+            x: 9,
+            y: 9,
+          }),
         },
         {
           type: "sketch.constraint.create",

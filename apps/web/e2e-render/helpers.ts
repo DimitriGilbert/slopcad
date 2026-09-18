@@ -159,7 +159,10 @@ export async function readFaceAnchors(
   expect(raw, "the fixture must publish face anchors").not.toBeNull();
   if (raw === null) throw new Error("unreachable: anchors checked above");
   const parsed = JSON.parse(raw) as FaceAnchorSurface;
-  expect(Object.keys(parsed).length, "at least one face anchor").toBeGreaterThan(0);
+  expect(
+    Object.keys(parsed).length,
+    "at least one face anchor",
+  ).toBeGreaterThan(0);
   return parsed;
 }
 
@@ -172,7 +175,11 @@ export function faceWithNormal(
   anchors: FaceAnchorSurface,
   target: readonly [number, number, number],
   tolerance = 0.05,
-): { readonly key: string; readonly faceIndex: number; readonly anchor: FaceAnchor } {
+): {
+  readonly key: string;
+  readonly faceIndex: number;
+  readonly anchor: FaceAnchor;
+} {
   for (const [key, anchor] of Object.entries(anchors)) {
     if (anchor.normal === null) continue;
     const matches =
@@ -216,14 +223,17 @@ export async function waitForSelectionFrame(
   expectedKey: string,
   rootId = "render-root",
 ): Promise<void> {
-  await page.waitForFunction(({ id, key: expected }) => {
-    const root = document.getElementById(id);
-    return (
-      root !== null &&
-      root.getAttribute("data-selection-key") === expected &&
-      root.getAttribute("data-cad-selection-frame") === expected
-    );
-  }, { id: rootId, key: expectedKey });
+  await page.waitForFunction(
+    ({ id, key: expected }) => {
+      const root = document.getElementById(id);
+      return (
+        root !== null &&
+        root.getAttribute("data-selection-key") === expected &&
+        root.getAttribute("data-cad-selection-frame") === expected
+      );
+    },
+    { id: rootId, key: expectedKey },
+  );
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
@@ -289,9 +299,7 @@ export async function readSelection(
   page: Page,
   rootId = "render-root",
 ): Promise<unknown[]> {
-  const raw = await page
-    .locator(`#${rootId}`)
-    .getAttribute("data-selection");
+  const raw = await page.locator(`#${rootId}`).getAttribute("data-selection");
   expect(raw, "the fixture must publish the selection JSON").not.toBeNull();
   if (raw === null) throw new Error("unreachable: selection checked above");
   return JSON.parse(raw) as unknown[];
@@ -317,7 +325,10 @@ export async function readSelectionRegeneration(
     .locator(`#${rootId}`)
     .getAttribute("data-selection-regeneration");
   const value = Number(raw);
-  expect(Number.isInteger(value) && value >= 0, `regeneration="${String(raw)}"`).toBe(true);
+  expect(
+    Number.isInteger(value) && value >= 0,
+    `regeneration="${String(raw)}"`,
+  ).toBe(true);
   return value;
 }
 
@@ -389,7 +400,9 @@ export async function readRenderedFrames(
     .locator(`#${rootId}`)
     .getAttribute("data-rendered-frames");
   const value = Number(raw);
-  expect(Number.isInteger(value) && value >= 0, `frames="${String(raw)}"`).toBe(true);
+  expect(Number.isInteger(value) && value >= 0, `frames="${String(raw)}"`).toBe(
+    true,
+  );
   return value;
 }
 
@@ -402,7 +415,9 @@ export async function waitForRenderedFrames(
   await page.waitForFunction(
     ({ count, root }) => {
       const element = document.getElementById(root);
-      const frames = Number(element?.getAttribute("data-rendered-frames") ?? "0");
+      const frames = Number(
+        element?.getAttribute("data-rendered-frames") ?? "0",
+      );
       return frames >= count;
     },
     { count: atLeast, root: rootId },
@@ -463,11 +478,9 @@ export async function dragFaceAnchorToFaceAnchor(
   if (box === null) throw new Error("unreachable: box checked above");
   await page.mouse.move(box.x + from.point[0], box.y + from.point[1]);
   await page.mouse.down();
-  await page.mouse.move(
-    box.x + to.point[0],
-    box.y + to.point[1],
-    { steps: 10 },
-  );
+  await page.mouse.move(box.x + to.point[0], box.y + to.point[1], {
+    steps: 10,
+  });
   await page.mouse.up();
 }
 
@@ -559,8 +572,14 @@ export async function readIoImportSurface(
       rendered: root?.getAttribute("data-cad-imported-volume") ?? null,
     };
   }, rootId);
-  expect(raw.source, "the /io fixture must publish the import surface").not.toBeNull();
-  const triangles = raw.triangles === null || raw.triangles === "" ? null : Number(raw.triangles);
+  expect(
+    raw.source,
+    "the /io fixture must publish the import surface",
+  ).not.toBeNull();
+  const triangles =
+    raw.triangles === null || raw.triangles === ""
+      ? null
+      : Number(raw.triangles);
   return {
     source: raw.source ?? "",
     triangles,
@@ -661,7 +680,10 @@ export async function readIoGlbSurface(
       rendered: root?.getAttribute("data-cad-glb-volume") ?? null,
     };
   }, rootId);
-  expect(raw.status, "the /io fixture must publish the GLB surface").not.toBeNull();
+  expect(
+    raw.status,
+    "the /io fixture must publish the GLB surface",
+  ).not.toBeNull();
   return {
     status: raw.status ?? "",
     nodes: raw.nodes ?? "",
@@ -769,10 +791,7 @@ export async function diffElementCaptures(
         return context.getImageData(0, 0, bitmap.width, bitmap.height);
       };
       const compare = async (): Promise<LocalizedPixelDiff> => {
-        const [a, b] = await Promise.all([
-          decode(firstPng),
-          decode(secondPng),
-        ]);
+        const [a, b] = await Promise.all([decode(firstPng), decode(secondPng)]);
         if (a.width !== b.width || a.height !== b.height) {
           throw new Error(
             `capture size mismatch: ${String(a.width)}x${String(a.height)} vs ${String(b.width)}x${String(b.height)}`,
@@ -836,7 +855,11 @@ export async function diffElementCaptures(
  */
 export async function locatorMaskRect(
   locator: Locator,
-  captureBox: { readonly x: number; readonly y: number; readonly width: number },
+  captureBox: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+  },
   captureWidthPx: number,
   inflationPx = 2,
 ): Promise<CaptureRect> {

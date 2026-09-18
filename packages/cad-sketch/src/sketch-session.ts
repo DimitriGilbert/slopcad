@@ -122,8 +122,7 @@ export interface SketchHistoryMove {
 }
 
 function moveCursor(session: SketchSession, cursor: number): SketchSession {
-  const entry =
-    cursor > 0 ? session.history.entries[cursor - 1] : undefined;
+  const entry = cursor > 0 ? session.history.entries[cursor - 1] : undefined;
   return Object.freeze({
     sketch: entry === undefined ? session.history.base : entry.sketch,
     history: Object.freeze({
@@ -155,7 +154,10 @@ export function undoSketchSession(
       },
     };
   }
-  return ok({ session: moveCursor(session, previous), transaction: entry.transaction });
+  return ok({
+    session: moveCursor(session, previous),
+    transaction: entry.transaction,
+  });
 }
 
 /**

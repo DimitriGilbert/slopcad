@@ -4,11 +4,20 @@
  * tests drive it at the wire level — raw messages in, parsed responses out —
  * pinning the trust boundary (malformed/versioned input), the cancellation
  * ledger routing (refuse, suppress, ignore), duplicate admission, misdirected
- * traffic, structured kernel failures, and the solid-id mapping lifecycle.
+ * traffic, structured kernel failures, the solid-id mapping lifecycle, and
+ * the Phase 26.5 vocabulary additions: the `solid.fillet` dispatch and the
+ * `solid.topology` extension's hosted/unsupported/cancelled routing, plus
+ * the Phase 26.6 `solid.chamfer` dispatch.
  */
 
 import { describe, expect, it } from "vitest";
-import { length, type ParseResult } from "@slopcad/cad-core";
+import {
+  createBodyId,
+  length,
+  type BodyId,
+  type ParseResult,
+  type TopologySnapshot,
+} from "@slopcad/cad-core";
 import type {
   WorkerErrorResponseMessage,
   WorkerSuccessResponseMessage,
@@ -24,6 +33,7 @@ import {
   BREP_IMPORT_UNSUPPORTED_CODE,
   STEP_EXPORT_UNSUPPORTED_CODE,
   STEP_IMPORT_UNSUPPORTED_CODE,
+  TOPOLOGY_UNSUPPORTED_CODE,
   type WorkerStepExportSettings,
 } from "./worker-operations";
 import {
@@ -45,6 +55,56 @@ const boxWireInput = {
   depth: { dimension: "length", unit: "mm", value: 3 },
   height: { dimension: "length", unit: "mm", value: 4 },
 } as const;
+
+const mmWire = (value: number) =>
+  ({
+    dimension: "length",
+    unit: "mm",
+    value,
+  }) as const;
+
+/**
+ * A minimal valid topology snapshot the wired extension reports verbatim,
+ * echoing the request's labeling context (the same wire-valid shape the
+ * operation codec's own tests pin).
+ */
+function testTopologySnapshot(
+  bodyId: BodyId,
+  regeneration: number,
+): TopologySnapshot {
+  return {
+    kernelId: "test-kernel",
+    persistentTopology: true,
+    identitySchemas: ["test-identity-v1"],
+    bodyId,
+    regeneration,
+    entities: [
+      {
+        kind: "edge",
+        ordinal: 5,
+        identity: {
+          kernelId: "test-kernel",
+          schema: "test-identity-v1",
+          data: { hash: 123456789 },
+        },
+        geometry: {
+          lengthMm: 4,
+          centroidAbsoluteMm: [1, 1.5, 2],
+          centroidRelativeMm: [1, 1.5, 0],
+        },
+      },
+      {
+        kind: "vertex",
+        ordinal: 0,
+        identity: null,
+        geometry: {
+          pointAbsoluteMm: [0, 0, 0],
+          pointRelativeMm: [-1, -1.5, -2],
+        },
+      },
+    ],
+  };
+}
 
 interface ServerHarness {
   /** Everything the server emitted, in order. */
@@ -74,6 +134,15 @@ function setup(
      * `null` to fail with a test code.
      */
     brepExport?: () => Uint8Array | null;
+    /**
+     * Wires a `solid.topology` extension: returning `true` reports the
+     * test snapshot (echoing the labeling context), `false` fails with a
+     * test code.
+     */
+    topology?: (context: {
+      readonly bodyId: string;
+      readonly regeneration: number;
+    }) => boolean;
   } = {},
 ): ServerHarness & {
   readonly boxCalls: readonly string[];
@@ -174,6 +243,33 @@ function setup(
             },
           };
         };
+  const topology =
+    options.topology === undefined
+      ? undefined
+      : (
+          solid: KernelSolid,
+          context: { readonly bodyId: BodyId; readonly regeneration: number },
+        ): ParseResult<TopologySnapshot> => {
+          if (
+            options.topology?.({
+              bodyId: context.bodyId,
+              regeneration: context.regeneration,
+            })
+          ) {
+            return {
+              ok: true as const,
+              value: testTopologySnapshot(context.bodyId, context.regeneration),
+            };
+          }
+          return {
+            ok: false as const,
+            error: {
+              code: "topology/test",
+              message: "test rejection",
+              input: solid,
+            },
+          };
+        };
   createWorkerServer({
     kernel,
     transport: pair.server,
@@ -181,6 +277,7 @@ function setup(
     stepExport,
     brepImport,
     brepExport,
+    topology,
   });
   const responses: unknown[] = [];
   pair.client.onMessage((data) => responses.push(data));
@@ -1006,5 +1103,543 @@ describe("the brep.export extension (Phase 21.5)", () => {
     const response = errorResponseAt(harness.responses, 1);
     expect(response.error.code).toBe("worker/operation-failed");
     expect(response.error.data).toEqual({ kernelCode: "brep-export/test" });
+  });
+});
+
+describe("the solid.fillet operation (Phase 26.5)", () => {
+  /** Sends a fillet request against a session solid, at the wire level. */
+  function requestFillet(
+    harness: ReturnType<typeof setup>,
+    requestId: string,
+    target: string,
+    edges: readonly number[],
+    radiusMm: number,
+  ): void {
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId,
+      operation: "solid.fillet",
+      input: { target, edges, radius: mmWire(radiusMm) },
+    });
+  }
+
+  it("answers solid.fillet through the kernel and mints the filleted solid", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    // Ordinal 8 is a vertical edge of the fake kernel's box-edge table —
+    // the snapshot-ordinal addressing a real fillet feature resolves to.
+    requestFillet(harness, "req_000002", "wsol_000001", [8], 0.5);
+    await flush();
+
+    const response = successResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.result).toEqual({ solid: "wsol_000002" });
+
+    // The minted fillet is an ordinary session solid whose volume is the
+    // analytic corner-fillet model's: the box minus one removed quadrant.
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000003",
+      operation: "solid.volume",
+      input: { solid: "wsol_000002" },
+    });
+    await flush();
+    const volume = parseWorkerOperationResult(
+      "solid.volume",
+      successResponseAt(harness.responses, 2).result,
+    );
+    expect(volume.ok).toBe(true);
+    if (!volume.ok) return;
+    expect(volume.value.volume).toBeCloseTo(
+      2 * 3 * 4 - 0.25 * (1 - Math.PI / 4) * 4,
+      9,
+    );
+  });
+
+  it("declines a target outside the kernel's fillet domain with the kernel's own unsupported code", async () => {
+    const harness = setup();
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000001",
+      operation: "solid.createSphere",
+      input: { radius: mmWire(2) },
+    });
+    await flush();
+    // The fake kernel's honest fillet domain is a pristine box leaf: a
+    // sphere target declines with kernel/unsupported-operation — the same
+    // structured code a fillet-less engine (Manifold, JSCAD) answers with.
+    requestFillet(harness, "req_000002", "wsol_000001", [8], 0.5);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.unsupportedOperation,
+    });
+  });
+
+  it("carries the stale-ordinal structured failure in the error data and mints nothing", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    requestFillet(harness, "req_000002", "wsol_000001", [999], 0.5);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.filletEdgeUnknown,
+    });
+    // A failed fillet mints no id: the next solid-producing outcome gets
+    // the session's second id.
+    harness.requestBox("req_000003");
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000002",
+    });
+  });
+
+  it("fails solid.fillet with the session's solid-not-owned for an unknown target", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    requestFillet(harness, "req_000002", "wsol_099999", [8], 0.5);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.solidNotOwned,
+    });
+  });
+
+  it("suppresses a cancelled fillet: the outcome is void and mints no id", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    requestFillet(harness, "req_000002", "wsol_000001", [8], 0.5);
+    harness.cancel("req_000002");
+    await flush();
+    expect(errorResponseAt(harness.responses, 1).error.code).toBe(
+      "worker/cancelled",
+    );
+
+    // The suppressed fillet consumed no id: the next mint is the
+    // session's second, and the channel stays healthy.
+    harness.requestBox("req_000003");
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000002",
+    });
+  });
+});
+
+describe("the solid.chamfer operation (Phase 26.6)", () => {
+  /** Sends a chamfer request against a session solid, at the wire level. */
+  function requestChamfer(
+    harness: ReturnType<typeof setup>,
+    requestId: string,
+    target: string,
+    edges: readonly number[],
+    distanceMm: number,
+  ): void {
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId,
+      operation: "solid.chamfer",
+      input: { target, edges, distance: mmWire(distanceMm) },
+    });
+  }
+
+  it("answers solid.chamfer through the kernel and mints the beveled solid", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    // Ordinal 8 is a vertical edge of the fake kernel's box-edge table —
+    // the snapshot-ordinal addressing a real chamfer feature resolves to.
+    requestChamfer(harness, "req_000002", "wsol_000001", [8], 0.5);
+    await flush();
+
+    const response = successResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.result).toEqual({ solid: "wsol_000002" });
+
+    // The minted chamfer is an ordinary session solid whose volume is the
+    // analytic corner-prism model's: the box minus one d²/2 wedge.
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000003",
+      operation: "solid.volume",
+      input: { solid: "wsol_000002" },
+    });
+    await flush();
+    const volume = parseWorkerOperationResult(
+      "solid.volume",
+      successResponseAt(harness.responses, 2).result,
+    );
+    expect(volume.ok).toBe(true);
+    if (!volume.ok) return;
+    expect(volume.value.volume).toBeCloseTo(2 * 3 * 4 - (0.25 / 2) * 4, 9);
+  });
+
+  it("declines a target outside the kernel's chamfer domain with the kernel's own unsupported code", async () => {
+    const harness = setup();
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000001",
+      operation: "solid.createSphere",
+      input: { radius: mmWire(2) },
+    });
+    await flush();
+    // The fake kernel's honest chamfer domain is a pristine box leaf: a
+    // sphere target declines with kernel/unsupported-operation — the same
+    // structured code a chamfer-less engine (Manifold, JSCAD) answers with.
+    requestChamfer(harness, "req_000002", "wsol_000001", [8], 0.5);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.unsupportedOperation,
+    });
+  });
+
+  it("carries the stale-ordinal structured failure in the error data and mints nothing", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    requestChamfer(harness, "req_000002", "wsol_000001", [999], 0.5);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.chamferEdgeUnknown,
+    });
+    // A failed chamfer mints no id: the next solid-producing outcome gets
+    // the session's second id.
+    harness.requestBox("req_000003");
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000002",
+    });
+  });
+});
+
+describe("the solid.shell operation (Phase 26.7)", () => {
+  /** Sends a shell request against a session solid, at the wire level. */
+  function requestShell(
+    harness: ReturnType<typeof setup>,
+    requestId: string,
+    target: string,
+    faces: readonly number[],
+    thicknessMm: number,
+  ): void {
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId,
+      operation: "solid.shell",
+      input: { target, faces, thickness: mmWire(thicknessMm) },
+    });
+  }
+
+  it("answers solid.shell through the kernel and mints the hollowed solid", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    // Ordinal 5 is the z-high face of the fake kernel's box-face table —
+    // the snapshot-ordinal addressing a real shell feature resolves to.
+    requestShell(harness, "req_000002", "wsol_000001", [5], 0.5);
+    await flush();
+
+    const response = successResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.result).toEqual({ solid: "wsol_000002" });
+
+    // The minted shell is an ordinary session solid whose volume is the
+    // analytic open-box model's: the box minus the inset cavity.
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000003",
+      operation: "solid.volume",
+      input: { solid: "wsol_000002" },
+    });
+    await flush();
+    const volume = parseWorkerOperationResult(
+      "solid.volume",
+      successResponseAt(harness.responses, 2).result,
+    );
+    expect(volume.ok).toBe(true);
+    if (!volume.ok) return;
+    expect(volume.value.volume).toBeCloseTo(
+      2 * 3 * 4 - (2 - 1) * (3 - 1) * (4 - 0.5),
+      9,
+    );
+  });
+
+  it("declines a target outside the kernel's shell domain with the kernel's own unsupported code", async () => {
+    const harness = setup();
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000001",
+      operation: "solid.createSphere",
+      input: { radius: mmWire(2) },
+    });
+    await flush();
+    // The fake kernel's honest shell domain is a pristine box leaf: a
+    // sphere target declines with kernel/unsupported-operation — the same
+    // structured code a shell-less engine (Manifold, JSCAD) answers with.
+    requestShell(harness, "req_000002", "wsol_000001", [5], 0.5);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.unsupportedOperation,
+    });
+  });
+
+  it("carries the stale-ordinal structured failure in the error data and mints nothing", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    requestShell(harness, "req_000002", "wsol_000001", [999], 0.5);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.shellFaceUnknown,
+    });
+    // A failed shell mints no id: the next solid-producing outcome gets
+    // the session's second id.
+    harness.requestBox("req_000003");
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000002",
+    });
+  });
+});
+
+describe("the solid.mirror operation (Phase 26.9)", () => {
+  /** Sends a mirror request against a session solid, at the wire level. */
+  function requestMirror(
+    harness: ReturnType<typeof setup>,
+    requestId: string,
+    target: string,
+    axis: "x" | "y" | "z",
+    offsetMm: number,
+  ): void {
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId,
+      operation: "solid.mirror",
+      input: { target, axis, offset: mmWire(offsetMm) },
+    });
+  }
+
+  it("answers solid.mirror through the kernel and mints the reflected solid", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    // The box(2, 3, 4) through the x-plane at x = 1: the interval [0, 2]
+    // flips to [2·1 − 2, 2·1 − 0] = [0, 2] — an in-plane mirror — while
+    // the y-axis twin flips y ∈ [0, 3] to [−3, 0]. Volume never moves.
+    requestMirror(harness, "req_000002", "wsol_000001", "y", 0);
+    await flush();
+
+    const response = successResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.result).toEqual({ solid: "wsol_000002" });
+
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000003",
+      operation: "solid.volume",
+      input: { solid: "wsol_000002" },
+    });
+    await flush();
+    const volume = parseWorkerOperationResult(
+      "solid.volume",
+      successResponseAt(harness.responses, 2).result,
+    );
+    expect(volume.ok).toBe(true);
+    if (!volume.ok) return;
+    expect(volume.value.volume).toBeCloseTo(2 * 3 * 4, 9);
+
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000004",
+      operation: "solid.bounds",
+      input: { solid: "wsol_000002" },
+    });
+    await flush();
+    const bounds = parseWorkerOperationResult(
+      "solid.bounds",
+      successResponseAt(harness.responses, 3).result,
+    );
+    expect(bounds.ok).toBe(true);
+    if (!bounds.ok) return;
+    expect(bounds.value.bounds).toEqual({
+      min: [0, -3, 0],
+      max: [2, 0, 4],
+    });
+  });
+
+  it("carries a foreign-target structured failure in the error data and mints nothing", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    requestMirror(harness, "req_000002", "wsol_999999", "x", 0);
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.solidNotOwned,
+    });
+    // A failed mirror mints no id: the next solid-producing outcome gets
+    // the session's second id.
+    harness.requestBox("req_000003");
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000002",
+    });
+  });
+});
+
+describe("the solid.topology extension (Phase 26.5)", () => {
+  function requestTopology(
+    harness: ReturnType<typeof setup>,
+    requestId: string,
+    solid: string,
+  ): void {
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId,
+      operation: "solid.topology",
+      input: {
+        solid,
+        bodyId: createBodyId("body_fillet_fixture"),
+        regeneration: 3,
+      },
+    });
+  }
+
+  it("answers solid.topology through the extension and mints no id", async () => {
+    const seen: { bodyId: string; regeneration: number }[] = [];
+    const harness = setup({
+      topology: (context) => {
+        seen.push(context);
+        return true;
+      },
+    });
+    harness.requestBox("req_000001");
+    await flush();
+    requestTopology(harness, "req_000002", "wsol_000001");
+    await flush();
+
+    const response = successResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    const parsed = parseWorkerOperationResult(
+      "solid.topology",
+      response.result,
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The snapshot crosses back wire-valid, echoing the labeling context.
+    expect(parsed.value.snapshot.bodyId).toBe("body_fillet_fixture");
+    expect(parsed.value.snapshot.regeneration).toBe(3);
+    expect(seen).toEqual([{ bodyId: "body_fillet_fixture", regeneration: 3 }]);
+    // solid.topology mints nothing: the next solid-producing outcome gets
+    // the session's second id, not a third.
+    harness.requestBox("req_000003");
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000002",
+    });
+  });
+
+  it("answers solid.topology with topology/unsupported when no extension is hosted", async () => {
+    const harness = setup();
+    harness.requestBox("req_000001");
+    await flush();
+    requestTopology(harness, "req_000002", "wsol_000001");
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.requestId).toBe("req_000002");
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: TOPOLOGY_UNSUPPORTED_CODE,
+    });
+  });
+
+  it("carries the extension's structured topology failure in the error data", async () => {
+    const harness = setup({ topology: () => false });
+    harness.requestBox("req_000001");
+    await flush();
+    requestTopology(harness, "req_000002", "wsol_000001");
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 1);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({ kernelCode: "topology/test" });
+  });
+
+  it("fails solid.topology with the session's solid-not-owned before the extension runs", async () => {
+    let extensionRan = false;
+    const harness = setup({
+      topology: () => {
+        extensionRan = true;
+        return true;
+      },
+    });
+    requestTopology(harness, "req_000001", "wsol_000404");
+    await flush();
+
+    const response = errorResponseAt(harness.responses, 0);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.solidNotOwned,
+    });
+    expect(extensionRan).toBe(false);
+  });
+
+  it("suppresses a cancelled topology request: the ack is the cancelled error and no id is consumed", async () => {
+    const harness = setup({ topology: () => true });
+    harness.requestBox("req_000001");
+    await flush();
+    requestTopology(harness, "req_000002", "wsol_000001");
+    harness.cancel("req_000002");
+    await flush();
+    expect(errorResponseAt(harness.responses, 1).error.code).toBe(
+      "worker/cancelled",
+    );
+
+    // A topology outcome owns no solids, so suppression releases nothing —
+    // and mints nothing either way: the next mint is the session's second.
+    harness.requestBox("req_000003");
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000002",
+    });
   });
 });

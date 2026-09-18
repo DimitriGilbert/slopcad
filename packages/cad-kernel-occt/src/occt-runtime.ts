@@ -45,9 +45,7 @@ import type { OpenCascadeInstance } from "replicad-opencascadejs";
  * re-exported from the package index — no OpenCascade type crosses the
  * package's public surface.
  */
-export const RUNTIME_BRAND = Symbol(
-  "slopcad.cad-kernel-occt/OcctRuntime",
-);
+export const RUNTIME_BRAND = Symbol("slopcad.cad-kernel-occt/OcctRuntime");
 
 /**
  * An initialized OpenCascade WASM runtime. Opaque by construction: the brand

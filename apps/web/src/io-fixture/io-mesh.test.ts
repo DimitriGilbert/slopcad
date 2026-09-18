@@ -7,7 +7,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { exportStlBinary, exportThreeMf, importStl, importThreeMf } from "@slopcad/cad-io";
+import {
+  exportStlBinary,
+  exportThreeMf,
+  importStl,
+  importThreeMf,
+} from "@slopcad/cad-io";
 import type { Tessellation } from "@slopcad/cad-kernel";
 
 import {
@@ -23,12 +28,18 @@ function unitCube(flippedWinding = false): Tessellation {
     0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1,
   ];
   const faces: readonly (readonly [number, number, number])[] = [
-    [0, 2, 1], [0, 3, 2], // bottom (−z)
-    [4, 5, 6], [4, 6, 7], // top (+z)
-    [0, 1, 5], [0, 5, 4], // front (−y)
-    [2, 3, 7], [2, 7, 6], // back (+y)
-    [0, 4, 7], [0, 7, 3], // left (−x)
-    [1, 2, 6], [1, 6, 5], // right (+x)
+    [0, 2, 1],
+    [0, 3, 2], // bottom (−z)
+    [4, 5, 6],
+    [4, 6, 7], // top (+z)
+    [0, 1, 5],
+    [0, 5, 4], // front (−y)
+    [2, 3, 7],
+    [2, 7, 6], // back (+y)
+    [0, 4, 7],
+    [0, 7, 3], // left (−x)
+    [1, 2, 6],
+    [1, 6, 5], // right (+x)
   ];
   const indices: number[] = [];
   for (const face of faces) {
@@ -97,14 +108,18 @@ describe("buildImportedMeshState", () => {
     expect(state.bounds).toEqual({ min: [0, 0, 0], max: [1, 1, 1] });
     expect(state.projection.objects).toHaveLength(1);
     expect(state.projection.objects[0]?.bodyId).toBe("body_imported_mesh");
-    expect(state.projection.camera).toEqual(fitCameraToBounds(meshBounds(unitCube())));
+    expect(state.projection.camera).toEqual(
+      fitCameraToBounds(meshBounds(unitCube())),
+    );
   });
 
   it("survives the STL round trip within float32 tolerance", () => {
     const exported = exportStlBinary(unitCube());
-    if (!exported.ok) throw new Error(`STL export failed: ${exported.error.message}`);
+    if (!exported.ok)
+      throw new Error(`STL export failed: ${exported.error.message}`);
     const imported = importStl(exported.value);
-    if (!imported.ok) throw new Error(`STL import failed: ${imported.error.message}`);
+    if (!imported.ok)
+      throw new Error(`STL import failed: ${imported.error.message}`);
     const state = buildImportedMeshState(imported.value.tessellation);
     expect(state.triangles).toBe(12);
     expect(state.volume).toBeCloseTo(1, 6);
@@ -112,9 +127,11 @@ describe("buildImportedMeshState", () => {
 
   it("survives the 3MF round trip losslessly", () => {
     const exported = exportThreeMf(unitCube(), { title: "unit cube" });
-    if (!exported.ok) throw new Error(`3MF export failed: ${exported.error.message}`);
+    if (!exported.ok)
+      throw new Error(`3MF export failed: ${exported.error.message}`);
     const imported = importThreeMf(exported.value);
-    if (!imported.ok) throw new Error(`3MF import failed: ${imported.error.message}`);
+    if (!imported.ok)
+      throw new Error(`3MF import failed: ${imported.error.message}`);
     expect(imported.value.metadata.title).toBe("unit cube");
     const state = buildImportedMeshState(imported.value.tessellation);
     expect(state.triangles).toBe(12);

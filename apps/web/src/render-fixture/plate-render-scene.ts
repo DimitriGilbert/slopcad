@@ -29,6 +29,7 @@ import {
   type RenderVector3,
 } from "@slopcad/cad-core";
 import type { ComputationContext } from "@slopcad/cad-kernel";
+import type { ExtrudeSceneRequest } from "../worker-fixture/extrude-scene";
 
 import {
   computePlateWithHole,
@@ -69,9 +70,7 @@ function unwrap<T>(result: ParseResult<T, ProjectionError>): T {
  * measurement always yields the same projection bytes, which is what makes
  * the fixture's settled scene byte-reproducible.
  */
-function plateRenderState(
-  measurement: PlateMeasurement,
-): PlateRenderState {
+function plateRenderState(measurement: PlateMeasurement): PlateRenderState {
   const object = unwrap(
     projectTessellation(PLATE_BODY_ID, measurement.tessellation),
   );
@@ -122,7 +121,9 @@ export function offsetPlateRenderState(
     projectTessellation(PLATE_BODY_ID, {
       positions,
       indices: tessellation.indices,
-      ...(tessellation.normals !== undefined ? { normals: tessellation.normals } : {}),
+      ...(tessellation.normals !== undefined
+        ? { normals: tessellation.normals }
+        : {}),
     }),
   );
   return {
@@ -130,3 +131,72 @@ export function offsetPlateRenderState(
     projection: unwrap(createRenderProjection([object], RENDER_FIXTURE_CAMERA)),
   };
 }
+
+// ---------------------------------------------------------------------------
+// The Phase 26.1 extrude scene assembly
+// ---------------------------------------------------------------------------
+
+/** The fixed view direction of the extrude scene camera (the plate home
+ * view's proportions: +x, −y, +z octant, z-up), normalized once. */
+const EXTRUDE_EYE_DIRECTION: readonly [number, number, number] = (() => {
+  const v: readonly [number, number, number] = [29, -40, 42];
+  const length = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / length, v[1] / length, v[2] / length];
+})();
+
+/**
+ * The extrude scene's deterministic camera, derived from the measured
+ * bounds: the eye sits on the fixed home-view direction at 2.2× the
+ * bounds' largest extent from the bounds centre — the same framing
+ * proportion the plate camera's authored values carry. Pure function of
+ * the measurement, so identical solids always yield identical projections.
+ */
+export function extrudeCamera(
+  bounds: PlateMeasurement["bounds"],
+): RenderCamera {
+  const center: [number, number, number] = [
+    (bounds.min[0] + bounds.max[0]) / 2,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2,
+  ];
+  const extent = Math.max(
+    bounds.max[0] - bounds.min[0],
+    bounds.max[1] - bounds.min[1],
+    bounds.max[2] - bounds.min[2],
+    5,
+  );
+  const distance = 2.2 * extent;
+  return {
+    kind: "perspective",
+    position: [
+      center[0] + EXTRUDE_EYE_DIRECTION[0] * distance,
+      center[1] + EXTRUDE_EYE_DIRECTION[1] * distance,
+      center[2] + EXTRUDE_EYE_DIRECTION[2] * distance,
+    ],
+    target: center,
+    up: [0, 0, 1],
+    fovDeg: 40,
+  };
+}
+
+/**
+ * Projects an extrude measurement into its render state under the body id
+ * the extrude feature declares — pure and deterministic like the plate
+ * twin, so the settled scene is byte-reproducible.
+ */
+export function extrudeRenderState(
+  measurement: PlateMeasurement,
+  bodyId: string,
+): PlateRenderState {
+  const object = unwrap(
+    projectTessellation(createBodyId(bodyId), measurement.tessellation),
+  );
+  return {
+    measurement,
+    projection: unwrap(
+      createRenderProjection([object], extrudeCamera(measurement.bounds)),
+    ),
+  };
+}
+
+export type { ExtrudeSceneRequest };

@@ -51,7 +51,7 @@ export const SKETCH_ENTITY_KINDS = [
 
 export type SketchEntityKind = (typeof SKETCH_ENTITY_KINDS)[number];
 
-/** Type guard for untrusted entity kinds. */export function isSketchEntityKind(
+/** Type guard for untrusted entity kinds. */ export function isSketchEntityKind(
   input: unknown,
 ): input is SketchEntityKind {
   return (
@@ -112,16 +112,17 @@ export interface ArcEntity extends EntityBase {
  */
 export interface RectangleEntity extends EntityBase {
   readonly kind: "rectangle";
-  readonly edges: readonly [SketchEntityId, SketchEntityId, SketchEntityId, SketchEntityId];
+  readonly edges: readonly [
+    SketchEntityId,
+    SketchEntityId,
+    SketchEntityId,
+    SketchEntityId,
+  ];
 }
 
 /** Union of every sketch entity. */
 export type SketchEntity =
-  | PointEntity
-  | LineEntity
-  | CircleEntity
-  | ArcEntity
-  | RectangleEntity;
+  PointEntity | LineEntity | CircleEntity | ArcEntity | RectangleEntity;
 
 /** Structured failure describing why input was rejected as an entity. */
 export interface SketchEntityError {
@@ -305,7 +306,12 @@ export function createArcEntity(
  */
 export function createRectangleEntity(
   id: SketchEntityId,
-  edges: readonly [SketchEntityId, SketchEntityId, SketchEntityId, SketchEntityId],
+  edges: readonly [
+    SketchEntityId,
+    SketchEntityId,
+    SketchEntityId,
+    SketchEntityId,
+  ],
   options: EntityOptions = {},
 ): RectangleEntity {
   const distinct = new Set<string>(edges);
@@ -335,11 +341,15 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 function toEdgeQuad(
   ids: readonly SketchEntityId[],
 ):
-  | [SketchEntityId, SketchEntityId, SketchEntityId, SketchEntityId]
-  | undefined {
+  [SketchEntityId, SketchEntityId, SketchEntityId, SketchEntityId] | undefined {
   if (ids.length !== 4) return undefined;
   const [a, b, c, d] = ids;
-  if (a === undefined || b === undefined || c === undefined || d === undefined) {
+  if (
+    a === undefined ||
+    b === undefined ||
+    c === undefined ||
+    d === undefined
+  ) {
     return undefined;
   }
   return [a, b, c, d];
@@ -557,7 +567,11 @@ export function parseSketchEntity(
           radius: radius.value,
         });
       }
-      const startAngle = parseFiniteNumber("startAngle", input.startAngle, input);
+      const startAngle = parseFiniteNumber(
+        "startAngle",
+        input.startAngle,
+        input,
+      );
       if (!startAngle.ok) return startAngle;
       const endAngle = parseFiniteNumber("endAngle", input.endAngle, input);
       if (!endAngle.ok) return endAngle;

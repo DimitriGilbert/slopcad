@@ -14,15 +14,25 @@ import {
 
 describe("sketch ids", () => {
   it("adopts valid wire-format ids and rejects malformed ones", () => {
-    expect(createSketchEntityId("skent_wall-start").toString()).toBe("skent_wall-start");
+    expect(createSketchEntityId("skent_wall-start").toString()).toBe(
+      "skent_wall-start",
+    );
     expect(createSketchConstraintId("skcon_000001")).toBeDefined();
-    expect(() => createSketchEntityId("skcon_wrong")).toThrow(SketchIdValidationError);
-    expect(() => createSketchEntityId("skent_")).toThrow(SketchIdValidationError);
-    expect(() => createSketchEntityId("skent_-leading")).toThrow(SketchIdValidationError);
-    expect(() => createSketchEntityId("skent_has space")).toThrow(SketchIdValidationError);
-    expect(() =>
-      createSketchConstraintId(`skcon_${"a".repeat(65)}`),
-    ).toThrow(SketchIdValidationError);
+    expect(() => createSketchEntityId("skcon_wrong")).toThrow(
+      SketchIdValidationError,
+    );
+    expect(() => createSketchEntityId("skent_")).toThrow(
+      SketchIdValidationError,
+    );
+    expect(() => createSketchEntityId("skent_-leading")).toThrow(
+      SketchIdValidationError,
+    );
+    expect(() => createSketchEntityId("skent_has space")).toThrow(
+      SketchIdValidationError,
+    );
+    expect(() => createSketchConstraintId(`skcon_${"a".repeat(65)}`)).toThrow(
+      SketchIdValidationError,
+    );
   });
 
   it("parses untrusted ids with structured failures per code", () => {
@@ -61,16 +71,19 @@ describe("sketch ids", () => {
     expect(resumed.nextEntityId()).toBe("skent_000003");
     expect(resumed.nextConstraintId()).toBe("skcon_000002");
     expect(resumed.state()).toEqual({ entity: 3, constraint: 2 });
-    expect(createSketchIdGenerator().state()).toEqual({ entity: 0, constraint: 0 });
+    expect(createSketchIdGenerator().state()).toEqual({
+      entity: 0,
+      constraint: 0,
+    });
   });
 
   it("rejects non-integer or negative generator state", () => {
-    expect(() => createSketchIdGenerator({ entity: -1, constraint: 0 })).toThrow(
-      RangeError,
-    );
-    expect(() => createSketchIdGenerator({ entity: 1.5, constraint: 0 })).toThrow(
-      RangeError,
-    );
+    expect(() =>
+      createSketchIdGenerator({ entity: -1, constraint: 0 }),
+    ).toThrow(RangeError);
+    expect(() =>
+      createSketchIdGenerator({ entity: 1.5, constraint: 0 }),
+    ).toThrow(RangeError);
   });
 
   it("refuses to emit ids past the exact-integer range", () => {
@@ -78,7 +91,9 @@ describe("sketch ids", () => {
       entity: Number.MAX_SAFE_INTEGER,
       constraint: 0,
     });
-    expect(() => generator.nextEntityId()).toThrow(SketchIdGeneratorExhaustedError);
+    expect(() => generator.nextEntityId()).toThrow(
+      SketchIdGeneratorExhaustedError,
+    );
     expect(generator.nextConstraintId()).toBe("skcon_000001");
     expect(generator.state().entity).toBe(Number.MAX_SAFE_INTEGER);
   });

@@ -46,7 +46,12 @@ import {
   valueIn,
 } from "@slopcad/cad-core";
 import type { SketchDiagnostic } from "./diagnostics";
-import type { ArcEntity, CircleEntity, LineEntity, SketchEntity } from "./entities";
+import type {
+  ArcEntity,
+  CircleEntity,
+  LineEntity,
+  SketchEntity,
+} from "./entities";
 
 import { SKETCH_DIAGNOSTIC_CODES } from "./diagnostics";
 import {
@@ -283,10 +288,7 @@ function requirePositiveLength(
   }
 }
 
-function requireOpenAngle(
-  kind: SketchConstraintKind,
-  value: AngleValue,
-): void {
+function requireOpenAngle(kind: SketchConstraintKind, value: AngleValue): void {
   const degrees = valueIn(value, "deg");
   if (!(degrees > 0 && degrees < DEGREES_STRAIGHT)) {
     throw new SketchConstraintValidationError(
@@ -425,7 +427,13 @@ export function createSymmetryAboutPointConstraint(
   second: PointTarget,
   about: PointTarget,
 ): SymmetryConstraint {
-  return { id, kind: "symmetry", first, second, about: { type: "point", point: about } };
+  return {
+    id,
+    kind: "symmetry",
+    first,
+    second,
+    about: { type: "point", point: about },
+  };
 }
 
 /** Builds a symmetry constraint about a line. */
@@ -435,7 +443,13 @@ export function createSymmetryAboutLineConstraint(
   second: PointTarget,
   about: SketchEntityId,
 ): SymmetryConstraint {
-  return { id, kind: "symmetry", first, second, about: { type: "line", entity: about } };
+  return {
+    id,
+    kind: "symmetry",
+    first,
+    second,
+    about: { type: "line", entity: about },
+  };
 }
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
@@ -465,11 +479,7 @@ function parsePointTarget(
     );
   }
   const { point } = input;
-  if (
-    point !== "start" &&
-    point !== "end" &&
-    point !== "center"
-  ) {
+  if (point !== "start" && point !== "end" && point !== "center") {
     return fail(
       constraintError(
         SKETCH_DIAGNOSTIC_CODES.constraintMalformed,
@@ -645,7 +655,12 @@ export function parseSketchConstraint(
       if (!first.ok) return first;
       const second = parsePointTarget(input.second);
       if (!second.ok) return second;
-      return ok({ id: id.value, kind: "coincident", first: first.value, second: second.value });
+      return ok({
+        id: id.value,
+        kind: "coincident",
+        first: first.value,
+        second: second.value,
+      });
     }
     case "horizontal":
     case "vertical": {
@@ -659,7 +674,12 @@ export function parseSketchConstraint(
       if (!first.ok) return first;
       const second = parseEntityField("second", input.second, input);
       if (!second.ok) return second;
-      return ok({ id: id.value, kind: input.kind, first: first.value, second: second.value });
+      return ok({
+        id: id.value,
+        kind: input.kind,
+        first: first.value,
+        second: second.value,
+      });
     }
     case "distance": {
       const first = parsePointTarget(input.first);
@@ -709,7 +729,12 @@ export function parseSketchConstraint(
       if (!first.ok) return first;
       const second = parseEntityField("second", input.second, input);
       if (!second.ok) return second;
-      return ok({ id: id.value, kind: "equal", first: first.value, second: second.value });
+      return ok({
+        id: id.value,
+        kind: "equal",
+        first: first.value,
+        second: second.value,
+      });
     }
     case "tangent": {
       const first = parseEntityField("first", input.first, input);
@@ -739,7 +764,12 @@ export function parseSketchConstraint(
       if (!point.ok) return point;
       const line = parseEntityField("line", input.line, input);
       if (!line.ok) return line;
-      return ok({ id: id.value, kind: "midpoint", point: point.value, line: line.value });
+      return ok({
+        id: id.value,
+        kind: "midpoint",
+        point: point.value,
+        line: line.value,
+      });
     }
     case "symmetry": {
       const first = parsePointTarget(input.first);
@@ -759,7 +789,9 @@ export function parseSketchConstraint(
   }
 }
 
-function serializePointTarget(target: PointTarget): Readonly<Record<string, unknown>> {
+function serializePointTarget(
+  target: PointTarget,
+): Readonly<Record<string, unknown>> {
   return { entity: target.entity, point: target.point };
 }
 
@@ -780,7 +812,11 @@ export function serializeSketchConstraint(
       };
     case "horizontal":
     case "vertical":
-      return { id: constraint.id, kind: constraint.kind, entity: constraint.entity };
+      return {
+        id: constraint.id,
+        kind: constraint.kind,
+        entity: constraint.entity,
+      };
     case "parallel":
     case "perpendicular":
     case "equal":
@@ -832,7 +868,10 @@ export function serializeSketchConstraint(
     case "symmetry": {
       const about =
         constraint.about.type === "point"
-          ? { type: "point", point: serializePointTarget(constraint.about.point) }
+          ? {
+              type: "point",
+              point: serializePointTarget(constraint.about.point),
+            }
           : { type: "line", entity: constraint.about.entity };
       return {
         id: constraint.id,
@@ -849,9 +888,7 @@ function isLine(entity: SketchEntity): entity is LineEntity {
   return entity.kind === "line";
 }
 
-function isCircular(
-  entity: SketchEntity,
-): entity is CircleEntity | ArcEntity {
+function isCircular(entity: SketchEntity): entity is CircleEntity | ArcEntity {
   return entity.kind === "circle" || entity.kind === "arc";
 }
 
@@ -899,7 +936,9 @@ export function validateConstraintReferences(
   const requireLine = (name: string, id: SketchEntityId): string | null => {
     const entity = find(id);
     if (entity === undefined) return `${name} references missing entity ${id}`;
-    return isLine(entity) ? null : `${name} must reference a line, found ${entity.kind}`;
+    return isLine(entity)
+      ? null
+      : `${name} must reference a line, found ${entity.kind}`;
   };
   const requireCircular = (name: string, id: SketchEntityId): string | null => {
     const entity = find(id);

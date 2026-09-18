@@ -29,7 +29,10 @@ import {
   FIXTURE_ROTATE_PARAMETER,
   FIXTURE_TRANSLATE_PARAMETERS,
 } from "./fixture-document";
-import { offsetPlateRenderState, type PlateRenderState } from "./plate-render-scene";
+import {
+  offsetPlateRenderState,
+  type PlateRenderState,
+} from "./plate-render-scene";
 
 const CAMERA: RenderCamera = {
   kind: "perspective",
@@ -57,7 +60,9 @@ function unwrap<T>(result: ParseResult<T, ProjectionError>): T {
 }
 
 function renderState(): PlateRenderState {
-  const object = unwrap(projectTessellation(FIXTURE_BODY_ID, MEASUREMENT.tessellation));
+  const object = unwrap(
+    projectTessellation(FIXTURE_BODY_ID, MEASUREMENT.tessellation),
+  );
   return {
     measurement: MEASUREMENT,
     projection: unwrap(createRenderProjection([object], CAMERA)),
@@ -100,7 +105,8 @@ describe("fixture document", () => {
     expect(appliedTranslationOffset(document)).toEqual([5, -2.5, 1]);
     // The translate feature is the resolved target for the plate body.
     expect(
-      document.features.find((feature) => feature.kind === "translate")?.outputs,
+      document.features.find((feature) => feature.kind === "translate")
+        ?.outputs,
     ).toEqual([FIXTURE_BODY_ID]);
   });
 

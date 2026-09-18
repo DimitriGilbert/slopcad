@@ -39,18 +39,27 @@
  */
 
 import { type FeatureInputRef, type FeatureRecord } from "./document";
-import { type BodyId, type FeatureId, type ParameterId } from "./ids";
+import {
+  type BodyId,
+  type FeatureId,
+  type ParameterId,
+  type ReferenceId,
+  type SketchDocumentId,
+} from "./ids";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 
 /**
  * The source nodes of the graph: entities that features consume but that
- * no feature can depend on — parameters and bodies.
+ * no feature can depend on — parameters, bodies, sketches, and persistent
+ * reference records.
  */
-export type FeatureGraphSourceId = ParameterId | BodyId;
+export type FeatureGraphSourceId =
+  ParameterId | BodyId | SketchDocumentId | ReferenceId;
 
 /**
  * Any node id accepted by affected-node queries: a feature, or a source
- * (parameter or body) whose change must drive invalidation.
+ * (parameter, body, sketch, or reference) whose change must drive
+ * invalidation.
  */
 export type FeatureGraphNodeId = FeatureId | FeatureGraphSourceId;
 
