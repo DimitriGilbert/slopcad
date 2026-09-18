@@ -1,50 +1,40 @@
 /**
  * The composed CAD workbench (Phase 15 phase-level deliverable, extended in
- * Phase 20): ONE browser page that mounts all four `@slopcad/ui` CAD
- * components — CadToolbar, CadViewport, CadModelTree, CadParameterPanel —
- * around a real document through a single `CadProvider` store, in a
- * product-grade tool layout: one dense command row across the top — the
- * tool strip, the feature timeline behind a divider, and the undo/redo
- * pair — with the model tree docked left, the parameter panel docked
- * right (internally scrollable when the document outgrows the frame),
- * the viewport dominant between them, and a status bar along the bottom.
+ * Phase 20; Phase 28 refactor): ONE browser page that mounts all four
+ * `@slopcad/ui` CAD components — CadToolbar, CadViewport, CadModelTree,
+ * CadParameterPanel — around a real document through a single `CadProvider`
+ * store, in a product-grade tool layout: one dense command row across the
+ * top — the tool strip, the feature timeline behind a divider, and the
+ * undo/redo pair — with the model tree docked left, the parameter panel
+ * docked right (internally scrollable when the document outgrows the
+ * frame), the viewport dominant between them, and a status bar along the
+ * bottom.
+ *
+ * Phase 28 moved the page's ORCHESTRATION (the store, the threaded
+ * regeneration loop, the session boot, the scene dispatch, the create
+ * actions, and the inspection readouts) verbatim into the shared workbench
+ * engine (`./workbench-engine`) that the Phase 28 complete workbench
+ * composition also runs on; this file is now the page's LAYOUT — the exact
+ * DOM the Phase 15–27 render baselines pin (ids, attributes, structure),
+ * rendered from the engine's returns.
  *
  * ## Composition wiring (page level only)
  *
- * The store is composed ONCE from the workbench's domain instances (the
- * workbench document — plate, bore diameter, translate + rotate features in
- * an upstream/downstream chain, expression-driven `volumeHint` — and the
- * tools that document supports: select, measure, rotate) and handed to
- * `CadProvider`. Every component mirrors its own concern below that
- * provider, so the components work TOGETHER while staying independent; the
- * page-level effects follow the document (the worker computation follows
- * the hole parameter), push the current projection into the store, and
- * announce each applied revision as a new regeneration.
- *
- * ## The Phase 20 regeneration loop (page level)
- *
- * The page threads regeneration state ACROSS edits — the robust loop, not a
- * from-scratch derivation: on every document / suppression / rollback
- * change it diffs the previous document into changed graph nodes
- * (`documentChangeInvalidations`), marks exactly those stale
- * (`markStale`), and runs one `regenerate` pass with the executor
- * stand-in, the suppressed set, the rollback marker, and the PRIOR
- * executor-results registry. Upstream edits therefore re-run only the
- * affected downstream chain, a failing feature leaves its already-executed
- * upstream valid (with last-known-valid results retained), and the same
- * change applied twice produces the identical executed sequence.
+ * The store is composed ONCE from the workbench's domain instances and
+ * handed to `CadProvider`. Every component mirrors its own concern below
+ * that provider, so the components work TOGETHER while staying
+ * independent; the page-level effects follow the document (the worker
+ * computation follows the hole parameter), push the current projection
+ * into the store, and announce each applied revision as a new
+ * regeneration — all inside the engine.
  *
  * ## The feature timeline strip
  *
  * The timeline is the history surface no component owns (the same reason
  * the undo/redo pair lives here, and the reason both share the command
- * row): one chip per feature in document order,
- * joined five-way status per chip (`valid`/`stale`/`failed`/`suppressed`/
- * `beyond-rollback` — suppression wins over parking), the rollback marker
- * as a clickable element BETWEEN chips (click a gap to roll back after the
- * feature before it, or before the first; click the marker to remove it and
- * re-execute what was parked), and a suppress toggle per chip (dependents
- * re-run without the suppressed feature, per the Phase 6.3 rule).
+ * row): one chip per feature in document order, joined five-way status per
+ * chip, the rollback marker as a clickable element BETWEEN chips, and a
+ * suppress toggle per chip.
  *
  * ## Machine-readable surface (`#workbench-root`)
  *
@@ -73,579 +63,82 @@
  * for).
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import type { ReactElement } from "react";
 import {
-  CadProvider,
-  createCadStore,
-  documentChangeInvalidations,
-  type CadDocument,
-  type FeatureId,
-  featureTimeline,
-  type FeatureRollbackPoint,
-  type FeatureTimelineEntry,
-  initialRegenerationStates,
-  markStale,
-  measureTool,
-  type RegenerationResultMap,
-  type RegenerationStateMap,
-  regenerate,
-  registerTool,
-  rotateTool,
-  selectTool,
-  SELECT_TOOL_ID,
-  selectionReferenceKey,
   serializeSelectionReference,
-  useCadDocument,
-  useCadHistory,
-  useCadSelection,
-  useCadStore,
-  useCadTools,
-  valueIn,
+  selectionReferenceKey,
 } from "@slopcad/cad-react";
-import {
-  angle,
-  createBodyId,
-  createFeatureId,
-  createParameterId,
-  createSketchDocumentId,
-  dimensionless,
-  formatBoundsExtents,
-  length,
-} from "@slopcad/cad-core";
+import { formatBoundsExtents } from "@slopcad/cad-core";
 import { Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import { CadModelTree } from "@slopcad/ui/components/cad/cad-model-tree";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
-import {
-  bootRenderFixtureSession,
-  completionJson,
-  faceAnchorSurface,
-  type RenderFixtureSession,
-} from "../render-fixture/fixture-session";
-import { WORKBENCH_SESSION_BACKEND } from "../render-fixture/session-backend";
-import { holeDiameterMm } from "../workbench-fixture/workbench-document";
-import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
-import { createCadWorkbenchSession } from "./session";
-import { documentExtrudeRequest, type ExtrudeSceneRequest } from "./extrude";
-import {
-  defaultHolePosition,
-  documentHoleSceneRequest,
-  holeBaseFeatureOf,
-  HOLE_DEFAULT_AXIS,
-  HOLE_DEFAULT_DEPTH_MM,
-  HOLE_DEFAULT_DIAMETER_MM,
-} from "./hole";
-import {
-  documentRevolveRequest,
-  type RevolveSceneRequest,
-  type SketchRevolveSubmission,
-} from "./revolve";
-import {
-  EXTRUDE_DEFAULT_DEPTH_MM,
-  SketchMode,
-  type SketchExtrudeSubmission,
-} from "./SketchMode";
+import { completionJson } from "../render-fixture/fixture-session";
+import { SketchMode } from "./SketchMode";
 import { FeatureTimelineStrip } from "./feature-timeline-strip";
-import { boundsReadout } from "./bounds-inspection";
-import { distanceReadout } from "./distance-inspection";
-import { massPropertiesReadout } from "./mass-properties-inspection";
-import { radiusReadout } from "./radius-inspection";
-
-/** An applied computation: the render state plus its revision identity. */
-interface AppliedRenderState {
-  readonly state: PlateRenderState;
-  readonly revision: number;
-}
-
-/** The threaded regeneration state the page carries between edits. */
-interface WorkbenchRunState {
-  readonly states: RegenerationStateMap;
-  readonly results: RegenerationResultMap;
-  readonly executed: readonly FeatureId[];
-}
-
-/** The previous inputs the derivation effect diffs against. */
-interface DerivationPrevious {
-  readonly document: CadDocument;
-  readonly suppressedKey: string;
-  readonly rollbackKey: string;
-  readonly states: RegenerationStateMap;
-  readonly results: RegenerationResultMap;
-}
-
-/** The workbench's top-level modes: the 3D model workspace or the sketch. */
-type WorkbenchMode = "model" | "sketch";
+import { WorkbenchMeasurementSection } from "./measurement-section";
+import { useWorkbenchEngine, WorkbenchStoreProvider } from "./workbench-engine";
 
 export function CadWorkbenchPage(): ReactElement {
-  // The workbench mode is page-level authoring state: the model workspace
-  // keeps its worker session alive across switches (hidden, not unmounted).
-  const [mode, setMode] = useState<WorkbenchMode>("model");
-
-  // The store is composed ONCE from the workbench's domain instances; the
-  // provider hands it to the hooks and to every CAD component below.
-  const [store] = useState(() =>
-    createCadStore({
-      session: createCadWorkbenchSession(),
-      tools: [
-        registerTool(selectTool),
-        registerTool(measureTool),
-        registerTool(rotateTool),
-      ],
-    }),
-  );
-
+  // The store is composed ONCE (the engine factory) and handed to the
+  // provider; the body below renders the layout from the engine.
   return (
-    <CadProvider store={store}>
-      <CadWorkbenchBody mode={mode} onModeChange={setMode} />
-    </CadProvider>
+    <WorkbenchStoreProvider>
+      <CadWorkbenchBody />
+    </WorkbenchStoreProvider>
   );
 }
 
-function CadWorkbenchBody({
-  mode,
-  onModeChange,
-}: {
-  readonly mode: WorkbenchMode;
-  readonly onModeChange: (mode: WorkbenchMode) => void;
-}): ReactElement {
-  const store = useCadStore("CadWorkbenchPage");
-  const documentApi = useCadDocument();
-  const selectionApi = useCadSelection();
-  const toolsApi = useCadTools();
-  const historyApi = useCadHistory();
-  const { arm } = toolsApi;
-  const { beginRegeneration } = selectionApi;
-
-  const [applied, setApplied] = useState<AppliedRenderState | null>(null);
-  const [renderedFrames, setRenderedFrames] = useState(0);
-  const sessionRef = useRef<RenderFixtureSession | null>(null);
-
-  // The executor stand-in: the document's hole parameter is the source of
-  // truth; the worker computation follows it (the same pipeline as the
-  // /render and Phase 14 fixtures).
-  const storedHole = holeDiameterMm(documentApi.document);
-
-  // -- The Phase 20 threaded regeneration loop ------------------------------
-  // Page-level authoring state: the suppressed set and the rollback marker
-  // are authoring data (not document data), so they live here and ride into
-  // every regenerate pass.
-  const [suppressed, setSuppressed] = useState<ReadonlySet<FeatureId>>(
-    () => new Set(),
-  );
-  const [rollback, setRollback] = useState<FeatureRollbackPoint | null>(null);
-  const [runState, setRunState] = useState<WorkbenchRunState | null>(null);
-  const [regenerationIssue, setRegenerationIssue] = useState<string | null>(
-    null,
-  );
-  const previousRef = useRef<DerivationPrevious | null>(null);
-
-  // The Phase 26.1/26.2/26.10 scene state: the plate computation until the
-  // first solid action commits a feature; afterwards the worker executes
-  // the document's extrude, revolve, or hole composition (parameter edits
-  // re-dispatch).
-  const [activeScene, setActiveScene] = useState<
-    "plate" | "extrude" | "revolve" | "hole"
-  >("plate");
-  const [extrudeCount, setExtrudeCount] = useState(0);
-  const [revolveCount, setRevolveCount] = useState(0);
-  const [holeCount, setHoleCount] = useState(0);
-
-  const workbenchDocument = documentApi.document;
-  const suppressedKey = useMemo(
-    () =>
-      [...suppressed]
-        .map((id) => String(id))
-        .sort()
-        .join(","),
-    [suppressed],
-  );
-  const rollbackKey =
-    rollback === null ? "" : `after:${String(rollback.afterFeatureId)}`;
-
-  useEffect(() => {
-    const previous = previousRef.current;
-    if (
-      previous !== null &&
-      previous.document === workbenchDocument &&
-      previous.suppressedKey === suppressedKey &&
-      previous.rollbackKey === rollbackKey
-    ) {
-      return;
-    }
-    const features = workbenchDocument.features;
-    const changedNodes =
-      previous === null || previous.document === workbenchDocument
-        ? []
-        : documentChangeInvalidations(previous.document, workbenchDocument);
-    const states =
-      previous === null
-        ? initialRegenerationStates(features)
-        : markStale(features, previous.states, changedNodes);
-    const applied = regenerate({
-      features,
-      states,
-      suppressed: [...suppressed],
-      execute: workbenchExecutor(workbenchDocument),
-      rollbackPoint: rollback,
-      results: previous?.results,
-    });
-    if (!applied.ok) {
-      setRegenerationIssue(applied.error.message);
-      return;
-    }
-    setRegenerationIssue(null);
-    setRunState({
-      states: applied.value.states,
-      results: applied.value.results,
-      executed: applied.value.executed,
-    });
-    previousRef.current = {
-      document: workbenchDocument,
-      suppressedKey,
-      rollbackKey,
-      states: applied.value.states,
-      results: applied.value.results,
-    };
-  }, [workbenchDocument, suppressed, suppressedKey, rollback, rollbackKey]);
-
-  // The Phase 26.1 extrude action (the sketch → solid UX bridge): commit
-  // the sketch record, the distance parameter, the output body, and the
-  // extrude feature in ONE atomic transaction, then switch the scene to the
-  // worker-executed extrusion and return to the model workspace. A refused
-  // transaction keeps everything unchanged.
-  const handleExtrude = (submission: SketchExtrudeSubmission): void => {
-    const n = extrudeCount + 1;
-    const suffix = n === 1 ? "" : String(n);
-    const sketchId = createSketchDocumentId(`skd_extrude${suffix}`);
-    const parameterId = createParameterId(`param_extrude_depth${suffix}`);
-    const bodyId = createBodyId(`body_extrude${suffix}`);
-    const featureId = createFeatureId(`feat_extrude${suffix}`);
-    const applied = documentApi.applyTransaction({
-      commands: [
-        {
-          type: "sketch.create",
-          id: sketchId,
-          name: `extrude sketch ${String(n)}`,
-          sketch: submission.sketch as unknown as Record<string, unknown>,
-        },
-        {
-          type: "parameter.create",
-          id: parameterId,
-          name: `extrudeDepth${suffix}`,
-          value: length(EXTRUDE_DEFAULT_DEPTH_MM),
-        },
-        { type: "body.create", id: bodyId, name: `pad ${String(n)}` },
-        {
-          type: "feature.create",
-          id: featureId,
-          kind: "extrude",
-          inputs: [
-            { kind: "sketch", id: sketchId },
-            { kind: "parameter", id: parameterId },
-          ],
-          outputs: [bodyId],
-        },
-      ],
-    });
-    if (!applied.ok) return;
-    setExtrudeCount(n);
-    setActiveScene("extrude");
-    onModeChange("model");
-  };
-
-  // The Phase 26.2 revolve action (the sketch → solid UX bridge): commit
-  // the sketch record, the SWEEP and AXIS angle parameters, the output
-  // body, and the revolve feature in ONE atomic transaction, then switch
-  // the scene to the worker-executed revolution and return to the model
-  // workspace. A refused transaction keeps everything unchanged. The axis
-  // is a line through the workplane origin along the direction angle the
-  // sketch mode's selector pinned (see ./revolve).
-  const handleRevolve = (submission: SketchRevolveSubmission): void => {
-    const n = revolveCount + 1;
-    const suffix = n === 1 ? "" : String(n);
-    const sketchId = createSketchDocumentId(`skd_revolve${suffix}`);
-    const sweepId = createParameterId(`param_revolve_sweep${suffix}`);
-    const axisId = createParameterId(`param_revolve_axis${suffix}`);
-    const bodyId = createBodyId(`body_revolve${suffix}`);
-    const featureId = createFeatureId(`feat_revolve${suffix}`);
-    const applied = documentApi.applyTransaction({
-      commands: [
-        {
-          type: "sketch.create",
-          id: sketchId,
-          name: `revolve sketch ${String(n)}`,
-          sketch: submission.sketch as unknown as Record<string, unknown>,
-        },
-        {
-          type: "parameter.create",
-          id: sweepId,
-          name: `revolveSweep${suffix}`,
-          value: angle(submission.sweepRad, "rad"),
-        },
-        {
-          type: "parameter.create",
-          id: axisId,
-          name: `revolveAxis${suffix}`,
-          value: angle(submission.axisDirectionRad, "rad"),
-        },
-        { type: "body.create", id: bodyId, name: `revolved ${String(n)}` },
-        {
-          type: "feature.create",
-          id: featureId,
-          kind: "revolve",
-          inputs: [
-            { kind: "sketch", id: sketchId },
-            { kind: "parameter", id: sweepId },
-            { kind: "parameter", id: axisId },
-          ],
-          outputs: [bodyId],
-        },
-      ],
-    });
-    if (!applied.ok) return;
-    setRevolveCount(n);
-    setActiveScene("revolve");
-    onModeChange("model");
-  };
-
-  // The Phase 26.10 hole action (the solid → hole UX bridge): commit the
-  // five hole parameters (diameter, depth, position x/y, axis — the
-  // bridge's parameter roles in declared order) and the hole feature in ONE
-  // atomic transaction, targeting the document's LAST extrude feature (the
-  // scene composition's base). The position defaults to the rendered top
-  // face's center — parameter-panel-driven authoring; every dimension is
-  // then a `parameter.set` away (the plan's regeneration criterion). A
-  // refused transaction keeps everything unchanged.
-  const holeBase = useMemo(
-    () => holeBaseFeatureOf(workbenchDocument),
-    [workbenchDocument],
-  );
-  const handleHole = (): void => {
-    const bounds = applied?.state.measurement.bounds;
-    if (holeBase === undefined || bounds === undefined) return;
-    const n = holeCount + 1;
-    // Unlike extrude/revolve, the FIRST hole's parameters carry their index
-    // too: the Phase 15 plate fixture document already owns the unsuffixed
-    // `holeDiameter` parameter name, and a name conflict would refuse the
-    // whole transaction.
-    const suffix = String(n);
-    const position = defaultHolePosition(bounds);
-    const diameterId = createParameterId(`param_hole_diameter${suffix}`);
-    const depthId = createParameterId(`param_hole_depth${suffix}`);
-    const xId = createParameterId(`param_hole_x${suffix}`);
-    const yId = createParameterId(`param_hole_y${suffix}`);
-    const axisId = createParameterId(`param_hole_axis${suffix}`);
-    const bodyId = createBodyId(`body_hole${suffix}`);
-    const featureId = createFeatureId(`feat_hole${suffix}`);
-    const committed = documentApi.applyTransaction({
-      commands: [
-        {
-          type: "parameter.create",
-          id: diameterId,
-          name: `holeDiameter${suffix}`,
-          value: length(HOLE_DEFAULT_DIAMETER_MM),
-        },
-        {
-          type: "parameter.create",
-          id: depthId,
-          name: `holeDepth${suffix}`,
-          value: length(HOLE_DEFAULT_DEPTH_MM),
-        },
-        {
-          type: "parameter.create",
-          id: xId,
-          name: `holeX${suffix}`,
-          value: length(position.x),
-        },
-        {
-          type: "parameter.create",
-          id: yId,
-          name: `holeY${suffix}`,
-          value: length(position.y),
-        },
-        {
-          type: "parameter.create",
-          id: axisId,
-          name: `holeAxis${suffix}`,
-          value: dimensionless(HOLE_DEFAULT_AXIS),
-        },
-        { type: "body.create", id: bodyId, name: `holed ${String(n)}` },
-        {
-          type: "feature.create",
-          id: featureId,
-          kind: "hole",
-          inputs: [
-            { kind: "feature", id: holeBase.id },
-            { kind: "parameter", id: diameterId },
-            { kind: "parameter", id: depthId },
-            { kind: "parameter", id: xId },
-            { kind: "parameter", id: yId },
-            { kind: "parameter", id: axisId },
-          ],
-          outputs: [bodyId],
-        },
-      ],
-    });
-    if (!committed.ok) return;
-    setHoleCount(n);
-    setActiveScene("hole");
-  };
-
-  const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {
-    if (runState === null) return null;
-    const joined = featureTimeline({
-      features: workbenchDocument.features,
-      states: runState.states,
-      rollback,
-      suppressed: [...suppressed],
-    });
-    return joined.ok ? joined.value : null;
-  }, [workbenchDocument, runState, rollback, suppressed]);
-
-  const toggleSuppressed = (id: FeatureId): void => {
-    setSuppressed((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  // The tree's statuses: the threaded loop's durable state map (statuses are
-  // PROP-ONLY; parked features read stale — their durable state).
-  const regenerationStates = runState === null ? null : runState.states;
-
-  useEffect(() => {
-    // The host's explicit boot configuration: the SELECT tool armed through
-    // the hook layer (cancel-if-active, reset, activate).
-    arm(SELECT_TOOL_ID);
-    const session = bootRenderFixtureSession(
-      {
-        rootId: "workbench-root",
-        statusId: "workbench-status",
-        volumeId: "workbench-volume",
-        errorId: "workbench-error",
-      },
-      (state, revision) => {
-        setApplied({ state, revision });
-        // A NEW regeneration: synthetic references die with the old one;
-        // stable references persist.
-        beginRegeneration(revision);
-      },
-    );
-    sessionRef.current = session;
-    return () => {
-      sessionRef.current = null;
-      session.dispose();
-    };
-    // arm and beginRegeneration are stable store operation identities: the
-    // session boots exactly once.
-  }, [arm, beginRegeneration]);
-
-  // The scene dispatch: whichever computation the active scene names follows
-  // the DOCUMENT (the parameter edit → regenerate criterion) — the plate
-  // scene follows the hole diameter, the extrude scene re-reads the
-  // document's extrude feature through the profile resolver, the hole scene
-  // re-reads the hole composition (base extrusion + every hole's five
-  // parameters). Declared AFTER the boot effect above so the mount pass
-  // runs with the session already in sessionRef — the initial plate
-  // dispatch fires, and later action re-triggers (extrudeCount, revolveCount,
-  // holeCount) re-dispatch the current scene.
-  useEffect(() => {
-    if (activeScene === "extrude") {
-      const request: ExtrudeSceneRequest | null =
-        documentExtrudeRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchExtrude(request, request.bodyId);
-      }
-      return;
-    }
-    if (activeScene === "revolve") {
-      const request: RevolveSceneRequest | null =
-        documentRevolveRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchRevolve(request, request.bodyId);
-      }
-      return;
-    }
-    if (activeScene === "hole") {
-      const derived = documentHoleSceneRequest(workbenchDocument);
-      if (derived !== null) {
-        sessionRef.current?.dispatchHole(derived.request, derived.bodyId);
-      }
-      return;
-    }
-    if (storedHole !== null) {
-      sessionRef.current?.dispatch(storedHole);
-    }
-  }, [
-    activeScene,
-    workbenchDocument,
+function CadWorkbenchBody(): ReactElement {
+  const engine = useWorkbenchEngine({
+    rootId: "workbench-root",
+    statusId: "workbench-status",
+    volumeId: "workbench-volume",
+    errorId: "workbench-error",
+  });
+  const {
+    applied,
+    executed,
+    historyApi,
+    holeBase,
+    mode,
+    noteRenderedFrame,
+    regenerationIssue,
+    regenerationStates,
+    rollback,
+    selectionApi,
+    setMode,
+    setRollback,
     storedHole,
-    extrudeCount,
-    revolveCount,
-    holeCount,
-  ]);
-
-  // The host pushes the CURRENT projection into the store — the projection
-  // access the active tool reads. Host-side state push, not mirrored state.
-  useEffect(() => {
-    store.setProjection(applied === null ? null : applied.state.projection);
-  }, [applied, store]);
+    timeline,
+    timelineJson,
+    toolsApi,
+    toggleSuppressed,
+    handleExtrude,
+    handleHole,
+    handleRevolve,
+  } = engine;
+  const store = engine.store;
+  const appliedState = applied;
+  const faceAnchors = engine.faceAnchors;
+  const measureText = engine.measureText;
+  const boundsState = engine.boundsState;
+  const radiusState = engine.radiusState;
+  const massPropertiesState = engine.massPropertiesState;
 
   const selectionKey = useMemo(
     () => selectionApi.selected.map(selectionReferenceKey).join(";"),
     [selectionApi.selected],
   );
 
-  const faceAnchors = useMemo(
-    () => (applied === null ? "" : faceAnchorSurface(applied.state)),
-    [applied],
-  );
-
-  // The measure tool's completion: the readout the Measurement block shows.
-  const measureText =
-    toolsApi.completion !== null &&
-    toolsApi.completion.detail.kind === "measurement"
-      ? valueIn(toolsApi.completion.detail.distance, "mm").toFixed(3)
-      : null;
-
-  // The bounds inspection (Phase 27.1): the scene solid's kernel-measured
-  // bounds — `solid.bounds` through the session/worker path — displayed
-  // when the selection resolves to exactly the measured body, with the
-  // booted kernel's declared tightness (see ./bounds-inspection).
-  const boundsState = boundsReadout({
-    selected: selectionApi.selected,
-    features: workbenchDocument.features,
-    sceneBodyId:
-      applied === null
-        ? undefined
-        : applied.state.projection.objects.find(
-            (object) => object.bodyId !== undefined,
-          )?.bodyId,
-    bounds: applied === null ? undefined : applied.state.measurement.bounds,
-    tightBooleanBounds: WORKBENCH_SESSION_BACKEND.tightBooleanBounds,
-  });
-
-  // The distance inspection (Phase 27.2): the selection's reference pair —
-  // exactly two selected references — measured through the reference
-  // matrix (see ./distance-inspection). The Distance row's value priority:
-  // the reference pair when one is selected; otherwise the measure tool's
-  // quick point-pair completion (the Phase 13 gesture keeps its role);
-  // otherwise nothing.
-  const referenceDistance = distanceReadout({
-    selected: selectionApi.selected,
-    features: workbenchDocument.features,
-    projection: applied === null ? undefined : applied.state.projection,
-  });
+  // The distance row's value priority: the reference pair when one is
+  // selected; otherwise the measure tool's quick point-pair completion (the
+  // Phase 13 gesture keeps its role); otherwise nothing.
+  const referenceDistance = engine.referenceDistance;
   const distanceText =
     referenceDistance.text ??
     (measureText === null ? null : `${measureText} mm`);
@@ -655,48 +148,6 @@ function CadWorkbenchBody({
       : measureText !== null
         ? "point pair"
         : null;
-
-  // The radius inspection (Phase 27.3): exactly one selected reference —
-  // measured through the radius support matrix (see ./radius-inspection):
-  // a cylindrical/circular selection shows its radius AND its diameter
-  // dual, a planar or non-circular selection declines structurally.
-  const radiusState = radiusReadout({
-    selected: selectionApi.selected,
-    features: workbenchDocument.features,
-    projection: applied === null ? undefined : applied.state.projection,
-  });
-
-  // The mass-properties inspection (Phase 27.4): the scene solid's
-  // kernel-measured volume and surface area — `solid.volume` and the new
-  // `solid.area` through the session/worker path — displayed when the
-  // selection resolves to exactly the measured body (see
-  // ./mass-properties-inspection; mass itself has no row: no density model
-  // exists, so density × volume is a downstream consumer's algebra).
-  const massPropertiesState = massPropertiesReadout({
-    selected: selectionApi.selected,
-    features: workbenchDocument.features,
-    sceneBodyId:
-      applied === null
-        ? undefined
-        : applied.state.projection.objects.find(
-            (object) => object.bodyId !== undefined,
-          )?.bodyId,
-    volume: applied === null ? undefined : applied.state.measurement.volume,
-    area: applied === null ? undefined : applied.state.measurement.area,
-  });
-
-  const timelineJson = useMemo(
-    () =>
-      JSON.stringify({
-        rollback:
-          rollback === null
-            ? null
-            : { afterFeatureId: rollback.afterFeatureId },
-        entries: timeline ?? [],
-        executed: runState === null ? [] : runState.executed,
-      }),
-    [rollback, timeline, runState],
-  );
 
   return (
     <div
@@ -729,7 +180,7 @@ function CadWorkbenchBody({
       data-mass-volume={massPropertiesState.volumeText ?? ""}
       data-mass-area={massPropertiesState.areaText ?? ""}
       data-command-log={JSON.stringify(store.commandLog)}
-      data-rendered-frames={String(renderedFrames)}
+      data-rendered-frames={String(engine.renderedFrames)}
       data-hole-diameter={storedHole === null ? "" : String(storedHole)}
       data-history={JSON.stringify({
         canUndo: historyApi.canUndo,
@@ -739,20 +190,20 @@ function CadWorkbenchBody({
       })}
       data-feature-timeline={timelineJson}
       data-sketch-mode={mode}
-      data-scene-kind={activeScene}
+      data-scene-kind={engine.activeScene}
       data-scene-extents={
-        applied === null
+        appliedState === null
           ? ""
-          : formatBoundsExtents(applied.state.measurement.bounds)
+          : formatBoundsExtents(appliedState.state.measurement.bounds)
       }
       data-scene-bounds={
-        applied === null
+        appliedState === null
           ? ""
           : JSON.stringify({
-              min: applied.state.measurement.bounds.min.map((v) =>
+              min: appliedState.state.measurement.bounds.min.map((v) =>
                 Number(v.toFixed(3)),
               ),
-              max: applied.state.measurement.bounds.max.map((v) =>
+              max: appliedState.state.measurement.bounds.max.map((v) =>
                 Number(v.toFixed(3)),
               ),
             })
@@ -793,8 +244,8 @@ function CadWorkbenchBody({
           ) : (
             <FeatureTimelineStrip
               entries={timeline}
+              executed={executed}
               rollback={rollback}
-              executed={runState === null ? [] : runState.executed}
               onRollback={setRollback}
               onToggleSuppressed={toggleSuppressed}
             />
@@ -858,7 +309,7 @@ function CadWorkbenchBody({
         <Button
           data-testid="workbench-mode-toggle"
           onClick={() => {
-            onModeChange("sketch");
+            setMode("sketch");
           }}
           size="xs"
           type="button"
@@ -870,7 +321,7 @@ function CadWorkbenchBody({
       {mode === "sketch" ? (
         <SketchMode
           onExit={() => {
-            onModeChange("model");
+            setMode("model");
           }}
           onExtrude={handleExtrude}
           onRevolve={handleRevolve}
@@ -897,126 +348,16 @@ function CadWorkbenchBody({
               />
             )}
             {/* The measurement home (the Phase 13 block, extended in Phases
-                27.1–27.4): every measurement readout surfaces here — the
-                Distance row carries the selection's reference-pair distance
-                (falling back to the measure tool's point-pair completion),
-                the Bounds row the selected body's kernel-measured bounding
-                dimensions, the Radius row the selected circular/
-                cylindrical reference's radius with its diameter dual, and
-                the Volume/Area rows the selected body's kernel-measured
-                mass properties. All rows format their values through the
-                same dimensional unit infrastructure. */}
-            <section
-              aria-label="Measurement"
-              className="border-border bg-background w-48 border"
-            >
-              <div className="text-muted-foreground border-border border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
-                Measurement
-              </div>
-              <div className="flex flex-col gap-1.5 px-2 py-2 text-xs">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Distance</span>
-                  {distanceText === null ? (
-                    <span className="text-muted-foreground font-mono">—</span>
-                  ) : (
-                    <span className="text-right font-mono">
-                      <span
-                        id="workbench-measure-readout"
-                        className="block break-words"
-                      >
-                        {distanceText}
-                      </span>
-                      <span
-                        id="workbench-distance-source"
-                        className="text-muted-foreground block"
-                      >
-                        {distanceSource}
-                      </span>
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Bounds</span>
-                  {boundsState.text === null ? (
-                    <span className="text-muted-foreground font-mono">—</span>
-                  ) : (
-                    <span className="text-right font-mono">
-                      <span
-                        id="workbench-bounds-readout"
-                        className="block break-words"
-                      >
-                        {boundsState.text}
-                      </span>
-                      <span
-                        id="workbench-bounds-tightness"
-                        className="text-muted-foreground block"
-                      >
-                        {boundsState.tightness === "tight"
-                          ? "tight"
-                          : "may be conservative"}
-                      </span>
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Radius</span>
-                  {radiusState.text === null ? (
-                    <span className="text-muted-foreground font-mono">—</span>
-                  ) : (
-                    <span className="text-right font-mono">
-                      <span
-                        id="workbench-radius-readout"
-                        className="block break-words"
-                      >
-                        {radiusState.text}
-                      </span>
-                      <span
-                        id="workbench-radius-diameter"
-                        className="block break-words"
-                      >
-                        {radiusState.diameterText}
-                      </span>
-                      <span
-                        id="workbench-radius-source"
-                        className="text-muted-foreground block"
-                      >
-                        {radiusState.source}
-                      </span>
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Volume</span>
-                  {massPropertiesState.volumeText === null ? (
-                    <span className="text-muted-foreground font-mono">—</span>
-                  ) : (
-                    <span className="text-right font-mono">
-                      <span
-                        id="workbench-volume-readout"
-                        className="block break-words"
-                      >
-                        {massPropertiesState.volumeText}
-                      </span>
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-muted-foreground">Area</span>
-                  {massPropertiesState.areaText === null ? (
-                    <span className="text-muted-foreground font-mono">—</span>
-                  ) : (
-                    <span className="text-right font-mono">
-                      <span
-                        id="workbench-area-readout"
-                        className="block break-words"
-                      >
-                        {massPropertiesState.areaText}
-                      </span>
-                    </span>
-                  )}
-                </div>
-              </div>
-            </section>
+                27.1–27.4): the ONE shared section (see
+                ./measurement-section) — the complete workbench renders the
+                same block from the same engine readouts. */}
+            <WorkbenchMeasurementSection
+              boundsState={boundsState}
+              distanceSource={distanceSource}
+              distanceText={distanceText}
+              massPropertiesState={massPropertiesState}
+              radiusState={radiusState}
+            />
           </div>
           {/* Fixed pixel box: part of the determinism contract (the camera
               spec is authored for exactly this 800×520 viewport; the scene
@@ -1031,19 +372,19 @@ function CadWorkbenchBody({
           >
             <CadViewport
               className="h-[520px] w-[800px]"
-              projection={applied === null ? null : applied.state.projection}
+              projection={
+                appliedState === null ? null : appliedState.state.projection
+              }
               onSettled={() => {
-                // Settle protocol: pixels may be compared only once this
-                // stamp agrees with the settled volume.
-                document
-                  .getElementById("workbench-root")
-                  ?.setAttribute(
-                    "data-cad-rendered-volume",
-                    applied === null
-                      ? ""
-                      : applied.state.measurement.volume.toFixed(3),
-                  );
-                setRenderedFrames((frames) => frames + 1);
+                // Settle protocol, exactly the Phase 15 semantics the
+                // render baselines pin: pixels may be compared only once
+                // this stamp agrees with the settled volume, written
+                // SYNCHRONOUSLY in the settle callback.
+                noteRenderedFrame(
+                  appliedState === null
+                    ? ""
+                    : appliedState.state.measurement.volume.toFixed(3),
+                );
               }}
               onSelectionRendered={(key) => {
                 document

@@ -18,6 +18,7 @@ import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
+import { Route as WorkbenchCompleteRouteImport } from './routes/workbench-complete'
 import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
@@ -70,6 +71,11 @@ const WorkbenchChainRoute = WorkbenchChainRouteImport.update({
   path: '/workbench-chain',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkbenchCompleteRoute = WorkbenchCompleteRouteImport.update({
+  id: '/workbench-complete',
+  path: '/workbench-complete',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkerRoute = WorkerRouteImport.update({
   id: '/worker',
   path: '/worker',
@@ -115,6 +121,7 @@ export interface FileRoutesByFullPath {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-chain': typeof WorkbenchChainRoute
+  '/workbench-complete': typeof WorkbenchCompleteRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -132,6 +139,7 @@ export interface FileRoutesByTo {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-chain': typeof WorkbenchChainRoute
+  '/workbench-complete': typeof WorkbenchCompleteRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -151,6 +159,7 @@ export interface FileRoutesById {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-chain': typeof WorkbenchChainRoute
+  '/workbench-complete': typeof WorkbenchCompleteRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -170,6 +179,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/workbench-chain'
+    | '/workbench-complete'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/workbench-chain'
+    | '/workbench-complete'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -205,6 +216,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/workbench-chain'
+    | '/workbench-complete'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -224,6 +236,7 @@ export interface RootRouteChildren {
   UiViewportRoute: typeof UiViewportRoute
   WorkbenchRoute: typeof WorkbenchRoute
   WorkbenchChainRoute: typeof WorkbenchChainRoute
+  WorkbenchCompleteRoute: typeof WorkbenchCompleteRoute
   WorkerRoute: typeof WorkerRoute
   WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
@@ -295,6 +308,13 @@ declare module '@tanstack/react-router' {
       path: '/workbench-chain'
       fullPath: '/workbench-chain'
       preLoaderRoute: typeof WorkbenchChainRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workbench-complete': {
+      id: '/workbench-complete'
+      path: '/workbench-complete'
+      fullPath: '/workbench-complete'
+      preLoaderRoute: typeof WorkbenchCompleteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/worker': {
@@ -371,6 +391,7 @@ const rootRouteChildren: RootRouteChildren = {
   UiViewportRoute: UiViewportRoute,
   WorkbenchRoute: WorkbenchRoute,
   WorkbenchChainRoute: WorkbenchChainRoute,
+  WorkbenchCompleteRoute: WorkbenchCompleteRoute,
   WorkerRoute: WorkerRoute,
   WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,
