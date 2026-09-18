@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteRouteImport } from './routes/_auth/route'
 import { Route as IoRouteImport } from './routes/io'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as PerfRouteImport } from './routes/perf'
 import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
@@ -44,6 +45,11 @@ const IoRoute = IoRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PerfRoute = PerfRouteImport.update({
+  id: '/perf',
+  path: '/perf',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RenderRoute = RenderRouteImport.update({
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
+  '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
+  '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
@@ -154,6 +162,7 @@ export interface FileRoutesById {
   '/_auth': typeof AuthRouteRouteWithChildren
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
+  '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
@@ -174,6 +183,7 @@ export interface FileRouteTypes {
     | '/'
     | '/io'
     | '/login'
+    | '/perf'
     | '/render'
     | '/spike'
     | '/ui-viewport'
@@ -192,6 +202,7 @@ export interface FileRouteTypes {
     | '/'
     | '/io'
     | '/login'
+    | '/perf'
     | '/render'
     | '/spike'
     | '/ui-viewport'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
     | '/_auth'
     | '/io'
     | '/login'
+    | '/perf'
     | '/render'
     | '/spike'
     | '/ui-viewport'
@@ -231,6 +243,7 @@ export interface RootRouteChildren {
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
   IoRoute: typeof IoRoute
   LoginRoute: typeof LoginRoute
+  PerfRoute: typeof PerfRoute
   RenderRoute: typeof RenderRoute
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
@@ -273,6 +286,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/perf': {
+      id: '/perf'
+      path: '/perf'
+      fullPath: '/perf'
+      preLoaderRoute: typeof PerfRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/render': {
@@ -386,6 +406,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRouteRoute: AuthRouteRouteWithChildren,
   IoRoute: IoRoute,
   LoginRoute: LoginRoute,
+  PerfRoute: PerfRoute,
   RenderRoute: RenderRoute,
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
