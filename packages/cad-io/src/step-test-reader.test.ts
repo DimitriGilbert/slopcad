@@ -47,9 +47,7 @@ describe("the STEP Part 21 test reader", () => {
     expect(document.header.timeStamp).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/,
     );
-    expect(document.header.processor).toBe(
-      "Open CASCADE STEP processor 8.0",
-    );
+    expect(document.header.processor).toBe("Open CASCADE STEP processor 8.0");
     expect(document.header.originator).toBe("Open CASCADE 8.0");
     // AP214, the AsIs default schema the binding emits (probed).
     expect(document.header.schema).toBe(

@@ -59,10 +59,7 @@ function allValid(features: readonly FeatureRecord[]): RegenerationStateMap {
   );
 }
 
-function diagnosticOn(
-  id: FeatureId,
-  message = "rebuild failed",
-): Diagnostic {
+function diagnosticOn(id: FeatureId, message = "rebuild failed"): Diagnostic {
   return {
     severity: "error",
     code: DIAGNOSTIC_CODES.arithmeticDivisionByZero,
@@ -73,9 +70,10 @@ function diagnosticOn(
 
 const succeed: FeatureExecutor = () => ({ ok: true });
 
-function recorder(
-  decide: (id: FeatureId) => FeatureExecutionOutcome,
-): { readonly calls: readonly FeatureId[]; readonly executor: FeatureExecutor } {
+function recorder(decide: (id: FeatureId) => FeatureExecutionOutcome): {
+  readonly calls: readonly FeatureId[];
+  readonly executor: FeatureExecutor;
+} {
   const calls: FeatureId[] = [];
   return {
     calls,
@@ -284,7 +282,10 @@ describe("regenerate: failure isolation", () => {
       },
     ];
     const run = runRegeneration({
-      features: [feature(fBore, [{ kind: "feature", id: fPad }]), feature(fPad)],
+      features: [
+        feature(fBore, [{ kind: "feature", id: fPad }]),
+        feature(fPad),
+      ],
       states: new Map(),
       execute: (candidate) =>
         candidate.id === fBore ? { ok: false, diagnostics } : { ok: true },
@@ -425,7 +426,10 @@ describe("regenerate: suppression", () => {
 
   it("clears diagnostics of a failed feature that becomes suppressed", () => {
     const failedPrior = new Map(allValid(branched));
-    failedPrior.set(fPad, { state: "failed", diagnostics: [diagnosticOn(fPad)] });
+    failedPrior.set(fPad, {
+      state: "failed",
+      diagnostics: [diagnosticOn(fPad)],
+    });
     const run = runRegeneration({
       features: branched,
       states: failedPrior,
@@ -585,7 +589,10 @@ describe("regeneration serialization", () => {
         { formatVersion: 2, features: [] },
         REGENERATION_ERROR_CODES.versionUnsupported,
       ],
-      [{ formatVersion: CAD_DOCUMENT_FORMAT_VERSION }, REGENERATION_ERROR_CODES.malformed],
+      [
+        { formatVersion: CAD_DOCUMENT_FORMAT_VERSION },
+        REGENERATION_ERROR_CODES.malformed,
+      ],
       [
         { formatVersion: CAD_DOCUMENT_FORMAT_VERSION, features: {} },
         REGENERATION_ERROR_CODES.malformed,

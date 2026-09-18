@@ -33,9 +33,7 @@ const GROUPS: CadSketchToolbarProps["groups"] = [
 
 /** The button of tool `toolId` (the strip's `data-sketch-tool-id` surface). */
 function toolButton(toolId: string): HTMLElement {
-  const element = document.querySelector(
-    `[data-sketch-tool-id="${toolId}"]`,
-  );
+  const element = document.querySelector(`[data-sketch-tool-id="${toolId}"]`);
   if (element === null) throw new Error(`no button for tool ${toolId}`);
   return element as HTMLElement;
 }
@@ -108,7 +106,9 @@ describe("CadSketchToolbar", () => {
       key: "1",
     });
     // No activation surface existed to be called; the strip simply rendered.
-    expect(document.querySelector('[data-sketch-tool-id="line"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-sketch-tool-id="line"]'),
+    ).not.toBeNull();
   });
 
   it("falls back to the raw tool id when labels omit a tool", () => {

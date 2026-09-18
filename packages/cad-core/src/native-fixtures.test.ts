@@ -44,7 +44,9 @@ function requireOk<T>(
   what: string,
 ): T {
   if (!result.ok) {
-    throw new Error(`The fixture test rejected ${what}: ${result.error.message}`);
+    throw new Error(
+      `The fixture test rejected ${what}: ${result.error.message}`,
+    );
   }
   return result.value;
 }
@@ -88,12 +90,16 @@ for (const name of [
         parseNativeCadDocumentFromString(text),
         `parsing ${name}`,
       );
-      expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(text);
+      expect(
+        stringifyNativeCadDocument(serializeNativeCadDocument(parsed)),
+      ).toBe(text);
       const fromBytes = requireOk(
         parseNativeCadDocumentFromBytes(encodeNativeCadDocument(parsed)),
         `the byte round trip of ${name}`,
       );
-      expect(stringifyNativeCadDocument(serializeNativeCadDocument(fromBytes))).toBe(text);
+      expect(
+        stringifyNativeCadDocument(serializeNativeCadDocument(fromBytes)),
+      ).toBe(text);
     });
   });
 }
@@ -101,7 +107,9 @@ for (const name of [
 describe("the plate-with-hole fixture", () => {
   const load = async (): Promise<NativeCadDocument> =>
     requireOk(
-      parseNativeCadDocumentFromString(await readFixture("plate-with-hole.native.json")),
+      parseNativeCadDocumentFromString(
+        await readFixture("plate-with-hole.native.json"),
+      ),
       "parsing the plate fixture",
     );
 
@@ -122,7 +130,10 @@ describe("the plate-with-hole fixture", () => {
     const volumeHint = document.parameters.parameters.find(
       (entry) => entry.name === "volumeHint",
     );
-    if (volumeHint?.expression === undefined || volumeHint.expression === null) {
+    if (
+      volumeHint?.expression === undefined ||
+      volumeHint.expression === null
+    ) {
       throw new Error("The plate fixture lost the volumeHint expression.");
     }
     expect(printExpression(volumeHint.expression)).toBe(
@@ -168,7 +179,10 @@ describe("the plate-with-hole fixture", () => {
       undoHistory(undoneTwice.history),
       "the third undo",
     );
-    const atBase = requireOk(undoHistory(undoneThrice.history), "the undo to the base");
+    const atBase = requireOk(
+      undoHistory(undoneThrice.history),
+      "the undo to the base",
+    );
     expect(atBase.document.features).toHaveLength(0);
     expect(canUndo(atBase.history)).toBe(false);
 
@@ -198,7 +212,9 @@ describe("the failed-feature fixture", () => {
     ]);
     const sphere = native.regeneration.get(createFeatureId("feat_sphere"));
     expect(sphere?.state).toBe("valid");
-    const translate = native.regeneration.get(createFeatureId("feat_translate"));
+    const translate = native.regeneration.get(
+      createFeatureId("feat_translate"),
+    );
     expect(translate?.state).toBe("failed");
     const diagnostic = translate?.diagnostics[0];
     expect(diagnostic?.severity).toBe("error");

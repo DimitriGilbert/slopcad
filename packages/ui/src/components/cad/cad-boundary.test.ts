@@ -10,7 +10,14 @@
  * its own dependency surface and is deliberately out of scope here.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -122,7 +129,11 @@ describe("CAD component import boundary", () => {
       const nested = join(root, "cad", "worker-bridge");
       mkdirSync(nested, { recursive: true });
       writeFileSync(join(root, "cad", "surface.ts"), "export {};\n", "utf8");
-      writeFileSync(join(nested, "bridge.ts"), `${hiddenKernelImport}\n`, "utf8");
+      writeFileSync(
+        join(nested, "bridge.ts"),
+        `${hiddenKernelImport}\n`,
+        "utf8",
+      );
       expect(boundaryViolations(join(root, "cad"))).toEqual([
         `${join(nested, "bridge.ts")} imports "${kernelSpecifier}"`,
       ]);

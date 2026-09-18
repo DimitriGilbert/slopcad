@@ -158,10 +158,7 @@ describe("unit conversion", () => {
     }
     expectClose(convert(convert(angle(1.5, "deg"), "rad"), "deg").value, 1.5);
     expectClose(convert(convert(area(3, "in2"), "mm2"), "in2").value, 3);
-    expectClose(
-      convert(convert(volume(0.5, "cm3"), "mm3"), "cm3").value,
-      0.5,
-    );
+    expectClose(convert(convert(volume(0.5, "cm3"), "mm3"), "cm3").value, 0.5);
   });
 
   it("rejects units of another dimension at compile time and runtime", () => {
@@ -176,9 +173,9 @@ describe("unit conversion", () => {
   });
 
   it("rejects conversions that overflow to a non-finite magnitude", () => {
-    expect(() =>
-      convert(length(Number.MAX_VALUE, "m"), "mm"),
-    ).toThrowError(DimensionalValueValidationError);
+    expect(() => convert(length(Number.MAX_VALUE, "m"), "mm")).toThrowError(
+      DimensionalValueValidationError,
+    );
   });
 });
 
@@ -310,10 +307,30 @@ describe("incompatible dimensional arithmetic", () => {
       left: AnyDimensionalValue;
       right: AnyDimensionalValue;
     }[] = [
-      { op: addValues, operation: "add", left: length(1), right: angle(90, "deg") },
-      { op: subtractValues, operation: "subtract", left: area(1), right: length(1) },
-      { op: multiplyValues, operation: "multiply", left: length(1), right: angle(1, "rad") },
-      { op: divideValues, operation: "divide", left: dimensionless(1), right: length(1) },
+      {
+        op: addValues,
+        operation: "add",
+        left: length(1),
+        right: angle(90, "deg"),
+      },
+      {
+        op: subtractValues,
+        operation: "subtract",
+        left: area(1),
+        right: length(1),
+      },
+      {
+        op: multiplyValues,
+        operation: "multiply",
+        left: length(1),
+        right: angle(1, "rad"),
+      },
+      {
+        op: divideValues,
+        operation: "divide",
+        left: dimensionless(1),
+        right: length(1),
+      },
     ];
     for (const { op, operation, left, right } of cases) {
       const result = op(left, right);
@@ -478,15 +495,39 @@ describe("serialization", () => {
       [{ dimension: "length" }, "unit/not-a-string"],
       [{ dimension: "length", unit: 5, value: 1 }, "unit/not-a-string"],
       [{ dimension: "length", unit: "km", value: 1 }, "unit/unknown"],
-      [{ dimension: "length", unit: "deg", value: 1 }, "value/unit-dimension-mismatch"],
-      [{ dimension: "angle", unit: "mm", value: 1 }, "value/unit-dimension-mismatch"],
-      [{ dimension: "area", unit: "1", value: 1 }, "value/unit-dimension-mismatch"],
-      [{ dimension: "volume", unit: "mm2", value: 1 }, "value/unit-dimension-mismatch"],
-      [{ dimension: "dimensionless", unit: "mm", value: 1 }, "value/unit-dimension-mismatch"],
+      [
+        { dimension: "length", unit: "deg", value: 1 },
+        "value/unit-dimension-mismatch",
+      ],
+      [
+        { dimension: "angle", unit: "mm", value: 1 },
+        "value/unit-dimension-mismatch",
+      ],
+      [
+        { dimension: "area", unit: "1", value: 1 },
+        "value/unit-dimension-mismatch",
+      ],
+      [
+        { dimension: "volume", unit: "mm2", value: 1 },
+        "value/unit-dimension-mismatch",
+      ],
+      [
+        { dimension: "dimensionless", unit: "mm", value: 1 },
+        "value/unit-dimension-mismatch",
+      ],
       [{ dimension: "length", unit: "mm" }, "value/invalid-magnitude"],
-      [{ dimension: "length", unit: "mm", value: "10" }, "value/invalid-magnitude"],
-      [{ dimension: "length", unit: "mm", value: Number.NaN }, "value/non-finite-magnitude"],
-      [{ dimension: "volume", unit: "m3", value: Infinity }, "value/non-finite-magnitude"],
+      [
+        { dimension: "length", unit: "mm", value: "10" },
+        "value/invalid-magnitude",
+      ],
+      [
+        { dimension: "length", unit: "mm", value: Number.NaN },
+        "value/non-finite-magnitude",
+      ],
+      [
+        { dimension: "volume", unit: "m3", value: Infinity },
+        "value/non-finite-magnitude",
+      ],
     ];
     for (const [input, code] of cases) {
       const result = parseDimensionalValue(input);

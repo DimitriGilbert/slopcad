@@ -56,7 +56,11 @@
  */
 
 import { useRef } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from "react";
 import {
   CadProviderError,
   useCadSelection,
@@ -182,12 +186,20 @@ export function CadViewport({
   regeneration: regenerationProp,
   selection: selectionProp,
 }: CadViewportProps) {
-  const labels: CadViewportLabels = { ...CAD_VIEWPORT_LABELS, ...labelOverrides };
+  const labels: CadViewportLabels = {
+    ...CAD_VIEWPORT_LABELS,
+    ...labelOverrides,
+  };
   const selectionApi = useOptionalCadSelection();
   const toolsApi = useOptionalCadTools();
 
   const modifiersRef = useRef(
-    toolModifiersFromNative({ shiftKey: false, altKey: false, ctrlKey: false, metaKey: false }),
+    toolModifiersFromNative({
+      shiftKey: false,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+    }),
   );
   /** The scene resolved a pick for the latest pointer down/up. */
   const pickDownRef = useRef(false);
@@ -205,7 +217,9 @@ export function CadViewport({
   const selection =
     selectionProp !== undefined ? selectionProp : selectionApi?.selected;
   const regeneration =
-    regenerationProp !== undefined ? regenerationProp : selectionApi?.regeneration;
+    regenerationProp !== undefined
+      ? regenerationProp
+      : selectionApi?.regeneration;
 
   const handleScenePickDown = (pick: CadPick): void => {
     pickDownRef.current = true;
@@ -251,9 +265,12 @@ export function CadViewport({
         }
       : {};
 
-  const handleContainerPointerDown = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const handleContainerPointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
     emptyDownRef.current =
-      !pickDownRef.current && !insideOverlay(overlayLayerRef.current, event.target);
+      !pickDownRef.current &&
+      !insideOverlay(overlayLayerRef.current, event.target);
     if (toolActive && emptyDownRef.current) {
       toolsApi?.dispatch(
         toolPointerEvent("pointer-down", null, toolModifiersFromNative(event)),
@@ -261,9 +278,12 @@ export function CadViewport({
     }
   };
 
-  const handleContainerPointerUp = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const handleContainerPointerUp = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
     const onEmptySpace =
-      !pickUpRef.current && !insideOverlay(overlayLayerRef.current, event.target);
+      !pickUpRef.current &&
+      !insideOverlay(overlayLayerRef.current, event.target);
     if (toolActive) {
       if (onEmptySpace) {
         toolsApi?.dispatch(

@@ -71,7 +71,9 @@ import {
  * must not fall through to prototype chains (scan a collection, or use a
  * `Map`).
  */
-export type ExpressionEnvironment = (name: string) => AnyDimensionalValue | undefined;
+export type ExpressionEnvironment = (
+  name: string,
+) => AnyDimensionalValue | undefined;
 
 /** Stable failure codes produced when evaluation is rejected. */
 export const EXPRESSION_EVALUATION_ERROR_CODES = {
@@ -221,7 +223,11 @@ function evaluateBinary(
           ? multiplyValues(left.value, right.value)
           : divideValues(left.value, right.value);
   if (!outcome.ok) {
-    return fail({ code: outcome.error.code, message: outcome.error.message, input: node });
+    return fail({
+      code: outcome.error.code,
+      message: outcome.error.message,
+      input: node,
+    });
   }
   return ok(outcome.value);
 }
@@ -300,8 +306,7 @@ function powerResultDimension(
   }
   const resultPower = LENGTH_POWERS[base] * power;
   const rounded = Math.round(resultPower);
-  const isInteger =
-    Math.abs(resultPower - rounded) <= POWER_INTEGER_TOLERANCE;
+  const isInteger = Math.abs(resultPower - rounded) <= POWER_INTEGER_TOLERANCE;
   if (!isInteger || rounded < 0 || rounded > 3) return null;
   return POWER_DIMENSIONS[rounded] ?? null;
 }

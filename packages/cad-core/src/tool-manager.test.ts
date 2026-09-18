@@ -65,7 +65,9 @@ function probeTool(id: string, parameter: ParameterId): CadTool<ProbeState> {
       }
       if (event.type === "pointer-up") {
         const issued = context.issue({
-          commands: [{ type: "parameter.set", id: parameter, value: length(2) }],
+          commands: [
+            { type: "parameter.set", id: parameter, value: length(2) },
+          ],
         });
         if (!issued.ok) throw new Error(issued.error.message);
         return {
@@ -80,15 +82,30 @@ function probeTool(id: string, parameter: ParameterId): CadTool<ProbeState> {
 }
 
 function pointerDown(): ToolInputEvent {
-  return { type: "pointer-down", point: null, pick: null, modifiers: NO_TOOL_MODIFIERS };
+  return {
+    type: "pointer-down",
+    point: null,
+    pick: null,
+    modifiers: NO_TOOL_MODIFIERS,
+  };
 }
 
 function pointerUp(): ToolInputEvent {
-  return { type: "pointer-up", point: null, pick: null, modifiers: NO_TOOL_MODIFIERS };
+  return {
+    type: "pointer-up",
+    point: null,
+    pick: null,
+    modifiers: NO_TOOL_MODIFIERS,
+  };
 }
 
 function pointerMove(): ToolInputEvent {
-  return { type: "pointer-move", point: null, pick: null, modifiers: NO_TOOL_MODIFIERS };
+  return {
+    type: "pointer-move",
+    point: null,
+    pick: null,
+    modifiers: NO_TOOL_MODIFIERS,
+  };
 }
 
 interface Harness {
@@ -240,7 +257,9 @@ describe("tool manager lifecycle", () => {
     expect(() =>
       makeHarness([probeTool("dup", PARAMETER), probeTool("dup", PARAMETER)]),
     ).toThrow(/twice/);
-    expect(() => makeHarness([probeTool("1bad", PARAMETER)])).toThrow(/tool id/);
+    expect(() => makeHarness([probeTool("1bad", PARAMETER)])).toThrow(
+      /tool id/,
+    );
   });
 
   it("surfaces a tool's last structured failure until the next activation", () => {

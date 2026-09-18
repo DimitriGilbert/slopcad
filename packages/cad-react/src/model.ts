@@ -144,4 +144,3 @@ export function updatePrimitiveTransaction(
 export function removeFeatureTransaction(id: FeatureId): CadTransaction {
   return cadTransaction(deleteFeatureCommand(id));
 }
-

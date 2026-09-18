@@ -166,13 +166,62 @@ function plateEntities(): TopologySnapshot["entities"] {
   return [
     // faces: bottom, top, front, back, left, right, bore wall — absolute
     // and body-relative centroids of the 30×20×10 plate (centre (15,10,5)).
-    entityOf({ kind: "face", ordinal: 0, hash: 101, areaMm2: 549.73, centroidAbsoluteMm: [15, 10, 0], centroidRelativeMm: [0, 0, -5] }),
-    entityOf({ kind: "face", ordinal: 1, hash: 102, areaMm2: 549.73, centroidAbsoluteMm: [15, 10, 10], centroidRelativeMm: [0, 0, 5] }),
-    entityOf({ kind: "face", ordinal: 2, hash: 103, areaMm2: 300, centroidAbsoluteMm: [15, 0, 5], centroidRelativeMm: [0, -10, 0] }),
-    entityOf({ kind: "face", ordinal: 3, hash: 104, areaMm2: 300, centroidAbsoluteMm: [15, 20, 5], centroidRelativeMm: [0, 10, 0] }),
-    entityOf({ kind: "face", ordinal: 4, hash: 105, areaMm2: 200, centroidAbsoluteMm: [0, 10, 5], centroidRelativeMm: [-15, 0, 0] }),
-    entityOf({ kind: "face", ordinal: 5, hash: 106, areaMm2: 200, centroidAbsoluteMm: [30, 10, 5], centroidRelativeMm: [15, 0, 0] }),
-    entityOf({ kind: "face", ordinal: 6, hash: 107, areaMm2: 251.32, centroidAbsoluteMm: [15, 10, 5], centroidRelativeMm: [0, 0, 0] }),
+    entityOf({
+      kind: "face",
+      ordinal: 0,
+      hash: 101,
+      areaMm2: 549.73,
+      centroidAbsoluteMm: [15, 10, 0],
+      centroidRelativeMm: [0, 0, -5],
+    }),
+    entityOf({
+      kind: "face",
+      ordinal: 1,
+      hash: 102,
+      areaMm2: 549.73,
+      centroidAbsoluteMm: [15, 10, 10],
+      centroidRelativeMm: [0, 0, 5],
+    }),
+    entityOf({
+      kind: "face",
+      ordinal: 2,
+      hash: 103,
+      areaMm2: 300,
+      centroidAbsoluteMm: [15, 0, 5],
+      centroidRelativeMm: [0, -10, 0],
+    }),
+    entityOf({
+      kind: "face",
+      ordinal: 3,
+      hash: 104,
+      areaMm2: 300,
+      centroidAbsoluteMm: [15, 20, 5],
+      centroidRelativeMm: [0, 10, 0],
+    }),
+    entityOf({
+      kind: "face",
+      ordinal: 4,
+      hash: 105,
+      areaMm2: 200,
+      centroidAbsoluteMm: [0, 10, 5],
+      centroidRelativeMm: [-15, 0, 0],
+    }),
+    entityOf({
+      kind: "face",
+      ordinal: 5,
+      hash: 106,
+      areaMm2: 200,
+      centroidAbsoluteMm: [30, 10, 5],
+      centroidRelativeMm: [15, 0, 0],
+    }),
+    entityOf({
+      kind: "face",
+      ordinal: 6,
+      hash: 107,
+      areaMm2: 251.32,
+      centroidAbsoluteMm: [15, 10, 5],
+      centroidRelativeMm: [0, 0, 0],
+    }),
   ];
 }
 
@@ -183,10 +232,15 @@ function mintedReference(
 ): ParseResult<TopologyEntityReference, ReferenceError> {
   const provenance = referenceProvenance(documentWithChain(), bodyId);
   if (!provenance.ok) throw new Error(provenance.error.message);
-  return mintTopologyReference(snapshotOf(entities), ordinal, provenance.value, {
-    id: createReferenceId("ref_probe_face"),
-    kind,
-  });
+  return mintTopologyReference(
+    snapshotOf(entities),
+    ordinal,
+    provenance.value,
+    {
+      id: createReferenceId("ref_probe_face"),
+      kind,
+    },
+  );
 }
 
 /** A ref id for references minted outside the shared helper. */
@@ -196,10 +250,7 @@ const refId = (): TopologyEntityReference["id"] =>
 describe("provenance", () => {
   it("derives the producing feature plus upstream ancestors in evaluation order", () => {
     // The chain produces body_tool via feat_cut which consumes feat_box.
-    const provenance = referenceProvenance(
-      documentWithChain(),
-      toolBodyId,
-    );
+    const provenance = referenceProvenance(documentWithChain(), toolBodyId);
     expect(provenance.ok).toBe(true);
     if (!provenance.ok) return;
     expect(provenance.value.bodyId).toBe(toolBodyId);
@@ -225,9 +276,7 @@ describe("provenance", () => {
     );
     expect(provenance.ok).toBe(false);
     if (provenance.ok) return;
-    expect(provenance.error.code).toBe(
-      REFERENCE_ERROR_CODES.unknownEntity,
-    );
+    expect(provenance.error.code).toBe(REFERENCE_ERROR_CODES.unknownEntity);
   });
 
   it("fails when two features produce the same body", () => {
@@ -298,9 +347,29 @@ describe("minting", () => {
     // from 0, so ordinal 0 is live in all three kinds AT ONCE — the
     // ordinal alone can never pick the entity.
     const entities: TopologySnapshot["entities"] = [
-      entityOf({ kind: "face", ordinal: 0, hash: 301, areaMm2: 600, centroidAbsoluteMm: [15, 10, 10], centroidRelativeMm: [0, 0, 5] }),
-      entityOf({ kind: "edge", ordinal: 0, hash: 302, lengthMm: 30, centroidAbsoluteMm: [15, 10, 10], centroidRelativeMm: [0, 0, 5] }),
-      entityOf({ kind: "vertex", ordinal: 0, hash: 303, pointAbsoluteMm: [0, 0, 0], pointRelativeMm: [-15, -10, -5] }),
+      entityOf({
+        kind: "face",
+        ordinal: 0,
+        hash: 301,
+        areaMm2: 600,
+        centroidAbsoluteMm: [15, 10, 10],
+        centroidRelativeMm: [0, 0, 5],
+      }),
+      entityOf({
+        kind: "edge",
+        ordinal: 0,
+        hash: 302,
+        lengthMm: 30,
+        centroidAbsoluteMm: [15, 10, 10],
+        centroidRelativeMm: [0, 0, 5],
+      }),
+      entityOf({
+        kind: "vertex",
+        ordinal: 0,
+        hash: 303,
+        pointAbsoluteMm: [0, 0, 0],
+        pointRelativeMm: [-15, -10, -5],
+      }),
     ];
     const face = mintedReference(0, entities, "face");
     expect(face.ok).toBe(true);
@@ -327,8 +396,20 @@ describe("minting", () => {
     // FACE's ordinal, never an edge's.
     const entities: TopologySnapshot["entities"] = [
       ...plateEntities(),
-      entityOf({ kind: "edge", ordinal: 0, hash: 501, lengthMm: 30, centroidRelativeMm: [0, 0, 5] }),
-      entityOf({ kind: "edge", ordinal: 1, hash: 502, lengthMm: 20, centroidRelativeMm: [0, 10, 0] }),
+      entityOf({
+        kind: "edge",
+        ordinal: 0,
+        hash: 501,
+        lengthMm: 30,
+        centroidRelativeMm: [0, 0, 5],
+      }),
+      entityOf({
+        kind: "edge",
+        ordinal: 1,
+        hash: 502,
+        lengthMm: 20,
+        centroidRelativeMm: [0, 10, 0],
+      }),
     ];
     const minted = mintedReference(6, entities, "edge");
     expect(minted.ok).toBe(false);
@@ -345,7 +426,10 @@ describe("minting", () => {
 
   it("rejects an entity without identity (a kernel that cannot label topology)", () => {
     const entities = [
-      { ...entityOf({ kind: "face", ordinal: 0, hash: 1, areaMm2: 1 }), identity: null },
+      {
+        ...entityOf({ kind: "face", ordinal: 0, hash: 1, areaMm2: 1 }),
+        identity: null,
+      },
     ];
     const minted = mintedReference(0, entities);
     expect(minted.ok).toBe(false);
@@ -414,9 +498,7 @@ describe("payload comparison", () => {
         centroidRelativeMm: [0, 10.001, 0],
       }),
     ).toBe(false);
-    expect(
-      topologyGeometryMatches(reference, { areaMm2: 300 }),
-    ).toBe(false);
+    expect(topologyGeometryMatches(reference, { areaMm2: 300 })).toBe(false);
   });
 });
 
@@ -424,7 +506,10 @@ describe("resolution (snapshot protocol)", () => {
   it("resolves a matching identity to valid at the snapshot's regeneration", () => {
     const minted = mintedReference(6);
     if (!minted.ok) throw new Error(minted.error.message);
-    const resolved = resolveTopologyReference(minted.value, snapshotOf(plateEntities()));
+    const resolved = resolveTopologyReference(
+      minted.value,
+      snapshotOf(plateEntities()),
+    );
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
     expect(resolved.value.validity).toEqual({
@@ -448,8 +533,20 @@ describe("resolution (snapshot protocol)", () => {
   it("resolves an identity collision to ambiguous with every candidate", () => {
     // The measured compound case: one TShape carried twice.
     const twin = snapshotOf([
-      entityOf({ kind: "face", ordinal: 0, hash: 42, areaMm2: 100, centroidRelativeMm: [0, 0, 0] }),
-      entityOf({ kind: "face", ordinal: 1, hash: 42, areaMm2: 100, centroidRelativeMm: [0, 0, 0] }),
+      entityOf({
+        kind: "face",
+        ordinal: 0,
+        hash: 42,
+        areaMm2: 100,
+        centroidRelativeMm: [0, 0, 0],
+      }),
+      entityOf({
+        kind: "face",
+        ordinal: 1,
+        hash: 42,
+        areaMm2: 100,
+        centroidRelativeMm: [0, 0, 0],
+      }),
     ]);
     const provenance = referenceProvenance(documentWithChain(), bodyId);
     if (!provenance.ok) throw new Error(provenance.error.message);
@@ -656,15 +753,22 @@ describe("validity transitions", () => {
       ordinal: 0,
       repair: {
         strategy: "geometric-reattach",
-        from: { identity: reference.identity, geometry: reference.geometry, regeneration: 1 },
-        to: { identity: reference.identity, geometry: reference.geometry, regeneration: 2, ordinal: 0 },
+        from: {
+          identity: reference.identity,
+          geometry: reference.geometry,
+          regeneration: 1,
+        },
+        to: {
+          identity: reference.identity,
+          geometry: reference.geometry,
+          regeneration: 2,
+          ordinal: 0,
+        },
       },
     });
     expect(jumped.ok).toBe(false);
     if (jumped.ok) return;
-    expect(jumped.error.code).toBe(
-      REFERENCE_ERROR_CODES.transitionInvalid,
-    );
+    expect(jumped.error.code).toBe(REFERENCE_ERROR_CODES.transitionInvalid);
   });
 
   it("treats invalid as terminal", () => {
@@ -683,9 +787,7 @@ describe("validity transitions", () => {
     });
     expect(revived.ok).toBe(false);
     if (revived.ok) return;
-    expect(revived.error.code).toBe(
-      REFERENCE_ERROR_CODES.transitionInvalid,
-    );
+    expect(revived.error.code).toBe(REFERENCE_ERROR_CODES.transitionInvalid);
   });
 
   it("rejects malformed records for their own state", () => {
@@ -743,8 +845,7 @@ describe("repair", () => {
     // The repaired reference now resolves valid by identity.
     const reResolved = resolveTopologyReference(value, rebuilt);
     expect(reResolved.ok).toBe(true);
-    if (reResolved.ok)
-      expect(reResolved.value.validity.state).toBe("valid");
+    if (reResolved.ok) expect(reResolved.value.validity.state).toBe("valid");
   });
 
   it("prefers the provenance re-execution identity match when the lineage survives", () => {
@@ -814,13 +915,14 @@ describe("repair", () => {
         ...entity,
         geometry: {
           ...entity.geometry,
-          centroidAbsoluteMm: entity.geometry.centroidAbsoluteMm === undefined
-            ? undefined
-            : ([
-                entity.geometry.centroidAbsoluteMm[0] + 5,
-                entity.geometry.centroidAbsoluteMm[1],
-                entity.geometry.centroidAbsoluteMm[2],
-              ] as const),
+          centroidAbsoluteMm:
+            entity.geometry.centroidAbsoluteMm === undefined
+              ? undefined
+              : ([
+                  entity.geometry.centroidAbsoluteMm[0] + 5,
+                  entity.geometry.centroidAbsoluteMm[1],
+                  entity.geometry.centroidAbsoluteMm[2],
+                ] as const),
         },
       })),
       { regeneration: 2 },
@@ -848,12 +950,28 @@ describe("repair", () => {
       [
         plateEntities()[0] as TopologySnapshot["entities"][number],
         // the two halves of the destroyed top face (fresh ordinals)
-        entityOf({ kind: "face", ordinal: 7, hash: 201, areaMm2: 262.78, centroidAbsoluteMm: [6.6, 10, 10], centroidRelativeMm: [-8.4, 0, 5.09] }),
-        entityOf({ kind: "face", ordinal: 8, hash: 202, areaMm2: 262.78, centroidAbsoluteMm: [23.4, 10, 10], centroidRelativeMm: [8.4, 0, 5.09] }),
-        ...plateEntities().slice(2).map((entity) => ({
-          ...entity,
-          ordinal: entity.ordinal + 7,
-        })),
+        entityOf({
+          kind: "face",
+          ordinal: 7,
+          hash: 201,
+          areaMm2: 262.78,
+          centroidAbsoluteMm: [6.6, 10, 10],
+          centroidRelativeMm: [-8.4, 0, 5.09],
+        }),
+        entityOf({
+          kind: "face",
+          ordinal: 8,
+          hash: 202,
+          areaMm2: 262.78,
+          centroidAbsoluteMm: [23.4, 10, 10],
+          centroidRelativeMm: [8.4, 0, 5.09],
+        }),
+        ...plateEntities()
+          .slice(2)
+          .map((entity) => ({
+            ...entity,
+            ordinal: entity.ordinal + 7,
+          })),
       ],
       { regeneration: 2 },
     );
@@ -866,9 +984,7 @@ describe("repair", () => {
     const repaired = repairTopologyReference(missing, split);
     expect(repaired.ok).toBe(false);
     if (repaired.ok) return;
-    expect(repaired.error.code).toBe(
-      REFERENCE_ERROR_CODES.repairNoCandidate,
-    );
+    expect(repaired.error.code).toBe(REFERENCE_ERROR_CODES.repairNoCandidate);
   });
 
   it("refuses several geometric candidates and never picks one", () => {
@@ -877,15 +993,38 @@ describe("repair", () => {
     // centroids, distinct identity payloads.
     const twins = snapshotOf(
       [
-        entityOf({ kind: "face", ordinal: 0, hash: 11, areaMm2: 100, centroidAbsoluteMm: [1, 1, 1], centroidRelativeMm: [1, 1, 1] }),
-        entityOf({ kind: "face", ordinal: 1, hash: 12, areaMm2: 100, centroidAbsoluteMm: [1, 1, 1], centroidRelativeMm: [1, 1, 1] }),
+        entityOf({
+          kind: "face",
+          ordinal: 0,
+          hash: 11,
+          areaMm2: 100,
+          centroidAbsoluteMm: [1, 1, 1],
+          centroidRelativeMm: [1, 1, 1],
+        }),
+        entityOf({
+          kind: "face",
+          ordinal: 1,
+          hash: 12,
+          areaMm2: 100,
+          centroidAbsoluteMm: [1, 1, 1],
+          centroidRelativeMm: [1, 1, 1],
+        }),
       ],
       { regeneration: 2 },
     );
     const provenance = referenceProvenance(documentWithChain(), bodyId);
     if (!provenance.ok) throw new Error(provenance.error.message);
     const minted = mintTopologyReference(
-      snapshotOf([entityOf({ kind: "face", ordinal: 0, hash: 9, areaMm2: 100, centroidAbsoluteMm: [1, 1, 1], centroidRelativeMm: [1, 1, 1] })]),
+      snapshotOf([
+        entityOf({
+          kind: "face",
+          ordinal: 0,
+          hash: 9,
+          areaMm2: 100,
+          centroidAbsoluteMm: [1, 1, 1],
+          centroidRelativeMm: [1, 1, 1],
+        }),
+      ]),
       0,
       provenance.value,
       { id: refId(), kind: "face" },
@@ -909,7 +1048,10 @@ describe("repair", () => {
       rehashAll(plateEntities(), 4000).map((entity) => ({
         ...entity,
         // topology changed: the bore wall split, every area halved
-        geometry: { ...entity.geometry, areaMm2: (entity.geometry.areaMm2 ?? 0) / 2 },
+        geometry: {
+          ...entity.geometry,
+          areaMm2: (entity.geometry.areaMm2 ?? 0) / 2,
+        },
       })),
       { regeneration: 2 },
     );
@@ -920,20 +1062,19 @@ describe("repair", () => {
     const repaired = repairTopologyReference(missing, changed);
     expect(repaired.ok).toBe(false);
     if (repaired.ok) return;
-    expect(repaired.error.code).toBe(
-      REFERENCE_ERROR_CODES.repairNoCandidate,
-    );
+    expect(repaired.error.code).toBe(REFERENCE_ERROR_CODES.repairNoCandidate);
   });
 
   it("requires the missing precondition", () => {
     const minted = mintedReference(6);
     if (!minted.ok) throw new Error(minted.error.message);
-    const repaired = repairTopologyReference(minted.value, snapshotOf(plateEntities()));
+    const repaired = repairTopologyReference(
+      minted.value,
+      snapshotOf(plateEntities()),
+    );
     expect(repaired.ok).toBe(false);
     if (repaired.ok) return;
-    expect(repaired.error.code).toBe(
-      REFERENCE_ERROR_CODES.repairPrecondition,
-    );
+    expect(repaired.error.code).toBe(REFERENCE_ERROR_CODES.repairPrecondition);
   });
 
   it("refuses an empty geometric descriptor (it would match everything)", () => {
@@ -944,12 +1085,13 @@ describe("repair", () => {
       geometry: {},
       validity: { state: "missing", regeneration: 1 },
     };
-    const repaired = repairTopologyReference(empty, snapshotOf(plateEntities()));
+    const repaired = repairTopologyReference(
+      empty,
+      snapshotOf(plateEntities()),
+    );
     expect(repaired.ok).toBe(false);
     if (repaired.ok) return;
-    expect(repaired.error.code).toBe(
-      REFERENCE_ERROR_CODES.repairPrecondition,
-    );
+    expect(repaired.error.code).toBe(REFERENCE_ERROR_CODES.repairPrecondition);
   });
 });
 
@@ -1041,9 +1183,7 @@ describe("serialization", () => {
 
   it("rejects malformed input structurally", () => {
     expect(parseTopologyReference(null).ok).toBe(false);
-    expect(
-      parseTopologyReference({ kind: "solid" }).ok,
-    ).toBe(false);
+    expect(parseTopologyReference({ kind: "solid" }).ok).toBe(false);
     const minted = mintedReference(6);
     if (!minted.ok) throw new Error(minted.error.message);
     const serialized = serializeTopologyReference(minted.value);

@@ -87,9 +87,9 @@ describe("FEATURE_TIMELINE_STATUSES derivation", () => {
     expect(FEATURE_TIMELINE_STATUSES).toHaveLength(
       FEATURE_REGENERATION_STATES.length + 1,
     );
-    expect(FEATURE_TIMELINE_STATUSES[FEATURE_TIMELINE_STATUSES.length - 1]).toBe(
-      "beyond-rollback",
-    );
+    expect(
+      FEATURE_TIMELINE_STATUSES[FEATURE_TIMELINE_STATUSES.length - 1],
+    ).toBe("beyond-rollback");
   });
 });
 
@@ -356,7 +356,10 @@ describe("documentChangeInvalidations", () => {
     });
     if (!updated.ok) throw new Error(updated.error.message);
     expect(
-      documentChangeInvalidations(before, { ...before, parameters: updated.value }),
+      documentChangeInvalidations(before, {
+        ...before,
+        parameters: updated.value,
+      }),
     ).toEqual([pWidth]);
   });
 
@@ -364,13 +367,16 @@ describe("documentChangeInvalidations", () => {
     const before = buildDocument();
     const updated = updateFeature(before, fSecond, {
       kind: "solid",
-      inputs: [{ kind: "feature", id: fFirst }, { kind: "body", id: bBase }],
+      inputs: [
+        { kind: "feature", id: fFirst },
+        { kind: "body", id: bBase },
+      ],
       outputs: [],
     });
     if (!updated.ok) throw new Error(updated.error.message);
-    expect(documentChangeInvalidations(before, updated.value.document)).toEqual([
-      fSecond,
-    ]);
+    expect(documentChangeInvalidations(before, updated.value.document)).toEqual(
+      [fSecond],
+    );
   });
 
   it("returns no nodes for a pure reorder", () => {
@@ -394,11 +400,14 @@ describe("documentChangeInvalidations", () => {
 
   it("reports added and removed feature ids", () => {
     const before = buildDocument();
-    const withExtra = addFeature(before, feature(createFeatureId("feat_extra")));
+    const withExtra = addFeature(
+      before,
+      feature(createFeatureId("feat_extra")),
+    );
     if (!withExtra.ok) throw new Error(withExtra.error.message);
-    expect(documentChangeInvalidations(before, withExtra.value.document)).toEqual([
-      createFeatureId("feat_extra"),
-    ]);
+    expect(
+      documentChangeInvalidations(before, withExtra.value.document),
+    ).toEqual([createFeatureId("feat_extra")]);
     const trimmed = {
       ...before,
       features: before.features.filter((entry) => entry.id !== fThird),
@@ -439,7 +448,9 @@ describe("parseFeatureRollbackShape", () => {
 
 describe("document error-code stability for reorder", () => {
   it("keeps the reorder codes in the stable tables", () => {
-    expect(DOCUMENT_ERROR_CODES.reorderInvalid).toBe("document/reorder-invalid");
+    expect(DOCUMENT_ERROR_CODES.reorderInvalid).toBe(
+      "document/reorder-invalid",
+    );
     expect(FEATURE_HISTORY_ERROR_CODES.orderInvalid).toBe(
       "feature-history/order-invalid",
     );
@@ -456,7 +467,9 @@ describe("rolled-back state maps serialize in the Phase 6.3 vocabulary", () => {
       rollbackPoint: { afterFeatureId: fFirst } satisfies FeatureRollbackPoint,
     });
     if (!run.ok) throw new Error(run.error.message);
-    for (const entry of serializeRegenerationStates(unwrap(run, "the run").states).features) {
+    for (const entry of serializeRegenerationStates(
+      unwrap(run, "the run").states,
+    ).features) {
       expect(FEATURE_REGENERATION_STATES).toContain(entry.state);
     }
   });

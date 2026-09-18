@@ -240,12 +240,7 @@ export interface ThreeMfImportError extends ParseFailure {
  * may declare, in the spec's spelling.
  */
 export type ThreeMfUnit =
-  | "micron"
-  | "millimeter"
-  | "centimeter"
-  | "inch"
-  | "foot"
-  | "meter";
+  "micron" | "millimeter" | "centimeter" | "inch" | "foot" | "meter";
 
 /**
  * The exact ST_Unit → millimetre conversion factors (micron 10⁻³,
@@ -625,7 +620,9 @@ function parseXmlDocument(text: string): XmlElement {
     const name = readName("end tag");
     skipWhitespace();
     if (cursor >= length || text.charAt(cursor) !== ">") {
-      reject(`end tag </${name}> must close with '>' immediately after the name.`);
+      reject(
+        `end tag </${name}> must close with '>' immediately after the name.`,
+      );
     }
     cursor += 1;
     const top = stack[stack.length - 1];
@@ -645,7 +642,8 @@ function parseXmlDocument(text: string): XmlElement {
       } else if (startsWith("<!--")) {
         skipComment();
       } else if (startsWith("<![CDATA[")) {
-        const top = stack[stack.length - 1] ??
+        const top =
+          stack[stack.length - 1] ??
           reject("CDATA is not allowed outside the root element.");
         readCdata(top);
       } else if (startsWith("<!")) {
@@ -1274,10 +1272,10 @@ function positiveIntegerAttribute(
 
 /** Interprets the parsed model root per the core single-object case. */
 function interpretModel(root: XmlElement): InterpretedModel {
-  const reject: (
-    code: ThreeMfImportErrorCode,
-    message: string,
-  ) => never = (code, message) => {
+  const reject: (code: ThreeMfImportErrorCode, message: string) => never = (
+    code,
+    message,
+  ) => {
     throw new ImportReject(code, message);
   };
   if (root.name !== "model") {
@@ -1644,7 +1642,11 @@ function interpretModel(root: XmlElement): InterpretedModel {
     unit: unitToken,
     positions,
     indices,
-    metadata: { ...(title === undefined ? {} : { title }), ...(designer === undefined ? {} : { designer }), ...(description === undefined ? {} : { description }) },
+    metadata: {
+      ...(title === undefined ? {} : { title }),
+      ...(designer === undefined ? {} : { designer }),
+      ...(description === undefined ? {} : { description }),
+    },
   };
 }
 

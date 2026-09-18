@@ -42,16 +42,9 @@
 import type { ToolContext } from "./tool-context";
 import type { ToolInputEvent } from "./tool-events";
 
-import {
-  type CadDocument,
-  getDocumentParameter,
-} from "./document";
+import { type CadDocument, getDocumentParameter } from "./document";
 import { length } from "./dimensional";
-import {
-  type BodyId,
-  type FeatureId,
-  type ParameterId,
-} from "./ids";
+import { type BodyId, type FeatureId, type ParameterId } from "./ids";
 import { type RenderVector3 } from "./projection";
 import { selectionReferenceBodyId } from "./selection";
 import {
@@ -86,8 +79,11 @@ export function resolveTranslateTarget(
 ): TranslateTarget | undefined {
   for (let index = document.features.length - 1; index >= 0; index -= 1) {
     const feature = document.features[index];
-    if (feature === undefined || feature.kind !== TRANSLATE_FEATURE_KIND) continue;
-    if (!feature.inputs.some((ref) => ref.kind === "body" && ref.id === bodyId)) {
+    if (feature === undefined || feature.kind !== TRANSLATE_FEATURE_KIND)
+      continue;
+    if (
+      !feature.inputs.some((ref) => ref.kind === "body" && ref.id === bodyId)
+    ) {
       continue;
     }
     const parameterIds: ParameterId[] = [];
@@ -109,7 +105,8 @@ export function resolveTranslateTarget(
       else if (y === undefined) y = id;
       else if (z === undefined) z = id;
     }
-    if (!valid || x === undefined || y === undefined || z === undefined) continue;
+    if (!valid || x === undefined || y === undefined || z === undefined)
+      continue;
     return { featureId: feature.id, parameters: [x, y, z] };
   }
   return undefined;
@@ -215,7 +212,10 @@ export const translateTool: CadTool<TranslateToolState> = {
           ),
         };
       }
-      const target = resolveTranslateTarget(context.session.document, state.bodyId);
+      const target = resolveTranslateTarget(
+        context.session.document,
+        state.bodyId,
+      );
       if (target === undefined) {
         return {
           state: AWAITING_ANCHOR,
@@ -228,9 +228,21 @@ export const translateTool: CadTool<TranslateToolState> = {
       }
       const transaction = {
         commands: [
-          { type: "parameter.set", id: target.parameters[0], value: length(vector[0]) },
-          { type: "parameter.set", id: target.parameters[1], value: length(vector[1]) },
-          { type: "parameter.set", id: target.parameters[2], value: length(vector[2]) },
+          {
+            type: "parameter.set",
+            id: target.parameters[0],
+            value: length(vector[0]),
+          },
+          {
+            type: "parameter.set",
+            id: target.parameters[1],
+            value: length(vector[1]),
+          },
+          {
+            type: "parameter.set",
+            id: target.parameters[2],
+            value: length(vector[2]),
+          },
         ],
       } as const;
       const issued = context.issue(transaction);

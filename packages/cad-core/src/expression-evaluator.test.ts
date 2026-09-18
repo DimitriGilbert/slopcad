@@ -124,14 +124,8 @@ describe("evaluateExpression arithmetic", () => {
   });
 
   it("rejects dimensionally invalid operations with the arithmetic codes", () => {
-    expectFailure(
-      "10mm + 45deg",
-      "arithmetic/incompatible-dimensions",
-    );
-    expectFailure(
-      "10mm * 45deg",
-      "arithmetic/incompatible-dimensions",
-    );
+    expectFailure("10mm + 45deg", "arithmetic/incompatible-dimensions");
+    expectFailure("10mm * 45deg", "arithmetic/incompatible-dimensions");
     expectFailure("10mm / 0", "arithmetic/division-by-zero");
     expectFailure("10mm / 0mm", "arithmetic/division-by-zero");
     expectFailure("5 / 0", "arithmetic/division-by-zero");
@@ -155,10 +149,7 @@ describe("evaluateExpression modulo", () => {
       "10mm % 45deg",
       EXPRESSION_EVALUATION_ERROR_CODES.moduloIncompatibleDimensions,
     );
-    expectFailure(
-      "10mm % 0mm",
-      EXPRESSION_EVALUATION_ERROR_CODES.moduloByZero,
-    );
+    expectFailure("10mm % 0mm", EXPRESSION_EVALUATION_ERROR_CODES.moduloByZero);
   });
 });
 

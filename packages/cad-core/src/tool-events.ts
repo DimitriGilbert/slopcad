@@ -147,7 +147,9 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function parsePoint(input: unknown): ParseResult<RenderVector3 | null, ToolEventError> {
+function parsePoint(
+  input: unknown,
+): ParseResult<RenderVector3 | null, ToolEventError> {
   if (input === null) return ok(null);
   if (!Array.isArray(input) || input.length !== 3) {
     return fail(
@@ -173,7 +175,9 @@ function parsePoint(input: unknown): ParseResult<RenderVector3 | null, ToolEvent
   return ok([x, y, z]);
 }
 
-function parseModifiers(input: unknown): ParseResult<ToolModifiers, ToolEventError> {
+function parseModifiers(
+  input: unknown,
+): ParseResult<ToolModifiers, ToolEventError> {
   if (
     !isPlainRecord(input) ||
     typeof input.shift !== "boolean" ||
@@ -215,7 +219,10 @@ function parsePick(
       ),
     );
   }
-  if (typeof input.renderObjectId !== "string" || input.renderObjectId.length === 0) {
+  if (
+    typeof input.renderObjectId !== "string" ||
+    input.renderObjectId.length === 0
+  ) {
     return fail(
       toolEventError(
         TOOL_EVENT_ERROR_CODES.malformed,
@@ -284,7 +291,11 @@ export function parseToolInputEvent(
   }
   const modifiers = parseModifiers(input.modifiers);
   if (!modifiers.ok) return modifiers;
-  if (type === "pointer-down" || type === "pointer-move" || type === "pointer-up") {
+  if (
+    type === "pointer-down" ||
+    type === "pointer-move" ||
+    type === "pointer-up"
+  ) {
     const point = parsePoint(input.point);
     if (!point.ok) return point;
     const pick = parsePick(input.pick);

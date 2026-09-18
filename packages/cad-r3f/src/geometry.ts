@@ -66,7 +66,10 @@ import type {
 export const RENDER_GEOMETRY_FLOAT32_TOLERANCE_MM = 1e-3;
 
 /** An id-keyed snapshot of the geometries currently rendered. */
-export type RenderGeometrySnapshot = ReadonlyMap<RenderObjectId, THREE.BufferGeometry>;
+export type RenderGeometrySnapshot = ReadonlyMap<
+  RenderObjectId,
+  THREE.BufferGeometry
+>;
 
 const EMPTY_SNAPSHOT: RenderGeometrySnapshot = new Map();
 
@@ -89,7 +92,9 @@ const KERNEL_NORMAL_GEOMETRIES = new WeakMap<THREE.BufferGeometry, true>();
  * `parseRenderProjection`): non-empty flat xyz triples, indices in vertex
  * range, normals paired and unit.
  */
-export function buildRenderObjectGeometry(object: RenderObject): THREE.BufferGeometry {
+export function buildRenderObjectGeometry(
+  object: RenderObject,
+): THREE.BufferGeometry {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
     "position",
@@ -99,7 +104,9 @@ export function buildRenderObjectGeometry(object: RenderObject): THREE.BufferGeo
   // computeVertexNormals takes its indexed (crease-averaging) path only when
   // geometry.index is set, and leaves untouched vertices of a partial
   // non-indexed pass as zero vectors — which normalize to NaN.
-  geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(object.indices), 1));
+  geometry.setIndex(
+    new THREE.BufferAttribute(new Uint32Array(object.indices), 1),
+  );
   if (object.normals !== undefined) {
     geometry.setAttribute(
       "normal",

@@ -76,7 +76,10 @@ export interface CadModelTreeProps {
 
 /** Visual presentation of one regeneration state: the status dot and text. */
 const STATUS_PRESENTATION: Readonly<
-  Record<FeatureRegenerationState, { readonly dot: string; readonly text: string }>
+  Record<
+    FeatureRegenerationState,
+    { readonly dot: string; readonly text: string }
+  >
 > = Object.freeze({
   // The healthy state stays quiet; failures are the only loud row.
   valid: Object.freeze({
@@ -99,10 +102,7 @@ const STATUS_PRESENTATION: Readonly<
 
 /** The label tokens of the four regeneration states. */
 type StatusLabelKey =
-  | "statusValid"
-  | "statusStale"
-  | "statusFailed"
-  | "statusSuppressed";
+  "statusValid" | "statusStale" | "statusFailed" | "statusSuppressed";
 
 /** The label token of each regeneration state. */
 const STATUS_LABEL_KEYS: Readonly<
@@ -164,7 +164,11 @@ function featureRowOf(
   };
 }
 
-function bodyRowOf(body: Body, depth: number, parentKey: string | null): CadTreeRow {
+function bodyRowOf(
+  body: Body,
+  depth: number,
+  parentKey: string | null,
+): CadTreeRow {
   return {
     key: selectionReferenceKey({ kind: "body", bodyId: body.id }),
     reference: { kind: "body", bodyId: body.id },
@@ -192,10 +196,16 @@ function deriveCadTreeShape(
     document.bodies.map((body) => [body.id, body]),
   );
   const claimed = new Set<BodyId>();
-  const groups: { readonly row: CadTreeRow; readonly children: readonly CadTreeRow[] }[] = [];
+  const groups: {
+    readonly row: CadTreeRow;
+    readonly children: readonly CadTreeRow[];
+  }[] = [];
   for (const feature of document.features) {
     const children: CadTreeRow[] = [];
-    const parentKey = selectionReferenceKey({ kind: "feature", featureId: feature.id });
+    const parentKey = selectionReferenceKey({
+      kind: "feature",
+      featureId: feature.id,
+    });
     for (const id of feature.outputs) {
       const body = bodiesById.get(id);
       if (body === undefined || claimed.has(id)) continue;
@@ -223,11 +233,18 @@ function deriveCadTreeShape(
  * tabindex navigation moves through. Collapsed groups contribute their
  * row but not their children.
  */
-function visibleCadTreeRows(shape: CadTreeShape, collapsed: ReadonlySet<FeatureId>): readonly CadTreeRow[] {
+function visibleCadTreeRows(
+  shape: CadTreeShape,
+  collapsed: ReadonlySet<FeatureId>,
+): readonly CadTreeRow[] {
   const rows: CadTreeRow[] = [];
   for (const group of shape.groups) {
     rows.push(group.row);
-    if (group.row.childCount > 0 && group.row.groupId !== undefined && !collapsed.has(group.row.groupId)) {
+    if (
+      group.row.childCount > 0 &&
+      group.row.groupId !== undefined &&
+      !collapsed.has(group.row.groupId)
+    ) {
       rows.push(...group.children);
     }
   }
@@ -247,7 +264,8 @@ function selectionTargetsRow(
 ): boolean {
   if (reference.kind === "feature") {
     return selection.some(
-      (entry) => entry.kind === "feature" && entry.featureId === reference.featureId,
+      (entry) =>
+        entry.kind === "feature" && entry.featureId === reference.featureId,
     );
   }
   return selection.some(
@@ -281,7 +299,11 @@ function collapsedWithout(
 }
 
 /** The expansion twisty: a pointer affordance; the keyboard uses the arrows. */
-function ChevronIcon({ expanded }: { readonly expanded: boolean }): ReactElement {
+function ChevronIcon({
+  expanded,
+}: {
+  readonly expanded: boolean;
+}): ReactElement {
   return (
     <svg
       aria-hidden="true"
@@ -325,7 +347,9 @@ function StatusChip({
       title={
         status.diagnostics.length === 0
           ? undefined
-          : status.diagnostics.map((diagnostic) => diagnostic.message).join("\n")
+          : status.diagnostics
+              .map((diagnostic) => diagnostic.message)
+              .join("\n")
       }
     >
       <span
@@ -376,7 +400,10 @@ export function CadModelTree({
   regenerationStates,
   selection: selectionProp,
 }: CadModelTreeProps) {
-  const labels: CadModelTreeLabels = { ...CAD_MODEL_TREE_LABELS, ...labelOverrides };
+  const labels: CadModelTreeLabels = {
+    ...CAD_MODEL_TREE_LABELS,
+    ...labelOverrides,
+  };
   const documentApi = useOptionalCadDocument();
   const selectionApi = useOptionalCadSelection();
 
@@ -409,7 +436,7 @@ export function CadModelTree({
   const focusedKey =
     activeKey !== null && rows.some((row) => row.key === activeKey)
       ? activeKey
-      : rows[0]?.key ?? null;
+      : (rows[0]?.key ?? null);
 
   const focusRow = (target: CadTreeRow | undefined): void => {
     if (target === undefined) return;
@@ -459,7 +486,11 @@ export function CadModelTree({
       case "ArrowRight": {
         event.preventDefault();
         const groupId = row.groupId;
-        if (groupId !== undefined && row.childCount > 0 && collapsed.has(groupId)) {
+        if (
+          groupId !== undefined &&
+          row.childCount > 0 &&
+          collapsed.has(groupId)
+        ) {
           setCollapsed(collapsedWithout(collapsed, groupId));
           break;
         }
@@ -469,7 +500,11 @@ export function CadModelTree({
       case "ArrowLeft": {
         event.preventDefault();
         const groupId = row.groupId;
-        if (groupId !== undefined && row.childCount > 0 && !collapsed.has(groupId)) {
+        if (
+          groupId !== undefined &&
+          row.childCount > 0 &&
+          !collapsed.has(groupId)
+        ) {
           setCollapsed(collapsedWith(collapsed, groupId));
           break;
         }
@@ -491,12 +526,14 @@ export function CadModelTree({
     const groupId = row.groupId;
     const selected = selectionTargetsRow(selection, row.reference);
     const collapsible = groupId !== undefined && row.childCount > 0;
-    const expanded = collapsible && groupId !== undefined && !collapsed.has(groupId);
+    const expanded =
+      collapsible && groupId !== undefined && !collapsed.has(groupId);
     const failure =
       row.status?.state === "failed" && row.status.diagnostics.length > 0
         ? row.status.diagnostics
         : undefined;
-    const failureId = failure === undefined ? undefined : `${domIdForKey(row.key)}-failure`;
+    const failureId =
+      failure === undefined ? undefined : `${domIdForKey(row.key)}-failure`;
     return (
       <div
         aria-describedby={failureId}
@@ -562,7 +599,10 @@ export function CadModelTree({
           ) : null}
         </div>
         {collapsible && expanded ? (
-          <div className="border-border/60 ml-[11px] border-l pl-1" role="group">
+          <div
+            className="border-border/60 ml-[11px] border-l pl-1"
+            role="group"
+          >
             {row.children.map((child) => renderRow(child))}
           </div>
         ) : null}

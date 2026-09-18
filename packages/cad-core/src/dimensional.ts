@@ -134,7 +134,11 @@ export class DimensionalArithmeticValidationError extends Error {
   }
 }
 
-function valueError(code: DimensionalErrorCode, message: string, input: unknown): DimensionalParseError {
+function valueError(
+  code: DimensionalErrorCode,
+  message: string,
+  input: unknown,
+): DimensionalParseError {
   return { code, message, input };
 }
 
@@ -205,11 +209,10 @@ function canonicalMagnitude(value: AnyDimensionalValue): number {
   return value.value * factorToCanonical(value.unit);
 }
 
-function convertedMagnitude(
-  value: AnyDimensionalValue,
-  unit: AnyUnit,
-): number {
-  return (value.value * factorToCanonical(value.unit)) / factorToCanonical(unit);
+function convertedMagnitude(value: AnyDimensionalValue, unit: AnyUnit): number {
+  return (
+    (value.value * factorToCanonical(value.unit)) / factorToCanonical(unit)
+  );
 }
 
 function requireUnitOfDimension(

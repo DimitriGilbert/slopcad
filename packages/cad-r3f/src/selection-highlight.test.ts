@@ -44,8 +44,12 @@ describe("isBodySelected", () => {
     expect(isBodySelected([], PLATE_BODY, undefined)).toBe(false);
     // The feature reference selects the object carrying that provenance.
     const plateWithFeature = makeObject("plate", FOLDED_SHEET_SHARED);
-    expect(isBodySelected(selection, plateWithFeature.bodyId, FEATURE)).toBe(true);
-    expect(isBodySelected(selection, plateWithFeature.bodyId, undefined)).toBe(true);
+    expect(isBodySelected(selection, plateWithFeature.bodyId, FEATURE)).toBe(
+      true,
+    );
+    expect(isBodySelected(selection, plateWithFeature.bodyId, undefined)).toBe(
+      true,
+    );
   });
 
   it("ignores synthetic references and unprovenanced objects", () => {
@@ -67,7 +71,10 @@ describe("selectedFaceIndices", () => {
   });
 
   it("ignores stale synthetic references (other regeneration tags)", () => {
-    const selection: readonly SelectionReference[] = [faceRef(6, 0), faceRef(8, 1)];
+    const selection: readonly SelectionReference[] = [
+      faceRef(6, 0),
+      faceRef(8, 1),
+    ];
     expect(selectedFaceIndices(selection, PLATE_BODY, 7)).toEqual([]);
   });
 
@@ -109,9 +116,15 @@ describe("buildFaceHighlightGeometry", () => {
     for (let corner = 0; corner < overlayIndex.count; corner += 1) {
       const overlayVertex = overlayIndex.getX(corner);
       const baseVertex = baseIndex.getX(3 + corner);
-      expect(overlayPosition.getX(overlayVertex)).toBe(basePosition.getX(baseVertex));
-      expect(overlayPosition.getY(overlayVertex)).toBe(basePosition.getY(baseVertex));
-      expect(overlayPosition.getZ(overlayVertex)).toBe(basePosition.getZ(baseVertex));
+      expect(overlayPosition.getX(overlayVertex)).toBe(
+        basePosition.getX(baseVertex),
+      );
+      expect(overlayPosition.getY(overlayVertex)).toBe(
+        basePosition.getY(baseVertex),
+      );
+      expect(overlayPosition.getZ(overlayVertex)).toBe(
+        basePosition.getZ(baseVertex),
+      );
     }
   });
 
@@ -136,8 +149,8 @@ describe("buildFaceHighlightGeometry", () => {
     expect(() => buildFaceHighlightGeometry(base, PLATE_GROUPING, [])).toThrow(
       RangeError,
     );
-    expect(() =>
-      buildFaceHighlightGeometry(base, PLATE_GROUPING, [2]),
-    ).toThrow(RangeError);
+    expect(() => buildFaceHighlightGeometry(base, PLATE_GROUPING, [2])).toThrow(
+      RangeError,
+    );
   });
 });

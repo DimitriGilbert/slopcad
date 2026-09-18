@@ -46,8 +46,7 @@ import { useCadStore } from "./provider";
 
 /** Structured failure of an expression-aware update. */
 export type ExpressionUpdateError =
-  | ExpressionParseError
-  | ExpressionEvaluationError;
+  ExpressionParseError | ExpressionEvaluationError;
 
 /** The failure union of {@link CadParametersApi.setValueFromExpression}. */
 export type ExpressionSetError = ExpressionUpdateError | TransactionError;

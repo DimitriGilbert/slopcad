@@ -31,24 +31,24 @@ All findings are pinned by tests in
 the pinned `replicad-opencascadejs@1.1.0` (OCCT 8.0) single-thread build,
 one WASM runtime per context (the regeneration setting).
 
-| # | Change class | Face-hash outcome | Geometry outcome |
-| --- | --- | --- | --- |
-| a | Rebuild the same feature graph (fresh builds, same process) | **0 of 7 hashes survive** — a completely disjoint set | Area and centroid sequences **bitwise equal**, same exploration order |
-| a' | Primitive rebuild, one dimension changed (30 → 31 mm) | 0 of 6 survive | Unchanged faces keep their areas exactly |
-| b | Harmless translate of the whole body (+5 mm in x) | 0 of 7 survive (location participates in the hash) | Areas bitwise equal; every centroid shifted by **exactly** the translation vector |
-| c | Topology-preserving boolean re-run | 0 of 7 survive | Areas bitwise equal |
-| d | Topology-CHANGING boolean (a wall subtract splitting the top face), same process | **3 of 7 survive** — exactly the untouched faces keep their TShape identity; the 4 touched faces' hashes vanish; 11 fresh faces get fresh hashes | Untouched faces' measures unchanged |
-| e | BREP/STEP round trip (serialization) | 0 of 7 survive | Areas preserved to ~3e-16 relative; **exploration order NOT preserved** |
-| e' | Cross-process import (the committed `plate-with-hole.brep` fixture, written by another process) | 0 of 7 survive | Areas equal within 1e-12; order not stable |
-| f | Symmetric split (two equal-area top halves) | Distinct hashes | Equal areas, mirrored centroids — geometric twins |
-| g | One TShape carried twice in a compound | The **same hash appears twice** | Identical measures — a true identity collision |
-| j | Edge exploration of one solid | Every edge hash appears **exactly twice** (30 occurrences, 15 distinct) — once per adjacent face, orientation ignored | — |
+| #   | Change class                                                                                    | Face-hash outcome                                                                                                                                | Geometry outcome                                                                  |
+| --- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| a   | Rebuild the same feature graph (fresh builds, same process)                                     | **0 of 7 hashes survive** — a completely disjoint set                                                                                            | Area and centroid sequences **bitwise equal**, same exploration order             |
+| a'  | Primitive rebuild, one dimension changed (30 → 31 mm)                                           | 0 of 6 survive                                                                                                                                   | Unchanged faces keep their areas exactly                                          |
+| b   | Harmless translate of the whole body (+5 mm in x)                                               | 0 of 7 survive (location participates in the hash)                                                                                               | Areas bitwise equal; every centroid shifted by **exactly** the translation vector |
+| c   | Topology-preserving boolean re-run                                                              | 0 of 7 survive                                                                                                                                   | Areas bitwise equal                                                               |
+| d   | Topology-CHANGING boolean (a wall subtract splitting the top face), same process                | **3 of 7 survive** — exactly the untouched faces keep their TShape identity; the 4 touched faces' hashes vanish; 11 fresh faces get fresh hashes | Untouched faces' measures unchanged                                               |
+| e   | BREP/STEP round trip (serialization)                                                            | 0 of 7 survive                                                                                                                                   | Areas preserved to ~3e-16 relative; **exploration order NOT preserved**           |
+| e'  | Cross-process import (the committed `plate-with-hole.brep` fixture, written by another process) | 0 of 7 survive                                                                                                                                   | Areas equal within 1e-12; order not stable                                        |
+| f   | Symmetric split (two equal-area top halves)                                                     | Distinct hashes                                                                                                                                  | Equal areas, mirrored centroids — geometric twins                                 |
+| g   | One TShape carried twice in a compound                                                          | The **same hash appears twice**                                                                                                                  | Identical measures — a true identity collision                                    |
+| j   | Edge exploration of one solid                                                                   | Every edge hash appears **exactly twice** (30 occurrences, 15 distinct) — once per adjacent face, orientation ignored                            | —                                                                                 |
 
 The decisive facts:
 
 1. **`HashCode` is allocation-address-derived.** Every rebuild — identical
    graph, identical process, identical op sequence — produces a disjoint
-   hash set (a). Kernel identity is a *within-regeneration* identity. It
+   hash set (a). Kernel identity is a _within-regeneration_ identity. It
    survives only along a live kernel lineage: the untouched faces of an
    incremental boolean keep it (d), which dies at the next rebuild anyway
    (a) and never survives serialization (e, e').
@@ -195,7 +195,7 @@ pinned by tests in both packages.
 
 ## Consequences
 
-- Reference validity after a rebuild is *expected* to be `missing` →
+- Reference validity after a rebuild is _expected_ to be `missing` →
   `repaired` for surviving entities: repair is the normal path, explicit
   and recorded, not an error state.
 - The identity payload's schema (`occt-shape-hash-v1`) is versioned per

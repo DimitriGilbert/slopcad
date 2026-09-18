@@ -12,7 +12,12 @@ import { EXPRESSION_AST_ERROR_CODES } from "./expression";
 import { EXPRESSION_EVALUATION_ERROR_CODES } from "./expression-evaluator";
 import { EXPRESSION_PARSE_ERROR_CODES } from "./expression-parser";
 import { FEATURE_GRAPH_ERROR_CODES } from "./feature-graph";
-import { type AnyCadId, ID_ERROR_CODES, ID_GENERATOR_ERROR_CODES, parseAnyCadId } from "./ids";
+import {
+  type AnyCadId,
+  ID_ERROR_CODES,
+  ID_GENERATOR_ERROR_CODES,
+  parseAnyCadId,
+} from "./ids";
 import { PARAMETER_ERROR_CODES } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { UNIT_ERROR_CODES } from "./units";
@@ -33,7 +38,12 @@ const KERNEL_EXECUTION_ERROR_CODES = {
 } as const;
 
 /** Severity levels in increasing order of seriousness. */
-export const DIAGNOSTIC_SEVERITIES = ["info", "warning", "error", "fatal"] as const;
+export const DIAGNOSTIC_SEVERITIES = [
+  "info",
+  "warning",
+  "error",
+  "fatal",
+] as const;
 
 export type DiagnosticSeverity = (typeof DIAGNOSTIC_SEVERITIES)[number];
 
@@ -47,8 +57,9 @@ export function isDiagnosticSeverity(
 }
 
 /** Numeric rank of each severity; higher means more serious. */
-export const DIAGNOSTIC_SEVERITY_ORDER: Readonly<Record<DiagnosticSeverity, number>> =
-  Object.freeze({ info: 0, warning: 1, error: 2, fatal: 3 });
+export const DIAGNOSTIC_SEVERITY_ORDER: Readonly<
+  Record<DiagnosticSeverity, number>
+> = Object.freeze({ info: 0, warning: 1, error: 2, fatal: 3 });
 
 /** Compares two severities; negative when `a` is less serious than `b`. */
 export function compareSeverities(
@@ -109,8 +120,7 @@ export const DIAGNOSTIC_CODES = {
     EXPRESSION_EVALUATION_ERROR_CODES.invalidSqrtDimension,
   expressionMinMaxIncompatibleDimensions:
     EXPRESSION_EVALUATION_ERROR_CODES.minMaxIncompatibleDimensions,
-  expressionNonFiniteResult:
-    EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+  expressionNonFiniteResult: EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
   expressionMalformedCall: EXPRESSION_EVALUATION_ERROR_CODES.malformedCall,
   parameterMalformed: PARAMETER_ERROR_CODES.malformed,
   parameterIdInvalid: PARAMETER_ERROR_CODES.idInvalid,
@@ -143,7 +153,8 @@ export const DIAGNOSTIC_CODES = {
   kernelOperationFailed: KERNEL_EXECUTION_ERROR_CODES.operationFailed,
 } as const;
 
-export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES];
+export type DiagnosticCode =
+  (typeof DIAGNOSTIC_CODES)[keyof typeof DIAGNOSTIC_CODES];
 
 const CODE_SET: ReadonlySet<string> = new Set(Object.values(DIAGNOSTIC_CODES));
 
@@ -197,9 +208,7 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 function isDataValue(input: unknown): input is DiagnosticDataValue {
   if (typeof input === "number") return Number.isFinite(input);
   return (
-    typeof input === "string" ||
-    typeof input === "boolean" ||
-    input === null
+    typeof input === "string" || typeof input === "boolean" || input === null
   );
 }
 
@@ -226,7 +235,10 @@ function parseLocation(
   }
   if (!Array.isArray(related)) {
     return fail(
-      malformed("Diagnostic location.related must be an array of CAD ids.", input),
+      malformed(
+        "Diagnostic location.related must be an array of CAD ids.",
+        input,
+      ),
     );
   }
   const relatedIds: AnyCadId[] = [];
@@ -247,7 +259,10 @@ function parseLocation(
 
 function parseDataField(
   data: unknown,
-): ParseResult<Readonly<Record<string, DiagnosticDataValue>>, DiagnosticParseError> {
+): ParseResult<
+  Readonly<Record<string, DiagnosticDataValue>>,
+  DiagnosticParseError
+> {
   if (!isPlainRecord(data)) {
     return fail(
       malformed(

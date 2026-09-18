@@ -81,15 +81,16 @@ function firePointer(
   clientX: number,
   clientY: number,
 ): void {
-  svg.getBoundingClientRect = () =>
-    new DOMRect(0, 0, 600, 400);
+  svg.getBoundingClientRect = () => new DOMRect(0, 0, 600, 400);
   fireEvent(svg, new MouseEvent(type, { bubbles: true, clientX, clientY }));
 }
 
 describe("CadSketchCanvas", () => {
   it("renders every entity with its machine attributes and construction styling", () => {
     const { view } = renderCanvas();
-    const line = view.container.querySelector('[data-sketch-entity-id="skent_a"]');
+    const line = view.container.querySelector(
+      '[data-sketch-entity-id="skent_a"]',
+    );
     expect(line?.getAttribute("data-sketch-construction")).toBeNull();
     expect(line?.getAttribute("data-sketch-selected")).toBeNull();
     expect(line?.getAttribute("data-sketch-diagnostic")).toBe("none");
@@ -110,7 +111,9 @@ describe("CadSketchCanvas", () => {
 
   it("maps screen y down: the origin renders at (origin.x, origin.y)", () => {
     const { view } = renderCanvas();
-    const line = view.container.querySelector('[data-sketch-entity-id="skent_a"]');
+    const line = view.container.querySelector(
+      '[data-sketch-entity-id="skent_a"]',
+    );
     // Workplane (0,0) → screen (100, 200); (50,0) → (300, 200).
     expect(line?.getAttribute("x1")).toBe("100");
     expect(line?.getAttribute("y1")).toBe("200");
@@ -183,7 +186,14 @@ describe("CadSketchCanvas", () => {
   it("renders picks, preview, regions, and annotations as machine-addressable nodes", () => {
     const { view } = renderCanvas({
       annotations: [
-        { id: "dim1", kind: "dimension", level: "info", text: "60 mm", x: 25, y: -5 },
+        {
+          id: "dim1",
+          kind: "dimension",
+          level: "info",
+          text: "60 mm",
+          x: 25,
+          y: -5,
+        },
       ],
       picks: [{ x: 10, y: 10 }],
       preview: { from: { x: 0, y: 0 }, kind: "line", to: { x: 30, y: 20 } },

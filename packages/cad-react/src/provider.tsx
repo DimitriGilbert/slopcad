@@ -16,7 +16,12 @@
  * and throws the structured {@link CadProviderError}.
  */
 
-import { createContext, useContext, type ReactElement, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 
 import { type CadStore } from "./store";
 
@@ -66,6 +71,8 @@ export function CadProvider({
   store,
 }: CadProviderProps): ReactElement {
   return (
-    <CadStoreContext.Provider value={store}>{children}</CadStoreContext.Provider>
+    <CadStoreContext.Provider value={store}>
+      {children}
+    </CadStoreContext.Provider>
   );
 }

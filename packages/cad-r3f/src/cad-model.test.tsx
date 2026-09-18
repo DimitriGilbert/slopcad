@@ -16,7 +16,11 @@ import type { RenderObjectId, RenderProjection } from "@slopcad/cad-core";
 import type { RenderGeometrySnapshot } from "./geometry";
 
 import { CadModel } from "./cad-model";
-import { FOLDED_SHEET_SHARED, makeObject, makeProjection } from "./render-fixtures";
+import {
+  FOLDED_SHEET_SHARED,
+  makeObject,
+  makeProjection,
+} from "./render-fixtures";
 
 const PLATE = makeObject("plate", FOLDED_SHEET_SHARED);
 const BLOCK = makeObject("block", FOLDED_SHEET_SHARED);
@@ -38,20 +42,29 @@ function renderModel(projection: RenderProjection): {
 } {
   const snapshots: RenderGeometrySnapshot[] = [];
   const view = render(
-    <CadModel projection={projection} onSync={(snapshot) => snapshots.push(snapshot)} />,
+    <CadModel
+      projection={projection}
+      onSync={(snapshot) => snapshots.push(snapshot)}
+    />,
   );
   return {
     container: view.container,
     snapshots,
     rerender: (next) =>
       view.rerender(
-        <CadModel projection={next} onSync={(snapshot) => snapshots.push(snapshot)} />,
+        <CadModel
+          projection={next}
+          onSync={(snapshot) => snapshots.push(snapshot)}
+        />,
       ),
     unmount: view.unmount,
   };
 }
 
-function geometryOf(snapshot: RenderGeometrySnapshot, id: RenderObjectId): THREE.BufferGeometry {
+function geometryOf(
+  snapshot: RenderGeometrySnapshot,
+  id: RenderObjectId,
+): THREE.BufferGeometry {
   const geometry = snapshot.get(id);
   if (geometry === undefined) {
     throw new Error(`Expected geometry for ${id}.`);
@@ -85,7 +98,8 @@ describe("CadModel", () => {
   });
 
   it("replaces by stable id across projection updates and disposes removed geometry", () => {
-    const { container, snapshots, rerender, unmount } = renderModel(BOTH_PROJECTION);
+    const { container, snapshots, rerender, unmount } =
+      renderModel(BOTH_PROJECTION);
     expect(snapshots.length).toBe(1);
     const first = snapshots[0];
     if (first === undefined) {
@@ -189,7 +203,9 @@ describe("CadModel selection highlight", () => {
         selection={[{ kind: "body", bodyId: createBodyId("body_plate") }]}
       />,
     );
-    const materials = [...view.container.querySelectorAll("meshstandardmaterial")];
+    const materials = [
+      ...view.container.querySelectorAll("meshstandardmaterial"),
+    ];
     expect(materials.length).toBe(2);
     const highlighted = materials.filter(
       (material) => material.getAttribute("color") === "#f59e0b",
@@ -198,9 +214,7 @@ describe("CadModel selection highlight", () => {
     expect(highlighted[0]?.getAttribute("emissive")).toBe("#f59e0b");
     expect(highlighted[0]?.getAttribute("emissiveintensity")).toBe("0.35");
     // The unselected block keeps the documented defaults.
-    const untouched = materials.find(
-      (material) => material !== highlighted[0],
-    );
+    const untouched = materials.find((material) => material !== highlighted[0]);
     expect(untouched?.getAttribute("color")).toBe("#8aadf4");
     expect(untouched?.getAttribute("emissive")).toBeNull();
   });

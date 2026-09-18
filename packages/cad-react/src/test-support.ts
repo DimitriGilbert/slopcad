@@ -28,9 +28,8 @@ import { createCadStore, type CadStore, type CadStoreOptions } from "./store";
 export const TEST_BODY_ID: BodyId = createBodyId("body_plate");
 
 /** The test document's width parameter id. */
-export const TEST_WIDTH_PARAMETER: ParameterId = createParameterId(
-  "param_width",
-);
+export const TEST_WIDTH_PARAMETER: ParameterId =
+  createParameterId("param_width");
 
 interface DocumentResult {
   readonly ok: boolean;
@@ -78,7 +77,9 @@ export function createTestStore(
       registerTool(selectTool),
       registerTool(measureTool),
     ],
-    ...(overrides.projection !== undefined ? { projection: overrides.projection } : {}),
+    ...(overrides.projection !== undefined
+      ? { projection: overrides.projection }
+      : {}),
     ...(overrides.onTransaction !== undefined
       ? { onTransaction: overrides.onTransaction }
       : {}),

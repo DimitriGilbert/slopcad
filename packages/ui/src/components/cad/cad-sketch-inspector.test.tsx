@@ -5,7 +5,13 @@
  * host), and the documented inert and hint behaviors.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -36,7 +42,8 @@ const CONSTRAINTS: CadSketchInspectorProps["constraints"] = [
     id: "skconf_bad",
     kind: "distance",
     label: "distance 100 mm",
-    message: "sketch/constraints-conflicting: drop skconf_bad to make the system solvable.",
+    message:
+      "sketch/constraints-conflicting: drop skconf_bad to make the system solvable.",
     status: "error",
   },
 ];
@@ -69,7 +76,9 @@ function constraintRow(id: string): HTMLElement {
 describe("CadSketchInspector", () => {
   it("shows the solver readout: status chip and degrees of freedom", () => {
     const { view } = renderInspector();
-    const root = view.container.querySelector('[data-slot="cad-sketch-inspector"]');
+    const root = view.container.querySelector(
+      '[data-slot="cad-sketch-inspector"]',
+    );
     expect(
       root?.querySelector('[data-testid="sketch-solve-status"]')?.textContent,
     ).toBe("Under-constrained");
@@ -81,19 +90,26 @@ describe("CadSketchInspector", () => {
 
   it("lists constraints with per-status styling and toggles selection", () => {
     const { onSelectConstraint } = renderInspector();
-    expect(constraintRow("skcon_width").getAttribute("data-sketch-constraint-status")).toBe(
-      "ok",
-    );
-    expect(constraintRow("skconf_bad").getAttribute("data-sketch-constraint-status")).toBe(
-      "error",
-    );
+    expect(
+      constraintRow("skcon_width").getAttribute(
+        "data-sketch-constraint-status",
+      ),
+    ).toBe("ok");
+    expect(
+      constraintRow("skconf_bad").getAttribute("data-sketch-constraint-status"),
+    ).toBe("error");
     fireEvent.click(constraintRow("skcon_width"));
     expect(onSelectConstraint).toHaveBeenLastCalledWith("skcon_width");
   });
 
   it("edits the selected dimensional constraint through the Formedible form", async () => {
     const { onEditDimension } = renderInspector({
-      dimension: { constraintId: "skcon_width", decimals: 3, unit: "mm", value: 60 },
+      dimension: {
+        constraintId: "skcon_width",
+        decimals: 3,
+        unit: "mm",
+        value: 60,
+      },
       selectedConstraintId: "skcon_width",
     });
     const input = screen.getByRole("spinbutton");
@@ -106,9 +122,14 @@ describe("CadSketchInspector", () => {
 
   it("surfaces the apply surface's structured refusal verbatim", async () => {
     renderInspector({
-      dimension: { constraintId: "skcon_width", decimals: 3, unit: "mm", value: 60 },
+      dimension: {
+        constraintId: "skcon_width",
+        decimals: 3,
+        unit: "mm",
+        value: 60,
+      },
       selectedConstraintId: "skcon_width",
-      ...( {
+      ...({
         onEditDimension: () => ({
           error: {
             code: "sketch/constraints-conflicting",
@@ -123,7 +144,8 @@ describe("CadSketchInspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     await waitFor(() => {
       expect(
-        document.querySelector('[data-testid="sketch-dimension-error"]')?.textContent,
+        document.querySelector('[data-testid="sketch-dimension-error"]')
+          ?.textContent,
       ).toContain("sketch/constraints-conflicting");
     });
   });
@@ -131,7 +153,9 @@ describe("CadSketchInspector", () => {
   it("shows the hint when no dimensional constraint is selected", () => {
     renderInspector();
     expect(screen.queryByRole("spinbutton")).toBeNull();
-    expect(screen.getByText(CAD_SKETCH_INSPECTOR_LABELS.dimensionHint)).toBeDefined();
+    expect(
+      screen.getByText(CAD_SKETCH_INSPECTOR_LABELS.dimensionHint),
+    ).toBeDefined();
   });
 
   it("renders the diagnostics feed with severities", () => {
@@ -144,8 +168,12 @@ describe("CadSketchInspector", () => {
         },
       ],
     });
-    const item = view.container.querySelector('[data-sketch-diagnostic-code="sketch/under-constrained"]');
-    expect(item?.getAttribute("data-sketch-diagnostic-severity")).toBe("warning");
+    const item = view.container.querySelector(
+      '[data-sketch-diagnostic-code="sketch/under-constrained"]',
+    );
+    expect(item?.getAttribute("data-sketch-diagnostic-severity")).toBe(
+      "warning",
+    );
     expect(item?.textContent).toContain("7 degrees of freedom");
   });
 });

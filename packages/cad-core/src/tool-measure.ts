@@ -53,7 +53,11 @@ export const measureTool: CadTool<MeasureToolState> = {
     event: ToolInputEvent,
     // No context: measure is a pure pick-pair computation over event data.
   ): ToolTransition<MeasureToolState> {
-    if (event.type !== "pointer-up" || event.pick === null || event.point === null) {
+    if (
+      event.type !== "pointer-up" ||
+      event.pick === null ||
+      event.point === null
+    ) {
       return { state, phase: "active" };
     }
     if (state.stage === "awaiting-first") {

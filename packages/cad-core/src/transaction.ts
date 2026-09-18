@@ -74,9 +74,7 @@ function transactionError(
  * (rather than a bare `Array.isArray`) keeps the element type narrowed to
  * {@link CadCommand} instead of degrading it through `any[]`.
  */
-function isCommandList(
-  commands: unknown,
-): commands is readonly CadCommand[] {
+function isCommandList(commands: unknown): commands is readonly CadCommand[] {
   return Array.isArray(commands);
 }
 

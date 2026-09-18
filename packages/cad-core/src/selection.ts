@@ -151,14 +151,11 @@ export interface VertexSelectionReference {
 
 /** A synthetic (transient) reference union: valid for one regeneration only. */
 export type SyntheticSelectionReference =
-  | FaceSelectionReference
-  | EdgeSelectionReference
-  | VertexSelectionReference;
+  FaceSelectionReference | EdgeSelectionReference | VertexSelectionReference;
 
 /** Any selection reference: the payload of a pick and a selection entry. */
 export type SelectionReference =
-  | StableSelectionReference
-  | SyntheticSelectionReference;
+  StableSelectionReference | SyntheticSelectionReference;
 
 /** The body id a reference addresses, for references that carry one. */
 export function selectionReferenceBodyId(
@@ -405,9 +402,17 @@ export function parseSelectionReference(
     return invalid();
   }
   if (kind === "feature") {
-    const featureId = parseReferenceId(input, "featureId", "feature", parseFeatureId);
+    const featureId = parseReferenceId(
+      input,
+      "featureId",
+      "feature",
+      parseFeatureId,
+    );
     if (!featureId.ok) return featureId;
-    const reference: { readonly kind: "feature"; readonly featureId: FeatureId } = {
+    const reference: {
+      readonly kind: "feature";
+      readonly featureId: FeatureId;
+    } = {
       kind,
       featureId: featureId.value,
     };
@@ -430,7 +435,11 @@ export function parseSelectionReference(
     return ok(reference);
   }
   const indexField =
-    kind === "face" ? "faceIndex" : kind === "edge" ? "edgeIndex" : "vertexIndex";
+    kind === "face"
+      ? "faceIndex"
+      : kind === "edge"
+        ? "edgeIndex"
+        : "vertexIndex";
   const regeneration = input.regeneration;
   if (!isNonNegativeInteger(regeneration)) {
     return fail(
@@ -565,9 +574,7 @@ export function pickSelection(
   const selected = existing
     ? state.selected.filter((entry) => selectionReferenceKey(entry) !== key)
     : [...state.selected, reference];
-  return ok(
-    Object.freeze({ ...state, selected: Object.freeze(selected) }),
-  );
+  return ok(Object.freeze({ ...state, selected: Object.freeze(selected) }));
 }
 
 /**
@@ -590,7 +597,10 @@ export function beginRegeneration(
   state: SelectionState,
   regeneration: number,
 ): ParseResult<SelectionState, SelectionError> {
-  if (!isNonNegativeInteger(regeneration) || regeneration <= state.regeneration) {
+  if (
+    !isNonNegativeInteger(regeneration) ||
+    regeneration <= state.regeneration
+  ) {
     return fail(
       selectionError(
         SELECTION_ERROR_CODES.regenerationInvalid,
@@ -663,7 +673,9 @@ export function parseSelectionState(
   input: unknown,
   options: ParseSelectionStateOptions = {},
 ): ParseResult<SelectionState, SelectionError> {
-  const invalidState = (detail: unknown): ParseResult<SelectionState, SelectionError> =>
+  const invalidState = (
+    detail: unknown,
+  ): ParseResult<SelectionState, SelectionError> =>
     fail(
       selectionError(
         SELECTION_ERROR_CODES.notAReference,
@@ -722,7 +734,10 @@ export function parseSelectionState(
     const parsed = parseSelectionReference(input.hover);
     if (!parsed.ok) return parsed;
     if (expected !== undefined) {
-      const current = checkCurrent(createSelectionState(expected), parsed.value);
+      const current = checkCurrent(
+        createSelectionState(expected),
+        parsed.value,
+      );
       if (!current.ok) return current;
     }
     hover = parsed.value;

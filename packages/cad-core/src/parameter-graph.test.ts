@@ -26,7 +26,9 @@ function parse(source: string) {
   return parsed.value;
 }
 
-function collectionWith(...parameters: readonly Parameter[]): ParameterCollection {
+function collectionWith(
+  ...parameters: readonly Parameter[]
+): ParameterCollection {
   let collection: ParameterCollection = EMPTY_PARAMETER_COLLECTION;
   for (const parameter of parameters) {
     const added = addParameter(collection, parameter);
@@ -36,7 +38,10 @@ function collectionWith(...parameters: readonly Parameter[]): ParameterCollectio
   return collection;
 }
 
-const literal = (id: ReturnType<typeof createParameterId>, name: string): Parameter => ({
+const literal = (
+  id: ReturnType<typeof createParameterId>,
+  name: string,
+): Parameter => ({
   id,
   name,
   value: length(10),
@@ -90,9 +95,27 @@ describe("parameterDependencyEdges", () => {
   it("covers every parameter including a diamond graph", () => {
     const collection = collectionWith(
       literal(widthId, "width"),
-      { id: leftId, name: "left", value: length(1), expression: parse("width + 1mm"), metadata: {} },
-      { id: rightId, name: "right", value: length(1), expression: parse("width - 1mm"), metadata: {} },
-      { id: rootId, name: "root", value: length(2), expression: parse("left + right"), metadata: {} },
+      {
+        id: leftId,
+        name: "left",
+        value: length(1),
+        expression: parse("width + 1mm"),
+        metadata: {},
+      },
+      {
+        id: rightId,
+        name: "right",
+        value: length(1),
+        expression: parse("width - 1mm"),
+        metadata: {},
+      },
+      {
+        id: rootId,
+        name: "root",
+        value: length(2),
+        expression: parse("left + right"),
+        metadata: {},
+      },
     );
     const edges = parameterDependencyEdges(collection);
     expect(edges.size).toBe(4);
@@ -106,8 +129,20 @@ describe("findParameterCycle", () => {
   it("returns null for acyclic collections", () => {
     const acyclic = collectionWith(
       literal(widthId, "width"),
-      { id: heightId, name: "height", value: length(20), expression: parse("width * 2"), metadata: {} },
-      { id: areaId, name: "area", value: length(200), expression: parse("height * width"), metadata: {} },
+      {
+        id: heightId,
+        name: "height",
+        value: length(20),
+        expression: parse("width * 2"),
+        metadata: {},
+      },
+      {
+        id: areaId,
+        name: "area",
+        value: length(200),
+        expression: parse("height * width"),
+        metadata: {},
+      },
     );
     expect(findParameterCycle(acyclic)).toBeNull();
     expect(findParameterCycle(EMPTY_PARAMETER_COLLECTION)).toBeNull();
@@ -126,25 +161,84 @@ describe("findParameterCycle", () => {
 
   it("detects two-parameter and three-parameter cycles", () => {
     const two = collectionWith(
-      { id: widthId, name: "width", value: length(10), expression: parse("height + 1mm"), metadata: {} },
-      { id: heightId, name: "height", value: length(20), expression: parse("width * 2"), metadata: {} },
+      {
+        id: widthId,
+        name: "width",
+        value: length(10),
+        expression: parse("height + 1mm"),
+        metadata: {},
+      },
+      {
+        id: heightId,
+        name: "height",
+        value: length(20),
+        expression: parse("width * 2"),
+        metadata: {},
+      },
     );
     expect(findParameterCycle(two)).toEqual([widthId, heightId, widthId]);
 
     const three = collectionWith(
-      { id: widthId, name: "width", value: length(10), expression: parse("depth + 1mm"), metadata: {} },
-      { id: heightId, name: "height", value: length(20), expression: parse("width * 2"), metadata: {} },
-      { id: depthId, name: "depth", value: length(5), expression: parse("height - 1mm"), metadata: {} },
+      {
+        id: widthId,
+        name: "width",
+        value: length(10),
+        expression: parse("depth + 1mm"),
+        metadata: {},
+      },
+      {
+        id: heightId,
+        name: "height",
+        value: length(20),
+        expression: parse("width * 2"),
+        metadata: {},
+      },
+      {
+        id: depthId,
+        name: "depth",
+        value: length(5),
+        expression: parse("height - 1mm"),
+        metadata: {},
+      },
     );
-    expect(findParameterCycle(three)).toEqual([widthId, depthId, heightId, widthId]);
+    expect(findParameterCycle(three)).toEqual([
+      widthId,
+      depthId,
+      heightId,
+      widthId,
+    ]);
   });
 
   it("returns the first cycle in collection order", () => {
     const both = collectionWith(
-      { id: widthId, name: "width", value: length(10), expression: parse("height + 1mm"), metadata: {} },
-      { id: heightId, name: "height", value: length(20), expression: parse("width * 2"), metadata: {} },
-      { id: leftId, name: "left", value: length(1), expression: parse("right"), metadata: {} },
-      { id: rightId, name: "right", value: length(1), expression: parse("left"), metadata: {} },
+      {
+        id: widthId,
+        name: "width",
+        value: length(10),
+        expression: parse("height + 1mm"),
+        metadata: {},
+      },
+      {
+        id: heightId,
+        name: "height",
+        value: length(20),
+        expression: parse("width * 2"),
+        metadata: {},
+      },
+      {
+        id: leftId,
+        name: "left",
+        value: length(1),
+        expression: parse("right"),
+        metadata: {},
+      },
+      {
+        id: rightId,
+        name: "right",
+        value: length(1),
+        expression: parse("left"),
+        metadata: {},
+      },
     );
     expect(findParameterCycle(both)).toEqual([widthId, heightId, widthId]);
   });
@@ -152,9 +246,27 @@ describe("findParameterCycle", () => {
   it("does not treat shared dependencies as cycles", () => {
     const diamond = collectionWith(
       literal(widthId, "width"),
-      { id: leftId, name: "left", value: length(1), expression: parse("width + 1mm"), metadata: {} },
-      { id: rightId, name: "right", value: length(1), expression: parse("width - 1mm"), metadata: {} },
-      { id: rootId, name: "root", value: length(2), expression: parse("left + right"), metadata: {} },
+      {
+        id: leftId,
+        name: "left",
+        value: length(1),
+        expression: parse("width + 1mm"),
+        metadata: {},
+      },
+      {
+        id: rightId,
+        name: "right",
+        value: length(1),
+        expression: parse("width - 1mm"),
+        metadata: {},
+      },
+      {
+        id: rootId,
+        name: "root",
+        value: length(2),
+        expression: parse("left + right"),
+        metadata: {},
+      },
     );
     expect(findParameterCycle(diamond)).toBeNull();
   });

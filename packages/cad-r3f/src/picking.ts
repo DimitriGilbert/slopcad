@@ -49,14 +49,19 @@ export const PICK_ERROR_CODES = {
   triangleOutOfRange: "pick/triangle-out-of-range",
 } as const;
 
-export type PickErrorCode = (typeof PICK_ERROR_CODES)[keyof typeof PICK_ERROR_CODES];
+export type PickErrorCode =
+  (typeof PICK_ERROR_CODES)[keyof typeof PICK_ERROR_CODES];
 
 /** Structured failure describing why a renderer hit was not resolvable. */
 export interface PickError extends ParseFailure {
   readonly code: PickErrorCode;
 }
 
-function pickError(code: PickErrorCode, message: string, input: unknown): PickError {
+function pickError(
+  code: PickErrorCode,
+  message: string,
+  input: unknown,
+): PickError {
   return { code, message, input };
 }
 
@@ -95,7 +100,8 @@ export interface ResolvePickInput {
 export function resolvePickReference(
   input: ResolvePickInput,
 ): ParseResult<SelectionReference, PickError> {
-  const bodyId: BodyId = input.object.bodyId ?? renderObjectIdBodyId(input.object.id);
+  const bodyId: BodyId =
+    input.object.bodyId ?? renderObjectIdBodyId(input.object.id);
   if (input.category === "body") {
     return ok({ kind: "body", bodyId });
   }
@@ -114,14 +120,23 @@ export function resolvePickReference(
     }
     throw error;
   }
-  return ok({ kind: "face", bodyId, regeneration: input.regeneration, faceIndex });
+  return ok({
+    kind: "face",
+    bodyId,
+    regeneration: input.regeneration,
+    faceIndex,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Spec → screen projection (the fixture's deterministic test hook)
 // ---------------------------------------------------------------------------
 
-function normalize(x: number, y: number, z: number): readonly [number, number, number] {
+function normalize(
+  x: number,
+  y: number,
+  z: number,
+): readonly [number, number, number] {
   const length = Math.hypot(x, y, z);
   if (length === 0) {
     throw new RangeError("Cannot normalize a zero-length direction.");

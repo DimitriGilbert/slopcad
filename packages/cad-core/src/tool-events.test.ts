@@ -17,7 +17,10 @@ import {
 
 const BODY = createBodyId("body_plate");
 
-function faceRef(regeneration: number, faceIndex: number): {
+function faceRef(
+  regeneration: number,
+  faceIndex: number,
+): {
   readonly kind: "face";
   readonly bodyId: typeof BODY;
   readonly regeneration: number;
@@ -97,7 +100,10 @@ describe("tool events", () => {
   });
 
   it("rejects unknown event types", () => {
-    const parsed = parseToolInputEvent({ type: "scroll", modifiers: NO_TOOL_MODIFIERS });
+    const parsed = parseToolInputEvent({
+      type: "scroll",
+      modifiers: NO_TOOL_MODIFIERS,
+    });
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.error.code).toBe(TOOL_EVENT_ERROR_CODES.typeUnknown);

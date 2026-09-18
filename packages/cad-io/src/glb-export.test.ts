@@ -116,7 +116,8 @@ function anonymousObject(
   indices: number[],
 ): RenderObject {
   const id = parseRenderObjectId(`rend_${payload}`);
-  if (!id.ok) throw new Error(`Fixture render id rejected: ${id.error.message}`);
+  if (!id.ok)
+    throw new Error(`Fixture render id rejected: ${id.error.message}`);
   return {
     id: id.value,
     positions,
@@ -138,7 +139,8 @@ function rawObject(
   normals?: number[],
 ): RenderObject {
   const id = parseRenderObjectId(`rend_${payload}`);
-  if (!id.ok) throw new Error(`Fixture render id rejected: ${id.error.message}`);
+  if (!id.ok)
+    throw new Error(`Fixture render id rejected: ${id.error.message}`);
   return {
     id: id.value,
     positions,
@@ -208,7 +210,11 @@ describe("GLB container structure (glTF 2.0 spec)", () => {
   it("writes the 12-byte header: magic, version 2, total length", () => {
     const soup = triangleSoup();
     const bytes = unwrapGlb(
-      exportGlb(projectionOf([projectedObject("plate", soup.positions, soup.indices, soup.normals)])),
+      exportGlb(
+        projectionOf([
+          projectedObject("plate", soup.positions, soup.indices, soup.normals),
+        ]),
+      ),
     );
     expect(bytes.length).toBeGreaterThanOrEqual(GLB_HEADER_BYTES);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -221,7 +227,11 @@ describe("GLB container structure (glTF 2.0 spec)", () => {
   it("carries the JSON chunk first and the BIN chunk second, both 4-aligned", () => {
     const soup = triangleSoup();
     const bytes = unwrapGlb(
-      exportGlb(projectionOf([projectedObject("plate", soup.positions, soup.indices, soup.normals)])),
+      exportGlb(
+        projectionOf([
+          projectedObject("plate", soup.positions, soup.indices, soup.normals),
+        ]),
+      ),
     );
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const { jsonChunkStart, jsonChunkLength, binChunkStart, binChunkLength } =
@@ -241,7 +251,11 @@ describe("GLB container structure (glTF 2.0 spec)", () => {
     // content length is.
     const soup = triangleSoup();
     const bytes = unwrapGlb(
-      exportGlb(projectionOf([projectedObject("plate", soup.positions, soup.indices, soup.normals)])),
+      exportGlb(
+        projectionOf([
+          projectedObject("plate", soup.positions, soup.indices, soup.normals),
+        ]),
+      ),
     );
     const { jsonChunkStart, jsonChunkLength, binChunkStart, binChunkLength } =
       containerLayout(bytes);
@@ -266,7 +280,11 @@ describe("GLB container structure (glTF 2.0 spec)", () => {
     expect(binChunkLength - declared).toBeLessThanOrEqual(3);
     expect(binChunkLength - declared).toBeGreaterThan(0); // 3 uint16 indices (6 bytes) need 2 pad bytes
     const binDataStart = binChunkStart + GLB_CHUNK_HEADER_BYTES;
-    for (let i = binDataStart + declared; i < binDataStart + binChunkLength; i += 1) {
+    for (
+      let i = binDataStart + declared;
+      i < binDataStart + binChunkLength;
+      i += 1
+    ) {
       expect(bytes[i]).toBe(0x00);
     }
   });
@@ -274,7 +292,11 @@ describe("GLB container structure (glTF 2.0 spec)", () => {
   it("emits the exporter's canonical top-level JSON key order", () => {
     const soup = triangleSoup();
     const bytes = unwrapGlb(
-      exportGlb(projectionOf([projectedObject("plate", soup.positions, soup.indices, soup.normals)])),
+      exportGlb(
+        projectionOf([
+          projectedObject("plate", soup.positions, soup.indices, soup.normals),
+        ]),
+      ),
     );
     const document = readGlb(bytes);
     expect(document.topLevelKeys).toEqual(CANONICAL_TOP_LEVEL_KEYS);
@@ -321,7 +343,9 @@ describe("GLB glTF-level structure and semantics", () => {
     const positions = [0, 0, 0, 1.5, 0, 0, 0, 0.1, 0];
     const normals = [0, 0, 1, 0, 0, 1, 0, 0, 1];
     const bytes = unwrapGlb(
-      exportGlb(projectionOf([projectedObject("plate", positions, [0, 1, 2], normals)])),
+      exportGlb(
+        projectionOf([projectedObject("plate", positions, [0, 1, 2], normals)]),
+      ),
     );
     const primitive = readGlb(bytes).nodes[0]?.primitive;
     expect(primitive).toBeDefined();
@@ -346,7 +370,11 @@ describe("GLB glTF-level structure and semantics", () => {
     );
     const primitive = readGlb(bytes).nodes[0]?.primitive;
     if (primitive === undefined) throw new Error("unreachable");
-    const minExpected = [Math.fround(-1.25), Math.fround(0), Math.fround(-3.75)];
+    const minExpected = [
+      Math.fround(-1.25),
+      Math.fround(0),
+      Math.fround(-3.75),
+    ];
     const maxExpected = [Math.fround(1), Math.fround(7), Math.fround(2.5)];
     expect(primitive.positionMin).toEqual(minExpected);
     expect(primitive.positionMax).toEqual(maxExpected);
@@ -355,7 +383,9 @@ describe("GLB glTF-level structure and semantics", () => {
   it("emits the documented CadScene material as linear pbrMetallicRoughness", () => {
     const soup = triangleSoup();
     const bytes = unwrapGlb(
-      exportGlb(projectionOf([projectedObject("plate", soup.positions, soup.indices)])),
+      exportGlb(
+        projectionOf([projectedObject("plate", soup.positions, soup.indices)]),
+      ),
     );
     const document = readGlb(bytes);
     expect(document.materialName).toBe(GLB_MATERIAL_NAME);
@@ -381,9 +411,9 @@ describe("GLB glTF-level structure and semantics", () => {
     expect(small.nodes[0]?.primitive.indexComponentType).toBe(5123);
     // At 65535 vertices the largest index is 65534 — the uint16 max the
     // spec allows without hitting the forbidden primitive-restart value.
-    expect(small.nodes[0]?.primitive.indices.every((index) => index < 65_535)).toBe(
-      true,
-    );
+    expect(
+      small.nodes[0]?.primitive.indices.every((index) => index < 65_535),
+    ).toBe(true);
     const large = readGlb(build(atLimit + 1));
     expect(large.nodes[0]?.primitive.indexComponentType).toBe(5125);
   });
@@ -391,12 +421,26 @@ describe("GLB glTF-level structure and semantics", () => {
   it("is byte-identical across repeated exports and independently built inputs", () => {
     const first = unwrapGlb(
       exportGlb(
-        projectionOf([projectedObject("plate", triangleSoup().positions, triangleSoup().indices, triangleSoup().normals)]),
+        projectionOf([
+          projectedObject(
+            "plate",
+            triangleSoup().positions,
+            triangleSoup().indices,
+            triangleSoup().normals,
+          ),
+        ]),
       ),
     );
     const second = unwrapGlb(
       exportGlb(
-        projectionOf([projectedObject("plate", triangleSoup().positions, triangleSoup().indices, triangleSoup().normals)]),
+        projectionOf([
+          projectedObject(
+            "plate",
+            triangleSoup().positions,
+            triangleSoup().indices,
+            triangleSoup().normals,
+          ),
+        ]),
       ),
     );
     expect(second.length).toBe(first.length);
@@ -409,7 +453,11 @@ describe("GLB glTF-level structure and semantics", () => {
     const multiFirst = unwrapGlb(
       exportGlb(
         projectionOf([
-          projectedObject("plate", triangleSoup().positions, triangleSoup().indices),
+          projectedObject(
+            "plate",
+            triangleSoup().positions,
+            triangleSoup().indices,
+          ),
           projectedObject("block", [1, 1, 1, 2, 1, 1, 1, 2, 1], [0, 1, 2]),
         ]),
       ),
@@ -417,7 +465,11 @@ describe("GLB glTF-level structure and semantics", () => {
     const multiSecond = unwrapGlb(
       exportGlb(
         projectionOf([
-          projectedObject("plate", triangleSoup().positions, triangleSoup().indices),
+          projectedObject(
+            "plate",
+            triangleSoup().positions,
+            triangleSoup().indices,
+          ),
           projectedObject("block", [1, 1, 1, 2, 1, 1, 1, 2, 1], [0, 1, 2]),
         ]),
       ),
@@ -453,7 +505,11 @@ describe("GLB export rejection matrix", () => {
       "glb-export/malformed-object",
       "positions not divisible by 3",
     );
-    const raggedIndices = rawObject("ragged-idx", [0, 0, 0, 1, 0, 0, 0, 1, 0], [0, 1]);
+    const raggedIndices = rawObject(
+      "ragged-idx",
+      [0, 0, 0, 1, 0, 0, 0, 1, 0],
+      [0, 1],
+    );
     expectGlbFailure(
       exportGlb(projectionOf([raggedIndices])),
       "glb-export/malformed-object",
@@ -473,19 +529,31 @@ describe("GLB export rejection matrix", () => {
   });
 
   it("rejects non-finite and float32-overflowing vertices with glb-export/non-finite-vertex", () => {
-    const nan = rawObject("nan", [Number.NaN, 0, 0, 1, 0, 0, 0, 1, 0], [0, 1, 2]);
+    const nan = rawObject(
+      "nan",
+      [Number.NaN, 0, 0, 1, 0, 0, 0, 1, 0],
+      [0, 1, 2],
+    );
     expectGlbFailure(
       exportGlb(projectionOf([nan])),
       "glb-export/non-finite-vertex",
       "NaN position",
     );
-    const infinite = rawObject("inf", [0, 0, 0, Number.POSITIVE_INFINITY, 0, 0, 0, 1, 0], [0, 1, 2]);
+    const infinite = rawObject(
+      "inf",
+      [0, 0, 0, Number.POSITIVE_INFINITY, 0, 0, 0, 1, 0],
+      [0, 1, 2],
+    );
     expectGlbFailure(
       exportGlb(projectionOf([infinite])),
       "glb-export/non-finite-vertex",
       "infinite position",
     );
-    const overflow = rawObject("overflow", [0, 0, 0, 1e39, 0, 0, 0, 1, 0], [0, 1, 2]);
+    const overflow = rawObject(
+      "overflow",
+      [0, 0, 0, 1e39, 0, 0, 0, 1, 0],
+      [0, 1, 2],
+    );
     expectGlbFailure(
       exportGlb(projectionOf([overflow])),
       "glb-export/non-finite-vertex",
@@ -522,7 +590,11 @@ describe("GLB test-reader strictness", () => {
   function validBytes(): Uint8Array {
     const soup = triangleSoup();
     return unwrapGlb(
-      exportGlb(projectionOf([projectedObject("plate", soup.positions, soup.indices, soup.normals)])),
+      exportGlb(
+        projectionOf([
+          projectedObject("plate", soup.positions, soup.indices, soup.normals),
+        ]),
+      ),
     );
   }
 
@@ -563,8 +635,17 @@ describe("GLB test-reader strictness", () => {
     view.setUint32(8, total, true);
     view.setUint32(GLB_HEADER_BYTES, jsonChunkLength, true);
     view.setUint32(GLB_HEADER_BYTES + 4, GLB_JSON_CHUNK_TYPE, true);
-    corrupt.set(valid.subarray(GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES, GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + contentLength), GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES);
-    corrupt.set(binChunk, GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + jsonChunkLength);
+    corrupt.set(
+      valid.subarray(
+        GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES,
+        GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + contentLength,
+      ),
+      GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES,
+    );
+    corrupt.set(
+      binChunk,
+      GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + jsonChunkLength,
+    );
     expect(() => readGlb(corrupt)).toThrow(/padding|Space|JSON/);
     expect(document.topLevelKeys.length).toBeGreaterThan(0); // sanity on the valid parse
   });
@@ -592,7 +673,10 @@ describe("GLB test-reader strictness", () => {
       ),
       GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES,
     );
-    corrupt.set(binChunk, GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + oddLength);
+    corrupt.set(
+      binChunk,
+      GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES + oddLength,
+    );
     expect(() => readGlb(corrupt)).toThrow(/multiple of four/);
   });
 
@@ -604,7 +688,10 @@ describe("GLB test-reader strictness", () => {
     const { binChunkStart } = containerLayout(valid);
     const corrupt = Uint8Array.from(valid);
     const firstPositionAt = binChunkStart + GLB_CHUNK_HEADER_BYTES;
-    const original = new DataView(corrupt.buffer).getFloat32(firstPositionAt, true);
+    const original = new DataView(corrupt.buffer).getFloat32(
+      firstPositionAt,
+      true,
+    );
     new DataView(corrupt.buffer).setFloat32(
       firstPositionAt,
       original === 0 ? 1.5 : 0,

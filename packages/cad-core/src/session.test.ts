@@ -184,7 +184,9 @@ describe("undoSession / redoSession", () => {
 
     const undone = unwrap(undoSession(session), "undoSession");
     expect(serializationOf(undone)).toBe(serializationOf(afterSet));
-    expect(undone.document.idGeneratorState).toEqual(afterSet.document.idGeneratorState);
+    expect(undone.document.idGeneratorState).toEqual(
+      afterSet.document.idGeneratorState,
+    );
 
     const redone = unwrap(redoSession(undone), "redoSession");
     expect(serializationOf(redone)).toBe(serializationOf(session));

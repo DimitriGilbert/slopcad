@@ -25,7 +25,9 @@ import {
 } from "./test-support";
 
 function requireValue<T>(
-  result: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { readonly message: string } },
+  result:
+    | { readonly ok: true; readonly value: T }
+    | { readonly ok: false; readonly error: { readonly message: string } },
   what: string,
 ): T {
   if (!result.ok) {
@@ -84,10 +86,7 @@ describe("CadStore notifications", () => {
     store.subscribeParameters(onParameters);
     store.subscribeSelection(onSelection);
 
-    const picked = store.pick(
-      { kind: "body", bodyId: TEST_BODY_ID },
-      false,
-    );
+    const picked = store.pick({ kind: "body", bodyId: TEST_BODY_ID }, false);
     expect(picked.ok).toBe(true);
     expect(onSelection).toHaveBeenCalledTimes(1);
     expect(onDocument).not.toHaveBeenCalled();
@@ -228,7 +227,11 @@ describe("CadStore history and command log", () => {
     const next = requireValue(
       applySessionTransaction(createTestSession(), {
         commands: [
-          { type: "parameter.set", id: TEST_WIDTH_PARAMETER, value: length(12) },
+          {
+            type: "parameter.set",
+            id: TEST_WIDTH_PARAMETER,
+            value: length(12),
+          },
         ],
       }),
       "the replacement session commit",
@@ -248,7 +251,9 @@ describe("CadStore tool lifecycle", () => {
     store.armTool("measure");
     expect(store.getToolSurface().activeToolId).toBe("measure");
     expect(store.getToolSurface().phase).toBe("active");
-    expect(store.getToolSurface().toolState).toEqual({ stage: "awaiting-first" });
+    expect(store.getToolSurface().toolState).toEqual({
+      stage: "awaiting-first",
+    });
   });
 
   it("cancel is guarded and idempotent; reset retires terminal phases", () => {

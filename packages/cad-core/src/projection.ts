@@ -358,10 +358,16 @@ function validateGeometry(
   label: string,
 ): ParseResult<ValidatedBuffers, ProjectionError> {
   const { positions, indices, normals } = input;
-  const malformed = (message: string, detail: unknown): ParseResult<ValidatedBuffers, ProjectionError> =>
+  const malformed = (
+    message: string,
+    detail: unknown,
+  ): ParseResult<ValidatedBuffers, ProjectionError> =>
     fail(projectionError(PROJECTION_ERROR_CODES.malformed, message, detail));
   if (!isUnknownArray(positions)) {
-    return malformed(`${label} positions must be an array of numbers.`, positions);
+    return malformed(
+      `${label} positions must be an array of numbers.`,
+      positions,
+    );
   }
   if (!isUnknownArray(indices)) {
     return malformed(`${label} indices must be an array of numbers.`, indices);
@@ -606,7 +612,9 @@ export function parseRenderCamera(
   const invalid = (
     message: string,
   ): ParseResult<RenderCamera, ProjectionError> =>
-    fail(projectionError(PROJECTION_ERROR_CODES.cameraMalformed, message, input));
+    fail(
+      projectionError(PROJECTION_ERROR_CODES.cameraMalformed, message, input),
+    );
   if (!isPlainRecord(input)) {
     return invalid("A render camera must be a plain object.");
   }

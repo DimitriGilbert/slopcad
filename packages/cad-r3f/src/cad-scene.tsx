@@ -276,7 +276,10 @@ export function CadScene({
         regeneration={regeneration}
         selection={selection}
       />
-      <SelectionProbe onSelectionRendered={onSelectionRendered} selection={selection} />
+      <SelectionProbe
+        onSelectionRendered={onSelectionRendered}
+        selection={selection}
+      />
       <SettleProbe onSettled={onSettled} projection={projection} />
     </Canvas>
   );

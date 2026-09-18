@@ -94,7 +94,12 @@
  * out-of-range indices.
  */
 
-import { type ParseFailure, type ParseResult, fail, ok } from "@slopcad/cad-core";
+import {
+  type ParseFailure,
+  type ParseResult,
+  fail,
+  ok,
+} from "@slopcad/cad-core";
 import type { RenderObject, RenderProjection } from "@slopcad/cad-core";
 
 /** Stable failure codes produced when GLB export rejects its input. */
@@ -379,7 +384,9 @@ function prepareObject(
     positions: positions32,
     normals: normals32,
     indices: indicesTyped,
-    indexComponentType: useUint32 ? COMPONENT_TYPE_UINT32 : COMPONENT_TYPE_UINT16,
+    indexComponentType: useUint32
+      ? COMPONENT_TYPE_UINT32
+      : COMPONENT_TYPE_UINT16,
     positionMin: min,
     positionMax: max,
   });
@@ -603,10 +610,10 @@ export function exportGlb(projection: RenderProjection): GlbExportResult {
       type: "SCALAR",
     });
     const attributes:
-      | { POSITION: number }
-      | { POSITION: number; NORMAL: number } = normalAccessor === null
-      ? { POSITION: positionAccessor }
-      : { POSITION: positionAccessor, NORMAL: normalAccessor };
+      { POSITION: number } | { POSITION: number; NORMAL: number } =
+      normalAccessor === null
+        ? { POSITION: positionAccessor }
+        : { POSITION: positionAccessor, NORMAL: normalAccessor };
     meshes.push({
       primitives: [
         {

@@ -14,7 +14,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { RenderProjection } from "@slopcad/cad-core";
 import type { RenderGeometrySnapshot } from "./geometry";
 
-import { FOLDED_SHEET_SHARED, makeObject, makeProjection } from "./render-fixtures";
+import {
+  FOLDED_SHEET_SHARED,
+  makeObject,
+  makeProjection,
+} from "./render-fixtures";
 import { useRenderGeometry } from "./use-render-geometry";
 
 const PLATE = makeObject("plate", FOLDED_SHEET_SHARED);

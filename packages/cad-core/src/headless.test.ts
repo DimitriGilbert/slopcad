@@ -77,7 +77,9 @@ function headlessBaseDocument(): CadDocument {
   let document = createDocument(createDocumentId("doc_headless"));
   const body = addBody(document, { id: BODY, name: "part" });
   if (!body.ok) {
-    throw new Error(`Headless fixture rejected the body: ${body.error.message}`);
+    throw new Error(
+      `Headless fixture rejected the body: ${body.error.message}`,
+    );
   }
   document = body.value.document;
   const parameter = addDocumentParameter(document, {
@@ -94,11 +96,15 @@ function headlessBaseDocument(): CadDocument {
 }
 
 function requireValue<T>(
-  result: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { readonly message: string } },
+  result:
+    | { readonly ok: true; readonly value: T }
+    | { readonly ok: false; readonly error: { readonly message: string } },
   what: string,
 ): T {
   if (!result.ok) {
-    throw new Error(`Headless fixture rejected ${what}: ${result.error.message}`);
+    throw new Error(
+      `Headless fixture rejected ${what}: ${result.error.message}`,
+    );
   }
   return result.value;
 }
@@ -140,10 +146,7 @@ describe("cad-core runs headless end to end", () => {
   });
 
   it("drives the tool runtime and manager with plain event data", () => {
-    const session = setWidth(
-      createSession(headlessBaseDocument()),
-      12,
-    );
+    const session = setWidth(createSession(headlessBaseDocument()), 12);
     const issued: number[] = [];
     const runtime = createToolRuntime({
       session,
@@ -185,6 +188,8 @@ describe("cad-core runs headless end to end", () => {
     // No transaction was issued: measure is a pure pick-pair computation.
     expect(issued).toEqual([]);
     // The runtime still exposes the session the React mirror would read.
-    expect(runtime.session.document.parameters.parameters[0]?.value.value).toBe(12);
+    expect(runtime.session.document.parameters.parameters[0]?.value.value).toBe(
+      12,
+    );
   });
 });

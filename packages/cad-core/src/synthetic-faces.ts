@@ -300,7 +300,9 @@ export function groupSyntheticFaces(
           continue;
         }
         const dot =
-          normalA[0] * normalB[0] + normalA[1] * normalB[1] + normalA[2] * normalB[2];
+          normalA[0] * normalB[0] +
+          normalA[1] * normalB[1] +
+          normalA[2] * normalB[2];
         if (dot >= COS_GROUPING_THRESHOLD) {
           unionFind.union(triangleA, triangleB);
         }
@@ -334,7 +336,10 @@ export function groupSyntheticFaces(
     faceCount: trianglesByFace.length,
     faces: Object.freeze(
       trianglesByFace.map((triangles, index) =>
-        Object.freeze({ index, triangleIndices: Object.freeze([...triangles]) }),
+        Object.freeze({
+          index,
+          triangleIndices: Object.freeze([...triangles]),
+        }),
       ),
     ),
     triangleFaces: Object.freeze([...triangleFaces]),
@@ -378,15 +383,11 @@ function triangleArea(
   const b = component(indices, triangle * 3 + 1);
   const c = component(indices, triangle * 3 + 2);
   const ux = component(positions, b * 3) - component(positions, a * 3);
-  const uy =
-    component(positions, b * 3 + 1) - component(positions, a * 3 + 1);
-  const uz =
-    component(positions, b * 3 + 2) - component(positions, a * 3 + 2);
+  const uy = component(positions, b * 3 + 1) - component(positions, a * 3 + 1);
+  const uz = component(positions, b * 3 + 2) - component(positions, a * 3 + 2);
   const vx = component(positions, c * 3) - component(positions, a * 3);
-  const vy =
-    component(positions, c * 3 + 1) - component(positions, a * 3 + 1);
-  const vz =
-    component(positions, c * 3 + 2) - component(positions, a * 3 + 2);
+  const vy = component(positions, c * 3 + 1) - component(positions, a * 3 + 1);
+  const vz = component(positions, c * 3 + 2) - component(positions, a * 3 + 2);
   const cx = uy * vz - uz * vy;
   const cy = uz * vx - ux * vz;
   const cz = ux * vy - uy * vx;

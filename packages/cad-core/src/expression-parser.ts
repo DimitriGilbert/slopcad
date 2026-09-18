@@ -66,9 +66,7 @@ function isDigit(char: string): boolean {
 
 function isIdentifierStart(char: string): boolean {
   return (
-    (char >= "A" && char <= "Z") ||
-    (char >= "a" && char <= "z") ||
-    char === "_"
+    (char >= "A" && char <= "Z") || (char >= "a" && char <= "z") || char === "_"
   );
 }
 
@@ -190,7 +188,12 @@ function lex(source: string): LexOutcome {
             unitToken,
           );
         }
-        tokens.push({ type: "unitLiteral", value: magnitude, unit: unitToken, position: start });
+        tokens.push({
+          type: "unitLiteral",
+          value: magnitude,
+          unit: unitToken,
+          position: start,
+        });
         continue;
       }
       tokens.push({ type: "number", value: magnitude, position: start });
@@ -204,7 +207,11 @@ function lex(source: string): LexOutcome {
       ) {
         index += 1;
       }
-      tokens.push({ type: "identifier", name: source.slice(start, index), position: start });
+      tokens.push({
+        type: "identifier",
+        name: source.slice(start, index),
+        position: start,
+      });
       continue;
     }
     if ("+-*/%^(),".includes(char)) {

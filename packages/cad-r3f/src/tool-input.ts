@@ -35,7 +35,12 @@ export function toolModifiersFromNative(native: {
   readonly ctrlKey: boolean;
   readonly metaKey: boolean;
 }): ToolModifiers {
-  return toolModifiers(native.shiftKey, native.altKey, native.ctrlKey, native.metaKey);
+  return toolModifiers(
+    native.shiftKey,
+    native.altKey,
+    native.ctrlKey,
+    native.metaKey,
+  );
 }
 
 /**

@@ -118,7 +118,9 @@ async function sessionPlateProjection(): Promise<RenderProjection> {
   }
   const object = projectTessellation(createBodyId("body_plate"), tessellation);
   if (!object.ok) {
-    throw new Error(`Projection rejected the plate soup: ${object.error.message}`);
+    throw new Error(
+      `Projection rejected the plate soup: ${object.error.message}`,
+    );
   }
   const projection = createRenderProjection([object.value], FIXTURE_CAMERA);
   if (!projection.ok) {
@@ -164,9 +166,11 @@ describe("GLB export of a real Manifold plate projection", () => {
   it("round-trips semantically through the independent reader", async () => {
     const projection = await sessionPlateProjection();
     const object = projection.objects[0];
-    if (object === undefined) throw new Error("the fixture projection is empty");
+    if (object === undefined)
+      throw new Error("the fixture projection is empty");
     const { positions, indices, normals } = object;
-    if (normals === undefined) throw new Error("the projected object lost its normals");
+    if (normals === undefined)
+      throw new Error("the projected object lost its normals");
 
     const document: GlbReadDocument = readGlb(exportPlateBytes(projection));
 
@@ -202,10 +206,14 @@ describe("GLB export of a real Manifold plate projection", () => {
     // The POSITION accessor's min/max describe the converted data — and
     // equal the fround bounds of the source soup per axis.
     const axisExtreme = (axis: number, maximise: boolean): number => {
-      let extreme = maximise ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+      let extreme = maximise
+        ? Number.NEGATIVE_INFINITY
+        : Number.POSITIVE_INFINITY;
       for (let i = axis; i < positions.length; i += 3) {
         const value = positions[i] ?? 0;
-        extreme = maximise ? Math.max(extreme, value) : Math.min(extreme, value);
+        extreme = maximise
+          ? Math.max(extreme, value)
+          : Math.min(extreme, value);
       }
       return Math.fround(extreme);
     };

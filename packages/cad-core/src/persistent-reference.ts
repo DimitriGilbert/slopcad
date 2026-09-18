@@ -115,7 +115,9 @@ export const REFERENCE_VALIDITY_STATES = [
 export type ReferenceValidity = (typeof REFERENCE_VALIDITY_STATES)[number];
 
 /** Runtime membership set behind {@link isTopologyReferenceKind}. */
-const TOPOLOGY_KIND_SET: ReadonlySet<string> = new Set(TOPOLOGY_REFERENCE_KINDS);
+const TOPOLOGY_KIND_SET: ReadonlySet<string> = new Set(
+  TOPOLOGY_REFERENCE_KINDS,
+);
 
 /** Whether `kind` is one of the topology reference kinds. */
 export function isTopologyReferenceKind(
@@ -149,9 +151,7 @@ const INVALID_REASON_SET: ReadonlySet<string> = new Set(
 );
 
 /** Whether `state` is one of the five validity states. */
-export function isReferenceValidity(
-  state: string,
-): state is ReferenceValidity {
+export function isReferenceValidity(state: string): state is ReferenceValidity {
   return VALIDITY_STATE_SET.has(state);
 }
 
@@ -321,10 +321,7 @@ function measureClose(a: number, b: number): boolean {
   return Math.abs(a - b) / scale <= REFERENCE_MEASURE_RELATIVE_TOLERANCE;
 }
 
-function vectorClose(
-  a: ReferenceVector3,
-  b: ReferenceVector3,
-): boolean {
+function vectorClose(a: ReferenceVector3, b: ReferenceVector3): boolean {
   return (
     Math.abs(a[0] - b[0]) <= REFERENCE_POSITION_TOLERANCE_MM &&
     Math.abs(a[1] - b[1]) <= REFERENCE_POSITION_TOLERANCE_MM &&
@@ -371,14 +368,20 @@ export function positionMatches(
   const absolute =
     (reference.centroidAbsoluteMm !== undefined &&
       candidate.centroidAbsoluteMm !== undefined &&
-      vectorClose(reference.centroidAbsoluteMm, candidate.centroidAbsoluteMm)) ||
+      vectorClose(
+        reference.centroidAbsoluteMm,
+        candidate.centroidAbsoluteMm,
+      )) ||
     (reference.pointAbsoluteMm !== undefined &&
       candidate.pointAbsoluteMm !== undefined &&
       vectorClose(reference.pointAbsoluteMm, candidate.pointAbsoluteMm));
   const relative =
     (reference.centroidRelativeMm !== undefined &&
       candidate.centroidRelativeMm !== undefined &&
-      vectorClose(reference.centroidRelativeMm, candidate.centroidRelativeMm)) ||
+      vectorClose(
+        reference.centroidRelativeMm,
+        candidate.centroidRelativeMm,
+      )) ||
     (reference.pointRelativeMm !== undefined &&
       candidate.pointRelativeMm !== undefined &&
       vectorClose(reference.pointRelativeMm, candidate.pointRelativeMm));
@@ -556,7 +559,12 @@ export type PersistentEntityReference =
 const ALLOWED_VALIDITY_TRANSITIONS: Readonly<
   Record<ReferenceValidity, ReadonlySet<ReferenceValidity>>
 > = Object.freeze({
-  valid: new Set<ReferenceValidity>(["valid", "missing", "ambiguous", "invalid"]),
+  valid: new Set<ReferenceValidity>([
+    "valid",
+    "missing",
+    "ambiguous",
+    "invalid",
+  ]),
   missing: new Set<ReferenceValidity>([
     "valid",
     "missing",
@@ -637,9 +645,7 @@ export function applyReferenceValidity(
       ),
     );
   }
-  return ok(
-    Object.freeze({ ...reference, validity: Object.freeze(record) }),
-  );
+  return ok(Object.freeze({ ...reference, validity: Object.freeze(record) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -753,17 +759,16 @@ export function referenceProvenance(
     }
   }
   const ordered = featureEvaluationOrder(document.features);
-  if (!ordered.ok) return fail(
-    referenceError(
-      REFERENCE_ERROR_CODES.provenanceAmbiguous,
-      `The feature graph behind body "${bodyId}" has no evaluation order: ${ordered.error.message}`,
-      bodyId,
-    ),
-  );
+  if (!ordered.ok)
+    return fail(
+      referenceError(
+        REFERENCE_ERROR_CODES.provenanceAmbiguous,
+        `The feature graph behind body "${bodyId}" has no evaluation order: ${ordered.error.message}`,
+        bodyId,
+      ),
+    );
   const featurePath = ordered.value.filter((id) => upstream.has(id));
-  return ok(
-    Object.freeze({ bodyId, featurePath: Object.freeze(featurePath) }),
-  );
+  return ok(Object.freeze({ bodyId, featurePath: Object.freeze(featurePath) }));
 }
 
 /**
@@ -949,7 +954,9 @@ export function resolveTopologyReference(
     );
   }
   if (
-    !snapshot.identitySchemas.some((schema) => schema === reference.identity.schema)
+    !snapshot.identitySchemas.some(
+      (schema) => schema === reference.identity.schema,
+    )
   ) {
     return applyReferenceValidity(
       reference,
@@ -1059,9 +1066,7 @@ export interface RepairReferenceOptions {
   readonly reexecuted?: TopologySnapshot;
 }
 
-function anchorOf(
-  reference: TopologyEntityReference,
-): ReferenceAnchor {
+function anchorOf(reference: TopologyEntityReference): ReferenceAnchor {
   return {
     identity: reference.identity,
     geometry: reference.geometry,
@@ -1286,9 +1291,7 @@ export function disambiguateTopologyReference(
 
 /** The synthetic selection reference a topology reference maps to. */
 export type TransientSelectionReference =
-  | FaceSelectionReference
-  | EdgeSelectionReference
-  | VertexSelectionReference;
+  FaceSelectionReference | EdgeSelectionReference | VertexSelectionReference;
 
 /**
  * Maps a RESOLVED persistent reference (valid or repaired) to the Phase 12
@@ -1354,9 +1357,7 @@ export function transientSelectionOf(
 // Serialization
 // ---------------------------------------------------------------------------
 
-function serializeVector(
-  vector: ReferenceVector3,
-): [number, number, number] {
+function serializeVector(vector: ReferenceVector3): [number, number, number] {
   return [vector[0], vector[1], vector[2]];
 }
 
@@ -1477,9 +1478,7 @@ export function serializeTopologyReference(
     validity: {
       state: validity.state,
       regeneration: validity.regeneration,
-      ...(validity.ordinal !== undefined
-        ? { ordinal: validity.ordinal }
-        : {}),
+      ...(validity.ordinal !== undefined ? { ordinal: validity.ordinal } : {}),
       ...(validity.candidates !== undefined
         ? { candidates: [...validity.candidates] }
         : {}),
@@ -1519,11 +1518,7 @@ function parseVector3(
   const first = input[0];
   const second = input[1];
   const third = input[2];
-  if (
-    first === undefined ||
-    second === undefined ||
-    third === undefined
-  ) {
+  if (first === undefined || second === undefined || third === undefined) {
     return fail(
       referenceError(
         REFERENCE_ERROR_CODES.fieldInvalid,
@@ -1580,10 +1575,7 @@ function parseGeometry(
     geometry.lengthMm = input.lengthMm;
   }
   if (input.centroidAbsoluteMm !== undefined) {
-    const parsed = parseVector3(
-      input.centroidAbsoluteMm,
-      "centroidAbsoluteMm",
-    );
+    const parsed = parseVector3(input.centroidAbsoluteMm, "centroidAbsoluteMm");
     if (!parsed.ok) return parsed;
     geometry.centroidAbsoluteMm = parsed.value;
   }
@@ -1593,10 +1585,7 @@ function parseGeometry(
     geometry.pointAbsoluteMm = parsed.value;
   }
   if (input.centroidRelativeMm !== undefined) {
-    const parsed = parseVector3(
-      input.centroidRelativeMm,
-      "centroidRelativeMm",
-    );
+    const parsed = parseVector3(input.centroidRelativeMm, "centroidRelativeMm");
     if (!parsed.ok) return parsed;
     geometry.centroidRelativeMm = parsed.value;
   }
@@ -1828,10 +1817,7 @@ function parseRepair(
     );
   }
   const strategy = input.strategy;
-  if (
-    typeof strategy !== "string" ||
-    !isReferenceRepairStrategy(strategy)
-  ) {
+  if (typeof strategy !== "string" || !isReferenceRepairStrategy(strategy)) {
     return fail(
       referenceError(
         REFERENCE_ERROR_CODES.fieldInvalid,
@@ -1911,10 +1897,7 @@ export function parseTopologyReference(
       ),
     );
   }
-  if (
-    typeof input.kind !== "string" ||
-    !isTopologyReferenceKind(input.kind)
-  ) {
+  if (typeof input.kind !== "string" || !isTopologyReferenceKind(input.kind)) {
     return fail(
       referenceError(
         REFERENCE_ERROR_CODES.notAReference,

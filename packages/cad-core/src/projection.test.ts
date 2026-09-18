@@ -414,7 +414,11 @@ describe("serializeRenderProjection / parseRenderProjection", () => {
         {
           ...serialized,
           objects: [
-            { ...firstObject, positions: [...tetraSoup.positions], indices: [] },
+            {
+              ...firstObject,
+              positions: [...tetraSoup.positions],
+              indices: [],
+            },
           ],
         },
         CODES.emptyTessellation,

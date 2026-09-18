@@ -63,7 +63,9 @@ function requireOk<T>(
   what: string,
 ): T {
   if (!result.ok) {
-    throw new Error(`The native format test builder rejected ${what}: ${result.error.message}`);
+    throw new Error(
+      `The native format test builder rejected ${what}: ${result.error.message}`,
+    );
   }
   return result.value;
 }
@@ -83,8 +85,10 @@ function baseDocument(): CadDocument {
     [PLATE_BODY, "plate"],
     [HOLE_BODY, "bore"],
   ] as const) {
-    document = requireOk(addBody(document, { id, name }), `the ${name} body`)
-      .document;
+    document = requireOk(
+      addBody(document, { id, name }),
+      `the ${name} body`,
+    ).document;
   }
   return document;
 }
@@ -155,7 +159,9 @@ function nativeText(native: NativeCadDocument = buildNative()): string {
 }
 
 /** A revived-JSON deep copy of the canonical serialized form. */
-function revived(native: NativeCadDocument = buildNative()): Record<string, unknown> {
+function revived(
+  native: NativeCadDocument = buildNative(),
+): Record<string, unknown> {
   return JSON.parse(nativeText(native)) as Record<string, unknown>;
 }
 
@@ -199,9 +205,11 @@ describe("native document serialization is deterministic", () => {
       createNativeCadDocument(baseDocument(), unsorted),
       "the unsorted metadata",
     );
-    expect(
-      Object.keys(serializeNativeCadDocument(native).metadata),
-    ).toEqual(["alpha", "bravo", "zulu"]);
+    expect(Object.keys(serializeNativeCadDocument(native).metadata)).toEqual([
+      "alpha",
+      "bravo",
+      "zulu",
+    ]);
   });
 
   it("keeps body records as pure id-and-name data", () => {
@@ -219,8 +227,13 @@ describe("native document serialization is deterministic", () => {
 describe("native documents round-trip exactly", () => {
   it("re-serializes a parsed document to byte-identical output", () => {
     const text = nativeText();
-    const parsed = requireOk(parseNativeCadDocumentFromString(text), "the parse");
-    expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(text);
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "the parse",
+    );
+    expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(
+      text,
+    );
   });
 
   it("preserves domain equality, not just bytes", () => {
@@ -235,9 +248,9 @@ describe("native documents round-trip exactly", () => {
     expect(parsed.history.entries).toHaveLength(native.history.entries.length);
     expect(parsed.history.cursor).toBe(native.history.cursor);
     expect(parsed.history.base.id).toBe(native.history.base.id);
-    expect(JSON.stringify(serializeRegenerationStates(parsed.regeneration))).toBe(
-      JSON.stringify(serializeRegenerationStates(native.regeneration)),
-    );
+    expect(
+      JSON.stringify(serializeRegenerationStates(parsed.regeneration)),
+    ).toBe(JSON.stringify(serializeRegenerationStates(native.regeneration)));
     expect(parsed.metadata).toEqual(native.metadata);
     expect(parsed.regeneration.get(PLATE_FEATURE)?.state).toBe("valid");
   });
@@ -254,7 +267,9 @@ describe("native documents round-trip exactly", () => {
       parseNativeCadDocumentFromString(nativeText(native)),
       "the parse",
     );
-    expect(parsed.document.features.map((feature) => feature.id)).toContain(authoredId);
+    expect(parsed.document.features.map((feature) => feature.id)).toContain(
+      authoredId,
+    );
   });
 
   it("restores undo and redo exactly (history replay equivalence)", () => {
@@ -274,7 +289,10 @@ describe("native documents round-trip exactly", () => {
 
     const undoneOnce = requireOk(undoHistory(parsed.history), "the undo");
     expect(thicknessOf(undoneOnce.document)).toBe(10);
-    const undoneToBase = requireOk(undoHistory(undoneOnce.history), "the second undo");
+    const undoneToBase = requireOk(
+      undoHistory(undoneOnce.history),
+      "the second undo",
+    );
     expect(undoneToBase.document.features).toHaveLength(0);
     expect(canUndo(undoneToBase.history)).toBe(false);
     const refused = undoHistory(undoneToBase.history);
@@ -290,8 +308,13 @@ describe("native documents round-trip exactly", () => {
       "the empty document",
     );
     const text = nativeText(native);
-    const parsed = requireOk(parseNativeCadDocumentFromString(text), "the parse");
-    expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(text);
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "the parse",
+    );
+    expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(
+      text,
+    );
     expect(parsed.history.entries).toHaveLength(0);
     expect(parsed.history.cursor).toBe(0);
     expect(parsed.metadata).toEqual({});
@@ -307,7 +330,10 @@ describe("native documents round-trip exactly", () => {
     const history = input.history as Record<string, unknown>;
     const transactions = history.transactions as Record<string, unknown>[];
     const regeneration = input.regeneration as Record<string, unknown>;
-    const regenerationFeatures = regeneration.features as Record<string, unknown>[];
+    const regenerationFeatures = regeneration.features as Record<
+      string,
+      unknown
+    >[];
     const firstOf = (
       entries: readonly Record<string, unknown>[],
       what: string,
@@ -328,12 +354,17 @@ describe("native documents round-trip exactly", () => {
     firstOf(regenerationFeatures, "regeneration entries").unknownField = "x";
     const parsed = requireOk(parseNativeCadDocument(input), "the parse");
     // Dropped on re-serialization: the canonical form is unchanged bytes.
-    expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(text);
+    expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(
+      text,
+    );
   });
 
   it("round-trips through the byte form and rejects invalid bytes and JSON", () => {
     const bytes = encodeNativeCadDocument(buildNative());
-    const parsed = requireOk(parseNativeCadDocumentFromBytes(bytes), "the byte parse");
+    const parsed = requireOk(
+      parseNativeCadDocumentFromBytes(bytes),
+      "the byte parse",
+    );
     expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(
       nativeText(),
     );
@@ -450,7 +481,9 @@ describe("the persisted state and the replayed log must agree", () => {
       error: { code: NATIVE_FORMAT_ERROR_CODES.historyMismatch },
     });
     if (!result.ok) {
-      const error = result.error as { readonly cause?: { readonly code?: string } };
+      const error = result.error as {
+        readonly cause?: { readonly code?: string };
+      };
       expect(error.cause?.code).toBe("transaction/command-failed");
     }
   });
@@ -689,7 +722,12 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "generator counter",
       mutate: (i) => {
-        ((i.document as Record<string, unknown>).idGenerator as Record<string, unknown>).body = -1;
+        (
+          (i.document as Record<string, unknown>).idGenerator as Record<
+            string,
+            unknown
+          >
+        ).body = -1;
       },
       path: "document.idGenerator.body",
     },
@@ -703,15 +741,25 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "empty body name",
       mutate: (i) => {
-        (((i.document as Record<string, unknown>).bodies as Record<string, unknown>[])[0] as Record<string, unknown>).name = "";
+        (
+          (
+            (i.document as Record<string, unknown>).bodies as Record<
+              string,
+              unknown
+            >[]
+          )[0] as Record<string, unknown>
+        ).name = "";
       },
       path: "document.bodies[0].name",
     },
     {
       name: "reserved parameter name",
       mutate: (i) => {
-        const parameters = (i.document as Record<string, unknown>).parameters as Record<string, unknown>;
-        const entry = (parameters.parameters as Record<string, unknown>[])[0] as Record<string, unknown>;
+        const parameters = (i.document as Record<string, unknown>)
+          .parameters as Record<string, unknown>;
+        const entry = (
+          parameters.parameters as Record<string, unknown>[]
+        )[0] as Record<string, unknown>;
         entry.name = "sqrt";
       },
       path: "document.parameters.parameters[0].name",
@@ -719,8 +767,11 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "dimensional value with a wrong-dimension unit",
       mutate: (i) => {
-        const parameters = (i.document as Record<string, unknown>).parameters as Record<string, unknown>;
-        const entry = (parameters.parameters as Record<string, unknown>[])[0] as Record<string, unknown>;
+        const parameters = (i.document as Record<string, unknown>)
+          .parameters as Record<string, unknown>;
+        const entry = (
+          parameters.parameters as Record<string, unknown>[]
+        )[0] as Record<string, unknown>;
         (entry.value as Record<string, unknown>).unit = "kg";
       },
       path: "document.parameters.parameters[0].value",
@@ -728,23 +779,36 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "malformed expression AST",
       mutate: (i) => {
-        const parameters = (i.document as Record<string, unknown>).parameters as Record<string, unknown>;
-        ((parameters.parameters as Record<string, unknown>[])[0] as Record<string, unknown>).expression = { kind: "bogus" };
+        const parameters = (i.document as Record<string, unknown>)
+          .parameters as Record<string, unknown>;
+        (
+          (parameters.parameters as Record<string, unknown>[])[0] as Record<
+            string,
+            unknown
+          >
+        ).expression = { kind: "bogus" };
       },
       path: "document.parameters.parameters[0].expression",
     },
     {
       name: "nested parameter metadata value",
       mutate: (i) => {
-        const parameters = (i.document as Record<string, unknown>).parameters as Record<string, unknown>;
-        ((parameters.parameters as Record<string, unknown>[])[0] as Record<string, unknown>).metadata = { deep: {} };
+        const parameters = (i.document as Record<string, unknown>)
+          .parameters as Record<string, unknown>;
+        (
+          (parameters.parameters as Record<string, unknown>[])[0] as Record<
+            string,
+            unknown
+          >
+        ).metadata = { deep: {} };
       },
       path: "document.parameters.parameters[0].metadata.deep",
     },
     {
       name: "feature kind",
       mutate: (i) => {
-        const features = (i.document as Record<string, unknown>).features as Record<string, unknown>[];
+        const features = (i.document as Record<string, unknown>)
+          .features as Record<string, unknown>[];
         (features[0] as Record<string, unknown>).kind = "9bad";
       },
       path: "document.features[0].kind",
@@ -752,30 +816,41 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "feature input of an unknown kind",
       mutate: (i) => {
-        const features = (i.document as Record<string, unknown>).features as Record<string, unknown>[];
-        ((features[0] as Record<string, unknown>).inputs as Record<string, unknown>[])[0] = { kind: "face", bodyId: "body_plate" };
+        const features = (i.document as Record<string, unknown>)
+          .features as Record<string, unknown>[];
+        (
+          (features[0] as Record<string, unknown>).inputs as Record<
+            string,
+            unknown
+          >[]
+        )[0] = { kind: "face", bodyId: "body_plate" };
       },
       path: "document.features[0].inputs[0]",
     },
     {
       name: "feature output id",
       mutate: (i) => {
-        const features = (i.document as Record<string, unknown>).features as Record<string, unknown>[];
-        ((features[0] as Record<string, unknown>).outputs as unknown[])[0] = "nope";
+        const features = (i.document as Record<string, unknown>)
+          .features as Record<string, unknown>[];
+        ((features[0] as Record<string, unknown>).outputs as unknown[])[0] =
+          "nope";
       },
       path: "document.features[0].outputs[0]",
     },
     {
       name: "history base id",
       mutate: (i) => {
-        ((i.history as Record<string, unknown>).base as Record<string, unknown>).id = "nope";
+        (
+          (i.history as Record<string, unknown>).base as Record<string, unknown>
+        ).id = "nope";
       },
       path: "history.base.id",
     },
     {
       name: "transaction version stamp",
       mutate: (i) => {
-        const transactions = (i.history as Record<string, unknown>).transactions as Record<string, unknown>[];
+        const transactions = (i.history as Record<string, unknown>)
+          .transactions as Record<string, unknown>[];
         (transactions[0] as Record<string, unknown>).formatVersion = 2;
       },
       path: "history.transactions[0].formatVersion",
@@ -783,8 +858,10 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "unknown command type",
       mutate: (i) => {
-        const transactions = (i.history as Record<string, unknown>).transactions as Record<string, unknown>[];
-        const commands = (transactions[0] as Record<string, unknown>).commands as Record<string, unknown>[];
+        const transactions = (i.history as Record<string, unknown>)
+          .transactions as Record<string, unknown>[];
+        const commands = (transactions[0] as Record<string, unknown>)
+          .commands as Record<string, unknown>[];
         (commands[0] as Record<string, unknown>).type = "feature.explode";
       },
       path: "history.transactions[0].commands[0].type",
@@ -792,8 +869,10 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "command feature kind",
       mutate: (i) => {
-        const transactions = (i.history as Record<string, unknown>).transactions as Record<string, unknown>[];
-        const commands = (transactions[0] as Record<string, unknown>).commands as Record<string, unknown>[];
+        const transactions = (i.history as Record<string, unknown>)
+          .transactions as Record<string, unknown>[];
+        const commands = (transactions[0] as Record<string, unknown>)
+          .commands as Record<string, unknown>[];
         (commands[0] as Record<string, unknown>).kind = "9bad";
       },
       path: "history.transactions[0].commands[0].kind",
@@ -815,7 +894,8 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "unknown regeneration state",
       mutate: (i) => {
-        const features = (i.regeneration as Record<string, unknown>).features as Record<string, unknown>[];
+        const features = (i.regeneration as Record<string, unknown>)
+          .features as Record<string, unknown>[];
         (features[0] as Record<string, unknown>).state = "exploded";
       },
       path: "regeneration.features[0].state",
@@ -823,7 +903,8 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "regeneration diagnostics not an array",
       mutate: (i) => {
-        const features = (i.regeneration as Record<string, unknown>).features as Record<string, unknown>[];
+        const features = (i.regeneration as Record<string, unknown>)
+          .features as Record<string, unknown>[];
         (features[0] as Record<string, unknown>).diagnostics = "nope";
       },
       path: "regeneration.features[0].diagnostics",
@@ -831,10 +912,18 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     {
       name: "malformed regeneration diagnostic",
       mutate: (i) => {
-        const features = (i.regeneration as Record<string, unknown>).features as Record<string, unknown>[];
+        const features = (i.regeneration as Record<string, unknown>)
+          .features as Record<string, unknown>[];
         const entry = features[0] as Record<string, unknown>;
         entry.state = "failed";
-        entry.diagnostics = [{ severity: "catastrophic", code: "kernel/operation-failed", message: "x", location: { primary: "feat_plate" } }];
+        entry.diagnostics = [
+          {
+            severity: "catastrophic",
+            code: "kernel/operation-failed",
+            message: "x",
+            location: { primary: "feat_plate" },
+          },
+        ];
       },
       path: "regeneration.features[0].diagnostics[0]",
     },
@@ -858,13 +947,17 @@ describe("validateNativeCadDocument checks structure without replay", () => {
           candidate.code === NATIVE_FORMAT_ISSUE_CODES.fieldInvalid &&
           candidate.path === field.path,
       );
-      expect(match, `${field.name}: expected a field-invalid issue at ${field.path}`).toBeDefined();
+      expect(
+        match,
+        `${field.name}: expected a field-invalid issue at ${field.path}`,
+      ).toBeDefined();
     }
   });
 
   it("reports the regeneration-unknown-feature class", () => {
     const input = revived();
-    const features = (input.regeneration as Record<string, unknown>).features as Record<string, unknown>[];
+    const features = (input.regeneration as Record<string, unknown>)
+      .features as Record<string, unknown>[];
     (features[0] as Record<string, unknown>).id = "feat_ghost";
     const validation = validateNativeCadDocument(input);
     expect(validation.valid).toBe(false);
@@ -882,8 +975,12 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     (input.history as Record<string, unknown>).cursor = 99;
     const validation = validateNativeCadDocument(input);
     expect(validation.issues.length).toBeGreaterThanOrEqual(2);
-    expect(validation.issues.map((entry) => entry.path)).toContain("document.id");
-    expect(validation.issues.map((entry) => entry.path)).toContain("history.cursor");
+    expect(validation.issues.map((entry) => entry.path)).toContain(
+      "document.id",
+    );
+    expect(validation.issues.map((entry) => entry.path)).toContain(
+      "history.cursor",
+    );
   });
 
   it("does not replay: unresolvable references pass validation but fail the parse", () => {
@@ -937,9 +1034,15 @@ function assertNoDerivedData(value: unknown): void {
     if (typeof current !== "object" || current === null) return;
     for (const [key, entry] of Object.entries(current)) {
       expect(GEOMETRY_KEYS, `geometry key "${key}"`).not.toContain(key);
-      expect(SYNTHETIC_REF_KEYS, `synthetic reference key "${key}"`).not.toContain(key);
+      expect(
+        SYNTHETIC_REF_KEYS,
+        `synthetic reference key "${key}"`,
+      ).not.toContain(key);
       if (key === "kind" && typeof entry === "string") {
-        expect(SYNTHETIC_REF_KINDS.has(entry), `synthetic kind "${entry}"`).toBe(false);
+        expect(
+          SYNTHETIC_REF_KINDS.has(entry),
+          `synthetic kind "${entry}"`,
+        ).toBe(false);
       }
       walk(entry);
     }
@@ -1066,7 +1169,9 @@ describe("the optional rollback field (Phase 20)", () => {
     expect(misShapedValidation.valid).toBe(false);
     expect(
       misShapedValidation.issues.some(
-        (entry) => entry.path === "rollback" && entry.code === "native-format/field-invalid",
+        (entry) =>
+          entry.path === "rollback" &&
+          entry.code === "native-format/field-invalid",
       ),
     ).toBe(true);
   });

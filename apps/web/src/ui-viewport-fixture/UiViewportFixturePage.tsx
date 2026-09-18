@@ -208,24 +208,23 @@ function UiViewportBody(): ReactElement {
     >
       <div>
         <h1 className="text-lg font-semibold">
-          Phase 15.1–15.4 CAD Viewport + Toolbar + Model Tree + Parameter
-          Panel Fixture
+          Phase 15.1–15.4 CAD Viewport + Toolbar + Model Tree + Parameter Panel
+          Fixture
         </h1>
         <p className="text-muted-foreground text-sm">
           The plate pipeline drawn through the CadViewport component in its
           provider-driven mode: no selection props, no pick callbacks — the
           viewport mirrors the selection concern and wires picks to the armed
           SELECT tool itself. The CadToolbar above mirrors the four registered
-          tools and arms through the store. The CadModelTree beside the
-          viewport mirrors the document and selection and picks through the
-          store; its statuses come from the regeneration map derived with the
-          domain&apos;s regenerate orchestration (a negative translation
-          component fails the translate feature). The CadParameterPanel beside
-          the tree mirrors the document&apos;s parameters and applies edits as
-          parameter.set transactions through the store; expression fields are
-          validated by the domain&apos;s own parser and evaluator. The overlay
-          chip mirrors provider state; the Clear button applies the domain
-          clear operation.
+          tools and arms through the store. The CadModelTree beside the viewport
+          mirrors the document and selection and picks through the store; its
+          statuses come from the regeneration map derived with the domain&apos;s
+          regenerate orchestration (a negative translation component fails the
+          translate feature). The CadParameterPanel beside the tree mirrors the
+          document&apos;s parameters and applies edits as parameter.set
+          transactions through the store; expression fields are validated by the
+          domain&apos;s own parser and evaluator. The overlay chip mirrors
+          provider state; the Clear button applies the domain clear operation.
         </p>
       </div>
       <div className="flex flex-wrap items-start gap-6">
