@@ -4,9 +4,12 @@
  * in document order, joined five-way status per chip
  * (`valid`/`stale`/`failed`/`suppressed`/`beyond-rollback` — suppression
  * wins over parking), the rollback marker as a clickable element BETWEEN
- * chips, and a suppress toggle per chip. Both workbench pages (the Phase 15
- * composition and the Phase 26 chain) mount this ONE implementation over
- * their own documents.
+ * chips, a suppress toggle per chip, and the run counter. Both workbench
+ * pages (the Phase 15 composition and the Phase 26 chain) mount this ONE
+ * implementation over their own documents; the Phase 28 complete
+ * workbench composes the exported parts ({@link FeatureTimelineChips},
+ * {@link FeatureTimelineSummary}) so its scrolling timeline region can
+ * keep the counter outside the scrolled content.
  */
 
 import type { ReactElement } from "react";
@@ -72,22 +75,60 @@ export interface FeatureTimelineStripProps {
 }
 
 /**
- * The chips and gaps of the feature timeline: one gap before each chip and
- * one after the last, each a named rollback target; the gap the marker
- * currently occupies renders the marker and clears it when clicked. The
- * right-aligned summary names the marker's position and the last run's
- * executed/parked counts.
+ * The feature timeline strip: the one-stop composition of the timeline's
+ * two surfaces — {@link FeatureTimelineChips} (the rollback gaps and the
+ * chips) followed by {@link FeatureTimelineSummary} (the run counter).
+ * Pages that give the timeline no scrolling region of its own mount this;
+ * a page that scrolls the chain inside a narrower region composes the two
+ * parts directly, so the counter can sit OUTSIDE the scrolled content —
+ * a summary that rides the scroll region clips mid-word exactly when the
+ * chain grows long enough to matter.
  */
 export function FeatureTimelineStrip({
   entries,
-  rollback,
   executed,
+  rollback,
   onRollback,
   onToggleSuppressed,
 }: FeatureTimelineStripProps): ReactElement {
-  const parkedCount = entries.filter(
-    (entry) => entry.status === "beyond-rollback",
-  ).length;
+  return (
+    <>
+      <FeatureTimelineChips
+        entries={entries}
+        rollback={rollback}
+        onRollback={onRollback}
+        onToggleSuppressed={onToggleSuppressed}
+      />
+      <FeatureTimelineSummary
+        entries={entries}
+        executed={executed}
+        rollback={rollback}
+      />
+    </>
+  );
+}
+
+/** Props of {@link FeatureTimelineChips}: the strip without its summary. */
+export interface FeatureTimelineChipsProps {
+  readonly entries: readonly FeatureTimelineEntry[];
+  readonly rollback: FeatureRollbackPoint | null;
+  readonly onRollback: (rollback: FeatureRollbackPoint | null) => void;
+  readonly onToggleSuppressed: (id: FeatureId) => void;
+}
+
+/**
+ * The chips and gaps of the feature timeline: one gap before each chip and
+ * one after the last, each a named rollback target; the gap the marker
+ * currently occupies renders the marker and clears it when clicked. This
+ * is the surface a scrolling host region scrolls — nothing else belongs
+ * inside it.
+ */
+export function FeatureTimelineChips({
+  entries,
+  rollback,
+  onRollback,
+  onToggleSuppressed,
+}: FeatureTimelineChipsProps): ReactElement {
   const activeIndex =
     rollback === null
       ? null
@@ -133,15 +174,44 @@ export function FeatureTimelineStrip({
           onRollback(null);
         }}
       />
-      <span
-        className="text-muted-foreground ml-auto shrink-0 pl-3 font-mono text-[11px]"
-        data-testid="timeline-summary"
-      >
-        {rollback === null ? "" : "rollback · "}
-        {` ${String(executed.length)} executed`}
-        {parkedCount > 0 ? ` · ${String(parkedCount)} parked` : ""}
-      </span>
     </>
+  );
+}
+
+/** Props of {@link FeatureTimelineSummary}. */
+export interface FeatureTimelineSummaryProps {
+  /** The timeline entries, for the parked count. */
+  readonly entries: readonly FeatureTimelineEntry[];
+  /** The last run's executed sequence, for the executed count. */
+  readonly executed: readonly FeatureId[];
+  /** The current rollback marker, for the `rollback ·` prefix. */
+  readonly rollback: FeatureRollbackPoint | null;
+}
+
+/**
+ * The timeline's right-aligned summary: the marker's position and the
+ * last run's executed/parked counts as one mono counter. `shrink-0` and
+ * `whitespace-nowrap` keep it a single unclipped line wherever the host
+ * places it — inside a plain flex row (the strip's own composition) or
+ * outside a scrolling region (the complete workbench's).
+ */
+export function FeatureTimelineSummary({
+  entries,
+  executed,
+  rollback,
+}: FeatureTimelineSummaryProps): ReactElement {
+  const parkedCount = entries.filter(
+    (entry) => entry.status === "beyond-rollback",
+  ).length;
+  return (
+    <span
+      className="text-muted-foreground ml-auto shrink-0 whitespace-nowrap pl-3 font-mono text-[11px]"
+      data-testid="timeline-summary"
+    >
+      {rollback === null ? "" : "rollback · "}
+      {` ${String(executed.length)} executed`}
+      {parkedCount > 0 ? ` · ${String(parkedCount)} parked` : ""}
+    </span>
   );
 }
 
