@@ -55,7 +55,11 @@ import type {
 } from "./solver";
 import type { SketchConstraintId } from "./sketch-ids";
 
-import { dependentRowFlags, rankOf, solveLeastSquaresStep } from "./solver-math";
+import {
+  dependentRowFlags,
+  rankOf,
+  solveLeastSquaresStep,
+} from "./solver-math";
 import {
   ParameterLayout,
   compileConstraintSystem,
@@ -158,8 +162,14 @@ function gaussNewton(
   if (evaluation.rms <= REFERENCE_SOLVER_CONVERGENCE_TOLERANCE) {
     return { parameters, rms: evaluation.rms, exit: "converged" };
   }
-  for (let iteration = 0; iteration < REFERENCE_SOLVER_MAX_ITERATIONS; iteration += 1) {
-    const gradients = evaluation.gradients.map((grad) => stripFixed(grad, fixedSlots));
+  for (
+    let iteration = 0;
+    iteration < REFERENCE_SOLVER_MAX_ITERATIONS;
+    iteration += 1
+  ) {
+    const gradients = evaluation.gradients.map((grad) =>
+      stripFixed(grad, fixedSlots),
+    );
     const { step } = solveLeastSquaresStep(
       gradients,
       evaluation.residuals,
@@ -172,7 +182,11 @@ function gaussNewton(
     }
     let accepted = false;
     let scale = 1;
-    for (let backtrack = 0; backtrack <= REFERENCE_SOLVER_MAX_BACKTRACK; backtrack += 1) {
+    for (
+      let backtrack = 0;
+      backtrack <= REFERENCE_SOLVER_MAX_BACKTRACK;
+      backtrack += 1
+    ) {
       const candidate = parameters.map(
         (value, index) => value + scale * (step[index] ?? 0),
       );
@@ -291,7 +305,13 @@ export function createReferenceSketchSolver(): SketchSolver {
         };
       }
       if (result.rms <= REFERENCE_SOLVER_CONVERGENCE_TOLERANCE) {
-        return convergedResult(entities, rows, layout, fixedSlots, result.parameters);
+        return convergedResult(
+          entities,
+          rows,
+          layout,
+          fixedSlots,
+          result.parameters,
+        );
       }
       return classifyFailure(
         constraints,
@@ -382,7 +402,8 @@ function classifyFailure(
   const removable: SketchConstraintId[] = [];
   for (const candidate of constraints) {
     const remaining = rows.filter(
-      (row) => !(row.origin.type === "explicit" && row.origin.id === candidate.id),
+      (row) =>
+        !(row.origin.type === "explicit" && row.origin.id === candidate.id),
     );
     const attempt = gaussNewton(
       remaining,

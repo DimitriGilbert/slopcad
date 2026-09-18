@@ -43,9 +43,7 @@ function requireEntry(row: number[], index: number): number {
   return value;
 }
 
-function copyMatrix(
-  matrix: readonly (readonly number[])[],
-): number[][] {
+function copyMatrix(matrix: readonly (readonly number[])[]): number[][] {
   return matrix.map((row) => [...row]);
 }
 
@@ -168,7 +166,9 @@ export function solveLeastSquaresStep(
   const m = residuals.length;
   if (n === 0) return { step: [], rank: 0 };
   // A = JᵀJ (n×n), b = −Jᵀr (n).
-  const a: number[][] = Array.from({ length: n }, () => new Array<number>(n).fill(0));
+  const a: number[][] = Array.from({ length: n }, () =>
+    new Array<number>(n).fill(0),
+  );
   const b: number[] = new Array<number>(n).fill(0);
   for (let i = 0; i < m; i += 1) {
     const row = jacobianRows[i];

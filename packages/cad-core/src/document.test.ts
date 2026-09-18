@@ -111,8 +111,10 @@ function sampleDocument(): CadDocument {
     name: "width",
     value: length(25.4, "mm"),
   });
-  document = addBodyOrDie(document, { id: bodySolidId, name: "Solid" })
-    .document;
+  document = addBodyOrDie(document, {
+    id: bodySolidId,
+    name: "Solid",
+  }).document;
   document = addFeatureOrDie(document, {
     id: featSketchId,
     kind: "sketch",
@@ -135,6 +137,7 @@ describe("createDocument", () => {
       feature: 0,
       body: 0,
       reference: 0,
+      sketch: 0,
     });
     expect(Object.isFrozen(document)).toBe(true);
     expect(Object.isFrozen(document.bodies)).toBe(true);
@@ -205,9 +208,9 @@ describe("addBody", () => {
       id: createBodyId("body_5"),
       name: "Unpadded",
     });
-    expect(
-      addBodyOrDie(unpadded.document, { name: "Generated" }).body.id,
-    ).toBe(createBodyId("body_000006"));
+    expect(addBodyOrDie(unpadded.document, { name: "Generated" }).body.id).toBe(
+      createBodyId("body_000006"),
+    );
   });
 
   it("never advances the generator for a non-numeric explicit id", () => {
@@ -216,9 +219,9 @@ describe("addBody", () => {
       name: "Solid",
     }).document;
     expect(document.idGeneratorState.body).toBe(0);
-    expect(
-      addBodyOrDie(document, { name: "Generated" }).body.id,
-    ).toBe(createBodyId("body_000001"));
+    expect(addBodyOrDie(document, { name: "Generated" }).body.id).toBe(
+      createBodyId("body_000001"),
+    );
   });
 
   it("rejects a numeric payload above MAX_SAFE_INTEGER as unclaimable (2^53 repro)", () => {
@@ -300,7 +303,10 @@ describe("addBody", () => {
     expect(Object.isFrozen(boundary)).toBe(true);
     expect(
       unwrap(
-        addDocumentParameter(boundary, { name: "width", value: length(1, "mm") }),
+        addDocumentParameter(boundary, {
+          name: "width",
+          value: length(1, "mm"),
+        }),
         "addDocumentParameter",
       ).parameter.id,
     ).toBe(createParameterId("param_000001"));
@@ -541,7 +547,7 @@ describe("addFeature", () => {
         createDocument(docId),
         illTypedFeatureInput({
           kind: "extrude",
-          inputs: [{ kind: "reference", id: createReferenceId("ref_top") }],
+          inputs: [{ kind: "spline", id: "curve_top" }],
           outputs: [],
         }),
       ),
@@ -681,7 +687,9 @@ describe("updateFeature", () => {
       inputs: [{ kind: "parameter", id: widthId }],
       outputs: [],
     });
-    expect(updated.value.document.features.length).toBe(document.features.length);
+    expect(updated.value.document.features.length).toBe(
+      document.features.length,
+    );
     expect(updated.value.document.features[0]?.id).toBe(featSketchId);
     expect(updated.value.document.features[1]?.id).toBe(featExtrudeId);
     expect(updated.value.document.idGeneratorState).toEqual(
@@ -738,7 +746,9 @@ describe("updateFeature", () => {
     expectError(
       updateFeature(sampleDocument(), featSketchId, {
         kind: "sketch",
-        inputs: [{ kind: "nonsense", id: widthId } as unknown as FeatureInputRef],
+        inputs: [
+          { kind: "nonsense", id: widthId } as unknown as FeatureInputRef,
+        ],
         outputs: [],
       }),
       DOCUMENT_ERROR_CODES.inputKindInvalid,
@@ -853,6 +863,7 @@ describe("serializeCadDocument", () => {
         feature: 0,
         body: 0,
         reference: 0,
+        // The additive sketch counter is emitted only when nonzero.
       },
       parameters: {
         parameters: [
@@ -929,6 +940,7 @@ describe("serializeCadDocument", () => {
         feature: 0,
         body: 0,
         reference: 0,
+        // The additive sketch counter is emitted only when nonzero.
       },
     };
     const revived = parseCadDocument(tampered);
@@ -949,7 +961,9 @@ describe("serializeCadDocument", () => {
       id: createBodyId("body_9007199254740990"),
       name: "Claimed at 2^53 - 2",
     }).document;
-    document = addBodyOrDie(document, { name: "Generated at the cap" }).document;
+    document = addBodyOrDie(document, {
+      name: "Generated at the cap",
+    }).document;
     expect(document.bodies[1]?.id).toBe(createBodyId("body_9007199254740991"));
     expect(document.idGeneratorState.body).toBe(Number.MAX_SAFE_INTEGER);
     const serialized = serializeCadDocument(document);
@@ -972,12 +986,36 @@ describe("parseCadDocument rejects malformed input", () => {
   }
 
   it.each([
-    ["input that is not an object", "just a string", DOCUMENT_ERROR_CODES.malformed],
-    ["wrong format version", { ...valid(), formatVersion: 2 }, DOCUMENT_ERROR_CODES.versionUnsupported],
-    ["missing format version", { ...valid(), formatVersion: undefined }, DOCUMENT_ERROR_CODES.versionUnsupported],
-    ["invalid document id", { ...valid(), id: "not-a-document-id" }, DOCUMENT_ERROR_CODES.idInvalid],
-    ["missing generator state", { ...valid(), idGenerator: undefined }, DOCUMENT_ERROR_CODES.generatorStateInvalid],
-    ["generator state not an object", { ...valid(), idGenerator: 3 }, DOCUMENT_ERROR_CODES.generatorStateInvalid],
+    [
+      "input that is not an object",
+      "just a string",
+      DOCUMENT_ERROR_CODES.malformed,
+    ],
+    [
+      "wrong format version",
+      { ...valid(), formatVersion: 2 },
+      DOCUMENT_ERROR_CODES.versionUnsupported,
+    ],
+    [
+      "missing format version",
+      { ...valid(), formatVersion: undefined },
+      DOCUMENT_ERROR_CODES.versionUnsupported,
+    ],
+    [
+      "invalid document id",
+      { ...valid(), id: "not-a-document-id" },
+      DOCUMENT_ERROR_CODES.idInvalid,
+    ],
+    [
+      "missing generator state",
+      { ...valid(), idGenerator: undefined },
+      DOCUMENT_ERROR_CODES.generatorStateInvalid,
+    ],
+    [
+      "generator state not an object",
+      { ...valid(), idGenerator: 3 },
+      DOCUMENT_ERROR_CODES.generatorStateInvalid,
+    ],
     [
       "negative generator counter",
       { ...valid(), idGenerator: { ...valid().idGenerator, body: -1 } },
@@ -993,8 +1031,16 @@ describe("parseCadDocument rejects malformed input", () => {
       { ...valid(), idGenerator: { ...valid().idGenerator, feature: "2" } },
       DOCUMENT_ERROR_CODES.generatorStateInvalid,
     ],
-    ["bodies not an array", { ...valid(), bodies: "none" }, DOCUMENT_ERROR_CODES.malformed],
-    ["body with invalid id", { ...valid(), bodies: [{ id: "x", name: "S" }] }, DOCUMENT_ERROR_CODES.idInvalid],
+    [
+      "bodies not an array",
+      { ...valid(), bodies: "none" },
+      DOCUMENT_ERROR_CODES.malformed,
+    ],
+    [
+      "body with invalid id",
+      { ...valid(), bodies: [{ id: "x", name: "S" }] },
+      DOCUMENT_ERROR_CODES.idInvalid,
+    ],
     [
       "body with invalid name",
       { ...valid(), bodies: [{ id: "body_solid", name: "" }] },
@@ -1014,7 +1060,12 @@ describe("parseCadDocument rejects malformed input", () => {
         ...valid(),
         features: [
           ...valid().features,
-          { id: "feat_9007199254740992", kind: "sketch", inputs: [], outputs: [] },
+          {
+            id: "feat_9007199254740992",
+            kind: "sketch",
+            inputs: [],
+            outputs: [],
+          },
         ],
       },
       DOCUMENT_ERROR_CODES.idInvalid,
@@ -1046,7 +1097,11 @@ describe("parseCadDocument rejects malformed input", () => {
       },
       DOCUMENT_ERROR_CODES.idConflict,
     ],
-    ["features not an array", { ...valid(), features: 7 }, DOCUMENT_ERROR_CODES.malformed],
+    [
+      "features not an array",
+      { ...valid(), features: 7 },
+      DOCUMENT_ERROR_CODES.malformed,
+    ],
     [
       "feature with invalid kind",
       {
@@ -1135,7 +1190,11 @@ describe("parseCadDocument rejects malformed input", () => {
       },
       DOCUMENT_ERROR_CODES.outputUnknown,
     ],
-    ["malformed parameters", { ...valid(), parameters: "nope" }, PARAMETER_ERROR_CODES.malformed],
+    [
+      "malformed parameters",
+      { ...valid(), parameters: "nope" },
+      PARAMETER_ERROR_CODES.malformed,
+    ],
     [
       "duplicate parameter ids",
       {
@@ -1187,6 +1246,7 @@ describe("parseCadDocument rejects malformed input", () => {
       feature: 0,
       body: 2,
       reference: 0,
+      sketch: 0,
     });
   });
 });

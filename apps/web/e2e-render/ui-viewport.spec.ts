@@ -201,7 +201,9 @@ test("picks select through the tool path and the overlay clear restores the base
   const anchors = await readFaceAnchors(page, "ui-viewport");
   const top = faceWithNormal(anchors, [0, 0, 1]);
   const revision = Number(
-    await page.locator("#ui-viewport-root").getAttribute("data-applied-revision"),
+    await page
+      .locator("#ui-viewport-root")
+      .getAttribute("data-applied-revision"),
   );
   const key = faceSelectionKey(revision, top.faceIndex);
   await clickFaceAnchor(page, top.anchor, [], "ui-viewport");

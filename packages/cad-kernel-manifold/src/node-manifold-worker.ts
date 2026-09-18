@@ -19,7 +19,10 @@ import type {
   NodeWorkerChannel,
   NodeWorkerChannelExit,
 } from "@slopcad/cad-kernel";
-import { createNodeWorkerChannel, nodeWorkerThreadEcho } from "@slopcad/cad-kernel";
+import {
+  createNodeWorkerChannel,
+  nodeWorkerThreadEcho,
+} from "@slopcad/cad-kernel";
 
 /**
  * Environment variable enabling the node entry's test-only thread echo (see
@@ -68,6 +71,7 @@ export function createNodeManifoldWorkerChannel(
 ): NodeManifoldWorkerChannel {
   return createNodeWorkerChannel({
     entryUrl: new URL("./manifold-worker.node.ts", import.meta.url),
-    echoEnv: options.echoThreadId === true ? NODE_MANIFOLD_WORKER_ECHO_ENV : undefined,
+    echoEnv:
+      options.echoThreadId === true ? NODE_MANIFOLD_WORKER_ECHO_ENV : undefined,
   });
 }

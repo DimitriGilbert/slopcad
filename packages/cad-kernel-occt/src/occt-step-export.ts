@@ -350,7 +350,10 @@ export function exportStepShapes(
       }
       if (
         validated.value.schema !== undefined &&
-        !oc.Interface_Static.SetCVal("write.step.schema", validated.value.schema)
+        !oc.Interface_Static.SetCVal(
+          "write.step.schema",
+          validated.value.schema,
+        )
       ) {
         return fail(
           stepError(

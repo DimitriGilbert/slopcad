@@ -38,7 +38,9 @@ export interface OcctWorkerBootReport {
  * either field, or carrying a non-finite time, reads as `null` — the
  * fixture treats that as absent data rather than a zero cost.
  */
-export function occtWorkerBootReport(data: unknown): OcctWorkerBootReport | null {
+export function occtWorkerBootReport(
+  data: unknown,
+): OcctWorkerBootReport | null {
   if (!isPlainRecord(data)) return null;
   const bootMs = data[OCCT_WORKER_BOOT_REPORT_KEY];
   const wasmUrl = data[OCCT_WORKER_BOOT_WASM_URL_KEY];

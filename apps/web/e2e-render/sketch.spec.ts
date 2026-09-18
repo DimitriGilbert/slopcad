@@ -69,7 +69,10 @@ async function enterSketchMode(page: Page): Promise<void> {
   await page.goto("/workbench");
   await page.locator(MODE_TOGGLE).click();
   await expect(page.locator(SKETCH)).toBeVisible();
-  await expect(page.locator(ROOT)).toHaveAttribute("data-sketch-mode", "sketch");
+  await expect(page.locator(ROOT)).toHaveAttribute(
+    "data-sketch-mode",
+    "sketch",
+  );
 }
 
 /** The parsed machine surface of the sketch root. */
@@ -81,10 +84,12 @@ interface SketchSurface {
     readonly construction: boolean;
   }[];
   readonly constraints: { readonly id: string; readonly kind: string }[];
-  readonly solved: readonly {
-    readonly id: string;
-    readonly kind: string;
-  }[] | null;
+  readonly solved:
+    | readonly {
+        readonly id: string;
+        readonly kind: string;
+      }[]
+    | null;
   readonly solve: { readonly status: string; readonly dof: number | null };
   readonly history: {
     readonly canUndo: boolean;
@@ -111,13 +116,21 @@ async function readSketchSurface(page: Page): Promise<SketchSurface> {
   const commands = (await readJson("data-sketch-commands")) as unknown[];
   return {
     tool: await readRaw("data-sketch-tool"),
-    entities: (await readJson("data-sketch-entities")) as SketchSurface["entities"],
-    constraints: (await readJson("data-sketch-constraints")) as SketchSurface["constraints"],
+    entities: (await readJson(
+      "data-sketch-entities",
+    )) as SketchSurface["entities"],
+    constraints: (await readJson(
+      "data-sketch-constraints",
+    )) as SketchSurface["constraints"],
     solved: (await readJson("data-sketch-solved")) as SketchSurface["solved"],
     solve: (await readJson("data-sketch-solve")) as SketchSurface["solve"],
-    history: (await readJson("data-sketch-history")) as SketchSurface["history"],
+    history: (await readJson(
+      "data-sketch-history",
+    )) as SketchSurface["history"],
     commands: commands.length,
-    diagnostics: (await readJson("data-sketch-diagnostics")) as SketchSurface["diagnostics"],
+    diagnostics: (await readJson(
+      "data-sketch-diagnostics",
+    )) as SketchSurface["diagnostics"],
   };
 }
 
@@ -128,8 +141,7 @@ async function solvedEntity(
 ): Promise<Record<string, unknown>> {
   const raw = await page.locator(SKETCH).getAttribute("data-sketch-solved");
   const solved = JSON.parse(raw ?? "null") as
-    | readonly Record<string, unknown>[]
-    | null;
+    readonly Record<string, unknown>[] | null;
   expect(solved, "a solved surface must exist").not.toBeNull();
   const entity = solved?.find((candidate) => candidate.id === entityId);
   expect(entity, `solved entity ${entityId}`).toBeDefined();
@@ -137,11 +149,7 @@ async function solvedEntity(
 }
 
 /** Clicks the canvas at a workplane mm point. */
-async function clickCanvas(
-  page: Page,
-  x: number,
-  y: number,
-): Promise<void> {
+async function clickCanvas(page: Page, x: number, y: number): Promise<void> {
   const point = canvasPoint(x, y);
   await page.locator(CANVAS).click({ position: point });
 }
@@ -149,7 +157,10 @@ async function clickCanvas(
 /** Activates a sketch tool through the toolbar button. */
 async function activateTool(page: Page, toolId: string): Promise<void> {
   await page.locator(`[data-sketch-tool-id="${toolId}"]`).click();
-  await expect(page.locator(SKETCH)).toHaveAttribute("data-sketch-tool", toolId);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-tool",
+    toolId,
+  );
 }
 
 /**
@@ -329,13 +340,15 @@ test("a distance dimension is measured, then edited through the inspector", asyn
   // The canvas annotation reads the new value as soon as the edit commits.
   await expect(page.locator(CANVAS)).toContainText("64 mm");
   // The solver moved the geometry: the solved edge is now exactly 64 mm.
-  await expect.poll(async () => {
-    const after = await solvedEntity(page, "skent_edge-1");
-    return Math.hypot(
-      Number(after.x2) - Number(after.x1),
-      Number(after.y2) - Number(after.y1),
-    );
-  }).toBeCloseTo(64, 6);
+  await expect
+    .poll(async () => {
+      const after = await solvedEntity(page, "skent_edge-1");
+      return Math.hypot(
+        Number(after.x2) - Number(after.x1),
+        Number(after.y2) - Number(after.y1),
+      );
+    })
+    .toBeCloseTo(64, 6);
   await saveArtifact(
     "sketch-dimension.png",
     await page.locator(CANVAS).screenshot(),
@@ -455,9 +468,7 @@ test("a conflicting edit surfaces structured diagnostics and keeps last-known-go
     Number(bottom.y2) - Number(bottom.y1),
   );
   expect(length).toBeCloseTo(40, 6);
-  await expect(page.locator(CANVAS)).toContainText(
-    "constraints-conflicting",
-  );
+  await expect(page.locator(CANVAS)).toContainText("constraints-conflicting");
 
   // The ERROR baseline is byte-stable on re-entry: undo the failing edit
   // (solved again), redo it (the identical failing state, identical bytes).
@@ -514,7 +525,11 @@ test("undo/redo rolls a whole sketch session back and forward", async ({
     expect(surface.constraints).toHaveLength(expected.constraints);
     expect(surface.entities).toHaveLength(expected.entities);
   }
-  expect(surface.history).toMatchObject({ canUndo: false, cursor: 0, depth: 3 });
+  expect(surface.history).toMatchObject({
+    canUndo: false,
+    cursor: 0,
+    depth: 3,
+  });
   await expect(page.locator(SKETCH)).toHaveAttribute(
     "data-sketch-entities",
     "[]",
@@ -533,13 +548,15 @@ test("undo/redo rolls a whole sketch session back and forward", async ({
     cursor: 3,
     depth: 3,
   });
-  await expect.poll(async () => {
-    const bottom = await solvedEntity(page, "skent_edge-1");
-    return Math.hypot(
-      Number(bottom.x2) - Number(bottom.x1),
-      Number(bottom.y2) - Number(bottom.y1),
-    );
-  }).toBeCloseTo(64, 6);
+  await expect
+    .poll(async () => {
+      const bottom = await solvedEntity(page, "skent_edge-1");
+      return Math.hypot(
+        Number(bottom.x2) - Number(bottom.x1),
+        Number(bottom.y2) - Number(bottom.y1),
+      );
+    })
+    .toBeCloseTo(64, 6);
 });
 
 test("construction toggle, trim, keyboard tools, Escape, and Delete", async ({
@@ -552,13 +569,19 @@ test("construction toggle, trim, keyboard tools, Escape, and Delete", async ({
   // it. Draw the first line: (-18,-10) → (60,-10).
   await page.locator('[data-sketch-tool-id="select"]').focus();
   await page.keyboard.press("2");
-  await expect(page.locator(SKETCH)).toHaveAttribute("data-sketch-tool", "line");
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-tool",
+    "line",
+  );
   await clickCanvas(page, -18, -10);
   await clickCanvas(page, 60, -10);
   // "1" is the select tool — keyboard again, from a fresh toolbar focus.
   await page.locator('[data-sketch-tool-id="line"]').focus();
   await page.keyboard.press("1");
-  await expect(page.locator(SKETCH)).toHaveAttribute("data-sketch-tool", "select");
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-tool",
+    "select",
+  );
   await expect(page.locator(SKETCH)).toHaveAttribute(
     "data-sketch-entities",
     expect.stringContaining("skent_line-1"),
@@ -599,8 +622,7 @@ test("construction toggle, trim, keyboard tools, Escape, and Delete", async ({
   await expect
     .poll(async () => {
       const current = JSON.parse(
-        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ??
-          "[]",
+        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
       ) as { id: string; x1: number; y1: number }[];
       return current.find((entity) => entity.id === "skent_line-2")?.y1;
     })
@@ -648,13 +670,15 @@ test("full sketch workflow: rectangle, constraints, dimension edit, undo, redo",
   await expect(input).toHaveValue("40");
   await input.fill("64");
   await page.getByRole("button", { name: "Apply" }).click();
-  await expect.poll(async () => {
-    const bottom = await solvedEntity(page, "skent_edge-1");
-    return Math.hypot(
-      Number(bottom.x2) - Number(bottom.x1),
-      Number(bottom.y2) - Number(bottom.y1),
-    );
-  }).toBeCloseTo(64, 6);
+  await expect
+    .poll(async () => {
+      const bottom = await solvedEntity(page, "skent_edge-1");
+      return Math.hypot(
+        Number(bottom.x2) - Number(bottom.x1),
+        Number(bottom.y2) - Number(bottom.y1),
+      );
+    })
+    .toBeCloseTo(64, 6);
   await page.locator('[data-testid="sketch-undo"]').click();
   await page.locator('[data-testid="sketch-redo"]').click();
   await settleForCapture(page);

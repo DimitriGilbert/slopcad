@@ -201,7 +201,12 @@ async function captureRectOf(
   inflationPx = 2,
 ): Promise<CaptureRect> {
   const dpr = await page.evaluate(() => window.devicePixelRatio);
-  return locatorMaskRect(locator, captureBox, captureBox.width * dpr, inflationPx);
+  return locatorMaskRect(
+    locator,
+    captureBox,
+    captureBox.width * dpr,
+    inflationPx,
+  );
 }
 
 /**
@@ -391,7 +396,10 @@ test("a tree click selects the body, highlights the viewport, and reproduces byt
     treeDiff.unmasked,
     "the selected body row must visibly highlight",
   ).toBeGreaterThan(0);
-  expect(treeDiff.unmaskedBounds, "tree diff bounds imply bounds").not.toBeNull();
+  expect(
+    treeDiff.unmaskedBounds,
+    "tree diff bounds imply bounds",
+  ).not.toBeNull();
   if (treeDiff.unmaskedBounds === null) {
     throw new Error("unreachable: bounds checked above");
   }
@@ -471,7 +479,10 @@ test("a viewport face selection highlights the owning body row in the tree", asy
     treeDiff.unmasked,
     "the owning body row must visibly highlight",
   ).toBeGreaterThan(0);
-  expect(treeDiff.unmaskedBounds, "tree diff bounds imply bounds").not.toBeNull();
+  expect(
+    treeDiff.unmaskedBounds,
+    "tree diff bounds imply bounds",
+  ).not.toBeNull();
   if (treeDiff.unmaskedBounds === null) {
     throw new Error("unreachable: bounds checked above");
   }
@@ -514,7 +525,10 @@ test("a forced feature failure shows the failed status and its diagnostic visibl
   await expect(rotateRow(page)).toHaveAttribute("data-status", "valid");
 
   const describedBy = await translateRow(page).getAttribute("aria-describedby");
-  expect(describedBy, "the failed row must describe its failure").not.toBeNull();
+  expect(
+    describedBy,
+    "the failed row must describe its failure",
+  ).not.toBeNull();
   if (describedBy === null) {
     throw new Error("unreachable: describedBy checked above");
   }

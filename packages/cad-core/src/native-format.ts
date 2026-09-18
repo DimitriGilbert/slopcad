@@ -105,10 +105,7 @@
  * the parser's fail-fast single error.
  */
 
-import {
-  CAD_COMMAND_TYPES,
-  isCadCommandType,
-} from "./command";
+import { CAD_COMMAND_TYPES, isCadCommandType } from "./command";
 import { parseDiagnostic } from "./diagnostics";
 import {
   type CadDocument,
@@ -147,10 +144,7 @@ import {
   migrateNativeCadDocument,
   readNativeFormatVersion,
 } from "./native-migration";
-import {
-  type ParameterError,
-  type ParameterMetadataValue,
-} from "./parameter";
+import { type ParameterError, type ParameterMetadataValue } from "./parameter";
 import {
   FEATURE_REGENERATION_STATES,
   type RegenerationError,
@@ -321,9 +315,7 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 function isMetadataValue(input: unknown): input is ParameterMetadataValue {
   if (typeof input === "number") return Number.isFinite(input);
   return (
-    typeof input === "string" ||
-    typeof input === "boolean" ||
-    input === null
+    typeof input === "string" || typeof input === "boolean" || input === null
   );
 }
 
@@ -339,7 +331,10 @@ function isNonNegativeInteger(input: unknown): input is number {
  */
 function parseNativeMetadata(
   input: unknown,
-): ParseResult<Readonly<Record<string, ParameterMetadataValue>>, NativeFormatError> {
+): ParseResult<
+  Readonly<Record<string, ParameterMetadataValue>>,
+  NativeFormatError
+> {
   if (input === undefined || input === null) {
     return ok(Object.freeze({}));
   }
@@ -957,7 +952,10 @@ function validateSerializedCadDocumentShape(
     );
   }
   validateGeneratorState(input.idGenerator, `${path}.idGenerator`, issues);
-  if (!isPlainRecord(input.parameters) || !Array.isArray(input.parameters.parameters)) {
+  if (
+    !isPlainRecord(input.parameters) ||
+    !Array.isArray(input.parameters.parameters)
+  ) {
     issue(
       issues,
       NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
@@ -1397,7 +1395,7 @@ function validateRegenerationShape(
         }
         diagnosticCount += 1;
       });
-      if ((state === "failed") !== (diagnosticCount > 0)) {
+      if ((state === "failed") !== diagnosticCount > 0) {
         issue(
           issues,
           NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
@@ -1420,10 +1418,7 @@ function validateRegenerationShape(
 /** The feature ids named by a document section, when its shape allows reading them. */
 function collectFeatureIds(input: unknown): ReadonlySet<string> {
   const ids = new Set<string>();
-  if (
-    isPlainRecord(input) &&
-    Array.isArray(input.features)
-  ) {
+  if (isPlainRecord(input) && Array.isArray(input.features)) {
     for (const entry of input.features) {
       if (isPlainRecord(entry) && typeof entry.id === "string") {
         ids.add(entry.id);

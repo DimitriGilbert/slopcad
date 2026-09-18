@@ -34,7 +34,9 @@ function trackDisposals(geometry: THREE.BufferGeometry): () => number {
 }
 
 /** The single render object id of a one-object fixture projection. */
-function onlyIdOf(projection: { readonly objects: readonly { readonly id: RenderObjectId }[] }): RenderObjectId {
+function onlyIdOf(projection: {
+  readonly objects: readonly { readonly id: RenderObjectId }[];
+}): RenderObjectId {
   const object = projection.objects[0];
   if (object === undefined) {
     throw new Error("Expected exactly one render object.");
@@ -43,7 +45,9 @@ function onlyIdOf(projection: { readonly objects: readonly { readonly id: Render
 }
 
 /** The second render object id of a two-object fixture projection. */
-function secondIdOf(projection: { readonly objects: readonly { readonly id: RenderObjectId }[] }): RenderObjectId {
+function secondIdOf(projection: {
+  readonly objects: readonly { readonly id: RenderObjectId }[];
+}): RenderObjectId {
   const object = projection.objects[1];
   if (object === undefined) {
     throw new Error("Expected exactly two render objects.");
@@ -59,7 +63,10 @@ function requireBoundingBox(geometry: THREE.BufferGeometry): THREE.Box3 {
 }
 
 /** Narrows an attribute to a plain BufferAttribute (renderer geometries are never interleaved). */
-function bufferAttributeOf(geometry: THREE.BufferGeometry, name: string): THREE.BufferAttribute {
+function bufferAttributeOf(
+  geometry: THREE.BufferGeometry,
+  name: string,
+): THREE.BufferAttribute {
   const attribute = geometry.getAttribute(name);
   if (!(attribute instanceof THREE.BufferAttribute)) {
     throw new Error(`Expected a plain BufferAttribute for "${name}".`);
@@ -180,7 +187,9 @@ describe("createRenderGeometryController", () => {
     const resynced = controller.sync(second);
     expect(resynced).toBe(snapshot);
     expect(disposals()).toBe(0);
-    expect(bufferAttributeOf(geometry, "position").version).toBe(positionVersion);
+    expect(bufferAttributeOf(geometry, "position").version).toBe(
+      positionVersion,
+    );
     controller.dispose();
   });
 

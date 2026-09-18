@@ -18,7 +18,10 @@ import {
 } from "./index";
 
 const num = (value: number): ExpressionNode => ({ kind: "number", value });
-const unit = (value: number, unit: "mm" | "deg" | "in" | "mm2"): ExpressionNode => ({
+const unit = (
+  value: number,
+  unit: "mm" | "deg" | "in" | "mm2",
+): ExpressionNode => ({
   kind: "unitLiteral",
   value,
   unit,
@@ -185,7 +188,10 @@ describe("parseExpressionAst", () => {
       { kind: "unitLiteral", value: -3, unit: "mm" },
       { kind: "identifier", name: "9lives" },
       { kind: "identifier", name: "with space" },
-      { kind: "identifier", name: "x".repeat(MAX_EXPRESSION_IDENTIFIER_LENGTH + 1) },
+      {
+        kind: "identifier",
+        name: "x".repeat(MAX_EXPRESSION_IDENTIFIER_LENGTH + 1),
+      },
       { kind: "identifier" },
       { kind: "unary", operator: "+", operand: num(1) },
       { kind: "unary", operator: "-" },
@@ -240,15 +246,13 @@ describe("extractExpressionDependencies", () => {
       extractExpressionDependencies(call("max", id("a"), id("b"), id("a"))),
     ).toEqual(new Set(["a", "b"]));
     expect(
-      extractExpressionDependencies(
-        neg(bin("-", id("x"), unit(1, "mm"))),
-      ),
+      extractExpressionDependencies(neg(bin("-", id("x"), unit(1, "mm")))),
     ).toEqual(new Set(["x"]));
   });
 
   it("never treats function names as dependencies", () => {
-    expect(
-      extractExpressionDependencies(call("sqrt", id("area"))),
-    ).toEqual(new Set(["area"]));
+    expect(extractExpressionDependencies(call("sqrt", id("area")))).toEqual(
+      new Set(["area"]),
+    );
   });
 });

@@ -102,7 +102,9 @@ export type SketchCommandType = (typeof SKETCH_COMMAND_TYPES)[number];
 const COMMAND_TYPE_SET: ReadonlySet<string> = new Set(SKETCH_COMMAND_TYPES);
 
 /** Type guard for untrusted sketch command type values. */
-export function isSketchCommandType(input: unknown): input is SketchCommandType {
+export function isSketchCommandType(
+  input: unknown,
+): input is SketchCommandType {
   return typeof input === "string" && COMMAND_TYPE_SET.has(input);
 }
 
@@ -114,7 +116,8 @@ export const DIMENSIONAL_CONSTRAINT_KINDS = [
   "diameter",
 ] as const;
 
-export type DimensionalConstraintKind = (typeof DIMENSIONAL_CONSTRAINT_KINDS)[number];
+export type DimensionalConstraintKind =
+  (typeof DIMENSIONAL_CONSTRAINT_KINDS)[number];
 
 /** Type guard for the dimensional constraint kinds. */
 export function isDimensionalConstraintKind(
@@ -135,10 +138,7 @@ export function isDimensionalConstraintKind(
  * replacement value in typed.
  */
 export type DimensionalConstraint =
-  | DistanceConstraint
-  | AngleConstraint
-  | RadiusConstraint
-  | DiameterConstraint;
+  DistanceConstraint | AngleConstraint | RadiusConstraint | DiameterConstraint;
 
 /** Type guard narrowing a constraint to the dimensional shapes. */
 export function isDimensionalConstraint(
@@ -329,7 +329,10 @@ function integrityProblem(sketch: Sketch): SketchCommandError | null {
     }
   }
   for (const constraint of sketch.constraints) {
-    const diagnostic = validateConstraintReferences(constraint, sketch.entities);
+    const diagnostic = validateConstraintReferences(
+      constraint,
+      sketch.entities,
+    );
     if (diagnostic !== null) {
       return commandError(
         SKETCH_COMMAND_ERROR_CODES.integrity,
@@ -469,7 +472,9 @@ export function applySketchCommand(
       });
     }
     case "sketch.dimension.set": {
-      const constraint = indexById(sketch.constraints).get(command.constraintId);
+      const constraint = indexById(sketch.constraints).get(
+        command.constraintId,
+      );
       if (constraint === undefined) {
         return fail(
           commandError(

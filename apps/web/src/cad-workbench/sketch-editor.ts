@@ -296,7 +296,9 @@ function pickKindProblem(
     case "coincident":
     case "distance":
     case "midpoint":
-      return isLine || isCircular || isPoint ? null : "needs a point-capable entity";
+      return isLine || isCircular || isPoint
+        ? null
+        : "needs a point-capable entity";
     case "tangent":
       return isLine || isCircular ? null : "needs a line or circle/arc";
     case "radius":
@@ -341,10 +343,7 @@ function nearestPointTarget(
     readonly distance: number;
     readonly point: PointTarget["point"];
   }[] = [];
-  const consider = (
-    point: EditorPoint,
-    name: PointTarget["point"],
-  ): void => {
+  const consider = (point: EditorPoint, name: PointTarget["point"]): void => {
     candidates.push({
       distance: Math.hypot(point.x - at.x, point.y - at.y),
       point: name,
@@ -462,8 +461,18 @@ function createIdMinter(
 
 /** The angle between two lines' directions, in degrees within (0, 180). */
 function angleBetweenDegrees(
-  a: { readonly x1: number; readonly y1: number; readonly x2: number; readonly y2: number },
-  b: { readonly x1: number; readonly y1: number; readonly x2: number; readonly y2: number },
+  a: {
+    readonly x1: number;
+    readonly y1: number;
+    readonly x2: number;
+    readonly y2: number;
+  },
+  b: {
+    readonly x1: number;
+    readonly y1: number;
+    readonly x2: number;
+    readonly y2: number;
+  },
 ): number {
   const angleA = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
   const angleB = Math.atan2(b.y2 - b.y1, b.x2 - b.x1);
@@ -574,13 +583,19 @@ function segmentCircleIntersections(
 /** Whether `point` lies on the CCW arc sweep from start to end angle. */
 function withinArcSweep(
   point: EditorPoint,
-  entity: { readonly cx: number; readonly cy: number; readonly startAngle: number; readonly endAngle: number },
+  entity: {
+    readonly cx: number;
+    readonly cy: number;
+    readonly startAngle: number;
+    readonly endAngle: number;
+  },
 ): boolean {
   const angle = Math.atan2(point.y - entity.cy, point.x - entity.cx);
   const normalized = angle < 0 ? angle + Math.PI * 2 : angle;
   const sweep =
     (entity.endAngle - entity.startAngle + Math.PI * 2) % (Math.PI * 2);
-  const relative = (normalized - entity.startAngle + Math.PI * 2) % (Math.PI * 2);
+  const relative =
+    (normalized - entity.startAngle + Math.PI * 2) % (Math.PI * 2);
   return relative <= sweep;
 }
 
@@ -610,7 +625,8 @@ function trimEntity(
     nearEnd.which === "start"
       ? { x: line.x2, y: line.y2 }
       : { x: line.x1, y: line.y1 };
-  let best: { readonly point: EditorPoint; readonly distance: number } | null = null;
+  let best: { readonly point: EditorPoint; readonly distance: number } | null =
+    null;
   for (const entity of sketch.entities) {
     if (entity.id === lineId) continue;
     const candidates: readonly EditorPoint[] = (() => {
@@ -663,7 +679,9 @@ function trimEntity(
 }
 
 /** The entity ids a constraint's operands mention (view-model helper). */
-export function constraintOperandIds(constraint: SketchConstraint): readonly string[] {
+export function constraintOperandIds(
+  constraint: SketchConstraint,
+): readonly string[] {
   switch (constraint.kind) {
     case "coincident":
     case "distance":
@@ -708,7 +726,9 @@ function constraintReferences(
 export function deleteEntityCommands(
   sketch: Sketch,
   entityId: SketchEntityId,
-): { readonly commands: readonly SketchCommand[] } | { readonly problem: string } {
+):
+  | { readonly commands: readonly SketchCommand[] }
+  | { readonly problem: string } {
   const referencedByRectangle = sketch.entities.some(
     (entity) => entity.kind === "rectangle" && entity.edges.includes(entityId),
   );
@@ -742,7 +762,9 @@ function constraintCommand(
   const mint = createIdMinter(sketch);
   const first = picks[0];
   const second = picks[1];
-  const entityOf = (pick: SketchEditorPick | undefined): SketchEntity | undefined =>
+  const entityOf = (
+    pick: SketchEditorPick | undefined,
+  ): SketchEntity | undefined =>
     pick === undefined
       ? undefined
       : sketch.entities.find((entity) => entity.id === pick.entityId);
@@ -765,7 +787,11 @@ function constraintCommand(
         return createParallelConstraint(id, first.entityId, second.entityId);
       }
       if (tool === "perpendicular") {
-        return createPerpendicularConstraint(id, first.entityId, second.entityId);
+        return createPerpendicularConstraint(
+          id,
+          first.entityId,
+          second.entityId,
+        );
       }
       if (tool === "equal") {
         return createEqualConstraint(id, first.entityId, second.entityId);
@@ -797,14 +823,17 @@ function constraintCommand(
       }
       const value = measuredDimensionValue("distance", sketch, picks);
       if (value === null || !(value > 0)) return null;
-      return createDistanceConstraint(id, firstTarget, secondTarget, length(value));
+      return createDistanceConstraint(
+        id,
+        firstTarget,
+        secondTarget,
+        length(value),
+      );
     }
     case "midpoint": {
       // Picks resolve in either order: the line pick is the line, the other
       // pick is the point.
-      const linePick = picks.find(
-        (pick) => entityOf(pick)?.kind === "line",
-      );
+      const linePick = picks.find((pick) => entityOf(pick)?.kind === "line");
       const pointPick = picks.find((pick) => pick !== linePick);
       if (linePick === undefined || pointPick === undefined) return null;
       return createMidpointConstraint(
@@ -1123,19 +1152,35 @@ function canvasPick(
           transaction: {
             commands: [
               {
-                entity: createLineEntity(bottom, { x: x0, y: y0 }, { x: x1, y: y0 }),
+                entity: createLineEntity(
+                  bottom,
+                  { x: x0, y: y0 },
+                  { x: x1, y: y0 },
+                ),
                 type: "sketch.entity.create",
               },
               {
-                entity: createLineEntity(right, { x: x1, y: y0 }, { x: x1, y: y1 }),
+                entity: createLineEntity(
+                  right,
+                  { x: x1, y: y0 },
+                  { x: x1, y: y1 },
+                ),
                 type: "sketch.entity.create",
               },
               {
-                entity: createLineEntity(top, { x: x1, y: y1 }, { x: x0, y: y1 }),
+                entity: createLineEntity(
+                  top,
+                  { x: x1, y: y1 },
+                  { x: x0, y: y1 },
+                ),
                 type: "sketch.entity.create",
               },
               {
-                entity: createLineEntity(left, { x: x0, y: y1 }, { x: x0, y: y0 }),
+                entity: createLineEntity(
+                  left,
+                  { x: x0, y: y1 },
+                  { x: x0, y: y0 },
+                ),
                 type: "sketch.entity.create",
               },
               {
@@ -1210,7 +1255,8 @@ function canvasPick(
     }
     default: {
       // The constraint tools.
-      if (!isSketchConstraintKind(state.tool)) return { state, transaction: null };
+      if (!isSketchConstraintKind(state.tool))
+        return { state, transaction: null };
       const tool: SketchConstraintTool = state.tool;
       const entity = entityById(event.entityId);
       if (entity === undefined) return { state, transaction: null };
@@ -1312,7 +1358,11 @@ function canvasPick(
         return {
           state: {
             ...state,
-            status: statusOf("error", referenceProblem.message, referenceProblem.code),
+            status: statusOf(
+              "error",
+              referenceProblem.message,
+              referenceProblem.code,
+            ),
           },
           transaction: null,
         };
@@ -1322,7 +1372,10 @@ function canvasPick(
           ...state,
           picks: [],
           selectedConstraintId: built.id,
-          status: statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.constraintApplied),
+          status: statusOf(
+            "ready",
+            SKETCH_EDITOR_STATUS_TEXT.constraintApplied,
+          ),
         },
         transaction: {
           commands: [{ constraint: built, type: "sketch.constraint.create" }],
@@ -1451,7 +1504,10 @@ function dimensionAnchor(
       const entity = sketch.entities.find(
         (candidate) => candidate.id === constraint.entity,
       );
-      if (entity !== undefined && (entity.kind === "circle" || entity.kind === "arc")) {
+      if (
+        entity !== undefined &&
+        (entity.kind === "circle" || entity.kind === "arc")
+      ) {
         return { x: entity.cx, y: entity.cy };
       }
       return null;

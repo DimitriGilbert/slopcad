@@ -155,11 +155,7 @@ describe("CAD hooks without a provider", () => {
       <HistoryProbe key="history" renders={{ count: 0 }} />,
     ];
     for (const probe of probes) {
-      const view = render(
-        <Boundary>
-          {probe}
-        </Boundary>,
-      );
+      const view = render(<Boundary>{probe}</Boundary>);
       const reported = view.container.querySelector(
         '[data-testid="boundary-error"]',
       );
@@ -634,9 +630,7 @@ describe("useCadModel", () => {
           type="button"
           onClick={() =>
             model.createPrimitive({
-              parameters: [
-                { id: TEST_WIDTH_PARAMETER, value: length(20) },
-              ],
+              parameters: [{ id: TEST_WIDTH_PARAMETER, value: length(20) }],
               feature: {
                 id: createFeatureId("feat_plate"),
                 kind: "plate",

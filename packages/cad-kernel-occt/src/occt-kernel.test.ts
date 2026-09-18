@@ -13,7 +13,12 @@
  */
 
 import { beforeAll, describe, expect, it } from "vitest";
-import { type AngleValue, type LengthValue, angle, length } from "@slopcad/cad-core";
+import {
+  type AngleValue,
+  type LengthValue,
+  angle,
+  length,
+} from "@slopcad/cad-core";
 import {
   assertBoundsEqual,
   assertTessellationValid,
@@ -122,6 +127,12 @@ describe("occt kernel identity and capabilities", () => {
       exactBooleanVolumes: true,
       tightBooleanBounds: true,
       persistentTopology: true,
+      sweep: true,
+      loft: true,
+      fillet: true,
+      chamfer: true,
+      shell: true,
+      mirror: true,
     });
   });
 
@@ -471,10 +482,7 @@ describe("occt rotation", () => {
       kernel.tessellate(fixture.result),
       "tessellate",
     );
-    const after = unwrapKernelResult(
-      kernel.tessellate(rotated),
-      "tessellate",
-    );
+    const after = unwrapKernelResult(kernel.tessellate(rotated), "tessellate");
     expect(tessellationTriangleCount(after)).toBe(
       tessellationTriangleCount(before),
     );
@@ -865,8 +873,7 @@ describe("occt kernel normals", () => {
       const dx = x - boreX;
       const dy = y - boreY;
       const distance = Math.hypot(dx, dy);
-      const onWall =
-        Math.abs(distance - radius) < 1e-3 && Math.abs(nz) < 1e-6;
+      const onWall = Math.abs(distance - radius) < 1e-3 && Math.abs(nz) < 1e-6;
       if (!onWall) continue;
       const radialDot = (nx * dx + ny * dy) / distance;
       if (radialDot > -0.99) {
@@ -1020,6 +1027,105 @@ describe("occt disposal hygiene", () => {
     assertBoundsEqual(
       unwrapKernelResult(kernel.bounds(moved), "moved bounds"),
       { min: [-5, -2, 7], max: [5, 8, 17] },
+    );
+  });
+});
+
+describe("occt kernel mirror (Phase 26.9)", () => {
+  it("reflects through SetMirror(gp_Ax2) with the orientation handled by the engine", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 30, 20, 10);
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(solid, { axis: "x", offset: length(5) }),
+      "mirror",
+    );
+    // Exact BREP isometry: the mirrored box measures its exact volume
+    // (POSITIVE GProp mass — an inverted-orientation solid would measure
+    // negative) and the exactly reflected interval bounds.
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored volume"),
+      30 * 20 * 10,
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored bounds"),
+      { min: [-20, 0, 0], max: [10, 20, 10] },
+      EXACT_BOUNDS_TOLERANCE,
+    );
+    // The mesh extractor's normals stay outward on the reflected far face:
+    // x = −20 carries (−1, 0, 0).
+    const soup = unwrapKernelResult(kernel.tessellate(mirrored), "soup");
+    expect(soup.normals).toBeDefined();
+    let foundOutward = false;
+    for (let v = 0; v < soup.positions.length / 3; v += 1) {
+      if ((soup.positions[v * 3] ?? 0) < -19.999) {
+        const nx = soup.normals?.[v * 3] ?? 0;
+        const ny = soup.normals?.[v * 3 + 1] ?? 0;
+        const nz = soup.normals?.[v * 3 + 2] ?? 0;
+        if (nx < -0.99 && Math.abs(ny) < 0.01 && Math.abs(nz) < 0.01) {
+          foundOutward = true;
+        }
+      }
+    }
+    expect(foundOutward).toBe(true);
+  });
+
+  it("mirrors the plate-with-hole exactly through the curved boundary", () => {
+    const kernel = makeKernel();
+    const plate = buildPlateWithHole(kernel).result;
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(plate, { axis: "y", offset: length(0) }),
+      "mirror",
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored plate volume"),
+      unwrapKernelResult(kernel.volume(plate), "plate volume"),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored plate bounds"),
+      { min: [0, -20, 0], max: [30, 0, 10] },
+      EXACT_BOUNDS_TOLERANCE,
+    );
+  });
+
+  it("composes mirror after rotation through the shared transform vocabulary", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 20, 10, 5);
+    const rotated = unwrapKernelResult(
+      kernel.transform(solid, {
+        x: length(0),
+        y: length(0),
+        z: length(0),
+        rotation: { axis: [0, 0, 1], angle: angle(90, "deg") },
+      }),
+      "rotate",
+    );
+    // x ∈ [-10, 0], y ∈ [0, 20]; mirroring through x = 0 flips x to
+    // [0, 10] — the reflection applies to the ROTATED result, exactly.
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(rotated, { axis: "x", offset: length(0) }),
+      "mirror",
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "rotated-mirrored bounds"),
+      { min: [0, 0, 0], max: [10, 20, 5] },
+      EXACT_BOUNDS_TOLERANCE,
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "rotated-mirrored volume"),
+      20 * 10 * 5,
+      EXACT_VOLUME_TOLERANCE,
+    );
+  });
+
+  it("rejects a non-finite offset with kernel/invalid-length before any OCCT object", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 10, 10, 10);
+    expectKernelFailure(
+      kernel.mirror(solid, { axis: "z", offset: nanLength }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "NaN offset",
     );
   });
 });

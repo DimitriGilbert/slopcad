@@ -53,6 +53,11 @@ export const SKETCH_DIAGNOSTIC_CODES = {
   constraintsConflicting: "sketch/constraints-conflicting",
   constraintsUnsatisfiable: "sketch/constraints-unsatisfiable",
   solverNotConverged: "sketch/solver-not-converged",
+  profileEmpty: "sketch/profile-empty",
+  profileOpenChain: "sketch/profile-open-chain",
+  profileDegenerate: "sketch/profile-degenerate",
+  profileSelfIntersecting: "sketch/profile-self-intersecting",
+  profileMultipleLoops: "sketch/profile-multiple-loops",
 } as const;
 
 export type SketchDiagnosticCode =
@@ -106,9 +111,7 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 function isDataValue(input: unknown): input is SketchDiagnosticDataValue {
   if (typeof input === "number") return Number.isFinite(input);
   return (
-    typeof input === "string" ||
-    typeof input === "boolean" ||
-    input === null
+    typeof input === "string" || typeof input === "boolean" || input === null
   );
 }
 
@@ -137,7 +140,8 @@ export function parseSketchDiagnostic(
       ok: false,
       error: {
         code: "sketch/diagnostic-malformed",
-        message: "Sketch diagnostic severity must be one of: info, warning, error.",
+        message:
+          "Sketch diagnostic severity must be one of: info, warning, error.",
         input,
       },
     };
@@ -195,7 +199,8 @@ export function parseSketchDiagnostic(
           ok: false,
           error: {
             code: "sketch/diagnostic-malformed",
-            message: "Sketch diagnostic location.related must be an array of sketch ids.",
+            message:
+              "Sketch diagnostic location.related must be an array of sketch ids.",
             input,
           },
         };

@@ -40,7 +40,10 @@ import {
   MANIFOLD_KERNEL_CAPABILITIES,
   manifoldKernelFromRuntime,
 } from "./manifold-kernel";
-import { type ManifoldRuntime, createManifoldRuntime } from "./manifold-runtime";
+import {
+  type ManifoldRuntime,
+  createManifoldRuntime,
+} from "./manifold-runtime";
 
 let runtime: ManifoldRuntime;
 
@@ -98,6 +101,12 @@ describe("manifold kernel identity and capabilities", () => {
       exactBooleanVolumes: true,
       tightBooleanBounds: true,
       persistentTopology: false,
+      sweep: false,
+      loft: false,
+      fillet: false,
+      chamfer: false,
+      shell: false,
+      mirror: true,
     });
   });
 
@@ -170,7 +179,11 @@ describe("manifold semantic fixtures", () => {
       kernel.volume(fixture.result),
       "plate volume",
     );
-    assertVolumeClose(resultVolume, fixture.analyticVolumeMm3, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(
+      resultVolume,
+      fixture.analyticVolumeMm3,
+      CURVED_VOLUME_TOLERANCE,
+    );
     assertVolumeLessThan(
       resultVolume,
       unwrapKernelResult(kernel.volume(fixture.plate), "solid plate volume"),
@@ -295,8 +308,7 @@ describe("manifold kernel normals", () => {
       const dx = x - boreX;
       const dy = y - boreY;
       const distance = Math.hypot(dx, dy);
-      const onWall =
-        Math.abs(distance - radius) < 1e-3 && Math.abs(nz) < 1e-9;
+      const onWall = Math.abs(distance - radius) < 1e-3 && Math.abs(nz) < 1e-9;
       if (!onWall) continue;
       const radialDot = (nx * dx + ny * dy) / distance;
       if (radialDot > -0.99) {
@@ -567,6 +579,86 @@ describe("manifold disposal hygiene", () => {
     assertBoundsEqual(
       unwrapKernelResult(kernel.bounds(union), "union bounds"),
       { min: [0, 0, 0], max: [40, 10, 10] },
+    );
+  });
+});
+
+describe("manifold kernel mirror (Phase 26.9)", () => {
+  it("re-winds the reflected mesh itself: crease-aware normals point outward", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 30, 20, 10);
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(solid, { axis: "x", offset: length(5) }),
+      "mirror",
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored bounds"),
+      { min: [-20, 0, 0], max: [10, 20, 10] },
+    );
+    // The engine accepted the negative-determinant matrix and corrected
+    // the winding internally: the box's planar x = −20 face carries its
+    // crease-split normal exactly (−1, 0, 0). A vertex-only reflection
+    // would keep (1, 0, 0) there and shade inside-out.
+    const soup = unwrapKernelResult(kernel.tessellate(mirrored), "soup");
+    expect(soup.normals).toBeDefined();
+    let foundOutward = false;
+    for (let v = 0; v < soup.positions.length / 3; v += 1) {
+      if ((soup.positions[v * 3] ?? 0) < -19.999) {
+        const nx = soup.normals?.[v * 3] ?? 0;
+        const ny = soup.normals?.[v * 3 + 1] ?? 0;
+        const nz = soup.normals?.[v * 3 + 2] ?? 0;
+        if (nx < -0.99 && Math.abs(ny) < 0.01 && Math.abs(nz) < 0.01) {
+          foundOutward = true;
+        }
+      }
+    }
+    expect(foundOutward).toBe(true);
+  });
+
+  it("mirrors a boolean result exactly: the plate-with-hole keeps its measured volume", () => {
+    const kernel = makeKernel();
+    const plate = buildPlateWithHole(kernel).result;
+    const mirrored = unwrapKernelResult(
+      kernel.mirror(plate, { axis: "z", offset: length(-4) }),
+      "mirror",
+    );
+    // Manifold volumes are exact on the boundary mesh; the reflection is
+    // an isometry, so the mirrored plate measures the same value to float
+    // noise — no re-quantization happens anywhere.
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(mirrored), "mirrored plate volume"),
+      unwrapKernelResult(kernel.volume(plate), "plate volume"),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(mirrored), "mirrored plate bounds"),
+      { min: [0, 0, -18], max: [30, 20, -8] },
+    );
+  });
+
+  it("rejects a non-finite offset with kernel/invalid-length before the engine", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 10, 10, 10);
+    expectKernelFailure(
+      kernel.mirror(solid, { axis: "y", offset: nanLength }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "NaN offset",
+    );
+    expectKernelFailure(
+      kernel.mirror(solid, { axis: "y", offset: infiniteLength }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "infinite offset",
+    );
+  });
+
+  it("declines a foreign handle with kernel/solid-not-owned", () => {
+    const mine = makeKernel();
+    const other = makeKernel();
+    const foreign = box(other, 10, 10, 10);
+    expectKernelFailure(
+      mine.mirror(foreign, { axis: "x", offset: length(0) }),
+      KERNEL_ERROR_CODES.solidNotOwned,
+      "foreign mirror target",
     );
   });
 });

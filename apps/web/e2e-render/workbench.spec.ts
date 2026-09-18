@@ -187,7 +187,9 @@ async function readSurface(page: Page): Promise<WorkbenchSurface> {
   return {
     holeDiameter: await raw("data-hole-diameter"),
     history: parse(await raw("data-history")) as HistorySurface,
-    commandLog: parse(await raw("data-command-log")) as readonly CommandLogEntry[],
+    commandLog: parse(
+      await raw("data-command-log"),
+    ) as readonly CommandLogEntry[],
     selection: parse(await raw("data-selection")) as readonly unknown[],
     toolId: await raw("data-tool-id"),
     toolPhase: await raw("data-tool-phase"),
@@ -245,7 +247,9 @@ async function waitForToolPhase(page: Page, phase: string): Promise<void> {
   await page.waitForFunction(
     ({ want, root }) => {
       const element = document.getElementById(root);
-      return element !== null && element.getAttribute("data-tool-phase") === want;
+      return (
+        element !== null && element.getAttribute("data-tool-phase") === want
+      );
     },
     { want: phase, root: ROOT },
   );
@@ -391,7 +395,10 @@ test("selecting the plate in the tree highlights the viewport byte-reproducibly"
   // rendered frame and the feature row stays unselected.
   await treeNode(page, PLATE_KEY).click();
   await waitForTreeSelectionFrame(page, PLATE_KEY, ROOT);
-  await expect(treeNode(page, PLATE_KEY)).toHaveAttribute("data-selected", "true");
+  await expect(treeNode(page, PLATE_KEY)).toHaveAttribute(
+    "data-selected",
+    "true",
+  );
   await expect(treeNode(page, FEATURE_KEY)).toHaveAttribute(
     "data-selected",
     "false",
@@ -429,7 +436,10 @@ test("selecting the plate in the tree highlights the viewport byte-reproducibly"
   await waitForToolPhase(page, "cancelled");
   await page.locator(CANVAS).click({ position: { x: 8, y: 8 } });
   await waitForTreeSelectionFrame(page, "", ROOT);
-  await expect(treeNode(page, PLATE_KEY)).toHaveAttribute("data-selected", "false");
+  await expect(treeNode(page, PLATE_KEY)).toHaveAttribute(
+    "data-selected",
+    "false",
+  );
   await settleForCapture(page);
   const clearedCanvas = await page.locator(CANVAS).screenshot();
   expect(
@@ -699,7 +709,10 @@ test("the toolbar's tools act on the viewport: measure completes, select drives 
   expect(completion.toolId).toBe("measure");
   expect(completion.detail.kind).toBe("measurement");
   const distance = completion.detail.distance;
-  expect(distance, "a measurement completion carries its distance").toBeDefined();
+  expect(
+    distance,
+    "a measurement completion carries its distance",
+  ).toBeDefined();
   if (distance === undefined) {
     throw new Error("unreachable: distance checked above");
   }
@@ -734,7 +747,10 @@ test("the toolbar's tools act on the viewport: measure completes, select drives 
   await page.keyboard.press("Escape");
   await waitForToolPhase(page, "cancelled");
   await page.locator(CANVAS).click({ position: { x: 8, y: 8 } });
-  await expect(page.locator(`#${ROOT}`)).toHaveAttribute("data-selection", "[]");
+  await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
+    "data-selection",
+    "[]",
+  );
 });
 
 test("the full authoring workflow is captured on video", async ({ page }) => {

@@ -38,6 +38,60 @@
  *   matrix (rotation first, about the world origin) composed with
  *   `translate` (second, world space) — the exact application order the
  *   contract's `TransformInput` pins.
+ * - `mirror` (Phase 26.9) maps to the same `geom3.transform` with the
+ *   reflection matrix (−1 on the plane axis's diagonal, 2·offset
+ *   translation); the library's lazy chain runs `poly3.transform`, which
+ *   REVERSES polygon vertex order under `mat4.isMirroring` (probed), so
+ *   the reflected facets stay outward with no adapter-side polygon
+ *   surgery.
+ * - `extrude` (Phase 26.1): the profile loop is tessellated at the shared
+ *   mesh-kernel deflection ({@link PROFILE_MAX_SEGMENT_ANGLE_RAD} —
+ *   straight polygons exact, curved segments in the measured ≈0.166%
+ *   chord-fan band derived there), wound CCW, converted to a `geom2`
+ *   polygon, and `extrudeLinear`-ed to `z ∈ [0, h]` (negative direction
+ *   pre-translates the prism to `[−h, 0]`); the placement composes the
+ *   same `fromRotation` matrix with a translate as `transform` does.
+ * - `revolve` (Phase 26.2): the loop is tessellated in the axis frame at
+ *   the shared deflection, mirrored to the non-negative radial side (the
+ *   axis-crossing rejection guarantees one-sidedness; a mirrored profile
+ *   sweeps the identical solid), wound CCW in (radial, axial), and
+ *   `extrudeRotate`-ed about +z with the profile starting at +x sweeping
+ *   CCW (probed) at 63 pinned segments; one composed placement
+ *   (`revolutionMeshTransform`) rebases the engine frame onto the
+ *   contract's axis frame before the placement rotation/translation
+ *   apply. Axis crossing is rejected BEFORE the library because
+ *   `extrudeRotate`'s only overflow behaviour silently caps points beyond
+ *   the axis to it — a crossing contour would build a different,
+ *   undiagnosed solid (probed in the library source).
+ * - `sweep` (Phase 26.3): the profile chord polygon is transported to the
+ *   path's stations (the contract's shared fixed-binormal frames at the
+ *   shared angular deflection — G1 joints' shared stations deduplicated)
+ *   and lofted between them with `extrudeFromSlices` (`repair: false` —
+ *   the transported polygons are exact and need no repair; caps on open
+ *   paths, none on closed rings, whose wall sequence closes itself).
+ *   Fidelity: a straight path is a two-station loft — the exact prism;
+ *   curved paths carry the documented station band (the same
+ *   deflection-derived class as the chord tessellation), judged in the
+ *   contract suite's curved tolerance.
+ * - `loft` (Phase 26.4): each section's CCW chord polygon becomes one
+ *   slice at its station z (placed by the same rotation-then-translation
+ *   composition), and `extrudeFromSlices` walls consecutive slices
+ *   vertex-to-vertex (the repair pass is a no-op — the slices are exact
+ *   closed polygons) with caps at both ends — the contract's
+ *   index-correspondence morph. The collection validation (member
+ *   validity, station ordering, vertex-count compatibility) rejects
+ *   BEFORE any JSCAD call: the library's own mismatch fallback
+ *   repartitions unequal slices to the LCM edge count with even mid-edge
+ *   splits (probed in the library source) — its own invented
+ *   correspondence, silently a different solid than any other kernel's,
+ *   exactly what the compatibility rule forbids. Fidelity: flat-triangle
+ *   walls are exact wherever the ruled walls are planar (probed: prism,
+ *   frustum, and multi-station fixtures agree with the fake kernel to
+ *   1e-12; curved members carry the chord band); a SKEW wall (the twisted
+ *   fixture) cannot flatten, so the solid built is the flat-wall one —
+ *   probed 2000/3 mm³ vs the ruled model's Simpson value on the
+ *   10mm-side, 45°-twist, 10mm-height square fixture — the per-kernel
+ *   divergence the contract documents.
  *
  * ## Discretization and honesty of measures
  *
@@ -100,8 +154,10 @@ import type * as ModelingTypes from "@jscad/modeling";
 import { type LengthValue, fail, ok, valueIn } from "@slopcad/cad-core";
 import {
   type BoxInput,
+  type ChamferInput,
   type ConeInput,
   type CylinderInput,
+  type FilletInput,
   type GeometryKernel,
   type KernelBounds,
   type KernelCapabilities,
@@ -110,9 +166,40 @@ import {
   type KernelResult,
   KERNEL_ERROR_CODES,
   type KernelSolid,
+  type MirrorInput,
+  type ProfileExtrudeInput,
+  type ProfileLoftInput,
+  type ProfileRevolveInput,
+  type ProfileSweepInput,
+  type ShellInput,
   type SphereInput,
   type Tessellation,
   type TransformInput,
+} from "@slopcad/cad-kernel";
+import {
+  applyMatrix3,
+  axisAngleMatrix,
+  decomposeSweepPath,
+  loftSectionPolygons,
+  loftSectionsProblem,
+  loftStations,
+  normalizeRevolveAxis,
+  polygonSignedArea,
+  PROFILE_MAX_SEGMENT_ANGLE_RAD,
+  type ProfilePoint2,
+  profileLoopProblem,
+  revolveCrossesAxis,
+  revolvePappusVolume,
+  revolveSignedExtremes,
+  revolutionMeshTransform,
+  sweepPathClosed,
+  sweepPathProblem,
+  sweepPathSelfIntersects,
+  sweepPieceStations,
+  sweepProfileArcAxisCrossing,
+  type SweepStation,
+  tessellateProfileLoop,
+  tessellateRevolveProfile,
 } from "@slopcad/cad-kernel";
 import { createSolidTag } from "@slopcad/cad-kernel";
 
@@ -126,15 +213,32 @@ import { JSCAD_BACKEND_ID } from "./jscad-backend";
 type JscadGeom3 = ModelingTypes.geometries.geom3.Geom3;
 
 /** The library namespaces the adapter uses, destructured once. */
-const { booleans, geometries, measurements, maths, primitives, transforms } =
-  modeling;
-const { union: jscadUnion, subtract: jscadSubtract, intersect: jscadIntersect } =
-  booleans;
+const {
+  booleans,
+  extrusions,
+  geometries,
+  measurements,
+  maths,
+  primitives,
+  transforms,
+} = modeling;
+const {
+  union: jscadUnion,
+  subtract: jscadSubtract,
+  intersect: jscadIntersect,
+} = booleans;
+const { extrudeLinear, extrudeFromSlices, extrudeRotate, slice } = extrusions;
 const { cuboid, cylinder, cylinderElliptic, sphere } = primitives;
 const { translate } = transforms;
 const { measureBoundingBox, measureVolume } = measurements;
 const { toPolygons, transform: transformGeom3 } = geometries.geom3;
-const { create: mat4Create, fromRotation } = maths.mat4;
+const { fromPoints: geom2FromPoints } = geometries.geom2;
+const { fromPoints: sliceFromPoints } = slice;
+const {
+  create: mat4Create,
+  fromRotation,
+  fromValues: mat4FromValues,
+} = maths.mat4;
 
 /**
  * Curved-primitive discretization: the number of segments per full
@@ -145,6 +249,19 @@ const { create: mat4Create, fromRotation } = maths.mat4;
  * −0.64% — all inside the contract suite's 5% curved tolerance.
  */
 export const JSCAD_CURVED_SEGMENTS = 32;
+
+/**
+ * Rotate-extrude segments `revolve` pins for a full turn: the shared
+ * mesh-kernel deflection ceiling (2π / {@link PROFILE_MAX_SEGMENT_ANGLE_RAD}
+ * = 63 chords, Δ ≈ 0.0997 rad) — the library scales this count
+ * proportionally for partial sweeps. Measured on the probe fixture
+ * (radius-25, height-30 axis-touching rectangle): full-turn volume deficit
+ * 0.1657%, the same inscribed-chord band `extrude` documents; partial
+ * sweeps carry the proportional chord/cap band of the same deflection.
+ */
+export const JSCAD_REVOLVE_SEGMENTS = Math.ceil(
+  (Math.PI * 2) / PROFILE_MAX_SEGMENT_ANGLE_RAD,
+);
 
 /**
  * Capabilities of the JSCAD kernel, honestly declared (the fake kernel's
@@ -167,6 +284,39 @@ export const JSCAD_CURVED_SEGMENTS = 32;
  *   polygon sets (probed exactly tight on union/intersect/plate).
  * - Topology is a polygon set rebuilt by every BSP boolean; there is no
  *   BREP and no face/edge identity to keep (`persistentTopology: false`).
+ * - The Phase 26.3 sweep lofts the transported profile polygon between
+ *   path stations at the shared deflection (`extrudeFromSlices`) — the
+ *   same fidelity class as the chord tessellation: straight paths exact
+ *   (a two-station loft is the prism), curved paths inside the documented
+ *   station band (`sweep: true`).
+ * - The Phase 26.4 loft walls the sections' CCW chord polygons between
+ *   their stations with the same `extrudeFromSlices` machinery — the
+ *   contract's vertex-morph exactly where the ruled walls are planar
+ *   (validated counts; probed agreeing with the fake kernel to 1e-12),
+ *   with the skew-wall (twisted) divergence documented per kernel
+ *   (`loft: true`).
+ * - The Phase 26.5 fillet is NOT implemented (`fillet: false`): the engine's
+ *   operation set carries no fillet (probed — `@jscad/modeling` ships
+ *   booleans, extrusions, hulls, minkowski, expansions, and modifiers; an
+ *   expansions-based corner approximation would be an adapter-side mesh
+ *   hack, not a kernel operation, and would not meet the exact-volume
+ *   fixtures). Every `fillet` call answers the structured
+ *   `kernel/unsupported-operation` — the Manifold twin's convention.
+ * - The Phase 26.6 chamfer is NOT implemented (`chamfer: false`), the
+ *   fillet's verdict verbatim: the engine's operation set carries no
+ *   chamfer either (the same probe), so every `chamfer` call answers the
+ *   structured `kernel/unsupported-operation`.
+ * - The Phase 26.7 shell is NOT implemented (`shell: false`): the engine's
+ *   operation set carries no hollowing (probed — `expandShell` is the
+ *   outward Minkowski expansion's internal helper: no face selection, no
+ *   wall building), so every `shell` call answers the structured
+ *   `kernel/unsupported-operation`.
+ * - The Phase 26.9 mirror IS implemented (`mirror: true`): the library's
+ *   own `geom3.transform` of the reflection matrix, whose lazy chain runs
+ *   `poly3.transform` — that helper reverses polygon vertex order under
+ *   `mat4.isMirroring`, keeping the reflected facets outward (probed:
+ *   `measureVolume` stays positive and the min-face facet normal points
+ *   away), so the adapter only passes the matrix.
  */
 export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -177,6 +327,12 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   exactBooleanVolumes: false,
   tightBooleanBounds: true,
   persistentTopology: false,
+  sweep: true,
+  loft: true,
+  fillet: false,
+  chamfer: false,
+  shell: false,
+  mirror: true,
 });
 
 /**
@@ -364,7 +520,11 @@ export function createJscadKernel(): GeometryKernel {
         const b = polygon.vertices[v];
         const c = polygon.vertices[v + 1];
         if (a === undefined || b === undefined || c === undefined) continue;
-        indices.push(positions.length / 3, positions.length / 3 + 1, positions.length / 3 + 2);
+        indices.push(
+          positions.length / 3,
+          positions.length / 3 + 1,
+          positions.length / 3 + 2,
+        );
         positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
       }
     }
@@ -457,6 +617,569 @@ export function createJscadKernel(): GeometryKernel {
       });
     },
 
+    extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
+      return run("extrude", KERNEL_ERROR_CODES.invalidProfile, () => {
+        const height = positiveLength(input.height, "height", "extrude");
+        if (!height.ok) return fail(height.error);
+        // Placement validation before any JSCAD work (same thresholds and
+        // codes as transform's rotation path).
+        const axis = rotationAxisIn(input.placement.rotation.axis, "extrude");
+        if (!axis.ok) return fail(axis.error);
+        let angleRad: number;
+        try {
+          angleRad = valueIn(input.placement.rotation.angle, "rad");
+        } catch {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "extrude rejected a rotation whose angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        if (!Number.isFinite(angleRad)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "extrude rejected a rotation whose angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const tx = valueIn(input.placement.translation.x, "mm");
+        const ty = valueIn(input.placement.translation.y, "mm");
+        const tz = valueIn(input.placement.translation.z, "mm");
+        // Structural profile checks: closure, degeneracy (documented probe
+        // scope), and the face floor.
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `extrude rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        const polygon: readonly ProfilePoint2[] = tessellateProfileLoop(
+          input.loop,
+        );
+        if (
+          polygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(polygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "extrude rejected the profile loop: it is degenerate (fewer than three distinct vertices or zero enclosed area).",
+            ),
+          );
+        }
+        // CCW winding keeps extrudeLinear's side normals outward.
+        const ccw =
+          polygonSignedArea(polygon) > 0 ? polygon : [...polygon].reverse();
+        const footprint = geom2FromPoints(
+          ccw.map((point) => [point.x, point.y] as [number, number]),
+        );
+        const prism = extrudeLinear({ height: height.value }, footprint);
+        const oriented =
+          input.direction === -1
+            ? translate([0, 0, -height.value], prism)
+            : prism;
+        const matrix = fromRotation(mat4Create(), angleRad, [
+          axis.value[0],
+          axis.value[1],
+          axis.value[2],
+        ]);
+        const placed = transformGeom3(matrix, oriented);
+        return ok(wrapSolid(translate([tx, ty, tz], placed)));
+      });
+    },
+
+    revolve(input: ProfileRevolveInput): KernelResult<KernelSolid> {
+      return run("revolve", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // The shared 26.2 validation battery, before any JSCAD work: the
+        // sweep-angle domain, the axis direction, the placement, the
+        // structural profile soundness, and the axis-crossing rejection.
+        // The crossing rejection is LOAD-BEARING for JSCAD specifically:
+        // `extrudeRotate`'s only overflow behaviour silently CAPS points
+        // beyond the axis to it (probed in the library source) — a
+        // crossing contour would build a different, undiagnosed solid.
+        let sweep: number;
+        try {
+          sweep = valueIn(input.angle, "rad");
+        } catch {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "revolve rejected the sweep angle: its magnitude is not a finite number.",
+            ),
+          );
+        }
+        if (!Number.isFinite(sweep)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "revolve rejected the sweep angle: its magnitude is not a finite number.",
+            ),
+          );
+        }
+        if (!(sweep > 0) || sweep > Math.PI * 2) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidSweepAngle,
+              `revolve rejected sweep angle ${String(sweep)} rad: the domain is (0, 2π] — zero sweeps no material, beyond a full turn double-covers it.`,
+            ),
+          );
+        }
+        const frame = normalizeRevolveAxis(input.axis);
+        if (frame === null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `revolve rejected an axis along [${String(input.axis.direction[0])}, ${String(input.axis.direction[1])}]: the direction must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const angle = valueIn(input.placement.rotation.angle, "rad");
+        if (!Number.isFinite(angle)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "revolve rejected the placement rotation: its angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const axis = input.placement.rotation.axis;
+        const axisSquared =
+          axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2];
+        if (
+          !Number.isFinite(axisSquared) ||
+          axisSquared === 0 ||
+          !Number.isFinite(axis[0]) ||
+          !Number.isFinite(axis[1]) ||
+          !Number.isFinite(axis[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `revolve rejected a rotation about [${String(axis[0])}, ${String(axis[1])}, ${String(axis[2])}]: the axis must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const translation: [number, number, number] = [
+          valueIn(input.placement.translation.x, "mm"),
+          valueIn(input.placement.translation.y, "mm"),
+          valueIn(input.placement.translation.z, "mm"),
+        ];
+        if (!translation.every((component) => Number.isFinite(component))) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "revolve rejected the placement translation: components must be finite lengths.",
+            ),
+          );
+        }
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `revolve rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        if (revolveCrossesAxis(input.loop, frame)) {
+          const extremes = revolveSignedExtremes(input.loop, frame);
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.profileAxisCrossing,
+              `revolve rejected the profile loop: it crosses the revolve axis (signed distances span [${String(extremes.min)}, ${String(extremes.max)}] mm). Move the profile fully to one side; touching the axis is allowed.`,
+            ),
+          );
+        }
+        // The chord polygon in axis coordinates (x = axial, y = signed
+        // radial) at the shared deflection, mirrored to the non-negative
+        // radial side `extrudeRotate` revolves (one-sidedness guaranteed by
+        // the crossing rejection; the mirror sweeps the identical solid).
+        const axisPolygon = tessellateRevolveProfile(input.loop, frame);
+        if (
+          axisPolygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(axisPolygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "revolve rejected the profile loop: it is degenerate (fewer than three distinct vertices, zero area, or an unclosed boundary).",
+            ),
+          );
+        }
+        if (!(revolvePappusVolume(axisPolygon, sweep) > 1e-9)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "revolve rejected the profile loop: it encloses no material away from the axis, so the sweep has zero volume.",
+            ),
+          );
+        }
+        const positiveSide =
+          Math.min(...axisPolygon.map((point) => point.y)) >= 0;
+        // Winding: CCW in the (radial, axial) plane (the mirroring above
+        // can flip it).
+        const mirrored = axisPolygon.map((point) => ({
+          x: Math.abs(point.y),
+          y: point.x,
+        }));
+        const ordered =
+          polygonSignedArea(mirrored) > 0 ? mirrored : [...mirrored].reverse();
+        const footprint = geom2FromPoints(
+          ordered.map((point) => [point.x, point.y] as [number, number]),
+        );
+        // `extrudeRotate` spins the footprint about the +z axis with the
+        // profile starting at +x and sweeping counter-clockwise (probed);
+        // 63 segments pins the shared mesh-kernel deflection for a full
+        // turn, scaled proportionally by the library for partial sweeps.
+        const revolved = extrudeRotate(
+          {
+            angle: sweep,
+            overflow: "cap",
+            segments: JSCAD_REVOLVE_SEGMENTS,
+            startAngle: 0,
+          },
+          footprint,
+        );
+        // One composed placement: the engine frame rebases onto the
+        // contract's axis frame, then the contract placement applies
+        // (rotation first about the world origin, translation second).
+        const placement = revolutionMeshTransform(
+          frame,
+          positiveSide,
+          axisAngleMatrix(axis, angle),
+          translation,
+        );
+        const r = placement.rotation;
+        const t = placement.translation;
+        // JSCAD mat4 is column-major.
+        const matrix = mat4FromValues(
+          r[0]?.[0] ?? 0,
+          r[1]?.[0] ?? 0,
+          r[2]?.[0] ?? 0,
+          0,
+          r[0]?.[1] ?? 0,
+          r[1]?.[1] ?? 0,
+          r[2]?.[1] ?? 0,
+          0,
+          r[0]?.[2] ?? 0,
+          r[1]?.[2] ?? 0,
+          r[2]?.[2] ?? 0,
+          0,
+          t[0],
+          t[1],
+          t[2],
+          1,
+        );
+        return ok(wrapSolid(transformGeom3(matrix, revolved)));
+      });
+    },
+
+    sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {
+      return run("sweep", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // The shared 26.3 validation battery, before any JSCAD work — the
+        // same structured rejections every implementing kernel runs.
+        const rotationAxis = rotationAxisIn(
+          input.placement.rotation.axis,
+          "sweep",
+        );
+        if (!rotationAxis.ok) return fail(rotationAxis.error);
+        let angleRad: number;
+        try {
+          angleRad = valueIn(input.placement.rotation.angle, "rad");
+        } catch {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "sweep rejected a rotation whose angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        if (!Number.isFinite(angleRad)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "sweep rejected a rotation whose angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const tx = valueIn(input.placement.translation.x, "mm");
+        const ty = valueIn(input.placement.translation.y, "mm");
+        const tz = valueIn(input.placement.translation.z, "mm");
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweep rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        const polygon: readonly ProfilePoint2[] = tessellateProfileLoop(
+          input.loop,
+        );
+        if (
+          polygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(polygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "sweep rejected the profile loop: it is degenerate (fewer than three distinct vertices or zero enclosed area).",
+            ),
+          );
+        }
+        const pathProblem = sweepPathProblem(input.path);
+        if (pathProblem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidPath,
+              `sweep rejected the path: ${pathProblem}.`,
+            ),
+          );
+        }
+        if (sweepPathSelfIntersects(input.path)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.pathSelfIntersecting,
+              "sweep rejected the path: it crosses itself (detected on the path's chord polyline). A self-crossing spine sweeps an undefined solid.",
+            ),
+          );
+        }
+        const crossing = sweepProfileArcAxisCrossing(input.loop, input.path);
+        if (crossing !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sweepSelfIntersecting,
+              `sweep rejected the input: the profile crosses an arc segment's centre axis at u = ${String(crossing.uAxis)} mm (signed distances span [${String(crossing.min)}, ${String(crossing.max)}]) — the tube would pinch through the bend. Move the profile fully to one side of every bend axis; touching is allowed.`,
+            ),
+          );
+        }
+        // The station loft: the CCW chord polygon transported to every
+        // path station (the shared fixed-binormal frames at the shared
+        // angular deflection), placed in world space, and lofted by
+        // JSCAD's extrudeFromSlices. Consecutive pieces share their joint
+        // station exactly (G1) — deduplicated so the loft never walls
+        // across a zero-length gap. A closed ring caps nothing: its wall
+        // sequence closes on itself; an open path caps both ends.
+        const ccw =
+          polygonSignedArea(polygon) > 0 ? polygon : [...polygon].reverse();
+        const closed = sweepPathClosed(input.path);
+        const stations: SweepStation[] = [];
+        for (const piece of decomposeSweepPath(input.path)) {
+          for (const station of sweepPieceStations(piece)) {
+            const last = stations[stations.length - 1];
+            const shared =
+              last !== undefined &&
+              Math.hypot(
+                last.position.x - station.position.x,
+                last.position.z - station.position.z,
+              ) <= 1e-9 &&
+              Math.hypot(last.e1.x - station.e1.x, last.e1.z - station.e1.z) <=
+                1e-9;
+            if (shared) continue;
+            stations.push(station);
+          }
+        }
+        const rotation = axisAngleMatrix(rotationAxis.value, angleRad);
+        const slices = stations.map((station) =>
+          sliceFromPoints(
+            ccw.map((vertex) => {
+              const world = applyMatrix3(rotation, [
+                station.position.x + vertex.x * station.e1.x,
+                vertex.y,
+                station.position.z + vertex.x * station.e1.z,
+              ]);
+              return [world[0] + tx, world[1] + ty, world[2] + tz] as [
+                number,
+                number,
+                number,
+              ];
+            }),
+          ),
+        );
+        const swept = extrudeFromSlices(
+          {
+            numberOfSlices: slices.length,
+            capStart: !closed,
+            capEnd: !closed,
+            close: false,
+            callback: (_progress: number, index: number) => {
+              const stationSlice = slices[index];
+              if (stationSlice === undefined) {
+                throw new Error(
+                  "Invariant violation: station slices exist for every index extrudeFromSlices requests.",
+                );
+              }
+              return stationSlice;
+            },
+          },
+          // The library's default repair pass runs on this base only, and
+          // is a no-op on the station slices: each is an exact closed
+          // polygon (a rigid image of the CCW chord polygon), so there is
+          // no gap to mend and no vertex to merge.
+          slices[0],
+        );
+        return ok(wrapSolid(swept));
+      });
+    },
+
+    loft(input: ProfileLoftInput): KernelResult<KernelSolid> {
+      return run("loft", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // The shared 26.4 validation battery, before any JSCAD work — the
+        // same structured rejections every implementing kernel runs. The
+        // vertex-count rule is LOAD-BEARING for JSCAD specifically: with
+        // unequal slices the library's extrudeWalls silently repartitions
+        // both to the LCM edge count (even mid-edge splits, probed in the
+        // library source) — its own invented correspondence, a different
+        // solid than the contract's index morph, with no diagnostic.
+        const rotationAxis = rotationAxisIn(
+          input.placement.rotation.axis,
+          "loft",
+        );
+        if (!rotationAxis.ok) return fail(rotationAxis.error);
+        let angleRad: number;
+        try {
+          angleRad = valueIn(input.placement.rotation.angle, "rad");
+        } catch {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "loft rejected a rotation whose angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        if (!Number.isFinite(angleRad)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "loft rejected a rotation whose angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const tx = valueIn(input.placement.translation.x, "mm");
+        const ty = valueIn(input.placement.translation.y, "mm");
+        const tz = valueIn(input.placement.translation.z, "mm");
+        const problem = loftSectionsProblem(input.sections);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              problem.code,
+              `loft rejected the section collection: ${problem.message}.`,
+            ),
+          );
+        }
+        // The section loft: each CCW chord polygon becomes one slice at
+        // its station z (placed by the rotation-then-translation
+        // composition), and extrudeFromSlices walls consecutive slices
+        // vertex-to-vertex — the contract's index morph exactly — with
+        // caps at both ends. Validated equal counts mean the library's
+        // repartition fallback never runs.
+        const rotation = axisAngleMatrix(rotationAxis.value, angleRad);
+        const stations = loftStations(input.sections);
+        const polygons = loftSectionPolygons(input.sections);
+        const slices = polygons.map((polygon, index) =>
+          sliceFromPoints(
+            polygon.map((vertex) => {
+              const z = stations[index] ?? 0;
+              const world = applyMatrix3(rotation, [vertex.x, vertex.y, z]);
+              return [world[0] + tx, world[1] + ty, world[2] + tz] as [
+                number,
+                number,
+                number,
+              ];
+            }),
+          ),
+        );
+        const firstSlice = slices[0];
+        if (firstSlice === undefined) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              "loft rejected the section collection: at least 2 are required.",
+            ),
+          );
+        }
+        const lofted = extrudeFromSlices(
+          {
+            numberOfSlices: slices.length,
+            capStart: true,
+            capEnd: true,
+            close: false,
+            callback: (_progress: number, index: number) => {
+              const sectionSlice = slices[index];
+              if (sectionSlice === undefined) {
+                throw new Error(
+                  "Invariant violation: section slices exist for every index extrudeFromSlices requests.",
+                );
+              }
+              return sectionSlice;
+            },
+          },
+          // The library's default repair pass runs on this base only, and
+          // the callback ignores the base entirely (each slice is an exact
+          // closed polygon — a rigid image of a CCW chord polygon at its
+          // station), so there is no gap to mend and no vertex to merge.
+          firstSlice,
+        );
+        return ok(wrapSolid(lofted));
+      });
+    },
+
+    fillet(input: FilletInput): KernelResult<KernelSolid> {
+      // The Manifold twin's convention (Phase 26.5): the engine has no
+      // fillet operation (probed — `@jscad/modeling` ships booleans,
+      // extrusions, hulls, minkowski, expansions, and modifiers; there is
+      // no edge selection and no rounding surface anywhere in the API), so
+      // every `fillet` call — valid input or not — answers with the
+      // structured unsupported code. An expansions-based corner
+      // approximation would be adapter-side meshing that misses the exact
+      // fixtures, not a kernel operation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "fillet is unsupported by the JSCAD kernel: the engine's operation set carries no fillet (booleans, extrusions, hulls, minkowski, expansions, modifiers only — probed), and the adapter does not approximate corner rounding in its place.",
+        ),
+      );
+    },
+
+    chamfer(input: ChamferInput): KernelResult<KernelSolid> {
+      // The fillet verdict, verbatim (Phase 26.6): the engine's operation
+      // set carries no chamfer either (the same probe), so every `chamfer`
+      // call — valid input or not — answers with the structured unsupported
+      // code. A boolean-cut corner approximation would be adapter-side
+      // meshing, not a kernel operation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "chamfer is unsupported by the JSCAD kernel: the engine's operation set carries no chamfer (the fillet verdict verbatim — booleans, extrusions, hulls, minkowski, expansions, modifiers only — probed), and the adapter does not approximate corner cutting in its place.",
+        ),
+      );
+    },
+
+    shell(input: ShellInput): KernelResult<KernelSolid> {
+      // The convention's FACE-addressed application (Phase 26.7): the
+      // engine's operation set carries no hollowing (probed — `expandShell`
+      // is the outward Minkowski expansion's internal helper: no face
+      // selection, no wall building), so every `shell` call — valid input
+      // or not — answers with the structured unsupported code. Subtraction-
+      // based wall carving would be adapter-side meshing, not a kernel
+      // operation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "shell is unsupported by the JSCAD kernel: the engine's operation set carries no hollowing (expandShell is the outward expansion's internal helper — no face selection, no wall building — probed), and the adapter does not approximate wall carving in its place.",
+        ),
+      );
+    },
+
     union(operands: readonly KernelSolid[]): KernelResult<KernelSolid> {
       return run("union", KERNEL_ERROR_CODES.invalidOperands, () => {
         const geometriesIn = operandsOf(operands, 2, "union");
@@ -528,16 +1251,91 @@ export function createJscadKernel(): GeometryKernel {
               ),
             );
           }
-          const matrix = fromRotation(
-            mat4Create(),
-            angleRad,
-            [axis.value[0], axis.value[1], axis.value[2]],
-          );
+          const matrix = fromRotation(mat4Create(), angleRad, [
+            axis.value[0],
+            axis.value[1],
+            axis.value[2],
+          ]);
           // Rotation first: about the world-origin axis (probed exact on
           // the quarter-turned box), then the world-space translation.
           placed = transformGeom3(matrix, placed);
         }
         return ok(wrapSolid(translate([x, y, z], placed)));
+      });
+    },
+
+    mirror(solid: KernelSolid, input: MirrorInput): KernelResult<KernelSolid> {
+      return run("mirror", KERNEL_ERROR_CODES.invalidLength, () => {
+        const geometry = geometryOf(solid, "mirror");
+        if (!geometry.ok) return fail(geometry.error);
+        // Every finite offset is a legal plane position (zero and negative
+        // offsets included); valueIn's non-finite throw normalizes into
+        // the shared invalid-length failure above.
+        const offset = valueIn(input.offset, "mm");
+        // Column-major reflection matrix (JSCAD's convention): −1 on the
+        // axis's diagonal, the axis translation 2·offset. The lazy
+        // transform chain's poly3.transform reverses vertex order under
+        // mat4.isMirroring (probed), keeping the facets outward — the
+        // adapter does no polygon surgery itself.
+        const doubled = 2 * offset;
+        const matrix =
+          input.axis === "x"
+            ? mat4FromValues(
+                -1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                doubled,
+                0,
+                0,
+                1,
+              )
+            : input.axis === "y"
+              ? mat4FromValues(
+                  1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  -1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  doubled,
+                  0,
+                  1,
+                )
+              : mat4FromValues(
+                  1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  0,
+                  0,
+                  0,
+                  -1,
+                  0,
+                  0,
+                  0,
+                  doubled,
+                  1,
+                );
+        return ok(wrapSolid(transformGeom3(matrix, geometry.value)));
       });
     },
 

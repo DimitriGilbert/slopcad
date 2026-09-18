@@ -12,7 +12,10 @@ import { beforeAll, describe } from "vitest";
 import { defineKernelContractSuite } from "@slopcad/cad-kernel";
 
 import { manifoldKernelFromRuntime } from "./manifold-kernel";
-import { type ManifoldRuntime, createManifoldRuntime } from "./manifold-runtime";
+import {
+  type ManifoldRuntime,
+  createManifoldRuntime,
+} from "./manifold-runtime";
 
 describe("manifold kernel contract", () => {
   let runtime: ManifoldRuntime;

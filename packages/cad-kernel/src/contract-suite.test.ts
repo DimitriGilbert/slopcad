@@ -24,7 +24,12 @@ import {
   CURVED_VOLUME_TOLERANCE,
   defineKernelContractSuite,
 } from "./contract-suite";
-import { createFakeKernel, FAKE_KERNEL_CAPABILITIES } from "./fake-kernel";
+import {
+  createFakeKernel,
+  FAKE_BOX_EDGE_TABLE,
+  FAKE_BOX_FACE_TABLE,
+  FAKE_KERNEL_CAPABILITIES,
+} from "./fake-kernel";
 
 /** A capability profile with both branched flags off; tests override one. */
 const BASE_CAPABILITIES: KernelCapabilities = {
@@ -36,6 +41,12 @@ const BASE_CAPABILITIES: KernelCapabilities = {
   exactBooleanVolumes: false,
   tightBooleanBounds: false,
   persistentTopology: false,
+  sweep: false,
+  loft: false,
+  fillet: false,
+  chamfer: false,
+  shell: false,
+  mirror: false,
 };
 
 function capabilities(
@@ -169,4 +180,25 @@ function createConservativeBoundsStubKernel(): GeometryKernel {
 defineKernelContractSuite(
   createConservativeBoundsStubKernel,
   "conservative-bounds stub",
+  {
+    // The stub delegates to the fake kernel, whose fillet and chamfer pass
+    // through — the fake's own documented box-edge hint applies verbatim.
+    fillet: {
+      cornerEdge: [FAKE_BOX_EDGE_TABLE.length - 1],
+      oppositeEdges: [
+        FAKE_BOX_EDGE_TABLE.length - 1,
+        FAKE_BOX_EDGE_TABLE.length - 4,
+      ],
+    },
+    chamfer: {
+      cornerEdge: [FAKE_BOX_EDGE_TABLE.length - 1],
+      oppositeEdges: [
+        FAKE_BOX_EDGE_TABLE.length - 1,
+        FAKE_BOX_EDGE_TABLE.length - 4,
+      ],
+    },
+    // The stub's shell also passes through to the fake kernel — the
+    // fake's own box-face hint applies verbatim.
+    shell: { openFace: FAKE_BOX_FACE_TABLE.length - 1 },
+  },
 );

@@ -64,8 +64,7 @@ const boxInput = { width: mm(2), depth: mm(3), height: mm(4) };
 
 const boxComputation = (
   context: ComputationContext,
-): Promise<WorkerSolidResult> =>
-  context.request("solid.createBox", boxInput);
+): Promise<WorkerSolidResult> => context.request("solid.createBox", boxInput);
 
 const failingComputation = (
   context: ComputationContext,
@@ -184,9 +183,13 @@ function deliverBoxResult(
   n: number,
 ): void {
   harness.deliver(
-    createWorkerSuccessResponse(boxRequestOf(harness, updateIndex), "solid.createBox", {
-      solid: solidIdOf(n),
-    }),
+    createWorkerSuccessResponse(
+      boxRequestOf(harness, updateIndex),
+      "solid.createBox",
+      {
+        solid: solidIdOf(n),
+      },
+    ),
   );
 }
 
@@ -384,7 +387,9 @@ describe("coordinator over hand-delivered resolutions", () => {
       (message) => message.operation === "solid.createSphere",
     );
     if (sphereRequest === undefined) {
-      throw new Error("Expected the failing computation's request on the wire.");
+      throw new Error(
+        "Expected the failing computation's request on the wire.",
+      );
     }
     harness.deliver(
       createWorkerErrorResponse(
@@ -414,7 +419,9 @@ describe("coordinator over hand-delivered resolutions", () => {
       (message) => message.operation === "solid.createSphere",
     );
     if (sphereRequest === undefined) {
-      throw new Error("Expected the failing computation's request on the wire.");
+      throw new Error(
+        "Expected the failing computation's request on the wire.",
+      );
     }
     harness.deliver(
       createWorkerErrorResponse(
@@ -437,7 +444,9 @@ describe("coordinator over hand-delivered resolutions", () => {
 
   it("releases a late mint that lands after the computation failed and settled — no late-mint leak", async () => {
     const harness = handDeliveryHarness("complete");
-    const pipeline = (context: ComputationContext): Promise<WorkerSolidResult> => {
+    const pipeline = (
+      context: ComputationContext,
+    ): Promise<WorkerSolidResult> => {
       // A trailing request the computation never awaits: its success is still
       // in flight when the failure settles the update — whatever it mints
       // will arrive for a computation that is already sealed.
@@ -533,7 +542,9 @@ describe("coordinator over hand-delivered resolutions", () => {
     expect(harness.coordinator.disposalFailures()).toHaveLength(1);
     const refusal = harness.coordinator.disposalFailures()[0];
     expect(refusal?.error.code).toBe("worker/operation-failed");
-    expect(refusal?.error.data).toEqual({ kernelCode: "kernel/solid-not-owned" });
+    expect(refusal?.error.data).toEqual({
+      kernelCode: "kernel/solid-not-owned",
+    });
     expect(harness.coordinator.visible()?.state.solid).toBe(solidIdOf(2));
     expect(harness.coordinator.drops()).toEqual([]);
   });
@@ -643,7 +654,9 @@ describe("coordinator over the real in-memory session", () => {
     for (let index = 0; index < 9; index += 1) {
       const outcome = settled[index];
       if (outcome === undefined) {
-        throw new Error(`Expected a settled outcome at index ${String(index)}.`);
+        throw new Error(
+          `Expected a settled outcome at index ${String(index)}.`,
+        );
       }
       const dropped = droppedOf(outcome);
       expect(dropped.failure?.error.code).toBe("worker/cancelled");

@@ -6,7 +6,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { angle, length, type ParseResult } from "@slopcad/cad-core";
+import {
+  angle,
+  createBodyId,
+  length,
+  type ParseResult,
+} from "@slopcad/cad-core";
 
 import { decodeBase64Strict, encodeBase64 } from "./worker-base64";
 import {
@@ -51,6 +56,8 @@ describe("operation vocabulary", () => {
       "solid.createSphere",
       "solid.createCylinder",
       "solid.createCone",
+      "solid.extrude",
+      "solid.revolve",
       "solid.union",
       "solid.subtract",
       "solid.intersect",
@@ -59,6 +66,11 @@ describe("operation vocabulary", () => {
       "solid.volume",
       "solid.tessellate",
       "solid.dispose",
+      "solid.fillet",
+      "solid.chamfer",
+      "solid.shell",
+      "solid.mirror",
+      "solid.topology",
       "step.import",
       "step.export",
       "brep.import",
@@ -119,6 +131,110 @@ describe("operation input round-trips", () => {
     expectInputRoundTrip("solid.dispose", { solid: solidA });
   });
 
+  it("round-trips the fillet input with its snapshot ordinals and radius", () => {
+    expectInputRoundTrip("solid.fillet", {
+      target: solidA,
+      edges: [0, 2],
+      radius: mm(3),
+    });
+  });
+
+  it("round-trips the chamfer input with its snapshot ordinals and distance", () => {
+    expectInputRoundTrip("solid.chamfer", {
+      target: solidA,
+      edges: [0, 2],
+      distance: mm(3),
+    });
+  });
+
+  it("round-trips the shell input with its snapshot face ordinals and thickness", () => {
+    expectInputRoundTrip("solid.shell", {
+      target: solidA,
+      faces: [5],
+      thickness: mm(2),
+    });
+  });
+
+  it("round-trips the mirror input with its plane axis and offset", () => {
+    expectInputRoundTrip("solid.mirror", {
+      target: solidA,
+      axis: "x",
+      offset: mm(-7),
+    });
+  });
+
+  it("round-trips the topology input with its labeled body and regeneration", () => {
+    expectInputRoundTrip("solid.topology", {
+      solid: solidA,
+      bodyId: createBodyId("body_fillet_fixture"),
+      regeneration: 7,
+    });
+  });
+
+  it("round-trips the topology result snapshot verbatim", () => {
+    const snapshot = {
+      kernelId: "opencascade",
+      persistentTopology: true,
+      identitySchemas: ["occt-shape-hash-v1"],
+      bodyId: createBodyId("body_fillet_fixture"),
+      regeneration: 7,
+      entities: [
+        {
+          kind: "edge",
+          ordinal: 5,
+          identity: {
+            kernelId: "opencascade",
+            schema: "occt-shape-hash-v1",
+            data: { hash: 123456789 },
+          },
+          geometry: {
+            lengthMm: 20,
+            centroidAbsoluteMm: [30, 10, 0],
+            centroidRelativeMm: [15, 0, -5],
+          },
+        },
+        {
+          kind: "vertex",
+          ordinal: 0,
+          identity: null,
+          geometry: {
+            pointAbsoluteMm: [30, 20, 10],
+            pointRelativeMm: [15, 10, 5],
+          },
+        },
+      ],
+    } as const;
+    const wire = serializeWorkerOperationResult("solid.topology", {
+      snapshot,
+    });
+    const parsed = parseWorkerOperationResult("solid.topology", wire);
+    expect(parsed).toEqual({ ok: true, value: { snapshot } });
+  });
+
+  it("rejects a topology result whose entity carries a malformed geometry", () => {
+    const failure = parseWorkerOperationResult("solid.topology", {
+      kernelId: "opencascade",
+      persistentTopology: true,
+      identitySchemas: ["occt-shape-hash-v1"],
+      bodyId: "body_fillet_fixture",
+      regeneration: 0,
+      entities: [
+        {
+          kind: "edge",
+          ordinal: 0,
+          identity: null,
+          geometry: { lengthMm: "long" },
+        },
+      ],
+    });
+    expect(failure.ok).toBe(false);
+    if (!failure.ok) {
+      expect(failure.error.code).toBe(
+        WORKER_PROTOCOL_ERROR_CODES.malformedPayload,
+      );
+    }
+  });
+
   it("round-trips a transform carrying the rotation extension", () => {
     // A non-unit axis survives verbatim; the angle rides canonical radians
     // (the same convention the mm lengths follow — non-canonical units are
@@ -132,6 +248,23 @@ describe("operation input round-trips", () => {
       solid: solidB,
       translation: { x: mm(0), y: mm(0), z: mm(0) },
       rotation: { axis: [-0.3, 0.4, Math.SQRT2], angle: angle(1) },
+    });
+  });
+
+  it("round-trips the revolve input with its axis line and sweep angle", () => {
+    expectInputRoundTrip("solid.revolve", {
+      loop: [
+        { kind: "line", start: [0, 0], end: [30, 0] },
+        { kind: "line", start: [30, 0], end: [30, 25] },
+        { kind: "line", start: [30, 25], end: [0, 25] },
+        { kind: "line", start: [0, 25], end: [0, 0] },
+      ],
+      axis: { point: [3, -4], direction: [0.6, 0.8] },
+      angle: angle(Math.PI / 2),
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: mm(1), y: mm(2), z: mm(3) },
+      },
     });
   });
 
@@ -418,6 +551,8 @@ describe("operation input validation", () => {
         topRadius: "pointy",
         height: 2,
       },
+      "solid.extrude": { loop: "not-a-loop", height: 2, direction: 1 },
+      "solid.revolve": { loop: [], axis: { point: [0, 0] }, angle: 2 },
       "solid.union": { operands: [solidA, 5] },
       "solid.subtract": { target: "not-an-id", tools: [] },
       "solid.intersect": { operands: {} },
@@ -429,6 +564,15 @@ describe("operation input validation", () => {
       "solid.volume": {},
       "solid.tessellate": { solid: "wsol_" },
       "solid.dispose": { solid: [] },
+      "solid.fillet": { target: solidA, edges: "edges", radius: 2 },
+      "solid.chamfer": { target: solidA, edges: "edges", distance: 2 },
+      "solid.shell": { target: solidA, faces: "faces", thickness: 2 },
+      "solid.mirror": { target: solidA, axis: "diagonal", offset: 2 },
+      "solid.topology": {
+        solid: solidA,
+        bodyId: "not-a-body",
+        regeneration: -1,
+      },
       "step.import": { data: "not!!!valid!!!base64" },
       "step.export": { solids: [solidA, "not-an-id"] },
       "brep.import": { data: 42 },

@@ -79,7 +79,9 @@ function sampleDocument(): CadDocument {
 
 function roundTripTransaction(transaction: CadTransaction): CadTransaction {
   return unwrap(
-    parseTransaction(JSON.parse(JSON.stringify(serializeTransaction(transaction)))),
+    parseTransaction(
+      JSON.parse(JSON.stringify(serializeTransaction(transaction))),
+    ),
     "parseTransaction",
   );
 }
@@ -87,7 +89,10 @@ function roundTripTransaction(transaction: CadTransaction): CadTransaction {
 describe("applyTransaction", () => {
   it("commits an empty transaction to the identical document value", () => {
     const document = sampleDocument();
-    const applied = unwrap(applyTransaction(document, { commands: [] }), "applyTransaction");
+    const applied = unwrap(
+      applyTransaction(document, { commands: [] }),
+      "applyTransaction",
+    );
     expect(applied).toBe(document);
   });
 
@@ -111,7 +116,9 @@ describe("applyTransaction", () => {
     );
     expect(applied.features.length).toBe(1);
     expect(applied.features[0]?.kind).toBe("sketch-2");
-    expect(getDocumentParameter(applied, widthId)?.value).toEqual(length(12.7, "mm"));
+    expect(getDocumentParameter(applied, widthId)?.value).toEqual(
+      length(12.7, "mm"),
+    );
   });
 
   it("supports chaining updates onto a feature created in the same transaction", () => {
@@ -133,13 +140,17 @@ describe("applyTransaction", () => {
         },
       ],
     };
-    const applied = unwrap(applyTransaction(sampleDocument(), transaction), "applyTransaction");
+    const applied = unwrap(
+      applyTransaction(sampleDocument(), transaction),
+      "applyTransaction",
+    );
     const feature = getFeature(applied, featPadId);
     expect(feature?.kind).toBe("pad-deep");
     expect(feature?.inputs).toEqual([{ kind: "parameter", id: widthId }]);
   });
 
-  it("fails atomically: first structured error, its index, and an untouched document", () => {    const document = sampleDocument();
+  it("fails atomically: first structured error, its index, and an untouched document", () => {
+    const document = sampleDocument();
     const before = JSON.stringify(serializeCadDocument(document));
     const failing: CadTransaction = {
       commands: [
@@ -157,7 +168,9 @@ describe("applyTransaction", () => {
     // Atomicity: the never-mutated input document is unchanged — no partial
     // effect of the first two commands is visible on it.
     expect(JSON.stringify(serializeCadDocument(document))).toBe(before);
-    expect(getDocumentParameter(document, widthId)?.value).toEqual(length(25.4, "mm"));
+    expect(getDocumentParameter(document, widthId)?.value).toEqual(
+      length(25.4, "mm"),
+    );
     expect(getFeature(document, featSketchId)?.id).toBe(featSketchId);
   });
 
@@ -201,15 +214,22 @@ describe("applyTransaction", () => {
     };
     const document = sampleDocument();
     const rebuilt = unwrap(
-      parseCadDocument(JSON.parse(JSON.stringify(serializeCadDocument(document)))),
+      parseCadDocument(
+        JSON.parse(JSON.stringify(serializeCadDocument(document))),
+      ),
       "parseCadDocument",
     );
-    const direct = unwrap(applyTransaction(document, transaction), "applyTransaction");
+    const direct = unwrap(
+      applyTransaction(document, transaction),
+      "applyTransaction",
+    );
     const replayed = unwrap(
       applyTransaction(rebuilt, roundTripTransaction(transaction)),
       "applyTransaction",
     );
-    expect(serializeCadDocument(replayed)).toEqual(serializeCadDocument(direct));
+    expect(serializeCadDocument(replayed)).toEqual(
+      serializeCadDocument(direct),
+    );
   });
 });
 
@@ -302,11 +322,16 @@ describe("serializeTransaction / parseTransaction", () => {
       ],
     };
     const document = sampleDocument();
-    const direct = unwrap(applyTransaction(document, transaction), "applyTransaction");
+    const direct = unwrap(
+      applyTransaction(document, transaction),
+      "applyTransaction",
+    );
     const replayed = unwrap(
       applyTransaction(document, roundTripTransaction(transaction)),
       "applyTransaction",
     );
-    expect(serializeCadDocument(replayed)).toEqual(serializeCadDocument(direct));
+    expect(serializeCadDocument(replayed)).toEqual(
+      serializeCadDocument(direct),
+    );
   });
 });

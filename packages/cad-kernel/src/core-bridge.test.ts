@@ -14,6 +14,7 @@ import {
   addDocumentParameter,
   addFeature,
   angle,
+  applyCommand,
   type BodyId,
   type CadDocument,
   createBodyId,
@@ -21,8 +22,11 @@ import {
   createDocumentId,
   createFeatureId,
   createParameterId,
+  createSketchDocumentId,
   DIAGNOSTIC_CODES,
   type Diagnostic,
+  dimensionless,
+  fail,
   type FeatureGraphError,
   type FeatureId,
   type FeatureRecordInput,
@@ -39,8 +43,13 @@ import {
   BRIDGE_FEATURE_KINDS,
   createKernelFeatureExecutor,
   type KernelExecutionBridge,
+  type KernelExecutorContext,
 } from "./core-bridge";
-import { type GeometryKernel, type KernelSolid } from "./contract";
+import {
+  type GeometryKernel,
+  KERNEL_ERROR_CODES,
+  type KernelSolid,
+} from "./contract";
 import {
   assertBoundsEqual,
   assertTessellationValid,
@@ -170,8 +179,20 @@ function runBridge(
   document: CadDocument,
   kernel: GeometryKernel = createFakeKernel(),
   bodies: ReadonlyMap<BodyId, KernelSolid> = new Map(),
+  profiles: KernelExecutorContext["profiles"] = () => ({
+    ok: false,
+    error: {
+      code: "sketch/profile-empty",
+      message: "no resolver in this fixture",
+      input: null,
+    },
+  }),
 ): BridgeRun {
-  const bridge = createKernelFeatureExecutor(kernel, { document, bodies });
+  const bridge = createKernelFeatureExecutor(kernel, {
+    document,
+    bodies,
+    profiles,
+  });
   const run = regenerate({
     features: document.features,
     states: initialRegenerationStates(document.features),
@@ -514,6 +535,298 @@ describe("bridge feature kinds", () => {
       "subtract",
       "intersect",
       "translate",
+      "extrude",
+      "revolve",
+      "fillet",
+      "chamfer",
+      "shell",
+      "patternLinear",
+      "patternCircular",
+      "mirror",
+      "hole",
     ]);
   });
 });
+
+describe("core bridge mirror (Phase 26.9)", () => {
+  const pPlane = createParameterId("param_mirror_plane");
+  const pMirrorOffset = createParameterId("param_mirror_offset");
+  const bBox = createBodyId("body_mirror_box");
+  const bMirror = createBodyId("body_mirror_result");
+  const fBox = createFeatureId("feat_mirror_box");
+  const fMirror = createFeatureId("feat_mirror");
+
+  /**
+   * Builds the box → mirror document. The box spans x ∈ [0, 30],
+   * y ∈ [0, 20], z ∈ [0, 10]; the mirror reflects it through the plane
+   * its two parameters select.
+   */
+  function buildMirrorDocument(plane: number, offsetMm: number): CadDocument {
+    let document = createDocument(createDocumentId("doc_bridge_mirror"));
+    for (const [id, name, value] of [
+      [pWidth, "width", length(30)],
+      [pDepth, "depth", length(20)],
+      [pHeight, "height", length(10)],
+      [pPlane, "plane", dimensionless(plane)],
+      [pMirrorOffset, "offset", length(offsetMm)],
+    ] as const) {
+      const added = addDocumentParameter(document, { id, name, value });
+      if (!added.ok) throw new Error(added.error.message);
+      document = added.value.document;
+    }
+    for (const body of [
+      { id: bBox, name: "box" },
+      { id: bMirror, name: "mirror" },
+    ]) {
+      const added = addBody(document, body);
+      if (!added.ok) throw new Error(added.error.message);
+      document = added.value.document;
+    }
+    for (const feature of [
+      {
+        id: fBox,
+        kind: "box",
+        inputs: [
+          { kind: "parameter", id: pWidth },
+          { kind: "parameter", id: pDepth },
+          { kind: "parameter", id: pHeight },
+        ],
+        outputs: [bBox],
+      },
+      {
+        id: fMirror,
+        kind: "mirror",
+        inputs: [
+          { kind: "feature", id: fBox },
+          { kind: "parameter", id: pPlane },
+          { kind: "parameter", id: pMirrorOffset },
+        ],
+        outputs: [bMirror],
+      },
+    ] as const satisfies readonly FeatureRecordInput[]) {
+      const added = addFeature(document, feature);
+      if (!added.ok) throw new Error(added.error.message);
+      document = added.value.document;
+    }
+    return document;
+  }
+
+  /** A mirror document with the feature's inputs replaced wholesale. */
+  function buildMalformedMirror(
+    inputs: FeatureRecordInput["inputs"],
+  ): CadDocument {
+    let document = buildMirrorDocument(1, 0);
+    document = {
+      ...document,
+      features: document.features.map((feature) =>
+        feature.id === fMirror ? { ...feature, inputs } : feature,
+      ),
+    };
+    return document;
+  }
+
+  it("executes the mirror feature end-to-end: identical volume, reflected bounds", () => {
+    const scenario = runBridge(buildMirrorDocument(1, -10));
+    expect(runOf(scenario).executed).toEqual([fBox, fMirror]);
+    const solid = scenario.bridge.solidOf(bMirror);
+    expect(solid).toBeDefined();
+    if (solid === undefined) return;
+    // Plane 1 = YZ (normal +x) at x = −10: x ∈ [0, 30] flips to
+    // [2·(−10) − 30, 2·(−10) − 0] = [−50, −20]; y and z unchanged.
+    assertVolumeClose(
+      unwrapKernelResult(scenario.kernel.volume(solid), "mirror volume"),
+      30 * 20 * 10,
+      1e-9,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(scenario.kernel.bounds(solid), "mirror bounds"),
+      { min: [-50, 0, 0], max: [-20, 20, 10] },
+      1e-9,
+    );
+  });
+
+  it("regenerates from parameter.set on the offset: the plane slides", () => {
+    const document = buildMirrorDocument(1, -10);
+    const set = applyCommand(document, {
+      type: "parameter.set",
+      id: pMirrorOffset,
+      value: length(5),
+    });
+    if (!set.ok) throw new Error(set.error.message);
+    const scenario = runBridge(set.value);
+    const solid = scenario.bridge.solidOf(bMirror);
+    expect(solid).toBeDefined();
+    if (solid === undefined) return;
+    // The same YZ plane family at x = 5: x flips to [−20, 10].
+    assertBoundsEqual(
+      unwrapKernelResult(scenario.kernel.bounds(solid), "mirror bounds"),
+      { min: [-20, 0, 0], max: [10, 20, 10] },
+      1e-9,
+    );
+    assertVolumeClose(
+      unwrapKernelResult(scenario.kernel.volume(solid), "mirror volume"),
+      30 * 20 * 10,
+      1e-9,
+    );
+  });
+
+  it("regenerates from parameter.set on the plane selector: 1 (YZ) → 3 (XY)", () => {
+    const document = buildMirrorDocument(1, -10);
+    const set = applyCommand(document, {
+      type: "parameter.set",
+      id: pPlane,
+      value: dimensionless(3),
+    });
+    if (!set.ok) throw new Error(set.error.message);
+    const scenario = runBridge(set.value);
+    const solid = scenario.bridge.solidOf(bMirror);
+    expect(solid).toBeDefined();
+    if (solid === undefined) return;
+    // Plane 3 = XY (normal +z) at z = −10: z ∈ [0, 10] flips to [−30, −20],
+    // x and y untouched.
+    assertBoundsEqual(
+      unwrapKernelResult(scenario.kernel.bounds(solid), "mirror bounds"),
+      { min: [0, 0, -30], max: [30, 20, -20] },
+      1e-9,
+    );
+  });
+
+  it("fails a plane selector outside 1..3 with kernel/parameter-invalid", () => {
+    for (const plane of [0, 4, 2.5]) {
+      const scenario = runBridge(buildMirrorDocument(plane, 0));
+      const diagnostic = failureDiagnosticOf(scenario, fMirror);
+      expect(diagnostic.code, `plane ${plane}`).toBe(
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+      );
+      expect(diagnostic.message).toContain("1 = YZ");
+      expect(scenario.bridge.solidOf(bMirror)).toBeUndefined();
+    }
+  });
+
+  it("fails an angle-typed plane or offset parameter with kernel/parameter-invalid", () => {
+    let document = buildMirrorDocument(1, 0);
+    document = {
+      ...document,
+      parameters: {
+        ...document.parameters,
+        parameters: document.parameters.parameters.map((parameter) =>
+          parameter.id === pPlane
+            ? { ...parameter, value: angle(45, "deg") }
+            : parameter,
+        ),
+      },
+    };
+    let scenario = runBridge(document);
+    expect(failureDiagnosticOf(scenario, fMirror).code).toBe(
+      DIAGNOSTIC_CODES.kernelParameterInvalid,
+    );
+
+    document = buildMirrorDocument(1, 0);
+    document = {
+      ...document,
+      parameters: {
+        ...document.parameters,
+        parameters: document.parameters.parameters.map((parameter) =>
+          parameter.id === pMirrorOffset
+            ? { ...parameter, value: angle(1) }
+            : parameter,
+        ),
+      },
+    };
+    scenario = runBridge(document);
+    const diagnostic = failureDiagnosticOf(scenario, fMirror);
+    expect(diagnostic.code).toBe(DIAGNOSTIC_CODES.kernelParameterInvalid);
+    expect(diagnostic.message).toContain("to be a length");
+  });
+
+  it("fails malformed layouts with kernel/feature-input-invalid", () => {
+    const sketchId = createSketchDocumentId("skd_mirror_malformed");
+    // Two targets.
+    let scenario = runBridge(
+      buildMalformedMirror([
+        { kind: "feature", id: fBox },
+        { kind: "feature", id: fBox },
+        { kind: "parameter", id: pPlane },
+        { kind: "parameter", id: pMirrorOffset },
+      ]),
+    );
+    expect(failureDiagnosticOf(scenario, fMirror).code).toBe(
+      DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+    );
+    // One parameter short.
+    scenario = runBridge(
+      buildMalformedMirror([
+        { kind: "feature", id: fBox },
+        { kind: "parameter", id: pPlane },
+      ]),
+    );
+    expect(failureDiagnosticOf(scenario, fMirror).code).toBe(
+      DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+    );
+    // A sketch input where the target belongs: the layout count still
+    // fits, so the offender branch names the sketch input itself.
+    scenario = runBridge(
+      buildMalformedMirror([
+        { kind: "feature", id: fBox },
+        { kind: "sketch", id: sketchId },
+        { kind: "parameter", id: pPlane },
+        { kind: "parameter", id: pMirrorOffset },
+      ]),
+    );
+    expect(failureDiagnosticOf(scenario, fMirror).code).toBe(
+      DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+    );
+    expect(failureDiagnosticOf(scenario, fMirror).message).toContain(
+      "cannot be mirrored",
+    );
+    expect(failureDiagnosticOf(scenario, fMirror).code).toBe(
+      DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+    );
+  });
+
+  it("refuses structurally on a kernel that has not declared the mirror capability", () => {
+    const inner = createFakeKernel();
+    const declining: GeometryKernel = {
+      ...inner,
+      capabilities: { ...inner.capabilities, mirror: false },
+    };
+    const scenario = runBridge(buildMirrorDocument(1, 0), declining);
+    const diagnostic = failureDiagnosticOf(scenario, fMirror);
+    expect(diagnostic.code).toBe(DIAGNOSTIC_CODES.kernelFeatureInputInvalid);
+    expect(diagnostic.message).toContain(
+      "does not declare the mirror capability",
+    );
+  });
+
+  it("rides a kernel rejection through as kernel/operation-failed with the code in data", () => {
+    const inner = createFakeKernel();
+    const rejecting: GeometryKernel = {
+      ...inner,
+      mirror: () =>
+        fail({
+          code: KERNEL_ERROR_CODES.solidNotOwned,
+          message: "fixture rejection",
+          input: null,
+        }),
+    };
+    const scenario = runBridge(buildMirrorDocument(1, 0), rejecting);
+    const diagnostic = failureDiagnosticOf(scenario, fMirror);
+    expect(diagnostic.code).toBe(DIAGNOSTIC_CODES.kernelOperationFailed);
+    expect(diagnostic.data?.kernelErrorCode).toBe("kernel/solid-not-owned");
+    expect(scenario.bridge.solidOf(bMirror)).toBeUndefined();
+  });
+});
+
+/** Extracts the first diagnostic of a failed feature from a bridge run. */
+function failureDiagnosticOf(
+  scenario: BridgeRun,
+  feature: FeatureId,
+): Diagnostic {
+  runOf(scenario);
+  const status = runOf(scenario).states.get(feature);
+  expect(status?.state).toBe("failed");
+  const diagnostic = status?.diagnostics[0];
+  if (diagnostic === undefined)
+    throw new Error("a failure carries diagnostics");
+  return diagnostic;
+}

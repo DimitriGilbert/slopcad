@@ -37,7 +37,9 @@ function parse(source: string): ExpressionNode {
   return parsed.value;
 }
 
-function collectionWith(...parameters: readonly Parameter[]): ParameterCollection {
+function collectionWith(
+  ...parameters: readonly Parameter[]
+): ParameterCollection {
   let collection: ParameterCollection = EMPTY_PARAMETER_COLLECTION;
   for (const parameter of parameters) {
     const added = addParameter(collection, parameter);
@@ -119,7 +121,13 @@ describe("addParameter", () => {
   });
 
   it("rejects invalid and reserved names", () => {
-    for (const name of ["", "9width", "with space", "with-dash", "x".repeat(65)]) {
+    for (const name of [
+      "",
+      "9width",
+      "with space",
+      "with-dash",
+      "x".repeat(65),
+    ]) {
       const created = addParameter(EMPTY_PARAMETER_COLLECTION, {
         id: widthId,
         name,
@@ -198,7 +206,11 @@ describe("parameter collection CRUD", () => {
     expect(getParameter(updated.value, heightId)).toEqual(height);
     expect(getParameter(collection, widthId)?.value).toEqual(length(10));
     expectError(
-      updateParameterValue(collection, createParameterId("param_missing"), length(1)),
+      updateParameterValue(
+        collection,
+        createParameterId("param_missing"),
+        length(1),
+      ),
       PARAMETER_ERROR_CODES.notFound,
     );
   });
@@ -229,7 +241,11 @@ describe("parameter collection CRUD", () => {
     });
     expect(getParameter(collection, widthId)?.metadata).toEqual({});
     expectError(
-      updateParameterMetadata(collection, createParameterId("param_missing"), {}),
+      updateParameterMetadata(
+        collection,
+        createParameterId("param_missing"),
+        {},
+      ),
       PARAMETER_ERROR_CODES.notFound,
     );
   });
@@ -385,8 +401,20 @@ describe("parameter serialization", () => {
 describe("parameterEnvironment", () => {
   it("resolves names to current values without prototype fallthrough", () => {
     const collection = collectionWith(
-      { id: widthId, name: "width", value: length(2.5, "in"), expression: null, metadata: {} },
-      { id: countId, name: "count", value: dimensionless(3), expression: null, metadata: {} },
+      {
+        id: widthId,
+        name: "width",
+        value: length(2.5, "in"),
+        expression: null,
+        metadata: {},
+      },
+      {
+        id: countId,
+        name: "count",
+        value: dimensionless(3),
+        expression: null,
+        metadata: {},
+      },
     );
     const resolve = parameterEnvironment(collection);
     expect(resolve("width")).toEqual(length(2.5, "in"));
@@ -400,8 +428,20 @@ describe("parameterEnvironment", () => {
 
   it("composes with expression evaluation end to end", () => {
     const collection = collectionWith(
-      { id: widthId, name: "width", value: length(10), expression: null, metadata: {} },
-      { id: heightId, name: "height", value: length(20), expression: parse("width * 2"), metadata: {} },
+      {
+        id: widthId,
+        name: "width",
+        value: length(10),
+        expression: null,
+        metadata: {},
+      },
+      {
+        id: heightId,
+        name: "height",
+        value: length(20),
+        expression: parse("width * 2"),
+        metadata: {},
+      },
     );
     const resolve = parameterEnvironment(collection);
     const evaluated = evaluateExpression(

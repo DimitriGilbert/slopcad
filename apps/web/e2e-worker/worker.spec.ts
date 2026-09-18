@@ -37,7 +37,17 @@ const DEFAULT_HOLE_DIAMETER_MM = 8;
  */
 const LAST_BURST_HOLE_DIAMETER_MM = 14;
 const BURST_HOLE_DIAMETERS: readonly number[] = [
-  8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12, 12.5, 13, 13.5,
+  8.5,
+  9,
+  9.5,
+  10,
+  10.5,
+  11,
+  11.5,
+  12,
+  12.5,
+  13,
+  13.5,
   LAST_BURST_HOLE_DIAMETER_MM,
 ];
 
@@ -131,31 +141,32 @@ test("rapid parameter updates leave the newest revision visible with observable 
 
   const dispatchedBefore = await readStateInt(page, "data-dispatched");
   const dropsBefore = await readStateInt(page, "data-drops");
-  const ticksBefore = Number(
-    await page.locator("#worker-ticks").textContent(),
-  );
+  const ticksBefore = Number(await page.locator("#worker-ticks").textContent());
 
   // The burst: one synchronous browser task fires all 12 parameter changes
   // as native input events, each dispatching a coordinator update. No
   // worker response can be processed until the task ends, so the first 11
   // computations are cancelled-and-dropped by construction.
-  await page.evaluate((diameters: readonly number[]) => {
-    const input = document.getElementById("param-holeDiameter");
-    if (!(input instanceof HTMLInputElement)) {
-      throw new Error("#param-holeDiameter input not found");
-    }
-    const proto = window.HTMLInputElement.prototype;
-    for (const diameter of diameters) {
-      // Reflect.set with a receiver runs the prototype's own value setter
-      // with `this = input` — the React-controlled-input discipline —
-      // without extracting the method off its descriptor.
-      const set = Reflect.set(proto, "value", String(diameter), input);
-      if (!set) {
-        throw new Error("setting #param-holeDiameter value failed");
+  await page.evaluate(
+    (diameters: readonly number[]) => {
+      const input = document.getElementById("param-holeDiameter");
+      if (!(input instanceof HTMLInputElement)) {
+        throw new Error("#param-holeDiameter input not found");
       }
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-  }, [...BURST_HOLE_DIAMETERS]);
+      const proto = window.HTMLInputElement.prototype;
+      for (const diameter of diameters) {
+        // Reflect.set with a receiver runs the prototype's own value setter
+        // with `this = input` — the React-controlled-input discipline —
+        // without extracting the method off its descriptor.
+        const set = Reflect.set(proto, "value", String(diameter), input);
+        if (!set) {
+          throw new Error("setting #param-holeDiameter value failed");
+        }
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    },
+    [...BURST_HOLE_DIAMETERS],
+  );
 
   await waitForSettledSurface(page);
 
@@ -163,10 +174,7 @@ test("rapid parameter updates leave the newest revision visible with observable 
   // analytic plate for the final burst diameter, and the visible state
   // stands at the newest revision.
   const volume = await readVolume(page);
-  expectVolumeCloseTo(
-    volume,
-    analyticPlateVolume(LAST_BURST_HOLE_DIAMETER_MM),
-  );
+  expectVolumeCloseTo(volume, analyticPlateVolume(LAST_BURST_HOLE_DIAMETER_MM));
   await expect(page.locator("#param-holeDiameter")).toHaveValue(
     String(LAST_BURST_HOLE_DIAMETER_MM),
   );

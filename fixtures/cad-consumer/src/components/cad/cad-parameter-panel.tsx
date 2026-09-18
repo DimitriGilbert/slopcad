@@ -212,7 +212,9 @@ function submittedEdit(
  * hook, so removing a provider above a mounted panel re-renders fewer hooks
  * and fails loudly in React, a programming error reported as one).
  */
-function useOptionalCadParameters(): ReturnType<typeof useCadParameters> | null {
+function useOptionalCadParameters(): ReturnType<
+  typeof useCadParameters
+> | null {
   try {
     return useCadParameters();
   } catch (error) {
@@ -281,15 +283,16 @@ export function CadParameterPanel({
             canonicalValue(parameter.value.dimension, edit.value),
           ),
         );
-        return applied.ok
-          ? { ok: true }
-          : { ok: false, error: applied.error };
+        return applied.ok ? { ok: true } : { ok: false, error: applied.error };
       }
       const evaluated = evaluateAgainst(collection, edit.expression);
       if (!evaluated.ok) {
         return {
           ok: false,
-          error: { code: evaluated.error.code, message: evaluated.error.message },
+          error: {
+            code: evaluated.error.code,
+            message: evaluated.error.message,
+          },
         };
       }
       const applied = store.applyCommand(
@@ -356,9 +359,7 @@ export function CadParameterPanel({
             : (value) => {
                 if (typeof value !== "string") return mergedLabels.valueInvalid;
                 const outcome = evaluate(value.trim());
-                return outcome.ok
-                  ? null
-                  : formatDomainError(outcome.error);
+                return outcome.ok ? null : formatDomainError(outcome.error);
               },
       });
     }
@@ -366,7 +367,11 @@ export function CadParameterPanel({
     return {
       defaultValues,
       fields,
-      onSubmit: ({ value }: { readonly value: CadParameterPanelFormValues }) => {
+      onSubmit: ({
+        value,
+      }: {
+        readonly value: CadParameterPanelFormValues;
+      }) => {
         setApplyFailure(undefined);
         if (apply === undefined) return;
         for (const parameter of parameterList) {

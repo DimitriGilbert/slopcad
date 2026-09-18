@@ -33,6 +33,56 @@
  *   21), whose BREP topology carries `TopoDS` identities; the reference
  *   model that consumes them is Phase 22's work, which is why the flag
  *   arrives ahead of any consumer.
+ * - `sweep`: the contract's profile-along-path sweep (Phase 26.3) is
+ *   implemented honestly. The FIRST operation the contract carries that not
+ *   every engine can do: Manifold has no sweep or loft primitive (probed),
+ *   so its adapter declares `false` and every `sweep` call answers with the
+ *   structured `kernel/unsupported-operation` — the flag exists exactly so
+ *   callers and suites branch upfront instead of discovering the limit
+ *   through failures.
+ * - `loft`: the contract's multi-section loft (Phase 26.4) is implemented
+ *   honestly — the same discipline `sweep` established: Manifold's engine
+ *   has no loft primitive either (probed), so its adapter declares `false`
+ *   and every `loft` call answers `kernel/unsupported-operation`, while
+ *   OCCT (exact ThruSections), the fake kernel (Simpson-exact morph), and
+ *   JSCAD (slice loft) declare `true`.
+ * - `fillet`: the contract's edge fillet (Phase 26.5) is implemented
+ *   honestly — the sweep/loft discipline again: Manifold and JSCAD have no
+ *   fillet primitive (probed; Manifold's "smooth out" is shading tangent
+ *   interpolation, not geometry), so both declare `false` and every `fillet`
+ *   call answers `kernel/unsupported-operation`, while OCCT (exact
+ *   `BRepFilletAPI_MakeFillet`) and the fake kernel (the analytic
+ *   corner-fillet model over its documented box-edge subset) declare `true`.
+ *   The flag gates the contract suite's fillet fixtures exactly like the
+ *   sweep and loft flags gate theirs.
+ * - `chamfer`: the contract's edge chamfer (Phase 26.6) is implemented
+ *   honestly — the fillet discipline verbatim: Manifold and JSCAD have no
+ *   chamfer primitive either (probed; the same engine verdicts as their
+ *   fillet), so both declare `false` and every `chamfer` call answers
+ *   `kernel/unsupported-operation`, while OCCT (exact
+ *   `BRepFilletAPI_MakeChamfer`, the symmetric-distance `Add`) and the fake
+ *   kernel (the analytic corner-prism model over the fillet subset's
+ *   box-edge domain) declare `true`. The flag gates the contract suite's
+ *   chamfer fixtures exactly like the fillet flag gates its own.
+ * - `shell`: the contract's face-removal hollowing (Phase 26.7) is
+ *   implemented honestly — the sweep/loft/fillet/chamfer discipline on the
+ *   FACE-addressed operation: Manifold's 3D surface has no offset or
+ *   hollow at all and JSCAD's `expandShell` is the outward expansion's
+ *   helper, not wall building (both probed), so both declare `false` and
+ *   every `shell` call answers `kernel/unsupported-operation`, while OCCT
+ *   (exact `BRepOffsetAPI_MakeThickSolid`, the inward-offset
+ *   `MakeThickSolidByJoin`) and the fake kernel (the analytic open-box
+ *   model over its single-face subset) declare `true`. The flag gates the
+ *   contract suite's shell fixtures exactly like its siblings gate theirs.
+ * - `mirror`: the contract's world-axis-plane reflection (Phase 26.9) is
+ *   implemented honestly — the flag exists for the same discipline as its
+ *   siblings (a kernel without an honest reflection answers the structured
+ *   `kernel/unsupported-operation`), though it is the first Phase 26
+ *   operation NO kernel needs to decline: every engine can reflect
+ *   (probed — OCCT's `gp_Trsf.SetMirror`, Manifold's negative-determinant
+ *   `transform`, JSCAD's `mat4.isMirroring` vertex reversal, and the fake
+ *   kernel's pointwise model), so all four adapters declare `true` and the
+ *   flag gates the suite's mirror fixtures uniformly anyway.
  */
 export interface KernelCapabilities {
   readonly booleans: boolean;
@@ -43,4 +93,10 @@ export interface KernelCapabilities {
   readonly exactBooleanVolumes: boolean;
   readonly tightBooleanBounds: boolean;
   readonly persistentTopology: boolean;
+  readonly sweep: boolean;
+  readonly loft: boolean;
+  readonly fillet: boolean;
+  readonly chamfer: boolean;
+  readonly shell: boolean;
+  readonly mirror: boolean;
 }

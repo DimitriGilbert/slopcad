@@ -19,19 +19,20 @@ import type {
   NodeWorkerChannel,
   NodeWorkerChannelExit,
 } from "@slopcad/cad-kernel";
-import { createNodeWorkerChannel, nodeWorkerThreadEcho } from "@slopcad/cad-kernel";
+import {
+  createNodeWorkerChannel,
+  nodeWorkerThreadEcho,
+} from "@slopcad/cad-kernel";
 
 /**
  * Environment variable enabling the node entry's test-only thread echo (see
  * the `./occt-worker.node` module doc): `1` posts one non-protocol message
  * carrying the worker's `threadId` before hosting starts.
  */
-export const NODE_OCCT_WORKER_ECHO_ENV =
-  "SLOPCAD_OCCT_WORKER_ECHO_THREAD_ID";
+export const NODE_OCCT_WORKER_ECHO_ENV = "SLOPCAD_OCCT_WORKER_ECHO_THREAD_ID";
 
 /** Message key of the thread echo: maps to the worker's `threadId`. */
-export const NODE_OCCT_WORKER_THREAD_ECHO_KEY =
-  "slopcadOcctWorkerThreadId";
+export const NODE_OCCT_WORKER_THREAD_ECHO_KEY = "slopcadOcctWorkerThreadId";
 
 /**
  * How the OpenCascade worker thread ended: `code` is its exit code
@@ -68,6 +69,7 @@ export function createNodeOcctWorkerChannel(
 ): NodeOcctWorkerChannel {
   return createNodeWorkerChannel({
     entryUrl: new URL("./occt-worker.node.ts", import.meta.url),
-    echoEnv: options.echoThreadId === true ? NODE_OCCT_WORKER_ECHO_ENV : undefined,
+    echoEnv:
+      options.echoThreadId === true ? NODE_OCCT_WORKER_ECHO_ENV : undefined,
   });
 }

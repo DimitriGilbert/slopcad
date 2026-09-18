@@ -78,8 +78,14 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
   toolbarLabel: "Sketch tools",
   tools: {
     select: { label: "Select", tooltip: "Select sketch entities" },
-    line: { label: "Line", tooltip: "Draw a line: click the start, then the end" },
-    circle: { label: "Circle", tooltip: "Draw a circle: click the center, then the radius" },
+    line: {
+      label: "Line",
+      tooltip: "Draw a line: click the start, then the end",
+    },
+    circle: {
+      label: "Circle",
+      tooltip: "Draw a circle: click the center, then the radius",
+    },
     rectangle: {
       label: "Rectangle",
       tooltip: "Draw a rectangle: click two opposite corners",
@@ -96,13 +102,28 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
     horizontal: { label: "Horizontal", tooltip: "Make a line horizontal" },
     vertical: { label: "Vertical", tooltip: "Make a line vertical" },
     parallel: { label: "Parallel", tooltip: "Make two lines parallel" },
-    perpendicular: { label: "Perpendicular", tooltip: "Make two lines perpendicular" },
+    perpendicular: {
+      label: "Perpendicular",
+      tooltip: "Make two lines perpendicular",
+    },
     equal: { label: "Equal", tooltip: "Equal lengths or equal radii" },
-    midpoint: { label: "Midpoint", tooltip: "Pin a point to a line's midpoint" },
-    tangent: { label: "Tangent", tooltip: "Tangency between lines and circles/arcs" },
-    distance: { label: "Distance", tooltip: "Dimension the distance between two points" },
+    midpoint: {
+      label: "Midpoint",
+      tooltip: "Pin a point to a line's midpoint",
+    },
+    tangent: {
+      label: "Tangent",
+      tooltip: "Tangency between lines and circles/arcs",
+    },
+    distance: {
+      label: "Distance",
+      tooltip: "Dimension the distance between two points",
+    },
     radius: { label: "Radius", tooltip: "Dimension a circle or arc radius" },
-    diameter: { label: "Diameter", tooltip: "Dimension a circle or arc diameter" },
+    diameter: {
+      label: "Diameter",
+      tooltip: "Dimension a circle or arc diameter",
+    },
     angle: { label: "Angle", tooltip: "Dimension the angle between two lines" },
   },
 };

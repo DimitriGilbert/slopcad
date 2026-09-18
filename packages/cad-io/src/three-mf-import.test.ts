@@ -28,10 +28,7 @@ import {
   unwrapKernelResult,
 } from "@slopcad/cad-kernel";
 
-import {
-  type ThreeMfExportResult,
-  exportThreeMf,
-} from "./three-mf-export";
+import { type ThreeMfExportResult, exportThreeMf } from "./three-mf-export";
 import {
   type ImportedThreeMfMesh,
   type ThreeMfImportError,
@@ -125,7 +122,10 @@ function fakeBoxMinusBoreTessellation(kernel: GeometryKernel): Tessellation {
     kernel.transform(cylinder, { x: mm(15), y: mm(10), z: mm(0) }),
     "transform",
   );
-  const drilled = unwrapKernelResult(kernel.subtract(plate, [bore]), "subtract");
+  const drilled = unwrapKernelResult(
+    kernel.subtract(plate, [bore]),
+    "subtract",
+  );
   return unwrapKernelResult(kernel.tessellate(drilled), "tessellate");
 }
 
@@ -236,7 +236,9 @@ function buildTestZip(
   for (const [i, entry] of parts.entries()) {
     localOffsets.push(cursor);
     cursor +=
-      30 + testEncoder.encode(entry.name).length + (plans[i]?.compressed.length ?? 0);
+      30 +
+      testEncoder.encode(entry.name).length +
+      (plans[i]?.compressed.length ?? 0);
   }
   const centralOffset = cursor;
   let centralSize = 0;
@@ -258,7 +260,7 @@ function buildTestZip(
     view.setUint16(offset + 12, DOS_DATE, true);
     view.setUint32(offset + 14, plan.crc, true);
     view.setUint32(offset + 18, plan.compressed.length, true);
-    view.setUint32(offset + 22, (parts[i]?.data.length) ?? 0, true);
+    view.setUint32(offset + 22, parts[i]?.data.length ?? 0, true);
     view.setUint16(offset + 26, plan.nameBytes.length, true);
     view.setUint16(offset + 28, 0, true);
     bytes.set(plan.nameBytes, offset + 30);
@@ -406,8 +408,8 @@ const FIXTURE_MODEL_XML = [
   "<!-- Externally authored 3MF fixture (slopcad Phase 18.4) -->",
   '<model unit="centimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">',
   '  <metadata name="Title">External tetrahedron</metadata>',
-  "  <metadata name=\"Designer\">Another CAD</metadata>",
-  "  <metadata name=\"Description\">Hand-authored centimeter fixture &lt;phase 18.4&gt;</metadata>",
+  '  <metadata name="Designer">Another CAD</metadata>',
+  '  <metadata name="Description">Hand-authored centimeter fixture &lt;phase 18.4&gt;</metadata>',
   '  <metadata name="Application">External Author 1.0</metadata>',
   "  <resources>",
   '    <object id="1" type="model">',
@@ -422,7 +424,7 @@ const FIXTURE_MODEL_XML = [
   '          <triangle v1="0" v2="2" v3="1"/>',
   '          <triangle v1="0" v2="3" v3="2"/>',
   '          <triangle v1="0" v2="1" v3="3"/>',
-  "          <triangle v1=\"1\" v2=\"2\" v3=\"3\"/>",
+  '          <triangle v1="1" v2="2" v3="3"/>',
   "        </triangles>",
   "      </mesh>",
   "    </object>",
@@ -705,7 +707,13 @@ describe("importThreeMf unit conversion", () => {
 
   it("converts micron, inch, foot, and meter coordinates to millimetres", () => {
     const micron = unwrapImport(
-      importThreeMf(unitPackage("micron", [[100, 0, 0], [0, 200, 0], [0, 0, 250]])),
+      importThreeMf(
+        unitPackage("micron", [
+          [100, 0, 0],
+          [0, 200, 0],
+          [0, 0, 250],
+        ]),
+      ),
     );
     expect(micron.units).toBe("micron");
     expect(micron.tessellation.positions).toEqual([
@@ -713,7 +721,13 @@ describe("importThreeMf unit conversion", () => {
     ]);
 
     const inch = unwrapImport(
-      importThreeMf(unitPackage("inch", [[1, 0, 0], [0, 0.5, 0], [0, 0, 3]])),
+      importThreeMf(
+        unitPackage("inch", [
+          [1, 0, 0],
+          [0, 0.5, 0],
+          [0, 0, 3],
+        ]),
+      ),
     );
     expect(inch.units).toBe("inch");
     expect(inch.tessellation.positions[3]).toBe(25.4);
@@ -721,12 +735,24 @@ describe("importThreeMf unit conversion", () => {
     expect(inch.tessellation.positions[11]).toBeCloseTo(76.2, 12);
 
     const foot = unwrapImport(
-      importThreeMf(unitPackage("foot", [[1, 0, 0], [0, 2, 0], [0, 0, 1]])),
+      importThreeMf(
+        unitPackage("foot", [
+          [1, 0, 0],
+          [0, 2, 0],
+          [0, 0, 1],
+        ]),
+      ),
     );
     expect(foot.tessellation.positions[3]).toBe(304.8);
 
     const meter = unwrapImport(
-      importThreeMf(unitPackage("meter", [[1.5, 0, 0], [0, 0.25, 0], [0, 0, 1]])),
+      importThreeMf(
+        unitPackage("meter", [
+          [1.5, 0, 0],
+          [0, 0.25, 0],
+          [0, 0, 1],
+        ]),
+      ),
     );
     expect(meter.tessellation.positions).toEqual([
       0, 0, 0, 1500, 0, 0, 0, 250, 0, 0, 0, 1000,
@@ -749,7 +775,9 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       "Zero-byte input",
     );
     expectImportFailure(
-      importThreeMf(modelPackage(TETRA_MODEL_XML.replace(/<build>[\s\S]*<\/build>\n/, ""))),
+      importThreeMf(
+        modelPackage(TETRA_MODEL_XML.replace(/<build>[\s\S]*<\/build>\n/, "")),
+      ),
       "three-mf-import/empty",
       "Model without a build",
     );
@@ -800,9 +828,7 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       "Corrupted central directory signature",
     );
     expectImportFailure(
-      importThreeMf(
-        withUint16At(boxPackage, boxPackage.length - 22 + 8, 4),
-      ),
+      importThreeMf(withUint16At(boxPackage, boxPackage.length - 22 + 8, 4)),
       "three-mf-import/not-a-zip",
       "EOCD entry count disagrees with the entries walked",
     );
@@ -820,7 +846,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       boxPackage.length - 6,
       true,
     );
-    const thirdCentral = centralOffset + 2 * 46 + "[Content_Types].xml".length +
+    const thirdCentral =
+      centralOffset +
+      2 * 46 +
+      "[Content_Types].xml".length +
       "_rels/.rels".length;
     const localOffsetOfThird = new DataView(boxPackage.buffer).getUint32(
       thirdCentral + 42,
@@ -849,9 +878,7 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       "Local header names a different entry",
     );
     expectImportFailure(
-      importThreeMf(
-        withUint32At(boxPackage, thirdCentral + 20, 999),
-      ),
+      importThreeMf(withUint32At(boxPackage, thirdCentral + 20, 999)),
       "three-mf-import/not-a-zip",
       "Central compressed size disagrees with the local header",
     );
@@ -862,7 +889,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
     const view = new DataView(corrupted.buffer);
     const centralOffset = view.getUint32(corrupted.length - 6, true);
     // Third entry is the model; find its local data start and flip a byte.
-    const thirdCentral = centralOffset + 2 * 46 + "[Content_Types].xml".length +
+    const thirdCentral =
+      centralOffset +
+      2 * 46 +
+      "[Content_Types].xml".length +
       "_rels/.rels".length;
     const localOffset = view.getUint32(thirdCentral + 42, true);
     const nameLength = view.getUint16(localOffset + 26, true);
@@ -883,7 +913,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
     ]);
     const view = new DataView(junkDeflate.buffer);
     const centralOffset = view.getUint32(junkDeflate.length - 6, true);
-    const thirdCentral = centralOffset + 2 * 46 + "[Content_Types].xml".length +
+    const thirdCentral =
+      centralOffset +
+      2 * 46 +
+      "[Content_Types].xml".length +
       "_rels/.rels".length;
     const localOffset = view.getUint32(thirdCentral + 42, true);
     const nameLength = view.getUint16(localOffset + 26, true);
@@ -896,13 +929,11 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
     if (outcome.ok) {
       throw new Error("Broken deflate stream unexpectedly imported.");
     }
-    expect(
-      [
-        "three-mf-import/bad-compression",
-        "three-mf-import/crc-mismatch",
-        "three-mf-import/not-a-zip",
-      ],
-    ).toContain(outcome.error.code);
+    expect([
+      "three-mf-import/bad-compression",
+      "three-mf-import/crc-mismatch",
+      "three-mf-import/not-a-zip",
+    ]).toContain(outcome.error.code);
 
     const cap = THREE_MF_IMPORT_MAX_PART_BYTES + 1;
     const overCap = withUint32At(
@@ -954,7 +985,8 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
   });
 
   it("three-mf-import/bad-relationship: absent, duplicated, external, duplicate ids", () => {
-    const modelType = "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel";
+    const modelType =
+      "http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel";
     const thumbnailType =
       "http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail";
     const relsPackage = (relsXml: string): Uint8Array =>
@@ -1046,7 +1078,9 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
     for (const unit of ["furlong", "MM", "millimetres", ""]) {
       expectImportFailure(
         importThreeMf(
-          modelPackage(TETRA_MODEL_XML.replace('unit="millimeter"', `unit="${unit}"`)),
+          modelPackage(
+            TETRA_MODEL_XML.replace('unit="millimeter"', `unit="${unit}"`),
+          ),
         ),
         "three-mf-import/invalid-unit",
         `unit="${unit}"`,
@@ -1055,9 +1089,16 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
   });
 
   it("three-mf-import/not-a-zip: entry-level framing defects", () => {
-    const view = new DataView(boxPackage.buffer, boxPackage.byteOffset, boxPackage.byteLength);
+    const view = new DataView(
+      boxPackage.buffer,
+      boxPackage.byteOffset,
+      boxPackage.byteLength,
+    );
     const centralOffset = view.getUint32(boxPackage.length - 6, true);
-    const thirdCentral = centralOffset + 2 * 46 + "[Content_Types].xml".length +
+    const thirdCentral =
+      centralOffset +
+      2 * 46 +
+      "[Content_Types].xml".length +
       "_rels/.rels".length;
     const thirdLocal = view.getUint32(thirdCentral + 42, true);
     expectImportFailure(
@@ -1281,7 +1322,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
         buildTestZip([
           part("[Content_Types].xml", CONTENT_TYPES_XML),
           // A model part with no extension: nothing to resolve a Default by.
-          part("_rels/.rels", RELS_XML.replace("/3D/3dmodel.model", "/3D/3dmodel")),
+          part(
+            "_rels/.rels",
+            RELS_XML.replace("/3D/3dmodel.model", "/3D/3dmodel"),
+          ),
           part("3D/3dmodel", TETRA_MODEL_XML),
         ]),
       ),
@@ -1301,12 +1345,18 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       ],
       [
         "prefixed root",
-        TETRA_MODEL_XML.replace(`<model unit="millimeter"`, `<m:model unit="millimeter"`).replace(
-          "</model>",
-          "</m:model>",
+        TETRA_MODEL_XML.replace(
+          `<model unit="millimeter"`,
+          `<m:model unit="millimeter"`,
+        ).replace("</model>", "</m:model>"),
+      ],
+      [
+        "DOCTYPE declaration",
+        TETRA_MODEL_XML.replace(
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE model>',
         ),
       ],
-      ["DOCTYPE declaration", TETRA_MODEL_XML.replace("<?xml version=\"1.0\" encoding=\"UTF-8\"?>", '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE model>')],
       ["unclosed element", TETRA_MODEL_XML.replace("</vertices>", "")],
       [
         "mismatched end tag",
@@ -1333,7 +1383,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
           '<vertex x="<1" y="0" z="0"/>',
         ),
       ],
-      ["text at document level", `stray<?xml version="1.0"?>`.concat(TETRA_MODEL_XML)],
+      [
+        "text at document level",
+        `stray<?xml version="1.0"?>`.concat(TETRA_MODEL_XML),
+      ],
       [
         "content after the root element",
         TETRA_MODEL_XML.replace("</model>\n", "</model>\n<extra/>"),
@@ -1349,8 +1402,9 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
             TETRA_MODEL_XML.match(/ {8}<vertices>[\s\S]*?<\/vertices>/)?.[0] ??
             "";
           const trianglesBlock =
-            TETRA_MODEL_XML.match(/ {8}<triangles>[\s\S]*?<\/triangles>/)?.[0] ??
-            "";
+            TETRA_MODEL_XML.match(
+              / {8}<triangles>[\s\S]*?<\/triangles>/,
+            )?.[0] ?? "";
           return TETRA_MODEL_XML.replace(
             `${verticesBlock}\n${trianglesBlock}`,
             `${trianglesBlock}\n${verticesBlock}`,
@@ -1458,7 +1512,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       ],
       [
         "second <build>",
-        TETRA_MODEL_XML.replace("  </build>", '  </build>\n  <build><item objectid="1"/></build>'),
+        TETRA_MODEL_XML.replace(
+          "  </build>",
+          '  </build>\n  <build><item objectid="1"/></build>',
+        ),
       ],
       [
         "resources without an object",
@@ -1477,10 +1534,7 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       ],
       [
         "unknown element inside <build>",
-        TETRA_MODEL_XML.replace(
-          "  <build>",
-          "  <build>\n    <junk/>",
-        ),
+        TETRA_MODEL_XML.replace("  <build>", "  <build>\n    <junk/>"),
       ],
       [
         "mesh without a vertices element",
@@ -1519,7 +1573,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
       ],
       [
         "unknown unprefixed element inside <mesh>",
-        TETRA_MODEL_XML.replace("      <mesh>", "      <mesh>\n        <junk/>"),
+        TETRA_MODEL_XML.replace(
+          "      <mesh>",
+          "      <mesh>\n        <junk/>",
+        ),
       ],
       [
         "duplicate metadata name",
@@ -1528,7 +1585,13 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
           '  <metadata name="Title">A</metadata>\n  <metadata name="Title">B</metadata>\n  <resources>',
         ),
       ],
-      ["metadata without a name", TETRA_MODEL_XML.replace("  <resources>", '  <metadata>no name</metadata>\n  <resources>')],
+      [
+        "metadata without a name",
+        TETRA_MODEL_XML.replace(
+          "  <resources>",
+          "  <metadata>no name</metadata>\n  <resources>",
+        ),
+      ],
     ];
     for (const [label, model] of cases) {
       expectImportFailure(
@@ -1613,7 +1676,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
     const centimeterOverflow = TETRA_MODEL_XML.replace(
       'unit="millimeter"',
       'unit="centimeter"',
-    ).replace('<vertex x="10" y="0" z="0"/>', '<vertex x="2e307" y="0" z="0"/>');
+    ).replace(
+      '<vertex x="10" y="0" z="0"/>',
+      '<vertex x="2e307" y="0" z="0"/>',
+    );
     expectImportFailure(
       importThreeMf(modelPackage(centimeterOverflow)),
       "three-mf-import/non-finite-vertex",
@@ -1625,7 +1691,10 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
     const cases: readonly [string, string][] = [
       [
         "negative index",
-        TETRA_MODEL_XML.replace('v1="0" v2="2" v3="1"', 'v1="-1" v2="2" v3="1"'),
+        TETRA_MODEL_XML.replace(
+          'v1="0" v2="2" v3="1"',
+          'v1="-1" v2="2" v3="1"',
+        ),
       ],
       [
         "index at the vertex count",
@@ -1699,14 +1768,15 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
 
 describe("importThreeMf tolerances (what well-formed external files may do)", () => {
   it("decodes predefined and numeric entities and CDATA in metadata text", () => {
-    const xml =
-      TETRA_MODEL_XML.replace(
+    const xml = TETRA_MODEL_XML.replace(
+      "  <resources>",
+      '  <metadata name="Title">A &amp; B &quot;q&quot; &apos;a&apos; &#65;&#x42;<![CDATA[<literal &>]]> emoji \u{1F6E0} end</metadata>\n' +
         "  <resources>",
-        '  <metadata name="Title">A &amp; B &quot;q&quot; &apos;a&apos; &#65;&#x42;<![CDATA[<literal &>]]> emoji \u{1F6E0} end</metadata>\n' +
-          "  <resources>",
-      );
+    );
     const imported = unwrapImport(importThreeMf(modelPackage(xml)));
-    expect(imported.metadata.title).toBe(`A & B "q" 'a' AB<literal &> emoji \u{1F6E0} end`);
+    expect(imported.metadata.title).toBe(
+      `A & B "q" 'a' AB<literal &> emoji \u{1F6E0} end`,
+    );
   });
 
   it("resolves the model part through an Override instead of a Default", () => {
@@ -1735,7 +1805,10 @@ describe("importThreeMf tolerances (what well-formed external files may do)", ()
     )
       .replace("  <resources>", "  <x:extra/><resources>")
       .replace("      <mesh>", "      <x:meshinfo/><mesh>")
-      .replace("        <triangles>", "        <triangles>\n          <x:tri/>");
+      .replace(
+        "        <triangles>",
+        "        <triangles>\n          <x:tri/>",
+      );
     // The replaces must all have applied — a silent no-op would make this
     // test assert nothing about extension tolerance.
     expect(xml).toContain("<x:extra/>");
@@ -1843,7 +1916,7 @@ describe("importThreeMf never throws on hostile bytes", () => {
 
   it("returns a structured result for seeded model-XML mutations", () => {
     const random = mulberry32(0xfeed);
-    const alphabet = "0123456789.eE+- \tnxyz</\">=";
+    const alphabet = '0123456789.eE+- \tnxyz</">=';
     const chars = [...TETRA_MODEL_XML];
     for (let i = 0; i < 150; i += 1) {
       const mutated = [...chars];
@@ -1865,9 +1938,16 @@ describe("importThreeMf never throws on hostile bytes", () => {
   });
 
   it("rejects deflate-flipped stored entries without throwing", () => {
-    const view = new DataView(boxPackage.buffer, boxPackage.byteOffset, boxPackage.byteLength);
+    const view = new DataView(
+      boxPackage.buffer,
+      boxPackage.byteOffset,
+      boxPackage.byteLength,
+    );
     const centralOffset = view.getUint32(boxPackage.length - 6, true);
-    const thirdCentral = centralOffset + 2 * 46 + "[Content_Types].xml".length +
+    const thirdCentral =
+      centralOffset +
+      2 * 46 +
+      "[Content_Types].xml".length +
       "_rels/.rels".length;
     const localOffset = view.getUint32(thirdCentral + 42, true);
     const flipped = withUint16At(

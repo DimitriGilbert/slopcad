@@ -8,10 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import {
-  groupSyntheticFaces,
-  type ParseResult,
-} from "@slopcad/cad-core";
+import { groupSyntheticFaces, type ParseResult } from "@slopcad/cad-core";
 import type { PickError } from "./picking";
 
 import {
@@ -19,7 +16,11 @@ import {
   renderCameraScreenPoint,
   resolvePickReference,
 } from "./picking";
-import { FOLDED_SHEET_SHARED, makeObject, TEST_CAMERA } from "./render-fixtures";
+import {
+  FOLDED_SHEET_SHARED,
+  makeObject,
+  TEST_CAMERA,
+} from "./render-fixtures";
 import { createSceneCamera } from "./scene-camera";
 
 const PLATE = makeObject("plate", FOLDED_SHEET_SHARED);
@@ -37,7 +38,8 @@ const ORTHO_CAMERA = {
 const VIEWPORT = { width: 800, height: 520 };
 
 function unwrap<T>(result: ParseResult<T, PickError>): T {
-  if (!result.ok) throw new Error(`Expected ok, received: ${result.error.message}`);
+  if (!result.ok)
+    throw new Error(`Expected ok, received: ${result.error.message}`);
   return result.value;
 }
 
@@ -136,8 +138,18 @@ describe("resolvePickReference", () => {
     );
     // The folded sheet's two triangles are adjacent but 90° apart: separate
     // synthetic faces, mapped by triangle index.
-    expect(face0).toEqual({ kind: "face", bodyId: "body_plate", regeneration: 4, faceIndex: 0 });
-    expect(face1).toEqual({ kind: "face", bodyId: "body_plate", regeneration: 4, faceIndex: 1 });
+    expect(face0).toEqual({
+      kind: "face",
+      bodyId: "body_plate",
+      regeneration: 4,
+      faceIndex: 0,
+    });
+    expect(face1).toEqual({
+      kind: "face",
+      bodyId: "body_plate",
+      regeneration: 4,
+      faceIndex: 1,
+    });
   });
 
   it("pins the id-derivation contract that makes body resolution total", () => {

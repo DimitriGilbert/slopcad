@@ -10,7 +10,9 @@ import { createSketchConstraintId, createSketchEntityId } from "./sketch-ids";
 
 describe("sketch diagnostics", () => {
   it("registers the full sketch/* code set with stable names", () => {
-    expect(SKETCH_DIAGNOSTIC_CODES.idWrongPrefix).toBe("sketch/id-wrong-prefix");
+    expect(SKETCH_DIAGNOSTIC_CODES.idWrongPrefix).toBe(
+      "sketch/id-wrong-prefix",
+    );
     expect(SKETCH_DIAGNOSTIC_CODES.versionUnsupported).toBe(
       "sketch/version-unsupported",
     );
@@ -23,7 +25,9 @@ describe("sketch diagnostics", () => {
     expect(SKETCH_DIAGNOSTIC_CODES.constraintReferenceMalformed).toBe(
       "sketch/constraint-reference-malformed",
     );
-    expect(SKETCH_DIAGNOSTIC_CODES.underConstrained).toBe("sketch/under-constrained");
+    expect(SKETCH_DIAGNOSTIC_CODES.underConstrained).toBe(
+      "sketch/under-constrained",
+    );
     expect(SKETCH_DIAGNOSTIC_CODES.constraintsRedundant).toBe(
       "sketch/constraints-redundant",
     );
@@ -55,7 +59,9 @@ describe("sketch diagnostics", () => {
       },
       { redundantEquations: 1 },
     );
-    const parsed = parseSketchDiagnostic(JSON.parse(JSON.stringify(diagnostic)));
+    const parsed = parseSketchDiagnostic(
+      JSON.parse(JSON.stringify(diagnostic)),
+    );
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.value).toEqual(diagnostic);
@@ -79,8 +85,11 @@ describe("sketch diagnostics", () => {
       }).ok,
     ).toBe(true);
     expect(
-      !parseSketchDiagnostic({ severity: "error", code: "sketch/malformed", message: "" })
-        .ok,
+      !parseSketchDiagnostic({
+        severity: "error",
+        code: "sketch/malformed",
+        message: "",
+      }).ok,
     ).toBe(true);
     expect(
       !parseSketchDiagnostic({

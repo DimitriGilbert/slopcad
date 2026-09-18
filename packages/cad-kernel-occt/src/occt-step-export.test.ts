@@ -222,11 +222,17 @@ describe("exported STEP re-imports with its semantics intact", () => {
     const solid = imported.value.solids[0]?.solid;
     if (solid === undefined) throw new Error("The import yielded no solid.");
 
-    const volume = unwrapKernelResult(kernel.volume(solid), "round-trip volume");
+    const volume = unwrapKernelResult(
+      kernel.volume(solid),
+      "round-trip volume",
+    );
     expect(Math.abs(volume - ANALYTIC_VOLUME_MM3)).toBeLessThanOrEqual(
       ANALYTIC_VOLUME_MM3 * EXACT_VOLUME_TOLERANCE,
     );
-    const bounds = unwrapKernelResult(kernel.bounds(solid), "round-trip bounds");
+    const bounds = unwrapKernelResult(
+      kernel.bounds(solid),
+      "round-trip bounds",
+    );
     const maxExpected = [PLATE.widthMm, PLATE.depthMm, PLATE.heightMm] as const;
     for (const axis of [0, 1, 2] as const) {
       expect(Math.abs(bounds.min[axis])).toBeLessThanOrEqual(
@@ -245,7 +251,11 @@ describe("exported STEP re-imports with its semantics intact", () => {
     if (!shapes.ok) throw new Error(shapes.error.message);
     const reimported = shapes.value.shapes[0];
     if (reimported === undefined) throw new Error("no re-imported shape");
-    expect(topologyCounts(reimported)).toEqual({ faces: 7, edges: 30, vertices: 60 });
+    expect(topologyCounts(reimported)).toEqual({
+      faces: 7,
+      edges: 30,
+      vertices: 60,
+    });
 
     kernel.dispose(solid);
     kernel.dispose(plate);

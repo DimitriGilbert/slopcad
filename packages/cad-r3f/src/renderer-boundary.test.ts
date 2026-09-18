@@ -6,7 +6,14 @@
  * import cannot enter cad-r3f without failing this suite.
  */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -103,7 +110,11 @@ describe("renderer import boundary", () => {
       const nested = join(root, "src", "worker-bridge");
       mkdirSync(nested, { recursive: true });
       writeFileSync(join(root, "src", "surface.ts"), "export {};\n", "utf8");
-      writeFileSync(join(nested, "bridge.ts"), `${hiddenKernelImport}\n`, "utf8");
+      writeFileSync(
+        join(nested, "bridge.ts"),
+        `${hiddenKernelImport}\n`,
+        "utf8",
+      );
       expect(boundaryViolations(join(root, "src"))).toEqual([
         `${join(nested, "bridge.ts")} imports "${kernelSpecifier}"`,
       ]);

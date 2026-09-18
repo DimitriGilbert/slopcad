@@ -16,12 +16,13 @@
 
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
-import type {
-  OpenCascadeInstance,
-  TopoDS_Shape,
-} from "replicad-opencascadejs";
+import type { OpenCascadeInstance, TopoDS_Shape } from "replicad-opencascadejs";
 
-import { createOcctRuntime, RUNTIME_BRAND, type OcctRuntime } from "./occt-runtime";
+import {
+  createOcctRuntime,
+  RUNTIME_BRAND,
+  type OcctRuntime,
+} from "./occt-runtime";
 import {
   OCCT_SHAPE_HASH_UPPER_BOUND,
   occtShapeTopology,
@@ -354,7 +355,9 @@ describe("experiment (e): serialization round trip (BREP string, same process)",
     const fixtureFingerprints = faceFingerprints(fixtureShape);
     const freshFingerprints = faceFingerprints(fresh);
     expect(overlap(fixtureFingerprints, freshFingerprints)).toBe(0);
-    const sortedFixture = [...areasOf(fixtureFingerprints)].sort((a, b) => a - b);
+    const sortedFixture = [...areasOf(fixtureFingerprints)].sort(
+      (a, b) => a - b,
+    );
     const sortedFresh = [...areasOf(freshFingerprints)].sort((a, b) => a - b);
     for (let i = 0; i < sortedFixture.length; i += 1) {
       const a = sortedFixture[i];

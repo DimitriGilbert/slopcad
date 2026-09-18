@@ -30,10 +30,7 @@ import { createRenderProjection, projectTessellation } from "./projection";
 import { createSelectionState } from "./selection";
 import { createSession } from "./session";
 import { createToolRuntime, type ToolRuntime } from "./tool-context";
-import {
-  NO_TOOL_MODIFIERS,
-  type ToolInputEvent,
-} from "./tool-events";
+import { NO_TOOL_MODIFIERS, type ToolInputEvent } from "./tool-events";
 import {
   createToolManager,
   registerTool,
@@ -52,7 +49,9 @@ const Z: ParameterId = createParameterId("param_translate_z");
 const ANGLE: ParameterId = createParameterId("param_rotate_z");
 
 function buildDocument(): CadDocument {
-  let document: CadDocument = createDocument(createDocumentId("doc_tools_test"));
+  let document: CadDocument = createDocument(
+    createDocumentId("doc_tools_test"),
+  );
   const body = addBody(document, { id: BODY, name: "plate" });
   if (!body.ok) throw new Error(body.error.message);
   document = body.value.document;
@@ -150,7 +149,10 @@ function bodyPick(point: readonly [number, number, number]): ToolInputEvent {
   return {
     type: "pointer-up",
     point,
-    pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+    pick: {
+      reference: { kind: "body", bodyId: BODY },
+      renderObjectId: "rend_plate",
+    },
     modifiers: NO_TOOL_MODIFIERS,
   };
 }
@@ -161,13 +163,21 @@ function shiftBodyPick(
   return {
     type: "pointer-up",
     point,
-    pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+    pick: {
+      reference: { kind: "body", bodyId: BODY },
+      renderObjectId: "rend_plate",
+    },
     modifiers: { ...NO_TOOL_MODIFIERS, shift: true },
   };
 }
 
 function miss(): ToolInputEvent {
-  return { type: "pointer-up", point: null, pick: null, modifiers: NO_TOOL_MODIFIERS };
+  return {
+    type: "pointer-up",
+    point: null,
+    pick: null,
+    modifiers: NO_TOOL_MODIFIERS,
+  };
 }
 
 describe("select tool", () => {
@@ -176,14 +186,20 @@ describe("select tool", () => {
     const manager = makeManager(runtime, selectTool);
     manager.activate(selectTool.id);
     manager.dispatch(bodyPick([1, 2, 3]));
-    expect(runtime.selection.selected).toEqual([{ kind: "body", bodyId: BODY }]);
+    expect(runtime.selection.selected).toEqual([
+      { kind: "body", bodyId: BODY },
+    ]);
     manager.dispatch(shiftBodyPick([4, 5, 6]));
     // Shift-click on the SAME reference toggles it off (multi mode).
     expect(runtime.selection.selected).toEqual([]);
     manager.dispatch(shiftBodyPick([4, 5, 6]));
-    expect(runtime.selection.selected).toEqual([{ kind: "body", bodyId: BODY }]);
+    expect(runtime.selection.selected).toEqual([
+      { kind: "body", bodyId: BODY },
+    ]);
     manager.dispatch(miss());
-    expect(runtime.selection.selected).toEqual([{ kind: "body", bodyId: BODY }]);
+    expect(runtime.selection.selected).toEqual([
+      { kind: "body", bodyId: BODY },
+    ]);
     expect(manager.phase).toBe("active");
   });
 
@@ -194,12 +210,17 @@ describe("select tool", () => {
     manager.dispatch({
       type: "pointer-move",
       point: [1, 1, 0],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
     expect(runtime.selection.hover).toEqual({ kind: "body", bodyId: BODY });
     manager.dispatch(bodyPick([1, 1, 0]));
-    expect(runtime.selection.selected).toEqual([{ kind: "body", bodyId: BODY }]);
+    expect(runtime.selection.selected).toEqual([
+      { kind: "body", bodyId: BODY },
+    ]);
     manager.dispatch({
       type: "pointer-move",
       point: null,
@@ -207,7 +228,9 @@ describe("select tool", () => {
       modifiers: NO_TOOL_MODIFIERS,
     });
     expect(runtime.selection.hover).toBeNull();
-    expect(runtime.selection.selected).toEqual([{ kind: "body", bodyId: BODY }]);
+    expect(runtime.selection.selected).toEqual([
+      { kind: "body", bodyId: BODY },
+    ]);
   });
 
   it("reports a failed selection op as a structured failure and stays active", () => {
@@ -247,7 +270,10 @@ describe("measure tool", () => {
     manager.activate(measureTool.id);
     expect(manager.toolState).toEqual({ stage: "awaiting-first" });
     manager.dispatch(bodyPick([0, 0, 0]));
-    expect(manager.toolState).toEqual({ stage: "awaiting-second", from: [0, 0, 0] });
+    expect(manager.toolState).toEqual({
+      stage: "awaiting-second",
+      from: [0, 0, 0],
+    });
     manager.dispatch(bodyPick([3, 4, 0]));
     expect(manager.phase).toBe("completed");
     const detail = manager.completion?.detail;
@@ -267,7 +293,10 @@ describe("measure tool", () => {
     manager.dispatch(bodyPick([1, 1, 1]));
     manager.dispatch(miss());
     expect(manager.phase).toBe("active");
-    expect(manager.toolState).toEqual({ stage: "awaiting-second", from: [1, 1, 1] });
+    expect(manager.toolState).toEqual({
+      stage: "awaiting-second",
+      from: [1, 1, 1],
+    });
     expect(commandLog).toEqual([]);
   });
 });
@@ -280,7 +309,10 @@ describe("translate tool", () => {
     const down: ToolInputEvent = {
       type: "pointer-down",
       point: [0, 0, 0],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     };
     manager.dispatch(down);
@@ -297,12 +329,23 @@ describe("translate tool", () => {
       modifiers: NO_TOOL_MODIFIERS,
     });
     // Preview updates tool state only — nothing issued yet.
-    expect(manager.toolState).toMatchObject({ stage: "dragging", lastVector: [5, 0, 0] });
+    expect(manager.toolState).toMatchObject({
+      stage: "dragging",
+      lastVector: [5, 0, 0],
+    });
     expect(commandLog).toEqual([]);
     manager.dispatch({
       type: "pointer-up",
       point: [5, -2, 1],
-      pick: { reference: { kind: "face", bodyId: BODY, regeneration: 0, faceIndex: 1 }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: {
+          kind: "face",
+          bodyId: BODY,
+          regeneration: 0,
+          faceIndex: 1,
+        },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
     expect(manager.phase).toBe("completed");
@@ -329,7 +372,10 @@ describe("translate tool", () => {
     manager.dispatch({
       type: "pointer-down",
       point: [1, 1, 1],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
     manager.dispatch({
@@ -345,7 +391,10 @@ describe("translate tool", () => {
     manager.dispatch({
       type: "pointer-down",
       point: [1, 1, 1],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
     manager.dispatch({
@@ -361,7 +410,10 @@ describe("translate tool", () => {
       type: "pointer-down",
       point: [0, 0, 0],
       pick: {
-        reference: { kind: "feature", featureId: createFeatureId("feat_translate") },
+        reference: {
+          kind: "feature",
+          featureId: createFeatureId("feat_translate"),
+        },
         renderObjectId: "rend_plate",
       },
       modifiers: NO_TOOL_MODIFIERS,
@@ -385,7 +437,10 @@ describe("translate tool", () => {
     manager.dispatch({
       type: "pointer-down",
       point: [0, 0, 0],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
     manager.dispatch({
@@ -417,10 +472,16 @@ describe("rotate tool", () => {
     manager.dispatch({
       type: "pointer-down",
       point: [30, 10, 0],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
-    expect(manager.toolState).toMatchObject({ stage: "dragging", lastAngle: 0 });
+    expect(manager.toolState).toMatchObject({
+      stage: "dragging",
+      lastAngle: 0,
+    });
     manager.dispatch({
       type: "pointer-up",
       point: [15, 20, 0],
@@ -449,7 +510,10 @@ describe("rotate tool", () => {
     manager.dispatch({
       type: "pointer-down",
       point: [30, 10, 0],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
     expect(manager.failure?.code).toBe("tool/target-unresolved");
@@ -464,7 +528,10 @@ describe("rotate tool", () => {
     manager.dispatch({
       type: "pointer-down",
       point: [30, 10, 0],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: NO_TOOL_MODIFIERS,
     });
     manager.dispatch({

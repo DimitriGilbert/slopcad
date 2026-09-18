@@ -12,7 +12,12 @@
  * serialize, and replay them like any other command log.
  */
 
-import type { CadSession, FeatureId, ParseResult, TransactionError } from "@slopcad/cad-core";
+import type {
+  CadSession,
+  FeatureId,
+  ParseResult,
+  TransactionError,
+} from "@slopcad/cad-core";
 import type { CadStore } from "./store";
 
 import {

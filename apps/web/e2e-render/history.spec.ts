@@ -76,9 +76,9 @@ interface TimelineExpectation {
 
 /** A panel field by its label — which IS the parameter name (domain data). */
 function panelField(page: Page, name: string): Locator {
-  return page.locator(
-    '[data-slot="cad-parameter-panel"]',
-  ).getByLabel(name, { exact: true });
+  return page
+    .locator('[data-slot="cad-parameter-panel"]')
+    .getByLabel(name, { exact: true });
 }
 
 /** The submit button of the panel's Formedible form. */
@@ -114,45 +114,54 @@ async function waitForTimeline(
   page: Page,
   expected: TimelineExpectation,
 ): Promise<TimelineSurface> {
-  await page.waitForFunction(({ check }) => {
-    const root = document.getElementById("workbench-root");
-    const raw = root?.getAttribute("data-feature-timeline") ?? null;
-    if (raw === null) return false;
-    const surface = JSON.parse(raw) as {
-      rollback: { afterFeatureId: string | null } | null;
-      entries: { id: string; status: string; diagnostics: { message: string }[] }[];
-      executed: string[];
-    };
-    if (
-      check.executed !== undefined &&
-      surface.executed.join("|") !== check.executed.join("|")
-    ) {
-      return false;
-    }
-    if (check.rollbackAfter !== undefined) {
+  await page.waitForFunction(
+    ({ check }) => {
+      const root = document.getElementById("workbench-root");
+      const raw = root?.getAttribute("data-feature-timeline") ?? null;
+      if (raw === null) return false;
+      const surface = JSON.parse(raw) as {
+        rollback: { afterFeatureId: string | null } | null;
+        entries: {
+          id: string;
+          status: string;
+          diagnostics: { message: string }[];
+        }[];
+        executed: string[];
+      };
       if (
-        check.rollbackAfter === null
-          ? surface.rollback !== null
-          : surface.rollback?.afterFeatureId !== check.rollbackAfter
+        check.executed !== undefined &&
+        surface.executed.join("|") !== check.executed.join("|")
       ) {
         return false;
       }
-    }
-    for (const [id, status] of check.statuses ?? []) {
-      const entry = surface.entries.find((candidate) => candidate.id === id);
-      if (entry === undefined || entry.status !== status) return false;
-    }
-    for (const [id, text] of check.diagnosticIncludes ?? []) {
-      const entry = surface.entries.find((candidate) => candidate.id === id);
-      if (
-        entry === undefined ||
-        !entry.diagnostics.some((diagnostic) => diagnostic.message.includes(text))
-      ) {
-        return false;
+      if (check.rollbackAfter !== undefined) {
+        if (
+          check.rollbackAfter === null
+            ? surface.rollback !== null
+            : surface.rollback?.afterFeatureId !== check.rollbackAfter
+        ) {
+          return false;
+        }
       }
-    }
-    return true;
-  }, { check: expected });
+      for (const [id, status] of check.statuses ?? []) {
+        const entry = surface.entries.find((candidate) => candidate.id === id);
+        if (entry === undefined || entry.status !== status) return false;
+      }
+      for (const [id, text] of check.diagnosticIncludes ?? []) {
+        const entry = surface.entries.find((candidate) => candidate.id === id);
+        if (
+          entry === undefined ||
+          !entry.diagnostics.some((diagnostic) =>
+            diagnostic.message.includes(text),
+          )
+        ) {
+          return false;
+        }
+      }
+      return true;
+    },
+    { check: expected },
+  );
   return readTimeline(page);
 }
 
@@ -305,7 +314,10 @@ test("the rollback marker parks downstream features; removing it re-executes the
 
   // Removing the marker re-executes exactly what was parked (stale is due);
   // the valid upstream feature is not due and does not re-run.
-  await rollbackGap(page, "Remove rollback point — Roll back after translate").click();
+  await rollbackGap(
+    page,
+    "Remove rollback point — Roll back after translate",
+  ).click();
   const unrolled = await waitForTimeline(page, {
     executed: [ROTATE_FEATURE],
     rollbackAfter: null,
@@ -479,7 +491,10 @@ test("the failure, rollback, and recovery workflow is captured on video", async 
     ],
   });
   await beat();
-  await rollbackGap(page, "Remove rollback point — Roll back after translate").click();
+  await rollbackGap(
+    page,
+    "Remove rollback point — Roll back after translate",
+  ).click();
   // Un-rolling EXPOSES the gated rotate feature (stale, due) while the
   // failed upstream re-attempts and fails again — honest gating, no
   // downstream execution through a failed input.

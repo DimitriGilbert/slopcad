@@ -166,7 +166,8 @@ export function createWorkplane(
   if (!isVec3(origin)) {
     return fail({
       code: SKETCH_DIAGNOSTIC_CODES.workplaneMalformed,
-      message: "Workplane origin must have finite numeric x, y, z components (mm).",
+      message:
+        "Workplane origin must have finite numeric x, y, z components (mm).",
       input: origin,
     });
   }

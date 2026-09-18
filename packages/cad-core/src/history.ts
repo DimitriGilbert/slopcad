@@ -102,9 +102,8 @@ export function createDocumentHistory(base: CadDocument): DocumentHistory {
  * very snapshot reference, not a copy.
  */
 export function currentDocument(history: DocumentHistory): CadDocument {
-  const entry = history.cursor > 0
-    ? history.entries[history.cursor - 1]
-    : undefined;
+  const entry =
+    history.cursor > 0 ? history.entries[history.cursor - 1] : undefined;
   return entry === undefined ? history.base : entry.document;
 }
 

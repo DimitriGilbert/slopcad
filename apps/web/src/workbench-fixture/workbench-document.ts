@@ -54,9 +54,8 @@ const WORKBENCH_TRANSLATE_PARAMETERS: readonly [
 ];
 
 /** The rotate-about-+Z angle parameter id. */
-const WORKBENCH_ROTATE_PARAMETER: ParameterId = createParameterId(
-  "param_rotate_z",
-);
+const WORKBENCH_ROTATE_PARAMETER: ParameterId =
+  createParameterId("param_rotate_z");
 
 /** The workbench's translate feature id (tool resolution target). */
 const WORKBENCH_TRANSLATE_FEATURE: FeatureId = createFeatureId(
@@ -64,9 +63,8 @@ const WORKBENCH_TRANSLATE_FEATURE: FeatureId = createFeatureId(
 );
 
 /** The workbench's rotate feature id (tool resolution target). */
-const WORKBENCH_ROTATE_FEATURE: FeatureId = createFeatureId(
-  "feat_rotate_plate",
-);
+const WORKBENCH_ROTATE_FEATURE: FeatureId =
+  createFeatureId("feat_rotate_plate");
 
 interface DocumentResult {
   readonly ok: boolean;
@@ -95,9 +93,7 @@ export function requireDocumentOk(
  * scene's default), and the translate/rotate feature plumbing, all at
  * identity values.
  */
-export function createWorkbenchSession(
-  holeDiameterMm: number,
-): CadSession {
+export function createWorkbenchSession(holeDiameterMm: number): CadSession {
   let document = createDocument(createDocumentId("doc_workbench_fixture"));
   document = requireDocumentOk(
     addBody(document, { id: WORKBENCH_BODY_ID, name: "plate" }),

@@ -176,14 +176,12 @@ function binaryFrameBytes(count: number): number {
 function isDecodableAsciiText(bytes: Uint8Array): boolean {
   for (let i = 0; i < bytes.length; i += 1) {
     const byte = bytes[i] ?? 0;
-    if (
-      !(
-        byte === 0x09 ||
-        byte === 0x0a ||
-        byte === 0x0d ||
-        (byte >= 0x20 && byte <= 0x7e)
-      )
-    ) {
+    if (!(
+      byte === 0x09 ||
+      byte === 0x0a ||
+      byte === 0x0d ||
+      (byte >= 0x20 && byte <= 0x7e)
+    )) {
       return false;
     }
   }
@@ -218,7 +216,9 @@ function hasUtf8BomSolid(bytes: Uint8Array): boolean {
     return false;
   }
   const rest = bytes.subarray(3);
-  return isDecodableAsciiText(rest) && firstWord(decodeAsciiBytes(rest)) === "solid";
+  return (
+    isDecodableAsciiText(rest) && firstWord(decodeAsciiBytes(rest)) === "solid"
+  );
 }
 
 /** Whether the bytes open with a UTF-16LE BOM before a UTF-16 `solid`. */
@@ -226,7 +226,9 @@ function hasUtf16LeBomSolid(bytes: Uint8Array): boolean {
   if (bytes.length < 12 || bytes[0] !== 0xff || bytes[1] !== 0xfe) {
     return false;
   }
-  const solidUtf16Le = [0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x69, 0x00, 0x64, 0x00];
+  const solidUtf16Le = [
+    0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x69, 0x00, 0x64, 0x00,
+  ];
   return solidUtf16Le.every((byte, i) => bytes[i + 2] === byte);
 }
 

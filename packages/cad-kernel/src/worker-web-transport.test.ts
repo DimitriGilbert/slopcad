@@ -119,7 +119,9 @@ describe("isWebWorkerMessagePort", () => {
   it("rejects scopes without the full message surface", () => {
     expect(isWebWorkerMessagePort(null)).toBe(false);
     expect(isWebWorkerMessagePort(42)).toBe(false);
-    expect(isWebWorkerMessagePort({ postMessage: () => undefined })).toBe(false);
+    expect(isWebWorkerMessagePort({ postMessage: () => undefined })).toBe(
+      false,
+    );
     expect(
       isWebWorkerMessagePort({
         postMessage: () => undefined,

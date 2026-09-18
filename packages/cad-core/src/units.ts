@@ -62,11 +62,7 @@ export type DimensionlessUnit = typeof DIMENSIONLESS_UNIT;
 
 /** Every unit token known to the registry. */
 export type AnyUnit =
-  | LengthUnit
-  | AngleUnit
-  | AreaUnit
-  | VolumeUnit
-  | DimensionlessUnit;
+  LengthUnit | AngleUnit | AreaUnit | VolumeUnit | DimensionlessUnit;
 
 /** The units of a given dimension. */
 export type UnitOf<D extends Dimension> = D extends "length"
@@ -153,7 +149,9 @@ export function unitDimension(unit: AnyUnit): Dimension {
   return UNIT_DIMENSIONS[unit];
 }
 
-const UNIT_TOKEN_SET: ReadonlySet<string> = new Set(Object.keys(UNIT_DIMENSIONS));
+const UNIT_TOKEN_SET: ReadonlySet<string> = new Set(
+  Object.keys(UNIT_DIMENSIONS),
+);
 
 /** Type guard for untrusted unit tokens. */
 export function isUnitToken(input: unknown): input is AnyUnit {
@@ -191,7 +189,8 @@ export const UNIT_ERROR_CODES = {
   unknown: "unit/unknown",
 } as const;
 
-export type UnitErrorCode = (typeof UNIT_ERROR_CODES)[keyof typeof UNIT_ERROR_CODES];
+export type UnitErrorCode =
+  (typeof UNIT_ERROR_CODES)[keyof typeof UNIT_ERROR_CODES];
 
 /** Structured failure describing why input was rejected as a unit. */
 export interface UnitParseError {
@@ -200,7 +199,11 @@ export interface UnitParseError {
   readonly input: unknown;
 }
 
-function unitError(code: UnitErrorCode, message: string, input: unknown): UnitParseError {
+function unitError(
+  code: UnitErrorCode,
+  message: string,
+  input: unknown,
+): UnitParseError {
   return { code, message, input };
 }
 
@@ -215,14 +218,12 @@ export interface ParsedUnit {
  * by the registry. Use this at trust boundaries (persisted documents,
  * imported files, expression tokens) before constructing dimensional values.
  */
-export function parseUnit(input: unknown): ParseResult<ParsedUnit, UnitParseError> {
+export function parseUnit(
+  input: unknown,
+): ParseResult<ParsedUnit, UnitParseError> {
   if (typeof input !== "string") {
     return fail(
-      unitError(
-        UNIT_ERROR_CODES.notAString,
-        "A unit must be a string.",
-        input,
-      ),
+      unitError(UNIT_ERROR_CODES.notAString, "A unit must be a string.", input),
     );
   }
   if (!isUnitToken(input)) {

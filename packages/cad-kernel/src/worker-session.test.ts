@@ -25,7 +25,9 @@ function failureOf(promise: Promise<unknown>): Promise<WorkerRequestFailure> {
     },
     (error: unknown) => {
       if (!(error instanceof WorkerRequestFailure)) {
-        throw new Error(`Expected a WorkerRequestFailure, received ${String(error)}.`);
+        throw new Error(
+          `Expected a WorkerRequestFailure, received ${String(error)}.`,
+        );
       }
       return error;
     },
@@ -44,7 +46,9 @@ describe("session round-trip against the fake kernel", () => {
       depth: mm(3),
       height: mm(4),
     });
-    const sphere = await client.request("solid.createSphere", { radius: mm(1) });
+    const sphere = await client.request("solid.createSphere", {
+      radius: mm(1),
+    });
     const cylinder = await client.request("solid.createCylinder", {
       radius: mm(1),
       height: mm(5),
@@ -68,15 +72,21 @@ describe("session round-trip against the fake kernel", () => {
       depth: mm(3),
       height: mm(4),
     });
-    const sphere = await client.request("solid.createSphere", { radius: mm(1) });
+    const sphere = await client.request("solid.createSphere", {
+      radius: mm(1),
+    });
 
-    const boxVolume = await client.request("solid.volume", { solid: box.solid });
+    const boxVolume = await client.request("solid.volume", {
+      solid: box.solid,
+    });
     expect(boxVolume.volume).toBe(24); // analytic: w·d·h
 
     const union = await client.request("solid.union", {
       operands: [box.solid, sphere.solid],
     });
-    const unionVolume = await client.request("solid.volume", { solid: union.solid });
+    const unionVolume = await client.request("solid.volume", {
+      solid: union.solid,
+    });
     // The union contains the whole box and adds at most the whole sphere.
     expect(unionVolume.volume).toBeGreaterThan(24 - 1e-6);
     expect(unionVolume.volume).toBeLessThan(24 + 4.18879 + 1e-6);
@@ -132,12 +142,18 @@ describe("session round-trip against the fake kernel", () => {
       operands: [boxA.solid, boxB.solid],
     });
 
-    const volume = await client.request("solid.volume", { solid: overlap.solid });
+    const volume = await client.request("solid.volume", {
+      solid: overlap.solid,
+    });
     expect(volume.volume).toBe(0);
-    const soup = await client.request("solid.tessellate", { solid: overlap.solid });
+    const soup = await client.request("solid.tessellate", {
+      solid: overlap.solid,
+    });
     expect(soup.tessellation.positions).toEqual([]);
     expect(soup.tessellation.indices).toEqual([]);
-    const bounds = await failureOf(client.request("solid.bounds", { solid: overlap.solid }));
+    const bounds = await failureOf(
+      client.request("solid.bounds", { solid: overlap.solid }),
+    );
     expect(bounds.error.code).toBe("worker/operation-failed");
     expect(bounds.error.data).toEqual({ kernelCode: "kernel/bounds-empty" });
   });
@@ -173,17 +189,23 @@ describe("session solid-id lifecycle", () => {
       height: mm(4),
     });
 
-    const disposed = await client.request("solid.dispose", { solid: box.solid });
+    const disposed = await client.request("solid.dispose", {
+      solid: box.solid,
+    });
     expect(disposed).toBeNull();
 
-    const volume = await failureOf(client.request("solid.volume", { solid: box.solid }));
+    const volume = await failureOf(
+      client.request("solid.volume", { solid: box.solid }),
+    );
     expect(volume.error.code).toBe("worker/operation-failed");
     expect(volume.error.data).toEqual({ kernelCode: "kernel/solid-not-owned" });
 
     const redispose = await failureOf(
       client.request("solid.dispose", { solid: box.solid }),
     );
-    expect(redispose.error.data).toEqual({ kernelCode: "kernel/solid-not-owned" });
+    expect(redispose.error.data).toEqual({
+      kernelCode: "kernel/solid-not-owned",
+    });
   });
 
   it("answers a never-minted solid reference as solid-not-owned", async () => {
@@ -193,7 +215,9 @@ describe("session solid-id lifecycle", () => {
       client.request("solid.union", { operands: [unknown, unknown] }),
     );
     expect(failure.error.code).toBe("worker/operation-failed");
-    expect(failure.error.data).toEqual({ kernelCode: "kernel/solid-not-owned" });
+    expect(failure.error.data).toEqual({
+      kernelCode: "kernel/solid-not-owned",
+    });
   });
 
   it("answers solid-not-owned for every operation kind that consumes a solid", async () => {
@@ -236,7 +260,9 @@ describe("session solid-id lifecycle", () => {
     for (const attempt of attempts) {
       const failure = await attempt;
       expect(failure.error.code).toBe("worker/operation-failed");
-      expect(failure.error.data).toEqual({ kernelCode: "kernel/solid-not-owned" });
+      expect(failure.error.data).toEqual({
+        kernelCode: "kernel/solid-not-owned",
+      });
     }
   });
 });
@@ -261,7 +287,9 @@ describe("session failure propagation", () => {
     const failure = await failureOf(
       client.request("solid.union", { operands: [box.solid] }),
     );
-    expect(failure.error.data).toEqual({ kernelCode: "kernel/invalid-operands" });
+    expect(failure.error.data).toEqual({
+      kernelCode: "kernel/invalid-operands",
+    });
   });
 });
 
@@ -279,7 +307,9 @@ describe("session cancellation over the full stack", () => {
 
     // The suppressed computation minted nothing: the next delivered solid
     // takes the id the voided box would have taken.
-    const sphere = await client.request("solid.createSphere", { radius: mm(1) });
+    const sphere = await client.request("solid.createSphere", {
+      radius: mm(1),
+    });
     expect(sphere.solid).toBe("wsol_000001");
   });
 
@@ -306,13 +336,21 @@ describe("session determinism", () => {
         depth: mm(3),
         height: mm(4),
       });
-      const sphere = await client.request("solid.createSphere", { radius: mm(1) });
+      const sphere = await client.request("solid.createSphere", {
+        radius: mm(1),
+      });
       const union = await client.request("solid.union", {
         operands: [box.solid, sphere.solid],
       });
-      const volume = await client.request("solid.volume", { solid: union.solid });
-      const bounds = await client.request("solid.bounds", { solid: union.solid });
-      const soup = await client.request("solid.tessellate", { solid: union.solid });
+      const volume = await client.request("solid.volume", {
+        solid: union.solid,
+      });
+      const bounds = await client.request("solid.bounds", {
+        solid: union.solid,
+      });
+      const soup = await client.request("solid.tessellate", {
+        solid: union.solid,
+      });
       await client.request("solid.dispose", { solid: sphere.solid });
       return { box, sphere, union, volume, bounds, soup };
     };

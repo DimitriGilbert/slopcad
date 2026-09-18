@@ -34,7 +34,9 @@ function requireOk<T>(
   what: string,
 ): T {
   if (!result.ok) {
-    throw new Error(`The migration test rejected ${what}: ${result.error.message}`);
+    throw new Error(
+      `The migration test rejected ${what}: ${result.error.message}`,
+    );
   }
   return result.value;
 }
@@ -46,7 +48,9 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 /** A minimal current-version document, as revived JSON. */
 function currentDocument(): Record<string, unknown> {
   const native = requireOk(
-    createNativeCadDocument(createDocument(createDocumentId("doc_migration_test"))),
+    createNativeCadDocument(
+      createDocument(createDocumentId("doc_migration_test")),
+    ),
     "the empty document",
   );
   return JSON.parse(
@@ -129,7 +133,9 @@ describe("readNativeFormatVersion", () => {
 
 describe("planNativeFormatMigrations", () => {
   it("plans the empty chain for an already-current version", () => {
-    expect(planNativeFormatMigrations(1, 1, [SYNTHETIC_V0_TO_V1])).toMatchObject({
+    expect(
+      planNativeFormatMigrations(1, 1, [SYNTHETIC_V0_TO_V1]),
+    ).toMatchObject({
       ok: true,
       value: [],
     });
@@ -158,7 +164,9 @@ describe("planNativeFormatMigrations", () => {
     if (!result.ok) {
       expect(result.error.message).toContain("version 0");
     }
-    expect(planNativeFormatMigrations(0, 2, [SYNTHETIC_V0_TO_V1])).toMatchObject({
+    expect(
+      planNativeFormatMigrations(0, 2, [SYNTHETIC_V0_TO_V1]),
+    ).toMatchObject({
       ok: false,
       error: { code: "native-migration/no-path" },
     });
@@ -179,11 +187,18 @@ describe("planNativeFormatMigrations", () => {
         SYNTHETIC_V0_TO_V1,
         { ...SYNTHETIC_V0_TO_V1, to: 1 },
       ]),
-    ).toMatchObject({ ok: false, error: { code: "native-migration/registry-invalid" } });
+    ).toMatchObject({
+      ok: false,
+      error: { code: "native-migration/registry-invalid" },
+    });
   });
 
   it("rejects malformed planning endpoints", () => {
-    for (const [from, to] of [[-1, 1], [1.5, 2], [1, 0]] as const) {
+    for (const [from, to] of [
+      [-1, 1],
+      [1.5, 2],
+      [1, 0],
+    ] as const) {
       expect(planNativeFormatMigrations(from, to, [])).toMatchObject({
         ok: false,
         error: { code: "native-migration/version-invalid" },
@@ -234,7 +249,10 @@ describe("runNativeFormatMigrations", () => {
   it("propagates a migration's structured failure", () => {
     expect(
       runNativeFormatMigrations("not an object", [SYNTHETIC_V0_TO_V1]),
-    ).toMatchObject({ ok: false, error: { code: "native-migration/migration-failed" } });
+    ).toMatchObject({
+      ok: false,
+      error: { code: "native-migration/migration-failed" },
+    });
   });
 
   it("rejects a migration that returns a non-object", () => {
@@ -243,10 +261,12 @@ describe("runNativeFormatMigrations", () => {
       to: 1,
       migrate: () => ok("a string"),
     };
-    expect(runNativeFormatMigrations(currentDocument(), [bogus])).toMatchObject({
-      ok: false,
-      error: { code: "native-migration/migration-invalid" },
-    });
+    expect(runNativeFormatMigrations(currentDocument(), [bogus])).toMatchObject(
+      {
+        ok: false,
+        error: { code: "native-migration/migration-invalid" },
+      },
+    );
   });
 });
 
@@ -305,7 +325,10 @@ describe("the migration mechanism end to end (synthetic, tests only)", () => {
       runNativeFormatMigrations(v0, [SYNTHETIC_V0_TO_V1]),
       "the synthetic migration",
     );
-    const parsed = requireOk(parseNativeCadDocument(migrated), "the migrated parse");
+    const parsed = requireOk(
+      parseNativeCadDocument(migrated),
+      "the migrated parse",
+    );
     expect(parsed.metadata).toEqual({ name: "old" });
   });
 

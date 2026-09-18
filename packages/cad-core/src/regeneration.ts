@@ -113,7 +113,11 @@
  * serialization output exactly.
  */
 
-import { type Diagnostic, type DiagnosticDataValue, parseDiagnostic } from "./diagnostics";
+import {
+  type Diagnostic,
+  type DiagnosticDataValue,
+  parseDiagnostic,
+} from "./diagnostics";
 import { type FeatureRecord } from "./document";
 import {
   affectedFeatures,
@@ -221,7 +225,10 @@ const SUPPRESSED_STATUS: FeatureRegenerationStatus = Object.freeze({
 function failedStatus(
   diagnostics: readonly Diagnostic[],
 ): FeatureRegenerationStatus {
-  return Object.freeze({ state: "failed", diagnostics: Object.freeze(diagnostics) });
+  return Object.freeze({
+    state: "failed",
+    diagnostics: Object.freeze(diagnostics),
+  });
 }
 
 /**
@@ -276,7 +283,10 @@ export function markStale(
       result.set(feature.id, prior);
       continue;
     }
-    result.set(feature.id, affected.has(feature.id) ? STALE_STATUS : prior ?? STALE_STATUS);
+    result.set(
+      feature.id,
+      affected.has(feature.id) ? STALE_STATUS : (prior ?? STALE_STATUS),
+    );
   }
   return result;
 }
@@ -301,7 +311,10 @@ export type FeatureExecutionRecord =
   | { readonly ok: false; readonly diagnostics: readonly Diagnostic[] };
 
 /** The executor-results registry: last attempt records, keyed by feature id. */
-export type RegenerationResultMap = ReadonlyMap<FeatureId, FeatureExecutionRecord>;
+export type RegenerationResultMap = ReadonlyMap<
+  FeatureId,
+  FeatureExecutionRecord
+>;
 
 /**
  * The caller-supplied, deterministic rebuild decider: given a feature, return
@@ -310,7 +323,9 @@ export type RegenerationResultMap = ReadonlyMap<FeatureId, FeatureExecutionRecor
  * calls it at most once per feature, in evaluation order — and it never
  * executes here: the geometry-kernel phases supply real executors later.
  */
-export type FeatureExecutor = (feature: FeatureRecord) => FeatureExecutionOutcome;
+export type FeatureExecutor = (
+  feature: FeatureRecord,
+) => FeatureExecutionOutcome;
 
 /** Input of {@link regenerate}. */
 export interface RegenerateInput {
@@ -436,7 +451,9 @@ export function regenerate(
     }
 
     if (
-      feature.inputs.some((ref) => ref.kind === "feature" && blocked.has(ref.id))
+      feature.inputs.some(
+        (ref) => ref.kind === "feature" && blocked.has(ref.id),
+      )
     ) {
       evaluated.set(id, STALE_STATUS);
       blocked.add(id);
@@ -656,7 +673,7 @@ export function parseRegenerationStates(
       }
       diagnostics = Object.freeze(parsedDiagnostics);
     }
-    if ((state === "failed") !== (diagnostics.length > 0)) {
+    if ((state === "failed") !== diagnostics.length > 0) {
       return fail(
         regenerationError(
           REGENERATION_ERROR_CODES.malformed,

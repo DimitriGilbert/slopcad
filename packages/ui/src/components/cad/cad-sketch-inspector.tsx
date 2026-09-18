@@ -152,13 +152,12 @@ export interface CadSketchInspectorProps {
 }
 
 /** The list status classes: quiet when healthy, loud on problems. */
-const STATUS_CLASSES: Readonly<
-  Record<CadSketchConstraintStatus, string>
-> = Object.freeze({
-  ok: "text-muted-foreground",
-  warning: "text-amber-600 dark:text-amber-400 font-medium",
-  error: "text-destructive font-medium",
-});
+const STATUS_CLASSES: Readonly<Record<CadSketchConstraintStatus, string>> =
+  Object.freeze({
+    ok: "text-muted-foreground",
+    warning: "text-amber-600 dark:text-amber-400 font-medium",
+    error: "text-destructive font-medium",
+  });
 
 const SEVERITY_CLASSES: Readonly<
   Record<CadSketchInspectorDiagnostic["severity"], string>
@@ -168,13 +167,12 @@ const SEVERITY_CLASSES: Readonly<
   error: "text-destructive",
 });
 
-const SOLVE_CLASSES: Readonly<
-  Record<CadSketchSolveStatus, string>
-> = Object.freeze({
-  solved: "text-emerald-600 dark:text-emerald-400",
-  "under-constrained": "text-amber-600 dark:text-amber-400",
-  failed: "text-destructive font-medium",
-});
+const SOLVE_CLASSES: Readonly<Record<CadSketchSolveStatus, string>> =
+  Object.freeze({
+    solved: "text-emerald-600 dark:text-emerald-400",
+    "under-constrained": "text-amber-600 dark:text-amber-400",
+    failed: "text-destructive font-medium",
+  });
 
 /** The inspector's form values: one number field keyed by constraint id. */
 type DimensionFormValues = Record<string, number | undefined>;
@@ -201,7 +199,8 @@ export function CadSketchInspector({
   );
 
   const formConfig = useMemo(() => {
-    const name = dimension === null ? "idle" : `value:${dimension.constraintId}`;
+    const name =
+      dimension === null ? "idle" : `value:${dimension.constraintId}`;
     const defaultValue =
       dimension === null
         ? undefined
@@ -229,7 +228,8 @@ export function CadSketchInspector({
         setApplyFailure(undefined);
         if (dimension === null || onEditDimension === undefined) return;
         const submitted = value[name];
-        if (typeof submitted !== "number" || !Number.isFinite(submitted)) return;
+        if (typeof submitted !== "number" || !Number.isFinite(submitted))
+          return;
         const outcome = onEditDimension(dimension.constraintId, submitted);
         if (!outcome.ok) {
           setApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
@@ -255,7 +255,10 @@ export function CadSketchInspector({
 
   return (
     <div
-      className={cn("border-border bg-background w-60 border text-sm", className)}
+      className={cn(
+        "border-border bg-background w-60 border text-sm",
+        className,
+      )}
       data-slot="cad-sketch-inspector"
       data-sketch-inspector-selected-constraint={selectedConstraintId ?? ""}
       data-sketch-inspector-solve-status={solveStatus}
@@ -306,9 +309,7 @@ export function CadSketchInspector({
                     data-sketch-constraint-status={constraint.status}
                     title={constraint.message ?? constraint.label}
                     onClick={() => {
-                      onSelectConstraint(
-                        selected ? null : constraint.id,
-                      );
+                      onSelectConstraint(selected ? null : constraint.id);
                     }}
                   >
                     <span

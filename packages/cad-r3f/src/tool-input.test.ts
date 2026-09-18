@@ -5,7 +5,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { createBodyId, createFeatureId, toolModifiers } from "@slopcad/cad-core";
+import {
+  createBodyId,
+  createFeatureId,
+  toolModifiers,
+} from "@slopcad/cad-core";
 import type { CadPick } from "./picking";
 
 import {
@@ -33,17 +37,28 @@ const FACE_PICK: CadPick = {
 
 describe("tool input normalization", () => {
   it("maps a pick to a pointer event with the pick's world point", () => {
-    const event = toolPointerEvent("pointer-down", BODY_PICK, toolModifiers(false, false, false, false));
+    const event = toolPointerEvent(
+      "pointer-down",
+      BODY_PICK,
+      toolModifiers(false, false, false, false),
+    );
     expect(event).toEqual({
       type: "pointer-down",
       point: [1.5, -2.5, 3.5],
-      pick: { reference: { kind: "body", bodyId: BODY }, renderObjectId: "rend_plate" },
+      pick: {
+        reference: { kind: "body", bodyId: BODY },
+        renderObjectId: "rend_plate",
+      },
       modifiers: { shift: false, alt: false, ctrl: false, meta: false },
     });
   });
 
   it("carries the pick's feature provenance when present", () => {
-    const event = toolPointerEvent("pointer-up", FACE_PICK, toolModifiers(true, false, false, false));
+    const event = toolPointerEvent(
+      "pointer-up",
+      FACE_PICK,
+      toolModifiers(true, false, false, false),
+    );
     expect(event.point).toEqual([0, 0, 10]);
     expect(event.pick).toEqual({
       reference: { kind: "face", bodyId: BODY, regeneration: 4, faceIndex: 2 },
@@ -54,7 +69,11 @@ describe("tool input normalization", () => {
   });
 
   it("normalizes empty-space pointers to null point and null pick", () => {
-    const event = toolPointerEvent("pointer-move", null, toolModifiers(false, true, false, false));
+    const event = toolPointerEvent(
+      "pointer-move",
+      null,
+      toolModifiers(false, true, false, false),
+    );
     expect(event).toEqual({
       type: "pointer-move",
       point: null,
@@ -65,12 +84,21 @@ describe("tool input normalization", () => {
 
   it("captures the four DOM modifier flags", () => {
     expect(
-      toolModifiersFromNative({ shiftKey: false, altKey: false, ctrlKey: true, metaKey: true }),
+      toolModifiersFromNative({
+        shiftKey: false,
+        altKey: false,
+        ctrlKey: true,
+        metaKey: true,
+      }),
     ).toEqual({ shift: false, alt: false, ctrl: true, meta: true });
   });
 
   it("builds keyboard events and serializes events as plain JSON", () => {
-    const event = toolKeyEvent("key-down", "Escape", toolModifiers(false, false, false, false));
+    const event = toolKeyEvent(
+      "key-down",
+      "Escape",
+      toolModifiers(false, false, false, false),
+    );
     expect(event).toEqual({
       type: "key-down",
       key: "Escape",

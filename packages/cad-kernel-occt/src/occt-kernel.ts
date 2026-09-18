@@ -26,6 +26,70 @@
  * kernels produce (`kernel/invalid-length`, plus `kernel/invalid-rotation`
  * for degenerate rotation axes/angles).
  *
+ * ## Profile extrusion (Phase 26.1)
+ *
+ * `extrude` is the EXACT prism path the contract's fidelity honesty
+ * promises: each profile segment becomes an exact edge (lines between
+ * points; arcs and circles from a `gp_Circ` on the local frame's
+ * `gp_Ax2` trimmed by `GC_MakeArcOfCircle` at the segment's angles), the
+ * wire is faced and `BRepPrimAPI_MakePrism` extrudes it along local z
+ * (direction −1 sweeps toward −z), and the placement reuses the transform
+ * composition (rotation first about the world-origin axis, translation
+ * second). Volumes of curved profiles are therefore exact (analytic
+ * cylinders), not chord-fan approximations. Structural profile validation
+ * (closure, non-degeneracy) runs BEFORE any OCCT call per the
+ * silent-mirror rule; the shared tessellation constant is imported only to
+ * document fidelity parity with the mesh kernels, not for geometry.
+ *
+ * ## Profile sweep (Phase 26.3)
+ *
+ * `sweep` is the EXACT pipe path: the path chain becomes a spine wire of
+ * exact edges in the local XZ plane (CCW in (x, z) = CCW about the −ŷ
+ * circle normal, probed; clockwise arcs mirror the plane; a full-turn arc
+ * is the whole-circle edge), and `BRepOffsetAPI_MakePipeShell` in
+ * corrected-Frenet mode carries the exact profile wire along it — for
+ * planar spines that is the contract's fixed-binormal transport, no twist.
+ * Probed: a straight spine prisms to the offset-cylinder volume at 0
+ * relative error, a quarter-arc spine hits the Pappus value exactly, and a
+ * closed circular spine builds the exact torus. The shared validation
+ * battery (path structure, chord self-intersection, the per-arc
+ * bend-axis crossing) rejects BEFORE any OCCT call; a pipe OCCT cannot
+ * make solid (`MakeSolid` false) throws inside the no-throw boundary and
+ * maps to the structured profile failure.
+ *
+ * ## Profile loft (Phase 26.4)
+ *
+ * `loft` is the EXACT ruled-loft path: each section's loop becomes the
+ * same exact wire `extrude` builds (lines, angularly-trimmed arcs, full
+ * circles), lifted to its station z, and
+ * `BRepOffsetAPI_ThruSections(isSolid, ruled = true)` joins consecutive
+ * sections with RULED surfaces — the piecewise-linear-per-span transport
+ * the contract pins (the smooth default would blend ACROSS stations, a
+ * different solid). Probed: a prismatic loft equals the prism volume at 0
+ * relative error, concentric circles give the exact conical frustum
+ * `πh(R² + Rr + r²)/3`, the twisted square the exact Simpson
+ * (prismoidal) value of the vertex morph — and a start-vertex-rotated
+ * (re-phased) square→square loft the index morph's Simpson value 2000/3,
+ * the correspondence the ADAPTER enforces: ThruSections' own
+ * wire-compatibility pass re-origins a later wire on a PHASE shift
+ * alone, identical segment structure included (probed: left at its
+ * default it de-twists the re-phased square to the prism — 1000 mm³, not
+ * 2000/3), so `CheckCompatibility(false)` disables the pass on
+ * equal-segment-count collections and the wires rule edge i ↔ edge i in
+ * authored order. With the pass off the engine no longer reconciles
+ * winding either — a CW member against a CCW one silently builds an
+ * EMPTY solid (probed volume 0) — so each section wire is CCW-normalized
+ * first, the authored-CW wire carried REVERSED (the same normalization
+ * the contract's chord polygons apply; probed to reproduce the reference
+ * kernel's morph phase exactly). Collections whose segment counts differ
+ * (equal chord counts: a circle and its authored 63-gon) keep the pass ON
+ * for the edge repartition their correspondence needs — probed: with the
+ * pass off that class silently builds volume 0 too — and the contract
+ * scopes that class's correspondence to each engine's own
+ * parameterization; the contract's vertex-count rule rejects mismatched
+ * collections before any engine call, so the pass never sees a chord
+ * count the rule has not already pinned.
+ *
  * ## Cone composition (no bound `BRepPrimAPI_MakeCone`)
  *
  * This binding ships no cone primitive, so `createCone` composes the
@@ -49,6 +113,15 @@
  * TShape under a new location (OCCT's native rigid-transform form); the
  * mesh extractor bakes the location into world-space vertices (probed on
  * translated and rotated solids).
+ *
+ * ## Mirror (Phase 26.9)
+ *
+ * `mirror` builds one `gp_Trsf` whose `SetMirror` is the PLANE reflection
+ * through the `gp_Ax2` at the offset point, normal to the selected axis,
+ * and applies it with the same `BRepBuilderAPI_Transform` — the negative
+ * determinant is not a rigid location, so the engine rebuilds the oriented
+ * geometry itself (probed: the mirrored box measures its exact POSITIVE
+ * GProp volume with outward tessellation normals).
  *
  * ## Empty solids (measurement-based detection)
  *
@@ -152,11 +225,17 @@ import type {
   TopologySnapshot,
 } from "@slopcad/cad-core";
 import { fail, ok, valueIn } from "@slopcad/cad-core";
-import type { TopoDS_Edge, TopoDS_Shape } from "replicad-opencascadejs";
+import type {
+  TopoDS_Edge,
+  TopoDS_Shape,
+  TopoDS_Wire,
+} from "replicad-opencascadejs";
 import {
   type BoxInput,
+  type ChamferInput,
   type ConeInput,
   type CylinderInput,
+  type FilletInput,
   type GeometryKernel,
   type KernelBounds,
   type KernelCapabilities,
@@ -165,9 +244,32 @@ import {
   type KernelResult,
   KERNEL_ERROR_CODES,
   type KernelSolid,
+  type MirrorInput,
+  type ProfileExtrudeInput,
+  type ProfileLoftInput,
+  type ProfileLoftSectionInput,
+  type ProfileRevolveInput,
+  type ProfileSweepInput,
+  type ShellInput,
   type SphereInput,
+  type SweepPathSegmentInput,
   type Tessellation,
   type TransformInput,
+} from "@slopcad/cad-kernel";
+import {
+  axisAngleMatrix,
+  loftSectionsProblem,
+  loftStations,
+  normalizeRevolveAxis,
+  polygonSignedArea,
+  profileLoopProblem,
+  revolveCrossesAxis,
+  revolveSignedExtremes,
+  sweepArcSignedSweep,
+  sweepPathProblem,
+  sweepPathSelfIntersects,
+  sweepProfileArcAxisCrossing,
+  tessellateProfileLoop,
 } from "@slopcad/cad-kernel";
 import { createSolidTag } from "@slopcad/cad-kernel";
 
@@ -188,6 +290,8 @@ import {
 import {
   OCCT_TOPOLOGY_DEFAULT_KINDS,
   OCCT_TOPOLOGY_IDENTITY_SCHEMA,
+  occtEdgesAtOrdinals,
+  occtFacesAtOrdinals,
   occtShapeTopology,
 } from "./occt-topology";
 import {
@@ -223,6 +327,44 @@ import {
  * - The full `TopoDS` face/edge/vertex topology survives every operation
  *   (`persistentTopology`) — declared now; the reference model that
  *   consumes stable topology identities is Phase 22's work.
+ * - The Phase 26.3 sweep is the exact pipe path
+ *   (`BRepOffsetAPI_MakePipeShell`, probed: straight spines prism exactly,
+ *   arc spines hit the Pappus values at 0 relative error, closed circular
+ *   spines build exact tori) (`sweep`).
+ * - The Phase 26.4 loft is the exact ruled loft
+ *   (`BRepOffsetAPI_ThruSections`, probed: a prism loft equals the prism,
+ *   concentric circles give the exact frustum, the twisted square the
+ *   exact Simpson value of the vertex morph, and the re-phased square the
+ *   index morph's 2000/3 — the adapter-enforced correspondence) (`loft`).
+ * - The Phase 26.5 fillet is the exact BREP fillet
+ *   (`BRepFilletAPI_MakeFillet`, probed: a box corner-edge fillet measures
+ *   the analytic `W·D·H − r²(1−π/4)·L` at 0 relative error, an oversized
+ *   radius fails `IsDone` cleanly into the structured fillet failure, and
+ *   a zero radius never reaches the engine — pre-validated) (`fillet`).
+ * - The Phase 26.6 chamfer is the exact BREP chamfer
+ *   (`BRepFilletAPI_MakeChamfer`, the symmetric-distance `Add`, probed: a
+ *   box corner-edge chamfer measures the analytic prism
+ *   `W·D·H − d²/2·L` at 0 relative error — including a distance past the
+ *   edge's own length — disjoint edges sum exactly, an oversized distance
+ *   and interfering same-face chamfers fail `IsDone` cleanly into the
+ *   structured chamfer failure, and the cylinder's seam edge THROWS inside
+ *   the WASM boundary, which the no-throw `run` boundary normalizes into
+ *   the same structured code) (`chamfer`).
+ * - The Phase 26.7 shell is the exact BREP hollow
+ *   (`BRepOffsetAPI_MakeThickSolid.MakeThickSolidByJoin` with the INWARD
+ *   offset — probed: the positive offset builds an outward-thickened solid
+ *   instead — a box opened at one face measures the analytic
+ *   `W·D·H − (W−2t)(D−2t)(H−t)` at 0 relative error, the empty closing
+ *   list returns the offset cavity region itself rather than hollow walls
+ *   so the contract requires ≥1 removed face, and degenerate thicknesses
+ *   never fail `IsDone` — the post-condition volume check and the no-throw
+ *   boundary surface them structured instead) (`shell`).
+ * - The Phase 26.9 mirror is the exact plane reflection
+ *   (`gp_Trsf.SetMirror` over the `gp_Ax2` through the offset point
+ *   normal to the axis, applied by `BRepBuilderAPI_Transform`; probed:
+ *   the mirrored box measures its exact volume with POSITIVE GProp mass
+ *   and outward tessellation normals — the engine handles the negative
+ *   determinant's orientation itself) (`mirror`).
  */
 export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -233,6 +375,12 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   exactBooleanVolumes: true,
   tightBooleanBounds: true,
   persistentTopology: true,
+  sweep: true,
+  loft: true,
+  fillet: true,
+  chamfer: true,
+  shell: true,
+  mirror: true,
 });
 
 /**
@@ -723,6 +871,328 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * Builds the closed profile wire (Phase 26.1): profile segments → exact
+   * edges (lines, angularly-trimmed arcs, full circles on the local frame's
+   * gp_Ax2) in the plane at station `z` (0 for the prism/revolve/pipe
+   * paths; a loft's sections build directly at their own stations, no
+   * transform round trip). Shared by the prism, revolution, pipe, and loft
+   * paths; every intermediate is deleted exactly once on the success path,
+   * and failures throw inside the caller's no-throw boundary.
+   */
+  const profileWire = (
+    loop: ProfileExtrudeInput["loop"],
+    z = 0,
+  ): TopoDS_Wire => {
+    const mkWire = new oc.BRepBuilderAPI_MakeWire();
+    const edges: TopoDS_Edge[] = [];
+    const disposeWireAndEdges = (): void => {
+      mkWire.delete();
+      for (const edge of edges) edge.delete();
+    };
+    for (const segment of loop) {
+      if (segment.kind === "line") {
+        const p1 = new oc.gp_Pnt(segment.start[0], segment.start[1], z);
+        const p2 = new oc.gp_Pnt(segment.end[0], segment.end[1], z);
+        const mkEdge = new oc.BRepBuilderAPI_MakeEdge(p1, p2);
+        p1.delete();
+        p2.delete();
+        const edge = mkEdge.Edge();
+        mkEdge.delete();
+        mkWire.Add(edge);
+        edges.push(edge);
+        continue;
+      }
+      const origin = new oc.gp_Pnt(segment.center[0], segment.center[1], z);
+      const normal = new oc.gp_Dir(0, 0, 1);
+      const xDir = new oc.gp_Dir(1, 0, 0);
+      const ax2 = new oc.gp_Ax2(origin, normal, xDir);
+      const circle = new oc.gp_Circ(ax2, segment.radius);
+      origin.delete();
+      normal.delete();
+      xDir.delete();
+      ax2.delete();
+      if (segment.kind === "circle") {
+        const mkEdge = new oc.BRepBuilderAPI_MakeEdge(circle);
+        const edge = mkEdge.Edge();
+        mkEdge.delete();
+        circle.delete();
+        mkWire.Add(edge);
+        edges.push(edge);
+        continue;
+      }
+      const a0 = valueIn(segment.startAngle, "rad");
+      const a1 = valueIn(segment.endAngle, "rad");
+      const mkArc = new oc.GC_MakeArcOfCircle(circle, a0, a1, true);
+      circle.delete();
+      const curve = mkArc.Value();
+      mkArc.delete();
+      const mkEdge = new oc.BRepBuilderAPI_MakeEdge(curve);
+      curve.delete();
+      const edge = mkEdge.Edge();
+      mkEdge.delete();
+      mkWire.Add(edge);
+      edges.push(edge);
+    }
+    if (!mkWire.IsDone()) {
+      disposeWireAndEdges();
+      throw new Error("the profile wire did not close.");
+    }
+    const wire = mkWire.Wire();
+    mkWire.delete();
+    for (const edge of edges) edge.delete();
+    return wire;
+  };
+
+  /** Faces a closed profile wire, disposing the wire either way. */
+  const profileFace = (wire: TopoDS_Shape): TopoDS_Shape => {
+    const mkFace = new oc.BRepBuilderAPI_MakeFace(wire, true);
+    if (!mkFace.IsDone()) {
+      mkFace.delete();
+      wire.delete();
+      throw new Error("the profile face did not build.");
+    }
+    const face = mkFace.Face();
+    mkFace.delete();
+    wire.delete();
+    return face;
+  };
+
+  /**
+   * The exact prism (Phase 26.1): profile wire → face →
+   * `BRepPrimAPI_MakePrism` along local z, then the placement transform
+   * (rotation first about the world-origin axis, translation second).
+   */
+  const newExtrusion = (
+    input: ProfileExtrudeInput,
+    height: number,
+  ): TopoDS_Shape => {
+    const face = profileFace(profileWire(input.loop));
+    const sweep =
+      input.direction === -1
+        ? new oc.gp_Vec(0, 0, -height)
+        : new oc.gp_Vec(0, 0, height);
+    const mkPrism = new oc.BRepPrimAPI_MakePrism(face, sweep, false, true);
+    face.delete();
+    sweep.delete();
+    if (!mkPrism.IsDone()) {
+      mkPrism.delete();
+      throw new Error("the prism did not build.");
+    }
+    return buildShape(mkPrism);
+  };
+
+  /**
+   * The exact revolution (Phase 26.2): profile wire → face →
+   * `BRepPrimAPI_MakeRevol` about the in-plane axis by the sweep angle —
+   * the same exact-surface path `createCone` composes from — then the
+   * placement transform. OCCT revolves the analytic profile: straight
+   * profiles give exact Pappus volumes, curved ones exact surfaces of
+   * revolution.
+   */
+  const newRevolution = (
+    input: ProfileRevolveInput,
+    sweep: number,
+  ): TopoDS_Shape => {
+    const face = profileFace(profileWire(input.loop));
+    const [px, py] = input.axis.point;
+    const [dx, dy] = input.axis.direction;
+    const origin = new oc.gp_Pnt(px, py, 0);
+    const direction = new oc.gp_Dir(dx, dy, 0);
+    const axis = new oc.gp_Ax1(origin, direction);
+    origin.delete();
+    direction.delete();
+    const mkRevol = new oc.BRepPrimAPI_MakeRevol(face, axis, sweep, false);
+    axis.delete();
+    face.delete();
+    if (!mkRevol.IsDone()) {
+      mkRevol.delete();
+      throw new Error("the revolution did not build.");
+    }
+    return buildShape(mkRevol);
+  };
+
+  /**
+   * Builds the sweep spine wire (Phase 26.3): the path chain's segments as
+   * exact edges in the local XZ plane (y = 0) — lines between points, arcs
+   * from a `gp_Circ` on the plane's `gp_Ax2` trimmed by
+   * `GC_MakeArcOfCircle`. The plane convention (probed): CCW in the (x, z)
+   * plane is CCW about the −ŷ normal, so a clockwise path arc mirrors the
+   * plane (+ŷ normal) and negates the angles; a full-turn arc (|ψ| = 2π)
+   * is the whole-circle edge — `GC_MakeArcOfCircle` cannot trim a closed
+   * turn. Every intermediate is deleted exactly once on the success path.
+   */
+  const sweepSpineWire = (
+    path: readonly SweepPathSegmentInput[],
+  ): TopoDS_Wire => {
+    const mkWire = new oc.BRepBuilderAPI_MakeWire();
+    const edges: TopoDS_Edge[] = [];
+    const disposeWireAndEdges = (): void => {
+      mkWire.delete();
+      for (const edge of edges) edge.delete();
+    };
+    for (const segment of path) {
+      if (segment.kind === "line") {
+        const p1 = new oc.gp_Pnt(segment.start[0], 0, segment.start[1]);
+        const p2 = new oc.gp_Pnt(segment.end[0], 0, segment.end[1]);
+        const mkEdge = new oc.BRepBuilderAPI_MakeEdge(p1, p2);
+        p1.delete();
+        p2.delete();
+        const edge = mkEdge.Edge();
+        mkEdge.delete();
+        mkWire.Add(edge);
+        edges.push(edge);
+        continue;
+      }
+      const sweep = sweepArcSignedSweep(segment);
+      const ccw = sweep > 0;
+      const center = new oc.gp_Pnt(segment.center[0], 0, segment.center[1]);
+      const normal = new oc.gp_Dir(0, ccw ? -1 : 1, 0);
+      const xDir = new oc.gp_Dir(1, 0, 0);
+      const ax2 = new oc.gp_Ax2(center, normal, xDir);
+      center.delete();
+      normal.delete();
+      xDir.delete();
+      const circle = new oc.gp_Circ(ax2, segment.radius);
+      ax2.delete();
+      if (Math.PI * 2 - Math.abs(sweep) <= 1e-9) {
+        const mkEdge = new oc.BRepBuilderAPI_MakeEdge(circle);
+        circle.delete();
+        const edge = mkEdge.Edge();
+        mkEdge.delete();
+        mkWire.Add(edge);
+        edges.push(edge);
+        continue;
+      }
+      const a0 = valueIn(segment.startAngle, "rad");
+      const a1 = valueIn(segment.endAngle, "rad");
+      const mkArc = new oc.GC_MakeArcOfCircle(
+        circle,
+        ccw ? a0 : -a0,
+        ccw ? a1 : -a1,
+        true,
+      );
+      circle.delete();
+      const curve = mkArc.Value();
+      mkArc.delete();
+      const mkEdge = new oc.BRepBuilderAPI_MakeEdge(curve);
+      curve.delete();
+      const edge = mkEdge.Edge();
+      mkEdge.delete();
+      mkWire.Add(edge);
+      edges.push(edge);
+    }
+    if (!mkWire.IsDone()) {
+      disposeWireAndEdges();
+      throw new Error("the sweep spine wire did not close.");
+    }
+    const wire = mkWire.Wire();
+    mkWire.delete();
+    for (const edge of edges) edge.delete();
+    return wire;
+  };
+
+  /**
+   * The exact pipe (Phase 26.3): spine wire + profile wire →
+   * `BRepOffsetAPI_MakePipeShell` in corrected-Frenet mode (the planar
+   * fixed-binormal frame — no twist for planar spines, the same transport
+   * the contract pins), the profile attached as-is at the spine's start
+   * (`WithContact`/`WithCorrection` false — the perpendicular attachment
+   * is validated before this runs), `Build` + `MakeSolid` for the closed
+   * profile, then the placement transform. Probed exact: straight spines
+   * prism, arc spines hit Pappus, closed circular spines torus.
+   */
+  const newSweep = (input: ProfileSweepInput): TopoDS_Shape => {
+    const spine = sweepSpineWire(input.path);
+    const profile = profileWire(input.loop);
+    const mkPipe = new oc.BRepOffsetAPI_MakePipeShell(spine);
+    mkPipe.SetMode(true);
+    mkPipe.Add(profile, false, false);
+    const ready = mkPipe.IsReady();
+    if (ready) {
+      mkPipe.Build();
+    }
+    const solidOk = ready && mkPipe.MakeSolid();
+    spine.delete();
+    profile.delete();
+    if (!ready || !solidOk) {
+      mkPipe.delete();
+      throw new Error("the swept pipe did not build into a solid.");
+    }
+    return buildShape(mkPipe);
+  };
+
+  /**
+   * The exact ruled loft (Phase 26.4): each section's loop → the exact
+   * wire at its station z → `BRepOffsetAPI_ThruSections` in SOLID, RULED
+   * mode — consecutive sections join by ruled surfaces, the contract's
+   * piecewise-linear-per-span transport, over the ADAPTER-ENFORCED
+   * correspondence (see the module doc): on equal-segment-count
+   * collections the engine's own compatibility pass is off
+   * (`CheckCompatibility(false)` — the pass re-origins a later wire on a
+   * phase shift ALONE, de-twisting a re-phased square→square loft to the
+   * prism, probed 1000 mm³ where the authored index morph measures the
+   * Simpson value 2000/3) and the CCW-normalized wires rule edge i ↔
+   * edge i in authored order; authored-CW loops are carried REVERSED —
+   * without the pass the engine no longer reconciles winding, and a CW
+   * member against a CCW one silently builds an empty solid (probed
+   * volume 0). Collections whose segment counts differ keep the pass on
+   * for the edge repartition (without it that class silently builds
+   * volume 0 too, probed) and their correspondence stays the engine's
+   * own parameterization — the contract's documented scope. Every wire is
+   * deleted exactly once after the builder consumes it; a loft OCCT
+   * cannot build throws inside the caller's no-throw boundary.
+   */
+  const newLoft = (
+    sections: readonly ProfileLoftSectionInput[],
+    stations: readonly number[],
+  ): TopoDS_Shape => {
+    const mkLoft = new oc.BRepOffsetAPI_ThruSections(true, true, 1e-6);
+    const segmentCount = sections[0]?.loop.length ?? 0;
+    const authoredCorrespondence = sections.every(
+      (section) => section.loop.length === segmentCount,
+    );
+    if (authoredCorrespondence) {
+      mkLoft.CheckCompatibility(false);
+    }
+    const wires: TopoDS_Wire[] = [];
+    for (let i = 0; i < sections.length; i += 1) {
+      const section = sections[i];
+      const z = stations[i];
+      if (section === undefined || z === undefined) {
+        mkLoft.delete();
+        for (const wire of wires) wire.delete();
+        throw new Error(
+          "Invariant violation: validated loft sections are dense.",
+        );
+      }
+      let wire = profileWire(section.loop, z);
+      if (
+        authoredCorrespondence &&
+        !(polygonSignedArea(tessellateProfileLoop(section.loop)) > 0)
+      ) {
+        // Authored CW: carry the wire REVERSED — the wire-level form of
+        // the CCW normalization the contract's chord polygons apply,
+        // starting the traversal at the normalized polygon's own first
+        // vertex (probed to reproduce the reference kernel's morph).
+        const oriented = wire.Oriented(oc.TopAbs_Orientation.TopAbs_REVERSED);
+        const reversed = oc.TopoDS.Wire(oriented);
+        oriented.delete();
+        wire.delete();
+        wire = reversed;
+      }
+      mkLoft.AddWire(wire);
+      wires.push(wire);
+    }
+    mkLoft.Build();
+    for (const wire of wires) wire.delete();
+    if (!mkLoft.IsDone()) {
+      mkLoft.delete();
+      throw new Error("the ruled loft did not build into a solid.");
+    }
+    return buildShape(mkLoft);
+  };
+
+  /**
    * Folds a pairwise boolean constructor over the operands (the binding has
    * no n-ary builder): `b(b(b(a₀, a₁), a₂), …)`. Operand payloads are never
    * deleted here — only fold intermediates, each as soon as the next step
@@ -830,6 +1300,620 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       });
     },
 
+    extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
+      return run("extrude", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // Validation BEFORE any OCCT call (the silent-mirror rule): height,
+        // placement rotation/translation, and the profile's structural
+        // soundness (closure, non-degeneracy) all reject here.
+        const height = positiveLength(input.height, "height", "extrude");
+        if (!height.ok) return fail(height.error);
+        const angle = angleIn(input.placement.rotation.angle, "extrude");
+        if (!angle.ok) return fail(angle.error);
+        const axis = axisIn(input.placement.rotation.axis, "extrude");
+        if (!axis.ok) return fail(axis.error);
+        const tx = lengthIn(
+          input.placement.translation.x,
+          "translation.x",
+          "extrude",
+        );
+        if (!tx.ok) return fail(tx.error);
+        const ty = lengthIn(
+          input.placement.translation.y,
+          "translation.y",
+          "extrude",
+        );
+        if (!ty.ok) return fail(ty.error);
+        const tz = lengthIn(
+          input.placement.translation.z,
+          "translation.z",
+          "extrude",
+        );
+        if (!tz.ok) return fail(tz.error);
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `extrude rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        // Sanity beyond structure: the tessellated boundary must bound a
+        // face (the same degeneracy floor the mesh kernels enforce).
+        const polygon = tessellateProfileLoop(input.loop);
+        if (
+          polygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(polygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "extrude rejected the profile loop: it is degenerate (fewer than three distinct vertices or zero enclosed area).",
+            ),
+          );
+        }
+        const prism = newExtrusion(input, height.value);
+        // Placement: rotation about the world-origin axis first, then the
+        // translation — the transform composition, applied via
+        // BRepBuilderAPI_Transform like every placed shape here.
+        const rot = axisAngleMatrix(axis.value, angle.value);
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          tx.value,
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          ty.value,
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          tz.value,
+        );
+        const placed = buildShape(
+          new oc.BRepBuilderAPI_Transform(prism, trsf, false, true),
+        );
+        trsf.delete();
+        prism.delete();
+        return ok(wrapSolid(placed));
+      });
+    },
+
+    revolve(input: ProfileRevolveInput): KernelResult<KernelSolid> {
+      return run("revolve", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // Validation BEFORE any OCCT call (the silent-mirror rule), in the
+        // shared 26.2 battery: sweep-angle domain, axis direction,
+        // placement, structural profile soundness, and the axis-crossing
+        // rejection (OCCT builds an undefined solid from a crossing
+        // profile — the crossing must never reach the engine).
+        const sweepValue = angleIn(input.angle, "revolve");
+        if (!sweepValue.ok) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "revolve rejected the sweep angle: its magnitude is not a finite number.",
+            ),
+          );
+        }
+        const sweep = sweepValue.value;
+        if (!(sweep > 0) || sweep > Math.PI * 2) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidSweepAngle,
+              `revolve rejected sweep angle ${String(sweep)} rad: the domain is (0, 2π] — zero sweeps no material, beyond a full turn double-covers it.`,
+            ),
+          );
+        }
+        const frame = normalizeRevolveAxis(input.axis);
+        if (frame === null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `revolve rejected an axis along [${String(input.axis.direction[0])}, ${String(input.axis.direction[1])}]: the direction must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const angle = angleIn(input.placement.rotation.angle, "revolve");
+        if (!angle.ok) return fail(angle.error);
+        const axis = axisIn(input.placement.rotation.axis, "revolve");
+        if (!axis.ok) return fail(axis.error);
+        const tx = lengthIn(
+          input.placement.translation.x,
+          "translation.x",
+          "revolve",
+        );
+        if (!tx.ok) return fail(tx.error);
+        const ty = lengthIn(
+          input.placement.translation.y,
+          "translation.y",
+          "revolve",
+        );
+        if (!ty.ok) return fail(ty.error);
+        const tz = lengthIn(
+          input.placement.translation.z,
+          "translation.z",
+          "revolve",
+        );
+        if (!tz.ok) return fail(tz.error);
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `revolve rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        // Sanity beyond structure: the tessellated boundary must bound a
+        // face (the shared degeneracy floor).
+        const polygon = tessellateProfileLoop(input.loop);
+        if (
+          polygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(polygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "revolve rejected the profile loop: it is degenerate (fewer than three distinct vertices or zero enclosed area).",
+            ),
+          );
+        }
+        if (revolveCrossesAxis(input.loop, frame)) {
+          const extremes = revolveSignedExtremes(input.loop, frame);
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.profileAxisCrossing,
+              `revolve rejected the profile loop: it crosses the revolve axis (signed distances span [${String(extremes.min)}, ${String(extremes.max)}] mm). Move the profile fully to one side; touching the axis is allowed.`,
+            ),
+          );
+        }
+        const revolved = newRevolution(input, sweep);
+        // Placement: the transform composition (rotation first, translation
+        // second), applied via BRepBuilderAPI_Transform like every placed
+        // shape here.
+        const rot = axisAngleMatrix(axis.value, angle.value);
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          tx.value,
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          ty.value,
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          tz.value,
+        );
+        const placed = buildShape(
+          new oc.BRepBuilderAPI_Transform(revolved, trsf, false, true),
+        );
+        trsf.delete();
+        revolved.delete();
+        return ok(wrapSolid(placed));
+      });
+    },
+
+    sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {
+      return run("sweep", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // Validation BEFORE any OCCT call (the silent-mirror rule), in the
+        // shared 26.3 battery: placement, the profile's structural
+        // soundness and face floor, the path's structure (origin start,
+        // perpendicular attachment, G1 joints), the path's chord-polyline
+        // self-intersection, and the per-arc bend-axis crossing — every
+        // rejection is structured and none reaches the engine.
+        const angle = angleIn(input.placement.rotation.angle, "sweep");
+        if (!angle.ok) return fail(angle.error);
+        const axis = axisIn(input.placement.rotation.axis, "sweep");
+        if (!axis.ok) return fail(axis.error);
+        const tx = lengthIn(
+          input.placement.translation.x,
+          "translation.x",
+          "sweep",
+        );
+        if (!tx.ok) return fail(tx.error);
+        const ty = lengthIn(
+          input.placement.translation.y,
+          "translation.y",
+          "sweep",
+        );
+        if (!ty.ok) return fail(ty.error);
+        const tz = lengthIn(
+          input.placement.translation.z,
+          "translation.z",
+          "sweep",
+        );
+        if (!tz.ok) return fail(tz.error);
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweep rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        const polygon = tessellateProfileLoop(input.loop);
+        if (
+          polygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(polygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "sweep rejected the profile loop: it is degenerate (fewer than three distinct vertices or zero enclosed area).",
+            ),
+          );
+        }
+        const pathProblem = sweepPathProblem(input.path);
+        if (pathProblem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidPath,
+              `sweep rejected the path: ${pathProblem}.`,
+            ),
+          );
+        }
+        if (sweepPathSelfIntersects(input.path)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.pathSelfIntersecting,
+              "sweep rejected the path: it crosses itself (detected on the path's chord polyline). A self-crossing spine sweeps an undefined solid.",
+            ),
+          );
+        }
+        const crossing = sweepProfileArcAxisCrossing(input.loop, input.path);
+        if (crossing !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sweepSelfIntersecting,
+              `sweep rejected the input: the profile crosses an arc segment's centre axis at u = ${String(crossing.uAxis)} mm (signed distances span [${String(crossing.min)}, ${String(crossing.max)}]) — the tube would pinch through the bend. Move the profile fully to one side of every bend axis; touching is allowed.`,
+            ),
+          );
+        }
+        const piped = newSweep(input);
+        const rot = axisAngleMatrix(axis.value, angle.value);
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          tx.value,
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          ty.value,
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          tz.value,
+        );
+        const placed = buildShape(
+          new oc.BRepBuilderAPI_Transform(piped, trsf, false, true),
+        );
+        trsf.delete();
+        piped.delete();
+        return ok(wrapSolid(placed));
+      });
+    },
+
+    loft(input: ProfileLoftInput): KernelResult<KernelSolid> {
+      return run("loft", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // Validation BEFORE any OCCT call (the silent-mirror rule), in the
+        // shared 26.4 battery: the placement, then the section collection —
+        // member validity, station ordering, and vertex-count compatibility
+        // (the last two reject with the structured loft codes) — so a
+        // mismatched collection never reaches ThruSections' own
+        // compatibility pass.
+        const angle = angleIn(input.placement.rotation.angle, "loft");
+        if (!angle.ok) return fail(angle.error);
+        const axis = axisIn(input.placement.rotation.axis, "loft");
+        if (!axis.ok) return fail(axis.error);
+        const tx = lengthIn(
+          input.placement.translation.x,
+          "translation.x",
+          "loft",
+        );
+        if (!tx.ok) return fail(tx.error);
+        const ty = lengthIn(
+          input.placement.translation.y,
+          "translation.y",
+          "loft",
+        );
+        if (!ty.ok) return fail(ty.error);
+        const tz = lengthIn(
+          input.placement.translation.z,
+          "translation.z",
+          "loft",
+        );
+        if (!tz.ok) return fail(tz.error);
+        const problem = loftSectionsProblem(input.sections);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              problem.code,
+              `loft rejected the section collection: ${problem.message}.`,
+            ),
+          );
+        }
+        const lofted = newLoft(input.sections, loftStations(input.sections));
+        // Placement: the transform composition (rotation first, translation
+        // second), applied via BRepBuilderAPI_Transform like every placed
+        // shape here.
+        const rot = axisAngleMatrix(axis.value, angle.value);
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          tx.value,
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          ty.value,
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          tz.value,
+        );
+        const placed = buildShape(
+          new oc.BRepBuilderAPI_Transform(lofted, trsf, false, true),
+        );
+        trsf.delete();
+        lofted.delete();
+        return ok(wrapSolid(placed));
+      });
+    },
+
+    fillet(input: FilletInput): KernelResult<KernelSolid> {
+      return run("fillet", KERNEL_ERROR_CODES.filletFailed, () => {
+        // Validation BEFORE any OCCT call (the silent-mirror rule): handle,
+        // radius, and the edge-address structure; then the ordinal
+        // resolution against the target's own snapshot numbering (the
+        // stale-reference check), and only then the builder.
+        const shape = shapeOf(input.target, "fillet");
+        if (!shape.ok) return fail(shape.error);
+        const radius = positiveLength(input.radius, "radius", "fillet");
+        if (!radius.ok) return fail(radius.error);
+        if (input.edges.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              "fillet rejected the edge list: at least one edge ordinal is required.",
+            ),
+          );
+        }
+        const seen = new Set<number>();
+        for (const ordinal of input.edges) {
+          if (!Number.isInteger(ordinal) || ordinal < 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `fillet rejected edge ordinal ${String(ordinal)}: ordinals are non-negative integers (snapshot edge addresses).`,
+              ),
+            );
+          }
+          if (seen.has(ordinal)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `fillet rejected the edge list: ordinal ${String(ordinal)} appears more than once.`,
+              ),
+            );
+          }
+          seen.add(ordinal);
+        }
+        const resolved = occtEdgesAtOrdinals(oc, shape.value, input.edges);
+        if (resolved.missing.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.filletEdgeUnknown,
+              `fillet rejected edge ordinal(s) ${resolved.missing.map(String).join(", ")}: none addresses an edge of the target's current topology snapshot (a stale reference resolved against an older regeneration, or an out-of-range ordinal).`,
+            ),
+          );
+        }
+        const mkFillet = new oc.BRepFilletAPI_MakeFillet(shape.value);
+        for (const edge of resolved.edges) {
+          mkFillet.Add(radius.value, edge);
+          edge.delete();
+        }
+        mkFillet.Build();
+        if (!mkFillet.IsDone()) {
+          mkFillet.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.filletFailed,
+              `fillet failed for radius ${String(radius.value)} mm: the fillet algorithm could not build a solid (probed canonical cause: the radius outruns the faces adjacent to a selected edge; interfering fillets fail the same way). Reduce the radius or select different edges.`,
+            ),
+          );
+        }
+        return ok(wrapSolid(buildShape(mkFillet)));
+      });
+    },
+
+    chamfer(input: ChamferInput): KernelResult<KernelSolid> {
+      return run("chamfer", KERNEL_ERROR_CODES.chamferFailed, () => {
+        // The fillet path's battery, verbatim, with the distance in the
+        // radius's place: handle, distance, and the edge-address structure
+        // validated BEFORE any OCCT call; then the ordinal resolution
+        // against the target's own snapshot numbering (the stale-reference
+        // check); and only then the builder. The no-throw boundary matters
+        // more here than for the fillet: probed, a seam-edge chamfer
+        // THROWS inside the WASM boundary (MakeFillet declines the same
+        // edge with IsDone = false), and this boundary is what normalizes
+        // that throw into the structured chamfer failure.
+        const shape = shapeOf(input.target, "chamfer");
+        if (!shape.ok) return fail(shape.error);
+        const distance = positiveLength(input.distance, "distance", "chamfer");
+        if (!distance.ok) return fail(distance.error);
+        if (input.edges.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              "chamfer rejected the edge list: at least one edge ordinal is required.",
+            ),
+          );
+        }
+        const seen = new Set<number>();
+        for (const ordinal of input.edges) {
+          if (!Number.isInteger(ordinal) || ordinal < 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `chamfer rejected edge ordinal ${String(ordinal)}: ordinals are non-negative integers (snapshot edge addresses).`,
+              ),
+            );
+          }
+          if (seen.has(ordinal)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `chamfer rejected the edge list: ordinal ${String(ordinal)} appears more than once.`,
+              ),
+            );
+          }
+          seen.add(ordinal);
+        }
+        const resolved = occtEdgesAtOrdinals(oc, shape.value, input.edges);
+        if (resolved.missing.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.chamferEdgeUnknown,
+              `chamfer rejected edge ordinal(s) ${resolved.missing.map(String).join(", ")}: none addresses an edge of the target's current topology snapshot (a stale reference resolved against an older regeneration, or an out-of-range ordinal).`,
+            ),
+          );
+        }
+        const mkChamfer = new oc.BRepFilletAPI_MakeChamfer(shape.value);
+        for (const edge of resolved.edges) {
+          mkChamfer.Add(distance.value, edge);
+          edge.delete();
+        }
+        mkChamfer.Build();
+        if (!mkChamfer.IsDone()) {
+          mkChamfer.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.chamferFailed,
+              `chamfer failed for distance ${String(distance.value)} mm: the chamfer algorithm could not build a solid (probed canonical causes: the distance meets or exceeds a face adjacent to a selected edge, or two chamfers' removed corners interfere). Reduce the distance or select different edges.`,
+            ),
+          );
+        }
+        return ok(wrapSolid(buildShape(mkChamfer)));
+      });
+    },
+
+    shell(input: ShellInput): KernelResult<KernelSolid> {
+      return run("shell", KERNEL_ERROR_CODES.shellFailed, () => {
+        // The edge-cut battery's shape on the FACE address: handle,
+        // thickness, and the face-list structure validated BEFORE any OCCT
+        // call; then the ordinal resolution against the target's own
+        // snapshot numbering (the stale-reference check); and only then
+        // the builder. Two probed engine truths shape what follows: the
+        // hollow runs on the INWARD (negative) offset — the positive one
+        // builds an outward-thickened solid — and degenerate thicknesses
+        // NEVER fail IsDone, so the no-throw boundary (the exact-collapse
+        // `Shape()` throw) and the closing post-condition are what surface
+        // them structured.
+        const shape = shapeOf(input.target, "shell");
+        if (!shape.ok) return fail(shape.error);
+        const thickness = positiveLength(input.thickness, "thickness", "shell");
+        if (!thickness.ok) return fail(thickness.error);
+        const t = thickness.value;
+        if (input.faces.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              "shell rejected the face list: at least one face ordinal is required (the open hollow shell; the fully closed hollow is out of contract scope — probed, the engine's zero-face answer is the offset cavity region itself, not the walls).",
+            ),
+          );
+        }
+        const seen = new Set<number>();
+        for (const ordinal of input.faces) {
+          if (!Number.isInteger(ordinal) || ordinal < 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `shell rejected face ordinal ${String(ordinal)}: ordinals are non-negative integers (snapshot face addresses).`,
+              ),
+            );
+          }
+          if (seen.has(ordinal)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `shell rejected the face list: ordinal ${String(ordinal)} appears more than once.`,
+              ),
+            );
+          }
+          seen.add(ordinal);
+        }
+        const resolved = occtFacesAtOrdinals(oc, shape.value, input.faces);
+        if (resolved.missing.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.shellFaceUnknown,
+              `shell rejected face ordinal(s) ${resolved.missing.map(String).join(", ")}: none addresses a face of the target's current topology snapshot (a stale reference resolved against an older regeneration, or an out-of-range ordinal).`,
+            ),
+          );
+        }
+        const targetVolume = volumeOfShape(shape.value);
+        const closing = new oc.NCollection_List_TopoDS_Shape();
+        for (const face of resolved.faces) {
+          closing.Append(face);
+        }
+        const maker = new oc.BRepOffsetAPI_MakeThickSolid();
+        maker.MakeThickSolidByJoin(
+          shape.value,
+          closing,
+          -t,
+          1e-6,
+          oc.BRepOffset_Mode.BRepOffset_Skin,
+          false,
+          false,
+          oc.GeomAbs_JoinType.GeomAbs_Arc,
+          true,
+        );
+        if (!maker.IsDone()) {
+          maker.delete();
+          closing.delete();
+          for (const face of resolved.faces) face.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.shellFailed,
+              `shell failed for thickness ${String(t)} mm: the hollowing algorithm could not build a solid. Reduce the thickness or change the face selection.`,
+            ),
+          );
+        }
+        // The exact-collapse fixture throws inside Shape() (probed); the
+        // no-throw run boundary normalizes that into the structured shell
+        // failure below.
+        const hollowed = maker.Shape();
+        maker.delete();
+        closing.delete();
+        for (const face of resolved.faces) face.delete();
+        // The semantic post-condition, because the engine does not keep
+        // this honesty itself (probed): a hollowed shell keeps STRICTLY
+        // positive volume — an exact cross-collapse measured 0 — strictly
+        // below the pristine target's — past the collapse the engine
+        // silently returned the untouched box, face removal and all.
+        const shellVolume = volumeOfShape(hollowed);
+        if (!(shellVolume > 0) || shellVolume >= targetVolume) {
+          hollowed.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.shellFailed,
+              `shell failed for thickness ${String(t)} mm: the walls meet or cross before the removed face is reached, so no hollow remains (probed: the engine itself would silently return the degenerate pristine or empty solid — the structured refusal is the adapter's). Reduce the thickness.`,
+            ),
+          );
+        }
+        return ok(wrapSolid(hollowed));
+      });
+    },
+
     union(operands: readonly KernelSolid[]): KernelResult<KernelSolid> {
       return run("union", KERNEL_ERROR_CODES.invalidOperands, () => {
         const shapes = operandsOf(operands, 2, "union");
@@ -933,6 +2017,59 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       });
     },
 
+    mirror(solid: KernelSolid, input: MirrorInput): KernelResult<KernelSolid> {
+      return run("mirror", KERNEL_ERROR_CODES.invalidLength, () => {
+        const shape = shapeOf(solid, "mirror");
+        if (!shape.ok) return fail(shape.error);
+        // Every finite offset is a legal plane position (zero and negative
+        // offsets included — the sign rules of sizes do not apply to plane
+        // positions); only non-finite magnitudes reject, before any OCCT
+        // object exists.
+        const offset = lengthIn(input.offset, "offset", "mirror");
+        if (!offset.ok) return fail(offset.error);
+        // The reflection through the axis plane at the offset: gp_Ax2
+        // locates the plane (its main direction N is the plane normal),
+        // SetMirror makes the trsf the plane reflection, and
+        // BRepBuilderAPI_Transform applies it — the negative determinant's
+        // orientation handled by the engine (probed: positive GProp volume,
+        // outward tessellation normals).
+        const components: readonly [number, number, number] =
+          input.axis === "x"
+            ? [offset.value, 0, 0]
+            : input.axis === "y"
+              ? [0, offset.value, 0]
+              : [0, 0, offset.value];
+        const normal: readonly [number, number, number] =
+          input.axis === "x"
+            ? [1, 0, 0]
+            : input.axis === "y"
+              ? [0, 1, 0]
+              : [0, 0, 1];
+        const point = new oc.gp_Pnt(
+          components[0],
+          components[1],
+          components[2],
+        );
+        const direction = new oc.gp_Dir(normal[0], normal[1], normal[2]);
+        // Vx only parameterizes the plane; any unit vector perpendicular
+        // to N serves — the reflection itself depends on point and N only.
+        const xDirection =
+          input.axis === "x" ? new oc.gp_Dir(0, 1, 0) : new oc.gp_Dir(1, 0, 0);
+        const ax2 = new oc.gp_Ax2(point, direction, xDirection);
+        point.delete();
+        direction.delete();
+        xDirection.delete();
+        const trsf = new oc.gp_Trsf();
+        trsf.SetMirror(ax2);
+        ax2.delete();
+        const mirrored = buildShape(
+          new oc.BRepBuilderAPI_Transform(shape.value, trsf, false, true),
+        );
+        trsf.delete();
+        return ok(wrapSolid(mirrored));
+      });
+    },
+
     bounds(solid: KernelSolid): KernelResult<KernelBounds> {
       const shape = shapeOf(solid, "bounds");
       if (!shape.ok) return fail(shape.error);
@@ -1021,10 +2158,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       // option validation first, the topology exploration inside the
       // boundary, and anything unexpected normalized into the structured
       // kernel-failure code.
-      if (
-        !Number.isInteger(options.regeneration) ||
-        options.regeneration < 0
-      ) {
+      if (!Number.isInteger(options.regeneration) || options.regeneration < 0) {
         return fail(
           kernelError(
             KERNEL_ERROR_CODES.invalidOperands,

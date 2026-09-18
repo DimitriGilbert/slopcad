@@ -99,9 +99,7 @@ const createPad: CadTransaction = {
 };
 
 const deletePad: CadTransaction = {
-  commands: [
-    { type: "feature.delete", id: featPadId },
-  ],
+  commands: [{ type: "feature.delete", id: featPadId }],
 };
 
 /** Applies a transaction to a document and records it into the history. */
@@ -109,8 +107,14 @@ function commit(
   history: ReturnType<typeof createDocumentHistory>,
   document: CadDocument,
   transaction: CadTransaction,
-): { history: ReturnType<typeof createDocumentHistory>; document: CadDocument } {
-  const next = unwrap(applyTransaction(document, transaction), "applyTransaction");
+): {
+  history: ReturnType<typeof createDocumentHistory>;
+  document: CadDocument;
+} {
+  const next = unwrap(
+    applyTransaction(document, transaction),
+    "applyTransaction",
+  );
   return {
     history: recordTransaction(history, transaction, next),
     document: next,
@@ -145,7 +149,9 @@ describe("DocumentHistory", () => {
   it("rewinds the generator on undo, so generated ids regenerate identically", () => {
     const base = sampleDocument();
     const generated: CadTransaction = {
-      commands: [{ type: "feature.create", kind: "fillet", inputs: [], outputs: [] }],
+      commands: [
+        { type: "feature.create", kind: "fillet", inputs: [], outputs: [] },
+      ],
     };
     const step = commit(createDocumentHistory(base), base, generated);
     const createdId = step.document.features.at(-1)?.id;
@@ -153,15 +159,22 @@ describe("DocumentHistory", () => {
     const undone = unwrap(undoHistory(step.history), "undoHistory");
     const recommit = commit(undone.history, undone.document, generated);
     expect(recommit.document.features.at(-1)?.id).toBe(createdId);
-    expect(serializationOf(recommit.document)).toBe(serializationOf(step.document));
+    expect(serializationOf(recommit.document)).toBe(
+      serializationOf(step.document),
+    );
   });
 
   it("redo restores the exact next state and consumes the redo branch", () => {
     const base = sampleDocument();
     const step = commit(createDocumentHistory(base), base, createPad);
     const undone = unwrap(undoHistory(step.history), "undoHistory");
-    const redone: HistoryMove = unwrap(redoHistory(undone.history), "redoHistory");
-    expect(serializationOf(redone.document)).toBe(serializationOf(step.document));
+    const redone: HistoryMove = unwrap(
+      redoHistory(undone.history),
+      "redoHistory",
+    );
+    expect(serializationOf(redone.document)).toBe(
+      serializationOf(step.document),
+    );
     expect(redone.document).toBe(step.document);
     expect(redone.transaction).toEqual(createPad);
     expect(canRedo(redone.history)).toBe(false);
@@ -174,7 +187,10 @@ describe("DocumentHistory", () => {
     const undone = unwrap(undoHistory(step.history), "undoHistory");
     const branched = commit(undone.history, undone.document, setWidth);
     expect(canRedo(branched.history)).toBe(false);
-    expectError(redoHistory(branched.history), HISTORY_ERROR_CODES.nothingToRedo);
+    expectError(
+      redoHistory(branched.history),
+      HISTORY_ERROR_CODES.nothingToRedo,
+    );
     // The discarded createPad entry is gone: undo goes straight to the base.
     const back = unwrap(undoHistory(branched.history), "undoHistory");
     expect(serializationOf(back.document)).toBe(serializationOf(base));
@@ -187,15 +203,23 @@ describe("DocumentHistory", () => {
     const after3 = commit(after2.history, after2.document, deletePad);
 
     const undo1 = unwrap(undoHistory(after3.history), "undoHistory");
-    expect(serializationOf(undo1.document)).toBe(serializationOf(after2.document));
+    expect(serializationOf(undo1.document)).toBe(
+      serializationOf(after2.document),
+    );
     const undo2 = unwrap(undoHistory(undo1.history), "undoHistory");
-    expect(serializationOf(undo2.document)).toBe(serializationOf(after1.document));
+    expect(serializationOf(undo2.document)).toBe(
+      serializationOf(after1.document),
+    );
     const redo1 = unwrap(redoHistory(undo2.history), "redoHistory");
-    expect(serializationOf(redo1.document)).toBe(serializationOf(after2.document));
+    expect(serializationOf(redo1.document)).toBe(
+      serializationOf(after2.document),
+    );
     const mutated = commit(redo1.history, redo1.document, setWidth);
     expect(canRedo(mutated.history)).toBe(false);
     const undo3 = unwrap(undoHistory(mutated.history), "undoHistory");
-    expect(serializationOf(undo3.document)).toBe(serializationOf(after2.document));
+    expect(serializationOf(undo3.document)).toBe(
+      serializationOf(after2.document),
+    );
   });
 
   it("restores the exact snapshot object on undo and redo, not a copy", () => {
@@ -216,16 +240,23 @@ describe("DocumentHistory", () => {
 
     let replayed = base;
     for (const entry of after3.history.entries) {
-      replayed = unwrap(applyTransaction(replayed, entry.transaction), "replay");
+      replayed = unwrap(
+        applyTransaction(replayed, entry.transaction),
+        "replay",
+      );
       expect(serializationOf(replayed)).toBe(serializationOf(entry.document));
-      expect(replayed.idGeneratorState).toEqual(entry.document.idGeneratorState);
+      expect(replayed.idGeneratorState).toEqual(
+        entry.document.idGeneratorState,
+      );
     }
     expect(serializationOf(replayed)).toBe(serializationOf(after3.document));
   });
 
   it("survives base documents that were themselves rebuilt from serialization", () => {
     const base = unwrap(
-      parseCadDocument(JSON.parse(JSON.stringify(serializeCadDocument(sampleDocument())))),
+      parseCadDocument(
+        JSON.parse(JSON.stringify(serializeCadDocument(sampleDocument()))),
+      ),
       "parseCadDocument",
     );
     const after1 = commit(createDocumentHistory(base), base, setWidth);

@@ -20,7 +20,6 @@ import {
   SYNTHETIC_FACE_GROUPING_THRESHOLD_DEGREES,
 } from "./synthetic-faces";
 
-
 interface RawTessellation {
   readonly positions: readonly number[];
   readonly indices: readonly number[];
@@ -40,12 +39,60 @@ const CUBE_FACES: readonly {
   readonly corners: readonly (readonly [number, number, number])[];
   readonly normal: readonly [number, number, number];
 }[] = [
-  { corners: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], normal: [0, 0, 1] },
-  { corners: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], normal: [0, 0, -1] },
-  { corners: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], normal: [1, 0, 0] },
-  { corners: [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]], normal: [-1, 0, 0] },
-  { corners: [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]], normal: [0, 1, 0] },
-  { corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], normal: [0, -1, 0] },
+  {
+    corners: [
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ],
+    normal: [0, 0, 1],
+  },
+  {
+    corners: [
+      [0, 0, 0],
+      [0, 1, 0],
+      [1, 1, 0],
+      [1, 0, 0],
+    ],
+    normal: [0, 0, -1],
+  },
+  {
+    corners: [
+      [1, 0, 0],
+      [1, 1, 0],
+      [1, 1, 1],
+      [1, 0, 1],
+    ],
+    normal: [1, 0, 0],
+  },
+  {
+    corners: [
+      [0, 0, 0],
+      [0, 0, 1],
+      [0, 1, 1],
+      [0, 1, 0],
+    ],
+    normal: [-1, 0, 0],
+  },
+  {
+    corners: [
+      [0, 1, 0],
+      [0, 1, 1],
+      [1, 1, 1],
+      [1, 1, 0],
+    ],
+    normal: [0, 1, 0],
+  },
+  {
+    corners: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 0, 1],
+      [0, 0, 1],
+    ],
+    normal: [0, -1, 0],
+  },
 ];
 
 function cubeTessellation(withNormals: boolean): RawTessellation {
@@ -71,13 +118,39 @@ function cubeTessellation(withNormals: boolean): RawTessellation {
 function foldPair(angleDeg: number, withNormals: boolean): RawTessellation {
   const rad = (angleDeg * Math.PI) / 180;
   const positions = [
-    0, 0, 0, 1, 0, 0, 0, 1, 0,
-    0, 0, 0, 1, 0, 0, 0, Math.cos(rad), -Math.sin(rad),
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    Math.cos(rad),
+    -Math.sin(rad),
   ];
   const secondNormal = [0, Math.sin(rad), Math.cos(rad)];
   const normals = [
-    0, 0, 1, 0, 0, 1, 0, 0, 1,
-    ...secondNormal, ...secondNormal, ...secondNormal,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    ...secondNormal,
+    ...secondNormal,
+    ...secondNormal,
   ];
   return withNormals
     ? { positions, indices: [0, 1, 2, 3, 4, 5], normals }
@@ -115,7 +188,12 @@ describe("groupSyntheticFaces", () => {
     expect(grouping.triangleCount).toBe(12);
     expect(grouping.faceCount).toBe(6);
     expect(grouping.faces.map((face) => face.triangleIndices)).toEqual([
-      [0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11],
+      [0, 1],
+      [2, 3],
+      [4, 5],
+      [6, 7],
+      [8, 9],
+      [10, 11],
     ]);
   });
 
@@ -123,7 +201,12 @@ describe("groupSyntheticFaces", () => {
     const grouping = groupSyntheticFaces(objectOf(cubeTessellation(false)));
     expect(grouping.faceCount).toBe(6);
     expect(grouping.faces.map((face) => face.triangleIndices)).toEqual([
-      [0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11],
+      [0, 1],
+      [2, 3],
+      [4, 5],
+      [6, 7],
+      [8, 9],
+      [10, 11],
     ]);
   });
 
@@ -145,16 +228,20 @@ describe("groupSyntheticFaces", () => {
 
   it("applies the documented ≤ threshold with geometric normals", () => {
     expect(SYNTHETIC_FACE_GROUPING_THRESHOLD_DEGREES).toBe(30);
-    expect(groupSyntheticFaces(objectOf(foldPair(25, false))).faceCount).toBe(1);
-    expect(groupSyntheticFaces(objectOf(foldPair(35, false))).faceCount).toBe(2);
+    expect(groupSyntheticFaces(objectOf(foldPair(25, false))).faceCount).toBe(
+      1,
+    );
+    expect(groupSyntheticFaces(objectOf(foldPair(35, false))).faceCount).toBe(
+      2,
+    );
   });
 
   it("requires adjacency: coplanar disconnected triangles stay separate", () => {
     const grouping = groupSyntheticFaces(
       objectOf({
         positions: [
-          0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0,
-          2, 0, 0, 3, 0, 0, 3, 1, 0, 2, 0, 0, 3, 1, 0, 2, 1, 0,
+          0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 2, 0, 0, 3, 0,
+          0, 3, 1, 0, 2, 0, 0, 3, 1, 0, 2, 1, 0,
         ],
         indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
       }),
@@ -168,7 +255,9 @@ describe("groupSyntheticFaces", () => {
     // curvature accumulates along a connected region by design.
     const grouping = groupSyntheticFaces(objectOf(helixStrip(10, 8)));
     expect(grouping.faceCount).toBe(1);
-    expect(faceOf(grouping, 0).triangleIndices).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(faceOf(grouping, 0).triangleIndices).toEqual([
+      0, 1, 2, 3, 4, 5, 6, 7,
+    ]);
   });
 
   it("splits a strip whose adjacent normal steps exceed the threshold", () => {
@@ -260,7 +349,9 @@ describe("syntheticFaceMeanNormal", () => {
   it("reports null for a face whose normals cancel (closed curve or degenerate)", () => {
     const object = objectOf(cubeTessellation(true));
     const grouping = groupSyntheticFaces(object);
-    expect(() => syntheticFaceMeanNormal(object, grouping, 9)).toThrow(RangeError);
+    expect(() => syntheticFaceMeanNormal(object, grouping, 9)).toThrow(
+      RangeError,
+    );
     // A face whose only triangle is degenerate has no representative normal
     // to average — null, not a fabricated direction.
     const degenerate = objectOf({
@@ -268,6 +359,8 @@ describe("syntheticFaceMeanNormal", () => {
       indices: [0, 1, 2],
     });
     const degenerateGrouping = groupSyntheticFaces(degenerate);
-    expect(syntheticFaceMeanNormal(degenerate, degenerateGrouping, 0)).toBeNull();
+    expect(
+      syntheticFaceMeanNormal(degenerate, degenerateGrouping, 0),
+    ).toBeNull();
   });
 });

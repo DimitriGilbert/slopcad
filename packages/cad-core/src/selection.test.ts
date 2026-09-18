@@ -6,15 +6,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type {
-  FaceSelectionReference,
-  SelectionReference,
-} from "./selection";
+import type { FaceSelectionReference, SelectionReference } from "./selection";
 
-import {
-  createBodyId,
-  createFeatureId,
-} from "./ids";
+import { createBodyId, createFeatureId } from "./ids";
 import {
   beginRegeneration,
   clearSelection,
@@ -41,17 +35,27 @@ const BODY_REF: SelectionReference = { kind: "body", bodyId: BODY };
 const SOLID_REF: SelectionReference = { kind: "solid", bodyId: BODY };
 const FEATURE_REF: SelectionReference = { kind: "feature", featureId: FEATURE };
 
-function faceRef(regeneration: number, faceIndex: number): FaceSelectionReference {
+function faceRef(
+  regeneration: number,
+  faceIndex: number,
+): FaceSelectionReference {
   return { kind: "face", bodyId: BODY, regeneration, faceIndex };
 }
 
-function unwrap<T>(result: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { message: string } }): T {
-  if (!result.ok) throw new Error(`Expected ok, received: ${result.error.message}`);
+function unwrap<T>(
+  result:
+    | { readonly ok: true; readonly value: T }
+    | { readonly ok: false; readonly error: { message: string } },
+): T {
+  if (!result.ok)
+    throw new Error(`Expected ok, received: ${result.error.message}`);
   return result.value;
 }
 
 function expectError<T>(
-  result: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: { code: string; message: string } },
+  result:
+    | { readonly ok: true; readonly value: T }
+    | { readonly ok: false; readonly error: { code: string; message: string } },
   code: string,
 ): void {
   expect(result.ok).toBe(false);
@@ -137,7 +141,13 @@ describe("pick semantics", () => {
     let state = createSelectionState(3);
     state = unwrap(pickSelection(state, BODY_REF, { additive: true }));
     state = unwrap(pickSelection(state, BODY_REF, { additive: true }));
-    state = unwrap(pickSelection(state, { kind: "body", bodyId: createBodyId("body_plate") }, { additive: true }));
+    state = unwrap(
+      pickSelection(
+        state,
+        { kind: "body", bodyId: createBodyId("body_plate") },
+        { additive: true },
+      ),
+    );
     expect(state.selected).toEqual([BODY_REF]);
   });
 
@@ -188,7 +198,10 @@ describe("hover semantics", () => {
 
   it("rejects a stale synthetic hover reference", () => {
     const state = createSelectionState(3);
-    expectError(hoverSelection(state, faceRef(2, 0)), SELECTION_ERROR_CODES.staleReference);
+    expectError(
+      hoverSelection(state, faceRef(2, 0)),
+      SELECTION_ERROR_CODES.staleReference,
+    );
   });
 });
 
@@ -216,28 +229,57 @@ describe("clear and regeneration transience", () => {
     expect(next.selected).toEqual([BODY_REF, FEATURE_REF, SOLID_REF]);
     expect(next.hover).toBeNull();
     // The old state is untouched: transitions are immutable.
-    expect(state.selected).toEqual([BODY_REF, FEATURE_REF, SOLID_REF, faceRef(1, 4)]);
+    expect(state.selected).toEqual([
+      BODY_REF,
+      FEATURE_REF,
+      SOLID_REF,
+      faceRef(1, 4),
+    ]);
     expect(state.hover).toEqual(faceRef(1, 5));
     // The surviving selection continues on the new regeneration.
-    const repicked = unwrap(pickSelection(next, faceRef(2, 4), { additive: true }));
-    expect(repicked.selected).toEqual([BODY_REF, FEATURE_REF, SOLID_REF, faceRef(2, 4)]);
+    const repicked = unwrap(
+      pickSelection(next, faceRef(2, 4), { additive: true }),
+    );
+    expect(repicked.selected).toEqual([
+      BODY_REF,
+      FEATURE_REF,
+      SOLID_REF,
+      faceRef(2, 4),
+    ]);
   });
 
   it("beginRegeneration requires a strictly increasing integer tag", () => {
     const state = createSelectionState(5);
-    expectError(beginRegeneration(state, 5), SELECTION_ERROR_CODES.regenerationInvalid);
-    expectError(beginRegeneration(state, 4), SELECTION_ERROR_CODES.regenerationInvalid);
-    expectError(beginRegeneration(state, 6.5), SELECTION_ERROR_CODES.regenerationInvalid);
+    expectError(
+      beginRegeneration(state, 5),
+      SELECTION_ERROR_CODES.regenerationInvalid,
+    );
+    expectError(
+      beginRegeneration(state, 4),
+      SELECTION_ERROR_CODES.regenerationInvalid,
+    );
+    expectError(
+      beginRegeneration(state, 6.5),
+      SELECTION_ERROR_CODES.regenerationInvalid,
+    );
     expect(unwrap(beginRegeneration(state, 6)).regeneration).toBe(6);
   });
 });
 
 describe("reference keys and serialization", () => {
   it("keys are equal exactly when references are equal", () => {
-    expect(selectionReferenceKey(BODY_REF)).toBe(selectionReferenceKey({ kind: "body", bodyId: BODY }));
-    expect(selectionReferenceKey(BODY_REF)).not.toBe(selectionReferenceKey(SOLID_REF));
-    expect(selectionReferenceKey(faceRef(3, 2))).not.toBe(selectionReferenceKey(faceRef(3, 3)));
-    expect(selectionReferenceKey(faceRef(3, 2))).not.toBe(selectionReferenceKey(faceRef(2, 2)));
+    expect(selectionReferenceKey(BODY_REF)).toBe(
+      selectionReferenceKey({ kind: "body", bodyId: BODY }),
+    );
+    expect(selectionReferenceKey(BODY_REF)).not.toBe(
+      selectionReferenceKey(SOLID_REF),
+    );
+    expect(selectionReferenceKey(faceRef(3, 2))).not.toBe(
+      selectionReferenceKey(faceRef(3, 3)),
+    );
+    expect(selectionReferenceKey(faceRef(3, 2))).not.toBe(
+      selectionReferenceKey(faceRef(2, 2)),
+    );
     expect(selectionReferenceKey(faceRef(3, 2))).toBe("face|body_plate|3|2");
   });
 
@@ -251,7 +293,9 @@ describe("reference keys and serialization", () => {
       { kind: "vertex", bodyId: BODY, regeneration: 3, vertexIndex: 7 },
     ];
     for (const reference of references) {
-      const parsed = parseSelectionReference(serializeSelectionReference(reference));
+      const parsed = parseSelectionReference(
+        serializeSelectionReference(reference),
+      );
       expect(unwrap(parsed)).toEqual(reference);
     }
   });
@@ -266,15 +310,61 @@ describe("reference keys and serialization", () => {
   });
 
   it("rejects malformed references", () => {
-    expectError(parseSelectionReference(null), SELECTION_ERROR_CODES.notAReference);
-    expectError(parseSelectionReference({ kind: "solid" }), SELECTION_ERROR_CODES.idInvalid);
-    expectError(parseSelectionReference({ kind: "body" }), SELECTION_ERROR_CODES.idInvalid);
-    expectError(parseSelectionReference({ kind: "topology" }), SELECTION_ERROR_CODES.notAReference);
-    expectError(parseSelectionReference({ kind: "body", bodyId: "feat_pad" }), SELECTION_ERROR_CODES.idInvalid);
-    expectError(parseSelectionReference({ kind: "face", bodyId: "feat_pad", regeneration: 1, faceIndex: 0 }), SELECTION_ERROR_CODES.idInvalid);
-    expectError(parseSelectionReference({ kind: "face", bodyId: BODY, regeneration: -1, faceIndex: 0 }), SELECTION_ERROR_CODES.fieldInvalid);
-    expectError(parseSelectionReference({ kind: "edge", bodyId: BODY, regeneration: 1, edgeIndex: 0.5 }), SELECTION_ERROR_CODES.fieldInvalid);
-    expectError(parseSelectionReference({ kind: "vertex", bodyId: BODY, regeneration: 1 }), SELECTION_ERROR_CODES.fieldInvalid);
+    expectError(
+      parseSelectionReference(null),
+      SELECTION_ERROR_CODES.notAReference,
+    );
+    expectError(
+      parseSelectionReference({ kind: "solid" }),
+      SELECTION_ERROR_CODES.idInvalid,
+    );
+    expectError(
+      parseSelectionReference({ kind: "body" }),
+      SELECTION_ERROR_CODES.idInvalid,
+    );
+    expectError(
+      parseSelectionReference({ kind: "topology" }),
+      SELECTION_ERROR_CODES.notAReference,
+    );
+    expectError(
+      parseSelectionReference({ kind: "body", bodyId: "feat_pad" }),
+      SELECTION_ERROR_CODES.idInvalid,
+    );
+    expectError(
+      parseSelectionReference({
+        kind: "face",
+        bodyId: "feat_pad",
+        regeneration: 1,
+        faceIndex: 0,
+      }),
+      SELECTION_ERROR_CODES.idInvalid,
+    );
+    expectError(
+      parseSelectionReference({
+        kind: "face",
+        bodyId: BODY,
+        regeneration: -1,
+        faceIndex: 0,
+      }),
+      SELECTION_ERROR_CODES.fieldInvalid,
+    );
+    expectError(
+      parseSelectionReference({
+        kind: "edge",
+        bodyId: BODY,
+        regeneration: 1,
+        edgeIndex: 0.5,
+      }),
+      SELECTION_ERROR_CODES.fieldInvalid,
+    );
+    expectError(
+      parseSelectionReference({
+        kind: "vertex",
+        bodyId: BODY,
+        regeneration: 1,
+      }),
+      SELECTION_ERROR_CODES.fieldInvalid,
+    );
   });
 });
 
@@ -294,9 +384,18 @@ describe("state serialization", () => {
       selected: [BODY_REF, { kind: "body", bodyId: BODY }],
       hover: null,
     };
-    expectError(parseSelectionState(state), SELECTION_ERROR_CODES.duplicateReference);
-    expectError(parseSelectionState({ regeneration: -1, selected: [], hover: null }), SELECTION_ERROR_CODES.regenerationInvalid);
-    expectError(parseSelectionState({ regeneration: 9, selected: "all" }), SELECTION_ERROR_CODES.notAReference);
+    expectError(
+      parseSelectionState(state),
+      SELECTION_ERROR_CODES.duplicateReference,
+    );
+    expectError(
+      parseSelectionState({ regeneration: -1, selected: [], hover: null }),
+      SELECTION_ERROR_CODES.regenerationInvalid,
+    );
+    expectError(
+      parseSelectionState({ regeneration: 9, selected: "all" }),
+      SELECTION_ERROR_CODES.notAReference,
+    );
   });
 
   it("enforces the expected regeneration at the revival boundary", () => {
@@ -335,7 +434,9 @@ describe("state serialization", () => {
       selected: [faceRef(5, 2), BODY_REF],
       hover: BODY_REF,
     });
-    expect(unwrap(parseSelectionState(current, { expectedRegeneration: 5 }))).toEqual({
+    expect(
+      unwrap(parseSelectionState(current, { expectedRegeneration: 5 })),
+    ).toEqual({
       regeneration: 5,
       selected: [faceRef(5, 2), BODY_REF],
       hover: BODY_REF,
@@ -347,7 +448,9 @@ describe("state serialization", () => {
       selected: [BODY_REF],
       hover: SOLID_REF,
     });
-    expect(unwrap(parseSelectionState(stableOnly, { expectedRegeneration: 5 }))).toEqual({
+    expect(
+      unwrap(parseSelectionState(stableOnly, { expectedRegeneration: 5 })),
+    ).toEqual({
       regeneration: 5,
       selected: [BODY_REF],
       hover: SOLID_REF,

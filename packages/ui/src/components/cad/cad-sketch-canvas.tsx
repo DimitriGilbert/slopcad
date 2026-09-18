@@ -120,13 +120,21 @@ export interface CadSketchCanvasAnnotation {
 
 /** The in-progress gesture preview, workplane mm. */
 export type CadSketchCanvasPreview =
-  | { readonly kind: "line"; readonly from: CadSketchPoint; readonly to: CadSketchPoint }
+  | {
+      readonly kind: "line";
+      readonly from: CadSketchPoint;
+      readonly to: CadSketchPoint;
+    }
   | {
       readonly kind: "rectangle";
       readonly from: CadSketchPoint;
       readonly to: CadSketchPoint;
     }
-  | { readonly kind: "circle"; readonly center: CadSketchPoint; readonly radius: number }
+  | {
+      readonly kind: "circle";
+      readonly center: CadSketchPoint;
+      readonly radius: number;
+    }
   | { readonly kind: "none" };
 
 /** The user-facing strings of {@link CadSketchCanvas}. Overridable via props. */
@@ -197,7 +205,10 @@ function distanceToSegment(
       ? 0
       : Math.max(
           0,
-          Math.min(1, ((point.x - a.x) * abx + (point.y - a.y) * aby) / lengthSquared),
+          Math.min(
+            1,
+            ((point.x - a.x) * abx + (point.y - a.y) * aby) / lengthSquared,
+          ),
         );
   const closest = { x: a.x + t * abx, y: a.y + t * aby };
   return Math.hypot(point.x - closest.x, point.y - closest.y);
@@ -280,7 +291,8 @@ export function CadSketchCanvas({
           );
         } else if (entity.kind === "circle") {
           distance = Math.abs(
-            Math.hypot(point.x - entity.cx, point.y - entity.cy) - entity.radius,
+            Math.hypot(point.x - entity.cx, point.y - entity.cy) -
+              entity.radius,
           );
         } else if (entity.kind === "arc") {
           const rim = Math.hypot(point.x - entity.cx, point.y - entity.cy);
@@ -327,8 +339,10 @@ export function CadSketchCanvas({
   // Colors: severity-driven, driven through fixed class tokens so the
   // surface stays on the design system (no raw hexes).
   const strokeFor = (entity: CadSketchCanvasEntity): string => {
-    if (entity.diagnostic === "error") return "var(--color-destructive, #dc2626)";
-    if (entity.diagnostic === "warning") return "var(--color-amber-500, #f59e0b)";
+    if (entity.diagnostic === "error")
+      return "var(--color-destructive, #dc2626)";
+    if (entity.diagnostic === "warning")
+      return "var(--color-amber-500, #f59e0b)";
     if (entity.selected) return "var(--color-sky-400, #38bdf8)";
     if (entity.construction) return "var(--color-muted-foreground, #71717a)";
     return "var(--color-foreground, #0a0a0a)";
@@ -516,9 +530,7 @@ export function CadSketchCanvas({
         data-sketch-selected={region.selected || undefined}
         fill={fill}
         fillOpacity={0.06}
-        points={screenPoints
-          .map((point) => `${point.x},${point.y}`)
-          .join(" ")}
+        points={screenPoints.map((point) => `${point.x},${point.y}`).join(" ")}
         stroke="none"
       />
     );

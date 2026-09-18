@@ -24,13 +24,14 @@ type BrandedId<K extends CadIdKind> = string & {
   readonly [cadIdBrand]: K;
 };
 
-/** The five domain object kinds that carry branded ids. */
+/** The six domain object kinds that carry branded ids. */
 export const CAD_ID_KINDS = [
   "document",
   "parameter",
   "feature",
   "body",
   "reference",
+  "sketch",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -48,6 +49,12 @@ export type BodyId = BrandedId<"body">;
  * (e.g. `ref_face-top`), kept separate from raw kernel handles by design.
  */
 export type ReferenceId = BrandedId<"reference">;
+/**
+ * Identifier of a sketch document entity (e.g. `skd_profile-base`): the
+ * document-resident record a feature input references when the feature
+ * consumes a sketch's profile (Phase 26.1's extrude).
+ */
+export type SketchDocumentId = BrandedId<"sketch">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -55,6 +62,7 @@ type CadIdTable = {
   feature: FeatureId;
   body: BodyId;
   reference: ReferenceId;
+  sketch: SketchDocumentId;
 };
 
 /** The branded id type of a given id kind. */
@@ -73,6 +81,7 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   feature: "feat",
   body: "body",
   reference: "ref",
+  sketch: "skd",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -108,7 +117,11 @@ export interface IdParseError {
   readonly input: unknown;
 }
 
-function idError(code: IdErrorCode, message: string, input: unknown): IdParseError {
+function idError(
+  code: IdErrorCode,
+  message: string,
+  input: unknown,
+): IdParseError {
   return { code, message, input };
 }
 
@@ -191,6 +204,13 @@ export function parseReferenceId(
   return parseIdOfKind("reference", input);
 }
 
+/** Parses untrusted input as a {@link SketchDocumentId}. */
+export function parseSketchDocumentId(
+  input: unknown,
+): ParseResult<SketchDocumentId, IdParseError> {
+  return parseIdOfKind("sketch", input);
+}
+
 /** An id of any kind together with the kind it was recognized as. */
 export interface ParsedCadId<K extends CadIdKind = CadIdKind> {
   readonly kind: K;
@@ -211,7 +231,9 @@ export function parseAnyCadId(
     );
   }
   if (input.length === 0) {
-    return fail(idError(ID_ERROR_CODES.empty, "A CAD id must not be empty.", input));
+    return fail(
+      idError(ID_ERROR_CODES.empty, "A CAD id must not be empty.", input),
+    );
   }
   const separator = input.indexOf("_");
   if (separator <= 0) {
@@ -308,6 +330,14 @@ export function createReferenceId(raw: string): ReferenceId {
 }
 
 /**
+ * Adopts an explicit user-provided sketch document id exactly as given
+ * (`skd_…` wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createSketchDocumentId(raw: string): SketchDocumentId {
+  return requireId("sketch", raw);
+}
+
+/**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
  */
@@ -359,6 +389,7 @@ export interface IdGenerator {
   nextFeatureId(): FeatureId;
   nextBodyId(): BodyId;
   nextReferenceId(): ReferenceId;
+  nextSketchDocumentId(): SketchDocumentId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -369,13 +400,19 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   feature: 0,
   body: 0,
   reference: 0,
+  sketch: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
 const ID_COUNTER_WIDTH = 6;
 
-function normalizeGeneratorState(initial: IdGeneratorState): Record<CadIdKind, number> {
-  const counters: Record<CadIdKind, number> = { ...DEFAULT_GENERATOR_STATE, ...initial };
+function normalizeGeneratorState(
+  initial: IdGeneratorState,
+): Record<CadIdKind, number> {
+  const counters: Record<CadIdKind, number> = {
+    ...DEFAULT_GENERATOR_STATE,
+    ...initial,
+  };
   for (const kind of CAD_ID_KINDS) {
     const count = counters[kind];
     if (!Number.isInteger(count) || count < 0) {
@@ -417,6 +454,7 @@ export function createIdGenerator(
     nextFeatureId: () => requireId("feature", nextRawId("feature")),
     nextBodyId: () => requireId("body", nextRawId("body")),
     nextReferenceId: () => requireId("reference", nextRawId("reference")),
+    nextSketchDocumentId: () => requireId("sketch", nextRawId("sketch")),
     state: () => Object.freeze({ ...counters }),
   };
 }

@@ -38,7 +38,9 @@ import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 export type ParameterMetadataValue = string | number | boolean | null;
 
 /** Free-form, JSON-safe metadata attached to a parameter. */
-export type ParameterMetadata = Readonly<Record<string, ParameterMetadataValue>>;
+export type ParameterMetadata = Readonly<
+  Record<string, ParameterMetadataValue>
+>;
 
 /** An immutable parameter record; the dimensional type is `value.dimension`. */
 export interface Parameter {
@@ -106,9 +108,7 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 function isMetadataValue(input: unknown): input is ParameterMetadataValue {
   if (typeof input === "number") return Number.isFinite(input);
   return (
-    typeof input === "string" ||
-    typeof input === "boolean" ||
-    input === null
+    typeof input === "string" || typeof input === "boolean" || input === null
   );
 }
 
@@ -129,9 +129,7 @@ function validateValue(
   return ok(parsed.value);
 }
 
-function validateName(
-  name: unknown,
-): ParseResult<string, ParameterError> {
+function validateName(name: unknown): ParseResult<string, ParameterError> {
   if (typeof name !== "string" || !isExpressionIdentifierName(name)) {
     return fail(
       parameterError(
@@ -377,9 +375,7 @@ export function updateParameterValue(
   return replaceParameter(collection, id, (parameter) => {
     const parsed = validateValue(value);
     if (!parsed.ok) return parsed;
-    return ok(
-      Object.freeze({ ...parameter, value: parsed.value }),
-    );
+    return ok(Object.freeze({ ...parameter, value: parsed.value }));
   });
 }
 
@@ -396,9 +392,7 @@ export function updateParameterExpression(
   return replaceParameter(collection, id, (parameter) => {
     const parsed = validateExpression(expression);
     if (!parsed.ok) return parsed;
-    return ok(
-      Object.freeze({ ...parameter, expression: parsed.value }),
-    );
+    return ok(Object.freeze({ ...parameter, expression: parsed.value }));
   });
 }
 
@@ -411,9 +405,7 @@ export function updateParameterMetadata(
   return replaceParameter(collection, id, (parameter) => {
     const parsed = validateMetadata(metadata);
     if (!parsed.ok) return parsed;
-    return ok(
-      Object.freeze({ ...parameter, metadata: parsed.value }),
-    );
+    return ok(Object.freeze({ ...parameter, metadata: parsed.value }));
   });
 }
 

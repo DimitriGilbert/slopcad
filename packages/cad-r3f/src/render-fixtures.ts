@@ -35,15 +35,9 @@ export const TEST_CAMERA: RenderCamera = {
  * component-exact comparison against this fixture.
  */
 export const FOLDED_SHEET_WITH_NORMALS = {
-  positions: [
-    0, 0, 0, 1, 0, 0, 1, 1, 0,
-    0, 0, 0, 1, 0, 0, 1, 0, -1,
-  ],
+  positions: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, -1],
   indices: [0, 1, 2, 3, 4, 5],
-  normals: [
-    0, 0, 1, 0, 0, 1, 0, 0, 1,
-    0, 0.6, 0.8, 0, 0.6, 0.8, 0, 0.6, 0.8,
-  ],
+  normals: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0.6, 0.8, 0, 0.6, 0.8, 0, 0.6, 0.8],
 } as const;
 
 /** The same fold indexed with shared vertices and no kernel normals. */
@@ -75,11 +69,16 @@ export function makeObject(
   },
 ): RenderObject {
   return unwrap(
-    projectTessellation(createBodyId(`${CAD_ID_PREFIXES.body}_${payload}`), buffers),
+    projectTessellation(
+      createBodyId(`${CAD_ID_PREFIXES.body}_${payload}`),
+      buffers,
+    ),
   );
 }
 
 /** Assembles render objects into a validated projection with the test camera. */
-export function makeProjection(objects: readonly RenderObject[]): RenderProjection {
+export function makeProjection(
+  objects: readonly RenderObject[],
+): RenderProjection {
   return unwrap(createRenderProjection(objects, TEST_CAMERA));
 }

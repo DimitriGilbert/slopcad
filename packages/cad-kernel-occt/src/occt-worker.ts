@@ -93,5 +93,17 @@ export async function hostOcctWorker(
         : fail(imported.error);
     },
     brepExport: (solids) => kernel.exportBrep(solids),
+    // The Phase 26.5 topology extension: this kernel reports persistent
+    // BREP topology, so `solid.topology` executes here — the browser's
+    // edge-picking layer reads the snapshot's entities and addresses
+    // `solid.fillet` (and the Phase 26.6 `solid.chamfer`; the Phase 26.7
+    // `solid.shell` by its FACE ordinals) by the same ordinals. A direct
+    // delegation: the wire input's parsed body id and regeneration pass
+    // through verbatim.
+    topology: (solid, options) =>
+      kernel.topologySnapshot(solid, {
+        bodyId: options.bodyId,
+        regeneration: options.regeneration,
+      }),
   });
 }

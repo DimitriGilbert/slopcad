@@ -528,16 +528,24 @@ export function RenderFixturePage() {
               </span>
             </li>
             <li>
-              tool = <span id="tool-status">{`${toolView.toolId ?? "none"} (${toolView.phase})`}</span>
+              tool ={" "}
+              <span id="tool-status">{`${toolView.toolId ?? "none"} (${toolView.phase})`}</span>
             </li>
             <li>
-              measure = <span id="measure-readout">{measureText === "" ? "—" : measureText}</span>
+              measure ={" "}
+              <span id="measure-readout">
+                {measureText === "" ? "—" : measureText}
+              </span>
             </li>
             <li>
-              translate = <span id="translate-readout">{`[${translateOffset.join(", ")}]`}</span>
+              translate ={" "}
+              <span id="translate-readout">{`[${translateOffset.join(", ")}]`}</span>
             </li>
             <li>
-              commands = <span id="command-count">{String(commandLogRef.current.length)}</span>
+              commands ={" "}
+              <span id="command-count">
+                {String(commandLogRef.current.length)}
+              </span>
             </li>
             <li data-testid="render-error" className="text-red-500">
               <span id="render-error" />
@@ -575,13 +583,21 @@ export function RenderFixturePage() {
           onPointerDown={(event) => {
             if (downWithPickRef.current) return;
             dispatchTool(
-              toolPointerEvent("pointer-down", null, toolModifiersFromNative(event)),
+              toolPointerEvent(
+                "pointer-down",
+                null,
+                toolModifiersFromNative(event),
+              ),
             );
           }}
           onPointerUp={(event) => {
             if (upWithPickRef.current) return;
             dispatchTool(
-              toolPointerEvent("pointer-up", null, toolModifiersFromNative(event)),
+              toolPointerEvent(
+                "pointer-up",
+                null,
+                toolModifiersFromNative(event),
+              ),
             );
           }}
         >

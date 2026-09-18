@@ -11,10 +11,7 @@ import { length } from "@slopcad/cad-core";
 import type { WorkerMessage } from "./worker-protocol";
 
 import { createWorkerClient, WorkerRequestFailure } from "./worker-client";
-import {
-  WORKER_PROTOCOL_ERROR_CODES,
-  workerError,
-} from "./worker-errors";
+import { WORKER_PROTOCOL_ERROR_CODES, workerError } from "./worker-errors";
 import { createWorkerRequestId, createWorkerSolidId } from "./worker-ids";
 import {
   createWorkerErrorResponse,
@@ -69,7 +66,9 @@ function failureOf(promise: Promise<unknown>): Promise<WorkerRequestFailure> {
     },
     (error: unknown) => {
       if (!(error instanceof WorkerRequestFailure)) {
-        throw new Error(`Expected a WorkerRequestFailure, received ${String(error)}.`);
+        throw new Error(
+          `Expected a WorkerRequestFailure, received ${String(error)}.`,
+        );
       }
       return error;
     },
@@ -106,7 +105,9 @@ describe("client correlation", () => {
   it("mints request ids sequentially, also across concurrent requests", async () => {
     const harness = setup();
     const box = harness.client.request("solid.createBox", boxInput);
-    const sphere = harness.client.request("solid.createSphere", { radius: mm(1) });
+    const sphere = harness.client.request("solid.createSphere", {
+      radius: mm(1),
+    });
     await flush();
 
     const first = sentMessageAt(harness, 0);
@@ -121,7 +122,9 @@ describe("client correlation", () => {
       }),
     );
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await expect(sphere).resolves.toEqual({ solid: "wsol_000002" });
     await expect(box).resolves.toEqual({ solid: "wsol_000001" });
@@ -134,10 +137,14 @@ describe("client correlation", () => {
     await flush();
 
     const message = sentMessageAt(harness, 0);
-    expect(message.kind === "request" && message.requestId).toBe("req_chosen.1");
+    expect(message.kind === "request" && message.requestId).toBe(
+      "req_chosen.1",
+    );
 
     harness.deliver(
-      createWorkerSuccessResponse(explicit, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(explicit, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await expect(box).resolves.toEqual({ solid: "wsol_000001" });
   });
@@ -152,9 +159,13 @@ describe("client failure propagation", () => {
     harness.deliver(
       createWorkerErrorResponse(
         firstRequestId,
-        workerError("worker/operation-failed", "The box was rejected by the kernel.", {
-          kernelCode: "kernel/invalid-length",
-        }),
+        workerError(
+          "worker/operation-failed",
+          "The box was rejected by the kernel.",
+          {
+            kernelCode: "kernel/invalid-length",
+          },
+        ),
       ),
     );
 
@@ -208,7 +219,9 @@ describe("client failure propagation", () => {
 
     // The channel is not poisoned: a later valid response still settles it.
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await flush();
     expect(settled).toBe(true);
@@ -253,9 +266,15 @@ describe("client failure propagation", () => {
     await flush();
 
     harness.deliver(
-      createWorkerRequest(secondRequestId, "solid.createSphere", { radius: mm(1) }),
+      createWorkerRequest(secondRequestId, "solid.createSphere", {
+        radius: mm(1),
+      }),
     );
-    harness.deliver({ protocolVersion: 1, kind: "cancel", requestId: "req_000001" });
+    harness.deliver({
+      protocolVersion: 1,
+      kind: "cancel",
+      requestId: "req_000001",
+    });
     await flush();
     expect(settled).toBe(false);
   });
@@ -269,18 +288,30 @@ describe("client id discipline", () => {
     await flush();
     expect(harness.sent).toHaveLength(1);
 
-    const second = harness.client.request("solid.createSphere", { radius: mm(1) }, explicit);
+    const second = harness.client.request(
+      "solid.createSphere",
+      { radius: mm(1) },
+      explicit,
+    );
     const failure = await failureOf(second);
     expect(failure.error.code).toBe("worker/duplicate-request");
     expect(harness.sent).toHaveLength(1); // the duplicate never reached the wire
 
     // The id stays spent after the first request settles, too.
     harness.deliver(
-      createWorkerSuccessResponse(explicit, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(explicit, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await expect(first).resolves.toEqual({ solid: "wsol_000001" });
-    const third = harness.client.request("solid.createSphere", { radius: mm(2) }, explicit);
-    expect((await failureOf(third)).error.code).toBe("worker/duplicate-request");
+    const third = harness.client.request(
+      "solid.createSphere",
+      { radius: mm(2) },
+      explicit,
+    );
+    expect((await failureOf(third)).error.code).toBe(
+      "worker/duplicate-request",
+    );
     expect(harness.sent).toHaveLength(1);
   });
 });
@@ -315,7 +346,9 @@ describe("client cancellation", () => {
       },
     );
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await flush();
     expect(resolvedWithSuccess).toBe(false);
@@ -333,7 +366,9 @@ describe("client cancellation", () => {
     const box = harness.client.request("solid.createBox", boxInput);
     await flush();
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await expect(box).resolves.toEqual({ solid: "wsol_000001" });
 
@@ -351,7 +386,9 @@ describe("client cancellation", () => {
     harness.client.close();
     const failure = await box.then(
       () => {
-        throw new Error("close must settle the in-flight request, not resolve it.");
+        throw new Error(
+          "close must settle the in-flight request, not resolve it.",
+        );
       },
       (error: unknown) => error,
     );
@@ -359,13 +396,17 @@ describe("client cancellation", () => {
     if (!(failure instanceof WorkerRequestFailure)) {
       throw new Error("Expected a WorkerRequestFailure.");
     }
-    expect(failure.error.code).toBe(WORKER_PROTOCOL_ERROR_CODES.transportClosed);
+    expect(failure.error.code).toBe(
+      WORKER_PROTOCOL_ERROR_CODES.transportClosed,
+    );
     expect(failure.error.message).toContain(`"${firstRequestId}"`);
 
     // A late success for the orphaned request is dropped: the request is
     // void from the close on, never resolved by straggling traffic.
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await flush();
     await expect(box).rejects.toMatchObject({
@@ -378,7 +419,9 @@ describe("client cancellation", () => {
     await flush();
     harness.client.close();
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await flush();
   });
@@ -403,7 +446,9 @@ describe("client discard hygiene for voided successes", () => {
       },
     );
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await flush();
     expect(resolvedWithSuccess).toBe(false);
@@ -445,14 +490,18 @@ describe("client discard hygiene for voided successes", () => {
     const box = harness.client.request("solid.createBox", boxInput);
     await flush();
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await expect(box).resolves.toEqual({ solid: "wsol_000001" });
 
     // A duplicate straggler for the settled id is a plain drop: the solid
     // belongs to the caller now, so no hygiene may touch it.
     harness.deliver(
-      createWorkerSuccessResponse(firstRequestId, "solid.createBox", { solid: firstSolid }),
+      createWorkerSuccessResponse(firstRequestId, "solid.createBox", {
+        solid: firstSolid,
+      }),
     );
     await flush();
     expect(harness.sent).toHaveLength(1); // only the original request

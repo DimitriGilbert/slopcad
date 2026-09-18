@@ -57,6 +57,10 @@ import {
   type SerializedDimensionalValue,
 } from "./dimensional";
 import {
+  addBody,
+  addDocumentReference,
+  addDocumentSketch,
+  addDocumentParameter,
   addFeature,
   type CadDocument,
   type DocumentError,
@@ -72,9 +76,13 @@ import {
   type BodyId,
   type FeatureId,
   type ParameterId,
+  type SketchDocumentId,
   parseBodyId,
   parseFeatureId,
   parseParameterId,
+  parseSketchDocumentId,
+  type ReferenceId,
+  parseReferenceId,
 } from "./ids";
 import { type ParameterError, updateParameterValue } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
@@ -83,10 +91,14 @@ import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 /** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder). */
 export const CAD_COMMAND_TYPES = [
   "parameter.set",
+  "parameter.create",
   "feature.create",
   "feature.update",
   "feature.delete",
   "feature.reorder",
+  "body.create",
+  "sketch.create",
+  "reference.create",
 ] as const;
 
 export type CadCommandType = (typeof CAD_COMMAND_TYPES)[number];
@@ -116,6 +128,29 @@ export type CadCommand =
       readonly type: "parameter.set";
       readonly id: ParameterId;
       readonly value: AnyDimensionalValue;
+    }
+  | {
+      readonly type: "parameter.create";
+      readonly id?: ParameterId;
+      readonly name: string;
+      readonly value: AnyDimensionalValue;
+    }
+  | {
+      readonly type: "body.create";
+      readonly id?: BodyId;
+      readonly name: string;
+    }
+  | {
+      readonly type: "sketch.create";
+      readonly id?: SketchDocumentId;
+      readonly name: string;
+      readonly sketch: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly type: "reference.create";
+      readonly id?: ReferenceId;
+      readonly name: string;
+      readonly reference: Readonly<Record<string, unknown>>;
     }
   | {
       readonly type: "feature.create";
@@ -195,6 +230,41 @@ export function applyCommand(
       if (!updated.ok) return updated;
       return ok(Object.freeze({ ...document, parameters: updated.value }));
     }
+    case "parameter.create": {
+      const added = addDocumentParameter(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+        value: command.value,
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
+    case "body.create": {
+      const added = addBody(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
+    case "sketch.create": {
+      const added = addDocumentSketch(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+        sketch: command.sketch,
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
+    case "reference.create": {
+      const added = addDocumentReference(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+        reference: command.reference,
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
     case "feature.create": {
       const added = addFeature(document, command);
       if (!added.ok) return added;
@@ -234,6 +304,33 @@ export type SerializedCadCommand =
     }
   | {
       readonly formatVersion: number;
+      readonly type: "parameter.create";
+      readonly id?: string;
+      readonly name: string;
+      readonly value: SerializedDimensionalValue;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "body.create";
+      readonly id?: string;
+      readonly name: string;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "sketch.create";
+      readonly id?: string;
+      readonly name: string;
+      readonly sketch: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "reference.create";
+      readonly id?: string;
+      readonly name: string;
+      readonly reference: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly formatVersion: number;
       readonly type: "feature.create";
       readonly id?: string;
       readonly kind: string;
@@ -265,9 +362,7 @@ function serializeInputRef(ref: FeatureInputRef): SerializedFeatureInputRef {
 }
 
 /** Serializes a command to its canonical, deterministic JSON form. */
-export function serializeCommand(
-  command: CadCommand,
-): SerializedCadCommand {
+export function serializeCommand(command: CadCommand): SerializedCadCommand {
   switch (command.type) {
     case "parameter.set":
       return {
@@ -292,6 +387,64 @@ export function serializeCommand(
             kind: command.kind,
             inputs: command.inputs.map(serializeInputRef),
             outputs: [...command.outputs],
+          };
+    case "parameter.create":
+      return command.id === undefined
+        ? {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            name: command.name,
+            value: serializeDimensionalValue(command.value),
+          }
+        : {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            id: command.id,
+            name: command.name,
+            value: serializeDimensionalValue(command.value),
+          };
+    case "body.create":
+      return command.id === undefined
+        ? {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            name: command.name,
+          }
+        : {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            id: command.id,
+            name: command.name,
+          };
+    case "sketch.create":
+      return command.id === undefined
+        ? {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            name: command.name,
+            sketch: command.sketch,
+          }
+        : {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            id: command.id,
+            name: command.name,
+            sketch: command.sketch,
+          };
+    case "reference.create":
+      return command.id === undefined
+        ? {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            name: command.name,
+            reference: command.reference,
+          }
+        : {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            id: command.id,
+            name: command.name,
+            reference: command.reference,
           };
     case "feature.update":
       return {
@@ -384,9 +537,7 @@ function parseCommandOutputs(
   return ok(Object.freeze(ids));
 }
 
-function parseCommandKind(
-  input: unknown,
-): ParseResult<string, CommandError> {
+function parseCommandKind(input: unknown): ParseResult<string, CommandError> {
   const parsed = parseFeatureKind(input);
   if (!parsed.ok) {
     return fail(
@@ -482,6 +633,162 @@ export function parseCommand(
       }
       return ok(
         Object.freeze({ type, id: parsedId.value, value: parsedValue.value }),
+      );
+    }
+    case "parameter.create": {
+      let id: ParameterId | undefined;
+      if (input.id !== undefined) {
+        const parsedId = parseParameterId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A parameter.create command needs a valid parameter id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A parameter.create command needs a non-empty name string.",
+            input.name,
+          ),
+        );
+      }
+      const parsedValue = parseDimensionalValue(input.value);
+      if (!parsedValue.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A parameter.create command needs a valid dimensional value: ${parsedValue.error.message}`,
+            input.value,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze(
+          id === undefined
+            ? { type, name: input.name, value: parsedValue.value }
+            : { type, id, name: input.name, value: parsedValue.value },
+        ),
+      );
+    }
+    case "body.create": {
+      let id: BodyId | undefined;
+      if (input.id !== undefined) {
+        const parsedId = parseBodyId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A body.create command needs a valid body id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A body.create command needs a non-empty name string.",
+            input.name,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze(
+          id === undefined
+            ? { type, name: input.name }
+            : { type, id, name: input.name },
+        ),
+      );
+    }
+    case "sketch.create": {
+      let id: SketchDocumentId | undefined;
+      if (input.id !== undefined) {
+        const parsedId = parseSketchDocumentId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A sketch.create command needs a valid sketch id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A sketch.create command needs a non-empty name string.",
+            input.name,
+          ),
+        );
+      }
+      if (!isPlainRecord(input.sketch)) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A sketch.create command needs a plain-object sketch payload (the sketch domain's canonical serialized form).",
+            input.sketch,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze(
+          id === undefined
+            ? { type, name: input.name, sketch: input.sketch }
+            : { type, id, name: input.name, sketch: input.sketch },
+        ),
+      );
+    }
+    case "reference.create": {
+      let id: ReferenceId | undefined;
+      if (input.id !== undefined) {
+        const parsedId = parseReferenceId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A reference.create command needs a valid reference id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A reference.create command needs a non-empty name string.",
+            input.name,
+          ),
+        );
+      }
+      if (!isPlainRecord(input.reference)) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A reference.create command needs a plain-object reference payload (the persistent-reference module's canonical serialized form).",
+            input.reference,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze(
+          id === undefined
+            ? { type, name: input.name, reference: input.reference }
+            : { type, id, name: input.name, reference: input.reference },
+        ),
       );
     }
     case "feature.create": {

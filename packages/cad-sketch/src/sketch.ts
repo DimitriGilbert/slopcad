@@ -19,7 +19,10 @@ import {
   type SketchConstraint,
   validateConstraintReferences,
 } from "./constraints";
-import { parseSketchConstraint, serializeSketchConstraint } from "./constraints";
+import {
+  parseSketchConstraint,
+  serializeSketchConstraint,
+} from "./constraints";
 import {
   type SketchEntity,
   parseSketchEntity,
@@ -30,7 +33,10 @@ import {
   parseWorkplane,
   serializeWorkplane,
 } from "./workplane";
-import { type SolvedSketchParameters, solvedEntityParametersById } from "./solver";
+import {
+  type SolvedSketchParameters,
+  solvedEntityParametersById,
+} from "./solver";
 
 /**
  * Version of the sketch serialization format implemented by this package.
@@ -92,7 +98,11 @@ function checkSketchIntegrity(
   entities: readonly SketchEntity[],
   constraints: readonly SketchConstraint[],
 ): SketchError | null {
-  const entityIds = checkUniqueIds(entities, SKETCH_DIAGNOSTIC_CODES.entityDuplicateId, "entity");
+  const entityIds = checkUniqueIds(
+    entities,
+    SKETCH_DIAGNOSTIC_CODES.entityDuplicateId,
+    "entity",
+  );
   if (!entityIds.ok) return entityIds.error;
   const constraintIds = checkUniqueIds(
     constraints,

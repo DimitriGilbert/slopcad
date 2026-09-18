@@ -78,11 +78,7 @@ import {
 
 /** A concern a consumer (or hook) can subscribe to. */
 export type CadStoreConcern =
-  | "document"
-  | "parameters"
-  | "history"
-  | "selection"
-  | "tools";
+  "document" | "parameters" | "history" | "selection" | "tools";
 
 /** All concerns, in emission order within one sync pass. */
 export const CAD_STORE_CONCERNS: readonly CadStoreConcern[] = [
@@ -189,7 +185,9 @@ export class CadStore {
 
   private readonly toolIdsValue: readonly string[];
 
-  private readonly onTransaction?: (transaction: SerializedCadTransaction) => void;
+  private readonly onTransaction?: (
+    transaction: SerializedCadTransaction,
+  ) => void;
 
   private readonly listeners: ReadonlyMap<CadStoreConcern, Set<Listener>>;
 
@@ -202,9 +200,8 @@ export class CadStore {
     tools: CadToolSurface;
   };
 
-  private commandLogEntries: readonly SerializedCadTransaction[] = Object.freeze(
-    [],
-  );
+  private commandLogEntries: readonly SerializedCadTransaction[] =
+    Object.freeze([]);
 
   constructor(options: CadStoreOptions) {
     this.onTransaction = options.onTransaction;

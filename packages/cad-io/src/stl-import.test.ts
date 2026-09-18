@@ -266,10 +266,16 @@ describe("importStl binary round-trip (18.1 export → import)", () => {
     const sourceBounds = positionsBounds(box.positions);
     for (const axis of [0, 1, 2]) {
       expect(
-        float32Close(importedBounds.min[axis] ?? 0, sourceBounds.min[axis] ?? 0),
+        float32Close(
+          importedBounds.min[axis] ?? 0,
+          sourceBounds.min[axis] ?? 0,
+        ),
       ).toBe(true);
       expect(
-        float32Close(importedBounds.max[axis] ?? 0, sourceBounds.max[axis] ?? 0),
+        float32Close(
+          importedBounds.max[axis] ?? 0,
+          sourceBounds.max[axis] ?? 0,
+        ),
       ).toBe(true);
       expect(float32Close(importedBounds.min[axis] ?? 0, 0)).toBe(true);
       expect(
@@ -331,10 +337,16 @@ describe("importStl binary round-trip (18.1 export → import)", () => {
     const sourceBounds = positionsBounds(soup.positions);
     for (const axis of [0, 1, 2]) {
       expect(
-        float32Close(importedBounds.min[axis] ?? 0, sourceBounds.min[axis] ?? 0),
+        float32Close(
+          importedBounds.min[axis] ?? 0,
+          sourceBounds.min[axis] ?? 0,
+        ),
       ).toBe(true);
       expect(
-        float32Close(importedBounds.max[axis] ?? 0, sourceBounds.max[axis] ?? 0),
+        float32Close(
+          importedBounds.max[axis] ?? 0,
+          sourceBounds.max[axis] ?? 0,
+        ),
       ).toBe(true);
     }
   });
@@ -381,11 +393,7 @@ describe("importStl ASCII fixture (externally authored)", () => {
       [0, 0, -1],
       [-1, 0, 0],
       [0, -1, 0],
-      [
-        0.5773502691896258,
-        0.5773502691896258,
-        0.5773502691896258,
-      ],
+      [0.5773502691896258, 0.5773502691896258, 0.5773502691896258],
     ];
     for (let t = 0; t < 4; t += 1) {
       for (const corner of [0, 1, 2]) {
@@ -421,7 +429,9 @@ describe("importStl ASCII fixture (externally authored)", () => {
     expect(first.tessellation.positions).toEqual(second.tessellation.positions);
     expect(first.tessellation.indices).toEqual(second.tessellation.indices);
     expect(first.tessellation.normals).toEqual(second.tessellation.normals);
-    expect(first.tessellation.positions).toEqual(byteCopy.tessellation.positions);
+    expect(first.tessellation.positions).toEqual(
+      byteCopy.tessellation.positions,
+    );
     expect(first.tessellation.normals).toEqual(byteCopy.tessellation.normals);
   });
 
@@ -462,9 +472,7 @@ describe("importStl format detection", () => {
   });
 
   it("accepts the documented ASCII variants (CRLF, nameless, blanks, exponents)", () => {
-    const crlf = asciiBytes(
-      ASCII_ONE_FACET_LINES.join("\r\n").concat("\r\n"),
-    );
+    const crlf = asciiBytes(ASCII_ONE_FACET_LINES.join("\r\n").concat("\r\n"));
     expect(unwrapImport(importStl(crlf)).flavor).toBe("ascii");
 
     const nameless = asciiVariant([
@@ -714,7 +722,9 @@ describe("importStl rejects malformed input (per failure class)", () => {
   });
 
   it("stl-import/ascii-syntax: an ASCII file cut mid-facet", () => {
-    const half = asciiBytes(tetraText.slice(0, Math.floor(tetraText.length / 2)));
+    const half = asciiBytes(
+      tetraText.slice(0, Math.floor(tetraText.length / 2)),
+    );
     expectImportFailure(
       importStl(half),
       "stl-import/ascii-syntax",

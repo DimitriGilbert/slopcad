@@ -65,6 +65,10 @@ import {
   parseFeatureId,
   parseParameterId,
   type ParameterId,
+  parseReferenceId,
+  type ReferenceId,
+  parseSketchDocumentId,
+  type SketchDocumentId,
 } from "./ids";
 import {
   addParameter,
@@ -95,6 +99,54 @@ export interface BodyInput {
 }
 
 /**
+ * A sketch document entity (Phase 26.1): the document-resident record of a
+ * sketch, carrying its canonical serialized form verbatim (cad-core stays
+ * sketch-format-agnostic — the sketch domain owns the payload's schema and
+ * its parse/serialize; the document guarantees only identity, a name, and
+ * JSON-safe fixed storage). Features reference a sketch record through a
+ * `{ kind: "sketch" }` input.
+ */
+export interface DocumentSketch {
+  readonly id: SketchDocumentId;
+  readonly name: string;
+  /** The sketch domain's canonical serialized sketch, stored verbatim. */
+  readonly sketch: Readonly<Record<string, unknown>>;
+}
+
+/** Input accepted by {@link addDocumentSketch}. */
+export interface DocumentSketchInput {
+  readonly id?: SketchDocumentId;
+  readonly name: string;
+  readonly sketch: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A persistent-reference entity (Phase 26.5): the document-resident record
+ * of a Phase 22 {@link TopologyEntityReference} — face, edge, or vertex —
+ * carrying its canonical serialized form verbatim (cad-core's persistent-
+ * reference module owns the payload's schema and its parse/serialize; the
+ * document guarantees only identity, a name, and JSON-safe fixed storage,
+ * the exact discipline the sketch records follow). Features reference a
+ * record through a `{ kind: "reference" }` input; the EXECUTOR resolves it
+ * against the owning solid's current topology snapshot — a moved or
+ * vanished entity surfaces there as a structured reference failure, never
+ * as silent re-attachment.
+ */
+export interface DocumentReference {
+  readonly id: ReferenceId;
+  readonly name: string;
+  /** The persistent-reference module's canonical serialized form, stored verbatim. */
+  readonly reference: Readonly<Record<string, unknown>>;
+}
+
+/** Input accepted by {@link addDocumentReference}. */
+export interface DocumentReferenceInput {
+  readonly id?: ReferenceId;
+  readonly name: string;
+  readonly reference: Readonly<Record<string, unknown>>;
+}
+
+/**
  * A typed reference to an entity a feature consumes. The `kind`/`id` pair is
  * validated for consistency (the id must carry the wire prefix of its
  * declared kind).
@@ -102,10 +154,18 @@ export interface BodyInput {
 export type FeatureInputRef =
   | { readonly kind: "parameter"; readonly id: ParameterId }
   | { readonly kind: "feature"; readonly id: FeatureId }
-  | { readonly kind: "body"; readonly id: BodyId };
+  | { readonly kind: "body"; readonly id: BodyId }
+  | { readonly kind: "sketch"; readonly id: SketchDocumentId }
+  | { readonly kind: "reference"; readonly id: ReferenceId };
 
 /** The entity kinds a feature input may reference. */
-export const FEATURE_INPUT_KINDS = ["parameter", "feature", "body"] as const;
+export const FEATURE_INPUT_KINDS = [
+  "parameter",
+  "feature",
+  "body",
+  "sketch",
+  "reference",
+] as const;
 
 export type FeatureInputKind = (typeof FEATURE_INPUT_KINDS)[number];
 
@@ -146,6 +206,13 @@ export interface CadDocument {
   readonly parameters: ParameterCollection;
   readonly bodies: readonly Body[];
   readonly features: readonly FeatureRecord[];
+  /** The document's sketch entities, in add order (empty in older files). */
+  readonly sketches: readonly DocumentSketch[];
+  /**
+   * The document's persistent-reference records, in add order (empty in
+   * older files; Phase 26.5-additive).
+   */
+  readonly references: readonly DocumentReference[];
   /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
@@ -158,7 +225,8 @@ export interface CadDocument {
 export type DocumentEntity =
   | { readonly kind: "parameter"; readonly parameter: Parameter }
   | { readonly kind: "body"; readonly body: Body }
-  | { readonly kind: "feature"; readonly feature: FeatureRecord };
+  | { readonly kind: "feature"; readonly feature: FeatureRecord }
+  | { readonly kind: "sketch"; readonly sketch: DocumentSketch };
 
 /** Result of {@link addBody}: the next document plus the added body. */
 export interface BodyAddResult {
@@ -178,6 +246,18 @@ export interface DocumentParameterAddResult {
   readonly parameter: Parameter;
 }
 
+/** Result of {@link addDocumentSketch}: next document plus the sketch. */
+export interface DocumentSketchAddResult {
+  readonly document: CadDocument;
+  readonly sketch: DocumentSketch;
+}
+
+/** Result of {@link addDocumentReference}: next document plus the record. */
+export interface DocumentReferenceAddResult {
+  readonly document: CadDocument;
+  readonly reference: DocumentReference;
+}
+
 /** Stable failure codes produced when document input is rejected. */
 export const DOCUMENT_ERROR_CODES = {
   malformed: "document/malformed",
@@ -187,6 +267,10 @@ export const DOCUMENT_ERROR_CODES = {
   idInvalid: "document/id-invalid",
   idConflict: "document/id-conflict",
   bodyNameInvalid: "document/body-name-invalid",
+  sketchNameInvalid: "document/sketch-name-invalid",
+  sketchPayloadInvalid: "document/sketch-payload-invalid",
+  referenceNameInvalid: "document/reference-name-invalid",
+  referencePayloadInvalid: "document/reference-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
   inputUnknown: "document/input-unknown",
@@ -220,7 +304,11 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 const BODY_NAME_MAX_LENGTH = 64;
 
 function validateBodyName(name: unknown): ParseResult<string, DocumentError> {
-  if (typeof name !== "string" || name.length === 0 || name.length > BODY_NAME_MAX_LENGTH) {
+  if (
+    typeof name !== "string" ||
+    name.length === 0 ||
+    name.length > BODY_NAME_MAX_LENGTH
+  ) {
     return fail(
       docError(
         DOCUMENT_ERROR_CODES.bodyNameInvalid,
@@ -314,6 +402,32 @@ export function parseFeatureInputRef(
     }
     return ok(Object.freeze({ kind, id: parsed.value }));
   }
+  if (kind === "sketch") {
+    const parsed = parseSketchDocumentId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A sketch input reference must carry a valid sketch id: ${parsed.error.message}`,
+          input,
+        ),
+      );
+    }
+    return ok(Object.freeze({ kind, id: parsed.value }));
+  }
+  if (kind === "reference") {
+    const parsed = parseReferenceId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A reference input reference must carry a valid reference id: ${parsed.error.message}`,
+          input,
+        ),
+      );
+    }
+    return ok(Object.freeze({ kind, id: parsed.value }));
+  }
   return fail(
     docError(
       DOCUMENT_ERROR_CODES.inputKindInvalid,
@@ -344,7 +458,9 @@ function parseFeatureInputRefs(
   return ok(Object.freeze(refs));
 }
 
-function parseBodyIdList(input: unknown): ParseResult<readonly BodyId[], DocumentError> {
+function parseBodyIdList(
+  input: unknown,
+): ParseResult<readonly BodyId[], DocumentError> {
   if (!Array.isArray(input)) {
     return fail(
       docError(
@@ -432,6 +548,7 @@ function raiseGeneratorState(
     feature: Math.max(base.feature, floor.feature),
     body: Math.max(base.body, floor.body),
     reference: Math.max(base.reference, floor.reference),
+    sketch: Math.max(base.sketch, floor.sketch),
   };
   return Object.freeze(raised);
 }
@@ -475,7 +592,9 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
   return (
     document.parameters.parameters.some((parameter) => parameter.id === id) ||
     document.bodies.some((body) => body.id === id) ||
-    document.features.some((feature) => feature.id === id)
+    document.features.some((feature) => feature.id === id) ||
+    document.sketches.some((sketch) => sketch.id === id) ||
+    document.references.some((reference) => reference.id === id)
   );
 }
 
@@ -491,6 +610,12 @@ function featureInputResolves(
   if (ref.kind === "feature") {
     return document.features.some((feature) => feature.id === ref.id);
   }
+  if (ref.kind === "sketch") {
+    return document.sketches.some((sketch) => sketch.id === ref.id);
+  }
+  if (ref.kind === "reference") {
+    return document.references.some((reference) => reference.id === ref.id);
+  }
   return document.bodies.some((body) => body.id === ref.id);
 }
 
@@ -505,6 +630,8 @@ export function createDocument(id: DocumentId): CadDocument {
     parameters: EMPTY_PARAMETER_COLLECTION,
     bodies: Object.freeze([]),
     features: Object.freeze([]),
+    sketches: Object.freeze([]),
+    references: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -524,6 +651,14 @@ export function getFeature(
   id: FeatureId,
 ): FeatureRecord | undefined {
   return document.features.find((feature) => feature.id === id);
+}
+
+/** Returns the sketch record with the given id, or undefined. */
+export function getDocumentSketch(
+  document: CadDocument,
+  id: SketchDocumentId,
+): DocumentSketch | undefined {
+  return document.sketches.find((sketch) => sketch.id === id);
 }
 
 /** Returns the document-level parameter with the given id, or undefined. */
@@ -547,6 +682,8 @@ export function getDocumentEntity(
   if (body !== undefined) return { kind: "body", body };
   const feature = document.features.find((candidate) => candidate.id === id);
   if (feature !== undefined) return { kind: "feature", feature };
+  const sketch = document.sketches.find((candidate) => candidate.id === id);
+  if (sketch !== undefined) return { kind: "sketch", sketch };
   return undefined;
 }
 
@@ -641,9 +778,7 @@ export function removeBody(
   return ok(
     Object.freeze({
       ...document,
-      bodies: Object.freeze(
-        document.bodies.filter((body) => body.id !== id),
-      ),
+      bodies: Object.freeze(document.bodies.filter((body) => body.id !== id)),
     }),
   );
 }
@@ -696,7 +831,11 @@ export function addFeature(
       );
     }
     id = parsed.value;
-    idGeneratorState = claimExplicitId(idGeneratorState, "feature", parsed.value);
+    idGeneratorState = claimExplicitId(
+      idGeneratorState,
+      "feature",
+      parsed.value,
+    );
   }
   for (const ref of inputs.value) {
     if (!featureInputResolves(document, ref)) {
@@ -911,7 +1050,11 @@ export function reorderFeature(
   id: FeatureId,
   afterFeatureId: FeatureId | null,
 ): ParseResult<CadDocument, DocumentError> {
-  const reordered = reorderFeatureRecords(document.features, id, afterFeatureId);
+  const reordered = reorderFeatureRecords(
+    document.features,
+    id,
+    afterFeatureId,
+  );
   if (!reordered.ok) {
     const code =
       reordered.error.code === FEATURE_HISTORY_ERROR_CODES.reorderUnknownFeature
@@ -919,9 +1062,7 @@ export function reorderFeature(
         : DOCUMENT_ERROR_CODES.reorderInvalid;
     return fail(docError(code, reordered.error.message, reordered.error.input));
   }
-  return ok(
-    Object.freeze({ ...document, features: reordered.value }),
-  );
+  return ok(Object.freeze({ ...document, features: reordered.value }));
 }
 
 /**
@@ -1007,6 +1148,332 @@ export function removeDocumentParameter(
   return ok(Object.freeze({ ...document, parameters: removed.value }));
 }
 
+/** A sketch name shares the body name rules (1-64 characters). */
+function validateSketchName(name: unknown): ParseResult<string, DocumentError> {
+  if (
+    typeof name !== "string" ||
+    name.length === 0 ||
+    name.length > BODY_NAME_MAX_LENGTH
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.sketchNameInvalid,
+        `A sketch name must be a string of 1-${BODY_NAME_MAX_LENGTH} characters.`,
+        name,
+      ),
+    );
+  }
+  return ok(name);
+}
+
+/** A sketch payload must be a plain object (its schema is the sketch domain's). */
+function validateSketchPayload(
+  sketch: unknown,
+): ParseResult<Readonly<Record<string, unknown>>, DocumentError> {
+  if (!isPlainRecord(sketch)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.sketchPayloadInvalid,
+        "A sketch record's payload must be a plain object (the sketch domain's canonical serialized form).",
+        sketch,
+      ),
+    );
+  }
+  return ok(sketch);
+}
+
+/**
+ * Deep-freezes plain serialized data (the sketch payload's contract shape —
+ * acyclic records and arrays): a recursive copy with every level frozen,
+ * non-container values passing through untouched. The stored sketch record
+ * thereby owns its payload outright — nothing stays shared with, or
+ * mutable through, the caller's input.
+ */
+function deepFreezePlainData(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(deepFreezePlainData));
+  }
+  if (isPlainRecord(value)) {
+    const frozen: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      frozen[key] = deepFreezePlainData(entry);
+    }
+    return Object.freeze(frozen);
+  }
+  return value;
+}
+
+function frozenSketchPayload(
+  payload: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  // The recursion preserves the payload's shape (record in, record out).
+  return deepFreezePlainData(payload) as Readonly<Record<string, unknown>>;
+}
+
+function frozenReferencePayload(
+  payload: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  // The recursion preserves the payload's shape (record in, record out).
+  return deepFreezePlainData(payload) as Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Adds a sketch document entity. The payload is stored verbatim (deeply
+ * frozen — a recursive freeze over its plain data); its schema is the
+ * sketch domain's, validated there on use.
+ */
+export function addDocumentSketch(
+  document: CadDocument,
+  input: DocumentSketchInput,
+): ParseResult<DocumentSketchAddResult, DocumentError> {
+  const name = validateSketchName(input.name);
+  if (!name.ok) return name;
+  const payload = validateSketchPayload(input.sketch);
+  if (!payload.ok) return payload;
+  let id: SketchDocumentId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextSketchDocumentId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseSketchDocumentId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A sketch id must be a valid sketch id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("sketch", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${parsed.value}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    id = parsed.value;
+    idGeneratorState = claimExplicitId(
+      idGeneratorState,
+      "sketch",
+      parsed.value,
+    );
+  }
+  const sketch = Object.freeze({
+    id,
+    name: name.value,
+    sketch: frozenSketchPayload(payload.value),
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      sketches: Object.freeze([...document.sketches, sketch]),
+      idGeneratorState,
+    }),
+    sketch,
+  });
+}
+
+/**
+ * Removes the sketch record with the given id. Refused with `in-use` while
+ * any feature declares it as an input; removal never cascades.
+ */
+export function removeDocumentSketch(
+  document: CadDocument,
+  id: SketchDocumentId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getDocumentSketch(document, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No sketch with id "${id}" exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const blocking = document.features.find((feature) =>
+    feature.inputs.some((ref) => ref.kind === "sketch" && ref.id === id),
+  );
+  if (blocking !== undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.inUse,
+        `Sketch "${id}" is referenced by feature "${blocking.id}".`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      sketches: Object.freeze(
+        document.sketches.filter((sketch) => sketch.id !== id),
+      ),
+    }),
+  );
+}
+
+/** A reference name shares the body name rules (1-64 characters). */
+function validateReferenceName(
+  name: unknown,
+): ParseResult<string, DocumentError> {
+  if (
+    typeof name !== "string" ||
+    name.length === 0 ||
+    name.length > BODY_NAME_MAX_LENGTH
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.referenceNameInvalid,
+        `A reference name must be a string of 1-${BODY_NAME_MAX_LENGTH} characters.`,
+        name,
+      ),
+    );
+  }
+  return ok(name);
+}
+
+/** A reference payload must be a plain object (its schema is the persistent-reference module's). */
+function validateReferencePayload(
+  reference: unknown,
+): ParseResult<Readonly<Record<string, unknown>>, DocumentError> {
+  if (!isPlainRecord(reference)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.referencePayloadInvalid,
+        "A reference record's payload must be a plain object (the persistent-reference module's canonical serialized form).",
+        reference,
+      ),
+    );
+  }
+  return ok(reference);
+}
+
+/**
+ * Adds a persistent-reference document entity. The payload is stored
+ * verbatim (deeply frozen, the sketch discipline); its schema is the
+ * persistent-reference module's, validated there on use
+ * (`parseTopologyReference`).
+ */
+export function addDocumentReference(
+  document: CadDocument,
+  input: DocumentReferenceInput,
+): ParseResult<DocumentReferenceAddResult, DocumentError> {
+  const name = validateReferenceName(input.name);
+  if (!name.ok) return name;
+  const payload = validateReferencePayload(input.reference);
+  if (!payload.ok) return payload;
+  let id: ReferenceId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextReferenceId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseReferenceId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A reference id must be a valid reference id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("reference", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${parsed.value}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    id = parsed.value;
+    idGeneratorState = claimExplicitId(
+      idGeneratorState,
+      "reference",
+      parsed.value,
+    );
+  }
+  const reference = Object.freeze({
+    id,
+    name: name.value,
+    reference: frozenReferencePayload(payload.value),
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      references: Object.freeze([...document.references, reference]),
+      idGeneratorState,
+    }),
+    reference,
+  });
+}
+
+/**
+ * Removes the reference record with the given id. Refused with `in-use`
+ * while any feature declares it as an input; removal never cascades.
+ */
+export function removeDocumentReference(
+  document: CadDocument,
+  id: ReferenceId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getDocumentReference(document, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No reference with id "${id}" exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const blocking = document.features.find((feature) =>
+    feature.inputs.some((ref) => ref.kind === "reference" && ref.id === id),
+  );
+  if (blocking !== undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.inUse,
+        `Reference "${id}" is referenced by feature "${blocking.id}".`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      references: Object.freeze(
+        document.references.filter((reference) => reference.id !== id),
+      ),
+    }),
+  );
+}
+
+/**
+ * Returns the reference record with the given id, or undefined.
+ */
+export function getDocumentReference(
+  document: CadDocument,
+  id: ReferenceId,
+): DocumentReference | undefined {
+  return document.references.find((reference) => reference.id === id);
+}
+
 /** Canonical JSON form of a body. */
 export interface SerializedBody {
   readonly id: string;
@@ -1027,14 +1494,49 @@ export interface SerializedFeatureRecord {
   readonly outputs: readonly string[];
 }
 
+/**
+ * Canonical JSON form of the id generator state. The `sketch` counter is
+ * Phase 26.1-additive: it is emitted exactly when nonzero, so documents
+ * that never carried sketch ids serialize byte-identically to their
+ * pre-sketch form; parsing defaults an absent counter to zero.
+ */
+export type SerializedIdGeneratorState = Omit<IdGeneratorState, "sketch"> & {
+  readonly sketch?: number;
+};
+
+function serializeIdGeneratorState(
+  state: IdGeneratorState,
+): SerializedIdGeneratorState {
+  return {
+    document: state.document,
+    parameter: state.parameter,
+    feature: state.feature,
+    body: state.body,
+    reference: state.reference,
+    ...(state.sketch === 0 ? {} : { sketch: state.sketch }),
+  };
+}
+
 /** Canonical JSON form of a whole document, in fixed key order. */
 export interface SerializedCadDocument {
   readonly formatVersion: number;
   readonly id: string;
-  readonly idGenerator: IdGeneratorState;
+  readonly idGenerator: SerializedIdGeneratorState;
   readonly parameters: SerializedParameterCollection;
   readonly bodies: readonly SerializedBody[];
   readonly features: readonly SerializedFeatureRecord[];
+  /** Present exactly when the document carries sketch entities (additive). */
+  readonly sketches?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly sketch: Readonly<Record<string, unknown>>;
+  }[];
+  /** Present exactly when the document carries reference records (additive). */
+  readonly references?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly reference: Readonly<Record<string, unknown>>;
+  }[];
 }
 
 /** Serializes a document to its canonical, deterministic JSON form. */
@@ -1044,7 +1546,7 @@ export function serializeCadDocument(
   return {
     formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
     id: document.id,
-    idGenerator: document.idGeneratorState,
+    idGenerator: serializeIdGeneratorState(document.idGeneratorState),
     parameters: serializeParameterCollection(document.parameters),
     bodies: document.bodies.map((body) => ({ id: body.id, name: body.name })),
     features: document.features.map((feature) => ({
@@ -1053,6 +1555,29 @@ export function serializeCadDocument(
       inputs: feature.inputs.map((ref) => ({ kind: ref.kind, id: ref.id })),
       outputs: [...feature.outputs],
     })),
+    // Additive (Phase 26.1): emitted only when sketches exist, so documents
+    // from before sketches serialize byte-identically to their old form.
+    ...(document.sketches.length === 0
+      ? {}
+      : {
+          sketches: document.sketches.map((sketch) => ({
+            id: sketch.id,
+            name: sketch.name,
+            sketch: sketch.sketch,
+          })),
+        }),
+    // Additive (Phase 26.5): emitted only when reference records exist, so
+    // documents from before references serialize byte-identically to their
+    // old form.
+    ...(document.references.length === 0
+      ? {}
+      : {
+          references: document.references.map((reference) => ({
+            id: reference.id,
+            name: reference.name,
+            reference: reference.reference,
+          })),
+        }),
   };
 }
 
@@ -1115,6 +1640,82 @@ function parseSerializedBody(input: unknown): ParseResult<Body, DocumentError> {
   const name = validateBodyName(input.name);
   if (!name.ok) return name;
   return ok(Object.freeze({ id: parsedId.value, name: name.value }));
+}
+
+function parseSerializedSketch(input: unknown): ParseResult<
+  {
+    id: SketchDocumentId;
+    name: string;
+    sketch: Readonly<Record<string, unknown>>;
+  },
+  DocumentError
+> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized sketch record must be a plain object with id, name, and sketch fields.",
+        input,
+      ),
+    );
+  }
+  const parsedId = parseSketchDocumentId(input.id);
+  if (!parsedId.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.idInvalid,
+        `A sketch id must be a valid sketch id: ${parsedId.error.message}`,
+        input.id,
+      ),
+    );
+  }
+  const name = validateSketchName(input.name);
+  if (!name.ok) return name;
+  const payload = validateSketchPayload(input.sketch);
+  if (!payload.ok) return payload;
+  return ok({
+    id: parsedId.value,
+    name: name.value,
+    sketch: payload.value,
+  });
+}
+
+function parseSerializedReference(input: unknown): ParseResult<
+  {
+    id: ReferenceId;
+    name: string;
+    reference: Readonly<Record<string, unknown>>;
+  },
+  DocumentError
+> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized reference record must be a plain object with id, name, and reference fields.",
+        input,
+      ),
+    );
+  }
+  const parsedId = parseReferenceId(input.id);
+  if (!parsedId.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.idInvalid,
+        `A reference id must be a valid reference id: ${parsedId.error.message}`,
+        input.id,
+      ),
+    );
+  }
+  const name = validateReferenceName(input.name);
+  if (!name.ok) return name;
+  const payload = validateReferencePayload(input.reference);
+  if (!payload.ok) return payload;
+  return ok({
+    id: parsedId.value,
+    name: name.value,
+    reference: payload.value,
+  });
 }
 
 function parseSerializedFeature(
@@ -1226,8 +1827,24 @@ export function parseCadDocument(
   if (!parsedGeneratorState.ok) return parsedGeneratorState;
   const parsedParameters = parseParameterCollection(input.parameters);
   if (!parsedParameters.ok) return parsedParameters;
-  const parsedBodies = parseSerializedList(input.bodies, "bodies", parseSerializedBody);
+  const parsedBodies = parseSerializedList(
+    input.bodies,
+    "bodies",
+    parseSerializedBody,
+  );
   if (!parsedBodies.ok) return parsedBodies;
+  const parsedSketches = parseSerializedList(
+    input.sketches ?? [],
+    "sketches",
+    parseSerializedSketch,
+  );
+  if (!parsedSketches.ok) return parsedSketches;
+  const parsedReferences = parseSerializedList(
+    input.references ?? [],
+    "references",
+    parseSerializedReference,
+  );
+  if (!parsedReferences.ok) return parsedReferences;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -1238,6 +1855,16 @@ export function parseCadDocument(
   let document = createDocument(parsedId.value);
   for (const parameter of parsedParameters.value.parameters) {
     const added = addDocumentParameter(document, parameter);
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  for (const sketch of parsedSketches.value) {
+    const added = addDocumentSketch(document, sketch);
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  for (const reference of parsedReferences.value) {
+    const added = addDocumentReference(document, reference);
     if (!added.ok) return added;
     document = added.value.document;
   }

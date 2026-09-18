@@ -244,7 +244,8 @@ function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
           },
           (failure: unknown) => {
             counters.settled += 1;
-            errorText = failure instanceof Error ? failure.message : String(failure);
+            errorText =
+              failure instanceof Error ? failure.message : String(failure);
             writeSurface();
           },
         );
@@ -327,13 +328,14 @@ export function OcctWorkerFixturePage() {
       data-dispose-settlement=""
     >
       <div>
-        <h1 className="text-lg font-semibold">Phase 21.2 OCCT Worker Fixture</h1>
+        <h1 className="text-lg font-semibold">
+          Phase 21.2 OCCT Worker Fixture
+        </h1>
         <p className="text-muted-foreground text-sm">
           Real OpenCascade kernel in a real Web Worker: 12-bore plate →
-          subtracts → rotation placement → measure, through the worker
-          protocol. Every value below is computed off-thread or counted by
-          the stale-result coordinator; the boot cost is surfaced, not
-          hidden.
+          subtracts → rotation placement → measure, through the worker protocol.
+          Every value below is computed off-thread or counted by the
+          stale-result coordinator; the boot cost is surfaced, not hidden.
         </p>
       </div>
       <label className="block text-sm" htmlFor="param-occt-hole-diameter">
@@ -368,11 +370,12 @@ export function OcctWorkerFixturePage() {
           status = <span id="occt-worker-status">boot</span>
         </li>
         <li>
-          volume = <span id="occt-worker-volume">…</span>{"\u00A0"}mm³ (exact
-          band)
+          volume = <span id="occt-worker-volume">…</span>
+          {"\u00A0"}mm³ (exact band)
         </li>
         <li>
-          bounds = <span id="occt-worker-bounds">…</span>{"\u00A0"}mm
+          bounds = <span id="occt-worker-bounds">…</span>
+          {"\u00A0"}mm
         </li>
         <li>
           triangles = <span id="occt-worker-triangles">…</span>
@@ -392,11 +395,11 @@ export function OcctWorkerFixturePage() {
           compute: <span id="occt-worker-compute-frames">0</span>)
         </li>
         <li>
-          worker boot = <span id="occt-worker-boot">…</span>{"\u00A0"}ms
-          (init), ready after{" "}
-          <span id="occt-worker-ready">…</span>{"\u00A0"}ms (wall clock incl.
-          fetch), asset{"\u00A0"}
-          <span id="occt-worker-wasm">…</span>{"\u00A0"}bytes
+          worker boot = <span id="occt-worker-boot">…</span>
+          {"\u00A0"}ms (init), ready after <span id="occt-worker-ready">…</span>
+          {"\u00A0"}ms (wall clock incl. fetch), asset{"\u00A0"}
+          <span id="occt-worker-wasm">…</span>
+          {"\u00A0"}bytes
         </li>
         <li data-testid="occt-worker-error" className="text-red-500">
           <span id="occt-worker-error" />

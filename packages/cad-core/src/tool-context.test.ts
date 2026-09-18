@@ -139,7 +139,10 @@ describe("tool context runtime", () => {
     });
     expect(toggled.ok).toBe(true);
     expect(runtime.selection.selected).toEqual([bodyRef, otherRef]);
-    const hovered = runtime.applySelection({ type: "hover", reference: otherRef });
+    const hovered = runtime.applySelection({
+      type: "hover",
+      reference: otherRef,
+    });
     expect(hovered.ok).toBe(true);
     expect(runtime.selection.hover).toEqual(otherRef);
     const cleared = runtime.applySelection({ type: "clear" });

@@ -268,13 +268,19 @@ describe("minting and validity against the real kernel", () => {
       "topologySnapshot",
     );
     expect(
-      v1.entities.some((entity) => entity.kind === "face" && entity.ordinal === 0),
+      v1.entities.some(
+        (entity) => entity.kind === "face" && entity.ordinal === 0,
+      ),
     ).toBe(true);
     expect(
-      v1.entities.some((entity) => entity.kind === "edge" && entity.ordinal === 0),
+      v1.entities.some(
+        (entity) => entity.kind === "edge" && entity.ordinal === 0,
+      ),
     ).toBe(true);
     expect(
-      v1.entities.some((entity) => entity.kind === "vertex" && entity.ordinal === 0),
+      v1.entities.some(
+        (entity) => entity.kind === "vertex" && entity.ordinal === 0,
+      ),
     ).toBe(true);
 
     const edge = mintTopologyReference(v1, 0, provenance.value, {
@@ -293,7 +299,12 @@ describe("minting and validity against the real kernel", () => {
     }
     expect(transientSelectionOf(edge.value)).toEqual({
       ok: true,
-      value: { kind: "edge", bodyId: drilledBody, regeneration: 1, edgeIndex: 0 },
+      value: {
+        kind: "edge",
+        bodyId: drilledBody,
+        regeneration: 1,
+        edgeIndex: 0,
+      },
       error: undefined,
     });
 
@@ -372,10 +383,15 @@ describe("harmless change (translate tweak): identity dies, repair re-anchors", 
 
     const v1 = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
     const boreFace = faceByArea(v1, BORE_WALL_AREA);
-    const minted = mintTopologyReference(v1, boreFace.ordinal, provenance.value, {
-      id: createReferenceId("ref_bore_wall"),
-      kind: "face",
-    });
+    const minted = mintTopologyReference(
+      v1,
+      boreFace.ordinal,
+      provenance.value,
+      {
+        id: createReferenceId("ref_bore_wall"),
+        kind: "face",
+      },
+    );
     if (!minted.ok) throw new Error(minted.error.message);
 
     // The harmless change: the same graph with the plate translated 5 mm.
@@ -414,11 +430,7 @@ describe("harmless change (translate tweak): identity dies, repair re-anchors", 
 
     // The repaired reference now resolves VALID against the same snapshot,
     // and maps to the Phase 12 synthetic selection of this regeneration.
-    const reResolved = resolveDocumentReference(
-      document,
-      repaired.value,
-      view,
-    );
+    const reResolved = resolveDocumentReference(document, repaired.value, view);
     expect(reResolved.ok).toBe(true);
     if (reResolved.ok) {
       expect(reResolved.value.validity.state).toBe("valid");
@@ -485,10 +497,15 @@ describe("topology-changing split: explicit invalidation, partial repair", () =>
     const v2 = snapshotOf(kernel, rebuilt, slottedBody, 2);
 
     const topFace = faceByAreaAndZ(v1, PLATE_TOP_AREA, 10);
-    const minted = mintTopologyReference(v1, topFace.ordinal, provenance.value, {
-      id: createReferenceId("ref_split_top"),
-      kind: "face",
-    });
+    const minted = mintTopologyReference(
+      v1,
+      topFace.ordinal,
+      provenance.value,
+      {
+        id: createReferenceId("ref_split_top"),
+        kind: "face",
+      },
+    );
     if (!minted.ok) throw new Error(minted.error.message);
     const resolved = resolveDocumentReference(
       document,
@@ -673,9 +690,7 @@ describe("document-level structural breaks", () => {
   });
 });
 
-function unwrapDocument(
-  result: ReturnType<typeof removeFeature>,
-): CadDocument {
+function unwrapDocument(result: ReturnType<typeof removeFeature>): CadDocument {
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
 }

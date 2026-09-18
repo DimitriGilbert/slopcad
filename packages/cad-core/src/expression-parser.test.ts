@@ -28,10 +28,7 @@ const call = (
   ...args: readonly ExpressionNode[]
 ): ExpressionNode => ({ kind: "call", callee, args });
 
-function expectAst(
-  source: string,
-  expected: ExpressionNode,
-): void {
+function expectAst(source: string, expected: ExpressionNode): void {
   const result = parseExpression(source);
   expect(result.ok).toBe(true);
   if (!result.ok) return;
@@ -61,7 +58,11 @@ describe("parseExpression literals", () => {
     expectAst("10mm", unit(10, "mm"));
     expectAst("2.5in", unit(2.5, "in"));
     expectAst("45deg", unit(45, "deg"));
-    expectAst("3.14159rad", { kind: "unitLiteral", value: 3.14159, unit: "rad" });
+    expectAst("3.14159rad", {
+      kind: "unitLiteral",
+      value: 3.14159,
+      unit: "rad",
+    });
     expectAst("100mm2", unit(100, "mm2"));
     expectAst("2cm3", { kind: "unitLiteral", value: 2, unit: "cm3" });
     expectAst("0.5m", { kind: "unitLiteral", value: 0.5, unit: "m" });
@@ -117,7 +118,10 @@ describe("parseExpression operators", () => {
     expectAst("sqrt(9mm2)", call("sqrt", unit(9, "mm2")));
     expectAst("min(a, b)", call("min", id("a"), id("b")));
     expectAst("min(a, b, 0)", call("min", id("a"), id("b"), num(0)));
-    expectAst("max(min(a, b), 1)", call("max", call("min", id("a"), id("b")), num(1)));
+    expectAst(
+      "max(min(a, b), 1)",
+      call("max", call("min", id("a"), id("b")), num(1)),
+    );
     expectAst("-sqrt(4)", neg(call("sqrt", num(4))));
     expectAst("2 * sqrt(9mm2)", bin("*", num(2), call("sqrt", unit(9, "mm2"))));
   });
@@ -164,7 +168,10 @@ describe("parseExpression malformed input", () => {
 
   it("rejects malformed numbers", () => {
     expectFailure("10.", EXPRESSION_PARSE_ERROR_CODES.invalidNumber);
-    expectFailure("9007199254740994", EXPRESSION_PARSE_ERROR_CODES.invalidNumber);
+    expectFailure(
+      "9007199254740994",
+      EXPRESSION_PARSE_ERROR_CODES.invalidNumber,
+    );
   });
 
   it("rejects unknown units attached to numbers", () => {
@@ -186,7 +193,10 @@ describe("parseExpression malformed input", () => {
 
   it("rejects truncation and unbalanced parentheses", () => {
     expectFailure("10 +", EXPRESSION_PARSE_ERROR_CODES.unexpectedEndOfInput);
-    expectFailure("(10mm", EXPRESSION_PARSE_ERROR_CODES.missingClosingParenthesis);
+    expectFailure(
+      "(10mm",
+      EXPRESSION_PARSE_ERROR_CODES.missingClosingParenthesis,
+    );
     expectFailure(
       "(10mm + 5mm",
       EXPRESSION_PARSE_ERROR_CODES.missingClosingParenthesis,
@@ -222,7 +232,9 @@ describe("parseExpression malformed input", () => {
     const result = parseExpression("10mm + @5mm");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.code).toBe(EXPRESSION_PARSE_ERROR_CODES.unexpectedCharacter);
+    expect(result.error.code).toBe(
+      EXPRESSION_PARSE_ERROR_CODES.unexpectedCharacter,
+    );
     expect(result.error.token).toBe("@");
     expect(result.error.position).toBe(7);
   });

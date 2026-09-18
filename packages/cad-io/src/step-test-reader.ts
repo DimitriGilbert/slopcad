@@ -86,14 +86,14 @@ export function readStepPart21(
   countTypes: readonly string[] = [],
 ): StepDocument {
   const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  require(
-    /^ISO-10303-21\s*;/.test(text),
-    "the file must open with the ISO-10303-21 keyword.",
-  );
-  require(
-    text.trimEnd().endsWith("END-ISO-10303-21;"),
-    "the file must end with the END-ISO-10303-21 terminator.",
-  );
+  require(/^ISO-10303-21\s*;/.test(
+    text,
+  ), "the file must open with the ISO-10303-21 keyword.");
+  require(text
+    .trimEnd()
+    .endsWith(
+      "END-ISO-10303-21;",
+    ), "the file must end with the END-ISO-10303-21 terminator.");
   const headerStart = text.indexOf("HEADER;");
   const headerEnd = text.indexOf("ENDSEC;");
   require(headerStart >= 0 && headerEnd > headerStart, "no header section.");

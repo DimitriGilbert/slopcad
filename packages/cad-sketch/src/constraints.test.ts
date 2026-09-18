@@ -33,10 +33,7 @@ import {
   createPointEntity,
   createRectangleEntity,
 } from "./entities";
-import {
-  createSketchConstraintId,
-  createSketchEntityId,
-} from "./sketch-ids";
+import { createSketchConstraintId, createSketchEntityId } from "./sketch-ids";
 
 const cid = (raw: string) => createSketchConstraintId(raw);
 const eid = (raw: string) => createSketchEntityId(raw);
@@ -71,7 +68,11 @@ function allConstraintSamples(): SketchConstraint[] {
     createEqualConstraint(cid("skcon_c9"), circleA, circleB),
     createTangentConstraint(cid("skcon_c10"), lineA, circleA),
     createTangentConstraint(cid("skcon_c11"), circleA, circleB, "internal"),
-    createMidpointConstraint(cid("skcon_c12"), pointTarget(pointA, "center"), lineB),
+    createMidpointConstraint(
+      cid("skcon_c12"),
+      pointTarget(pointA, "center"),
+      lineB,
+    ),
     createSymmetryAboutPointConstraint(
       cid("skcon_c13"),
       pointTarget(lineA, "start"),
@@ -108,11 +109,17 @@ describe("constraint builders", () => {
   it("rejects angle values at or outside the open (0°, 180°) interval", () => {
     for (const degrees of [0, 180, -30, 270]) {
       expect(() =>
-        createAngleConstraint(cid("skcon_x"), lineA, lineB, angle(degrees, "deg")),
+        createAngleConstraint(
+          cid("skcon_x"),
+          lineA,
+          lineB,
+          angle(degrees, "deg"),
+        ),
       ).toThrow(SketchConstraintValidationError);
     }
     expect(
-      createAngleConstraint(cid("skcon_x"), lineA, lineB, angle(179.5, "deg")).kind,
+      createAngleConstraint(cid("skcon_x"), lineA, lineB, angle(179.5, "deg"))
+        .kind,
     ).toBe("angle");
   });
 
@@ -134,7 +141,9 @@ describe("constraint serialization", () => {
   it("round-trips every constraint kind exactly", () => {
     for (const constraint of allConstraintSamples()) {
       const serialized = serializeSketchConstraint(constraint);
-      const parsed = parseSketchConstraint(JSON.parse(JSON.stringify(serialized)));
+      const parsed = parseSketchConstraint(
+        JSON.parse(JSON.stringify(serialized)),
+      );
       expect(parsed.ok, constraint.kind).toBe(true);
       if (!parsed.ok) continue;
       expect(parsed.value, constraint.kind).toEqual(constraint);
@@ -153,7 +162,11 @@ describe("constraint serialization", () => {
         length(2.54, "cm"),
       ),
     );
-    expect(distance.value).toEqual({ dimension: "length", unit: "mm", value: 25.4 });
+    expect(distance.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 25.4,
+    });
     const angleConstraint = serializeSketchConstraint(
       createAngleConstraint(cid("skcon_x"), lineA, lineB, angle(90, "deg")),
     );
@@ -215,7 +228,11 @@ describe("constraint serialization", () => {
       SKETCH_DIAGNOSTIC_CODES.constraintUnknownKind,
     );
     expect(
-      !parseSketchConstraint({ id: "feat_x", kind: "horizontal", entity: "skent_a" }).ok,
+      !parseSketchConstraint({
+        id: "feat_x",
+        kind: "horizontal",
+        entity: "skent_a",
+      }).ok,
     ).toBe(true);
     expect(
       !parseSketchConstraint({
@@ -252,9 +269,9 @@ describe("constraint serialization", () => {
       first: "skent_line-a",
       second: "skent_circle-a",
     });
-    expect(parsed.ok && parsed.value.kind === "tangent" && parsed.value.variant).toBe(
-      "external",
-    );
+    expect(
+      parsed.ok && parsed.value.kind === "tangent" && parsed.value.variant,
+    ).toBe("external");
   });
 
   it("ignores unknown fields so future versions deserialize", () => {
@@ -280,12 +297,18 @@ describe("constraint reference validation", () => {
 
   it("accepts well-formed references for every kind", () => {
     for (const constraint of allConstraintSamples()) {
-      expect(validateConstraintReferences(constraint, entities), constraint.kind).toBeNull();
+      expect(
+        validateConstraintReferences(constraint, entities),
+        constraint.kind,
+      ).toBeNull();
     }
   });
 
   it("rejects references to missing entities with the malformed-reference code", () => {
-    const constraint = createHorizontalConstraint(cid("skcon_x"), eid("skent_ghost"));
+    const constraint = createHorizontalConstraint(
+      cid("skcon_x"),
+      eid("skent_ghost"),
+    );
     const diagnostic = validateConstraintReferences(constraint, entities);
     expect(diagnostic?.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.constraintReferenceMalformed,
@@ -326,7 +349,11 @@ describe("constraint reference validation", () => {
     ).not.toBeNull();
     expect(
       validateConstraintReferences(
-        createMidpointConstraint(cid("skcon_x"), pointTarget(circleA, "start"), lineB),
+        createMidpointConstraint(
+          cid("skcon_x"),
+          pointTarget(circleA, "start"),
+          lineB,
+        ),
         entities,
       ),
     ).not.toBeNull();

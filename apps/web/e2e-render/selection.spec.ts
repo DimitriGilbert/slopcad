@@ -47,7 +47,10 @@ const RIGHT_WALL_NORMAL = [1, 0, 0] as const;
 const ENLARGED_HOLE_DIAMETER_MM = 12;
 
 /** Expected serialized form of the synthetic face reference for a pick. */
-function expectedFaceRef(revision: number, faceIndex: number): Record<string, number | string> {
+function expectedFaceRef(
+  revision: number,
+  faceIndex: number,
+): Record<string, number | string> {
   return {
     kind: "face",
     bodyId: "body_plate",
@@ -96,11 +99,10 @@ test("a face can be selected and reports the synthetic face and body references"
   // Restore the face category for the specs that follow.
   await page.locator("#pick-category-face").check();
   await clickFaceAnchor(page, top.anchor);
-  await waitForSelectionFrame(
-    page,
-    faceSelectionKey(revision, top.faceIndex),
-  );
-  expect(await readSelection(page)).toEqual([expectedFaceRef(revision, top.faceIndex)]);
+  await waitForSelectionFrame(page, faceSelectionKey(revision, top.faceIndex));
+  expect(await readSelection(page)).toEqual([
+    expectedFaceRef(revision, top.faceIndex),
+  ]);
 });
 
 test("selection survives same-regeneration re-renders and drops on regeneration change", async ({
@@ -161,7 +163,9 @@ test("selection survives same-regeneration re-renders and drops on regeneration 
   // A parameter change regenerates the model: NEW revision, NEW synthetic
   // space — the face selection is dropped (transience, enforced by the
   // domain state) and the highlight disappears.
-  await page.locator("#param-holeDiameter").fill(String(ENLARGED_HOLE_DIAMETER_MM));
+  await page
+    .locator("#param-holeDiameter")
+    .fill(String(ENLARGED_HOLE_DIAMETER_MM));
   await waitForSettledScene(page);
   const nextRevision = await readSelectionRegeneration(page);
   expect(nextRevision).toBeGreaterThan(revision);

@@ -40,8 +40,15 @@ function rectangleEdges() {
 
 describe("sketch integrity", () => {
   it("accepts a consistent sketch", () => {
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 10, y: 4 });
-    const constraint = createHorizontalConstraint(cid("skcon_h"), eid("skent_l"));
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 10, y: 4 },
+    );
+    const constraint = createHorizontalConstraint(
+      cid("skcon_h"),
+      eid("skent_l"),
+    );
     const result = createSketch(xyWorkplane(), [line], [constraint]);
     expect(result.ok).toBe(true);
   });
@@ -66,10 +73,11 @@ describe("sketch integrity", () => {
       pointTarget(eid("skent_q"), "center"),
       length(5),
     );
-    const duplicateConstraint = createSketch(xyWorkplane(), [point, other], [
-      first,
-      second,
-    ]);
+    const duplicateConstraint = createSketch(
+      xyWorkplane(),
+      [point, other],
+      [first, second],
+    );
     expect(!duplicateConstraint.ok && duplicateConstraint.error.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.constraintDuplicateId,
     );
@@ -77,15 +85,24 @@ describe("sketch integrity", () => {
 
   it("rejects rectangles whose edges are missing or not lines", () => {
     const edges = rectangleEdges();
-    const rect = createRectangleEntity(
-      eid("skent_rect"),
-      [edges[0].id, edges[1].id, edges[2].id, edges[3].id],
+    const rect = createRectangleEntity(eid("skent_rect"), [
+      edges[0].id,
+      edges[1].id,
+      edges[2].id,
+      edges[3].id,
+    ]);
+    const missingEdge = createSketch(
+      xyWorkplane(),
+      [...edges.slice(0, 3), rect],
+      [],
     );
-    const missingEdge = createSketch(xyWorkplane(), [...edges.slice(0, 3), rect], []);
     expect(!missingEdge.ok && missingEdge.error.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.rectangleEdgesMalformed,
     );
-    const pointImposter = createPointEntity(eid("skent_point-imposter"), { x: 0, y: 0 });
+    const pointImposter = createPointEntity(eid("skent_point-imposter"), {
+      x: 0,
+      y: 0,
+    });
     const wrongKind = createSketch(
       xyWorkplane(),
       [...edges.slice(0, 3), pointImposter, rect],
@@ -97,8 +114,15 @@ describe("sketch integrity", () => {
   });
 
   it("rejects constraints whose references do not resolve", () => {
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 10, y: 4 });
-    const constraint = createHorizontalConstraint(cid("skcon_h"), eid("skent_ghost"));
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 10, y: 4 },
+    );
+    const constraint = createHorizontalConstraint(
+      cid("skcon_h"),
+      eid("skent_ghost"),
+    );
     const result = createSketch(xyWorkplane(), [line], [constraint]);
     expect(!result.ok && result.error.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.constraintReferenceMalformed,
@@ -114,14 +138,23 @@ describe("sketch serialization", () => {
       [edges[0].id, edges[1].id, edges[2].id, edges[3].id],
       { construction: false },
     );
-    const anchor = createPointEntity(eid("skent_anchor"), { x: 0, y: 0 }, {
-      construction: true,
-      fixed: true,
-    });
+    const anchor = createPointEntity(
+      eid("skent_anchor"),
+      { x: 0, y: 0 },
+      {
+        construction: true,
+        fixed: true,
+      },
+    );
     const arc = createArcEntity(eid("skent_arc"), { x: 5, y: 5 }, 3, 0.25, 2.5);
-    const circle = createCircleEntity(eid("skent_circle"), { x: -5, y: -5 }, 2, {
-      fixed: true,
-    });
+    const circle = createCircleEntity(
+      eid("skent_circle"),
+      { x: -5, y: -5 },
+      2,
+      {
+        fixed: true,
+      },
+    );
     const constraints = [
       createCoincidentConstraint(
         cid("skcon_join"),
@@ -136,13 +169,11 @@ describe("sketch serialization", () => {
         length(30),
       ),
     ];
-    const sketch = createSketch(xyWorkplane(), [
-      anchor,
-      ...edges,
-      rectangle,
-      arc,
-      circle,
-    ], constraints);
+    const sketch = createSketch(
+      xyWorkplane(),
+      [anchor, ...edges, rectangle, arc, circle],
+      constraints,
+    );
     expect(sketch.ok).toBe(true);
     if (!sketch.ok) return;
     const serialized = serializeSketch(sketch.value);
@@ -164,7 +195,12 @@ describe("sketch serialization", () => {
     const sketch = createSketch(xyWorkplane(), [], []);
     expect(sketch.ok && serializeSketch(sketch.value).formatVersion).toBe(1);
     for (const formatVersion of [0, 2, "1", null]) {
-      const result = parseSketch({ formatVersion, workplane: null, entities: [], constraints: [] });
+      const result = parseSketch({
+        formatVersion,
+        workplane: null,
+        entities: [],
+        constraints: [],
+      });
       expect(!result.ok && result.error.code).toBe(
         SKETCH_DIAGNOSTIC_CODES.versionUnsupported,
       );
@@ -183,27 +219,42 @@ describe("sketch serialization", () => {
         workplane: null,
       }).ok,
     ).toBe(true);
-    expect(
-      !parseSketch({ ...validSerialized, entities: {} }).ok,
-    ).toBe(true);
-    expect(
-      !parseSketch({ ...validSerialized, constraints: "none" }).ok,
-    ).toBe(true);
+    expect(!parseSketch({ ...validSerialized, entities: {} }).ok).toBe(true);
+    expect(!parseSketch({ ...validSerialized, constraints: "none" }).ok).toBe(
+      true,
+    );
   });
 });
 
 describe("applySolvedParameters", () => {
   it("replaces parameters in place, preserving flags and composition", () => {
     const edges = rectangleEdges();
-    const rectangle = createRectangleEntity(
-      eid("skent_rect"),
-      [edges[0].id, edges[1].id, edges[2].id, edges[3].id],
+    const rectangle = createRectangleEntity(eid("skent_rect"), [
+      edges[0].id,
+      edges[1].id,
+      edges[2].id,
+      edges[3].id,
+    ]);
+    const anchor = createPointEntity(
+      eid("skent_anchor"),
+      { x: 0, y: 0 },
+      { fixed: true },
     );
-    const anchor = createPointEntity(eid("skent_anchor"), { x: 0, y: 0 }, { fixed: true });
-    const arc = createArcEntity(eid("skent_arc"), { x: 5, y: 5 }, 3, 0.25, 2.5, {
-      construction: true,
-    });
-    const sketch = createSketch(xyWorkplane(), [anchor, ...edges, rectangle, arc], []);
+    const arc = createArcEntity(
+      eid("skent_arc"),
+      { x: 5, y: 5 },
+      3,
+      0.25,
+      2.5,
+      {
+        construction: true,
+      },
+    );
+    const sketch = createSketch(
+      xyWorkplane(),
+      [anchor, ...edges, rectangle, arc],
+      [],
+    );
     expect(sketch.ok).toBe(true);
     if (!sketch.ok) return;
     const solved: SolvedSketchParameters = {
@@ -260,9 +311,7 @@ describe("applySolvedParameters", () => {
     );
     expect(() =>
       applySolvedParameters(sketch.value, {
-        entities: [
-          { id: point.id, kind: "line", x1: 0, y1: 0, x2: 1, y2: 1 },
-        ],
+        entities: [{ id: point.id, kind: "line", x1: 0, y1: 0, x2: 1, y2: 1 }],
       }),
     ).toThrow(RangeError);
   });

@@ -47,19 +47,9 @@ import type { ToolContext } from "./tool-context";
 import type { ToolInputEvent } from "./tool-events";
 
 import { angle, type AngleValue } from "./dimensional";
-import {
-  type CadDocument,
-  getDocumentParameter,
-} from "./document";
-import {
-  type BodyId,
-  type FeatureId,
-  type ParameterId,
-} from "./ids";
-import {
-  type RenderProjection,
-  type RenderVector3,
-} from "./projection";
+import { type CadDocument, getDocumentParameter } from "./document";
+import { type BodyId, type FeatureId, type ParameterId } from "./ids";
+import { type RenderProjection, type RenderVector3 } from "./projection";
 import { selectionReferenceBodyId } from "./selection";
 import {
   TOOL_FAILURE_CODES,
@@ -94,7 +84,9 @@ export function resolveRotateTarget(
   for (let index = document.features.length - 1; index >= 0; index -= 1) {
     const feature = document.features[index];
     if (feature === undefined || feature.kind !== ROTATE_FEATURE_KIND) continue;
-    if (!feature.inputs.some((ref) => ref.kind === "body" && ref.id === bodyId)) {
+    if (
+      !feature.inputs.some((ref) => ref.kind === "body" && ref.id === bodyId)
+    ) {
       continue;
     }
     let parameterId: ParameterId | undefined;
@@ -107,7 +99,8 @@ export function resolveRotateTarget(
     }
     if (parameterCount !== 1 || parameterId === undefined) continue;
     const parameter = getDocumentParameter(document, parameterId);
-    if (parameter === undefined || parameter.value.dimension !== "angle") continue;
+    if (parameter === undefined || parameter.value.dimension !== "angle")
+      continue;
     return { featureId: feature.id, parameterId };
   }
   return undefined;
@@ -123,7 +116,9 @@ export function bodyBoundsCenter(
   bodyId: BodyId,
 ): RenderVector3 | undefined {
   if (projection === null) return undefined;
-  const object = projection.objects.find((candidate) => candidate.bodyId === bodyId);
+  const object = projection.objects.find(
+    (candidate) => candidate.bodyId === bodyId,
+  );
   if (object === undefined) return undefined;
   return [
     (object.bounds.min[0] + object.bounds.max[0]) / 2,
@@ -215,7 +210,13 @@ export const rotateTool: CadTool<RotateToolState> = {
         };
       }
       return {
-        state: { stage: "dragging", bodyId, center, from: event.point, lastAngle: 0 },
+        state: {
+          stage: "dragging",
+          bodyId,
+          center,
+          from: event.point,
+          lastAngle: 0,
+        },
         phase: "active",
       };
     }
@@ -249,7 +250,10 @@ export const rotateTool: CadTool<RotateToolState> = {
           ),
         };
       }
-      const target = resolveRotateTarget(context.session.document, state.bodyId);
+      const target = resolveRotateTarget(
+        context.session.document,
+        state.bodyId,
+      );
       if (target === undefined) {
         return {
           state: AWAITING_ANCHOR,

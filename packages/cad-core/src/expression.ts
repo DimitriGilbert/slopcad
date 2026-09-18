@@ -26,7 +26,9 @@ export type ExpressionFunction = (typeof EXPRESSION_FUNCTIONS)[number];
 const FUNCTION_SET: ReadonlySet<string> = new Set(EXPRESSION_FUNCTIONS);
 
 /** Type guard for untrusted function names. */
-export function isExpressionFunction(input: unknown): input is ExpressionFunction {
+export function isExpressionFunction(
+  input: unknown,
+): input is ExpressionFunction {
   return typeof input === "string" && FUNCTION_SET.has(input);
 }
 
@@ -148,10 +150,7 @@ export interface ExpressionAstError extends ParseFailure {
   readonly code: ExpressionAstErrorCode;
 }
 
-function astError(
-  message: string,
-  input: unknown,
-): ExpressionAstError {
+function astError(message: string, input: unknown): ExpressionAstError {
   return { code: EXPRESSION_AST_ERROR_CODES.malformed, message, input };
 }
 
@@ -238,9 +237,7 @@ function validateNode(
   if (kind === "unary") {
     const { operator, operand } = input;
     if (operator !== "-") {
-      return fail(
-        astError('A unary node operator must be "-".', input),
-      );
+      return fail(astError('A unary node operator must be "-".', input));
     }
     const parsedOperand = validateNode(operand, depth + 1);
     if (!parsedOperand.ok) return parsedOperand;

@@ -277,10 +277,7 @@ export function assertTessellationValid(
       `Tessellation indices length ${indices.length} is not divisible by 3.`,
     );
   }
-  if (
-    normals !== undefined &&
-    normals.length !== positions.length
-  ) {
+  if (normals !== undefined && normals.length !== positions.length) {
     throw new Error(
       `Tessellation normals length ${normals.length} does not match positions length ${positions.length}.`,
     );

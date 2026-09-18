@@ -117,12 +117,14 @@ const HOLE_FAILURE_DIAGNOSTIC: Diagnostic = {
   location: { primary: HOLE_FEATURE },
 };
 
-function executorFor(
-  failing: "none" | "hole",
-): (feature: { readonly kind: string }) => { readonly ok: true } | {
-  readonly ok: false;
-  readonly diagnostics: readonly Diagnostic[];
-} {
+function executorFor(failing: "none" | "hole"): (feature: {
+  readonly kind: string;
+}) =>
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly diagnostics: readonly Diagnostic[];
+    } {
   return (feature) => {
     if (failing === "hole" && feature.kind === "hole") {
       return { ok: false, diagnostics: [HOLE_FAILURE_DIAGNOSTIC] };
@@ -190,7 +192,9 @@ afterEach(cleanup);
 
 describe("CadModelTree", () => {
   it("renders the derived hierarchy from a real document", () => {
-    renderInProvider(createCadStore({ session: createSession(buildTreeDocument()) }));
+    renderInProvider(
+      createCadStore({ session: createSession(buildTreeDocument()) }),
+    );
     expect(
       screen.getByRole("tree", { name: CAD_MODEL_TREE_LABELS.treeLabel }),
     ).not.toBeNull();
@@ -200,7 +204,9 @@ describe("CadModelTree", () => {
     const pad = row("feature|feat_pad");
     expect(pad.getAttribute("aria-level")).toBe("1");
     expect(pad.textContent).toContain("pad");
-    expect(pad.querySelector('[data-node-key="body|body_plate"]')).not.toBeNull();
+    expect(
+      pad.querySelector('[data-node-key="body|body_plate"]'),
+    ).not.toBeNull();
     const plate = row("body|body_plate");
     expect(plate.getAttribute("aria-level")).toBe("2");
     expect(plate.textContent).toContain("plate");
@@ -239,7 +245,9 @@ describe("CadModelTree", () => {
 
     // First producer (document order) owns the single body row…
     expect(
-      row("feature|feat_pad").querySelector('[data-node-key="body|body_plate"]'),
+      row("feature|feat_pad").querySelector(
+        '[data-node-key="body|body_plate"]',
+      ),
     ).not.toBeNull();
     // …the later claimer does not duplicate it…
     expect(
@@ -372,7 +380,9 @@ describe("CadModelTree", () => {
     });
     expect(row("body|body_plate").getAttribute("data-selected")).toBe("true");
     expect(row("feature|feat_pad").getAttribute("data-selected")).toBe("false");
-    expect(row("feature|feat_hole").getAttribute("data-selected")).toBe("false");
+    expect(row("feature|feat_hole").getAttribute("data-selected")).toBe(
+      "false",
+    );
 
     // A feature reference highlights exactly its own row.
     act(() => {
@@ -386,7 +396,8 @@ describe("CadModelTree", () => {
     const store = createCadStore({
       session: createSession(buildTreeDocument()),
     });
-    const onPick = vi.fn<(reference: SelectionReference, additive: boolean) => void>();
+    const onPick =
+      vi.fn<(reference: SelectionReference, additive: boolean) => void>();
     renderInProvider(store, {
       selection: [{ kind: "body", bodyId: SPARE_BODY }],
       onPick,
@@ -420,14 +431,22 @@ describe("CadModelTree", () => {
 
   it("renders the titled empty state without a document or rows", () => {
     render(<CadModelTree />);
-    expect(screen.getByText(CAD_MODEL_TREE_LABELS.emptyDocument)).not.toBeNull();
+    expect(
+      screen.getByText(CAD_MODEL_TREE_LABELS.emptyDocument),
+    ).not.toBeNull();
     expect(document.querySelector("[role='tree']")).toBeNull();
     expect(document.querySelectorAll("[data-cad-tree-node]")).toHaveLength(0);
   });
 
   it("renders the empty-document text for a real but empty document", () => {
-    render(<CadModelTree document={createDocument(createDocumentId("doc_tree_empty"))} />);
-    expect(screen.getByText(CAD_MODEL_TREE_LABELS.emptyDocument)).not.toBeNull();
+    render(
+      <CadModelTree
+        document={createDocument(createDocumentId("doc_tree_empty"))}
+      />,
+    );
+    expect(
+      screen.getByText(CAD_MODEL_TREE_LABELS.emptyDocument),
+    ).not.toBeNull();
   });
 
   it("collapses and expands groups as component-local UI state", () => {
@@ -438,13 +457,17 @@ describe("CadModelTree", () => {
 
     fireEvent.click(toggleOf("feature|feat_pad"));
     expect(pad.getAttribute("aria-expanded")).toBe("false");
-    expect(document.querySelector('[data-node-key="body|body_plate"]')).toBeNull();
+    expect(
+      document.querySelector('[data-node-key="body|body_plate"]'),
+    ).toBeNull();
 
     // The collapsed set is UI state: a NEW document identity (same shape)
     // does not reset it within the mount.
     view.rerender(<CadModelTree document={buildTreeDocument()} />);
     expect(pad.getAttribute("aria-expanded")).toBe("false");
-    expect(document.querySelector('[data-node-key="body|body_plate"]')).toBeNull();
+    expect(
+      document.querySelector('[data-node-key="body|body_plate"]'),
+    ).toBeNull();
 
     fireEvent.click(toggleOf("feature|feat_pad"));
     expect(pad.getAttribute("aria-expanded")).toBe("true");
@@ -452,7 +475,8 @@ describe("CadModelTree", () => {
   });
 
   it("drives the tree pattern from the keyboard: arrows, Home/End, Enter/Space", () => {
-    const onPick = vi.fn<(reference: SelectionReference, additive: boolean) => void>();
+    const onPick =
+      vi.fn<(reference: SelectionReference, additive: boolean) => void>();
     render(<CadModelTree document={buildTreeDocument()} onPick={onPick} />);
     const pad = row("feature|feat_pad");
     pad.focus();

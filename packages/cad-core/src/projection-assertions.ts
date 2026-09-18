@@ -86,7 +86,9 @@ export function assertRenderObjectValid(
     );
   }
   if (requireTriangles && indices.length === 0) {
-    throw new Error("Render object is empty but at least one triangle is required.");
+    throw new Error(
+      "Render object is empty but at least one triangle is required.",
+    );
   }
   for (let i = 0; i < positions.length; i += 1) {
     const value = positions[i];
@@ -181,7 +183,9 @@ export function assertProjectionValid(
   for (const object of projection.objects) {
     assertRenderObjectValid(object, options);
     if (seen.has(object.id)) {
-      throw new Error(`Duplicate render object id "${object.id}" in projection.`);
+      throw new Error(
+        `Duplicate render object id "${object.id}" in projection.`,
+      );
     }
     seen.add(object.id);
   }
@@ -297,7 +301,11 @@ function compareCameraVector(
     ["z", az, ez],
   ];
   for (const [axis, a, e] of components) {
-    if (!Number.isFinite(a) || !Number.isFinite(e) || Math.abs(a - e) > tolerance) {
+    if (
+      !Number.isFinite(a) ||
+      !Number.isFinite(e) ||
+      Math.abs(a - e) > tolerance
+    ) {
       throw new Error(
         `Camera ${field} component ${axis} (${a}) is not within ${tolerance} of ${e}.`,
       );
@@ -344,11 +352,26 @@ export function assertCameraClose(
       `Camera kind mismatch: ${actual.kind} vs ${expected.kind}.`,
     );
   }
-  compareCameraVector(actual.position, expected.position, "position", linearToleranceMm);
-  compareCameraVector(actual.target, expected.target, "target", linearToleranceMm);
+  compareCameraVector(
+    actual.position,
+    expected.position,
+    "position",
+    linearToleranceMm,
+  );
+  compareCameraVector(
+    actual.target,
+    expected.target,
+    "target",
+    linearToleranceMm,
+  );
   compareCameraVector(actual.up, expected.up, "up", linearToleranceMm);
   if (actual.kind === "perspective" && expected.kind === "perspective") {
-    compareCameraScalar(actual.fovDeg, expected.fovDeg, "fovDeg", fovToleranceDeg);
+    compareCameraScalar(
+      actual.fovDeg,
+      expected.fovDeg,
+      "fovDeg",
+      fovToleranceDeg,
+    );
     return;
   }
   if (actual.kind === "orthographic" && expected.kind === "orthographic") {

@@ -28,7 +28,12 @@ const baseDiagnostic: Diagnostic = {
 
 describe("DIAGNOSTIC_SEVERITIES", () => {
   it("pins the four severity levels in increasing severity order", () => {
-    expect(DIAGNOSTIC_SEVERITIES).toEqual(["info", "warning", "error", "fatal"]);
+    expect(DIAGNOSTIC_SEVERITIES).toEqual([
+      "info",
+      "warning",
+      "error",
+      "fatal",
+    ]);
   });
 
   it("orders severities for filtering and sorting", () => {
@@ -134,18 +139,24 @@ describe("parseDiagnostic", () => {
   });
 
   it("rejects invalid severity values", () => {
-    expect(parseDiagnostic({ ...baseDiagnostic, severity: "critical" }).ok).toBe(false);
+    expect(
+      parseDiagnostic({ ...baseDiagnostic, severity: "critical" }).ok,
+    ).toBe(false);
     expect(parseDiagnostic({ ...baseDiagnostic, severity: 7 }).ok).toBe(false);
   });
 
   it("rejects unregistered codes", () => {
-    expect(parseDiagnostic({ ...baseDiagnostic, code: "kernel/crash" }).ok).toBe(false);
+    expect(
+      parseDiagnostic({ ...baseDiagnostic, code: "kernel/crash" }).ok,
+    ).toBe(false);
   });
 
   it("rejects empty or non-string messages", () => {
     expect(parseDiagnostic({ ...baseDiagnostic, message: "" }).ok).toBe(false);
     expect(parseDiagnostic({ ...baseDiagnostic, message: 5 }).ok).toBe(false);
-    expect(parseDiagnostic({ ...baseDiagnostic, message: undefined }).ok).toBe(false);
+    expect(parseDiagnostic({ ...baseDiagnostic, message: undefined }).ok).toBe(
+      false,
+    );
   });
 
   it("rejects diagnostics without a valid location primary id", () => {
@@ -156,10 +167,12 @@ describe("parseDiagnostic", () => {
         message: baseDiagnostic.message,
       }).ok,
     ).toBe(false);
-    expect(parseDiagnostic({
-      ...baseDiagnostic,
-      location: { primary: "not-an-id" },
-    }).ok).toBe(false);
+    expect(
+      parseDiagnostic({
+        ...baseDiagnostic,
+        location: { primary: "not-an-id" },
+      }).ok,
+    ).toBe(false);
   });
 
   it("rejects malformed related id lists", () => {
@@ -172,7 +185,10 @@ describe("parseDiagnostic", () => {
     expect(
       parseDiagnostic({
         ...baseDiagnostic,
-        location: { ...baseDiagnostic.location, related: ["param_width", "junk"] },
+        location: {
+          ...baseDiagnostic.location,
+          related: ["param_width", "junk"],
+        },
       }).ok,
     ).toBe(false);
   });
@@ -181,7 +197,9 @@ describe("parseDiagnostic", () => {
     expect(
       parseDiagnostic({ ...baseDiagnostic, data: { nested: { deep: 1 } } }).ok,
     ).toBe(false);
-    expect(parseDiagnostic({ ...baseDiagnostic, data: { list: [1] } }).ok).toBe(false);
+    expect(parseDiagnostic({ ...baseDiagnostic, data: { list: [1] } }).ok).toBe(
+      false,
+    );
     expect(
       parseDiagnostic({ ...baseDiagnostic, data: { nan: Number.NaN } }).ok,
     ).toBe(false);

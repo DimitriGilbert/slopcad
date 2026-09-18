@@ -18,6 +18,7 @@ export type {
   ParameterId,
   ParsedCadId,
   ReferenceId,
+  SketchDocumentId,
 } from "./ids";
 export {
   CAD_ID_KINDS,
@@ -39,6 +40,8 @@ export {
   parseFeatureId,
   parseParameterId,
   parseReferenceId,
+  parseSketchDocumentId,
+  createSketchDocumentId,
 } from "./ids";
 export type {
   Diagnostic,
@@ -201,7 +204,10 @@ export {
   updateParameterMetadata,
   updateParameterValue,
 } from "./parameter";
-export { findParameterCycle, parameterDependencyEdges } from "./parameter-graph";
+export {
+  findParameterCycle,
+  parameterDependencyEdges,
+} from "./parameter-graph";
 export type {
   CadCommand,
   CadCommandType,
@@ -293,6 +299,11 @@ export type {
   BodyInput,
   CadDocument,
   DocumentEntity,
+  DocumentReference,
+  DocumentReferenceAddResult,
+  DocumentReferenceInput,
+  DocumentSketch,
+  DocumentSketchInput,
   DocumentError,
   DocumentErrorCode,
   DocumentParameterAddResult,
@@ -318,6 +329,12 @@ export {
   FEATURE_INPUT_KINDS,
   getBody,
   getDocumentEntity,
+  getDocumentSketch,
+  addDocumentSketch,
+  removeDocumentSketch,
+  getDocumentReference,
+  addDocumentReference,
+  removeDocumentReference,
   getDocumentParameter,
   getFeature,
   parseCadDocument,
@@ -561,10 +578,7 @@ export {
   TRANSLATE_TOOL_ID,
   translateTool,
 } from "./tool-translate";
-export type {
-  RotateTarget,
-  RotateToolState,
-} from "./tool-rotate";
+export type { RotateTarget, RotateToolState } from "./tool-rotate";
 export {
   bodyBoundsCenter,
   resolveRotateTarget,

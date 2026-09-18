@@ -9,13 +9,14 @@
  * runs headless without any of this module.
  */
 export * from "@slopcad/cad-core";
-export { CadProvider, CadProviderError, CAD_PROVIDER_ERROR_CODE, useCadStore } from "./provider";
-export type { CadProviderProps } from "./provider";
 export {
-  CAD_STORE_CONCERNS,
-  CadStore,
-  createCadStore,
-} from "./store";
+  CadProvider,
+  CadProviderError,
+  CAD_PROVIDER_ERROR_CODE,
+  useCadStore,
+} from "./provider";
+export type { CadProviderProps } from "./provider";
+export { CAD_STORE_CONCERNS, CadStore, createCadStore } from "./store";
 export type {
   CadHistoryView,
   CadStoreConcern,

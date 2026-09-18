@@ -114,40 +114,28 @@ function readContainer(bytes: Uint8Array): {
   readonly jsonText: string;
   readonly bin: Uint8Array | null;
 } {
-  require(
-    bytes.length >= 12 + 8,
-    `expected at least 20 bytes, got ${bytes.length}.`,
-  );
+  require(bytes.length >=
+    12 + 8, `expected at least 20 bytes, got ${bytes.length}.`);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  require(
-    u32(view, 0) === 0x4654_6c67,
-    `magic is 0x${u32(view, 0).toString(16)}, not 0x46546c67 (ASCII "glTF").`,
-  );
+  require(u32(view, 0) ===
+    0x4654_6c67, `magic is 0x${u32(view, 0).toString(16)}, not 0x46546c67 (ASCII "glTF").`);
   require(u32(view, 4) === 2, `container version ${u32(view, 4)} is not 2.`);
-  require(
-    u32(view, 8) === bytes.length,
-    `header length ${u32(view, 8)} does not equal the byte length ${bytes.length}.`,
-  );
+  require(u32(view, 8) ===
+    bytes.length, `header length ${u32(view, 8)} does not equal the byte length ${bytes.length}.`);
   let cursor = 12;
   let jsonText: string | null = null;
   let jsonChunkEnd = -1;
   let bin: Uint8Array | null = null;
   while (cursor < bytes.length) {
-    require(
-      cursor + 8 <= bytes.length,
-      `chunk preamble at ${cursor} runs past the buffer.`,
-    );
+    require(cursor + 8 <=
+      bytes.length, `chunk preamble at ${cursor} runs past the buffer.`);
     const chunkLength = u32(view, cursor);
     const chunkType = u32(view, cursor + 4);
     const dataStart = cursor + 8;
-    require(
-      chunkLength % 4 === 0,
-      `chunk at ${cursor} has length ${chunkLength}, not a multiple of four.`,
-    );
-    require(
-      dataStart + chunkLength <= bytes.length,
-      `chunk at ${cursor} (length ${chunkLength}) runs past the buffer.`,
-    );
+    require(chunkLength % 4 ===
+      0, `chunk at ${cursor} has length ${chunkLength}, not a multiple of four.`);
+    require(dataStart + chunkLength <=
+      bytes.length, `chunk at ${cursor} (length ${chunkLength}) runs past the buffer.`);
     if (chunkType === 0x4e4f_534a) {
       require(jsonText === null, "more than one JSON chunk.");
       require(cursor === 12, "the JSON chunk is not the very first chunk.");
@@ -161,14 +149,10 @@ function readContainer(bytes: Uint8Array): {
       jsonChunkEnd = dataStart + chunkLength;
     } else if (chunkType === 0x004e_4942) {
       require(bin === null, "more than one BIN chunk.");
-      require(
-        jsonText !== null,
-        "the BIN chunk appears before the JSON chunk.",
-      );
-      require(
-        cursor === jsonChunkEnd,
-        "the BIN chunk does not directly follow the (padded) JSON chunk.",
-      );
+      require(jsonText !==
+        null, "the BIN chunk appears before the JSON chunk.");
+      require(cursor ===
+        jsonChunkEnd, "the BIN chunk does not directly follow the (padded) JSON chunk.");
       bin = slice(bytes, dataStart, dataStart + chunkLength);
     } else {
       throw new Error(
@@ -178,10 +162,8 @@ function readContainer(bytes: Uint8Array): {
     cursor = dataStart + chunkLength;
   }
   require(jsonText !== null, "no JSON chunk.");
-  require(
-    cursor === bytes.length,
-    `chunks end at ${cursor} but the file is ${bytes.length} bytes.`,
-  );
+  require(cursor ===
+    bytes.length, `chunks end at ${cursor} but the file is ${bytes.length} bytes.`);
   return { jsonText, bin };
 }
 
@@ -194,10 +176,10 @@ function isArray(value: unknown): value is unknown[] {
 }
 
 function numberOf(value: unknown, where: string): number {
-  require(
-    typeof value === "number" && Number.isFinite(value),
-    `${where} is not a finite number (got ${String(value)}).`,
-  );
+  require(typeof value === "number" &&
+    Number.isFinite(
+      value,
+    ), `${where} is not a finite number (got ${String(value)}).`);
   return value;
 }
 
@@ -256,13 +238,12 @@ function readAccessorRecord(input: unknown, where: string): AccessorRecord {
   require(isRecord(input), `${where} is not an object.`);
   const bufferView = numberOf(input.bufferView, `${where}.bufferView`);
   const byteOffset =
-    input.byteOffset === undefined ? 0 : numberOf(input.byteOffset, `${where}.byteOffset`);
+    input.byteOffset === undefined
+      ? 0
+      : numberOf(input.byteOffset, `${where}.byteOffset`);
   const count = numberOf(input.count, `${where}.count`);
   const componentType = numberOf(input.componentType, `${where}.componentType`);
-  require(
-    typeof input.type === "string",
-    `${where}.type is not a string.`,
-  );
+  require(typeof input.type === "string", `${where}.type is not a string.`);
   const readTriple = (value: unknown): readonly number[] | null => {
     if (value === undefined) return null;
     return arrayOf(value, `${where} min/max`).map((component) =>
@@ -287,10 +268,8 @@ interface BufferViewRecord {
 
 function readBufferViewRecord(input: unknown, where: string): BufferViewRecord {
   require(isRecord(input), `${where} is not an object.`);
-  require(
-    input.byteStride === undefined,
-    `${where} carries a byteStride; this reader decodes our producer's tightly-packed views.`,
-  );
+  require(input.byteStride ===
+    undefined, `${where} carries a byteStride; this reader decodes our producer's tightly-packed views.`);
   return {
     byteOffset: numberOf(input.byteOffset, `${where}.byteOffset`),
     byteLength: numberOf(input.byteLength, `${where}.byteLength`),
@@ -313,28 +292,19 @@ function decodeAccessor(
   const view = bufferViews[accessor.bufferView];
   require(view !== undefined, `${where} references a missing bufferView.`);
   const size = componentSize(accessor.componentType);
-  require(
-    view.byteOffset % size === 0,
-    `${where}'s bufferView byteOffset ${view.byteOffset} is not a multiple of the component size ${size}.`,
-  );
-  require(
-    accessor.byteOffset % size === 0,
-    `${where}'s byteOffset ${accessor.byteOffset} is not a multiple of the component size ${size}.`,
-  );
+  require(view.byteOffset % size ===
+    0, `${where}'s bufferView byteOffset ${view.byteOffset} is not a multiple of the component size ${size}.`);
+  require(accessor.byteOffset % size ===
+    0, `${where}'s byteOffset ${accessor.byteOffset} is not a multiple of the component size ${size}.`);
   const elementSize = size * (accessor.type === "VEC3" ? 3 : 1);
-  require(
-    accessor.byteOffset + accessor.count * elementSize <= view.byteLength,
-    `${where} needs ${accessor.byteOffset + accessor.count * elementSize} bytes inside its bufferView of ${view.byteLength}.`,
-  );
-  require(
-    view.byteOffset + view.byteLength <= bufferByteLength,
-    `${where}'s bufferView spans past the declared buffer byte length.`,
-  );
-  require(
-    view.byteOffset + accessor.byteOffset + accessor.count * elementSize <=
-      bin.length,
-    `${where}'s data runs past the BIN chunk.`,
-  );
+  require(accessor.byteOffset + accessor.count * elementSize <=
+    view.byteLength, `${where} needs ${accessor.byteOffset + accessor.count * elementSize} bytes inside its bufferView of ${view.byteLength}.`);
+  require(view.byteOffset + view.byteLength <=
+    bufferByteLength, `${where}'s bufferView spans past the declared buffer byte length.`);
+  require(view.byteOffset +
+    accessor.byteOffset +
+    accessor.count * elementSize <=
+    bin.length, `${where}'s data runs past the BIN chunk.`);
   const dv = new DataView(bin.buffer, bin.byteOffset, bin.byteLength);
   const base = view.byteOffset + accessor.byteOffset;
   const values: number[] = [];
@@ -360,14 +330,10 @@ function readPrimitive(
   bufferByteLength: number,
 ): GlbReadPrimitive {
   require(isRecord(primitiveInput), "a mesh primitive is not an object.");
-  require(
-    numberOf(primitiveInput.mode, "primitive.mode") === 4,
-    "primitive.mode is not 4 (TRIANGLES); this reader decodes our producer's indexed triangles.",
-  );
-  require(
-    numberOf(primitiveInput.material, "primitive.material") === 0,
-    "primitive.material is not 0; this reader decodes our producer's single shared material.",
-  );
+  require(numberOf(primitiveInput.mode, "primitive.mode") ===
+    4, "primitive.mode is not 4 (TRIANGLES); this reader decodes our producer's indexed triangles.");
+  require(numberOf(primitiveInput.material, "primitive.material") ===
+    0, "primitive.material is not 0; this reader decodes our producer's single shared material.");
   const attributes = primitiveInput.attributes;
   require(isRecord(attributes), "primitive.attributes is not an object.");
   const positionAccessorIndex = numberOf(
@@ -378,15 +344,12 @@ function readPrimitive(
     accessorsInput[positionAccessorIndex],
     `accessor ${positionAccessorIndex} (POSITION)`,
   );
-  require(
-    positionAccessor.type === "VEC3" &&
-      positionAccessor.componentType === TYPE_FLOAT32,
-    "the POSITION accessor is not VEC3 float32.",
-  );
-  require(
-    positionAccessor.min !== null && positionAccessor.max !== null,
-    "the POSITION accessor carries no min/max (a spec MUST).",
-  );
+  require(positionAccessor.type === "VEC3" &&
+    positionAccessor.componentType ===
+      TYPE_FLOAT32, "the POSITION accessor is not VEC3 float32.");
+  require(positionAccessor.min !== null &&
+    positionAccessor.max !==
+      null, "the POSITION accessor carries no min/max (a spec MUST).");
   const positionValues = decodeAccessor(
     positionAccessor,
     bufferViews,
@@ -423,14 +386,14 @@ function readPrimitive(
     if (z > computedMax[2]) computedMax[2] = z;
   }
   for (const axis of [0, 1, 2]) {
-    require(
-      (positionAccessor.min ?? [])[axis] === computedMin[axis],
-      `POSITION accessor min[${String(axis)}] is ${String((positionAccessor.min ?? [])[axis])}, but the decoded data's min is ${computedMin[axis]}.`,
-    );
-    require(
-      (positionAccessor.max ?? [])[axis] === computedMax[axis],
-      `POSITION accessor max[${String(axis)}] is ${String((positionAccessor.max ?? [])[axis])}, but the decoded data's max is ${computedMax[axis]}.`,
-    );
+    require((positionAccessor.min ?? [])[axis] ===
+      computedMin[
+        axis
+      ], `POSITION accessor min[${String(axis)}] is ${String((positionAccessor.min ?? [])[axis])}, but the decoded data's min is ${computedMin[axis]}.`);
+    require((positionAccessor.max ?? [])[axis] ===
+      computedMax[
+        axis
+      ], `POSITION accessor max[${String(axis)}] is ${String((positionAccessor.max ?? [])[axis])}, but the decoded data's max is ${computedMax[axis]}.`);
   }
 
   let normals: readonly (readonly [number, number, number])[] | null = null;
@@ -443,15 +406,11 @@ function readPrimitive(
       accessorsInput[normalAccessorIndex],
       `accessor ${normalAccessorIndex} (NORMAL)`,
     );
-    require(
-      normalAccessor.type === "VEC3" &&
-        normalAccessor.componentType === TYPE_FLOAT32,
-      "the NORMAL accessor is not VEC3 float32.",
-    );
-    require(
-      normalAccessor.count === positionAccessor.count,
-      "the NORMAL accessor's count does not match POSITION's (a spec MUST).",
-    );
+    require(normalAccessor.type === "VEC3" &&
+      normalAccessor.componentType ===
+        TYPE_FLOAT32, "the NORMAL accessor is not VEC3 float32.");
+    require(normalAccessor.count ===
+      positionAccessor.count, "the NORMAL accessor's count does not match POSITION's (a spec MUST).");
     const normalValues = decodeAccessor(
       normalAccessor,
       bufferViews,
@@ -470,24 +429,22 @@ function readPrimitive(
     normals = decoded;
   }
 
-  const indexAccessorIndex = numberOf(primitiveInput.indices, "primitive.indices");
+  const indexAccessorIndex = numberOf(
+    primitiveInput.indices,
+    "primitive.indices",
+  );
   const indexAccessor = readAccessorRecord(
     accessorsInput[indexAccessorIndex],
     `accessor ${indexAccessorIndex} (indices)`,
   );
-  require(
-    indexAccessor.type === "SCALAR",
-    "the indices accessor is not SCALAR.",
-  );
-  require(
-    indexAccessor.componentType === TYPE_UINT16 ||
-      indexAccessor.componentType === TYPE_UINT32,
-    "the indices accessor is not uint16 or uint32.",
-  );
-  require(
-    indexAccessor.count % 3 === 0 && indexAccessor.count > 0,
-    "the index count is not a non-zero multiple of three (triangles topology).",
-  );
+  require(indexAccessor.type ===
+    "SCALAR", "the indices accessor is not SCALAR.");
+  require(indexAccessor.componentType === TYPE_UINT16 ||
+    indexAccessor.componentType ===
+      TYPE_UINT32, "the indices accessor is not uint16 or uint32.");
+  require(indexAccessor.count % 3 === 0 &&
+    indexAccessor.count >
+      0, "the index count is not a non-zero multiple of three (triangles topology).");
   const indices = decodeAccessor(
     indexAccessor,
     bufferViews,
@@ -498,14 +455,11 @@ function readPrimitive(
   const forbidden = componentMax(indexAccessor.componentType);
   for (let i = 0; i < indices.length; i += 1) {
     const value = indices[i] ?? -1;
-    require(
-      value >= 0 && value < positionAccessor.count,
-      `index ${i} is ${value}, outside the vertex range 0..${positionAccessor.count - 1}.`,
-    );
-    require(
-      value !== forbidden,
-      `index ${i} equals ${forbidden}, the component-type maximum the spec forbids (primitive restart).`,
-    );
+    require(value >= 0 &&
+      value <
+        positionAccessor.count, `index ${i} is ${value}, outside the vertex range 0..${positionAccessor.count - 1}.`);
+    require(value !==
+      forbidden, `index ${i} equals ${forbidden}, the component-type maximum the spec forbids (primitive restart).`);
   }
   return {
     positions,
@@ -537,70 +491,60 @@ export function readGlb(bytes: Uint8Array): GlbReadDocument {
   }
   const asset = json.asset;
   require(isRecord(asset), "asset is not an object.");
-  require(
-    typeof asset.version === "string",
-    `asset.version is ${String(asset.version)}, not a string.`,
-  );
-  require(
-    asset.version === "2.0",
-    `asset.version is ${asset.version}, not "2.0".`,
-  );
-  require(
-    asset.generator === undefined || typeof asset.generator === "string",
-    "asset.generator is present but not a string.",
-  );
+  require(typeof asset.version ===
+    "string", `asset.version is ${String(asset.version)}, not a string.`);
+  require(asset.version ===
+    "2.0", `asset.version is ${asset.version}, not "2.0".`);
+  require(asset.generator === undefined ||
+    typeof asset.generator ===
+      "string", "asset.generator is present but not a string.");
   const bufferViews = arrayOf(json.bufferViews, "bufferViews").map((entry, i) =>
     readBufferViewRecord(entry, `bufferViews[${String(i)}]`),
   );
   const accessorsInput = arrayOf(json.accessors, "accessors");
   const buffers = arrayOf(json.buffers, "buffers");
-  require(buffers.length === 1, `expected exactly one buffer, got ${buffers.length}.`);
+  require(buffers.length ===
+    1, `expected exactly one buffer, got ${buffers.length}.`);
   const firstBuffer = buffers[0];
   require(isRecord(firstBuffer), "buffers[0] is not an object.");
-  const bufferByteLength = numberOf(firstBuffer.byteLength, "buffers[0].byteLength");
-  require(
-    bin !== null,
-    "no BIN chunk: this reader decodes our producer's GLB-stored buffer.",
+  const bufferByteLength = numberOf(
+    firstBuffer.byteLength,
+    "buffers[0].byteLength",
   );
-  require(
-    bufferByteLength <= bin.length && bin.length - bufferByteLength <= 3,
-    `the BIN chunk holds ${bin.length} bytes but the buffer declares ${bufferByteLength} (padding must be 0-3 bytes).`,
-  );
+  require(bin !==
+    null, "no BIN chunk: this reader decodes our producer's GLB-stored buffer.");
+  require(bufferByteLength <= bin.length &&
+    bin.length - bufferByteLength <=
+      3, `the BIN chunk holds ${bin.length} bytes but the buffer declares ${bufferByteLength} (padding must be 0-3 bytes).`);
   for (let i = bufferByteLength; i < bin.length; i += 1) {
-    require(
-      (bin[i] ?? 1) === 0,
-      `BIN chunk padding byte ${i - bufferByteLength} is not zero.`,
-    );
+    require((bin[i] ?? 1) ===
+      0, `BIN chunk padding byte ${i - bufferByteLength} is not zero.`);
   }
-  require(
-    numberOf(json.scene, "scene") === 0,
-    "scene is not 0; this reader decodes our producer's single scene.",
-  );
+  require(numberOf(json.scene, "scene") ===
+    0, "scene is not 0; this reader decodes our producer's single scene.");
   const scenes = arrayOf(json.scenes, "scenes");
-  require(scenes.length === 1, `expected exactly one scene, got ${scenes.length}.`);
+  require(scenes.length ===
+    1, `expected exactly one scene, got ${scenes.length}.`);
   const firstScene = scenes[0];
   require(isRecord(firstScene), "scenes[0] is not an object.");
   const sceneNodes = arrayOf(firstScene.nodes, "scenes[0].nodes");
   const nodesInput = arrayOf(json.nodes, "nodes");
   const meshesInput = arrayOf(json.meshes, "meshes");
   const materials = arrayOf(json.materials, "materials");
-  require(materials.length === 1, `expected exactly one material, got ${materials.length}.`);
+  require(materials.length ===
+    1, `expected exactly one material, got ${materials.length}.`);
   const material = materials[0];
   require(isRecord(material), "materials[0] is not an object.");
-  require(
-    typeof material.name === "string",
-    "materials[0].name is not a string.",
-  );
+  require(typeof material.name ===
+    "string", "materials[0].name is not a string.");
   const pbr = material.pbrMetallicRoughness;
   require(isRecord(pbr), "materials[0].pbrMetallicRoughness is not an object.");
   const baseColorFactor = arrayOf(
     pbr.baseColorFactor,
     "pbrMetallicRoughness.baseColorFactor",
   ).map((component) => numberOf(component, "baseColorFactor component"));
-  require(
-    baseColorFactor.length === 4,
-    `baseColorFactor has ${baseColorFactor.length} components, not 4.`,
-  );
+  require(baseColorFactor.length ===
+    4, `baseColorFactor has ${baseColorFactor.length} components, not 4.`);
 
   const nodes: GlbReadNode[] = [];
   const nodeNames: (string | null)[] = [];
@@ -609,20 +553,18 @@ export function readGlb(bytes: Uint8Array): GlbReadDocument {
     const node = nodesInput[index];
     require(node !== undefined, `scene references missing node ${index}.`);
     require(isRecord(node), `node ${index} is not an object.`);
-    require(
-      node.name === undefined || typeof node.name === "string",
-      `node ${index} name is present but not a string.`,
-    );
+    require(node.name === undefined ||
+      typeof node.name ===
+        "string", `node ${index} name is present but not a string.`);
     const name = node.name === undefined ? null : node.name;
     const meshIndex = numberOf(node.mesh, `node ${index}.mesh`);
     const mesh = meshesInput[meshIndex];
-    require(mesh !== undefined, `node ${index} references missing mesh ${meshIndex}.`);
+    require(mesh !==
+      undefined, `node ${index} references missing mesh ${meshIndex}.`);
     require(isRecord(mesh), `mesh ${meshIndex} is not an object.`);
     const primitives = arrayOf(mesh.primitives, `mesh ${meshIndex}.primitives`);
-    require(
-      primitives.length === 1,
-      `mesh ${meshIndex} carries ${primitives.length} primitives; this reader decodes our producer's one-primitive meshes.`,
-    );
+    require(primitives.length ===
+      1, `mesh ${meshIndex} carries ${primitives.length} primitives; this reader decodes our producer's one-primitive meshes.`);
     const primitive = readPrimitive(
       primitives[0],
       accessorsInput,
@@ -633,15 +575,12 @@ export function readGlb(bytes: Uint8Array): GlbReadDocument {
     nodeNames.push(name);
     nodes.push({ name, mesh: meshIndex, primitive });
   }
-  require(
-    nodeNames.length === nodesInput.length,
-    "the scene does not reference every node.",
-  );
+  require(nodeNames.length ===
+    nodesInput.length, "the scene does not reference every node.");
   return {
     assetVersion: asset.version,
     topLevelKeys: Object.keys(json),
-    generator:
-      asset.generator === undefined ? null : asset.generator,
+    generator: asset.generator === undefined ? null : asset.generator,
     nodeNames,
     nodes,
     materialName: material.name,
@@ -673,10 +612,10 @@ export function glbVolumeMm3(primitive: GlbReadPrimitive): number {
     const a = positions[indices[t] ?? 0];
     const b = positions[indices[t + 1] ?? 0];
     const c = positions[indices[t + 2] ?? 0];
-    require(
-      a !== undefined && b !== undefined && c !== undefined,
-      "a triangle references a vertex outside the position array.",
-    );
+    require(a !== undefined &&
+      b !== undefined &&
+      c !==
+        undefined, "a triangle references a vertex outside the position array.");
     total +=
       a[0] * (b[1] * c[2] - b[2] * c[1]) +
       a[1] * (b[2] * c[0] - b[0] * c[2]) +

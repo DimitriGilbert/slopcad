@@ -97,10 +97,7 @@ export function buildPlateWithHole(
     boreY,
     0,
   );
-  const result = unwrapKernelResult(
-    kernel.subtract(plate, [bore]),
-    "subtract",
-  );
+  const result = unwrapKernelResult(kernel.subtract(plate, [bore]), "subtract");
   const { widthMm, depthMm, heightMm, boreRadiusMm } = PLATE_WITH_HOLE;
   return {
     plate,

@@ -23,7 +23,7 @@
     "quality:duplication": "jscpd --config jscpd.config.json --noTips .",
     "quality:report": "node scripts/quality-report.mjs",
     "quality:knip": "knip",
-    "verify": "pnpm run check-types && pnpm run lint && pnpm test && pnpm build",
+    "verify": "pnpm run check-types && pnpm run lint && pnpm run format:check && pnpm test && pnpm build",
     "dev:web": "turbo run dev -F web --",
     "db:push": "turbo run db:push -F @slopcad/db --",
     "db:studio": "turbo run db:studio -F @slopcad/db --",

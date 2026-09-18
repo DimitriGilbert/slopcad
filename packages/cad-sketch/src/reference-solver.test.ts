@@ -49,13 +49,19 @@ const eid = (raw: string) => createSketchEntityId(raw);
 const cid = (raw: string) => createSketchConstraintId(`skcon_${raw}`);
 
 function solvedOf(
-  result: Extract<SketchSolveResult, { status: "solved" | "under-constrained" }>,
+  result: Extract<
+    SketchSolveResult,
+    { status: "solved" | "under-constrained" }
+  >,
 ): ReadonlyMap<string, SolvedEntityParameters> {
   return solvedEntityParametersById(result.parameters);
 }
 
 function solvedLine(
-  result: Extract<SketchSolveResult, { status: "solved" | "under-constrained" }>,
+  result: Extract<
+    SketchSolveResult,
+    { status: "solved" | "under-constrained" }
+  >,
   id: string,
 ): { x1: number; y1: number; x2: number; y2: number } {
   const solved = solvedOf(result).get(id);
@@ -66,18 +72,27 @@ function solvedLine(
 }
 
 function solvedCircle(
-  result: Extract<SketchSolveResult, { status: "solved" | "under-constrained" }>,
+  result: Extract<
+    SketchSolveResult,
+    { status: "solved" | "under-constrained" }
+  >,
   id: string,
 ): { cx: number; cy: number; radius: number } {
   const solved = solvedOf(result).get(id);
-  if (solved === undefined || (solved.kind !== "circle" && solved.kind !== "arc")) {
+  if (
+    solved === undefined ||
+    (solved.kind !== "circle" && solved.kind !== "arc")
+  ) {
     throw new Error(`Missing solved circle ${id}`);
   }
   return solved;
 }
 
 function solvedPoint(
-  result: Extract<SketchSolveResult, { status: "solved" | "under-constrained" }>,
+  result: Extract<
+    SketchSolveResult,
+    { status: "solved" | "under-constrained" }
+  >,
   id: string,
 ): { x: number; y: number } {
   const solved = solvedOf(result).get(id);
@@ -164,7 +179,10 @@ describe("reference solver — classic fixtures", () => {
     expect(small.cy).toBeCloseTo(0, 6);
     expect(small.radius).toBeCloseTo(20, 6);
     expect(large.radius).toBeCloseTo(30, 6);
-    expect(Math.hypot(large.cx - small.cx, large.cy - small.cy)).toBeCloseTo(50, 6);
+    expect(Math.hypot(large.cx - small.cx, large.cy - small.cy)).toBeCloseTo(
+      50,
+      6,
+    );
     expect(
       pointLineDistance({ x: small.cx, y: small.cy }, line),
       "line tangent to small circle",
@@ -173,11 +191,16 @@ describe("reference solver — classic fixtures", () => {
       pointLineDistance({ x: large.cx, y: large.cy }, line),
       "line tangent to large circle",
     ).toBeCloseTo(30, 6);
-    expect(Math.hypot(line.x2 - line.x1, line.y2 - line.y1)).toBeCloseTo(100, 6);
-    expect(Math.hypot(line.x1, line.y1)).toBeCloseTo(25, 6);
-    expect(result.diagnostics.some((d) => d.code === SKETCH_DIAGNOSTIC_CODES.underConstrained)).toBe(
-      true,
+    expect(Math.hypot(line.x2 - line.x1, line.y2 - line.y1)).toBeCloseTo(
+      100,
+      6,
     );
+    expect(Math.hypot(line.x1, line.y1)).toBeCloseTo(25, 6);
+    expect(
+      result.diagnostics.some(
+        (d) => d.code === SKETCH_DIAGNOSTIC_CODES.underConstrained,
+      ),
+    ).toBe(true);
   });
 
   it("solves an arc chain join exactly", () => {
@@ -199,10 +222,16 @@ describe("reference solver — classic fixtures", () => {
     expect(arc.cx).toBeCloseTo(28.5, 5);
     expect(arc.cy).toBeCloseTo(9.36749, 4);
     const arcSolved = solvedOf(result).get("skent_arc-arc");
-    expect(arcSolved?.kind === "arc" && arcSolved.startAngle).toBeCloseTo(4.35484, 4);
+    expect(arcSolved?.kind === "arc" && arcSolved.startAngle).toBeCloseTo(
+      4.35484,
+      4,
+    );
     const startPoint =
       arcSolved?.kind === "arc"
-        ? { x: arcSolved.cx + arcSolved.radius * Math.cos(arcSolved.startAngle), y: arcSolved.cy + arcSolved.radius * Math.sin(arcSolved.startAngle) }
+        ? {
+            x: arcSolved.cx + arcSolved.radius * Math.cos(arcSolved.startAngle),
+            y: arcSolved.cy + arcSolved.radius * Math.sin(arcSolved.startAngle),
+          }
         : undefined;
     expect(startPoint?.x).toBeCloseTo(25, 6);
     expect(startPoint?.y).toBeCloseTo(0, 6);
@@ -231,7 +260,9 @@ describe("reference solver — classic fixtures", () => {
     if (result.status !== "failed") return;
     expect(result.diagnostics).toHaveLength(1);
     const diagnostic = result.diagnostics[0];
-    expect(diagnostic?.code).toBe(SKETCH_DIAGNOSTIC_CODES.constraintsConflicting);
+    expect(diagnostic?.code).toBe(
+      SKETCH_DIAGNOSTIC_CODES.constraintsConflicting,
+    );
     expect(diagnostic?.severity).toBe("error");
     expect(diagnostic?.location?.primary).toBe("skcon_conflict-a");
     expect(diagnostic?.location?.related).toEqual(["skcon_conflict-b"]);
@@ -286,10 +317,15 @@ describe("reference solver — per-constraint battery", () => {
   });
 
   it("horizontal and vertical level the respective axis", () => {
-    const hLine = createLineEntity(eid("skent_h"), { x: 0, y: 0 }, { x: 10, y: 4 });
-    const hResult = solver.solve([hLine], [
-      createHorizontalConstraint(cid("h"), eid("skent_h")),
-    ]);
+    const hLine = createLineEntity(
+      eid("skent_h"),
+      { x: 0, y: 0 },
+      { x: 10, y: 4 },
+    );
+    const hResult = solver.solve(
+      [hLine],
+      [createHorizontalConstraint(cid("h"), eid("skent_h"))],
+    );
     expect(hResult.status).toBe("under-constrained");
     if (hResult.status !== "failed") {
       expect(hResult.dof).toBe(3);
@@ -298,10 +334,15 @@ describe("reference solver — per-constraint battery", () => {
       expect(solved.x1).toBeCloseTo(0, 9);
       expect(solved.x2).toBeCloseTo(10, 9);
     }
-    const vLine = createLineEntity(eid("skent_v"), { x: 0, y: 0 }, { x: 4, y: 10 });
-    const vResult = solver.solve([vLine], [
-      createVerticalConstraint(cid("v"), eid("skent_v")),
-    ]);
+    const vLine = createLineEntity(
+      eid("skent_v"),
+      { x: 0, y: 0 },
+      { x: 4, y: 10 },
+    );
+    const vResult = solver.solve(
+      [vLine],
+      [createVerticalConstraint(cid("v"), eid("skent_v"))],
+    );
     expect(vResult.status).toBe("under-constrained");
     if (vResult.status !== "failed") {
       const solved = solvedLine(vResult, "skent_v");
@@ -314,9 +355,10 @@ describe("reference solver — per-constraint battery", () => {
   it("parallel and perpendicular align line directions", () => {
     const a = createLineEntity(eid("skent_a"), { x: 0, y: 0 }, { x: 10, y: 1 });
     const b = createLineEntity(eid("skent_b"), { x: 0, y: 5 }, { x: 9, y: 8 });
-    const parallel = solver.solve([a, b], [
-      createParallelConstraint(cid("par"), eid("skent_a"), eid("skent_b")),
-    ]);
+    const parallel = solver.solve(
+      [a, b],
+      [createParallelConstraint(cid("par"), eid("skent_a"), eid("skent_b"))],
+    );
     expect(parallel.status).toBe("under-constrained");
     if (parallel.status !== "failed") {
       expect(parallel.dof).toBe(7);
@@ -328,9 +370,16 @@ describe("reference solver — per-constraint battery", () => {
     }
     const c = createLineEntity(eid("skent_c"), { x: 0, y: 0 }, { x: 10, y: 0 });
     const d = createLineEntity(eid("skent_d"), { x: 1, y: 1 }, { x: 4, y: 3 });
-    const perpendicular = solver.solve([c, d], [
-      createPerpendicularConstraint(cid("perp"), eid("skent_c"), eid("skent_d")),
-    ]);
+    const perpendicular = solver.solve(
+      [c, d],
+      [
+        createPerpendicularConstraint(
+          cid("perp"),
+          eid("skent_c"),
+          eid("skent_d"),
+        ),
+      ],
+    );
     expect(perpendicular.status).toBe("under-constrained");
     if (perpendicular.status !== "failed") {
       const sc = solvedLine(perpendicular, "skent_c");
@@ -344,14 +393,17 @@ describe("reference solver — per-constraint battery", () => {
   it("distance enforces the exact separation between two point targets", () => {
     const a = createPointEntity(eid("skent_a"), { x: 0, y: 0 });
     const b = createPointEntity(eid("skent_b"), { x: 30, y: 4 });
-    const result = solver.solve([a, b], [
-      createDistanceConstraint(
-        cid("dist"),
-        pointTarget(eid("skent_a"), "center"),
-        pointTarget(eid("skent_b"), "center"),
-        length(50),
-      ),
-    ]);
+    const result = solver.solve(
+      [a, b],
+      [
+        createDistanceConstraint(
+          cid("dist"),
+          pointTarget(eid("skent_a"), "center"),
+          pointTarget(eid("skent_b"), "center"),
+          length(50),
+        ),
+      ],
+    );
     expect(result.status).toBe("under-constrained");
     if (result.status === "failed") return;
     expect(result.dof).toBe(3);
@@ -362,35 +414,53 @@ describe("reference solver — per-constraint battery", () => {
 
   it("angle enforces the exact angle between two lines", () => {
     const a = createLineEntity(eid("skent_a"), { x: 0, y: 0 }, { x: 10, y: 0 });
-    const b = createLineEntity(eid("skent_b"), { x: 0, y: 0 }, { x: 10, y: 10 });
-    const result = solver.solve([a, b], [
-      createAngleConstraint(cid("ang"), eid("skent_a"), eid("skent_b"), angle(30, "deg")),
-    ]);
+    const b = createLineEntity(
+      eid("skent_b"),
+      { x: 0, y: 0 },
+      { x: 10, y: 10 },
+    );
+    const result = solver.solve(
+      [a, b],
+      [
+        createAngleConstraint(
+          cid("ang"),
+          eid("skent_a"),
+          eid("skent_b"),
+          angle(30, "deg"),
+        ),
+      ],
+    );
     expect(result.status).toBe("under-constrained");
     if (result.status === "failed") return;
     expect(result.dof).toBe(7);
     const sa = solvedLine(result, "skent_a");
     const sb = solvedLine(result, "skent_b");
-    const dot = (sa.x2 - sa.x1) * (sb.x2 - sb.x1) + (sa.y2 - sa.y1) * (sb.y2 - sb.y1);
+    const dot =
+      (sa.x2 - sa.x1) * (sb.x2 - sb.x1) + (sa.y2 - sa.y1) * (sb.y2 - sb.y1);
     const cross =
       (sa.x2 - sa.x1) * (sb.y2 - sb.y1) - (sa.y2 - sa.y1) * (sb.x2 - sb.x1);
-    expect(Math.atan2(Math.abs(cross), dot)).toBeCloseTo((30 * Math.PI) / 180, 6);
+    expect(Math.atan2(Math.abs(cross), dot)).toBeCloseTo(
+      (30 * Math.PI) / 180,
+      6,
+    );
   });
 
   it("radius and diameter size circles exactly", () => {
     const circle = createCircleEntity(eid("skent_c"), { x: 0, y: 0 }, 7);
-    const radius = solver.solve([circle], [
-      createRadiusConstraint(cid("r"), eid("skent_c"), length(25)),
-    ]);
+    const radius = solver.solve(
+      [circle],
+      [createRadiusConstraint(cid("r"), eid("skent_c"), length(25))],
+    );
     expect(radius.status).toBe("under-constrained");
     if (radius.status !== "failed") {
       expect(radius.dof).toBe(2);
       expect(solvedCircle(radius, "skent_c").radius).toBeCloseTo(25, 6);
     }
     const circle2 = createCircleEntity(eid("skent_c2"), { x: 0, y: 0 }, 7);
-    const diameter = solver.solve([circle2], [
-      createDiameterConstraint(cid("d"), eid("skent_c2"), length(20)),
-    ]);
+    const diameter = solver.solve(
+      [circle2],
+      [createDiameterConstraint(cid("d"), eid("skent_c2"), length(20))],
+    );
     expect(diameter.status).toBe("under-constrained");
     if (diameter.status !== "failed") {
       expect(solvedCircle(diameter, "skent_c2").radius).toBeCloseTo(10, 6);
@@ -400,9 +470,10 @@ describe("reference solver — per-constraint battery", () => {
   it("equal matches line lengths and circle radii", () => {
     const a = createLineEntity(eid("skent_a"), { x: 0, y: 0 }, { x: 10, y: 0 });
     const b = createLineEntity(eid("skent_b"), { x: 0, y: 5 }, { x: 20, y: 5 });
-    const lines = solver.solve([a, b], [
-      createEqualConstraint(cid("eq"), eid("skent_a"), eid("skent_b")),
-    ]);
+    const lines = solver.solve(
+      [a, b],
+      [createEqualConstraint(cid("eq"), eid("skent_a"), eid("skent_b"))],
+    );
     expect(lines.status).toBe("under-constrained");
     if (lines.status !== "failed") {
       const sa = solvedLine(lines, "skent_a");
@@ -414,9 +485,10 @@ describe("reference solver — per-constraint battery", () => {
     }
     const c1 = createCircleEntity(eid("skent_c1"), { x: 0, y: 0 }, 5);
     const c2 = createCircleEntity(eid("skent_c2"), { x: 30, y: 0 }, 9);
-    const circles = solver.solve([c1, c2], [
-      createEqualConstraint(cid("eqc"), eid("skent_c1"), eid("skent_c2")),
-    ]);
+    const circles = solver.solve(
+      [c1, c2],
+      [createEqualConstraint(cid("eqc"), eid("skent_c1"), eid("skent_c2"))],
+    );
     expect(circles.status).toBe("under-constrained");
     if (circles.status !== "failed") {
       expect(solvedCircle(circles, "skent_c1").radius).toBeCloseTo(
@@ -427,11 +499,16 @@ describe("reference solver — per-constraint battery", () => {
   });
 
   it("tangent enforces line-to-circle and circle-to-circle tangency", () => {
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 10, y: 4 });
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 10, y: 4 },
+    );
     const circle = createCircleEntity(eid("skent_c"), { x: 5, y: 10 }, 5);
-    const lineCase = solver.solve([line, circle], [
-      createTangentConstraint(cid("t"), eid("skent_l"), eid("skent_c")),
-    ]);
+    const lineCase = solver.solve(
+      [line, circle],
+      [createTangentConstraint(cid("t"), eid("skent_l"), eid("skent_c"))],
+    );
     expect(lineCase.status).toBe("under-constrained");
     if (lineCase.status !== "failed") {
       const solvedCenter = solvedCircle(lineCase, "skent_c");
@@ -444,9 +521,17 @@ describe("reference solver — per-constraint battery", () => {
     }
     const c1 = createCircleEntity(eid("skent_c1"), { x: 0, y: 0 }, 5);
     const c2 = createCircleEntity(eid("skent_c2"), { x: 20, y: 0 }, 7);
-    const external = solver.solve([c1, c2], [
-      createTangentConstraint(cid("tx"), eid("skent_c1"), eid("skent_c2"), "external"),
-    ]);
+    const external = solver.solve(
+      [c1, c2],
+      [
+        createTangentConstraint(
+          cid("tx"),
+          eid("skent_c1"),
+          eid("skent_c2"),
+          "external",
+        ),
+      ],
+    );
     expect(external.status).toBe("under-constrained");
     if (external.status !== "failed") {
       const s1 = solvedCircle(external, "skent_c1");
@@ -455,9 +540,17 @@ describe("reference solver — per-constraint battery", () => {
     }
     const c3 = createCircleEntity(eid("skent_c3"), { x: 0, y: 0 }, 5);
     const c4 = createCircleEntity(eid("skent_c4"), { x: 20, y: 0 }, 7);
-    const internal = solver.solve([c3, c4], [
-      createTangentConstraint(cid("tn"), eid("skent_c3"), eid("skent_c4"), "internal"),
-    ]);
+    const internal = solver.solve(
+      [c3, c4],
+      [
+        createTangentConstraint(
+          cid("tn"),
+          eid("skent_c3"),
+          eid("skent_c4"),
+          "internal",
+        ),
+      ],
+    );
     expect(internal.status).toBe("under-constrained");
     if (internal.status !== "failed") {
       const s3 = solvedCircle(internal, "skent_c3");
@@ -468,14 +561,21 @@ describe("reference solver — per-constraint battery", () => {
 
   it("midpoint places the point at the line's midpoint", () => {
     const point = createPointEntity(eid("skent_p"), { x: 2, y: 3 });
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 10, y: 0 });
-    const result = solver.solve([point, line], [
-      createMidpointConstraint(
-        cid("mid"),
-        pointTarget(eid("skent_p"), "center"),
-        eid("skent_l"),
-      ),
-    ]);
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    );
+    const result = solver.solve(
+      [point, line],
+      [
+        createMidpointConstraint(
+          cid("mid"),
+          pointTarget(eid("skent_p"), "center"),
+          eid("skent_l"),
+        ),
+      ],
+    );
     expect(result.status).toBe("under-constrained");
     if (result.status === "failed") return;
     expect(result.dof).toBe(4);
@@ -487,14 +587,17 @@ describe("reference solver — per-constraint battery", () => {
     const a = createPointEntity(eid("skent_a"), { x: 0, y: 0 });
     const b = createPointEntity(eid("skent_b"), { x: 10, y: 0 });
     const c = createPointEntity(eid("skent_c"), { x: 4, y: 0 });
-    const aboutPoint = solver.solve([a, b, c], [
-      createSymmetryAboutPointConstraint(
-        cid("sym-p"),
-        pointTarget(eid("skent_a"), "center"),
-        pointTarget(eid("skent_b"), "center"),
-        pointTarget(eid("skent_c"), "center"),
-      ),
-    ]);
+    const aboutPoint = solver.solve(
+      [a, b, c],
+      [
+        createSymmetryAboutPointConstraint(
+          cid("sym-p"),
+          pointTarget(eid("skent_a"), "center"),
+          pointTarget(eid("skent_b"), "center"),
+          pointTarget(eid("skent_c"), "center"),
+        ),
+      ],
+    );
     expect(aboutPoint.status).toBe("under-constrained");
     if (aboutPoint.status !== "failed") {
       const pa = solvedPoint(aboutPoint, "skent_a");
@@ -511,14 +614,17 @@ describe("reference solver — per-constraint battery", () => {
       { x: 0, y: 10 },
       { fixed: true },
     );
-    const aboutLine = solver.solve([d, e, axis], [
-      createSymmetryAboutLineConstraint(
-        cid("sym-l"),
-        pointTarget(eid("skent_d"), "center"),
-        pointTarget(eid("skent_e"), "center"),
-        eid("skent_axis"),
-      ),
-    ]);
+    const aboutLine = solver.solve(
+      [d, e, axis],
+      [
+        createSymmetryAboutLineConstraint(
+          cid("sym-l"),
+          pointTarget(eid("skent_d"), "center"),
+          pointTarget(eid("skent_e"), "center"),
+          eid("skent_axis"),
+        ),
+      ],
+    );
     expect(aboutLine.status).toBe("under-constrained");
     if (aboutLine.status !== "failed") {
       const pd = solvedPoint(aboutLine, "skent_d");
@@ -531,7 +637,11 @@ describe("reference solver — per-constraint battery", () => {
 
 describe("reference solver — semantics and diagnostics", () => {
   it("reports malformed references instead of throwing", () => {
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 10, y: 0 });
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    );
     const missing = createCoincidentConstraint(
       cid("ghost"),
       pointTarget(eid("skent_l"), "start"),
@@ -554,7 +664,11 @@ describe("reference solver — semantics and diagnostics", () => {
   });
 
   it("collects every malformed constraint, not just the first", () => {
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 10, y: 0 });
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    );
     const constraints = [
       createHorizontalConstraint(cid("h1"), eid("skent_ghost-1")),
       createHorizontalConstraint(cid("h2"), eid("skent_ghost-2")),
@@ -566,17 +680,25 @@ describe("reference solver — semantics and diagnostics", () => {
   });
 
   it("treats a constraint contradicting a fixed entity as conflicting", () => {
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 50, y: 0 }, {
-      fixed: true,
-    });
-    const result = solver.solve([line], [
-      createDistanceConstraint(
-        cid("d"),
-        pointTarget(eid("skent_l"), "start"),
-        pointTarget(eid("skent_l"), "end"),
-        length(60),
-      ),
-    ]);
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 50, y: 0 },
+      {
+        fixed: true,
+      },
+    );
+    const result = solver.solve(
+      [line],
+      [
+        createDistanceConstraint(
+          cid("d"),
+          pointTarget(eid("skent_l"), "start"),
+          pointTarget(eid("skent_l"), "end"),
+          length(60),
+        ),
+      ],
+    );
     expect(result.status).toBe("failed");
     if (result.status !== "failed") return;
     expect(result.diagnostics[0]?.code).toBe(
@@ -639,12 +761,18 @@ describe("reference solver — semantics and diagnostics", () => {
   });
 
   it("solves construction geometry identically to real geometry", () => {
-    const line = createLineEntity(eid("skent_l"), { x: 0, y: 0 }, { x: 10, y: 4 }, {
-      construction: true,
-    });
-    const result = solver.solve([line], [
-      createHorizontalConstraint(cid("h"), eid("skent_l")),
-    ]);
+    const line = createLineEntity(
+      eid("skent_l"),
+      { x: 0, y: 0 },
+      { x: 10, y: 4 },
+      {
+        construction: true,
+      },
+    );
+    const result = solver.solve(
+      [line],
+      [createHorizontalConstraint(cid("h"), eid("skent_l"))],
+    );
     expect(result.status).toBe("under-constrained");
     if (result.status === "failed") return;
     expect(solvedLine(result, "skent_l").y1).toBeCloseTo(
@@ -657,12 +785,21 @@ describe("reference solver — semantics and diagnostics", () => {
     const sketch = fullyConstrainedTriangleSketch();
     const first = solver.solve(sketch.entities, sketch.constraints);
     const second = solver.solve(sketch.entities, sketch.constraints);
-    const third = createReferenceSketchSolver().solve(sketch.entities, sketch.constraints);
+    const third = createReferenceSketchSolver().solve(
+      sketch.entities,
+      sketch.constraints,
+    );
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
     expect(JSON.stringify(first)).toBe(JSON.stringify(third));
     const failedSketch = conflictingDimensionsSketch();
-    const failedFirst = solver.solve(failedSketch.entities, failedSketch.constraints);
-    const failedSecond = solver.solve(failedSketch.entities, failedSketch.constraints);
+    const failedFirst = solver.solve(
+      failedSketch.entities,
+      failedSketch.constraints,
+    );
+    const failedSecond = solver.solve(
+      failedSketch.entities,
+      failedSketch.constraints,
+    );
     expect(JSON.stringify(failedFirst)).toBe(JSON.stringify(failedSecond));
   });
 

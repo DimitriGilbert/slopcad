@@ -203,7 +203,9 @@ afterEach(cleanup);
 
 describe("CadParameterPanel", () => {
   it("renders names, canonical quantities with units, and the defining expression", () => {
-    render(<CadParameterPanel parameters={buildDisplayCollection().parameters} />);
+    render(
+      <CadParameterPanel parameters={buildDisplayCollection().parameters} />,
+    );
 
     // Panel title; a real Formedible form carries the fields (structural
     // evidence: the editable surface is a form, not decorated divs).
@@ -356,7 +358,7 @@ describe("CadParameterPanel", () => {
     fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
     expect(
       await screen.findByText(
-        "expression/unknown-identifier: Unknown identifier \"unknownName\".",
+        'expression/unknown-identifier: Unknown identifier "unknownName".',
       ),
     ).toBeTruthy();
     expect(store.commandLog).toHaveLength(0);
@@ -414,7 +416,9 @@ describe("CadParameterPanel", () => {
   });
 
   it("renders inert without any apply surface: disabled fields, no submit", () => {
-    render(<CadParameterPanel parameters={buildDisplayCollection().parameters} />);
+    render(
+      <CadParameterPanel parameters={buildDisplayCollection().parameters} />,
+    );
 
     expect(screen.getByLabelText("width")).toHaveProperty("disabled", true);
     expect(screen.getByLabelText("derivedDepth")).toHaveProperty(

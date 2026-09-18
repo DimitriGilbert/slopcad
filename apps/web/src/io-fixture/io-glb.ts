@@ -149,7 +149,8 @@ export async function loadGlbViewerState(
     for (let i = 0; i < indexAttribute.count; i += 1) {
       indices.push(indexAttribute.getX(i));
     }
-    const normalAttribute: BufferAttribute | InterleavedBufferAttribute | undefined =
+    const normalAttribute:
+      BufferAttribute | InterleavedBufferAttribute | undefined =
       child.geometry.getAttribute("normal");
     const firstMaterial = Array.isArray(child.material)
       ? child.material[0]
@@ -193,10 +194,15 @@ export async function loadGlbViewerState(
     : { positions, indices };
   const object = projectTessellation(GLB_VIEWER_BODY_ID, tessellation);
   if (!object.ok) {
-    throw new Error(`GLB viewer rejected the loaded soup: ${object.error.message}`);
+    throw new Error(
+      `GLB viewer rejected the loaded soup: ${object.error.message}`,
+    );
   }
   const projection = unwrapProjection(
-    createRenderProjection([object.value], fitCameraToBounds(meshBounds(tessellation))),
+    createRenderProjection(
+      [object.value],
+      fitCameraToBounds(meshBounds(tessellation)),
+    ),
   );
   return {
     meshes: loaded.map((mesh) => ({
