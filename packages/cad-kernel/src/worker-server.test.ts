@@ -697,6 +697,74 @@ describe("server solid-id mapping", () => {
   });
 });
 
+describe("the solid.area operation (Phase 27.4)", () => {
+  it("measures the booted kernel's surface area over the wire", async () => {
+    const { responses, send } = setup();
+    send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000001",
+      operation: "solid.createBox",
+      input: boxWireInput,
+    });
+    await flush();
+    send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000002",
+      operation: "solid.area",
+      input: { solid: "wsol_000001" },
+    });
+    await flush();
+
+    const area = parseWorkerOperationResult(
+      "solid.area",
+      successResponseAt(responses, 1).result,
+    );
+    expect(area.ok).toBe(true);
+    if (!area.ok) return;
+    // The harness box is 2x3x4 mm: the analytic area 2(wd+wh+dh) is exact
+    // on every declaring kernel, the booted (fake) one included.
+    expect(area.value.area).toBeCloseTo(2 * (2 * 3 + 2 * 4 + 3 * 4), 9);
+  });
+
+  it("declines a solid outside the kernel's area model with the kernel's own structured code", async () => {
+    const { responses, send } = setup();
+    send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000001",
+      operation: "solid.createBox",
+      input: boxWireInput,
+    });
+    await flush();
+    send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000002",
+      operation: "solid.subtract",
+      input: { target: "wsol_000001", tools: ["wsol_000001"] },
+    });
+    await flush();
+    send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000003",
+      operation: "solid.area",
+      input: { solid: "wsol_000002" },
+    });
+    await flush();
+
+    // A total self-subtraction is an EMPTY solid, and empty solids are
+    // boolean nodes in the fake model: outside its analytic area subset.
+    const response = errorResponseAt(responses, 2);
+    expect(response.error.code).toBe("worker/operation-failed");
+    expect(response.error.data).toEqual({
+      kernelCode: "kernel/unsupported-operation",
+    });
+  });
+});
+
 describe("the step.import extension (Phase 21.3)", () => {
   const stepInput = { data: "SSBXLUhPTEU=" };
 

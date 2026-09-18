@@ -52,6 +52,7 @@ import {
 } from "./contract";
 import {
   assertBoundsContain,
+  assertAreaClose,
   assertBoundsEqual,
   assertTessellationValid,
   assertVolumeClose,
@@ -440,6 +441,81 @@ export function defineKernelContractSuite(
         unwrapKernelResult(kernel.volume(frustum), "frustum volume"),
         (Math.PI * 10 * (4 ** 2 + 4 * 2 + 2 ** 2)) / 3,
         CURVED_VOLUME_TOLERANCE,
+      );
+    });
+
+    it("measures surface area: box exact, curved primitives within the volume band, or answers unsupported honestly", () => {
+      // Phase 27.4: the whole-solid surface-area measurement, judged in the
+      // same exact/banded classes as the volumes — analytic-exact where the
+      // kernel's representation is (the box; every declaring kernel measures
+      // a box exactly), within the shared curved tolerance where the
+      // kernel's boundary representation discretizes curvature (the mesh
+      // kernels' faceted cylinders/spheres/cones sit in the same inscribed
+      // band their volumes document).
+      const kernel = createKernel();
+      const solid = box(kernel, 30, 20, 10);
+      if (!kernel.capabilities.surfaceArea) {
+        // The honesty contract for kernels without the surface-area
+        // measurement: even a perfectly measurable solid answers the
+        // structured unsupported code, never a silently approximate number.
+        expectKernelFailure(
+          kernel.area(solid),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "area on a kernel without the surfaceArea capability",
+        );
+        return;
+      }
+      assertAreaClose(
+        unwrapKernelResult(kernel.area(solid), "box area"),
+        2 * (30 * 20 + 30 * 10 + 20 * 10),
+        EXACT_VOLUME_TOLERANCE,
+      );
+      const sphere = unwrapKernelResult(
+        kernel.createSphere({ radius: length(10) }),
+        "createSphere",
+      );
+      assertAreaClose(
+        unwrapKernelResult(kernel.area(sphere), "sphere area"),
+        4 * Math.PI * 10 ** 2,
+        CURVED_VOLUME_TOLERANCE,
+      );
+      const cylinder = unwrapKernelResult(
+        kernel.createCylinder({ radius: length(4), height: length(10) }),
+        "createCylinder",
+      );
+      assertAreaClose(
+        unwrapKernelResult(kernel.area(cylinder), "cylinder area"),
+        2 * Math.PI * 4 * (4 + 10),
+        CURVED_VOLUME_TOLERANCE,
+      );
+      const frustum = unwrapKernelResult(
+        kernel.createCone({
+          bottomRadius: length(4),
+          topRadius: length(2),
+          height: length(10),
+        }),
+        "createCone",
+      );
+      const slant = Math.hypot(4 - 2, 10);
+      assertAreaClose(
+        unwrapKernelResult(kernel.area(frustum), "frustum area"),
+        Math.PI * (4 + 2) * slant + Math.PI * 4 ** 2 + Math.PI * 2 ** 2,
+        CURVED_VOLUME_TOLERANCE,
+      );
+    });
+
+    it("preserves surface area under translation, with the volume", () => {
+      const kernel = createKernel();
+      if (!kernel.capabilities.surfaceArea) return;
+      const solid = box(kernel, 30, 20, 10);
+      const moved = unwrapKernelResult(
+        kernel.transform(solid, { x: length(5), y: length(-2), z: length(7) }),
+        "transform",
+      );
+      assertAreaClose(
+        unwrapKernelResult(kernel.area(moved), "translated area"),
+        2 * (30 * 20 + 30 * 10 + 20 * 10),
+        EXACT_VOLUME_TOLERANCE,
       );
     });
 

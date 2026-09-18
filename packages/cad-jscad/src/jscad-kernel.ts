@@ -230,7 +230,7 @@ const {
 const { extrudeLinear, extrudeFromSlices, extrudeRotate, slice } = extrusions;
 const { cuboid, cylinder, cylinderElliptic, sphere } = primitives;
 const { translate } = transforms;
-const { measureBoundingBox, measureVolume } = measurements;
+const { measureArea, measureBoundingBox, measureVolume } = measurements;
 const { toPolygons, transform: transformGeom3 } = geometries.geom3;
 const { fromPoints: geom2FromPoints } = geometries.geom2;
 const { fromPoints: sliceFromPoints } = slice;
@@ -317,6 +317,15 @@ export const JSCAD_REVOLVE_SEGMENTS = Math.ceil(
  *   `mat4.isMirroring`, keeping the reflected facets outward (probed:
  *   `measureVolume` stays positive and the min-face facet normal points
  *   away), so the adapter only passes the matrix.
+ * - The Phase 27.4 surface-area measurement IS implemented
+ *   (`surfaceArea: true`): the library's own `measureArea` — the polygon
+ *   set's total facet area, exact w.r.t. the kernel's polygon-set
+ *   representation, the same semantics class as its `measureVolume`
+ *   volumes (probed: the corner-origin box measures exactly 2200 mm²; the
+ *   32-segment plate-with-bore lands at the inscribed band of the analytic
+ *   2 200 + 48π mm², to +0.010%; boolean outputs measure over their BSP
+ *   polygon sets, the declared-estimated honesty class of their volumes;
+ *   an empty polygon set measures 0).
  */
 export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -333,6 +342,7 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   chamfer: false,
   shell: false,
   mirror: true,
+  surfaceArea: true,
 });
 
 /**
@@ -1362,6 +1372,13 @@ export function createJscadKernel(): GeometryKernel {
       if (!geometry.ok) return fail(geometry.error);
       if (isEmpty(geometry.value)) return ok(0);
       return ok(measureVolume(geometry.value));
+    },
+
+    area(solid: KernelSolid): KernelResult<number> {
+      const geometry = geometryOf(solid, "area");
+      if (!geometry.ok) return fail(geometry.error);
+      if (isEmpty(geometry.value)) return ok(0);
+      return ok(measureArea(geometry.value));
     },
 
     tessellate(solid: KernelSolid): KernelResult<Tessellation> {

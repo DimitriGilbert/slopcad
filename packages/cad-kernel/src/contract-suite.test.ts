@@ -47,6 +47,7 @@ const BASE_CAPABILITIES: KernelCapabilities = {
   chamfer: false,
   shell: false,
   mirror: false,
+  surfaceArea: false,
 };
 
 function capabilities(

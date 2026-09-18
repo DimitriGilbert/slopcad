@@ -213,6 +213,15 @@ import {
  *   volume, the raw soup's signed volume stays positive, crease-aware
  *   normals point outward), so the adapter passes the reflection matrix
  *   straight through, no mesh surgery.
+ * - The Phase 27.4 surface-area measurement IS implemented
+ *   (`surfaceArea: true`): the engine's own `Manifold.surfaceArea()`
+ *   property — exact over the exact boundary mesh representation, the same
+ *   semantics class as its divergence-theorem volumes (probed: the
+ *   30×20×10 box measures exactly 2200 mm², and the plate-with-bore — its
+ *   r = 4 bore is the engine's 28-chord default — measures 2351.111 mm²,
+ *   +0.0134% over the analytic 2 200 + 48π mm², inside the same
+ *   inscribed-polygon band its volume documents; an empty manifold
+ *   measures 0).
  */
 export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -229,6 +238,7 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   chamfer: false,
   shell: false,
   mirror: true,
+  surfaceArea: true,
 });
 
 /**
@@ -986,6 +996,13 @@ export function manifoldKernelFromRuntime(
       if (!manifold.ok) return fail(manifold.error);
       if (manifold.value.isEmpty()) return ok(0);
       return ok(manifold.value.volume());
+    },
+
+    area(solid: KernelSolid): KernelResult<number> {
+      const manifold = manifoldOf(solid, "area");
+      if (!manifold.ok) return fail(manifold.error);
+      if (manifold.value.isEmpty()) return ok(0);
+      return ok(manifold.value.surfaceArea());
     },
 
     tessellate(solid: KernelSolid): KernelResult<Tessellation> {

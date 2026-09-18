@@ -163,6 +163,7 @@ export const WORKER_OPERATION_IDS = [
   "solid.transform",
   "solid.bounds",
   "solid.volume",
+  "solid.area",
   "solid.tessellate",
   "solid.dispose",
   "solid.fillet",
@@ -629,6 +630,15 @@ export interface WorkerVolumeResult {
   readonly volume: number;
 }
 
+/**
+ * Result of `solid.area` (Phase 27.4): the whole-solid surface area in
+ * mm² (0 for an empty solid), measured with the booted kernel's own
+ * semantics (see the contract's `area` documentation).
+ */
+export interface WorkerAreaResult {
+  readonly area: number;
+}
+
 /** Result of `solid.tessellate`: the indexed triangle soup in mm. */
 export interface WorkerTessellationResult {
   readonly tessellation: Tessellation;
@@ -651,6 +661,7 @@ export interface WorkerOperationInputs {
   readonly "solid.transform": WorkerTransformInput;
   readonly "solid.bounds": WorkerSolidRefInput;
   readonly "solid.volume": WorkerSolidRefInput;
+  readonly "solid.area": WorkerSolidRefInput;
   readonly "solid.tessellate": WorkerSolidRefInput;
   readonly "solid.dispose": WorkerSolidRefInput;
   readonly "solid.fillet": WorkerFilletInput;
@@ -683,6 +694,7 @@ export interface WorkerOperationResults {
   readonly "solid.transform": WorkerSolidResult;
   readonly "solid.bounds": WorkerBoundsResult;
   readonly "solid.volume": WorkerVolumeResult;
+  readonly "solid.area": WorkerAreaResult;
   readonly "solid.tessellate": WorkerTessellationResult;
   readonly "solid.dispose": WorkerDisposeResult;
   readonly "solid.fillet": WorkerSolidResult;
@@ -797,6 +809,9 @@ export interface SerializedWorkerOperationInputs {
   readonly "solid.volume": {
     readonly solid: string;
   };
+  readonly "solid.area": {
+    readonly solid: string;
+  };
   readonly "solid.tessellate": {
     readonly solid: string;
   };
@@ -889,6 +904,9 @@ export interface SerializedWorkerOperationResults {
   };
   readonly "solid.volume": {
     readonly volume: number;
+  };
+  readonly "solid.area": {
+    readonly area: number;
   };
   readonly "solid.tessellate": {
     readonly tessellation: {
@@ -1747,7 +1765,11 @@ function serializeSolidRefInput(input: WorkerSolidRefInput): {
 
 function parseSolidRefInput(
   operation:
-    "solid.bounds" | "solid.volume" | "solid.tessellate" | "solid.dispose",
+    | "solid.bounds"
+    | "solid.volume"
+    | "solid.area"
+    | "solid.tessellate"
+    | "solid.dispose",
   payload: unknown,
 ): ParseResult<WorkerSolidRefInput, WorkerParseError> {
   const record = requirePayloadRecord(operation, payload);
@@ -2533,6 +2555,7 @@ const INPUT_SERIALIZERS: {
   "solid.transform": serializeTransformInput,
   "solid.bounds": serializeSolidRefInput,
   "solid.volume": serializeSolidRefInput,
+  "solid.area": serializeSolidRefInput,
   "solid.tessellate": serializeSolidRefInput,
   "solid.dispose": serializeSolidRefInput,
   "solid.fillet": serializeFilletInput,
@@ -2564,6 +2587,7 @@ const INPUT_PARSERS: {
   "solid.transform": parseTransformInput,
   "solid.bounds": (payload) => parseSolidRefInput("solid.bounds", payload),
   "solid.volume": (payload) => parseSolidRefInput("solid.volume", payload),
+  "solid.area": (payload) => parseSolidRefInput("solid.area", payload),
   "solid.tessellate": (payload) =>
     parseSolidRefInput("solid.tessellate", payload),
   "solid.dispose": (payload) => parseSolidRefInput("solid.dispose", payload),
@@ -2722,6 +2746,35 @@ function parseVolumeResult(
   return ok({ volume });
 }
 
+/**
+ * Serializes `solid.area`'s result: the mm² value carried verbatim (the
+ * kernel already reports canonical-unit numbers).
+ */
+function serializeAreaResult(
+  result: WorkerAreaResult,
+): SerializedWorkerOperationResult<"solid.area"> {
+  return { area: result.area };
+}
+
+/**
+ * Parses `solid.area`'s result at the trust boundary: a finite,
+ * non-negative number, the volume parser's discipline over mm².
+ */
+function parseAreaResult(
+  payload: unknown,
+): ParseResult<WorkerAreaResult, WorkerParseError> {
+  const record = requirePayloadRecord("solid.area", payload);
+  if (!record.ok) return record;
+  const area = record.value.area;
+  if (!isFiniteNumber(area) || area < 0) {
+    return payloadError(
+      'The "solid.area" result field "area" must be a finite, non-negative number.',
+      area,
+    );
+  }
+  return ok({ area });
+}
+
 function serializeTessellationResult(
   result: WorkerTessellationResult,
 ): SerializedWorkerOperationResult<"solid.tessellate"> {
@@ -2860,6 +2913,7 @@ const RESULT_SERIALIZERS: {
   "solid.transform": serializeSolidResult,
   "solid.bounds": serializeBoundsResult,
   "solid.volume": serializeVolumeResult,
+  "solid.area": serializeAreaResult,
   "solid.tessellate": serializeTessellationResult,
   "solid.dispose": serializeDisposeResult,
   "solid.fillet": serializeSolidResult,
@@ -2893,6 +2947,7 @@ const RESULT_PARSERS: {
   "solid.transform": (payload) => parseSolidResult("solid.transform", payload),
   "solid.bounds": parseBoundsResult,
   "solid.volume": parseVolumeResult,
+  "solid.area": parseAreaResult,
   "solid.tessellate": parseTessellationResult,
   "solid.dispose": parseDisposeResult,
   "solid.fillet": (payload) => parseSolidResult("solid.fillet", payload),
@@ -2956,6 +3011,7 @@ const RESULT_MINTS: {
   "solid.transform": (result) => [result.solid],
   "solid.bounds": () => [],
   "solid.volume": () => [],
+  "solid.area": () => [],
   "solid.tessellate": () => [],
   "solid.dispose": () => [],
   "solid.fillet": (result) => [result.solid],

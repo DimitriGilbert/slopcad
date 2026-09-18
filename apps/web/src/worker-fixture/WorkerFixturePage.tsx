@@ -19,6 +19,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { formatBoundsExtents } from "@slopcad/cad-core";
 import {
   createStaleResultCoordinator,
   createWebWorkerTransport,
@@ -51,14 +52,6 @@ interface FixtureCounters {
 function setText(id: string, text: string): void {
   const element = document.getElementById(id);
   if (element !== null) element.textContent = text;
-}
-
-/** Bounds rendered as extents, the spike's `30.000 × 20.000 × 10.000` form. */
-function formatBoundsExtents(measurement: PlateMeasurement): string {
-  const { min, max } = measurement.bounds;
-  return [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
-    .map((extent) => extent.toFixed(3))
-    .join(" × ");
 }
 
 /**
@@ -111,7 +104,7 @@ function bootWorkerFixtureSession(): WorkerFixtureSession {
     );
     setText(
       "worker-bounds",
-      visible === null ? "…" : formatBoundsExtents(visible.state),
+      visible === null ? "…" : formatBoundsExtents(visible.state.bounds),
     );
     setText(
       "worker-triangles",

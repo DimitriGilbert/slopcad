@@ -54,7 +54,15 @@
  * from `onSettled`, `data-cad-selection-frame` from `onSelectionRendered`),
  * the mirrored domain state (`data-selection`, `data-selection-key`,
  * `data-tool-id`, `data-tool-phase`, `data-tool-state`,
- * `data-tool-completion`, `data-tool-failure`, `data-measure`),
+ * `data-tool-completion`, `data-tool-failure`, `data-measure` (the
+ * measure tool's point-pair completion), `data-distance`,
+ * `data-distance-source` and `data-distance-declined` (the Phase 27.2
+ * reference-matrix readout and its structured decline), `data-bounds` and
+ * `data-bounds-tightness` (the Phase 27.1 bounds inspection's readout and
+ * the booted kernel's declared tightness), `data-radius`,
+ * `data-radius-diameter`, `data-radius-source` and `data-radius-declined`
+ * (the Phase 27.3 radius inspection's dual presentation and its structured
+ * decline),
  * `data-command-log` (the store's canonical serialized transactions),
  * `data-hole-diameter` (the document's stored parameter), `data-history`
  * (the undo/redo view), `data-feature-timeline` (the Phase 20 view: rollback
@@ -102,6 +110,7 @@ import {
   createParameterId,
   createSketchDocumentId,
   dimensionless,
+  formatBoundsExtents,
   length,
 } from "@slopcad/cad-core";
 import { Redo2, Undo2 } from "lucide-react";
@@ -118,6 +127,7 @@ import {
   faceAnchorSurface,
   type RenderFixtureSession,
 } from "../render-fixture/fixture-session";
+import { WORKBENCH_SESSION_BACKEND } from "../render-fixture/session-backend";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { createCadWorkbenchSession } from "./session";
@@ -141,6 +151,10 @@ import {
   type SketchExtrudeSubmission,
 } from "./SketchMode";
 import { FeatureTimelineStrip } from "./feature-timeline-strip";
+import { boundsReadout } from "./bounds-inspection";
+import { distanceReadout } from "./distance-inspection";
+import { massPropertiesReadout } from "./mass-properties-inspection";
+import { radiusReadout } from "./radius-inspection";
 
 /** An applied computation: the render state plus its revision identity. */
 interface AppliedRenderState {
@@ -604,6 +618,73 @@ function CadWorkbenchBody({
       ? valueIn(toolsApi.completion.detail.distance, "mm").toFixed(3)
       : null;
 
+  // The bounds inspection (Phase 27.1): the scene solid's kernel-measured
+  // bounds — `solid.bounds` through the session/worker path — displayed
+  // when the selection resolves to exactly the measured body, with the
+  // booted kernel's declared tightness (see ./bounds-inspection).
+  const boundsState = boundsReadout({
+    selected: selectionApi.selected,
+    features: workbenchDocument.features,
+    sceneBodyId:
+      applied === null
+        ? undefined
+        : applied.state.projection.objects.find(
+            (object) => object.bodyId !== undefined,
+          )?.bodyId,
+    bounds: applied === null ? undefined : applied.state.measurement.bounds,
+    tightBooleanBounds: WORKBENCH_SESSION_BACKEND.tightBooleanBounds,
+  });
+
+  // The distance inspection (Phase 27.2): the selection's reference pair —
+  // exactly two selected references — measured through the reference
+  // matrix (see ./distance-inspection). The Distance row's value priority:
+  // the reference pair when one is selected; otherwise the measure tool's
+  // quick point-pair completion (the Phase 13 gesture keeps its role);
+  // otherwise nothing.
+  const referenceDistance = distanceReadout({
+    selected: selectionApi.selected,
+    features: workbenchDocument.features,
+    projection: applied === null ? undefined : applied.state.projection,
+  });
+  const distanceText =
+    referenceDistance.text ??
+    (measureText === null ? null : `${measureText} mm`);
+  const distanceSource =
+    referenceDistance.text !== null
+      ? referenceDistance.source
+      : measureText !== null
+        ? "point pair"
+        : null;
+
+  // The radius inspection (Phase 27.3): exactly one selected reference —
+  // measured through the radius support matrix (see ./radius-inspection):
+  // a cylindrical/circular selection shows its radius AND its diameter
+  // dual, a planar or non-circular selection declines structurally.
+  const radiusState = radiusReadout({
+    selected: selectionApi.selected,
+    features: workbenchDocument.features,
+    projection: applied === null ? undefined : applied.state.projection,
+  });
+
+  // The mass-properties inspection (Phase 27.4): the scene solid's
+  // kernel-measured volume and surface area — `solid.volume` and the new
+  // `solid.area` through the session/worker path — displayed when the
+  // selection resolves to exactly the measured body (see
+  // ./mass-properties-inspection; mass itself has no row: no density model
+  // exists, so density × volume is a downstream consumer's algebra).
+  const massPropertiesState = massPropertiesReadout({
+    selected: selectionApi.selected,
+    features: workbenchDocument.features,
+    sceneBodyId:
+      applied === null
+        ? undefined
+        : applied.state.projection.objects.find(
+            (object) => object.bodyId !== undefined,
+          )?.bodyId,
+    volume: applied === null ? undefined : applied.state.measurement.volume,
+    area: applied === null ? undefined : applied.state.measurement.area,
+  });
+
   const timelineJson = useMemo(
     () =>
       JSON.stringify({
@@ -636,6 +717,17 @@ function CadWorkbenchBody({
         toolsApi.failure === null ? "" : JSON.stringify(toolsApi.failure)
       }
       data-measure={measureText === null ? "" : `${measureText} mm`}
+      data-distance={distanceText ?? ""}
+      data-distance-source={distanceSource ?? ""}
+      data-distance-declined={referenceDistance.declined ?? ""}
+      data-radius={radiusState.text ?? ""}
+      data-radius-diameter={radiusState.diameterText ?? ""}
+      data-radius-source={radiusState.source ?? ""}
+      data-radius-declined={radiusState.declined ?? ""}
+      data-bounds={boundsState.text ?? ""}
+      data-bounds-tightness={boundsState.tightness}
+      data-mass-volume={massPropertiesState.volumeText ?? ""}
+      data-mass-area={massPropertiesState.areaText ?? ""}
       data-command-log={JSON.stringify(store.commandLog)}
       data-rendered-frames={String(renderedFrames)}
       data-hole-diameter={storedHole === null ? "" : String(storedHole)}
@@ -651,12 +743,7 @@ function CadWorkbenchBody({
       data-scene-extents={
         applied === null
           ? ""
-          : (() => {
-              const { min, max } = applied.state.measurement.bounds;
-              return [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
-                .map((extent) => extent.toFixed(3))
-                .join(" × ");
-            })()
+          : formatBoundsExtents(applied.state.measurement.bounds)
       }
       data-scene-bounds={
         applied === null
@@ -809,6 +896,16 @@ function CadWorkbenchBody({
                 className="w-48"
               />
             )}
+            {/* The measurement home (the Phase 13 block, extended in Phases
+                27.1–27.4): every measurement readout surfaces here — the
+                Distance row carries the selection's reference-pair distance
+                (falling back to the measure tool's point-pair completion),
+                the Bounds row the selected body's kernel-measured bounding
+                dimensions, the Radius row the selected circular/
+                cylindrical reference's radius with its diameter dual, and
+                the Volume/Area rows the selected body's kernel-measured
+                mass properties. All rows format their values through the
+                same dimensional unit infrastructure. */}
             <section
               aria-label="Measurement"
               className="border-border bg-background w-48 border"
@@ -816,14 +913,108 @@ function CadWorkbenchBody({
               <div className="text-muted-foreground border-border border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
                 Measurement
               </div>
-              <div className="px-2 py-2 text-sm">
-                {measureText === null ? (
-                  <span className="text-muted-foreground font-mono">—</span>
-                ) : (
-                  <span id="workbench-measure-readout" className="font-mono">
-                    {`${measureText} mm`}
-                  </span>
-                )}
+              <div className="flex flex-col gap-1.5 px-2 py-2 text-xs">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">Distance</span>
+                  {distanceText === null ? (
+                    <span className="text-muted-foreground font-mono">—</span>
+                  ) : (
+                    <span className="text-right font-mono">
+                      <span
+                        id="workbench-measure-readout"
+                        className="block break-words"
+                      >
+                        {distanceText}
+                      </span>
+                      <span
+                        id="workbench-distance-source"
+                        className="text-muted-foreground block"
+                      >
+                        {distanceSource}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">Bounds</span>
+                  {boundsState.text === null ? (
+                    <span className="text-muted-foreground font-mono">—</span>
+                  ) : (
+                    <span className="text-right font-mono">
+                      <span
+                        id="workbench-bounds-readout"
+                        className="block break-words"
+                      >
+                        {boundsState.text}
+                      </span>
+                      <span
+                        id="workbench-bounds-tightness"
+                        className="text-muted-foreground block"
+                      >
+                        {boundsState.tightness === "tight"
+                          ? "tight"
+                          : "may be conservative"}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">Radius</span>
+                  {radiusState.text === null ? (
+                    <span className="text-muted-foreground font-mono">—</span>
+                  ) : (
+                    <span className="text-right font-mono">
+                      <span
+                        id="workbench-radius-readout"
+                        className="block break-words"
+                      >
+                        {radiusState.text}
+                      </span>
+                      <span
+                        id="workbench-radius-diameter"
+                        className="block break-words"
+                      >
+                        {radiusState.diameterText}
+                      </span>
+                      <span
+                        id="workbench-radius-source"
+                        className="text-muted-foreground block"
+                      >
+                        {radiusState.source}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">Volume</span>
+                  {massPropertiesState.volumeText === null ? (
+                    <span className="text-muted-foreground font-mono">—</span>
+                  ) : (
+                    <span className="text-right font-mono">
+                      <span
+                        id="workbench-volume-readout"
+                        className="block break-words"
+                      >
+                        {massPropertiesState.volumeText}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-muted-foreground">Area</span>
+                  {massPropertiesState.areaText === null ? (
+                    <span className="text-muted-foreground font-mono">—</span>
+                  ) : (
+                    <span className="text-right font-mono">
+                      <span
+                        id="workbench-area-readout"
+                        className="block break-words"
+                      >
+                        {massPropertiesState.areaText}
+                      </span>
+                    </span>
+                  )}
+                </div>
               </div>
             </section>
           </div>

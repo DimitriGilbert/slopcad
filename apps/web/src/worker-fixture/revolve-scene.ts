@@ -4,7 +4,7 @@
  * `solid.revolve` request with the sketch-resolved profile loop, the
  * in-plane axis line, the sweep angle, and the workplane placement, then
  * the same measurements the plate and extrude scenes return
- * (`solid.volume`, `solid.bounds`, `solid.tessellate`).
+ * (`solid.volume`, `solid.area`, `solid.bounds`, `solid.tessellate`).
  *
  * The placement rotation is pre-converted to an axis-angle pair the kernel
  * contract expects (cad-sketch's `workplaneToPlacement` supplies the values
@@ -51,6 +51,9 @@ export async function computeRevolveScene(
   const volume = await context.request("solid.volume", {
     solid: revolved.solid,
   });
+  const area = await context.request("solid.area", {
+    solid: revolved.solid,
+  });
   const bounds = await context.request("solid.bounds", {
     solid: revolved.solid,
   });
@@ -59,6 +62,7 @@ export async function computeRevolveScene(
   });
   return {
     volume: volume.volume,
+    area: area.area,
     bounds: bounds.bounds,
     triangles: tessellation.tessellation.indices.length / 3,
     tessellation: tessellation.tessellation,

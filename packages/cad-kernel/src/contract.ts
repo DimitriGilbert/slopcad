@@ -1206,6 +1206,28 @@ export interface GeometryKernel {
   /** The solid's volume in mm³ (0 for an empty solid). */
   volume(solid: KernelSolid): KernelResult<number>;
   /**
+   * The solid's total surface area in mm² (0 for an empty solid); requires
+   * the `surfaceArea` capability (Phase 27.4). Each kernel measures with
+   * its own honest semantics, the same exact/banded classes its volumes
+   * use: the OpenCascade backend integrates the BREP's surfaces exactly
+   * (`BRepGProp.SurfaceProperties` — probed delta 0 from the analytic
+   * plate-with-bore value); the mesh kernels (Manifold, JSCAD) measure
+   * their own boundary representation exactly — for curved primitives
+   * that boundary is the kernel's documented discretization, so the value
+   * sits in the same band as its volume; the fake kernel answers its
+   * analytic primitive subset exactly and declines every other node
+   * (booleans, sweeps, lofts, the modelled repair shapes) with the
+   * structured `kernel/unsupported-operation`, naming its subset — never
+   * a silently approximate number. A kernel declaring `surfaceArea:
+   * false` answers every call with the structured
+   * `kernel/unsupported-operation`, like every capability-gated
+   * operation. Surface area is the mass-property pair of `volume`; MASS
+   * itself is deliberately absent — the contract has no density model,
+   * and `mass = density × volume` is a downstream consumer's unit
+   * algebra, not a kernel measurement.
+   */
+  area(solid: KernelSolid): KernelResult<number>;
+  /**
    * A deterministic, valid, indexed triangle soup of the solid (empty for
    * an empty solid). Not promised to be the exact boundary of boolean
    * results — kernels without exact boolean surfaces emit a deterministic

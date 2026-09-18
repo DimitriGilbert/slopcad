@@ -176,6 +176,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   chamfer: true,
   shell: true,
   mirror: true,
+  surfaceArea: true,
 });
 
 /** The fake kernel's backend id. */
@@ -2073,6 +2074,51 @@ function voxelVolume(shape: FakeShape): number {
 
 function shapeVolume(shape: FakeShape): number {
   return analyticVolume(shape) ?? voxelVolume(shape);
+}
+
+/**
+ * The analytic surface area of the fake kernel's measured subset — the
+ * same closed forms its analytic volumes are — or `undefined` outside it:
+ * the four primitives (box `2(wd+dh+wh)`, sphere `4πr²`, cylinder
+ * `2πr(r+h)`, frustum lateral + both caps) and the two isometry nodes
+ * (`translate`, `mirror` — a reflection preserves area exactly, so both
+ * delegate like the volume's mirror delegation does). Every other node
+ * declines at the `area` entry point instead of surfacing a number this
+ * model cannot honest — booleans have no analytic area (their volumes are
+ * the documented voxel quadrature; a voxel grid measures no surface), and
+ * the modelled sweep/loft/repair shapes carry no closed form.
+ */
+function analyticArea(shape: FakeShape): number | undefined {
+  switch (shape.kind) {
+    case "box":
+      return (
+        2 *
+        (at(shape.size, 0) * at(shape.size, 1) +
+          at(shape.size, 1) * at(shape.size, 2) +
+          at(shape.size, 0) * at(shape.size, 2))
+      );
+    case "sphere":
+      return 4 * Math.PI * shape.radius ** 2;
+    case "cylinder":
+      return 2 * Math.PI * shape.radius * (shape.radius + shape.height);
+    case "cone": {
+      const slant = Math.hypot(
+        shape.bottomRadius - shape.topRadius,
+        shape.height,
+      );
+      return (
+        Math.PI * (shape.bottomRadius + shape.topRadius) * slant +
+        Math.PI * shape.bottomRadius ** 2 +
+        Math.PI * shape.topRadius ** 2
+      );
+    }
+    case "translate":
+      return analyticArea(shape.source);
+    case "mirror":
+      return analyticArea(shape.source);
+    default:
+      return undefined;
+  }
 }
 
 function quad(p1: Vec3, p2: Vec3, p3: Vec3, p4: Vec3): readonly Triangle[] {
@@ -4042,6 +4088,21 @@ export function createFakeKernel(): GeometryKernel {
 
     volume(solid: KernelSolid): KernelResult<number> {
       return volumeOf(solid);
+    },
+
+    area(solid: KernelSolid): KernelResult<number> {
+      const shape = shapeOf(solid, "area");
+      if (!shape.ok) return fail(shape.error);
+      const area = analyticArea(shape.value);
+      if (area === undefined) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            `area rejected the solid: the fake kernel's surface-area domain is its analytic primitive subset (box, sphere, cylinder, cone, and their translate/mirror isometries); this solid is a "${shape.value.kind}" node, whose area has no closed form in the fake model. The general surface-area reference kernel is the OpenCascade backend.`,
+          ),
+        );
+      }
+      return ok(area);
     },
 
     tessellate(solid: KernelSolid): KernelResult<Tessellation> {

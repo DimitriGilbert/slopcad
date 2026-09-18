@@ -497,6 +497,24 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
                 error: kernelFailure("solid.volume", result.error),
               };
         }
+        case "solid.area": {
+          const solid = ownedSolid("solid.area", request.input.solid);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.area(solid.handle);
+          return result.ok
+            ? {
+                status: "value",
+                response: createWorkerSuccessResponse(requestId, "solid.area", {
+                  area: result.value,
+                }),
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.area", result.error),
+              };
+        }
         case "solid.tessellate": {
           const solid = ownedSolid("solid.tessellate", request.input.solid);
           if (solid.status === "failed") {

@@ -123,6 +123,7 @@ import type { ImportedThreeMfMesh } from "@slopcad/cad-io/three-mf-import";
 import { exportStlBinary } from "@slopcad/cad-io/stl-export";
 import { importStl } from "@slopcad/cad-io/stl-import";
 import type { ImportedStlMesh } from "@slopcad/cad-io/stl-import";
+import { formatBoundsExtents } from "@slopcad/cad-core";
 import {
   createWebWorkerTransport,
   createWorkerClient,
@@ -215,17 +216,6 @@ const EXPORT_TITLE = "slopcad plate";
 /** The imported-mesh viewport's fixed box (determinism contract, as on
  * every fixture: the camera fit is pure, the size is constant per page). */
 const VIEWPORT_CLASS = "h-[400px] w-[600px]";
-
-/** Formats bounds as the fixtures' extents form `30.000 × 20.000 × 10.000`. */
-function extentsText(bounds: ImportedMeshState["bounds"]): string {
-  return [
-    bounds.max[0] - bounds.min[0],
-    bounds.max[1] - bounds.min[1],
-    bounds.max[2] - bounds.min[2],
-  ]
-    .map((extent) => extent.toFixed(3))
-    .join(" × ");
-}
 
 export function MeshIoPage(): ReactElement {
   const [applied, setApplied] = useState<PlateRenderState | null>(null);
@@ -677,7 +667,9 @@ export function MeshIoPage(): ReactElement {
         glbView === null ? "" : JSON.stringify(glbView.material)
       }
       data-glb-volume-exact={glbView === null ? "" : String(glbView.volume)}
-      data-glb-extents={glbView === null ? "" : extentsText(glbView.bounds)}
+      data-glb-extents={
+        glbView === null ? "" : formatBoundsExtents(glbView.bounds)
+      }
       data-cad-glb-volume=""
       data-glb-frames={String(glbFrames)}
       data-import-source={importView === null ? "" : importView.source}
@@ -696,7 +688,7 @@ export function MeshIoPage(): ReactElement {
           : String(meshSignedVolume(applied.measurement.tessellation))
       }
       data-import-extents={
-        importView === null ? "" : extentsText(importView.mesh.bounds)
+        importView === null ? "" : formatBoundsExtents(importView.mesh.bounds)
       }
       data-import-detail={importView === null ? "" : importView.detailJson}
       data-import-error={importError}
@@ -986,7 +978,7 @@ export function MeshIoPage(): ReactElement {
               </span>
               {"\u00A0"}mm³, extents ={" "}
               <span id="io-import-extents">
-                {extentsText(importView.mesh.bounds)}
+                {formatBoundsExtents(importView.mesh.bounds)}
               </span>
               {"\u00A0"}mm,{" "}
               <span id="io-import-detail">{importView.detailJson}</span>
@@ -1007,7 +999,9 @@ export function MeshIoPage(): ReactElement {
               , volume ={" "}
               <span id="io-glb-volume">{glbView.volume.toFixed(3)}</span>
               {"\u00A0"}mm³, extents ={" "}
-              <span id="io-glb-extents">{extentsText(glbView.bounds)}</span>
+              <span id="io-glb-extents">
+                {formatBoundsExtents(glbView.bounds)}
+              </span>
               {"\u00A0"}mm
             </>
           )}

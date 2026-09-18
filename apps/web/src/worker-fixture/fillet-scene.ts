@@ -98,6 +98,7 @@ export async function computeFilletScene(
   const boxVolume = await context.request("solid.volume", {
     solid: box.solid,
   });
+  const boxArea = await context.request("solid.area", { solid: box.solid });
   const boxBounds = await context.request("solid.bounds", { solid: box.solid });
   const boxTessellation = await context.request("solid.tessellate", {
     solid: box.solid,
@@ -117,6 +118,9 @@ export async function computeFilletScene(
     const volume = await context.request("solid.volume", {
       solid: rounded.solid,
     });
+    const area = await context.request("solid.area", {
+      solid: rounded.solid,
+    });
     const bounds = await context.request("solid.bounds", {
       solid: rounded.solid,
     });
@@ -125,6 +129,7 @@ export async function computeFilletScene(
     });
     filleted = {
       volume: volume.volume,
+      area: area.area,
       bounds: bounds.bounds,
       triangles: tessellation.tessellation.indices.length / 3,
       tessellation: tessellation.tessellation,
@@ -134,6 +139,7 @@ export async function computeFilletScene(
   return {
     box: {
       volume: boxVolume.volume,
+      area: boxArea.area,
       bounds: boxBounds.bounds,
       triangles: boxTessellation.tessellation.indices.length / 3,
       tessellation: boxTessellation.tessellation,

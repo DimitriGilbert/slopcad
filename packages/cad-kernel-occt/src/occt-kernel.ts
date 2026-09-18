@@ -365,6 +365,11 @@ import {
  *   the mirrored box measures its exact volume with POSITIVE GProp mass
  *   and outward tessellation normals — the engine handles the negative
  *   determinant's orientation itself) (`mirror`).
+ * - The Phase 27.4 surface-area measurement integrates the BREP's
+ *   surfaces exactly (`BRepGProp.SurfaceProperties` → `GProp_GProps.Mass`,
+ *   the surface sibling of the volume integration; probed: the 30×20×10
+ *   box measures exactly 2200 mm², the plate-with-bore exactly
+ *   2 200 + 48π mm² at delta 0, an empty compound 0) (`surfaceArea`).
  */
 export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -381,6 +386,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   chamfer: true,
   shell: true,
   mirror: true,
+  surfaceArea: true,
 });
 
 /**
@@ -1244,6 +1250,17 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     }
   };
 
+  /** The exact BREP surface area of a shape (Phase 27.4), in mm². */
+  const areaOfShape = (shape: TopoDS_Shape): number => {
+    const props = new oc.GProp_GProps();
+    try {
+      oc.BRepGProp.SurfaceProperties(shape, props, true, false);
+      return props.Mass();
+    } finally {
+      props.delete();
+    }
+  };
+
   return {
     id: OCCT_BACKEND_ID,
     capabilities: OCCT_KERNEL_CAPABILITIES,
@@ -2100,6 +2117,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       if (!shape.ok) return fail(shape.error);
       // Exact BREP integration; an empty solid measures exactly 0.
       return ok(volumeOfShape(shape.value));
+    },
+
+    area(solid: KernelSolid): KernelResult<number> {
+      const shape = shapeOf(solid, "area");
+      if (!shape.ok) return fail(shape.error);
+      // Exact BREP surface integration (probed: analytic-exact on the
+      // plate-with-bore); an empty compound measures exactly 0.
+      return ok(areaOfShape(shape.value));
     },
 
     tessellate(solid: KernelSolid): KernelResult<Tessellation> {

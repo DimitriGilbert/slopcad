@@ -103,6 +103,7 @@ import {
   createParameterId,
   createSketchDocumentId,
   dimensionless,
+  formatBoundsExtents,
   length,
 } from "@slopcad/cad-core";
 import { Redo2, Undo2 } from "lucide-react";
@@ -825,12 +826,7 @@ function CadChainWorkbenchBody({
       data-scene-extents={
         applied === null
           ? ""
-          : (() => {
-              const { min, max } = renderedMeasurementOf(applied.scene).bounds;
-              return [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
-                .map((extent) => extent.toFixed(3))
-                .join(" × ");
-            })()
+          : formatBoundsExtents(renderedMeasurementOf(applied.scene).bounds)
       }
       data-scene-bounds={
         applied === null

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { angle, length } from "@slopcad/cad-core";
 import type { LengthValue } from "@slopcad/cad-core";
 import {
+  assertAreaClose,
   assertBoundsEqual,
   assertTessellationValid,
   assertVolumeClose,
@@ -57,6 +58,7 @@ describe("createJscadKernel", () => {
       chamfer: false,
       shell: false,
       mirror: true,
+      surfaceArea: true,
     });
   });
 
@@ -129,6 +131,14 @@ describe("createJscadKernel", () => {
     assertVolumeClose(
       unwrapKernelResult(kernel.volume(scene.result), "plate volume"),
       scene.analyticVolumeMm3,
+      CURVED_VOLUME_TOLERANCE,
+    );
+    // Phase 27.4: `area` is the library's own `measureArea` over the BSP
+    // polygon set — probed +0.010% vs the analytic box-minus-circles-plus-
+    // wall value on this adapter, inside the same curved band.
+    assertAreaClose(
+      unwrapKernelResult(kernel.area(scene.result), "plate area"),
+      scene.analyticAreaMm2,
       CURVED_VOLUME_TOLERANCE,
     );
     // Every face of the true result lies on the plate's box and JSCAD's

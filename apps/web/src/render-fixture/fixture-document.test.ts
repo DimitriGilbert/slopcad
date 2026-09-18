@@ -44,6 +44,7 @@ const CAMERA: RenderCamera = {
 
 const MEASUREMENT: PlateMeasurement = {
   volume: 6000,
+  area: 2200,
   bounds: { min: [0, 0, 0], max: [30, 20, 10] },
   triangles: 2,
   tessellation: {

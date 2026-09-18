@@ -20,6 +20,7 @@ import {
   length,
 } from "@slopcad/cad-core";
 import {
+  assertAreaClose,
   assertBoundsEqual,
   assertTessellationValid,
   assertVolumeClose,
@@ -133,6 +134,7 @@ describe("occt kernel identity and capabilities", () => {
       chamfer: true,
       shell: true,
       mirror: true,
+      surfaceArea: true,
     });
   });
 
@@ -292,6 +294,27 @@ describe("occt semantic fixtures", () => {
       "plate tessellation",
     );
     assertTessellationValid(soup, { bounds: fixture.tightBounds });
+  });
+
+  it("measures surface area exactly: box and plate-with-bore at the analytic values", () => {
+    // Phase 27.4: `BRepGProp.SurfaceProperties` integrates the BREP's
+    // surfaces exactly — the box measures its closed form, and the drilled
+    // plate measures box-faces-minus-two-bore-circles-plus-bore-wall at the
+    // analytic value (probed at delta 0), the surface sibling of the
+    // volume integration's 0-relative-error result.
+    const kernel = makeKernel();
+    const solid = box(kernel, 30, 20, 10);
+    assertAreaClose(
+      unwrapKernelResult(kernel.area(solid), "box area"),
+      2 * (30 * 20 + 30 * 10 + 20 * 10),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    const fixture = buildPlateWithHole(kernel);
+    assertAreaClose(
+      unwrapKernelResult(kernel.area(fixture.result), "plate area"),
+      fixture.analyticAreaMm2,
+      EXACT_VOLUME_TOLERANCE,
+    );
   });
 
   it("evaluates the boolean chain: every volume exact, bounds tight", () => {
@@ -762,6 +785,13 @@ describe("occt empty-solid semantics (detected by measurement)", () => {
     expect(tessellationTriangleCount(soup)).toBe(0);
     expect(soup.positions.length).toBe(0);
     expect(soup.normals).toBeUndefined();
+    // Phase 27.4: the surface area of an empty compound measures exactly 0
+    // (the GProp surface integration over no faces), the volume rule's twin.
+    assertAreaClose(
+      unwrapKernelResult(kernel.area(empty), "empty area"),
+      0,
+      EXACT_VOLUME_TOLERANCE,
+    );
   });
 
   it("maps disjoint intersection onto the contract's empty-solid behaviour", () => {

@@ -8,6 +8,7 @@
 
 import type { SelectionReference } from "@slopcad/cad-core";
 import {
+  formatBoundsExtents,
   groupSyntheticFaces,
   serializeDimensionalValue,
   serializeSelectionReference,
@@ -25,7 +26,6 @@ import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
 import type {
   ExtrudeSceneRequest,
   HoleSceneRequest,
-  PlateMeasurement,
   RevolveSceneRequest,
 } from "../worker-fixture/plate-scene-extra";
 
@@ -93,14 +93,6 @@ function round1(value: number): number {
 /** Three-decimal rounding for normal metadata. */
 function round3(value: number): number {
   return Number(value.toFixed(3));
-}
-
-/** Bounds rendered as extents, the fixtures' `30.000 × 20.000 × 10.000` form. */
-function formatBoundsExtents(measurement: PlateMeasurement): string {
-  const { min, max } = measurement.bounds;
-  return [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
-    .map((extent) => extent.toFixed(3))
-    .join(" × ");
 }
 
 /**
@@ -232,7 +224,9 @@ export function bootRenderFixtureSession(
     if (targets.boundsId !== undefined) {
       setText(
         targets.boundsId,
-        visible === null ? "…" : formatBoundsExtents(visible.state.measurement),
+        visible === null
+          ? "…"
+          : formatBoundsExtents(visible.state.measurement.bounds),
       );
     }
     if (targets.trianglesId !== undefined) {

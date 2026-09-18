@@ -172,16 +172,18 @@ function stageFailure(
 
 const mm = (value: number) => length(value, "mm");
 
-/** The measurement trio every stage reports (volume, bounds, tessellation). */
+/** The measurement set every stage reports (volume, area, bounds, tessellation). */
 async function measure(
   context: ComputationContext,
   solid: WorkerSolidId,
 ): Promise<PlateMeasurement> {
   const volume = await context.request("solid.volume", { solid });
+  const area = await context.request("solid.area", { solid });
   const bounds = await context.request("solid.bounds", { solid });
   const tessellation = await context.request("solid.tessellate", { solid });
   return {
     volume: volume.volume,
+    area: area.area,
     bounds: bounds.bounds,
     triangles: tessellation.tessellation.indices.length / 3,
     tessellation: tessellation.tessellation,
