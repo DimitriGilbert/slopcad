@@ -20,17 +20,27 @@
  * host held real bytes; an outcome exists only after a real parse. A
  * disabled format renders with its description and cannot be started.
  *
- * ## Mounting
+ * ## Mounting and focus
  *
  * Dialog content mounts ONLY while `open` (the command menu's documented
  * SSR discipline); Escape and backdrop dismissal are the dialog
- * primitives' existing behavior, folded into `onOpenChange`.
+ * primitives' existing behavior, folded into `onOpenChange`. Both dialogs
+ * are modal (the primitive's default): focus is trapped while open and
+ * released on close. Because hosts open them from state (a toolbar
+ * button, a palette command) rather than a rendered `DialogTrigger`, the
+ * primitive cannot know where focus came from — the optional `finalFocus`
+ * ref is the documented restoration point, and a host that passes its
+ * trigger button's ref gets trigger-accurate focus restoration for free
+ * (unset, close restores to the element the primitive tracked, if any).
+ * While a format exchange is pending the dialog reports `aria-busy`, so
+ * assistive technology reads it as busy rather than silently disabled.
  *
  * All user-facing strings live in the exported label constants
  * (overridable via `labels` props); format labels, descriptions, byte
  * counts, and error text are host data rendered verbatim.
  */
 
+import type { RefObject } from "react";
 import { cn } from "cn";
 
 import { Button } from "../button";
@@ -107,6 +117,11 @@ export interface CadExportDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   /** Label token overrides, merged over {@link CAD_EXPORT_DIALOG_LABELS}. */
   readonly labels?: Partial<CadExportDialogLabels>;
+  /**
+   * Ref to the element focus returns to when the dialog closes — the
+   * host's trigger, typically (see the mounting-and-focus doc section).
+   */
+  readonly finalFocus?: RefObject<HTMLElement | null>;
   /** Extends the dialog content classes. */
   readonly className?: string;
 }
@@ -119,6 +134,7 @@ export function CadExportDialog({
   className,
   entries = [],
   error = "",
+  finalFocus,
   formats,
   labels: labelOverrides,
   onExport,
@@ -134,8 +150,10 @@ export function CadExportDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
+        aria-busy={pendingFormatId !== null || undefined}
         className={cn("sm:max-w-lg", className)}
         data-cad-export-dialog=""
+        finalFocus={finalFocus}
       >
         <DialogHeader>
           <DialogTitle>{labels.title}</DialogTitle>
@@ -293,6 +311,11 @@ export interface CadImportDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   /** Label token overrides, merged over {@link CAD_IMPORT_DIALOG_LABELS}. */
   readonly labels?: Partial<CadImportDialogLabels>;
+  /**
+   * Ref to the element focus returns to when the dialog closes — the
+   * host's trigger, typically (see the mounting-and-focus doc section).
+   */
+  readonly finalFocus?: RefObject<HTMLElement | null>;
   /** Extends the dialog content classes. */
   readonly className?: string;
 }
@@ -306,6 +329,7 @@ export function CadImportDialog({
   accept,
   className,
   error = "",
+  finalFocus,
   formats,
   held = [],
   labels: labelOverrides,
@@ -325,8 +349,10 @@ export function CadImportDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
+        aria-busy={pending || undefined}
         className={cn("sm:max-w-lg", className)}
         data-cad-import-dialog=""
+        finalFocus={finalFocus}
       >
         <DialogHeader>
           <DialogTitle>{labels.title}</DialogTitle>

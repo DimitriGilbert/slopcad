@@ -275,7 +275,7 @@ function TimelineFragment({
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
           aria-pressed={suppressed}
-          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center"
+          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
           title={
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
@@ -314,7 +314,8 @@ function TimelineGap({
     <button
       type="button"
       aria-label={active ? `Remove rollback point — ${label}` : label}
-      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer"
+      aria-pressed={active}
+      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
       title={active ? `Remove rollback point — ${label}` : label}
       onClick={() => {
         if (active) {

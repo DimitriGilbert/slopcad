@@ -13,6 +13,7 @@
     "test:render": "playwright test -c playwright.render.config.ts",
     "test:spike": "playwright test -c playwright.spike.config.ts",
     "test:workbench": "playwright test -c playwright.workbench.config.ts",
+    "test:a11y": "playwright test -c playwright.a11y.config.ts",
     "test:worker": "playwright test -c playwright.worker.config.ts",
     "test:perf": "playwright test -c playwright.perf.config.ts",
     "lint": "eslint ."

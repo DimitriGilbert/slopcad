@@ -246,6 +246,11 @@ export function CompleteCadWorkbench({
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importedFrames, setImportedFrames] = useState(0);
+  // The dialog trigger buttons: the dialogs open from state (these buttons,
+  // the palette's File commands), so the primitive cannot track the opener
+  // itself — these refs are the documented focus-restoration points.
+  const importTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement | null>(null);
   // The last import outcome the auto-close has seen (identity-tracked: the
   // builder-built io surface re-mints the outcome object every render).
   const seenOutcomeRef = useRef<CadImportOutcome | null>(null);
@@ -605,6 +610,7 @@ export function CompleteCadWorkbench({
       <CadExportDialog
         entries={ioSurface.exportEntries}
         error={ioSurface.exportError}
+        finalFocus={exportTriggerRef}
         formats={ioSurface.exportFormats}
         onExport={ioSurface.onExport}
         onOpenChange={setExportDialogOpen}
@@ -613,6 +619,7 @@ export function CompleteCadWorkbench({
       />
       <CadImportDialog
         error={ioSurface.importError}
+        finalFocus={importTriggerRef}
         formats={ioSurface.importFormats}
         held={ioSurface.importHeld}
         onImportFiles={ioSurface.onImportFiles}
@@ -765,6 +772,7 @@ export function CompleteCadWorkbench({
                 onClick={() => {
                   setImportDialogOpen(true);
                 }}
+                ref={importTriggerRef}
                 size="xs"
                 type="button"
                 variant="outline"
@@ -777,6 +785,7 @@ export function CompleteCadWorkbench({
                 onClick={() => {
                   setExportDialogOpen(true);
                 }}
+                ref={exportTriggerRef}
                 size="xs"
                 title={
                   applied === null
