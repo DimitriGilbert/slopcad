@@ -290,9 +290,13 @@ function rotateEntries(
  * Jacobi eigen decomposition of a symmetric 3×3 matrix: cyclic sweeps of
  * Givens rotations zero the off-diagonal entries. Fully deterministic —
  * fixed sweep order, fixed convergence threshold, so the same input always
- * yields the same eigenvectors (up to the sign the caller fixes).
+ * yields the same eigenvectors (up to the sign the caller fixes). Both
+ * `values` and `vectors` are mapped through the SAME ascending-order
+ * permutation of the converged diagonal's columns, so every eigenvalue
+ * stays paired with its eigenvector column as the
+ * {@link EigenDecomposition} contract documents.
  */
-function jacobiEigenDecomposition(matrix: Matrix3): EigenDecomposition {
+export function jacobiEigenDecomposition(matrix: Matrix3): EigenDecomposition {
   const a: Matrix3 = [
     [matrix[0][0], matrix[0][1], matrix[0][2]],
     [matrix[1][0], matrix[1][1], matrix[1][2]],
@@ -367,9 +371,9 @@ function jacobiEigenDecomposition(matrix: Matrix3): EigenDecomposition {
     return value;
   };
   const values: readonly [number, number, number] = Object.freeze([
-    diag(0),
-    diag(1),
-    diag(2),
+    diag(order[0]),
+    diag(order[1]),
+    diag(order[2]),
   ]);
   const vectors: readonly [
     readonly [number, number, number],
@@ -799,16 +803,20 @@ export function fitCylindricalRadius(
     );
   }
 
-  // Lift the fitted centre onto the axis at the vertices' mean height.
+  // Lift the fitted centre back to world millimetres: the inverse of the
+  // (x, y, z) → (u, v, a) projection is the frame-weighted sum through the
+  // SAME orthonormal frame {e1, e2, axis} the projection used — the fitted
+  // circle's (centerU, centerV) carried by e1/e2, placed on the axis at the
+  // vertices' mean axial coordinate.
   let meanAxial = 0;
   for (const [x, y, z] of points) {
     meanAxial += x * axis[0] + y * axis[1] + z * axis[2];
   }
   meanAxial /= points.length;
   const center: readonly [number, number, number] = [
-    centerU + meanAxial * axis[0],
-    centerV + meanAxial * axis[1],
-    meanAxial * axis[2],
+    centerU * e1[0] + centerV * e2[0] + meanAxial * axis[0],
+    centerU * e1[1] + centerV * e2[1] + meanAxial * axis[1],
+    centerU * e1[2] + centerV * e2[2] + meanAxial * axis[2],
   ];
   return ok(
     measureOf(radius, "fitted", {
