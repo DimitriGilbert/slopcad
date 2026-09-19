@@ -216,16 +216,23 @@ async function probeStartup(): Promise<Record<string, number[]>> {
     const channel = bootChannel(() => {});
     channel.worker.addEventListener("message", onMessage);
     const client = channel.client;
-    const box = await client.request("solid.createBox", {
-      width: length(30, "mm"),
-      depth: length(20, "mm"),
-      height: length(10, "mm"),
-    });
-    firstResponse.push(performance.now() - created);
-    await client.request("solid.dispose", { solid: box.solid });
-    client.close();
-    channel.worker.removeEventListener("message", onMessage);
-    channel.dispose();
+    // Cleanup runs on EVERY path, not just success: a non-crash rejection
+    // (a refused solid.createBox/solid.dispose) must not leak the worker
+    // thread and its minted solids — close/dispose are idempotent with the
+    // crash settlement.
+    try {
+      const box = await client.request("solid.createBox", {
+        width: length(30, "mm"),
+        depth: length(20, "mm"),
+        height: length(10, "mm"),
+      });
+      firstResponse.push(performance.now() - created);
+      await client.request("solid.dispose", { solid: box.solid });
+    } finally {
+      client.close();
+      channel.worker.removeEventListener("message", onMessage);
+      channel.dispose();
+    }
     // Let the terminated worker's teardown land before the next boot.
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -316,24 +323,31 @@ async function probeOperations(): Promise<OperationCapture> {
     },
   };
 
-  for (let iteration = 0; iteration < OPERATION_ITERATIONS; iteration += 1) {
-    mints.length = 0;
-    const started = performance.now();
-    await computePlateWithHole(context, PLATE_HOLE_DIAMETER_DEFAULT_MM);
-    chainTotals.push(performance.now() - started);
-    for (const solid of mints) {
-      await client.request("solid.dispose", { solid });
+  // Cleanup runs on EVERY path, not just success: a non-crash rejection
+  // mid-loop (a failed chain stage, a refused solid.dispose) must not leak
+  // the worker thread and its minted solids — close/dispose are idempotent
+  // with the crash settlement.
+  try {
+    for (let iteration = 0; iteration < OPERATION_ITERATIONS; iteration += 1) {
+      mints.length = 0;
+      const started = performance.now();
+      await computePlateWithHole(context, PLATE_HOLE_DIAMETER_DEFAULT_MM);
+      chainTotals.push(performance.now() - started);
+      for (const solid of mints) {
+        await client.request("solid.dispose", { solid });
+      }
     }
+    samples["op.chain.plateWithHole.totalMs"] = chainTotals;
+    if (tessellation === null || wireResponse === null) {
+      throw new Error(
+        "The operation probe never observed a tessellate response.",
+      );
+    }
+    return { samples, tessellation, wireResponse };
+  } finally {
+    client.close();
+    channel.dispose();
   }
-  client.close();
-  channel.dispose();
-  samples["op.chain.plateWithHole.totalMs"] = chainTotals;
-  if (tessellation === null || wireResponse === null) {
-    throw new Error(
-      "The operation probe never observed a tessellate response.",
-    );
-  }
-  return { samples, tessellation, wireResponse };
 }
 
 /** The plate fixture's deterministic camera (the /render fixture's spec). */

@@ -77,9 +77,14 @@ function setText(id: string, text: string): void {
 /**
  * Boots the fixture's worker session. Client-only by construction (called
  * from an effect): `Worker` exists in the browser, and the worker entry
- * hosts the real OpenCascade kernel off-thread.
+ * hosts the real OpenCascade kernel off-thread. `onTerminal` fires exactly
+ * once, when the channel settles terminally (a thread crash or the
+ * deliberate `disposeNow`), so the page can stop dispatching into the
+ * dead channel and retire the terminate control.
  */
-function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
+function bootOcctWorkerFixtureSession(
+  onTerminal?: () => void,
+): OcctWorkerFixtureSession {
   const workerStartedAt = performance.now();
   let errorText = "";
   // The crash-settling boot (Phase 35 hardening): a dead thread settles
@@ -92,6 +97,7 @@ function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
     (failure) => {
       errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
       writeSurface();
+      onTerminal?.();
     },
   );
   const transport = boot.transport;
@@ -174,10 +180,14 @@ function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
       root.setAttribute("data-disposed", disposed ? "1" : "0");
       root.setAttribute("data-dispose-settlement", disposeSettlement);
     }
-    setText(
-      "occt-worker-status",
-      disposed ? "disposed" : inFlight > 0 ? "computing" : "idle",
-    );
+    const status = disposed
+      ? "disposed"
+      : inFlight > 0
+        ? "computing"
+        : errorText === ""
+          ? "idle"
+          : "failed";
+    setText("occt-worker-status", status);
     setText(
       "occt-worker-volume",
       visible === null ? "…" : visible.state.volume.toFixed(3),
@@ -251,13 +261,18 @@ function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
     disposeNow(): void {
       if (disposed) return;
       disposed = true;
+      onTerminal?.();
       // One request under an explicit, channel-unique id — the coordinator
       // mints its computation ids from its own generator, so a default-
       // minted id here would collide with the session's first computation
       // request (`worker/duplicate-request`, single-use ids per channel) —
       // then the channel dies inside the same synchronous task: no response
       // can be processed before close, so the settlement below is
-      // deterministic, not a race.
+      // deterministic, not a race. This also holds when the channel
+      // ALREADY settled terminally (a crash): the closed client refuses
+      // the request locally and immediately with the structured
+      // `worker/transport-closed` failure, so the settlement below is
+      // written on that path too — never left pending.
       const inFlight = boot.client.request(
         "solid.createSphere",
         { radius: length(1, "mm") },
@@ -291,10 +306,16 @@ export function OcctWorkerFixturePage() {
     OCCT_HOLE_DIAMETER_DEFAULT_MM,
   );
   const [booted, setBooted] = useState(false);
+  // Dead-channel gating: once the channel settles terminally (a crash or
+  // the deliberate terminate), the input must stop dispatching into it and
+  // the terminate control must retire — the channel is already dead.
+  const [terminal, setTerminal] = useState(false);
   const sessionRef = useRef<OcctWorkerFixtureSession | null>(null);
 
   useEffect(() => {
-    const session = bootOcctWorkerFixtureSession();
+    const session = bootOcctWorkerFixtureSession(() => {
+      setTerminal(true);
+    });
     sessionRef.current = session;
     setBooted(true);
     session.dispatch(OCCT_HOLE_DIAMETER_DEFAULT_MM);
@@ -341,12 +362,12 @@ export function OcctWorkerFixturePage() {
         </span>
         <input
           id="param-occt-hole-diameter"
-          className="border-input bg-background w-full rounded border px-2 py-1 font-mono"
+          className="border-input bg-background w-full rounded border px-2 py-1 font-mono disabled:cursor-not-allowed disabled:opacity-50"
           type="number"
           min={OCCT_HOLE_DIAMETER_MIN_MM}
           max={OCCT_HOLE_DIAMETER_MAX_MM}
           step={0.5}
-          disabled={!booted}
+          disabled={!booted || terminal}
           value={holeDiameter}
           onChange={(event) => {
             const parsed = Number(event.target.value);
@@ -404,7 +425,8 @@ export function OcctWorkerFixturePage() {
       <button
         id="occt-worker-dispose"
         type="button"
-        className="border-input bg-background rounded border px-3 py-1 text-xs"
+        className="border-input bg-background rounded border px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={!booted || terminal}
         onClick={() => {
           sessionRef.current?.disposeNow();
         }}

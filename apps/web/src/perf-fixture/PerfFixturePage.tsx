@@ -107,6 +107,12 @@ export function PerfFixturePage(): ReactElement {
   } | null>(null);
   // The latest applied-state timestamp (the settle pairs against it).
   const appliedAtRef = useRef<number | null>(null);
+  // One live run at a time: a run owns the shared probe state (settle
+  // waiters, session, results) until it settles, so a second invocation
+  // must be a no-op, never an interleaved concurrent run that would poison
+  // the first (the disabled rerun button is the primary gate; this guard
+  // covers every other entry point).
+  const runInFlightRef = useRef(false);
 
   const resolveNextSettle = useCallback((): void => {
     const [first, ...rest] = settleWaitersRef.current;
@@ -123,114 +129,122 @@ export function PerfFixturePage(): ReactElement {
 
   /** The whole benchmark sequence: measurements, then the scene probe. */
   const runBenchmark = useCallback(async (): Promise<void> => {
-    setApplied(null);
-    setResults({
-      phase: "measuring",
-      startedAt: new Date().toISOString(),
-      samples: {},
-    });
-    const samples: Record<string, number[]> = {};
-    let measured: InPageMeasurements | null = null;
-    try {
-      measured = await runInPageMeasurements();
-      for (const [key, values] of Object.entries(measured.samples)) {
-        samples[key] = [...values];
-      }
-
-      // The scene probe: the production coordinator session + CadScene.
-      const dispatchToSettledSamples: number[] = [];
-      const dispatchToAppliedSamples: number[] = [];
-      const applyToFrameSamples: number[] = [];
-      const bootStarted = performance.now();
-      const session = bootRenderFixtureSession(
-        {
-          rootId: "perf-root",
-          statusId: "perf-status",
-          volumeId: "perf-volume",
-          errorId: "perf-error",
-        },
-        (state, revision) => {
-          appliedAtRef.current = performance.now();
-          if (pendingRef.current !== null) {
-            pendingRef.current = {
-              ...pendingRef.current,
-              appliedAt: appliedAtRef.current,
-            };
-          }
-          setApplied({ state, revision });
-        },
-      );
-      sessionRef.current = session;
-      settleWaitersRef.current = [];
-
-      // The first dispatch; its settle resolves the boot measurement.
-      const firstSettle = waitForSettle();
-      session.dispatch(PLATE_HOLE_DIAMETER_DEFAULT_MM);
-      await withTimeout(
-        firstSettle,
-        SETTLE_DEADLINE_MS,
-        "The scene probe's first dispatch never settled.",
-      );
-      samples["scene.firstSettle.ms"] = [performance.now() - bootStarted];
-
-      // The update loop: one dispatch at a time, each awaited through the
-      // settle probe — sequential edits, no racing (cancellation behavior
-      // under rapid updates is the worker spec's domain, not this probe's).
-      for (const diameter of SCENE_DIAMETERS) {
-        const settle = waitForSettle();
-        pendingRef.current = {
-          dispatchedAt: performance.now(),
-          appliedAt: null,
-        };
-        session.dispatch(diameter);
-        await withTimeout(
-          settle,
-          SETTLE_DEADLINE_MS,
-          `The scene probe's dispatch (${String(diameter)} mm) never settled.`,
-        );
-        const pending = pendingRef.current;
-        pendingRef.current = null;
-        const settledAt = performance.now();
-        if (pending !== null) {
-          dispatchToSettledSamples.push(settledAt - pending.dispatchedAt);
-          if (pending.appliedAt !== null) {
-            dispatchToAppliedSamples.push(
-              pending.appliedAt - pending.dispatchedAt,
-            );
-            applyToFrameSamples.push(settledAt - pending.appliedAt);
-          }
-        }
-        // Let the post-settle React state (applied revision, surface
-        // writes) land before the next dispatch.
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      session.dispose();
-      sessionRef.current = null;
-      samples["scene.paramUpdate.dispatchToSettledMs"] =
-        dispatchToSettledSamples;
-      samples["scene.paramUpdate.dispatchToAppliedMs"] =
-        dispatchToAppliedSamples;
-      samples["scene.paramUpdate.applyToFrameMs"] = applyToFrameSamples;
-    } catch (error) {
-      sessionRef.current?.dispose();
-      sessionRef.current = null;
-      setResults({
-        phase: "failed",
-        startedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
-        environment: measured?.environment,
-        geometry: measured?.geometry,
-        samples: Object.freeze(samples),
-      });
+    if (runInFlightRef.current) {
       return;
     }
-    setResults({
-      phase: "done",
-      startedAt: new Date().toISOString(),
-      environment: measured.environment,
-      geometry: measured.geometry,
-      samples: Object.freeze(samples),
-    });
+    runInFlightRef.current = true;
+    try {
+      setApplied(null);
+      setResults({
+        phase: "measuring",
+        startedAt: new Date().toISOString(),
+        samples: {},
+      });
+      const samples: Record<string, number[]> = {};
+      let measured: InPageMeasurements | null = null;
+      try {
+        measured = await runInPageMeasurements();
+        for (const [key, values] of Object.entries(measured.samples)) {
+          samples[key] = [...values];
+        }
+
+        // The scene probe: the production coordinator session + CadScene.
+        const dispatchToSettledSamples: number[] = [];
+        const dispatchToAppliedSamples: number[] = [];
+        const applyToFrameSamples: number[] = [];
+        const bootStarted = performance.now();
+        const session = bootRenderFixtureSession(
+          {
+            rootId: "perf-root",
+            statusId: "perf-status",
+            volumeId: "perf-volume",
+            errorId: "perf-error",
+          },
+          (state, revision) => {
+            appliedAtRef.current = performance.now();
+            if (pendingRef.current !== null) {
+              pendingRef.current = {
+                ...pendingRef.current,
+                appliedAt: appliedAtRef.current,
+              };
+            }
+            setApplied({ state, revision });
+          },
+        );
+        sessionRef.current = session;
+        settleWaitersRef.current = [];
+
+        // The first dispatch; its settle resolves the boot measurement.
+        const firstSettle = waitForSettle();
+        session.dispatch(PLATE_HOLE_DIAMETER_DEFAULT_MM);
+        await withTimeout(
+          firstSettle,
+          SETTLE_DEADLINE_MS,
+          "The scene probe's first dispatch never settled.",
+        );
+        samples["scene.firstSettle.ms"] = [performance.now() - bootStarted];
+
+        // The update loop: one dispatch at a time, each awaited through the
+        // settle probe — sequential edits, no racing (cancellation behavior
+        // under rapid updates is the worker spec's domain, not this probe's).
+        for (const diameter of SCENE_DIAMETERS) {
+          const settle = waitForSettle();
+          pendingRef.current = {
+            dispatchedAt: performance.now(),
+            appliedAt: null,
+          };
+          session.dispatch(diameter);
+          await withTimeout(
+            settle,
+            SETTLE_DEADLINE_MS,
+            `The scene probe's dispatch (${String(diameter)} mm) never settled.`,
+          );
+          const pending = pendingRef.current;
+          pendingRef.current = null;
+          const settledAt = performance.now();
+          if (pending !== null) {
+            dispatchToSettledSamples.push(settledAt - pending.dispatchedAt);
+            if (pending.appliedAt !== null) {
+              dispatchToAppliedSamples.push(
+                pending.appliedAt - pending.dispatchedAt,
+              );
+              applyToFrameSamples.push(settledAt - pending.appliedAt);
+            }
+          }
+          // Let the post-settle React state (applied revision, surface
+          // writes) land before the next dispatch.
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        session.dispose();
+        sessionRef.current = null;
+        samples["scene.paramUpdate.dispatchToSettledMs"] =
+          dispatchToSettledSamples;
+        samples["scene.paramUpdate.dispatchToAppliedMs"] =
+          dispatchToAppliedSamples;
+        samples["scene.paramUpdate.applyToFrameMs"] = applyToFrameSamples;
+      } catch (error) {
+        sessionRef.current?.dispose();
+        sessionRef.current = null;
+        setResults({
+          phase: "failed",
+          startedAt: new Date().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+          environment: measured?.environment,
+          geometry: measured?.geometry,
+          samples: Object.freeze(samples),
+        });
+        return;
+      }
+      setResults({
+        phase: "done",
+        startedAt: new Date().toISOString(),
+        environment: measured.environment,
+        geometry: measured.geometry,
+        samples: Object.freeze(samples),
+      });
+    } finally {
+      runInFlightRef.current = false;
+    }
   }, [waitForSettle]);
 
   useEffect(() => {
@@ -285,8 +299,9 @@ export function PerfFixturePage(): ReactElement {
           <div>
             <button
               id="perf-rerun"
-              className="border-input bg-background rounded border px-2 py-1 text-xs"
+              className="border-input bg-background rounded border px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
               type="button"
+              disabled={results.phase === "measuring"}
               onClick={() => {
                 void runBenchmark();
               }}

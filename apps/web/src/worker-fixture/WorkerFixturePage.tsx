@@ -55,9 +55,14 @@ function setText(id: string, text: string): void {
 /**
  * Boots the fixture's worker session. Client-only by construction (called
  * from an effect): `Worker` exists in the browser, and the worker entry
- * hosts the real Manifold kernel off-thread.
+ * hosts the real Manifold kernel off-thread. `onTerminal` fires exactly
+ * once, when the channel settles terminally (a thread crash — this fixture
+ * has no deliberate dispose control), so the page can stop dispatching
+ * into the dead channel.
  */
-function bootWorkerFixtureSession(): WorkerFixtureSession {
+function bootWorkerFixtureSession(
+  onTerminal?: () => void,
+): WorkerFixtureSession {
   let errorText = "";
   // The crash-settling boot (Phase 35 hardening): a dead thread settles
   // in-flight requests (worker/transport-closed) instead of hanging, and
@@ -69,6 +74,7 @@ function bootWorkerFixtureSession(): WorkerFixtureSession {
     (failure) => {
       errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
       writeSurface();
+      onTerminal?.();
     },
   );
   const coordinator = createStaleResultCoordinator<PlateMeasurement>({
@@ -100,7 +106,9 @@ function bootWorkerFixtureSession(): WorkerFixtureSession {
       root.setAttribute("data-drops", String(coordinator.drops().length));
       root.setAttribute("data-error", errorText);
     }
-    setText("worker-status", inFlight > 0 ? "computing" : "idle");
+    const status =
+      inFlight > 0 ? "computing" : errorText === "" ? "idle" : "failed";
+    setText("worker-status", status);
     setText(
       "worker-volume",
       visible === null ? "…" : visible.state.volume.toFixed(3),
@@ -172,10 +180,16 @@ export function WorkerFixturePage() {
     PLATE_HOLE_DIAMETER_DEFAULT_MM,
   );
   const [booted, setBooted] = useState(false);
+  // Dead-channel gating: once the channel settles terminally (a crash),
+  // the input must stop dispatching into it — post-crash requests can
+  // never produce a healthy computation.
+  const [terminal, setTerminal] = useState(false);
   const sessionRef = useRef<WorkerFixtureSession | null>(null);
 
   useEffect(() => {
-    const session = bootWorkerFixtureSession();
+    const session = bootWorkerFixtureSession(() => {
+      setTerminal(true);
+    });
     sessionRef.current = session;
     setBooted(true);
     session.dispatch(PLATE_HOLE_DIAMETER_DEFAULT_MM);
@@ -213,12 +227,12 @@ export function WorkerFixturePage() {
         </span>
         <input
           id="param-holeDiameter"
-          className="border-input bg-background w-full rounded border px-2 py-1 font-mono"
+          className="border-input bg-background w-full rounded border px-2 py-1 font-mono disabled:cursor-not-allowed disabled:opacity-50"
           type="number"
           min={PLATE_HOLE_DIAMETER_MIN_MM}
           max={PLATE_HOLE_DIAMETER_MAX_MM}
           step={0.5}
-          disabled={!booted}
+          disabled={!booted || terminal}
           value={holeDiameter}
           onChange={(event) => {
             const parsed = Number(event.target.value);
