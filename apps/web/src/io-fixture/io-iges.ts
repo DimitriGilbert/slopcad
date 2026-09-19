@@ -48,11 +48,16 @@ let enginePromise: Promise<IgesEngine> | undefined;
 
 function bootIgesEngine(): Promise<IgesEngine> {
   // The package's own browser entry owns the wasm pin (the `?url` import
-  // must resolve from the package that carries the dependency).
-  enginePromise ??=
-    import("@slopcad/cad-kernel-occt/occt-iges-engine.web").then(
-      ({ createBrowserIgesEngine }) => createBrowserIgesEngine(),
-    );
+  // must resolve from the package that carries the dependency). A failed
+  // boot clears the page-level memo — the package runtime's twin
+  // discipline — so a transient fetch/instantiate failure is retried on
+  // the next import instead of bricking the page until reload.
+  enginePromise ??= import("@slopcad/cad-kernel-occt/occt-iges-engine.web")
+    .then(({ createBrowserIgesEngine }) => createBrowserIgesEngine())
+    .catch((error: unknown) => {
+      enginePromise = undefined;
+      throw error;
+    });
   return enginePromise;
 }
 

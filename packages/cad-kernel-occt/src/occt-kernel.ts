@@ -2088,84 +2088,109 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     },
 
     bounds(solid: KernelSolid): KernelResult<KernelBounds> {
-      const shape = shapeOf(solid, "bounds");
-      if (!shape.ok) return fail(shape.error);
-      const box = new oc.Bnd_Box();
-      try {
-        oc.BRepBndLib.AddOptimal(shape.value, box, false, false);
-        // A void box is the measured signature of an empty solid (disjoint
-        // booleans return non-null empty shapes) — IsNull is not.
-        if (box.IsVoid()) {
-          return fail(
-            kernelError(
-              KERNEL_ERROR_CODES.boundsEmpty,
-              "bounds rejected an empty solid: an empty set has no bounding box.",
-            ),
-          );
+      // Same no-throw boundary as every operation (the read-only sibling
+      // topologySnapshot's discipline): a binding-level throw out of
+      // AddOptimal is normalized into the structured kernel-failure code.
+      return run("bounds", KERNEL_ERROR_CODES.invalidOperands, () => {
+        const shape = shapeOf(solid, "bounds");
+        if (!shape.ok) return fail(shape.error);
+        const box = new oc.Bnd_Box();
+        try {
+          oc.BRepBndLib.AddOptimal(shape.value, box, false, false);
+          // A void box is the measured signature of an empty solid (disjoint
+          // booleans return non-null empty shapes) — IsNull is not.
+          if (box.IsVoid()) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.boundsEmpty,
+                "bounds rejected an empty solid: an empty set has no bounding box.",
+              ),
+            );
+          }
+          return ok({
+            min: [box.GetXMin(), box.GetYMin(), box.GetZMin()],
+            max: [box.GetXMax(), box.GetYMax(), box.GetZMax()],
+          });
+        } finally {
+          box.delete();
         }
-        return ok({
-          min: [box.GetXMin(), box.GetYMin(), box.GetZMin()],
-          max: [box.GetXMax(), box.GetYMax(), box.GetZMax()],
-        });
-      } finally {
-        box.delete();
-      }
+      });
     },
 
     volume(solid: KernelSolid): KernelResult<number> {
-      const shape = shapeOf(solid, "volume");
-      if (!shape.ok) return fail(shape.error);
-      // Exact BREP integration; an empty solid measures exactly 0.
-      return ok(volumeOfShape(shape.value));
+      // Same no-throw boundary: a VolumeProperties binding throw is
+      // normalized, never escaped (the props wrapper's finally stays inside).
+      return run("volume", KERNEL_ERROR_CODES.invalidOperands, () => {
+        const shape = shapeOf(solid, "volume");
+        if (!shape.ok) return fail(shape.error);
+        // Exact BREP integration; an empty solid measures exactly 0.
+        return ok(volumeOfShape(shape.value));
+      });
     },
 
     area(solid: KernelSolid): KernelResult<number> {
-      const shape = shapeOf(solid, "area");
-      if (!shape.ok) return fail(shape.error);
-      // Exact BREP surface integration (probed: analytic-exact on the
-      // plate-with-bore); an empty compound measures exactly 0.
-      return ok(areaOfShape(shape.value));
+      // Same no-throw boundary: a SurfaceProperties binding throw is
+      // normalized, never escaped.
+      return run("area", KERNEL_ERROR_CODES.invalidOperands, () => {
+        const shape = shapeOf(solid, "area");
+        if (!shape.ok) return fail(shape.error);
+        // Exact BREP surface integration (probed: analytic-exact on the
+        // plate-with-bore); an empty compound measures exactly 0.
+        return ok(areaOfShape(shape.value));
+      });
     },
 
     tessellate(solid: KernelSolid): KernelResult<Tessellation> {
-      const shape = shapeOf(solid, "tessellate");
-      if (!shape.ok) return fail(shape.error);
-      const data = oc.ReplicadMeshExtractor.extract(
-        shape.value,
-        OCCT_TESSELLATION_LINEAR_DEFLECTION_MM,
-        OCCT_TESSELLATION_ANGULAR_TOLERANCE_RAD,
-        false,
+      // Same no-throw boundary: the mesh extractor's extract call sits
+      // inside it too (a throw there must not escape the kernel raw).
+      return run(
+        "tessellate",
+        KERNEL_ERROR_CODES.invalidOperands,
+        (): KernelResult<Tessellation> => {
+          const shape = shapeOf(solid, "tessellate");
+          if (!shape.ok) return fail(shape.error);
+          const data = oc.ReplicadMeshExtractor.extract(
+            shape.value,
+            OCCT_TESSELLATION_LINEAR_DEFLECTION_MM,
+            OCCT_TESSELLATION_ANGULAR_TOLERANCE_RAD,
+            false,
+          );
+          try {
+            if (data.getTrianglesSize() === 0) {
+              return ok({ positions: [], indices: [] });
+            }
+            // Fresh views off the live wasmMemory (cached views detach on
+            // growth), copied out immediately — no allocation between the
+            // view and the copy. Sizes are element counts (probed): float32
+            // positions/normals, uint32 triangle indices.
+            const buffer = oc.wasmMemory.buffer;
+            const positions = Array.from(
+              new Float32Array(
+                buffer,
+                data.getVerticesPtr(),
+                data.getVerticesSize(),
+              ),
+            );
+            const normals = Array.from(
+              new Float32Array(
+                buffer,
+                data.getNormalsPtr(),
+                data.getNormalsSize(),
+              ),
+            );
+            const indices = Array.from(
+              new Uint32Array(
+                buffer,
+                data.getTrianglesPtr(),
+                data.getTrianglesSize(),
+              ),
+            );
+            return ok({ positions, indices, normals });
+          } finally {
+            data.delete();
+          }
+        },
       );
-      try {
-        if (data.getTrianglesSize() === 0) {
-          return ok({ positions: [], indices: [] });
-        }
-        // Fresh views off the live wasmMemory (cached views detach on
-        // growth), copied out immediately — no allocation between the view
-        // and the copy. Sizes are element counts (probed): float32
-        // positions/normals, uint32 triangle indices.
-        const buffer = oc.wasmMemory.buffer;
-        const positions = Array.from(
-          new Float32Array(
-            buffer,
-            data.getVerticesPtr(),
-            data.getVerticesSize(),
-          ),
-        );
-        const normals = Array.from(
-          new Float32Array(buffer, data.getNormalsPtr(), data.getNormalsSize()),
-        );
-        const indices = Array.from(
-          new Uint32Array(
-            buffer,
-            data.getTrianglesPtr(),
-            data.getTrianglesSize(),
-          ),
-        );
-        return ok({ positions, indices, normals });
-      } finally {
-        data.delete();
-      }
     },
 
     dispose(solid: KernelSolid): void {

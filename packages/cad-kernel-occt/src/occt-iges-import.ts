@@ -41,7 +41,8 @@
  * ## The engine boundary
  *
  * {@link createIgesEngine} initializes the wasm once per JavaScript
- * context (memoized — the twin discipline of `./occt-runtime`) and returns
+ * context (memoized, with a failed initialization clearing the memo so it
+ * can be retried — the twin discipline of `./occt-runtime`) and returns
  * an opaque {@link IgesEngine} handle; under Node the binding's own asset
  * resolution finds the wasm next to its glue (probed), and in the browser
  * the caller pins the asset through the standard emscripten `locateFile`
@@ -142,9 +143,17 @@ export function createIgesEngine(options?: {
     ...(options?.locateFile === undefined
       ? {}
       : { locateFile: options.locateFile }),
-  }).then((instance): IgesEngine => ({
-    [IGES_ENGINE_BRAND]: instance,
-  }));
+  })
+    .then((instance): IgesEngine => ({
+      [IGES_ENGINE_BRAND]: instance,
+    }))
+    .catch((error: unknown) => {
+      // A failed initialization clears the memo so an environment fix can
+      // be retried (the twin discipline of `./occt-runtime`); concurrent
+      // callers still await the same initialization.
+      sharedEngine = undefined;
+      throw error;
+    });
   sharedEngine = engine;
   return engine;
 }
