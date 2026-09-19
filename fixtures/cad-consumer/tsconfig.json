@@ -15,7 +15,9 @@
     "noEmit": true,
     "useDefineForClassFields": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@slopcad/cad-kernel": ["../../packages/cad-kernel/src/index.ts"],
+      "@slopcad/cad-kernel/*": ["../../packages/cad-kernel/src/*.ts"]
     },
     "types": ["vite/client"]
   },

@@ -1,0 +1,142 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "slopcad-cad-components",
+  "homepage": "https://github.com/slopcad/slopcad",
+  "items": [
+    {
+      "name": "component-contract",
+      "type": "registry:lib",
+      "title": "Component Contract",
+      "description": "The serialized parametric-component contract (Phase 32.1): definition schema, parameter descriptors, ports, preview metadata, canonical serialization, and strict-on-known-fields parse with structured component-contract/* refusals.",
+      "dependencies": ["@slopcad/cad-core"],
+      "files": [
+        {
+          "path": "src/component-contract.ts",
+          "type": "registry:lib",
+          "target": "src/cad/component-contract.ts"
+        }
+      ]
+    },
+    {
+      "name": "component-kernel",
+      "type": "registry:lib",
+      "title": "Component Kernel",
+      "description": "The kernel-neutral execution surface components build through: the async ComponentKernel mirror of GeometryKernel plus directComponentKernel for in-process kernels.",
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-kernel"],
+      "files": [
+        {
+          "path": "src/component-kernel.ts",
+          "type": "registry:lib",
+          "target": "src/cad/component-kernel.ts"
+        }
+      ]
+    },
+    {
+      "name": "cad-component",
+      "type": "registry:lib",
+      "title": "CAD Component",
+      "description": "The runtime component model: what a CadComponent is (definition + build + ports), the structured build result shapes, and defineComponent validation.",
+      "registryDependencies": [
+        "@slopcad/component-contract",
+        "@slopcad/component-kernel"
+      ],
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-kernel"],
+      "files": [
+        {
+          "path": "src/cad-component.ts",
+          "type": "registry:lib",
+          "target": "src/cad/cad-component.ts"
+        }
+      ]
+    },
+    {
+      "name": "context-kernel",
+      "type": "registry:lib",
+      "title": "Context Kernel",
+      "description": "The ComponentKernel adapter that runs every component call over a ComputationContext — the stale-result-coordinated worker-protocol client browser sessions dispatch through.",
+      "registryDependencies": ["@slopcad/component-kernel"],
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-kernel"],
+      "files": [
+        {
+          "path": "src/context-kernel.ts",
+          "type": "registry:lib",
+          "target": "src/cad/context-kernel.ts"
+        }
+      ]
+    },
+    {
+      "name": "nema17-mount",
+      "type": "registry:lib",
+      "title": "NEMA 17 Stepper Mount",
+      "description": "Faceplate mount for a NEMA 17 frame stepper (NEMA ICS 16: 42.3 mm faceplate, 31 mm M3 grid, ISO 273 clearance): square plate, register bore, optional collar — seven parameters, five ports, one body.",
+      "registryDependencies": [
+        "@slopcad/component-contract",
+        "@slopcad/cad-component"
+      ],
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-kernel"],
+      "files": [
+        {
+          "path": "src/nema17-mount.ts",
+          "type": "registry:lib",
+          "target": "src/cad/nema17-mount.ts"
+        }
+      ]
+    },
+    {
+      "name": "arduino-mount",
+      "type": "registry:lib",
+      "title": "Arduino UNO R3 Mount",
+      "description": "Mounting base for an Arduino UNO R3 (official drawing: 68.58 x 53.34 mm, four standoff bosses incl. the 50.80 mm shield pair): five parameters, four ports, one body.",
+      "registryDependencies": [
+        "@slopcad/component-contract",
+        "@slopcad/cad-component"
+      ],
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-kernel"],
+      "files": [
+        {
+          "path": "src/arduino-mount.ts",
+          "type": "registry:lib",
+          "target": "src/cad/arduino-mount.ts"
+        }
+      ]
+    },
+    {
+      "name": "enclosure",
+      "type": "registry:lib",
+      "title": "Electronics Enclosure",
+      "description": "Two-body electronics enclosure (shell + seated lid) with rounded rectangular profile, screw bosses, and lid pilots — twelve parameters, five ports, two bodies.",
+      "registryDependencies": [
+        "@slopcad/component-contract",
+        "@slopcad/cad-component"
+      ],
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-kernel"],
+      "files": [
+        {
+          "path": "src/enclosure.ts",
+          "type": "registry:lib",
+          "target": "src/cad/enclosure.ts"
+        }
+      ]
+    },
+    {
+      "name": "nema17-assembly-example",
+      "type": "registry:block",
+      "title": "NEMA 17 Assembly Study (example)",
+      "description": "A complete headless composition example: builds the NEMA 17 mount, the Arduino UNO mount, and the enclosure through one kernel, lays the bodies out along x from their own measured bounds, and reports per-body volumes plus the mount's kernel-free ports.",
+      "registryDependencies": [
+        "@slopcad/nema17-mount",
+        "@slopcad/arduino-mount",
+        "@slopcad/enclosure",
+        "@slopcad/component-kernel"
+      ],
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-kernel"],
+      "files": [
+        {
+          "path": "src/examples/nema17-assembly.ts",
+          "type": "registry:block",
+          "target": "src/cad/examples/nema17-assembly.ts"
+        }
+      ]
+    }
+  ]
+}

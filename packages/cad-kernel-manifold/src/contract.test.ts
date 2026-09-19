@@ -9,7 +9,7 @@
  */
 
 import { beforeAll, describe } from "vitest";
-import { defineKernelContractSuite } from "@slopcad/cad-kernel";
+import { defineKernelContractSuite } from "@slopcad/cad-kernel/contract-suite";
 
 import { manifoldKernelFromRuntime } from "./manifold-kernel";
 import {

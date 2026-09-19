@@ -430,6 +430,34 @@
       ]
     },
     {
+      "name": "cad-command-menu",
+      "type": "registry:component",
+      "title": "CAD Command Menu",
+      "description": "Command palette over the CAD commands the host registers, composed with the command item.",
+      "registryDependencies": ["@slopcad/command"],
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-command-menu.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-io-dialog",
+      "type": "registry:component",
+      "title": "CAD Import/Export Dialog",
+      "description": "Import/export dialog with format list and progress surface, composed with the button and dialog items.",
+      "registryDependencies": ["@slopcad/button", "@slopcad/dialog"],
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-io-dialog.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "cad-model-tree",
       "type": "registry:component",
       "title": "CAD Model Tree",
@@ -452,6 +480,74 @@
       "files": [
         {
           "path": "src/components/cad/cad-parameter-panel.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-property-panel",
+      "type": "registry:component",
+      "title": "CAD Property Panel",
+      "description": "Provider-driven property inspector mirroring the @slopcad/cad-react selection: body and feature properties with edit actions.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["@slopcad/cad-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-property-panel.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-sketch-canvas",
+      "type": "registry:component",
+      "title": "CAD Sketch Canvas",
+      "description": "Pointer-driven 2D sketch canvas with an immutable render loop and tool-agnostic stroke input.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-sketch-canvas.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-sketch-inspector",
+      "type": "registry:component",
+      "title": "CAD Sketch Inspector",
+      "description": "Sketch constraint editor over Formedible: one field per constraint with live validation.",
+      "registryDependencies": ["@slopcad/formedible"],
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-sketch-inspector.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-sketch-toolbar",
+      "type": "registry:component",
+      "title": "CAD Sketch Toolbar",
+      "description": "Sketch tool toolbar with keyboard shortcuts and tool activation callbacks.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-sketch-toolbar.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-status-bar",
+      "type": "registry:component",
+      "title": "CAD Status Bar",
+      "description": "Provider-driven status bar mirroring the @slopcad/cad-react session: active tool, phase, and selection summary.",
+      "dependencies": ["@slopcad/cad-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-status-bar.tsx",
           "type": "registry:component"
         }
       ]
@@ -480,6 +576,46 @@
         {
           "path": "src/components/cad/cad-viewport.tsx",
           "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "plate-workbench",
+      "type": "registry:block",
+      "title": "Plate Workbench",
+      "description": "A complete CAD workbench composition: the toolbar, viewport, model tree, and parameter panel around one real provider store, a parametric plate document, and a Manifold-kernel geometry pipeline on the main thread. Mount PlateWorkbench() anywhere.",
+      "registryDependencies": [
+        "@slopcad/cad-model-tree",
+        "@slopcad/cad-parameter-panel",
+        "@slopcad/cad-toolbar",
+        "@slopcad/cad-viewport"
+      ],
+      "dependencies": [
+        "@slopcad/cad-react",
+        "@slopcad/cad-kernel",
+        "@slopcad/cad-kernel-manifold",
+        "manifold-3d"
+      ],
+      "files": [
+        {
+          "path": "src/examples/plate-workbench/plate-workbench.tsx",
+          "type": "registry:block",
+          "target": "src/examples/plate-workbench/plate-workbench.tsx"
+        },
+        {
+          "path": "src/examples/plate-workbench/plate-document.ts",
+          "type": "registry:lib",
+          "target": "src/examples/plate-workbench/plate-document.ts"
+        },
+        {
+          "path": "src/examples/plate-workbench/plate-geometry.ts",
+          "type": "registry:lib",
+          "target": "src/examples/plate-workbench/plate-geometry.ts"
+        },
+        {
+          "path": "src/examples/plate-workbench/manifold-wasm.d.ts",
+          "type": "registry:lib",
+          "target": "src/examples/plate-workbench/manifold-wasm.d.ts"
         }
       ]
     }

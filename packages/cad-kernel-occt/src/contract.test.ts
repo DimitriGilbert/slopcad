@@ -10,7 +10,7 @@
  */
 
 import { beforeAll, describe } from "vitest";
-import { defineKernelContractSuite } from "@slopcad/cad-kernel";
+import { defineKernelContractSuite } from "@slopcad/cad-kernel/contract-suite";
 
 import { occtKernelFromRuntime } from "./occt-kernel";
 import { createOcctRuntime, type OcctRuntime } from "./occt-runtime";

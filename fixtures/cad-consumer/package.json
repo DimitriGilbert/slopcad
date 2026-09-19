@@ -19,6 +19,7 @@
     "@slopcad/cad-kernel-manifold": "file:../../packages/cad-kernel-manifold",
     "@slopcad/cad-r3f": "file:../../packages/cad-r3f",
     "@slopcad/cad-react": "file:../../packages/cad-react",
+    "@slopcad/cad-sketch": "file:../../packages/cad-sketch",
     "@tanstack/react-form": "^1.33.5",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.3.0",

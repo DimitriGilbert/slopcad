@@ -731,6 +731,12 @@ importers:
       '@shadcn/react':
         specifier: ^0.2.1
         version: 0.2.1(@types/react@19.2.18)(react@19.2.8)
+      '@slopcad/cad-kernel':
+        specifier: workspace:*
+        version: link:../cad-kernel
+      '@slopcad/cad-kernel-manifold':
+        specifier: workspace:*
+        version: link:../cad-kernel-manifold
       '@slopcad/cad-r3f':
         specifier: workspace:*
         version: link:../cad-r3f
@@ -755,6 +761,9 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 1.41.0(react@19.2.8)
+      manifold-3d:
+        specifier: 3.5.3
+        version: 3.5.3(@gltf-transform/core@4.5.0)(@gltf-transform/extensions@4.5.0)(@gltf-transform/functions@4.5.0(@types/node@26.4.1))(esbuild-wasm@0.27.7)
       next-themes:
         specifier: 'catalog:'
         version: 0.4.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
