@@ -183,6 +183,10 @@ describe("createRenderGeometryController", () => {
     }
     const disposals = trackDisposals(geometry);
     const positionVersion = bufferAttributeOf(geometry, "position").version;
+    // The fixture is normals-less: its fallback normal attribute must also
+    // stay untouched by an equal re-sync (the re-derivation only runs when
+    // content actually changed).
+    const normalVersion = bufferAttributeOf(geometry, "normal").version;
     const second = makeProjection([makeObject("plate", FRACTIONAL_TRIANGLE)]);
     const resynced = controller.sync(second);
     expect(resynced).toBe(snapshot);
@@ -190,6 +194,7 @@ describe("createRenderGeometryController", () => {
     expect(bufferAttributeOf(geometry, "position").version).toBe(
       positionVersion,
     );
+    expect(bufferAttributeOf(geometry, "normal").version).toBe(normalVersion);
     controller.dispose();
   });
 
@@ -203,6 +208,12 @@ describe("createRenderGeometryController", () => {
       throw new Error("Expected geometry for the plate object.");
     }
     const disposals = trackDisposals(geometry);
+    // The fixture carries no kernel normals, so this geometry shades through
+    // the build-time fallback; capture those normals to prove the in-place
+    // update re-derives them below.
+    const normalBefore = new Float32Array(
+      bufferAttributeOf(geometry, "normal").array,
+    );
     const updated = makeObject("plate", {
       positions: [0.1, -2.5, 3.25, 1.5, 0, 0.5, 2, 1.25, 4.5],
       indices: [0, 2, 1],
@@ -224,6 +235,17 @@ describe("createRenderGeometryController", () => {
     expect(Math.abs(box.max.z - 4.5)).toBeLessThanOrEqual(
       RENDER_GEOMETRY_FLOAT32_TOLERANCE_MM,
     );
+    // Fallback normals follow the moved positions: the update re-derives
+    // them from the new positions AND the new (winding-flipped) index, so a
+    // normals-less object never shades moved geometry with the previous
+    // geometry's normals. The freshly built twin is the reference.
+    const normalAfter = bufferAttributeOf(geometry, "normal");
+    const normalReference = bufferAttributeOf(
+      buildRenderObjectGeometry(updated),
+      "normal",
+    );
+    expect(normalAfter.array).toEqual(normalReference.array);
+    expect(normalAfter.array).not.toEqual(normalBefore);
     controller.dispose();
   });
 

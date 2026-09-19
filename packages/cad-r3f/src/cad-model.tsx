@@ -97,6 +97,36 @@ const DEFAULT_MATERIAL: CadModelMaterialProps = {
 const NO_SELECTION: readonly SelectionReference[] = [];
 
 /**
+ * Generation-mismatch guard for the highlight memo: `renderData`/`grouping`
+ * memoize on the NEW projection while `geometries` lags one effect flush, so
+ * one render can cross the new grouping's selected faces with the previous
+ * generation's base geometry. A highlight may only be built when the base's
+ * index buffer covers every triangle those faces reference (and every
+ * selected face is inside the grouping); otherwise the overlay is skipped
+ * for this render and rebuilt from the next flush's matching base — never
+ * thrown together from mismatched generations inside `useMemo`.
+ */
+function baseCoversSelectedFaces(
+  base: THREE.BufferGeometry,
+  grouping: SyntheticFaceGrouping,
+  faceIndices: readonly number[],
+): boolean {
+  const indexCount = base.getIndex()?.count ?? 0;
+  for (const faceIndex of faceIndices) {
+    const face = grouping.faces[faceIndex];
+    if (face === undefined) {
+      return false;
+    }
+    for (const triangle of face.triangleIndices) {
+      if (triangle * 3 + 2 >= indexCount) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
  * Highlight meshes never intersect rays: an overlay lying exactly on the
  * base surface must not intercept a pick aimed at it (and its index space
  * would resolve to the wrong triangles). Stable identity, no churn.
@@ -189,6 +219,7 @@ export function CadModel({
       if (faceIndices.length === 0) continue;
       const base = geometries.get(id);
       if (base === undefined) continue;
+      if (!baseCoversSelectedFaces(base, data.grouping, faceIndices)) continue;
       map.set(id, buildFaceHighlightGeometry(base, data.grouping, faceIndices));
     }
     return map;
@@ -250,9 +281,12 @@ export function CadModel({
       {[...geometries].map(([id, geometry]) => {
         const data = renderData.get(id);
         if (data === undefined) return null;
+        // The body id is total over the projection contract (picking.ts
+        // resolves body picks the same way): renderer-owned objects may omit
+        // `bodyId`, and their body-level selections must still highlight.
         const selected = isBodySelected(
           selectionList,
-          data.object.bodyId,
+          data.object.bodyId ?? renderObjectIdBodyId(data.object.id),
           data.object.featureId,
         );
         const handlers = interactive

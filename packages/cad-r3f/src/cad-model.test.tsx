@@ -12,7 +12,12 @@ import { cleanup, render } from "@testing-library/react";
 import type * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBodyId } from "@slopcad/cad-core";
-import type { RenderObjectId, RenderProjection } from "@slopcad/cad-core";
+import type {
+  RenderObject,
+  RenderObjectId,
+  RenderProjection,
+  SelectionReference,
+} from "@slopcad/cad-core";
 import type { RenderGeometrySnapshot } from "./geometry";
 
 import { CadModel } from "./cad-model";
@@ -196,6 +201,55 @@ describe("CadModel selection highlight", () => {
     expect(view.container.querySelector("meshbasicmaterial")).toBeNull();
   });
 
+  it("skips a face highlight that crosses geometry generations, then rebuilds it after the flush", () => {
+    // The plate's single coplanar synthetic face spans triangles 0..1 in the
+    // grown projection; the lagging base snapshot from the first projection
+    // holds one triangle's 3 indices. The highlights memo runs during that
+    // crossed-generation render — indexing the new grouping into the stale
+    // base must skip the overlay (a render-phase crash without the guard),
+    // and the geometry effect's flush rebuilds it from the matching base.
+    const triangle = makeObject("plate", {
+      positions: [0, 0, 0, 1, 0, 0, 1, 1, 0],
+      indices: [0, 1, 2],
+    });
+    const quad = makeObject("plate", {
+      positions: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0],
+      indices: [0, 1, 2, 0, 2, 3],
+    });
+    const selection: readonly SelectionReference[] = [
+      {
+        kind: "face",
+        bodyId: createBodyId("body_plate"),
+        regeneration: 5,
+        faceIndex: 0,
+      },
+    ];
+    const view = render(
+      <CadModel
+        projection={makeProjection([triangle])}
+        regeneration={5}
+        selection={selection}
+      />,
+    );
+    // One base mesh plus the one-face highlight from the matching base.
+    expect(view.container.querySelectorAll("mesh").length).toBe(2);
+    // The crossed-generation commit: rerender throws out of useMemo if the
+    // guard is missing, and otherwise lands with the overlay rebuilt.
+    view.rerender(
+      <CadModel
+        projection={makeProjection([quad])}
+        regeneration={5}
+        selection={selection}
+      />,
+    );
+    const highlight = view.container.querySelector('mesh[renderorder="1"]');
+    expect(highlight).not.toBeNull();
+    const highlightMaterial = highlight?.querySelector("meshbasicmaterial");
+    expect(highlightMaterial?.getAttribute("color")).toBe("#f59e0b");
+    // Exactly one base mesh and one rebuilt highlight.
+    expect(view.container.querySelectorAll("mesh").length).toBe(2);
+  });
+
   it("applies the documented body-selection material change", () => {
     const view = render(
       <CadModel
@@ -217,6 +271,27 @@ describe("CadModel selection highlight", () => {
     const untouched = materials.find((material) => material !== highlighted[0]);
     expect(untouched?.getAttribute("color")).toBe("#8aadf4");
     expect(untouched?.getAttribute("emissive")).toBeNull();
+  });
+
+  it("highlights a body selection for a bodyId-less render object through the id-derived fallback", () => {
+    // Renderer-owned objects may omit `bodyId` (projection contract); the
+    // pick resolver derives it from the render object id (totality contract
+    // pinned in picking.test.ts), and the body highlight must agree — a
+    // body pick that resolves must also highlight.
+    const anonymous: RenderObject = { ...PLATE, bodyId: undefined };
+    const view = render(
+      <CadModel
+        projection={makeProjection([anonymous])}
+        selection={[{ kind: "body", bodyId: createBodyId("body_plate") }]}
+      />,
+    );
+    const materials = [
+      ...view.container.querySelectorAll("meshstandardmaterial"),
+    ];
+    expect(materials.length).toBe(1);
+    expect(materials[0]?.getAttribute("color")).toBe("#f59e0b");
+    expect(materials[0]?.getAttribute("emissive")).toBe("#f59e0b");
+    expect(materials[0]?.getAttribute("emissiveintensity")).toBe("0.35");
   });
 
   it("renders no highlight without a selection", () => {
