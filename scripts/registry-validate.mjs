@@ -236,21 +236,40 @@ if (WITH_ARTIFACTS) {
         }
       }
       const source = unionItems.get(name);
-      for (const [index, file] of (artifact.files ?? []).entries()) {
+      const artifactFiles = artifact.files ?? [];
+      for (const file of artifactFiles) {
         if (file.target !== undefined && !isSafeRelativePath(file.target)) {
           error(
             `artifacts/${name}.json: unsafe target ${JSON.stringify(file.target)}`,
           );
         }
-        const declared = source.item.files[index];
-        if (!declared) {
-          error(`artifacts/${name}.json: file list does not match the source`);
+      }
+      // Source-driven, path-keyed correspondence: equal file-list lengths
+      // and one byte-fresh embedded entry per declared source file. The
+      // previous positional mapping could not detect an artifact MISSING
+      // trailing file(s) — the shape produced when a source item gains a
+      // file without a rebuild — and false-passed as byte-fresh.
+      const declaredFiles = source.item.files;
+      if (artifactFiles.length !== declaredFiles.length) {
+        error(
+          `artifacts/${name}.json: file list does not match the source (artifact embeds ${artifactFiles.length} file(s), source declares ${declaredFiles.length})`,
+        );
+      }
+      const artifactByPath = new Map(
+        artifactFiles.map((file) => [file.path, file]),
+      );
+      for (const declared of declaredFiles) {
+        const embedded = artifactByPath.get(declared.path);
+        if (embedded === undefined) {
+          error(
+            `artifacts/${name}.json: file list does not match the source (no embedded entry for declared file ${declared.path})`,
+          );
           continue;
         }
         const onDisk = join(ROOT, dirname(source.label), declared.path);
         if (!existsSync(onDisk)) continue; // already reported above
         const sourceBytes = readFileSync(onDisk, "utf8");
-        if (file.content !== sourceBytes) {
+        if (embedded.content !== sourceBytes) {
           error(
             `artifacts/${name}.json: embedded content of ${declared.path} is stale (rerun scripts/registry-build.sh)`,
           );
