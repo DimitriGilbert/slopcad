@@ -24,6 +24,7 @@ import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
+import { Route as ComponentsComponentIdRouteImport } from './routes/components.$componentId'
 import { Route as AuthDocumentsDocumentIdRouteImport } from './routes/_auth/documents.$documentId'
 import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
 import { Route as AuthProjectsProjectIdRouteImport } from './routes/_auth/projects.$projectId'
@@ -105,6 +106,11 @@ const AuthDashboardRoute = AuthDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthRouteRoute,
 } as any)
+const ComponentsComponentIdRoute = ComponentsComponentIdRouteImport.update({
+  id: '/components/$componentId',
+  path: '/components/$componentId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthDocumentsDocumentIdRoute = AuthDocumentsDocumentIdRouteImport.update({
   id: '/documents/$documentId',
   path: '/documents/$documentId',
@@ -151,6 +157,7 @@ export interface FileRoutesByFullPath {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
   '/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -173,6 +180,7 @@ export interface FileRoutesByTo {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
   '/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -197,6 +205,7 @@ export interface FileRoutesById {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
+  '/components/$componentId': typeof ComponentsComponentIdRoute
   '/_auth/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
   '/_auth/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -221,6 +230,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/components/$componentId'
     | '/documents/$documentId'
     | '/projects/$projectId'
     | '/api/auth/$'
@@ -243,6 +253,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/components/$componentId'
     | '/documents/$documentId'
     | '/projects/$projectId'
     | '/api/auth/$'
@@ -266,6 +277,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/_auth/dashboard'
+    | '/components/$componentId'
     | '/_auth/documents/$documentId'
     | '/_auth/projects/$projectId'
     | '/api/auth/$'
@@ -289,6 +301,7 @@ export interface RootRouteChildren {
   WorkerRoute: typeof WorkerRoute
   WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
+  ComponentsComponentIdRoute: typeof ComponentsComponentIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiIoImport3mfRoute: typeof ApiIoImport3mfRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
@@ -401,6 +414,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthDashboardRouteImport
       parentRoute: typeof AuthRouteRoute
     }
+    '/components/$componentId': {
+      id: '/components/$componentId'
+      path: '/components/$componentId'
+      fullPath: '/components/$componentId'
+      preLoaderRoute: typeof ComponentsComponentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_auth/documents/$documentId': {
       id: '/_auth/documents/$documentId'
       path: '/documents/$documentId'
@@ -479,6 +499,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkerRoute: WorkerRoute,
   WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,
+  ComponentsComponentIdRoute: ComponentsComponentIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiIoImport3mfRoute: ApiIoImport3mfRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,

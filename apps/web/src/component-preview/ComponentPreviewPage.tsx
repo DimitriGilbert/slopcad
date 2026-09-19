@@ -1,0 +1,424 @@
+/**
+ * The reusable-component preview page (Phase 32): one parametric CAD
+ * component rendered live by the real Manifold kernel in the module
+ * worker — built through `@slopcad/cad-components`' public surfaces only
+ * (the serialized definition, the context kernel, the analytic fixtures)
+ * — with its parameter panel wired through the SAME public parameter
+ * mechanism the workbench speaks: the component's descriptors become a
+ * cad-core parameter collection (`componentParameterCollection`), the
+ * `@slopcad/ui` `CadParameterPanel` (a Formedible form) edits it, and an
+ * applied edit resolves through the component contract before the worker
+ * rebuilds.
+ *
+ * ## Machine-readable surface (`#component-preview-root`)
+ *
+ * The session's settle attributes (`data-dispatched`, `data-settled`,
+ * `data-in-flight`, `data-current-revision`, `data-applied-revision`,
+ * `data-volume`, `data-expected-volume`, `data-error`), the viewport's
+ * settle stamp (`data-cad-rendered-volume` from `onSettled`), the current
+ * `data-parameter-values`, the resolved `data-ports`, and the per-body
+ * `data-bodies` — all deterministic functions of (component, values).
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactElement } from "react";
+import { Link } from "@tanstack/react-router";
+import {
+  componentParameterCollection,
+  resolveComponentParameters,
+  PHASE32_COMPONENTS,
+  type CadComponent,
+  type ComponentParameterValues,
+  type ComponentPortInstance,
+} from "@slopcad/cad-components";
+import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
+import type {
+  CadParameterApply,
+  CadParameterApplyOutcome,
+} from "@slopcad/ui/components/cad/cad-parameter-panel";
+import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
+
+import {
+  bootComponentPreviewSession,
+  type ComponentPreviewSession,
+  type ComponentPreviewState,
+} from "./component-preview-session";
+
+/** The bodies' preview card ids derive from the definition's body ids. */
+const BODY_ID_PREFIX = "body_";
+
+function bodyLabel(bodyId: string): string {
+  return bodyId.startsWith(BODY_ID_PREFIX)
+    ? bodyId.slice(BODY_ID_PREFIX.length)
+    : bodyId;
+}
+
+/** One port row of the interface table. */
+function PortRow({
+  port,
+}: {
+  readonly port: ComponentPortInstance;
+}): ReactElement {
+  const [x, y, z] = port.position;
+  return (
+    <tr className="border-border/60 border-t">
+      <td className="py-1.5 pr-2 font-mono text-xs">{port.name}</td>
+      <td className="text-muted-foreground py-1.5 pr-2 text-xs">{port.kind}</td>
+      <td className="text-muted-foreground py-1.5 text-right font-mono text-xs whitespace-nowrap">
+        {x.toFixed(2)}, {y.toFixed(2)}, {z.toFixed(2)}
+        {port.diameter !== undefined ? ` · ⌀${port.diameter.toFixed(1)}` : ""}
+      </td>
+    </tr>
+  );
+}
+
+export function ComponentPreviewPage({
+  componentId,
+}: {
+  readonly componentId: string;
+}): ReactElement | null {
+  const component: CadComponent | undefined = useMemo(
+    () => PHASE32_COMPONENTS.find((c) => c.definition.id === componentId),
+    [componentId],
+  );
+
+  const [values, setValues] = useState<ComponentParameterValues>({});
+  const [preview, setPreview] = useState<ComponentPreviewState | null>(null);
+  const [renderedFrames, setRenderedFrames] = useState(0);
+  const sessionRef = useRef<ComponentPreviewSession | null>(null);
+
+  // The panel's apply surface: resolve the edit through the component's
+  // OWN contract (bounds, unknown names) before anything dispatches.
+  const onApply = useCallback<CadParameterApply>(
+    (parameter, edit) => {
+      if (component === undefined || edit.kind !== "value") {
+        return {
+          ok: false,
+          error: {
+            code: "component-preview/unsupported-edit",
+            message: "The preview edits literal parameter values only.",
+          },
+        };
+      }
+      const next: ComponentParameterValues = {
+        ...values,
+        [parameter.name]: edit.value,
+      };
+      const resolved = resolveComponentParameters(component.definition, next);
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          error: { code: resolved.error.code, message: resolved.error.message },
+        } satisfies CadParameterApplyOutcome;
+      }
+      setValues(next);
+      sessionRef.current?.dispatch(component, next);
+      return { ok: true };
+    },
+    [component, values],
+  );
+
+  // Boot the worker session with the component's defaults.
+  useEffect(() => {
+    if (component === undefined) return;
+    const defaults = Object.fromEntries(
+      component.definition.parameters.map((parameter) => [
+        parameter.name,
+        parameter.defaultValue,
+      ]),
+    );
+    setValues(defaults);
+    setPreview(null);
+    const session = bootComponentPreviewSession(
+      {
+        rootId: "component-preview-root",
+        statusId: "component-preview-status",
+        volumeId: "component-preview-volume",
+        expectedVolumeId: "component-preview-expected-volume",
+        boundsId: "component-preview-bounds",
+        trianglesId: "component-preview-triangles",
+        errorId: "component-preview-error",
+      },
+      (state) => {
+        setPreview(state);
+      },
+    );
+    sessionRef.current = session;
+    session.dispatch(component, defaults);
+    return () => {
+      sessionRef.current = null;
+      session.dispose();
+    };
+  }, [component]);
+
+  const parameters = useMemo(
+    () =>
+      component === undefined
+        ? null
+        : componentParameterCollection(component.definition, values),
+    [component, values],
+  );
+
+  const ports = useMemo(
+    () => (component === undefined ? [] : component.ports(values)),
+    [component, values],
+  );
+
+  const bodiesJson = useMemo(
+    () =>
+      preview === null
+        ? ""
+        : JSON.stringify(
+            preview.bodies.map((body) => ({
+              bodyId: body.bodyId,
+              volumeMm3: Number(body.volumeMm3.toFixed(3)),
+            })),
+          ),
+    [preview],
+  );
+
+  if (component === undefined) {
+    return (
+      <div className="container mx-auto max-w-3xl px-4 py-16">
+        <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+          Component preview
+        </p>
+        <h1 className="mb-4 text-2xl font-semibold tracking-tight">
+          Unknown component
+        </h1>
+        <p className="text-muted-foreground text-sm">
+          No reusable component is registered under{" "}
+          <span className="font-mono">{componentId}</span>. The Phase 32
+          registry serves:
+        </p>
+        <ul className="mt-4 space-y-1 font-mono text-sm">
+          {PHASE32_COMPONENTS.map((c) => (
+            <li key={c.definition.id}>
+              <Link
+                className="underline"
+                to="/components/$componentId"
+                params={{ componentId: c.definition.id }}
+              >
+                {c.definition.id}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  const definition = component.definition;
+  const siblings = PHASE32_COMPONENTS.filter(
+    (c) => c.definition.id !== componentId,
+  );
+
+  return (
+    <div
+      id="component-preview-root"
+      className="mx-auto w-full max-w-7xl space-y-5 p-6"
+      data-component-id={componentId}
+      data-dispatched="0"
+      data-settled="0"
+      data-in-flight="0"
+      data-current-revision="0"
+      data-applied-revision=""
+      data-volume=""
+      data-expected-volume=""
+      data-cad-rendered-volume=""
+      data-error=""
+      data-rendered-frames={String(renderedFrames)}
+      data-parameter-values={JSON.stringify(values)}
+      data-ports={JSON.stringify(
+        ports.map((port) => ({
+          diameter: port.diameter ?? null,
+          kind: port.kind,
+          name: port.name,
+          position: port.position,
+        })),
+      )}
+      data-bodies={bodiesJson}
+    >
+      <header className="space-y-3">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+            Reusable parametric CAD components
+          </p>
+          <p className="text-muted-foreground font-mono text-xs">
+            {definition.id} · v{definition.version}
+          </p>
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {definition.name}
+        </h1>
+        <p className="text-muted-foreground max-w-4xl text-sm leading-relaxed">
+          {definition.description}
+        </p>
+        <nav aria-label="Other components" className="flex flex-wrap gap-2">
+          {siblings.map((sibling) => (
+            <Link
+              key={sibling.definition.id}
+              to="/components/$componentId"
+              params={{ componentId: sibling.definition.id }}
+              className="border-border hover:bg-accent border px-3 py-1.5 font-mono text-xs"
+            >
+              {sibling.definition.name} →
+            </Link>
+          ))}
+        </nav>
+      </header>
+
+      <div className="flex flex-wrap items-start gap-6">
+        <div className="flex w-96 shrink-0 flex-col gap-4">
+          <section
+            aria-label="Component parameters"
+            className="border-border bg-card border p-4"
+          >
+            {parameters !== null && parameters.ok ? (
+              <CadParameterPanel
+                className="w-full"
+                parameters={parameters.value.parameters}
+                onApply={onApply}
+                labels={{ submit: "Rebuild" }}
+              />
+            ) : (
+              <p className="text-destructive text-sm" role="alert">
+                {parameters === null
+                  ? "The submitted values no longer resolve against the definition."
+                  : parameters.error.message}
+              </p>
+            )}
+          </section>
+
+          <section
+            aria-label="Interface"
+            className="border-border bg-card border p-4"
+          >
+            <h2 className="text-muted-foreground mb-3 text-xs font-medium tracking-wider uppercase">
+              Interface — {String(ports.length)} ports
+            </h2>
+            <table className="w-full">
+              <tbody>
+                {ports.map((port) => (
+                  <PortRow key={port.name} port={port} />
+                ))}
+              </tbody>
+            </table>
+          </section>
+
+          <section
+            aria-label="Build readouts"
+            className="border-border bg-card border p-4"
+          >
+            <h2 className="text-muted-foreground mb-3 text-xs font-medium tracking-wider uppercase">
+              Build
+            </h2>
+            <ul className="space-y-1 font-mono text-xs">
+              <li>
+                status ={" "}
+                <span id="component-preview-status" className="text-foreground">
+                  boot
+                </span>
+              </li>
+              <li>
+                volume ={" "}
+                <span id="component-preview-volume" className="text-foreground">
+                  …
+                </span>{" "}
+                mm³
+              </li>
+              <li>
+                analytic ={" "}
+                <span
+                  id="component-preview-expected-volume"
+                  className="text-foreground"
+                >
+                  …
+                </span>{" "}
+                mm³
+              </li>
+              <li>
+                bounds ={" "}
+                <span id="component-preview-bounds" className="text-foreground">
+                  …
+                </span>{" "}
+                mm
+              </li>
+              <li>
+                triangles ={" "}
+                <span
+                  id="component-preview-triangles"
+                  className="text-foreground"
+                >
+                  …
+                </span>
+              </li>
+              <li>
+                frames ={" "}
+                <span id="component-preview-frames" className="text-foreground">
+                  {String(renderedFrames)}
+                </span>
+              </li>
+              <li
+                data-testid="component-preview-error"
+                className="text-destructive"
+              >
+                <span id="component-preview-error" />
+              </li>
+            </ul>
+          </section>
+        </div>
+
+        {/* The fixed pixel box: part of the determinism contract (the
+            camera derives from measured bounds; the viewport runs dpr 1).
+            Capped at the viewport's 800px so the caption wraps under it
+            instead of inflating the column past the row's width. */}
+        <div className="max-w-[800px] space-y-2">
+          <div id="component-preview-viewport">
+            <CadViewport
+              className="h-[520px] w-[800px]"
+              projection={preview === null ? null : preview.projection}
+              regeneration={preview === null ? undefined : 1}
+              onSettled={() => {
+                document
+                  .getElementById("component-preview-root")
+                  ?.setAttribute(
+                    "data-cad-rendered-volume",
+                    preview === null ? "" : preview.totalVolumeMm3.toFixed(3),
+                  );
+                setRenderedFrames((frames) => frames + 1);
+              }}
+              overlay={
+                <div className="pointer-events-none absolute top-2 left-2 flex gap-2 font-mono text-[11px]">
+                  <span className="border-border bg-background/85 border px-2 py-1">
+                    {definition.id} ·{" "}
+                    {String(preview === null ? 0 : preview.bodies.length)}{" "}
+                    {preview !== null && preview.bodies.length === 1
+                      ? "body"
+                      : "bodies"}
+                  </span>
+                  {preview !== null && preview.bodies.length > 1 ? (
+                    <span className="border-border bg-background/85 border px-2 py-1">
+                      {preview.bodies
+                        .map(
+                          (body) =>
+                            `${bodyLabel(body.bodyId)} ${body.volumeMm3.toFixed(0)}mm³`,
+                        )
+                        .join(" · ")}
+                    </span>
+                  ) : null}
+                </div>
+              }
+            />
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Real Manifold kernel in a module worker — the build rides the same
+            `solid.*` operation vocabulary as the workbench. Volume is the
+            kernel&apos;s divergence-theorem measurement; the analytic value is
+            the component&apos;s closed-form fixture at the current parameters.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
