@@ -653,9 +653,9 @@ export function resolveExtrudeProfile(
 
 /**
  * The full-circle sweep of a circle entity as a loop segment's angular
- * extent (2π), exposed for kernel adapters; an arc's sweep is its own.
+ * extent (2π); an arc's sweep is its own.
  */
-export function profileSegmentSweep(segment: ProfileSegment): number {
+function profileSegmentSweep(segment: ProfileSegment): number {
   if (segment.kind === "line") return 0;
   if (segment.kind === "circle") return Math.PI * 2;
   return arcSegmentSweep(segment);

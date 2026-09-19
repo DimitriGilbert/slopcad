@@ -45,20 +45,48 @@ node-server) under software WebGL (`--use-angle=swiftshader
 --enable-unsafe-swiftshader`), fixed viewport 1280×720, DPR 1 — so the
 tested bytes are the shipped bytes and screenshots are byte-stable:
 
-| Command                | Suite             | Covers                                                                                               |
-| ---------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
-| `pnpm test:e2e`        | `e2e/`            | the app smoke                                                                                        |
-| `pnpm test:render`     | `e2e-render/`     | the deterministic scene, selection, tools, workbench, IO, sketch — 87 tests, byte-stable screenshots |
-| `pnpm test:worker`     | `e2e-worker/`     | the Manifold and OCCT worker fixtures                                                                |
-| `pnpm test:workbench`  | `e2e-workbench/`  | the complete workbench suite                                                                         |
-| `pnpm test:a11y`       | a11y config       | keyboard and screen-reader access                                                                    |
-| `pnpm test:projects`   | projects config   | project/document persistence                                                                         |
-| `pnpm test:components` | components config | registry component previews                                                                          |
-| `pnpm test:perf`       | perf config       | performance budgets (`budgets.json` — never lower a budget)                                          |
-| `pnpm test:docs`       | `e2e-docs/`       | the `/docs` documentation application                                                                |
+| Command                | Suite             | Covers                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm test:e2e`        | `e2e/`            | the app smoke                                                                                                                                                                                                                                                                                                                                            |
+| `pnpm test:render`     | `e2e-render/`     | the deterministic scene, selection, tools, workbench, IO, sketch — 87 tests, byte-stable screenshots                                                                                                                                                                                                                                                     |
+| `pnpm test:worker`     | `e2e-worker/`     | the Manifold and OCCT worker fixtures                                                                                                                                                                                                                                                                                                                    |
+| `pnpm test:workbench`  | `e2e-workbench/`  | the complete workbench suite                                                                                                                                                                                                                                                                                                                             |
+| `pnpm test:a11y`       | a11y config       | keyboard and screen-reader access                                                                                                                                                                                                                                                                                                                        |
+| `pnpm test:projects`   | projects config   | project/document persistence                                                                                                                                                                                                                                                                                                                             |
+| `pnpm test:components` | components config | registry component previews                                                                                                                                                                                                                                                                                                                              |
+| `pnpm test:perf`       | perf config       | performance budgets (`budgets.json` — never lower a budget)                                                                                                                                                                                                                                                                                              |
+| `pnpm test:docs`       | `e2e-docs/`       | the `/docs` documentation application                                                                                                                                                                                                                                                                                                                    |
+| `pnpm test:matrix`     | `e2e-matrix/`     | the browser compatibility matrix — core workbench workflows on Chromium + Firefox + WebKit (Firefox runs the DOM battery; its render-stamp battery carries the visible reasoned skip: headless Firefox has no WebGL on the reference machine). WebKit needs the one-time user-space `pnpm webkit:deps` on hosts without libjpeg8/ICU 74 system packages. |
 
 All browser suites are outside `pnpm verify` by design — they build the
 app first.
+
+## The compatibility and release gates
+
+Three more local gates complete the release hardening (Phase 35):
+
+- **Native document compatibility** —
+  `packages/cad-core/src/native-compatibility.test.ts` (inside
+  `pnpm test`): every committed `packages/cad-core/fixtures/*.native.json`
+  enrolls automatically in the battery — format stamp, structural
+  validation, byte-identical round trips, deterministic serialization,
+  full transaction-log replay to every persisted intermediate state,
+  undo/redo cycle to the head, and migration no-op at the current
+  version, plus the migration registry's contiguity invariant.
+- **Registry consumer matrix** — `pnpm registry:matrix`: the full consumer
+  reinstalled from scratch with the four registry categories requested in
+  REVERSED order (dependency resolution is order-independent) and the
+  minimal consumer (`fixtures/cad-consumer-minimal`) installed with just
+  one UI component + one CAD component; both gate on install → typecheck
+  → build → browser smoke.
+- **Clean checkout** — `pnpm clean:verify`: exports the exact working
+  tree (stage → `git write-tree` → `git archive`, no commit needed) into
+  a temp directory and runs the whole battery there — install from the
+  committed lockfile, the documented contributor `.env` step, fresh
+  database migrations, check-types, lint, format:check, unit, build, the
+  e2e smoke (on its own dev port, never a live one), registry build +
+  validation, and the full consumer reinstall + build. Nothing
+  developer-local or generated is required.
 
 ## The one gate
 

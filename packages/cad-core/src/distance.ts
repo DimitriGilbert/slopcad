@@ -145,7 +145,7 @@ export function surfaceEntity(
  * contract already validated these buffers (flat, finite, in range), so the
  * surface aliases them unchanged.
  */
-export function surfaceOfRenderObject(object: RenderObject): MeasureEntity {
+function surfaceOfRenderObject(object: RenderObject): MeasureEntity {
   return surfaceEntity("body", object.positions, object.indices);
 }
 

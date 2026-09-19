@@ -7,9 +7,12 @@ import { defineConfig } from "vite";
 export default defineConfig({
   // `host: true` binds 0.0.0.0 so the dev/preview servers are reachable
   // over the LAN from other devices (owner request). Config-level so every
-  // invocation (pnpm dev, dev:web, --filter web dev) gets it.
+  // invocation (pnpm dev, dev:web, --filter web dev) gets it. The port is
+  // env-overridable (DEV_PORT) so isolated batteries — e.g. the clean
+  // checkout verification — can boot their own dev server beside a live
+  // one without reuse ambiguity.
   server: {
-    port: 3001,
+    port: Number(process.env.DEV_PORT ?? 3001),
     host: true,
   },
   preview: {

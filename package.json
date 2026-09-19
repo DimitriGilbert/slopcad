@@ -1,6 +1,7 @@
 {
   "name": "slopcad",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -27,6 +28,8 @@
     "registry:build": "bash scripts/registry-build.sh",
     "registry:validate": "node scripts/registry-validate.mjs --artifacts",
     "registry:regenerate": "bash scripts/cad-registry-regenerate.sh",
+    "registry:matrix": "bash scripts/cad-registry-matrix.sh",
+    "clean:verify": "bash scripts/clean-checkout-verify.sh",
     "verify": "pnpm run check-types && pnpm run lint && pnpm run format:check && pnpm test && pnpm build",
     "dev:web": "turbo run dev -F web --",
     "db:push": "turbo run db:push -F @slopcad/db --",
@@ -38,7 +41,9 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
-    "test:docs": "pnpm --filter web test:docs"
+    "test:docs": "pnpm --filter web test:docs",
+    "test:matrix": "pnpm --filter web test:matrix",
+    "webkit:deps": "bash scripts/webkit-user-deps.sh"
   },
   "dependencies": {
     "@slopcad/env": "workspace:*",

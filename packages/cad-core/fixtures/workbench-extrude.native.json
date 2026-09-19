@@ -1,0 +1,369 @@
+{
+  "formatVersion": 1,
+  "metadata": {
+    "name": "workbench-extrude",
+    "unitSystem": "metric"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_workbench_extrude",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_base_depth",
+          "name": "baseDepth",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 9
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_extrude_depth",
+          "name": "extrudeDepth",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 12
+          },
+          "expression": {
+            "kind": "binary",
+            "operator": "*",
+            "left": {
+              "kind": "identifier",
+              "name": "baseDepth"
+            },
+            "right": {
+              "kind": "number",
+              "value": 2
+            }
+          },
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_pad",
+        "name": "pad"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_extrude",
+        "kind": "extrude",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_profile"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_extrude_depth"
+          }
+        ],
+        "outputs": [
+          "body_pad"
+        ]
+      }
+    ],
+    "sketches": [
+      {
+        "id": "skd_profile",
+        "name": "profile",
+        "sketch": {
+          "formatVersion": 1,
+          "workplane": {
+            "origin": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "normal": {
+              "x": 0,
+              "y": 0,
+              "z": 1
+            },
+            "xAxis": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_rect_a",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 0,
+              "x2": 24,
+              "y2": 0
+            },
+            {
+              "id": "skent_rect_b",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 24,
+              "y1": 0,
+              "x2": 24,
+              "y2": 16
+            },
+            {
+              "id": "skent_rect_c",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 24,
+              "y1": 16,
+              "x2": 0,
+              "y2": 16
+            },
+            {
+              "id": "skent_rect_d",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 16,
+              "x2": 0,
+              "y2": 0
+            }
+          ],
+          "constraints": [
+            {
+              "id": "skcon_width",
+              "kind": "distance",
+              "first": {
+                "entity": "skent_rect_a",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_rect_a",
+                "point": "end"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 24
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_workbench_extrude",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": [
+          {
+            "id": "param_base_depth",
+            "name": "baseDepth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 6
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_extrude_depth",
+            "name": "extrudeDepth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 12
+            },
+            "expression": {
+              "kind": "binary",
+              "operator": "*",
+              "left": {
+                "kind": "identifier",
+                "name": "baseDepth"
+              },
+              "right": {
+                "kind": "number",
+                "value": 2
+              }
+            },
+            "metadata": {}
+          }
+        ]
+      },
+      "bodies": [],
+      "features": [],
+      "sketches": [
+        {
+          "id": "skd_profile",
+          "name": "profile",
+          "sketch": {
+            "formatVersion": 1,
+            "workplane": {
+              "origin": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "normal": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+              },
+              "xAxis": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "entities": [
+              {
+                "id": "skent_rect_a",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": 0,
+                "x2": 24,
+                "y2": 0
+              },
+              {
+                "id": "skent_rect_b",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 24,
+                "y1": 0,
+                "x2": 24,
+                "y2": 16
+              },
+              {
+                "id": "skent_rect_c",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 24,
+                "y1": 16,
+                "x2": 0,
+                "y2": 16
+              },
+              {
+                "id": "skent_rect_d",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": 16,
+                "x2": 0,
+                "y2": 0
+              }
+            ],
+            "constraints": [
+              {
+                "id": "skcon_width",
+                "kind": "distance",
+                "first": {
+                  "entity": "skent_rect_a",
+                  "point": "start"
+                },
+                "second": {
+                  "entity": "skent_rect_a",
+                  "point": "end"
+                },
+                "value": {
+                  "dimension": "length",
+                  "unit": "mm",
+                  "value": 24
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "transactions": [
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_pad",
+            "name": "pad"
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_extrude",
+            "kind": "extrude",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_profile"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_extrude_depth"
+              }
+            ],
+            "outputs": [
+              "body_pad"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "parameter.set",
+            "id": "param_base_depth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 9
+            }
+          }
+        ]
+      }
+    ],
+    "cursor": 3
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": [
+      {
+        "id": "feat_extrude",
+        "state": "stale",
+        "diagnostics": []
+      }
+    ]
+  }
+}
