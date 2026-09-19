@@ -30,6 +30,7 @@ import {
   STL_TRIANGLE_BYTES,
   exportStlBinary,
 } from "./stl-export";
+import { importStl } from "./stl-import";
 import {
   type StlDocument,
   documentBounds,
@@ -435,6 +436,48 @@ describe("exportStlBinary rejects malformed input", () => {
       "stl-export/non-finite-normal",
       "NaN normal",
     );
+  });
+});
+
+describe("exportStlBinary facet-normal overflow guard", () => {
+  // Three same-sign finite components of 1e308 sum past DBL_MAX, so the
+  // facet normal's renormalized mean is Infinity / Infinity = NaN —
+  // validation must reject the soup rather than write a NaN float32 facet
+  // normal into the file that this package's own importStl refuses.
+  const overflowSoup: Tessellation = {
+    positions: [0, 0, 0, 10, 0, 0, 0, 10, 0],
+    indices: [0, 1, 2],
+    normals: [1e308, 0, 0, 1e308, 0, 0, 1e308, 0, 0],
+  };
+
+  it("rejects normal components beyond the finite float32 range instead of writing NaN facet normals", () => {
+    const error = expectStlFailure(
+      exportStlBinary(overflowSoup),
+      "stl-export/non-finite-normal",
+      "Normals beyond float32 range",
+    );
+    expect(error.message).toContain("float32");
+  });
+
+  it("round-trips the unit-normal control cleanly through importStl", () => {
+    const unitSoup: Tessellation = {
+      positions: overflowSoup.positions,
+      indices: overflowSoup.indices,
+      normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+    };
+    const imported = importStl(unwrapStl(exportStlBinary(unitSoup)));
+    if (!imported.ok) {
+      throw new Error(
+        `Unit-normal control failed to re-import: ${imported.error.code}: ${imported.error.message}.`,
+      );
+    }
+    expect(imported.value.flavor).toBe("binary");
+    expect(imported.value.tessellation.positions).toEqual([
+      0, 0, 0, 10, 0, 0, 0, 10, 0,
+    ]);
+    expect(imported.value.tessellation.normals).toEqual([
+      0, 0, 1, 0, 0, 1, 0, 0, 1,
+    ]);
   });
 });
 
