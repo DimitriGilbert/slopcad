@@ -73,6 +73,18 @@ function rotationAngle(
 }
 
 /**
+ * Angles within this of 0 or π count as exactly degenerate for the
+ * skew-symmetric axis form: `Math.sin(Math.PI)` is ~1.2e-16 — never 0 — so
+ * an exact-zero sine test cannot fire at 180°, and near-degenerate sines
+ * amplify matrix noise. `Math.acos` cannot resolve angles closer than
+ * ~3e-8 to π either (its slope at ±1 is infinite, so a trace float error
+ * of a few ulps widens the angle by more than 1e-8), so the window must
+ * sit above that resolution floor while staying far below any meaningful
+ * angular difference.
+ */
+const DEGENERATE_ANGLE_EPSILON = 1e-7;
+
+/**
  * Maps a workplane onto its kernel-contract placement: the rotation about
  * the world origin that orients the canonical local frame onto the
  * workplane's basis, plus the translation to the workplane origin. A profile
@@ -82,28 +94,40 @@ function rotationAngle(
 export function workplaneToPlacement(workplane: Workplane): WorkplanePlacement {
   const m = frameMatrix(workplane);
   const angle = rotationAngle(m);
-  const sin = Math.sin(angle);
-  if (sin === 0) {
-    // Angle 0 (identity) or angle π (a 180° turn): the skew-symmetric form
-    // degenerates. The 180° case: the axis comes from the diagonal's signs.
-    if (angle < Math.PI / 2) {
-      return {
-        rotation: { axis: [0, 0, 1], angleRad: 0 },
-        translation: { ...workplane.origin },
-      };
-    }
-    // Angle π: R = 2nnᵀ − I, so n² = (R + I)/2 diagonal.
-    const xx = (m[0][0] + 1) / 2;
-    const yy = (m[1][1] + 1) / 2;
-    const zz = (m[2][2] + 1) / 2;
-    const x = Math.sqrt(Math.max(0, xx));
-    const y = Math.sqrt(Math.max(0, yy));
-    const z = Math.sqrt(Math.max(0, zz));
+  if (angle <= DEGENERATE_ANGLE_EPSILON) {
+    // Angle 0 (identity): the neutral representation, not a fabricated 2π.
     return {
-      rotation: { axis: [x, y, z], angleRad: Math.PI },
+      rotation: { axis: [0, 0, 1], angleRad: 0 },
       translation: { ...workplane.origin },
     };
   }
+  if (Math.abs(angle - Math.PI) <= DEGENERATE_ANGLE_EPSILON) {
+    // Angle π: R = 2nnᵀ − I, so n² = (R + I)/2 on the diagonal. The signs
+    // come from the off-diagonals (Rij = 2·ni·nj) through the largest
+    // component — unconditional positive square roots would fold a
+    // mixed-sign axis into the all-positive octant and mis-orient the
+    // frame. The largest squared component is at least 1/3, so the
+    // pivot never vanishes.
+    const xx = (m[0][0] + 1) / 2;
+    const yy = (m[1][1] + 1) / 2;
+    const zz = (m[2][2] + 1) / 2;
+    let axis: PlacementAxis;
+    if (xx >= yy && xx >= zz) {
+      const x = Math.sqrt(Math.max(0, xx));
+      axis = [x, m[0][1] / (2 * x), m[0][2] / (2 * x)];
+    } else if (yy >= zz) {
+      const y = Math.sqrt(Math.max(0, yy));
+      axis = [m[0][1] / (2 * y), y, m[1][2] / (2 * y)];
+    } else {
+      const z = Math.sqrt(Math.max(0, zz));
+      axis = [m[0][2] / (2 * z), m[1][2] / (2 * z), z];
+    }
+    return {
+      rotation: { axis, angleRad: Math.PI },
+      translation: { ...workplane.origin },
+    };
+  }
+  const sin = Math.sin(angle);
   const axis: PlacementAxis = [
     (m[2][1] - m[1][2]) / (2 * sin),
     (m[0][2] - m[2][0]) / (2 * sin),

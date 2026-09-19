@@ -21,6 +21,7 @@ import {
   SKETCH_DIAGNOSTIC_CODES,
   applySolvedParameters,
   createAngleConstraint,
+  createArcEntity,
   createCircleEntity,
   createCoincidentConstraint,
   createDiameterConstraint,
@@ -445,6 +446,39 @@ describe("reference solver — per-constraint battery", () => {
     );
   });
 
+  it("angle solves to the requested angle even when drawn at the supplementary branch, never converging to the supplement", () => {
+    // Drawn at ~170° between the directions — nearest zero of the OLD
+    // sine-form residual was the supplement (150° for a requested 30°);
+    // the cosine form's only zero on the unsigned domain is 30° itself.
+    const a = createLineEntity(eid("skent_a"), { x: 0, y: 0 }, { x: 10, y: 0 });
+    const b = createLineEntity(
+      eid("skent_b"),
+      { x: 0, y: 0 },
+      { x: -9.85, y: 1.74 },
+    );
+    const result = solver.solve(
+      [a, b],
+      [
+        createAngleConstraint(
+          cid("ang"),
+          eid("skent_a"),
+          eid("skent_b"),
+          angle(30, "deg"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("under-constrained");
+    if (result.status === "failed") return;
+    const sa = solvedLine(result, "skent_a");
+    const sb = solvedLine(result, "skent_b");
+    const dot =
+      (sa.x2 - sa.x1) * (sb.x2 - sb.x1) + (sa.y2 - sa.y1) * (sb.y2 - sb.y1);
+    const cross =
+      (sa.x2 - sa.x1) * (sb.y2 - sb.y1) - (sa.y2 - sa.y1) * (sb.x2 - sb.x1);
+    const measuredDegrees = (Math.atan2(Math.abs(cross), dot) * 180) / Math.PI;
+    expect(measuredDegrees).toBeCloseTo(30, 6);
+  });
+
   it("radius and diameter size circles exactly", () => {
     const circle = createCircleEntity(eid("skent_c"), { x: 0, y: 0 }, 7);
     const radius = solver.solve(
@@ -818,6 +852,69 @@ describe("reference solver — semantics and diagnostics", () => {
       const revived: unknown = JSON.parse(JSON.stringify(result));
       expect(revived).toEqual(result);
     }
+  });
+});
+
+describe("reference solver — degenerate arc solves are rejected, not applied", () => {
+  it("fails a solve whose arc collapses to a zero sweep (coincident arc endpoints), instead of reporting success", () => {
+    // The system is consistent (both endpoints pin to one angle), so the
+    // iteration converges — but the only convergent arcs are degenerate:
+    // start ≡ end (mod 2π). The physicality guard must convert that into a
+    // structured failure, never a success-family status carrying an arc
+    // that would fail parseSketch once applied.
+    const arc = createArcEntity(eid("skent_arc"), { x: 0, y: 0 }, 5, 0.5, 2.6);
+    const result = solver.solve(
+      [arc],
+      [
+        createCoincidentConstraint(
+          cid("collapse"),
+          pointTarget(eid("skent_arc"), "start"),
+          pointTarget(eid("skent_arc"), "end"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("failed");
+    if (result.status !== "failed") return;
+    expect(result.diagnostics[0]?.severity).toBe("error");
+    expect(result.diagnostics[0]?.code).toBe(
+      SKETCH_DIAGNOSTIC_CODES.solverNotConverged,
+    );
+  });
+
+  it("fails a solve whose tiny negative raw sweep would wrap into a near-full circle", () => {
+    // Both arc endpoints coincident to one fixed point on the circle: the
+    // solved angles straddle the pinned angle with a tiny negative raw
+    // remainder (end − start ≈ −1e-12), which independent canonicalization
+    // used to wrap into a 2π − ε sweep — a small drawn arc silently turned
+    // into a near-full circle that round-trips cleanly.
+    const pinAngle = 0.54;
+    const pin = createPointEntity(
+      eid("skent_pin"),
+      { x: 5 * Math.cos(pinAngle), y: 5 * Math.sin(pinAngle) },
+      { fixed: true },
+    );
+    const arc = createArcEntity(eid("skent_arc"), { x: 0, y: 0 }, 5, 0.5, 0.58);
+    const result = solver.solve(
+      [arc, pin],
+      [
+        createCoincidentConstraint(
+          cid("pin-start"),
+          pointTarget(eid("skent_arc"), "start"),
+          pointTarget(eid("skent_pin"), "center"),
+        ),
+        createCoincidentConstraint(
+          cid("pin-end"),
+          pointTarget(eid("skent_arc"), "end"),
+          pointTarget(eid("skent_pin"), "center"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("failed");
+    if (result.status !== "failed") return;
+    expect(result.diagnostics[0]?.severity).toBe("error");
+    expect(result.diagnostics[0]?.code).toBe(
+      SKETCH_DIAGNOSTIC_CODES.solverNotConverged,
+    );
   });
 });
 
