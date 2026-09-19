@@ -667,6 +667,71 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     expect(validation.formatVersion).toBe(1);
   });
 
+  it("accepts every create command the transaction log can carry", () => {
+    // The command vocabulary is wider than feature commands: a session's
+    // log can legitimately hold parameter.create, body.create,
+    // sketch.create, and reference.create entries (the workbench's extrude
+    // commit writes exactly these). The structural validator must accept
+    // each shape, not flag the feature-only fields it does not carry.
+    let session = createSession(baseDocument());
+    session = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          {
+            type: "parameter.create",
+            id: createParameterId("param_pad_depth"),
+            name: "padDepth",
+            value: length(10),
+          },
+        ],
+      }),
+      "the parameter.create commit",
+    );
+    session = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          { type: "body.create", id: createBodyId("body_pad"), name: "pad" },
+        ],
+      }),
+      "the body.create commit",
+    );
+    session = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          {
+            type: "sketch.create",
+            name: "pad sketch",
+            sketch: { formatVersion: 1 },
+          },
+        ],
+      }),
+      "the sketch.create commit",
+    );
+    session = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          {
+            type: "reference.create",
+            name: "edge reference",
+            reference: { kind: "edge" },
+          },
+        ],
+      }),
+      "the reference.create commit",
+    );
+    const validation = validateNativeCadDocument(
+      revived({
+        document: session.document,
+        history: session.history,
+        regeneration: new Map(),
+        metadata: {},
+        rollback: null,
+      }),
+    );
+    expect(validation.valid).toBe(true);
+    expect(validation.issues).toEqual([]);
+  });
+
   it("rejects non-objects with the not-an-object class", () => {
     for (const input of [null, [], "document", 7]) {
       const validation = validateNativeCadDocument(input);

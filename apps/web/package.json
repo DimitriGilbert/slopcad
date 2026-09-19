@@ -18,7 +18,8 @@
     "test:worker": "playwright test -c playwright.worker.config.ts",
     "test:perf": "playwright test -c playwright.perf.config.ts",
     "lint": "eslint .",
-    "test:components": "playwright test -c playwright.components.config.ts"
+    "test:components": "playwright test -c playwright.components.config.ts",
+    "test:docs": "playwright test -c playwright.docs.config.ts"
   },
   "dependencies": {
     "@libsql/client": "catalog:",
@@ -34,6 +35,7 @@
     "@slopcad/cad-r3f": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
     "@slopcad/cad-sketch": "workspace:*",
+    "@slopcad/docs-examples": "workspace:*",
     "@slopcad/env": "workspace:*",
     "@slopcad/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",

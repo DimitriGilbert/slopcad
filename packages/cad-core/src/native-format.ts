@@ -138,6 +138,8 @@ import {
   parseDocumentId,
   parseFeatureId,
   parseParameterId,
+  parseReferenceId,
+  parseSketchDocumentId,
 } from "./ids";
 import {
   type NativeMigrationError,
@@ -1089,6 +1091,35 @@ function validateSerializedCadDocumentShape(
   }
 }
 
+/** Validates a create-command's display name (a non-empty string). */
+function validateNameShape(
+  input: unknown,
+  path: string,
+  type: string,
+  issues: Issues,
+): void {
+  if (typeof input !== "string" || input.length === 0) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      `A ${type} command needs a non-empty name string.`,
+    );
+  }
+}
+
+/** Validates an opaque create-command payload (any plain object). */
+function validateRecordShape(
+  input: unknown,
+  path: string,
+  message: string,
+  issues: Issues,
+): void {
+  if (!isPlainRecord(input)) {
+    issue(issues, NATIVE_FORMAT_ISSUE_CODES.fieldInvalid, path, message);
+  }
+}
+
 function validateCommandShape(
   input: unknown,
   path: string,
@@ -1123,6 +1154,68 @@ function validateCommandShape(
       );
     }
     validateDimensionalShape(input.value, `${path}.value`, issues);
+    return;
+  }
+  if (type === "parameter.create") {
+    // The id is optional on create (the domain mints one when absent).
+    if (input.id !== undefined && !parseParameterId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A parameter.create command's optional id must be a valid parameter id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "parameter.create", issues);
+    validateDimensionalShape(input.value, `${path}.value`, issues);
+    return;
+  }
+  if (type === "body.create") {
+    if (input.id !== undefined && !parseBodyId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A body.create command's optional id must be a valid body id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "body.create", issues);
+    return;
+  }
+  if (type === "sketch.create") {
+    if (input.id !== undefined && !parseSketchDocumentId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A sketch.create command's optional id must be a valid sketch id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "sketch.create", issues);
+    validateRecordShape(
+      input.sketch,
+      `${path}.sketch`,
+      "A sketch.create command's sketch payload must be a plain object.",
+      issues,
+    );
+    return;
+  }
+  if (type === "reference.create") {
+    if (input.id !== undefined && !parseReferenceId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A reference.create command's optional id must be a valid reference id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "reference.create", issues);
+    validateRecordShape(
+      input.reference,
+      `${path}.reference`,
+      "A reference.create command's reference payload must be a plain object.",
+      issues,
+    );
     return;
   }
   if (type === "feature.delete") {

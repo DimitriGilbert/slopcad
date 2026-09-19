@@ -1,0 +1,12 @@
+{
+  "extends": "@slopcad/config/tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "src",
+    "vitest.config.ts",
+    "../cad-kernel-occt/src/occt-import-js.d.ts"
+  ]
+}

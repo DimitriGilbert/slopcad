@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteRouteImport } from './routes/_auth/route'
+import { Route as DocsRouteImport } from './routes/docs'
 import { Route as IoRouteImport } from './routes/io'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PerfRouteImport } from './routes/perf'
@@ -39,6 +40,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const AuthRouteRoute = AuthRouteRouteImport.update({
   id: '/_auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IoRoute = IoRouteImport.update({
@@ -144,6 +150,7 @@ const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/docs': typeof DocsRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
@@ -167,6 +174,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/docs': typeof DocsRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
@@ -192,6 +200,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteRouteWithChildren
+  '/docs': typeof DocsRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
@@ -217,6 +226,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/docs'
     | '/io'
     | '/login'
     | '/perf'
@@ -240,6 +250,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/docs'
     | '/io'
     | '/login'
     | '/perf'
@@ -264,6 +275,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_auth'
+    | '/docs'
     | '/io'
     | '/login'
     | '/perf'
@@ -289,6 +301,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
+  DocsRoute: typeof DocsRoute
   IoRoute: typeof IoRoute
   LoginRoute: typeof LoginRoute
   PerfRoute: typeof PerfRoute
@@ -321,6 +334,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/io': {
@@ -487,6 +507,7 @@ const AuthRouteRouteWithChildren = AuthRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRouteRoute: AuthRouteRouteWithChildren,
+  DocsRoute: DocsRoute,
   IoRoute: IoRoute,
   LoginRoute: LoginRoute,
   PerfRoute: PerfRoute,

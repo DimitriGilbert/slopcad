@@ -37,7 +37,8 @@
     "docker:build": "docker compose build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f"
+    "docker:logs": "docker compose logs -f",
+    "test:docs": "pnpm --filter web test:docs"
   },
   "dependencies": {
     "@slopcad/env": "workspace:*",

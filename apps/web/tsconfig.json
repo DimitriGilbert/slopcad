@@ -16,7 +16,8 @@
     "noUncheckedSideEffectImports": true,
     "paths": {
       "@/*": ["./src/*"],
-      "@slopcad/ui/*": ["../../packages/ui/src/*"]
+      "@slopcad/ui/*": ["../../packages/ui/src/*"],
+      "@slopcad/docs-examples/*": ["../../packages/docs-examples/src/*"]
     }
   }
 }
