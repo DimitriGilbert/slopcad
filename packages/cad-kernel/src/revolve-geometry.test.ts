@@ -11,6 +11,7 @@ import { angle } from "@slopcad/cad-core";
 import type { ProfileRevolveAxisInput } from "./contract";
 
 import {
+  profileLoopProblem,
   revolveCrossesAxis,
   revolvePappusVolume,
   REVOLVE_AXIS_TOUCH_TOLERANCE_MM,
@@ -61,6 +62,49 @@ describe("normalizeRevolveAxis", () => {
     expect(
       normalizeRevolveAxis({ point: [0, 0], direction: [Infinity, 0] }),
     ).toBeNull();
+  });
+});
+
+/** The shared loop structural validator (angles in any authored unit) ------ */
+
+describe("profileLoopProblem", () => {
+  it("accepts a closed loop whose arc angles are authored in degrees", () => {
+    // The contract's ProfileSegmentInput documents "angles in any angle
+    // unit, canonicalized internally": a deg-authored lower semicircle
+    // from (5,0) to (15,0) closed by three lines is structurally sound.
+    // Reading the magnitudes as radians (the angle-unit trap this guards
+    // against) would place the arc's endpoints at cos/sin of 180/360 RADIANS
+    // and reject the loop with a spurious closure gap.
+    const loop: Parameters<typeof profileLoopProblem>[0] = [
+      {
+        kind: "arc",
+        center: [10, 0] as [number, number],
+        radius: 5,
+        startAngle: angle(180, "deg"),
+        endAngle: angle(360, "deg"),
+      },
+      { kind: "line", start: [15, 0], end: [15, 10] },
+      { kind: "line", start: [15, 10], end: [5, 10] },
+      { kind: "line", start: [5, 10], end: [5, 0] },
+    ];
+    expect(profileLoopProblem(loop)).toBeNull();
+  });
+
+  it("still reports non-finite arc angles as a structured problem", () => {
+    const loop: Parameters<typeof profileLoopProblem>[0] = [
+      {
+        kind: "arc" as const,
+        center: [10, 0] as [number, number],
+        radius: 5,
+        startAngle: {
+          dimension: "angle" as const,
+          unit: "deg" as const,
+          value: Number.POSITIVE_INFINITY,
+        },
+        endAngle: angle(360, "deg"),
+      },
+    ];
+    expect(profileLoopProblem(loop)).toBe("an arc has non-finite angles");
   });
 });
 
@@ -167,6 +211,26 @@ describe("revolveSignedExtremes", () => {
     expect(extremes.min).toBeCloseTo(5, 12);
     expect(extremes.max).toBeCloseTo(11, 12);
   });
+
+  it("measures a deg-authored arc by its true radian sweep", () => {
+    // Arc 350°→370° about (0,0), r=10: the true y-extent about the x axis
+    // is ±10·sin(10°) ≈ ±1.736 — both sides of the axis. Reading the raw
+    // magnitudes as radians would land the candidates where sin ≈ −1 and
+    // report a one-sided extent.
+    const loop: Parameters<typeof revolveSignedExtremes>[0] = [
+      {
+        kind: "arc" as const,
+        center: [0, 0] as [number, number],
+        radius: 10,
+        startAngle: angle(350, "deg"),
+        endAngle: angle(370, "deg"),
+      },
+    ];
+    const extremes = revolveSignedExtremes(loop, X_FRAME);
+    const reach = 10 * Math.sin((10 * Math.PI) / 180);
+    expect(extremes.min).toBeCloseTo(-reach, 12);
+    expect(extremes.max).toBeCloseTo(reach, 12);
+  });
 });
 
 /** The crossing rule ------------------------------------------------------- */
@@ -256,6 +320,24 @@ describe("revolveCrossesAxis", () => {
       },
     ];
     expect(revolveCrossesAxis(toucher, X_FRAME)).toBe(false);
+  });
+
+  it("rejects a deg-authored arc that crosses the axis (the fail-open guard)", () => {
+    // The 350°→370° arc has material strictly on both sides of the x axis
+    // (±10·sin(10°) ≈ ±1.736 mm, far beyond the touch tolerance); the
+    // validator must report the crossing — misreading the deg magnitudes as
+    // radians would admit it and the mesh kernels would silently clip the
+    // far side.
+    const loop: Parameters<typeof revolveCrossesAxis>[0] = [
+      {
+        kind: "arc" as const,
+        center: [0, 0] as [number, number],
+        radius: 10,
+        startAngle: angle(350, "deg"),
+        endAngle: angle(370, "deg"),
+      },
+    ];
+    expect(revolveCrossesAxis(loop, X_FRAME)).toBe(true);
   });
 
   it("honours the documented touch tolerance symmetrically", () => {

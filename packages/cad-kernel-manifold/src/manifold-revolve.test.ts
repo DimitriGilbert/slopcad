@@ -142,6 +142,71 @@ describe("manifold revolve", () => {
     );
   });
 
+  it("keeps a legal touching profile's quarter turn on the +v side when the touch vertex rounds to −ε", () => {
+    // Oblique axis [1,1] through the origin: a vertex authored at decimal
+    // coordinates (0.1 + 0.2, 0.3) reads signed radial −5.6e-17 — legal
+    // touching under REVOLVE_AXIS_TOUCH_TOLERANCE_MM, but below an exact
+    // `>= 0` side test, which would append the π-rotated −v placement and
+    // put the quarter turn at z ∈ [−10, 0] instead of [0, 10].
+    const r = Math.SQRT1_2;
+    const u: readonly [number, number] = [r, r];
+    const v: readonly [number, number] = [-r, r];
+    const along = (
+      p: readonly [number, number],
+      q: readonly [number, number],
+      k: number,
+    ): [number, number] => [p[0] + k * q[0], p[1] + k * q[1]];
+    const p1: readonly [number, number] = [0.1 + 0.2, 0.3];
+    const p2 = along(p1, u, 20);
+    const p3 = along(p2, v, 10);
+    const p4 = along(p1, v, 10);
+    const loop: Parameters<GeometryKernel["revolve"]>[0]["loop"] = [
+      { kind: "line", start: p1, end: p2 },
+      { kind: "line", start: p2, end: p3 },
+      { kind: "line", start: p3, end: p4 },
+      { kind: "line", start: p4, end: p1 },
+    ];
+    const input = (sweepRad: number) => ({
+      loop,
+      axis: {
+        point: [0, 0] as [number, number],
+        direction: [1, 1] as [number, number],
+      },
+      angle: angle(sweepRad, "rad"),
+      placement: identityPlacement,
+    });
+    const quarter = unwrapKernelResult(
+      kernel.revolve(input(Math.PI / 2)),
+      "touching quarter revolve",
+    );
+    // Straight-line profile: the Pappus value is exact (200 mm² at centroid
+    // distance 5 mm, swept π/2).
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(quarter), "quarter volume"),
+      200 * 5 * (Math.PI / 2),
+      0.003,
+    );
+    const quarterBounds = unwrapKernelResult(
+      kernel.bounds(quarter),
+      "quarter bounds",
+    );
+    expect(quarterBounds.min[2]).toBeGreaterThanOrEqual(-1e-6);
+    expect(quarterBounds.max[2]).toBeGreaterThan(9);
+    // The full turn is placement-symmetric: unaffected by the side choice.
+    const full = unwrapKernelResult(
+      kernel.revolve(input(Math.PI * 2)),
+      "touching full revolve",
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(full), "full volume"),
+      200 * 5 * Math.PI * 2,
+      0.003,
+    );
+    const fullBounds = unwrapKernelResult(kernel.bounds(full), "full bounds");
+    expect(fullBounds.min[2]).toBeLessThan(0);
+    expect(fullBounds.max[2]).toBeGreaterThan(0);
+  });
+
   it("rejects a crossing profile with the structured code BEFORE Manifold can silently clip it", () => {
     // Manifold.revolve would keep only the positive-radial part of this
     // contour without any diagnostic (probed, and stated in its API docs);

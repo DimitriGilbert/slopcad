@@ -226,8 +226,6 @@ export function applyMatrix3(
  */
 export function profileLoopProblem(
   loop: readonly ProfileSegmentInput[],
-  angleInRad: (value: { readonly value: number }) => number = (value) =>
-    value.value,
 ): string | null {
   if (loop.length === 0) return "the loop is empty";
   const ends: { readonly start: ProfilePoint2; readonly end: ProfilePoint2 }[] =
@@ -259,11 +257,18 @@ export function profileLoopProblem(
       ends.push({ start: point, end: point });
       continue;
     }
-    const a0 = angleInRad(segment.startAngle);
-    const a1 = angleInRad(segment.endAngle);
-    if (!Number.isFinite(a0) || !Number.isFinite(a1)) {
+    // Angles arrive in any authored unit (the contract's ProfileSegmentInput
+    // documents "angles in any angle unit, canonicalized internally") and
+    // are read in radians via the same valueIn conversion the module's
+    // tessellators apply.
+    if (
+      !Number.isFinite(segment.startAngle.value) ||
+      !Number.isFinite(segment.endAngle.value)
+    ) {
       return "an arc has non-finite angles";
     }
+    const a0 = valueIn(segment.startAngle, "rad");
+    const a1 = valueIn(segment.endAngle, "rad");
     const sweep = (((a1 - a0) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
     if (sweep === 0) {
       return "an arc sweeps a zero angle (a full circle must use a circle segment)";
@@ -358,7 +363,6 @@ function axisSignedDistance(
 function segmentSignedExtremes(
   segment: ProfileSegmentInput,
   frame: RevolveAxisFrame,
-  angleInRad: (value: { readonly value: number }) => number,
 ): { readonly min: number; readonly max: number } {
   if (segment.kind === "line") {
     const a = axisSignedDistance(frame, segment.start[0], segment.start[1]);
@@ -380,7 +384,8 @@ function segmentSignedExtremes(
       max: centerDistance + segment.radius,
     };
   }
-  const a0 = angleInRad(segment.startAngle);
+  // Authored in any angle unit, read in radians (the module's convention).
+  const a0 = valueIn(segment.startAngle, "rad");
   const sweep = profileSegmentSweepRad(segment);
   const phi = Math.atan2(frame.u.y, frame.u.x);
   const within = (theta: number): boolean =>
@@ -409,13 +414,11 @@ function segmentSignedExtremes(
 export function revolveSignedExtremes(
   loop: readonly ProfileSegmentInput[],
   frame: RevolveAxisFrame,
-  angleInRad: (value: { readonly value: number }) => number = (value) =>
-    value.value,
 ): { readonly min: number; readonly max: number } {
   let min = Infinity;
   let max = -Infinity;
   for (const segment of loop) {
-    const extremes = segmentSignedExtremes(segment, frame, angleInRad);
+    const extremes = segmentSignedExtremes(segment, frame);
     min = Math.min(min, extremes.min);
     max = Math.max(max, extremes.max);
   }
@@ -433,10 +436,8 @@ export function revolveSignedExtremes(
 export function revolveCrossesAxis(
   loop: readonly ProfileSegmentInput[],
   frame: RevolveAxisFrame,
-  angleInRad: (value: { readonly value: number }) => number = (value) =>
-    value.value,
 ): boolean {
-  const { min, max } = revolveSignedExtremes(loop, frame, angleInRad);
+  const { min, max } = revolveSignedExtremes(loop, frame);
   return (
     min < -REVOLVE_AXIS_TOUCH_TOLERANCE_MM &&
     max > REVOLVE_AXIS_TOUCH_TOLERANCE_MM
@@ -910,8 +911,6 @@ export function sweepPathSelfIntersects(
 export function sweepProfileArcAxisCrossing(
   loop: readonly ProfileSegmentInput[],
   path: readonly SweepPathSegmentInput[],
-  angleInRad: (value: { readonly value: number }) => number = (value) =>
-    value.value,
 ): {
   readonly uAxis: number;
   readonly min: number;
@@ -926,8 +925,8 @@ export function sweepProfileArcAxisCrossing(
       direction: [0, 1],
     });
     if (frame === null) continue;
-    if (revolveCrossesAxis(loop, frame, angleInRad)) {
-      const extremes = revolveSignedExtremes(loop, frame, angleInRad);
+    if (revolveCrossesAxis(loop, frame)) {
+      const extremes = revolveSignedExtremes(loop, frame);
       return { uAxis, min: extremes.min, max: extremes.max };
     }
   }

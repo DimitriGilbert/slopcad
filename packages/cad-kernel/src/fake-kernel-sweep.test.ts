@@ -303,6 +303,50 @@ describe("fake kernel sweep (the analytic reference)", () => {
     );
   });
 
+  it("bounds an asymmetric placed sweep by the rotation ROW support (not the inverse rotation's)", () => {
+    const kernel = createFakeKernel();
+    // Asymmetric section x ∈ [0,6], y ∈ [−2,2], straight +z path 40 mm,
+    // placed rotated +90° about z and translated (5,5,0): local x maps to
+    // world +y and local y to world −x, so the true placed AABB is
+    // x ∈ [3,7], y ∈ [5,11], z ∈ [0,40]. Building the support direction
+    // from the rotation matrix's COLUMN instead of its row would report the
+    // AABB of the −90°-rotated solid — y ∈ [−1,5] — not even a
+    // conservative container for material reaching y = 11.
+    const solid = unwrapKernelResult(
+      kernel.sweep({
+        loop: [
+          { kind: "line", start: [0, -2], end: [6, -2] },
+          { kind: "line", start: [6, -2], end: [6, 2] },
+          { kind: "line", start: [6, 2], end: [0, 2] },
+          { kind: "line", start: [0, 2], end: [0, -2] },
+        ],
+        path: [{ kind: "line", start: [0, 0], end: [0, 40] }],
+        placement: {
+          rotation: { axis: [0, 0, 1], angle: angle(Math.PI / 2) },
+          translation: { x: length(5), y: length(5), z: length(0) },
+        },
+      }),
+      "placed asymmetric sweep",
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(solid), "volume"),
+      6 * 4 * 40,
+      1e-9,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(solid), "placed bounds"),
+      { min: [3, 5, 0], max: [7, 11, 40] },
+      1e-6,
+    );
+    // The soup's own extents must agree with the reported box (the placed
+    // walls reach y = 11, inside the reported bounds).
+    const soup = unwrapKernelResult(kernel.tessellate(solid), "soup");
+    assertTessellationValid(soup, {
+      bounds: { min: [3, 5, 0], max: [7, 11, 40] },
+      toleranceMm: 1e-6,
+    });
+  });
+
   it("keeps tessellations deterministic", () => {
     const kernel = createFakeKernel();
     const solid = unwrapKernelResult(

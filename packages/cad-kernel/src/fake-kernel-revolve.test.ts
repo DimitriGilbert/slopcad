@@ -193,6 +193,83 @@ describe("fake kernel revolve: exact measures", () => {
     );
   });
 
+  it("keeps a touching profile's sweep start on the +v side when the touch vertex rounds to −ε", () => {
+    // The oblique axis [1,1] through the origin: a vertex authored at
+    // decimal coordinates (0.1 + 0.2, 0.3) reads signed radial −5.6e-17 —
+    // legal touching under the shared REVOLVE_AXIS_TOUCH_TOLERANCE_MM, but
+    // below an exact `>= 0` test. The side decision must stay +v: the
+    // quarter turn's material classifies into z ≥ 0 (probed by voxel
+    // intersection), not the π-rotated −v placement an exact test would
+    // choose (whose classification covers nothing of the +v profile).
+    const kernel = createFakeKernel();
+    const r = Math.SQRT1_2;
+    const u: readonly [number, number] = [r, r];
+    const v: readonly [number, number] = [-r, r];
+    const along = (
+      p: readonly [number, number],
+      q: readonly [number, number],
+      k: number,
+    ): [number, number] => [p[0] + k * q[0], p[1] + k * q[1]];
+    // Touching edge on the axis (s ≈ −5.6e-17 at every corner of the edge),
+    // axial length 20 along u, radial height 10 along v.
+    const p1: readonly [number, number] = [0.1 + 0.2, 0.3];
+    const p2 = along(p1, u, 20);
+    const p3 = along(p2, v, 10);
+    const p4 = along(p1, v, 10);
+    const solid = unwrapKernelResult(
+      kernel.revolve({
+        loop: [
+          { kind: "line", start: p1, end: p2 },
+          { kind: "line", start: p2, end: p3 },
+          { kind: "line", start: p3, end: p4 },
+          { kind: "line", start: p4, end: p1 },
+        ],
+        axis: { point: [0, 0], direction: [1, 1] },
+        angle: angle(Math.PI / 2, "rad"),
+        placement: {
+          rotation: { axis: [0, 0, 1], angle: angle(0) },
+          translation: { x: length(0), y: length(0), z: length(0) },
+        },
+      }),
+      "touching revolve",
+    );
+    const probe = (z0: number) =>
+      unwrapKernelResult(
+        kernel.transform(
+          unwrapKernelResult(
+            kernel.createBox({
+              width: length(30),
+              depth: length(35),
+              height: length(4),
+            }),
+            "probe box",
+          ),
+          { x: length(-10), y: length(-10), z: length(z0) },
+        ),
+        "probe placement",
+      );
+    const plus = unwrapKernelResult(
+      kernel.volume(
+        unwrapKernelResult(
+          kernel.intersect([solid, probe(1)]),
+          "plus intersect",
+        ),
+      ),
+      "plus volume",
+    );
+    const minus = unwrapKernelResult(
+      kernel.volume(
+        unwrapKernelResult(
+          kernel.intersect([solid, probe(-5)]),
+          "minus intersect",
+        ),
+      ),
+      "minus volume",
+    );
+    expect(plus).toBeGreaterThan(0);
+    expect(minus).toBe(0);
+  });
+
   it("tessellates deterministically into an outward-wound mesh of the solid", () => {
     const kernel = createFakeKernel();
     const solid = unwrapKernelResult(
