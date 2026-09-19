@@ -9,6 +9,9 @@ import { drizzle } from "drizzle-orm/libsql";
 
 import * as schema from "./schema";
 
+/** The drizzle handle the api layer's routers receive (see the routers' factories). */
+export type SlopcadDatabase = ReturnType<typeof createDb>;
+
 export function createDb() {
   const client = createClient({
     url: env.DATABASE_URL,

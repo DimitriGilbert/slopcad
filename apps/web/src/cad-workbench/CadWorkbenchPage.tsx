@@ -81,7 +81,11 @@ import { completionJson } from "../render-fixture/fixture-session";
 import { SketchMode } from "./SketchMode";
 import { FeatureTimelineStrip } from "./feature-timeline-strip";
 import { WorkbenchMeasurementSection } from "./measurement-section";
-import { useWorkbenchEngine, WorkbenchStoreProvider } from "./workbench-engine";
+import {
+  useWorkbenchEngine,
+  WorkbenchStoreProvider,
+  type WorkbenchEngine,
+} from "./workbench-engine";
 
 export function CadWorkbenchPage(): ReactElement {
   // The store is composed ONCE (the engine factory) and handed to the
@@ -100,6 +104,24 @@ function CadWorkbenchBody(): ReactElement {
     volumeId: "workbench-volume",
     errorId: "workbench-error",
   });
+  return <WorkbenchLayout engine={engine} />;
+}
+
+/**
+ * The composed workbench's LAYOUT, rendered from a caller-supplied engine
+ * run: the exact Phase 15-27 DOM (ids, attributes, structure), now shared
+ * by every page that boots the engine. The optional `bar` slot renders one
+ * page-level row ABOVE the command row (Phase 31: the persistence bar of
+ * the project-scoped workbench); when absent — the bare workbench — the
+ * DOM is byte-identical to the pinned baseline.
+ */
+export function WorkbenchLayout({
+  engine,
+  bar,
+}: {
+  readonly engine: WorkbenchEngine;
+  readonly bar?: ReactElement;
+}): ReactElement {
   const {
     applied,
     executed,
@@ -209,6 +231,14 @@ function CadWorkbenchBody(): ReactElement {
             })
       }
     >
+      {/* The page-level bar (Phase 31 persistence chrome) when the host
+          supplies one; the bare workbench renders nothing here, keeping its
+          pinned DOM byte-identical. */}
+      {bar === undefined ? null : (
+        <div className="border-border bg-background shrink-0 border-b">
+          {bar}
+        </div>
+      )}
       {/* Tool row: the component's tool strip; the feature timeline (the
           Phase 20 history surface) sits beside it behind a divider, and the
           undo/redo pair on the right — the page-level surfaces of concerns
