@@ -74,10 +74,17 @@ async function settleForCapture(page: Page): Promise<void> {
  * volume attribute exists and is stable across two polls. (The render
  * stamp itself is the WebGL battery's concern; Firefox cannot produce
  * one, and every engine can produce this.)
+ *
+ * "Stable across two polls" means two CONSECUTIVE quiescent polls that
+ * agree — never a baseline pinned to the first observation: a first poll
+ * that lands in the post-commit/pre-dispatch window reads the OLD volume,
+ * and a pinned baseline could then never match the post-settle NEW volume
+ * (a guaranteed 30 s hang). Tracking the previous quiescent poll lets the
+ * wait self-heal through the transition instead.
  */
 async function waitForNumericSettle(page: Page): Promise<string> {
   const deadline = Date.now() + 30_000;
-  let first = "";
+  let previous = "";
   while (Date.now() < deadline) {
     const state = await page.evaluate((rootId) => {
       const root = document.getElementById(rootId);
@@ -87,8 +94,8 @@ async function waitForNumericSettle(page: Page): Promise<string> {
       };
     }, ROOT);
     if (state.inFlight === "0" && state.volume !== "") {
-      if (first === "") first = state.volume;
-      else if (first === state.volume) return first;
+      if (previous === state.volume) return state.volume;
+      previous = state.volume;
     }
     await page.waitForTimeout(250);
   }

@@ -94,6 +94,7 @@ import type {
 
 import { createDiagnosticLog } from "./diagnostic-log";
 import { WorkerRequestFailure } from "./worker-client";
+import { WORKER_PROTOCOL_ERROR_CODES } from "./worker-errors";
 import { createWorkerIdGenerator } from "./worker-ids";
 import { resultMintsSolids } from "./worker-operations";
 import { createRevisionClock } from "./revision";
@@ -208,6 +209,13 @@ export interface StaleResultCoordinator<S> {
 interface RunningComputation {
   readonly revision: RevisionTag;
   readonly requestIds: Set<WorkerRequestId>;
+  /**
+   * The promise each recorded request settled into, keyed by id. The cancel
+   * loop pairs this with `requestIds` to sink the void rejections it itself
+   * causes for requests the computation fired but never awaited — nothing
+   * else reads it, and the map dies with the computation.
+   */
+  readonly responses: Map<WorkerRequestId, Promise<unknown>>;
   readonly mints: Set<WorkerSolidId>;
   /**
    * True once the computation's fate is decided and its mint set is final.
@@ -217,6 +225,23 @@ interface RunningComputation {
    * site instead of accumulating into a set nobody will release.
    */
   sealed: boolean;
+}
+
+/**
+ * The disposal failure codes that void the REQUEST itself rather than report
+ * a disposal verdict: `worker/transport-closed` (the channel is gone — a
+ * crash-driven `close()` settles every later request this way) and
+ * `worker/cancelled` (the disposal request was voided by its caller). On a
+ * dead channel nothing can be disposed and nothing should be — the solids die
+ * with the channel — so these are best-effort silence instead of a
+ * `disposalFailures` entry, and an update whose channel died mid-flight still
+ * settles. Every other refusal stays observable.
+ */
+function isVoidedDisposalFailure(error: WorkerRequestFailure): boolean {
+  return (
+    error.error.code === WORKER_PROTOCOL_ERROR_CODES.transportClosed ||
+    error.error.code === WORKER_PROTOCOL_ERROR_CODES.cancelled
+  );
 }
 
 /**
@@ -245,8 +270,12 @@ export function createStaleResultCoordinator<S>(
   /**
    * Disposes `mints` over the channel and settles only when every disposal
    * has. A disposal the channel refuses is a structured worker failure and is
-   * recorded in `disposalFailures` (observable); anything else rethrows —
-   * it is channel corruption, not a disposal outcome.
+   * recorded in `disposalFailures` (observable) — except the voided-request
+   * codes (see {@link isVoidedDisposalFailure}), which a dead channel
+   * produces for every request and which are best-effort silence; either way
+   * the disposal settles rather than hanging an update on a channel that can
+   * answer nothing. Anything else rethrows — it is channel corruption, not a
+   * disposal outcome.
    */
   async function releaseMints(
     mints: ReadonlySet<WorkerSolidId>,
@@ -258,7 +287,7 @@ export function createStaleResultCoordinator<S>(
           () => undefined,
           (error: unknown) => {
             if (error instanceof WorkerRequestFailure) {
-              disposalFaults.push(error);
+              if (!isVoidedDisposalFailure(error)) disposalFaults.push(error);
               return;
             }
             throw error;
@@ -303,12 +332,30 @@ export function createStaleResultCoordinator<S>(
       const revision = clock.bump();
       if (policy === "cancel") {
         for (const computation of running) {
-          for (const id of computation.requestIds) client.cancel(id);
+          for (const id of computation.requestIds) {
+            client.cancel(id);
+            // The cancel above voided the request synchronously. A caller
+            // that awaited it sees the structured worker/cancelled
+            // rejection through its own handler; a request the computation
+            // fired but never awaited (a supported scenario — see the
+            // late-mint rules above) has no such handler, and this
+            // coordinator-caused rejection is sunk right here instead of
+            // escaping as an unhandled one. Scoping is by construction: the
+            // pinned cancellation rule freezes a voided request's fate, so
+            // this sink can only ever swallow the void this loop itself
+            // created — a rejection that settled earlier kept every handler
+            // (or non-handler) it already had.
+            const response = computation.responses.get(id);
+            if (response !== undefined) {
+              void response.then(undefined, () => undefined);
+            }
+          }
         }
       }
       const computation: RunningComputation = {
         revision,
         requestIds: new Set<WorkerRequestId>(),
+        responses: new Map<WorkerRequestId, Promise<unknown>>(),
         mints: new Set<WorkerSolidId>(),
         sealed: false,
       };
@@ -319,12 +366,18 @@ export function createStaleResultCoordinator<S>(
         request(operation, input) {
           const id = ids.nextRequestId();
           computation.requestIds.add(id);
-          return client.request(operation, input, id).then((result) => {
-            for (const mint of resultMintsSolids(operation, result)) {
-              recordMint(computation, mint);
-            }
-            return result;
-          });
+          const response = client
+            .request(operation, input, id)
+            .then((result) => {
+              for (const mint of resultMintsSolids(operation, result)) {
+                recordMint(computation, mint);
+              }
+              return result;
+            });
+          // Retained so the cancel loop can sink exactly the void IT
+          // causes for never-awaited requests (see above).
+          computation.responses.set(id, response);
+          return response;
         },
       };
 

@@ -144,6 +144,53 @@ describe("addParameter", () => {
       expectError(created, PARAMETER_ERROR_CODES.nameReserved);
     }
   });
+
+  it("stores a flat operator chain at exactly the depth limit", () => {
+    // 128 terms is the deepest flat chain the parser accepts and the AST
+    // validator revalidates, so storage must accept it too — source that
+    // parses can be stored (129 terms never reaches storage: the parser
+    // rejects it with expression/too-deep).
+    const expression = parse(
+      Array.from({ length: 128 }, () => "1").join(" + "),
+    );
+    const created = addParameter(EMPTY_PARAMETER_COLLECTION, {
+      id: widthId,
+      name: "width",
+      value: length(1),
+      expression,
+    });
+    expect(created.ok).toBe(true);
+    expect(
+      parseExpression(Array.from({ length: 129 }, () => "1").join(" + ")).ok,
+    ).toBe(false);
+  });
+
+  it("rejects a value with no finite canonical magnitude on both typed and revived input", () => {
+    // A persisted 1e308 m value would crash its next save (canonical
+    // conversion overflows); the persistence boundary rejects it structured.
+    expectError(
+      addParameter(EMPTY_PARAMETER_COLLECTION, {
+        id: widthId,
+        name: "width",
+        value: length(1e308, "m"),
+      }),
+      PARAMETER_ERROR_CODES.invalidValue,
+    );
+    expectError(
+      parseParameterCollection({
+        parameters: [
+          {
+            id: "param_width",
+            name: "width",
+            value: { dimension: "length", unit: "m", value: 1e308 },
+            expression: null,
+            metadata: {},
+          },
+        ],
+      }),
+      PARAMETER_ERROR_CODES.invalidValue,
+    );
+  });
 });
 
 describe("parameter collection CRUD", () => {

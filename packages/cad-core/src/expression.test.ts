@@ -13,6 +13,7 @@ import {
   isExpressionFunction,
   MAX_EXPRESSION_DEPTH,
   MAX_EXPRESSION_IDENTIFIER_LENGTH,
+  parseExpression,
   parseExpressionAst,
   printExpression,
 } from "./index";
@@ -128,6 +129,44 @@ describe("printExpression", () => {
     expect(
       printExpression(call("max", call("min", id("a"), id("b")), num(1))),
     ).toBe("max(min(a, b), 1)");
+  });
+
+  it("prints magnitudes as decimals the lexer can re-read, never exponents", () => {
+    // Everyday magnitudes stay byte-identical to String(value).
+    expect(printExpression(num(0.000001))).toBe("0.000001");
+    expect(printExpression(num(2 ** 53 - 1))).toBe("9007199254740991");
+    // String() would emit 5e-7 here; the V1 number token has no exponent
+    // syntax, so the same number prints as an explicit decimal.
+    expect(printExpression(num(5e-7))).toBe("0.0000005");
+    expect(printExpression(unit(5e-7, "mm"))).toBe("0.0000005mm");
+    // 1e21-scale magnitudes and plain integers beyond the safe-integer
+    // range: the plain integer forms are not lexable (integers must be
+    // safe integers), so the exact decimal form carries a `.0` tail.
+    expect(printExpression(num(1e21))).toBe("1000000000000000000000.0");
+    expect(printExpression(num(1.5e21))).toBe("1500000000000000000000.0");
+    expect(printExpression(num(1e20))).toBe("100000000000000000000.0");
+    expect(printExpression(num(2 ** 53))).toBe("9007199254740992.0");
+  });
+
+  it("round-trips extreme-magnitude literals through print and re-parse", () => {
+    // Revived-from-JSON ASTs can carry any finite magnitude, including the
+    // exponential-notation range; their printed form must re-parse to the
+    // identical AST (the pinned parse(print(ast)) invariant).
+    const extreme: readonly ExpressionNode[] = [
+      num(5e-7),
+      unit(5e-7, "mm"),
+      num(1e21),
+      num(1.5e21),
+      num(2 ** 53),
+    ];
+    for (const node of extreme) {
+      const printed = printExpression(node);
+      expect(printed).not.toContain("e");
+      const reparsed = parseExpression(printed);
+      expect(reparsed.ok).toBe(true);
+      if (!reparsed.ok) continue;
+      expect(reparsed.value).toEqual(node);
+    }
   });
 });
 

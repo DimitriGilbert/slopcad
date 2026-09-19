@@ -232,68 +232,92 @@ export const arduinoMount: CadComponent = {
     const depthMm = ARDUINO_UNO_R3_FOOTPRINT.boardDepthMm + 2 * p.marginMm;
     const totalHeightMm = p.plateThicknessMm + p.standoffHeightMm;
 
-    const plate = await kernel.createBox({
-      depth: length(depthMm),
-      height: length(p.plateThicknessMm),
-      width: length(widthMm),
-    });
-    if (!plate.ok) return plate;
+    // Dispose discipline: every intermediate solid the build mints is
+    // released through the kernel that minted it — refusal paths included
+    // — and only the returned body's solid survives the build (`dispose`
+    // is the release path for WASM-backed kernels; disposing operands
+    // after a boolean is proven safe by the kernel's own contract suite).
+    const minted: KernelSolid[] = [];
+    let returned: KernelSolid | undefined;
+    try {
+      const plate = await kernel.createBox({
+        depth: length(depthMm),
+        height: length(p.plateThicknessMm),
+        width: length(widthMm),
+      });
+      if (!plate.ok) return plate;
+      minted.push(plate.value);
 
-    const centers = boardHoleCentersMm(p.marginMm);
-    const tools: KernelSolid[] = [];
-    const standoffs: KernelSolid[] = [];
-    for (const [x, y] of centers) {
-      const standoff = await kernel.createCylinder({
-        height: length(p.standoffHeightMm),
-        radius: length(p.standoffDiameterMm / 2),
-      });
-      if (!standoff.ok) return standoff;
-      const placed = await kernel.transform(standoff.value, {
-        x: length(x),
-        y: length(y),
-        z: length(p.plateThicknessMm),
-      });
-      if (!placed.ok) return placed;
-      standoffs.push(placed.value);
+      const centers = boardHoleCentersMm(p.marginMm);
+      const tools: KernelSolid[] = [];
+      const standoffs: KernelSolid[] = [];
+      for (const [x, y] of centers) {
+        const standoff = await kernel.createCylinder({
+          height: length(p.standoffHeightMm),
+          radius: length(p.standoffDiameterMm / 2),
+        });
+        if (!standoff.ok) return standoff;
+        minted.push(standoff.value);
+        const placed = await kernel.transform(standoff.value, {
+          x: length(x),
+          y: length(y),
+          z: length(p.plateThicknessMm),
+        });
+        if (!placed.ok) return placed;
+        minted.push(placed.value);
+        standoffs.push(placed.value);
+      }
+
+      let assembled = plate.value;
+      if (standoffs.length > 0) {
+        const united = await kernel.union([plate.value, ...standoffs]);
+        if (!united.ok) return united;
+        minted.push(united.value);
+        assembled = united.value;
+      }
+
+      for (const [x, y] of centers) {
+        const hole = await kernel.createCylinder({
+          height: length(totalHeightMm),
+          radius: length(p.boardHoleDiameterMm / 2),
+        });
+        if (!hole.ok) return hole;
+        minted.push(hole.value);
+        const holePlaced = await kernel.transform(hole.value, {
+          x: length(x),
+          y: length(y),
+          z: length(0),
+        });
+        if (!holePlaced.ok) return holePlaced;
+        minted.push(holePlaced.value);
+        tools.push(holePlaced.value);
+      }
+
+      const drilled = await kernel.subtract(assembled, tools);
+      if (!drilled.ok) return drilled;
+      minted.push(drilled.value);
+      returned = drilled.value;
+
+      return {
+        ok: true,
+        value: {
+          bodies: [
+            {
+              bodyId: ARDUINO_MOUNT_DEFINITION.preview.bodyIds[0] ?? "",
+              name: "base",
+              solid: drilled.value,
+            },
+          ],
+        },
+      };
+    } finally {
+      for (const solid of minted) {
+        if (solid === returned) {
+          continue;
+        }
+        await kernel.dispose(solid);
+      }
     }
-
-    let assembled = plate.value;
-    if (standoffs.length > 0) {
-      const united = await kernel.union([plate.value, ...standoffs]);
-      if (!united.ok) return united;
-      assembled = united.value;
-    }
-
-    for (const [x, y] of centers) {
-      const hole = await kernel.createCylinder({
-        height: length(totalHeightMm),
-        radius: length(p.boardHoleDiameterMm / 2),
-      });
-      if (!hole.ok) return hole;
-      const holePlaced = await kernel.transform(hole.value, {
-        x: length(x),
-        y: length(y),
-        z: length(0),
-      });
-      if (!holePlaced.ok) return holePlaced;
-      tools.push(holePlaced.value);
-    }
-
-    const drilled = await kernel.subtract(assembled, tools);
-    if (!drilled.ok) return drilled;
-
-    return {
-      ok: true,
-      value: {
-        bodies: [
-          {
-            bodyId: ARDUINO_MOUNT_DEFINITION.preview.bodyIds[0] ?? "",
-            name: "base",
-            solid: drilled.value,
-          },
-        ],
-      },
-    };
   },
 
   ports(values: ComponentParameterValues): readonly ComponentPortInstance[] {

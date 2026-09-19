@@ -9,7 +9,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { CANONICAL_UNITS, length } from "@slopcad/cad-core";
+import {
+  CANONICAL_UNITS,
+  length,
+  updateParameterValue,
+} from "@slopcad/cad-core";
 import type { CadComponent } from "./cad-component";
 
 import {
@@ -497,6 +501,33 @@ describe("component contract: the cad-core parameter-collection bridge", () => {
     expect(
       parameterValuesOfCollection(ENCLOSURE_DEFINITION, collection.value),
     ).toEqual(edited);
+  });
+
+  it("reads an authored-unit edit back in canonical units (panel edit path)", () => {
+    const collection = componentParameterCollection(
+      ENCLOSURE_DEFINITION,
+      ENCLOSURE_DEFAULT_PARAMETERS,
+    );
+    expect(collection.ok).toBe(true);
+    if (!collection.ok) return;
+    const parameter = collection.value.parameters.find(
+      (candidate) => candidate.name === "innerWidthMm",
+    );
+    expect(parameter).toBeDefined();
+    if (parameter === undefined) return;
+    // A panel edit stores the value in its authored unit: 6 cm. The
+    // read-back must be the canonical magnitude (60 mm), not 6.
+    const edited = updateParameterValue(
+      collection.value,
+      parameter.id,
+      length(6, "cm"),
+    );
+    expect(edited.ok).toBe(true);
+    if (!edited.ok) return;
+    expect(
+      parameterValuesOfCollection(ENCLOSURE_DEFINITION, edited.value)
+        .innerWidthMm,
+    ).toBe(60);
   });
 
   it("filters a collection down to one definition's parameters", () => {

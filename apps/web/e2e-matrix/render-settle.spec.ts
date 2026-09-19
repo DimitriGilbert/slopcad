@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { waitForSettledScene } from "../e2e-render/helpers";
+import { dispatchedCount, waitForSettledScene } from "../e2e-render/helpers";
 
 /**
  * Phase 35.3 browser compatibility matrix — the WebGL render-stamp
@@ -52,12 +52,19 @@ test("a parametric edit re-settles the scene at the new volume", async ({
   await page.goto("/workbench-complete");
   const bootVolume = await waitForSettledScene(page, ROOT);
 
+  // The settle is ANCHORED on the dispatch counter captured before the
+  // Apply click: the edit's document change and its dispatch effect land
+  // in separate commits, so an unanchored wait could accept the pre-edit
+  // settled state.
+  const beforeEdit = await dispatchedCount(page, ROOT);
   await page.getByLabel("holeDiameter", { exact: true }).fill("10");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
     "data-hole-diameter",
     "10",
   );
-  const editedVolume = await waitForSettledScene(page, ROOT);
+  const editedVolume = await waitForSettledScene(page, ROOT, {
+    afterDispatch: beforeEdit,
+  });
   expect(editedVolume).not.toBe(bootVolume);
 });

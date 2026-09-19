@@ -20,8 +20,10 @@
  * sugar and nothing evaluates JavaScript — lexing and parsing produce frozen
  * AST nodes or structured failures with stable `expression/*` codes, carrying
  * the offending token and its source position. Nesting deeper than
- * {@link MAX_EXPRESSION_DEPTH} is rejected so hostile input cannot overflow
- * the stack.
+ * {@link MAX_EXPRESSION_DEPTH} — counting one level per operand of a flat
+ * same-precedence chain, exactly as the AST validator counts it — is
+ * rejected so hostile input cannot overflow the stack and whatever parses
+ * can be stored.
  */
 
 import {
@@ -260,6 +262,26 @@ export function parseExpression(
   return new Parser(source, tokens.value).parse();
 }
 
+/**
+ * The height of a parsed AST: the number of nodes on its longest
+ * root-to-leaf path — exactly the measure `validateNode`'s depth limit
+ * applies to (the root sits at depth 1).
+ */
+function astHeight(node: ExpressionNode): number {
+  switch (node.kind) {
+    case "number":
+    case "unitLiteral":
+    case "identifier":
+      return 1;
+    case "unary":
+      return 1 + astHeight(node.operand);
+    case "binary":
+      return 1 + Math.max(astHeight(node.left), astHeight(node.right));
+    case "call":
+      return 1 + Math.max(...node.args.map(astHeight));
+  }
+}
+
 class Parser {
   private readonly source: string;
   private readonly tokens: readonly Token[];
@@ -281,6 +303,14 @@ class Parser {
         `Unexpected token "${this.lexeme(trailing)}" after the expression.`,
       );
     }
+    // The authoritative depth gate: the fold loops reject chains as they
+    // build, but their accounting cannot see a max-height operand that a
+    // LATER fold wraps, so the finished tree's path height is checked
+    // against the same limit the AST validator enforces — whatever parses
+    // is storable.
+    if (astHeight(expression.value) > MAX_EXPRESSION_DEPTH) {
+      return this.tooDeepFailure();
+    }
     return expression;
   }
 
@@ -291,6 +321,11 @@ class Parser {
     const first = this.parseMultiplicative(depth);
     if (!first.ok) return first;
     let left = first.value;
+    // Folding a same-precedence operand nests the accumulated expression one
+    // level deeper (a left-leaning spine), so the chain consumes one depth
+    // level per folded operator exactly as the AST validator counts it —
+    // whatever parses is storable, including at the depth limit.
+    let chainDepth = depth;
     while (true) {
       const operator = this.current();
       if (
@@ -299,10 +334,12 @@ class Parser {
       ) {
         return ok(left);
       }
+      if (this.tooDeep(chainDepth + 1)) return this.tooDeepFailure();
       this.advance();
-      const right = this.parseMultiplicative(depth);
+      const right = this.parseMultiplicative(chainDepth + 1);
       if (!right.ok) return right;
       left = this.binary(operator.lexeme, left, right.value);
+      chainDepth += 1;
     }
   }
 
@@ -312,6 +349,8 @@ class Parser {
     const first = this.parseUnary(depth);
     if (!first.ok) return first;
     let left = first.value;
+    // Same fold-depth accounting as the additive loop above.
+    let chainDepth = depth;
     while (true) {
       const operator = this.current();
       if (
@@ -322,10 +361,12 @@ class Parser {
       ) {
         return ok(left);
       }
+      if (this.tooDeep(chainDepth + 1)) return this.tooDeepFailure();
       this.advance();
-      const right = this.parseUnary(depth);
+      const right = this.parseUnary(chainDepth + 1);
       if (!right.ok) return right;
       left = this.binary(operator.lexeme, left, right.value);
+      chainDepth += 1;
     }
   }
 
@@ -513,7 +554,7 @@ class Parser {
   private tooDeepFailure(): ParseResult<ExpressionNode, ExpressionParseError> {
     return this.rejectHere(
       EXPRESSION_PARSE_ERROR_CODES.tooDeep,
-      `An expression may nest at most ${MAX_EXPRESSION_DEPTH} levels.`,
+      `An expression may nest at most ${MAX_EXPRESSION_DEPTH} levels (a chain of same-precedence operators counts one level per operand).`,
     );
   }
 

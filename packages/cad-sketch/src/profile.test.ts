@@ -16,7 +16,11 @@ import {
   createRectangleEntity,
   createSketch,
   createSketchEntityId,
+  createWorkplane,
   frontWorkplane,
+  parseWorkplane,
+  serializeWorkplane,
+  workplaneBasis,
   xyWorkplane,
   type Sketch,
 } from "./index";
@@ -50,6 +54,24 @@ function rectangleSketch(): {
   );
   if (!created.ok) throw new Error(created.error.message);
   return { sketch: created.value, rectangleId };
+}
+
+/** Rodrigues rotation of `v` about `axis` by `angle` (right-hand rule). */
+function rotateAbout(
+  v: readonly [number, number, number],
+  axis: readonly [number, number, number],
+  angle: number,
+): readonly [number, number, number] {
+  const [kx, ky, kz] = axis;
+  const [vx, vy, vz] = v;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const dot = kx * vx + ky * vy + kz * vz;
+  return [
+    vx * cos + (ky * vz - kz * vy) * sin + kx * dot * (1 - cos),
+    vy * cos + (kz * vx - kx * vz) * sin + ky * dot * (1 - cos),
+    vz * cos + (kx * vy - ky * vx) * sin + kz * dot * (1 - cos),
+  ];
 }
 
 describe("resolveProfileLoops", () => {
@@ -334,6 +356,59 @@ describe("resolveExtrudeProfile", () => {
     expect(resolved.value.segments.length).toBe(4);
   });
 
+  it("accepts a valid triangle whose three segments are drawn from shared points (degeneracy counts walk vertices, not stored starts)", () => {
+    // The same 50 mm² triangle as the head-to-tail control below, but every
+    // segment is stored emanating from (0,0)/(10,0) — a legal sketch, since
+    // entities carry no direction guarantee. Keying the corner count on
+    // stored draw-direction starts used to reject it as "encloses no area".
+    const a = createSketchEntityId("skent_sp-a");
+    const b = createSketchEntityId("skent_sp-b");
+    const c = createSketchEntityId("skent_sp-c");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createLineEntity(a, { x: 0, y: 0 }, { x: 10, y: 0 }),
+        createLineEntity(b, { x: 0, y: 0 }, { x: 0, y: 10 }),
+        createLineEntity(c, { x: 10, y: 0 }, { x: 0, y: 10 }),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const resolved = resolveExtrudeProfile(created.value.entities);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(Math.abs(profileLoopSignedArea(resolved.value))).toBeCloseTo(50, 6);
+  });
+
+  it("resolves the same triangle drawn head-to-tail (control)", () => {
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createLineEntity(
+          createSketchEntityId("skent_ht-a"),
+          { x: 0, y: 0 },
+          { x: 10, y: 0 },
+        ),
+        createLineEntity(
+          createSketchEntityId("skent_ht-b"),
+          { x: 10, y: 0 },
+          { x: 0, y: 10 },
+        ),
+        createLineEntity(
+          createSketchEntityId("skent_ht-c"),
+          { x: 0, y: 10 },
+          { x: 0, y: 0 },
+        ),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const resolved = resolveExtrudeProfile(created.value.entities);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(Math.abs(profileLoopSignedArea(resolved.value))).toBeCloseTo(50, 6);
+  });
+
   it("fails with sketch/profile-multiple-loops when several loops exist", () => {
     const { sketch } = rectangleSketch();
     const withCircle = createSketch(
@@ -388,5 +463,80 @@ describe("workplaneToPlacement", () => {
     const first = workplaneToPlacement(frontWorkplane(4));
     const second = workplaneToPlacement(frontWorkplane(4));
     expect(second).toEqual(first);
+  });
+
+  it("recovers a valid non-zero axis for every exactly-180° frame (the bottom XY plane, the other axis-aligned mirrors, and a mixed-sign diagonal)", () => {
+    // Math.sin(Math.PI) is ~1.2e-16, never 0, so the old sin === 0 gate left
+    // the 180° branch unreachable: these frames fell through to the general
+    // branch whose numerators are all exactly 0, yielding axis [0,0,0] —
+    // which every kernel rejects with kernel/invalid-rotation.
+    const halfDiagonal = Math.SQRT1_2;
+    const frames: ReadonlyArray<{
+      readonly normal: {
+        readonly x: number;
+        readonly y: number;
+        readonly z: number;
+      };
+      readonly xAxis: {
+        readonly x: number;
+        readonly y: number;
+        readonly z: number;
+      };
+    }> = [
+      { normal: { x: 0, y: 0, z: -1 }, xAxis: { x: 1, y: 0, z: 0 } },
+      { normal: { x: 0, y: 0, z: -1 }, xAxis: { x: -1, y: 0, z: 0 } },
+      { normal: { x: 0, y: 0, z: 1 }, xAxis: { x: -1, y: 0, z: 0 } },
+      // A 180° frame whose axis has mixed signs: unconditional positive
+      // square roots would fold the axis into the wrong octant.
+      {
+        normal: { x: 0, y: 0, z: -1 },
+        xAxis: { x: halfDiagonal, y: -halfDiagonal, z: 0 },
+      },
+    ];
+    for (const frame of frames) {
+      const created = createWorkplane(
+        { x: 0, y: 0, z: 0 },
+        frame.normal,
+        frame.xAxis,
+      );
+      if (!created.ok) throw new Error(created.error.message);
+      const placement = workplaneToPlacement(created.value);
+      expect(placement.rotation.angleRad).toBeCloseTo(Math.PI, 9);
+      const [ax, ay, az] = placement.rotation.axis;
+      // The kernel rotation contract wants a finite, non-zero axis; the
+      // recovered axis must also be unit and genuinely reproduce the frame.
+      expect(
+        Number.isFinite(ax) && Number.isFinite(ay) && Number.isFinite(az),
+      ).toBe(true);
+      expect(Math.hypot(ax, ay, az)).toBeCloseTo(1, 9);
+      const basis = workplaneBasis(created.value);
+      const e1 = rotateAbout([1, 0, 0], placement.rotation.axis, Math.PI);
+      const e2 = rotateAbout([0, 1, 0], placement.rotation.axis, Math.PI);
+      const e3 = rotateAbout([0, 0, 1], placement.rotation.axis, Math.PI);
+      expect(e1[0]).toBeCloseTo(basis.xAxis.x, 9);
+      expect(e1[1]).toBeCloseTo(basis.xAxis.y, 9);
+      expect(e1[2]).toBeCloseTo(basis.xAxis.z, 9);
+      expect(e2[0]).toBeCloseTo(basis.yAxis.x, 9);
+      expect(e2[1]).toBeCloseTo(basis.yAxis.y, 9);
+      expect(e2[2]).toBeCloseTo(basis.yAxis.z, 9);
+      expect(e3[0]).toBeCloseTo(basis.normal.x, 9);
+      expect(e3[1]).toBeCloseTo(basis.normal.y, 9);
+      expect(e3[2]).toBeCloseTo(basis.normal.z, 9);
+      // The frame (and with it the placement) round-trips through
+      // serialize/parse exactly.
+      const revived = parseWorkplane(
+        JSON.parse(
+          JSON.stringify(serializeWorkplane(created.value)),
+        ) as unknown,
+      );
+      if (!revived.ok) throw new Error(revived.error.message);
+      expect(workplaneToPlacement(revived.value)).toEqual(placement);
+    }
+  });
+
+  it("still yields the exact [1, 0, 0], π/2 pair for the 90° front workplane (control)", () => {
+    const placement = workplaneToPlacement(frontWorkplane(4));
+    expect(placement.rotation.axis).toEqual([1, 0, 0]);
+    expect(placement.rotation.angleRad).toBeCloseTo(Math.PI / 2, 12);
   });
 });

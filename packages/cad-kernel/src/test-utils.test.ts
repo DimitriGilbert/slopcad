@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import { KERNEL_ERROR_CODES } from "./contract";
 import {
+  assertAreaClose,
   assertBoundsContain,
   assertBoundsEqual,
   assertTessellationValid,
@@ -89,6 +90,21 @@ describe("assertBoundsEqual", () => {
       ),
     ).toThrow(/Bounds mismatch/);
   });
+
+  it("rejects a non-finite actual component", () => {
+    expect(() =>
+      assertBoundsEqual(
+        { min: [Number.NaN, 0, 0], max: [30, 20, 10] },
+        PLATE_BOUNDS,
+      ),
+    ).toThrow(/non-finite component/);
+    expect(() =>
+      assertBoundsEqual(
+        { min: [0, 0, 0], max: [30, 20, Number.POSITIVE_INFINITY] },
+        PLATE_BOUNDS,
+      ),
+    ).toThrow(/non-finite component/);
+  });
 });
 
 describe("assertBoundsContain", () => {
@@ -109,6 +125,24 @@ describe("assertBoundsContain", () => {
       assertBoundsContain(PLATE_BOUNDS, { min: [0, 0, 0], max: [30, 20, 10] }),
     ).not.toThrow();
   });
+
+  it("rejects a NaN outer box (a NaN container contains nothing)", () => {
+    expect(() =>
+      assertBoundsContain(
+        { min: [Number.NaN, 0, 0], max: [30, 20, 10] },
+        { min: [5, 5, 0], max: [25, 15, 10] },
+      ),
+    ).toThrow(/do not contain/);
+  });
+
+  it("rejects a NaN inner corner (NaN corners sit inside nothing)", () => {
+    expect(() =>
+      assertBoundsContain(PLATE_BOUNDS, {
+        min: [Number.NaN, 5, 0],
+        max: [25, 15, 10],
+      }),
+    ).toThrow(/do not contain/);
+  });
 });
 
 describe("assertVolumeClose", () => {
@@ -120,6 +154,37 @@ describe("assertVolumeClose", () => {
   it("rejects volumes beyond the relative tolerance", () => {
     expect(() => assertVolumeClose(1030, 1000, 0.02)).toThrow(
       /not within 2% of the expected/,
+    );
+  });
+
+  it("rejects a non-finite actual volume", () => {
+    expect(() => assertVolumeClose(Number.NaN, 1000, 0.02)).toThrow(
+      /not a finite number/,
+    );
+    expect(() =>
+      assertVolumeClose(Number.POSITIVE_INFINITY, 1000, 0.02),
+    ).toThrow(/not a finite number/);
+  });
+});
+
+describe("assertAreaClose", () => {
+  it("accepts areas within the relative tolerance", () => {
+    expect(() => assertAreaClose(606, 600, 0.02)).not.toThrow();
+    expect(() => assertAreaClose(0, 0, 0.05)).not.toThrow();
+  });
+
+  it("rejects areas beyond the relative tolerance", () => {
+    expect(() => assertAreaClose(620, 600, 0.02)).toThrow(
+      /not within 2% of the expected/,
+    );
+  });
+
+  it("rejects a non-finite actual area", () => {
+    expect(() => assertAreaClose(Number.NaN, 600, 0.02)).toThrow(
+      /not a finite number/,
+    );
+    expect(() => assertAreaClose(Number.NEGATIVE_INFINITY, 600, 0.02)).toThrow(
+      /not a finite number/,
     );
   });
 });

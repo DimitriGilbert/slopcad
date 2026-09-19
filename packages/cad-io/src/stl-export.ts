@@ -55,7 +55,8 @@
  * {@link StlExportError} on the cad-core `ParseResult` discipline — never a
  * throw, never a partially-written buffer: empty tessellations (an empty
  * solid has no boundary to export), non-triple-aligned arrays, mismatched
- * normals, non-finite vertices or normals, and out-of-range indices.
+ * normals, non-finite or float32-overflowing vertices or normals, and
+ * out-of-range indices.
  */
 
 import {
@@ -74,7 +75,10 @@ export const STL_EXPORT_ERROR_CODES = {
   malformedTessellation: "stl-export/malformed-tessellation",
   /** A vertex coordinate was NaN/infinite, or beyond the finite float32 range. */
   nonFiniteVertex: "stl-export/non-finite-vertex",
-  /** A normal component (when the soup carries normals) was not finite. */
+  /**
+   * A normal component (when the soup carries normals) was NaN/infinite, or
+   * beyond the finite float32 range.
+   */
   nonFiniteNormal: "stl-export/non-finite-normal",
   /** An index was not an integer inside the vertex range. */
   indexOutOfRange: "stl-export/index-out-of-range",
@@ -188,6 +192,13 @@ function validateTessellation(
         return stlError(
           STL_EXPORT_ERROR_CODES.nonFiniteNormal,
           `Tessellation normal component ${i} is not a finite number (got ${String(value)}).`,
+          tessellation,
+        );
+      }
+      if (Math.abs(value) > FLOAT32_MAX) {
+        return stlError(
+          STL_EXPORT_ERROR_CODES.nonFiniteNormal,
+          `Tessellation normal component ${i} (${value}) is beyond the finite float32 range ±${FLOAT32_MAX}; the facet normal's renormalized mean of such components can overflow to NaN.`,
           tessellation,
         );
       }

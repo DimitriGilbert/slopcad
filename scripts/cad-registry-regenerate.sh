@@ -19,11 +19,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONSUMER="$ROOT/fixtures/cad-consumer"
 PORT=46219
 SERVER_PID=""
+SERVER_LOG="$(mktemp "${TMPDIR:-/tmp}/cad-registry-server.XXXXXX.log")"
 
 cleanup() {
   if [[ -n "$SERVER_PID" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$SERVER_LOG" ]]; then
+    rm -f "$SERVER_LOG"
   fi
 }
 trap cleanup EXIT
@@ -49,18 +53,44 @@ pnpm install --filter .
 
 step "4/7 Install every registry category from the local artifacts"
 cd "$ROOT/packages/ui"
-python3 -m http.server "$PORT" --bind 127.0.0.1 --directory public/r >/dev/null 2>&1 &
+# Capture (never discard) the server's output: python http.server logs every
+# request it serves to stderr — which is how readiness attributes the
+# responder — and a bind failure's traceback is the diagnosis on death.
+python3 -m http.server "$PORT" --bind 127.0.0.1 --directory public/r >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
+# Attribution: only THIS script's server can write $SERVER_LOG. A foreign
+# listener that already holds the port kills our server with a bind error
+# while curl stays green — without the log check, that foreign process
+# would silently become the registry every later install fetches from.
 READY=0
+FOREIGN=0
 for _ in $(seq 1 50); do
   if curl -fsS "http://127.0.0.1:$PORT/registry.json" >/dev/null 2>&1; then
-    READY=1
+    # Give our own server a moment to log the request it just served.
+    for _probe in $(seq 1 10); do
+      grep -q "\"GET /registry.json" "$SERVER_LOG" 2>/dev/null && break
+      sleep 0.2
+    done
+    if grep -q "\"GET /registry.json" "$SERVER_LOG" 2>/dev/null && kill -0 "$SERVER_PID" 2>/dev/null; then
+      READY=1
+    else
+      FOREIGN=1
+    fi
     break
+  fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    break # our server died and nothing answers; stop polling
   fi
   sleep 0.2
 done
+if [[ "$FOREIGN" == "1" ]]; then
+  printf 'ERROR: port %s is served by another process — the script'\''s own server (pid %s) is not the responder. Refusing to install registry items from a foreign responder.\nServer output:\n' "$PORT" "$SERVER_PID" >&2
+  cat "$SERVER_LOG" >&2
+  exit 1
+fi
 if [[ "$READY" != "1" ]]; then
-  printf 'ERROR: artifact server did not start (port %s in use?)\n' "$PORT" >&2
+  printf 'ERROR: artifact server did not start (port %s in use?); server output:\n' "$PORT" >&2
+  cat "$SERVER_LOG" >&2
   exit 1
 fi
 cd "$CONSUMER"

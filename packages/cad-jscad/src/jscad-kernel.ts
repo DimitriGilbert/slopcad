@@ -190,6 +190,7 @@ import {
   profileLoopProblem,
   revolveCrossesAxis,
   revolvePappusVolume,
+  REVOLVE_AXIS_TOUCH_TOLERANCE_MM,
   revolveSignedExtremes,
   revolutionMeshTransform,
   sweepPathClosed,
@@ -829,8 +830,14 @@ export function createJscadKernel(): GeometryKernel {
             ),
           );
         }
+        // The shared touch tolerance (not an exact >= 0): a legal touching
+        // profile whose on-axis vertex rounds to −ε (oblique axes, decimal
+        // arithmetic) passes the crossing validator yet would take the
+        // π-rotated −v-side placement — 180° from the contract's sweep-start
+        // semantics.
         const positiveSide =
-          Math.min(...axisPolygon.map((point) => point.y)) >= 0;
+          Math.min(...axisPolygon.map((point) => point.y)) >=
+          -REVOLVE_AXIS_TOUCH_TOLERANCE_MM;
         // Winding: CCW in the (radial, axial) plane (the mirroring above
         // can flip it).
         const mirrored = axisPolygon.map((point) => ({

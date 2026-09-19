@@ -138,27 +138,46 @@ export async function assemblyStudy(
     readonly enclosure?: Record<string, number>;
   } = {},
 ): Promise<AssemblyStudyResult> {
+  // Ownership ledger (dispose discipline): the study owns every solid its
+  // three builds return plus every placed copy it mints, and the returned
+  // value carries ONLY the placed copies — so each original is released
+  // the moment its placed copy exists, and an early return releases
+  // everything still held through the kernel that minted it.
+  const unplaced: KernelSolid[] = [];
+  const placedSoFar: KernelSolid[] = [];
+  const fail = async (
+    error: AssemblyStudyError,
+  ): Promise<AssemblyStudyResult> => {
+    for (const solid of [...unplaced, ...placedSoFar]) {
+      await kernel.dispose(solid);
+    }
+    return { ok: false, error };
+  };
+
   const nema17 = await buildComponent(
     "nema17-mount",
     kernel,
     nema17Mount,
     values.nema17 ?? NEMA17_MOUNT_DEFAULT_PARAMETERS,
   );
-  if ("step" in nema17) return { ok: false, error: nema17 };
+  if ("step" in nema17) return fail(nema17);
+  unplaced.push(...nema17.bodies.map((body) => body.solid));
   const arduino = await buildComponent(
     "arduino-mount",
     kernel,
     arduinoMount,
     values.arduino ?? ARDUINO_MOUNT_DEFAULT_PARAMETERS,
   );
-  if ("step" in arduino) return { ok: false, error: arduino };
+  if ("step" in arduino) return fail(arduino);
+  unplaced.push(...arduino.bodies.map((body) => body.solid));
   const enclosureBuild = await buildComponent(
     "enclosure",
     kernel,
     enclosure,
     values.enclosure ?? ENCLOSURE_DEFAULT_PARAMETERS,
   );
-  if ("step" in enclosureBuild) return { ok: false, error: enclosureBuild };
+  if ("step" in enclosureBuild) return fail(enclosureBuild);
+  unplaced.push(...enclosureBuild.bodies.map((body) => body.solid));
 
   const bodies: AssemblyStudyBody[] = [];
   let cursorX = 0;
@@ -174,19 +193,21 @@ export async function assemblyStudy(
       // own canonical frame, so the placement translates by exactly the
       // offset that lands min.x on the layout cursor.
       const own = await measure(componentId, kernel, body.solid);
-      if ("step" in own) return { ok: false, error: own };
+      if ("step" in own) return fail(own);
       const dxMm = cursorX - own.bounds.min[0];
       const placed = await place(kernel, body.solid, dxMm);
       if (!placed.ok) {
-        return {
-          ok: false,
-          error: {
-            step: componentId,
-            code: placed.error.code,
-            message: placed.error.message,
-          },
-        };
+        return fail({
+          step: componentId,
+          code: placed.error.code,
+          message: placed.error.message,
+        });
       }
+      // The placed copy replaces the original in the returned value; the
+      // original's disposal is owed from here on regardless of outcome.
+      await kernel.dispose(body.solid);
+      unplaced.splice(unplaced.indexOf(body.solid), 1);
+      placedSoFar.push(placed.value);
       const widthMm = own.bounds.max[0] - own.bounds.min[0];
       const bounds: KernelBounds = {
         max: [cursorX + widthMm, own.bounds.max[1], own.bounds.max[2]],

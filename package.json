@@ -17,6 +17,7 @@
     "test:render": "pnpm --filter web test:render",
     "test:spike": "pnpm --filter web test:spike",
     "test:perf": "pnpm --filter web test:perf",
+    "smoke:consumer": "pnpm -C fixtures/cad-consumer smoke",
     "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

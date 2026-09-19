@@ -141,6 +141,18 @@ export interface SketchModeProps {
    */
   readonly onExtrude: (submission: SketchExtrudeSubmission) => void;
   /**
+   * Keeps the extrude action from committing: a host whose document
+   * composition ONE more extrude would invalidate (the chain workbench —
+   * the chain scene request composes one extrude as the base) passes
+   * `true`, so the button states that instead of committing a transaction
+   * the scene can no longer resolve. Optional: a host whose document
+   * accepts any number of extrudes (the established workbench) omits it
+   * and the action stays unguarded, exactly as before.
+   */
+  readonly extrudeDisabled?: boolean;
+  /** The guarded action's explanation, shown as the disabled button's title. */
+  readonly extrudeDisabledTitle?: string;
+  /**
    * The Phase 26.2 revolve action: the host commits the sketch as a
    * document record, creates the sweep and axis parameters plus the revolve
    * feature, and dispatches the real kernel execution to the worker. Called
@@ -177,6 +189,8 @@ export function SketchMode({
   onExit,
   onExtrude,
   onRevolve,
+  extrudeDisabled = false,
+  extrudeDisabledTitle,
 }: SketchModeProps): ReactElement {
   const [session, setSession] = useState(() =>
     createSketchSession(createWorkbenchSketch()),
@@ -577,8 +591,10 @@ export function SketchMode({
         </Button>
         <Button
           data-testid="sketch-extrude"
+          disabled={extrudeDisabled}
           onClick={extrude}
           size="xs"
+          title={extrudeDisabled ? extrudeDisabledTitle : undefined}
           type="button"
           variant="outline"
         >

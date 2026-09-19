@@ -43,6 +43,7 @@ import {
   angle,
   area,
   type AnyDimensionalValue,
+  DimensionalValueValidationError,
   dimensionless,
   divideValues,
   length,
@@ -132,8 +133,49 @@ const LENGTH_POWERS: Readonly<Record<Exclude<Dimension, "angle">, number>> =
 /** Absolute tolerance when a computed length power must be an integer; 1e-9 is safe because valid result powers lie in [0, 3]. */
 const POWER_INTEGER_TOLERANCE = 1e-9;
 
-function canonicalMagnitude(value: AnyDimensionalValue): number {
-  return valueIn(value, CANONICAL_UNITS[value.dimension]);
+/**
+ * The canonical-unit magnitude of `value`, reporting a conversion that
+ * overflows to a non-finite magnitude as the structured non-finite-result
+ * failure. The dimensional layer signals this conversion failure by throwing
+ * its typed validation error; the evaluator never throws (module contract),
+ * so that throw is converted here — the conversion itself is never
+ * reimplemented.
+ */
+function canonicalMagnitude(
+  value: AnyDimensionalValue,
+  node: ExpressionNode,
+): ParseResult<number, ExpressionEvaluationError> {
+  try {
+    return ok(valueIn(value, CANONICAL_UNITS[value.dimension]));
+  } catch (error) {
+    if (error instanceof DimensionalValueValidationError) {
+      return fail({
+        code: EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+        message: `The ${value.dimension} value ${String(value.value)} ${value.unit} does not convert to a finite magnitude in the canonical unit ${String(CANONICAL_UNITS[value.dimension])} of its dimension.`,
+        input: node,
+      });
+    }
+    throw error;
+  }
+}
+
+/** Converts a value to its canonical unit under the same contract as {@link canonicalMagnitude}. */
+function toCanonicalStructured(
+  value: AnyDimensionalValue,
+  node: ExpressionNode,
+): EvalOutcome {
+  try {
+    return ok(toCanonical(value));
+  } catch (error) {
+    if (error instanceof DimensionalValueValidationError) {
+      return fail({
+        code: EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+        message: `The ${value.dimension} value ${String(value.value)} ${value.unit} does not convert to a finite magnitude in the canonical unit ${String(CANONICAL_UNITS[value.dimension])} of its dimension.`,
+        input: node,
+      });
+    }
+    throw error;
+  }
 }
 
 function canonicalQuantity(
@@ -171,7 +213,7 @@ function evaluate(
     case "number":
       return ok(dimensionless(node.value));
     case "unitLiteral":
-      return ok(toCanonical(quantityInUnit(node.value, node.unit)));
+      return toCanonicalStructured(quantityInUnit(node.value, node.unit), node);
     case "identifier": {
       const value = resolve(node.name);
       if (value === undefined) {
@@ -186,12 +228,9 @@ function evaluate(
     case "unary": {
       const operand = evaluate(node.operand, resolve);
       if (!operand.ok) return operand;
-      return ok(
-        canonicalQuantity(
-          operand.value.dimension,
-          -canonicalMagnitude(operand.value),
-        ),
-      );
+      const magnitude = canonicalMagnitude(operand.value, node);
+      if (!magnitude.ok) return magnitude;
+      return ok(canonicalQuantity(operand.value.dimension, -magnitude.value));
     }
     case "binary":
       return evaluateBinary(node, resolve);
@@ -247,16 +286,23 @@ function evaluateModulo(
       node,
     );
   }
-  const divisor = canonicalMagnitude(right.value);
-  if (divisor === 0) {
+  const divisor = canonicalMagnitude(right.value, node);
+  if (!divisor.ok) return divisor;
+  if (divisor.value === 0) {
     return reject(
       EXPRESSION_EVALUATION_ERROR_CODES.moduloByZero,
       `Cannot take the remainder by a ${right.value.dimension} value of zero magnitude.`,
       node,
     );
   }
-  const magnitude = canonicalMagnitude(left.value) % divisor;
-  return ok(canonicalQuantity(left.value.dimension, magnitude));
+  const leftMagnitude = canonicalMagnitude(left.value, node);
+  if (!leftMagnitude.ok) return leftMagnitude;
+  return ok(
+    canonicalQuantity(
+      left.value.dimension,
+      leftMagnitude.value % divisor.value,
+    ),
+  );
 }
 
 function evaluatePower(
@@ -274,20 +320,26 @@ function evaluatePower(
       node,
     );
   }
-  const power = canonicalMagnitude(exponent.value);
-  const resultDimension = powerResultDimension(base.value.dimension, power);
+  const power = canonicalMagnitude(exponent.value, node);
+  if (!power.ok) return power;
+  const resultDimension = powerResultDimension(
+    base.value.dimension,
+    power.value,
+  );
   if (resultDimension === null) {
     return reject(
       EXPRESSION_EVALUATION_ERROR_CODES.invalidExponentValue,
-      `Raising a ${base.value.dimension} value to the power ${String(power)} has no result dimension in the closed dimension algebra.`,
+      `Raising a ${base.value.dimension} value to the power ${String(power.value)} has no result dimension in the closed dimension algebra.`,
       node,
     );
   }
-  const magnitude = Math.pow(canonicalMagnitude(base.value), power);
+  const baseMagnitude = canonicalMagnitude(base.value, node);
+  if (!baseMagnitude.ok) return baseMagnitude;
+  const magnitude = Math.pow(baseMagnitude.value, power.value);
   if (!Number.isFinite(magnitude)) {
     return reject(
       EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
-      `Raising the given base to the power ${String(power)} does not produce a finite real magnitude.`,
+      `Raising the given base to the power ${String(power.value)} does not produce a finite real magnitude.`,
       node,
     );
   }
@@ -340,7 +392,9 @@ function evaluateSqrt(
       node,
     );
   }
-  const magnitude = Math.sqrt(canonicalMagnitude(operand.value));
+  const operandMagnitude = canonicalMagnitude(operand.value, node);
+  if (!operandMagnitude.ok) return operandMagnitude;
+  const magnitude = Math.sqrt(operandMagnitude.value);
   if (!Number.isFinite(magnitude)) {
     return reject(
       EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
@@ -376,9 +430,13 @@ function evaluateExtremum(
     }
   }
   let winner = first;
-  let winnerMagnitude = canonicalMagnitude(winner);
+  const firstMagnitude = canonicalMagnitude(first, node);
+  if (!firstMagnitude.ok) return firstMagnitude;
+  let winnerMagnitude = firstMagnitude.value;
   for (const candidate of evaluated.slice(1)) {
-    const candidateMagnitude = canonicalMagnitude(candidate);
+    const candidateResult = canonicalMagnitude(candidate, node);
+    if (!candidateResult.ok) return candidateResult;
+    const candidateMagnitude = candidateResult.value;
     if (
       wantMaximum
         ? candidateMagnitude > winnerMagnitude
@@ -388,7 +446,9 @@ function evaluateExtremum(
       winnerMagnitude = candidateMagnitude;
     }
   }
-  return ok(toCanonical(winner));
+  // `winnerMagnitude` is the winner's canonical magnitude by construction, so
+  // the result is rebuilt from it — never through another conversion.
+  return ok(canonicalQuantity(winner.dimension, winnerMagnitude));
 }
 
 function rejectMalformedCall(node: CallNode): EvalOutcome {
@@ -403,7 +463,9 @@ function rejectMalformedCall(node: CallNode): EvalOutcome {
  * Evaluates an expression to a canonical-unit dimensional value. The result
  * depends only on the AST and the environment (deterministic); every
  * rejection — unknown identifiers, division by zero, dimensionally invalid
- * operations, non-real results — is a structured failure with a stable code.
+ * operations, non-real results, magnitudes whose conversion to the canonical
+ * unit overflows — is a structured failure with a stable code; this function
+ * never throws.
  */
 export function evaluateExpression(
   node: ExpressionNode,

@@ -23,11 +23,20 @@ import {
   EXACT_BOUNDS_TOLERANCE,
   EXACT_VOLUME_TOLERANCE,
 } from "@slopcad/cad-kernel/contract-suite";
-import type { OpenCascadeInstance, TopoDS_Shape } from "replicad-opencascadejs";
+import type {
+  OpenCascadeInstance,
+  TopoDS_Builder,
+  TopoDS_Compound,
+  TopoDS_Shape,
+} from "replicad-opencascadejs";
 import type { OcctKernel } from "./occt-kernel";
 
 import { occtKernelFromRuntime } from "./occt-kernel";
-import { BREP_EXPORT_ERROR_CODES, BREP_IMPORT_ERROR_CODES } from "./occt-brep";
+import {
+  BREP_EXPORT_ERROR_CODES,
+  BREP_IMPORT_ERROR_CODES,
+  exportBrepShapes,
+} from "./occt-brep";
 import {
   createOcctRuntime,
   RUNTIME_BRAND,
@@ -418,3 +427,92 @@ function importBrepShapesForCounts(bytes: Uint8Array): TopoDS_Shape {
   }
   return shape;
 }
+
+/** One raw box shape off the real binding (the kernel's own construction). */
+function rawBoxShape(
+  width: number,
+  depth: number,
+  height: number,
+): TopoDS_Shape {
+  const instance = oc();
+  const maker = new instance.BRepPrimAPI_MakeBox(width, depth, height);
+  const shape = maker.Shape();
+  maker.delete();
+  return shape;
+}
+
+describe("the compound wrapper is deleted when the compound build throws", () => {
+  it("returns the structured kernel-failure and deletes the TopoDS_Compound", () => {
+    // Counting stub over the real binding: every constructed compound's
+    // delete() is observed; the builder's MakeCompound is the throwing
+    // seam (the probed class of binding error the outer catch exists for).
+    const real = oc();
+    let compoundDeletes = 0;
+    const countingCompounds = new Proxy(real.TopoDS_Compound, {
+      construct(target) {
+        const made: unknown = Reflect.construct(target, []);
+        const instance = made as TopoDS_Compound;
+        return new Proxy(instance, {
+          get(obj, property, receiver) {
+            if (property === "delete") {
+              return () => {
+                compoundDeletes += 1;
+                obj.delete();
+              };
+            }
+            const value: unknown = Reflect.get(obj, property, receiver);
+            if (typeof value !== "function") {
+              return value;
+            }
+            const bound: unknown = value.bind(obj);
+            return bound;
+          },
+        });
+      },
+    });
+    const throwingBuilders = new Proxy(real.TopoDS_Builder, {
+      construct(target) {
+        const made: unknown = Reflect.construct(target, []);
+        const instance = made as TopoDS_Builder;
+        return new Proxy(instance, {
+          get(obj, property, receiver) {
+            if (property === "MakeCompound") {
+              return (): never => {
+                throw new Error("TopoDS_Builder.MakeCompound binding boom");
+              };
+            }
+            const value: unknown = Reflect.get(obj, property, receiver);
+            if (typeof value !== "function") {
+              return value;
+            }
+            const bound: unknown = value.bind(obj);
+            return bound;
+          },
+        });
+      },
+    });
+    const stubbed = new Proxy(real, {
+      get(target, property, receiver) {
+        if (property === "TopoDS_Compound") return countingCompounds;
+        if (property === "TopoDS_Builder") return throwingBuilders;
+        const value: unknown = Reflect.get(target, property, receiver);
+        return value;
+      },
+    });
+
+    // Two shapes force the compound (multi-shape) path.
+    const shapes = [rawBoxShape(10, 10, 10), rawBoxShape(5, 5, 5)];
+    const result = exportBrepShapes(stubbed, shapes);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe(BREP_EXPORT_ERROR_CODES.kernelFailure);
+      expect(result.error.message).toContain(
+        "TopoDS_Builder.MakeCompound binding boom",
+      );
+    }
+    // The wrapper is deleted on the throwing path — no leak past the catch.
+    expect(compoundDeletes).toBe(1);
+    for (const shape of shapes) shape.delete();
+  });
+});

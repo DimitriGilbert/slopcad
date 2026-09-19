@@ -495,15 +495,15 @@ export class CadStore {
     if (session.document !== this.mirrored.document) {
       this.mirrored.document = session.document;
       this.emit("document");
-      if (session.document.parameters !== this.mirrored.parameters) {
-        this.mirrored.parameters = session.document.parameters;
-        this.emit("parameters");
-      }
-      const history = this.computeHistoryView();
-      if (!sameHistoryView(history, this.mirrored.history)) {
-        this.mirrored.history = history;
-        this.emit("history");
-      }
+    }
+    if (session.document.parameters !== this.mirrored.parameters) {
+      this.mirrored.parameters = session.document.parameters;
+      this.emit("parameters");
+    }
+    const history = this.computeHistoryView();
+    if (!sameHistoryView(history, this.mirrored.history)) {
+      this.mirrored.history = history;
+      this.emit("history");
     }
     if (this.runtime.selection !== this.mirrored.selection) {
       this.mirrored.selection = this.runtime.selection;

@@ -425,6 +425,39 @@ describe("client cancellation", () => {
     );
     await flush();
   });
+
+  it("refuses a request issued after close with worker/transport-closed — never pending, never sent", async () => {
+    const harness = setup();
+    harness.client.close();
+
+    // The refusal settles immediately with the close path's own structured
+    // code: a closed channel could never deliver this request a response, so
+    // registering it as pending would hang the caller forever.
+    const failure = await failureOf(
+      harness.client.request("solid.createBox", boxInput),
+    );
+    expect(failure.error.code).toBe(
+      WORKER_PROTOCOL_ERROR_CODES.transportClosed,
+    );
+    expect(failure.error.message).toContain(`"${firstRequestId}"`);
+
+    // The refused request never touched the channel…
+    expect(harness.sent).toHaveLength(0);
+    // …and close stays terminal: a second close is quiet, and a request with
+    // a caller-chosen id is refused the same way (the guard is in issue()).
+    harness.client.close();
+    const explicit = await failureOf(
+      harness.client.request(
+        "solid.createBox",
+        boxInput,
+        createWorkerRequestId("req_after-close"),
+      ),
+    );
+    expect(explicit.error.code).toBe(
+      WORKER_PROTOCOL_ERROR_CODES.transportClosed,
+    );
+    expect(harness.sent).toHaveLength(0);
+  });
 });
 
 describe("client discard hygiene for voided successes", () => {

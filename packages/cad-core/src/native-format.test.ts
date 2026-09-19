@@ -20,7 +20,9 @@ import {
   createFeatureId,
   createNativeCadDocument,
   createParameterId,
+  createReferenceId,
   createSession,
+  createSketchDocumentId,
   CAD_NATIVE_FORMAT_VERSION,
   encodeNativeCadDocument,
   initialRegenerationStates,
@@ -1189,12 +1191,14 @@ describe("the optional rollback field (Phase 20)", () => {
   });
 
   it("rejects a marker naming a feature the document does not have", () => {
+    // The serializer now omits a stale marker (see the symmetry suite
+    // below), so the rejection this pins is the PARSER's own: a foreign or
+    // hand-edited file that carries one. The marker is injected directly,
+    // never through the serializer.
     const ghost = createFeatureId("feat_ghost");
-    const rolled: NativeCadDocument = {
-      ...buildNative(),
-      rollback: { afterFeatureId: ghost },
-    };
-    const parsed = parseNativeCadDocumentFromString(nativeText(rolled));
+    const input = JSON.parse(nativeText()) as Record<string, unknown>;
+    input.rollback = { afterFeatureId: ghost };
+    const parsed = parseNativeCadDocument(input);
     expect(parsed.ok).toBe(false);
     if (parsed.ok) throw new Error("expected a rejection");
     expect(parsed.error.code).toBe(
@@ -1239,5 +1243,215 @@ describe("the optional rollback field (Phase 20)", () => {
           entry.code === "native-format/field-invalid",
       ),
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Serializer/parser symmetry and validator agreement (the review fixes)
+// ---------------------------------------------------------------------------
+
+describe("the serializer never emits a file its own parser rejects", () => {
+  it("omits a stale rollback marker instead of persisting it", () => {
+    // The production reach: the engine's marker is page-level state that a
+    // document regression (undo, an opened older version) can outlive.
+    // Serializing it verbatim would emit a file the parser refuses with
+    // native-format/rollback-unknown-feature; the serializer omits it.
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(nativeText()),
+      "the parse",
+    );
+    const stale: NativeCadDocument = {
+      ...parsed,
+      rollback: { afterFeatureId: createFeatureId("feat_was_deleted") },
+    };
+    const serialized = serializeNativeCadDocument(stale);
+    expect(Object.keys(serialized)).not.toContain("rollback");
+    const text = stringifyNativeCadDocument(serialized);
+    expect((JSON.parse(text) as Record<string, unknown>).rollback).toBe(
+      undefined,
+    );
+    const reparsed = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "re-parsing the stale-marker output",
+    );
+    expect(reparsed.rollback).toBeNull();
+  });
+
+  it("keeps emitting start-of-timeline markers, which never go stale", () => {
+    const start: NativeCadDocument = {
+      ...buildNative(),
+      rollback: { afterFeatureId: null },
+    };
+    const serialized = serializeNativeCadDocument(start);
+    expect(serialized.rollback).toEqual({ afterFeatureId: null });
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(stringifyNativeCadDocument(serialized)),
+      "parsing the start-of-timeline marker",
+    );
+    expect(parsed.rollback).toEqual({ afterFeatureId: null });
+  });
+
+  it("keeps emitting a marker anchored at a feature the document declares", () => {
+    const rolled: NativeCadDocument = {
+      ...buildNative(),
+      rollback: { afterFeatureId: PLATE_FEATURE },
+    };
+    const serialized = serializeNativeCadDocument(rolled);
+    expect(serialized.rollback).toEqual({ afterFeatureId: PLATE_FEATURE });
+  });
+});
+
+describe("the validator agrees with the parser on regeneration diagnostics", () => {
+  it("accepts an absent diagnostics key exactly as the parser defaults it", () => {
+    const input = revived();
+    const features = (input.regeneration as Record<string, unknown>)
+      .features as Record<string, unknown>[];
+    delete features[0]?.diagnostics;
+    const validation = validateNativeCadDocument(input);
+    expect(validation.valid).toBe(true);
+    expect(validation.issues).toEqual([]);
+    expect(parseNativeCadDocument(input).ok).toBe(true);
+  });
+
+  it("still rejects an explicit null or malformed diagnostics value, as the parser does", () => {
+    for (const diagnostics of [null, "nope", {}]) {
+      const label = JSON.stringify(diagnostics);
+      const input = revived();
+      const features = (input.regeneration as Record<string, unknown>)
+        .features as Record<string, unknown>[];
+      (features[0] as Record<string, unknown>).diagnostics = diagnostics;
+      expect(validateNativeCadDocument(input).valid, label).toBe(false);
+      expect(parseNativeCadDocument(input).ok, label).toBe(false);
+    }
+  });
+
+  it("still requires a failed state to carry diagnostics, absent or not", () => {
+    const input = revived();
+    const features = (input.regeneration as Record<string, unknown>)
+      .features as Record<string, unknown>[];
+    const entry = features[0] as Record<string, unknown>;
+    entry.state = "failed";
+    delete entry.diagnostics;
+    expect(validateNativeCadDocument(input).valid).toBe(false);
+    expect(parseNativeCadDocument(input).ok).toBe(false);
+  });
+});
+
+describe("the validator inspects the additive sketches and references sections", () => {
+  it("accepts well-formed sections and round-trips them", () => {
+    // The control: a document carrying real sketch and reference records
+    // (the workbench's own commit shapes) validates clean and parses.
+    let session = createSession(baseDocument());
+    session = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          {
+            type: "sketch.create",
+            id: createSketchDocumentId("skd_pad"),
+            name: "pad sketch",
+            sketch: { formatVersion: 1 },
+          },
+          {
+            type: "reference.create",
+            id: createReferenceId("ref_edge"),
+            name: "edge reference",
+            reference: { ordinal: 3 },
+          },
+          {
+            type: "feature.create",
+            id: PLATE_FEATURE,
+            kind: "box",
+            inputs: [{ kind: "sketch", id: createSketchDocumentId("skd_pad") }],
+            outputs: [PLATE_BODY],
+          },
+        ],
+      }),
+      "the sketch/reference commit",
+    );
+    const input = revived({
+      document: session.document,
+      history: session.history,
+      regeneration: new Map(),
+      metadata: {},
+      rollback: null,
+    });
+    const validation = validateNativeCadDocument(input);
+    expect(validation.issues).toEqual([]);
+    expect(validation.valid).toBe(true);
+    const parsed = requireOk(parseNativeCadDocument(input), "the parse");
+    expect(parsed.document.sketches[0]?.id).toBe("skd_pad");
+    expect(parsed.document.references[0]?.id).toBe("ref_edge");
+  });
+
+  it("reports malformed sections in the document AND in history.base, where the parse also fails", () => {
+    const badSketches = [
+      { id: 42, name: "s", sketch: {} },
+      { id: "skd_bad_payload", name: "p", sketch: "nope" },
+    ];
+    const badReferences = [
+      { id: 42, name: "r", reference: {} },
+      { id: "ref_bad_payload", name: "p", reference: 7 },
+    ];
+    const input = revived();
+    (input.document as Record<string, unknown>).sketches = badSketches;
+    (input.document as Record<string, unknown>).references = badReferences;
+    const base = (input.history as Record<string, unknown>).base as Record<
+      string,
+      unknown
+    >;
+    base.sketches = badSketches;
+    base.references = badReferences;
+    const validation = validateNativeCadDocument(input);
+    expect(validation.valid).toBe(false);
+    for (const path of [
+      "document.sketches[0].id",
+      "document.sketches[1].sketch",
+      "document.references[0].id",
+      "document.references[1].reference",
+      "history.base.sketches[0].id",
+      "history.base.references[0].id",
+    ]) {
+      expect(
+        validation.issues.some(
+          (entry) =>
+            entry.path === path &&
+            entry.code === NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        ),
+        path,
+      ).toBe(true);
+    }
+    // Both surfaces agree the file is malformed: the parse fails too.
+    expect(parseNativeCadDocument(input).ok).toBe(false);
+  });
+
+  it("agrees on a malformed list injected ONLY into history.base", () => {
+    const input = revived();
+    const base = (input.history as Record<string, unknown>).base as Record<
+      string,
+      unknown
+    >;
+    base.sketches = [{ id: 42, name: "s", sketch: {} }];
+    const validation = validateNativeCadDocument(input);
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        code: NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        path: "history.base.sketches[0].id",
+      }),
+    );
+    expect(parseNativeCadDocument(input).ok).toBe(false);
+  });
+
+  it("still accepts an absent or null section, exactly as the parser defaults it", () => {
+    for (const value of [undefined, null]) {
+      const input = revived();
+      (input.document as Record<string, unknown>).sketches = value;
+      (input.document as Record<string, unknown>).references = value;
+      const validation = validateNativeCadDocument(input);
+      expect(validation.valid, String(String(value))).toBe(true);
+      expect(parseNativeCadDocument(input).ok, String(String(value))).toBe(
+        true,
+      );
+    }
   });
 });

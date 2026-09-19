@@ -564,16 +564,47 @@ export interface SerializedDimensionalValue {
   readonly value: number;
 }
 
-/** Serializes a value to its canonical JSON form. */
+/**
+ * Serializes a value to its canonical JSON form, reporting a magnitude whose
+ * conversion to the canonical unit of its dimension overflows as the
+ * structured `value/non-finite-magnitude` failure instead of throwing — the
+ * dynamic-path serializer for callers that persist values which may carry
+ * extreme magnitudes in non-canonical units.
+ */
+export function serializeDimensionalValueResult(
+  value: AnyDimensionalValue,
+): ParseResult<SerializedDimensionalValue, DimensionalParseError> {
+  const canonicalUnit = CANONICAL_UNITS[value.dimension];
+  const magnitude = value.value * factorToCanonical(value.unit);
+  if (!Number.isFinite(magnitude)) {
+    return fail(
+      valueError(
+        DIMENSIONAL_ERROR_CODES.nonFiniteMagnitude,
+        `A dimensional value of ${String(value.value)} ${value.unit} has no finite magnitude in the canonical unit ${String(canonicalUnit)} of its dimension.`,
+        value,
+      ),
+    );
+  }
+  return ok({
+    dimension: value.dimension,
+    unit: canonicalUnit,
+    value: magnitude,
+  });
+}
+
+/**
+ * Serializes a value to its canonical JSON form, throwing the module's
+ * structured validation error when the canonical magnitude overflows (use
+ * {@link serializeDimensionalValueResult} for the structured form).
+ */
 export function serializeDimensionalValue(
   value: AnyDimensionalValue,
 ): SerializedDimensionalValue {
-  const canonical = toCanonical(value);
-  return {
-    dimension: canonical.dimension,
-    unit: canonical.unit,
-    value: canonical.value,
-  };
+  const result = serializeDimensionalValueResult(value);
+  if (!result.ok) {
+    throw new DimensionalValueValidationError(result.error);
+  }
+  return result.value;
 }
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
@@ -660,6 +691,19 @@ export function parseDimensionalValue(
       valueError(
         DIMENSIONAL_ERROR_CODES.nonFiniteMagnitude,
         `A dimensional value magnitude must be a finite number, received ${String(value)}.`,
+        input,
+      ),
+    );
+  }
+  // A finite magnitude in a non-canonical unit can still overflow when
+  // converted (1e308 m has no finite mm magnitude); such a value has no
+  // canonical serialization, so the persistence boundary rejects it here
+  // rather than letting the next save fail on it.
+  if (!Number.isFinite(value * factorToCanonical(unit))) {
+    return fail(
+      valueError(
+        DIMENSIONAL_ERROR_CODES.nonFiniteMagnitude,
+        `A dimensional value magnitude must remain finite in the canonical unit of its dimension; ${String(value)} ${unit} does not.`,
         input,
       ),
     );

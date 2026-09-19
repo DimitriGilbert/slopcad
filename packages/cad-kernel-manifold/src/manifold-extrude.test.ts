@@ -10,7 +10,11 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 import { angle, length } from "@slopcad/cad-core";
-import { type GeometryKernel, KERNEL_ERROR_CODES } from "@slopcad/cad-kernel";
+import {
+  type GeometryKernel,
+  KERNEL_ERROR_CODES,
+  tessellationTriangleCount,
+} from "@slopcad/cad-kernel";
 import {
   assertBoundsEqual,
   assertVolumeClose,
@@ -120,6 +124,51 @@ describe("manifold extrude", () => {
       KERNEL_ERROR_CODES.invalidProfile,
       "self-intersecting bowtie",
     );
+  });
+
+  it("extrudes a clockwise-authored square to the identical solid of its CCW twin (winding independence)", () => {
+    // The contract pins loop traversal direction as irrelevant; Manifold's
+    // Positive fill rule alone would treat the CW outer contour as unfilled
+    // and silently return an EMPTY solid (probed: CW square → isEmpty,
+    // volume 0, empty soup) where the fake kernel and JSCAD extrude 500.
+    const clockwise: Parameters<GeometryKernel["extrude"]>[0]["loop"] = [
+      { kind: "line", start: [0, 0], end: [0, 10] },
+      { kind: "line", start: [0, 10], end: [10, 10] },
+      { kind: "line", start: [10, 10], end: [10, 0] },
+      { kind: "line", start: [10, 0], end: [0, 0] },
+    ];
+    const cw = unwrapKernelResult(
+      kernel.extrude({
+        loop: clockwise,
+        height: length(5),
+        direction: 1,
+        placement: identityPlacement,
+      }),
+      "clockwise extrude",
+    );
+    const cwVolume = unwrapKernelResult(kernel.volume(cw), "cw volume");
+    assertVolumeClose(cwVolume, 500, 1e-9);
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(cw), "cw bounds"),
+      { min: [0, 0, 0], max: [10, 10, 5] },
+      1e-9,
+    );
+    expect(
+      tessellationTriangleCount(
+        unwrapKernelResult(kernel.tessellate(cw), "cw tessellate"),
+      ),
+    ).toBeGreaterThan(0);
+    // The CCW twin extrudes the byte-identical volume.
+    const ccw = unwrapKernelResult(
+      kernel.extrude({
+        loop: rectLoop(0, 0, 10, 10),
+        height: length(5),
+        direction: 1,
+        placement: identityPlacement,
+      }),
+      "counter-clockwise extrude",
+    );
+    expect(unwrapKernelResult(kernel.volume(ccw), "ccw volume")).toBe(cwVolume);
   });
 
   it("places the prism with a 90° rotation about z exactly (probed Mat4 convention)", () => {

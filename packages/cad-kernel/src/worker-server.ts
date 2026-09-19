@@ -863,10 +863,22 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
     if (decision === "suppress") {
       // Cancellation wins ties: drop the computed outcome. Computed solids
       // that will never be addressed are released, so nothing leaks past the
-      // void request — and no ids are minted for them.
-      if (outcome.status === "solid") kernel.dispose(outcome.handle);
+      // void request — and no ids are minted for them. Each release is
+      // contained per handle: the ledger already burned this id to terminal,
+      // so a kernel dispose that breaks the contract and throws must not
+      // cost the request its one terminal response — the cancelled ack below
+      // is always reached, and the next handle's release still runs.
+      const release = (handle: KernelSolid): void => {
+        try {
+          kernel.dispose(handle);
+        } catch {
+          // Best-effort release of a void outcome: the worst a throwing
+          // dispose can cost here is its own handle, never the ack.
+        }
+      };
+      if (outcome.status === "solid") release(outcome.handle);
       if (outcome.status === "solids") {
-        for (const handle of outcome.handles) kernel.dispose(handle);
+        for (const handle of outcome.handles) release(handle);
       }
       transport.send(cancelledAck(requestId, "while the request was running"));
       return;

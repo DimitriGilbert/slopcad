@@ -220,7 +220,8 @@ export function bootRenderFixtureSession(
       );
       root.setAttribute("data-error", errorText);
     }
-    const status = inFlight > 0 ? "computing" : "idle";
+    const status =
+      inFlight > 0 ? "computing" : errorText === "" ? "idle" : "failed";
     const volume =
       visible === null ? "…" : visible.state.measurement.volume.toFixed(3);
     if (targets.statusId !== undefined) setText(targets.statusId, status);
@@ -263,6 +264,10 @@ export function bootRenderFixtureSession(
   return {
     dispatch(holeDiameterMm: number): void {
       counters.dispatched += 1;
+      // A new dispatch supersedes the previous failure's error text: the
+      // error surface must reset on recovery, not stay write-once (the
+      // chain sibling's discipline).
+      errorText = "";
       writeSurface();
       coordinator
         .update((context) => computePlateRenderState(context, holeDiameterMm))
@@ -275,6 +280,7 @@ export function bootRenderFixtureSession(
     },
     dispatchExtrude(request: ExtrudeSceneRequest, bodyId: string): void {
       counters.dispatched += 1;
+      errorText = "";
       writeSurface();
       coordinator
         .update(async (context) =>
@@ -292,6 +298,7 @@ export function bootRenderFixtureSession(
     },
     dispatchRevolve(request: RevolveSceneRequest, bodyId: string): void {
       counters.dispatched += 1;
+      errorText = "";
       writeSurface();
       coordinator
         .update(async (context) =>
@@ -309,6 +316,7 @@ export function bootRenderFixtureSession(
     },
     dispatchHole(request: HoleSceneRequest, bodyId: string): void {
       counters.dispatched += 1;
+      errorText = "";
       writeSurface();
       coordinator
         .update(async (context) =>

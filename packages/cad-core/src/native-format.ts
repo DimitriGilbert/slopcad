@@ -420,16 +420,44 @@ function canonicalMetadata(
 }
 
 /**
+ * Whether a rollback marker may ride a document's serialization:
+ * start-of-timeline markers always may (they name no feature), and an
+ * anchored marker must name one of the document's features — the same
+ * membership the parser enforces (`native-format/rollback-unknown-feature`
+ * otherwise), kept here so the serializer never emits a file its own
+ * parser rejects.
+ */
+function rollbackMarkerReferencesDeclaredFeature(
+  document: CadDocument,
+  marker: FeatureRollbackPoint,
+): boolean {
+  return (
+    marker.afterFeatureId === null ||
+    document.features.some((feature) => feature.id === marker.afterFeatureId)
+  );
+}
+
+/**
  * Serializes a native document to its canonical, deterministic JSON form:
  * fixed key order at every level (inherited from the substrate serializers,
  * plus sorted metadata keys), canonical dimensional values, and stable id
  * rendering — the same document always produces the identical value. The
- * optional `rollback` field is emitted (last) exactly when a marker is set,
- * so a marker-free document serializes to the pre-Phase 20 byte form.
+ * optional `rollback` field is emitted (last) exactly when a marker is set
+ * AND still names a feature of the document (or sits at the timeline
+ * start): a stale marker — one whose anchored feature the document no
+ * longer declares — is omitted rather than persisted, so a marker-free
+ * document serializes to the pre-Phase 20 byte form and the format never
+ * emits a file its own parser rejects.
  */
 export function serializeNativeCadDocument(
   native: NativeCadDocument,
 ): SerializedNativeCadDocument {
+  const marker = native.rollback;
+  const rollback =
+    marker !== null &&
+    rollbackMarkerReferencesDeclaredFeature(native.document, marker)
+      ? marker
+      : null;
   return {
     formatVersion: CAD_NATIVE_FORMAT_VERSION,
     metadata: canonicalMetadata(native.metadata),
@@ -442,11 +470,11 @@ export function serializeNativeCadDocument(
       cursor: native.history.cursor,
     },
     regeneration: serializeRegenerationStates(native.regeneration),
-    ...(native.rollback === null
+    ...(rollback === null
       ? {}
       : {
           rollback: {
-            afterFeatureId: native.rollback.afterFeatureId,
+            afterFeatureId: rollback.afterFeatureId,
           },
         }),
   };
@@ -923,6 +951,137 @@ function validateSerializedParameter(
   validateMetadataShape(input.metadata, `${path}.metadata`, issues);
 }
 
+/**
+ * Validates the additive sketches section's shape (the substrate parser's
+ * `parseSerializedSketch` requirements): an array of plain records, each
+ * with a valid sketch id, a 1-64 character name, and a plain-object payload
+ * (the sketch domain's own schema validates on use). Absent or null parses
+ * as the empty list, so absent validates clean — the validator and the
+ * parser must agree on what is well-formed.
+ */
+function validateSerializedSketchListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized sketches must be an array of sketch records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const entryPath = `${path}[${String(index)}]`;
+    if (!isPlainRecord(entry)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        entryPath,
+        "A serialized sketch record must be a plain object with id, name, and sketch fields.",
+      );
+      return;
+    }
+    if (!parseSketchDocumentId(entry.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.id`,
+        "A sketch id must carry the sketch id prefix and payload rules.",
+      );
+    }
+    if (
+      typeof entry.name !== "string" ||
+      entry.name.length < 1 ||
+      entry.name.length > BODY_NAME_MAX_LENGTH
+    ) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.name`,
+        "A sketch name must be a string of 1-64 characters.",
+      );
+    }
+    if (!isPlainRecord(entry.sketch)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.sketch`,
+        "A sketch record's payload must be a plain object (the sketch domain's canonical serialized form).",
+      );
+    }
+  });
+}
+
+/**
+ * Validates the additive references section's shape (the substrate
+ * parser's `parseSerializedReference` requirements): an array of plain
+ * records, each with a valid reference id, a 1-64 character name, and a
+ * plain-object payload (the persistent-reference module's own schema
+ * validates on use). Absent or null parses as the empty list, so absent
+ * validates clean — the validator and the parser must agree on what is
+ * well-formed.
+ */
+function validateSerializedReferenceListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized references must be an array of reference records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const entryPath = `${path}[${String(index)}]`;
+    if (!isPlainRecord(entry)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        entryPath,
+        "A serialized reference record must be a plain object with id, name, and reference fields.",
+      );
+      return;
+    }
+    if (!parseReferenceId(entry.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.id`,
+        "A reference id must carry the reference id prefix and payload rules.",
+      );
+    }
+    if (
+      typeof entry.name !== "string" ||
+      entry.name.length < 1 ||
+      entry.name.length > BODY_NAME_MAX_LENGTH
+    ) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.name`,
+        "A reference name must be a string of 1-64 characters.",
+      );
+    }
+    if (!isPlainRecord(entry.reference)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.reference`,
+        "A reference record's payload must be a plain object (the persistent-reference module's canonical serialized form).",
+      );
+    }
+  });
+}
+
 function validateSerializedCadDocumentShape(
   input: unknown,
   path: string,
@@ -1089,6 +1248,17 @@ function validateSerializedCadDocumentShape(
       }
     });
   }
+  // The additive sections (sketches, references): absent means empty (the
+  // substrate parser defaults it), but a PRESENT list is inspected with the
+  // parser's own per-record requirements, so a malformed list no longer
+  // validates clean only to fail the parse. Runs for every document section
+  // the validator walks — the top-level document and history.base alike.
+  validateSerializedSketchListShape(input.sketches, `${path}.sketches`, issues);
+  validateSerializedReferenceListShape(
+    input.references,
+    `${path}.references`,
+    issues,
+  );
 }
 
 /** Validates a create-command's display name (a non-empty string). */
@@ -1467,7 +1637,13 @@ function validateRegenerationShape(
       return;
     }
     const state = entry.state;
-    if (!Array.isArray(entry.diagnostics)) {
+    // An absent diagnostics key parses as the empty list (the regeneration
+    // substrate defaults it), so the validator accepts it too — the two
+    // surfaces must agree on what is well-formed. An explicit null or
+    // non-array value stays invalid, exactly as the parser rejects it.
+    const diagnostics: unknown =
+      entry.diagnostics === undefined ? [] : entry.diagnostics;
+    if (!Array.isArray(diagnostics)) {
       issue(
         issues,
         NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
@@ -1476,7 +1652,7 @@ function validateRegenerationShape(
       );
     } else {
       let diagnosticCount = 0;
-      entry.diagnostics.forEach((diagnostic, diagnosticIndex) => {
+      diagnostics.forEach((diagnostic, diagnosticIndex) => {
         const diagnosticPath = `${entryPath}.diagnostics[${String(diagnosticIndex)}]`;
         if (!parseDiagnostic(diagnostic).ok) {
           issue(

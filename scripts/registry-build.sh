@@ -23,6 +23,11 @@ if [[ ! -x "$SHADCN" ]]; then
   exit 1
 fi
 
+# Prune before building: `shadcn build` never deletes per-item JSONs and
+# registry-index.mjs unions every schema-carrying *.json on disk, so a
+# removed or renamed source item would keep being advertised with stale
+# bytes forever without this.
+rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 for registry_dir in packages/ui packages/cad-components apps/web; do

@@ -1711,3 +1711,143 @@ describe("the solid.topology extension (Phase 26.5)", () => {
     });
   });
 });
+
+describe("server suppression-path dispose containment", () => {
+  interface ThrowingDisposeHarness {
+    readonly responses: unknown[];
+    readonly send: (data: unknown) => void;
+    /** How many times the throwing kernel dispose was attempted. */
+    disposeAttempts(): number;
+  }
+
+  /**
+   * A server over a fake kernel whose `dispose` ALWAYS throws (the plausible
+   * failure of a WASM-backed backend doing real release work), counting
+   * every attempt: a void request's cleanup must never cost the request the
+   * one terminal response the ledger still owes it.
+   */
+  function throwingDisposeServer(
+    options: { importTwoSolids?: boolean } = {},
+  ): ThrowingDisposeHarness {
+    const base = createFakeKernel();
+    let disposeAttempts = 0;
+    const kernel: GeometryKernel = {
+      ...base,
+      dispose: () => {
+        disposeAttempts += 1;
+        throw new Error("wasm heap gone");
+      },
+    };
+    const stepImport =
+      options.importTwoSolids === true
+        ? (): ParseResult<KernelSolid[]> => {
+            const first = base.createBox(boxWireInput);
+            const second = base.createBox(boxWireInput);
+            if (!first.ok || !second.ok) {
+              throw new Error("The harness boxes must mint.");
+            }
+            return { ok: true as const, value: [first.value, second.value] };
+          }
+        : undefined;
+    const pair = createInMemoryTransportPair();
+    createWorkerServer({ kernel, transport: pair.server, stepImport });
+    const responses: unknown[] = [];
+    pair.client.onMessage((data) => responses.push(data));
+    return {
+      responses,
+      send: (data) => pair.client.send(data),
+      disposeAttempts: () => disposeAttempts,
+    };
+  }
+
+  /** Runs `stage`, capturing every process-level unhandled error it caused. */
+  async function capturingUnhandledErrors(
+    stage: () => Promise<void>,
+  ): Promise<unknown[]> {
+    const unhandled: unknown[] = [];
+    const capture = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("uncaughtException", capture);
+    process.on("unhandledRejection", capture);
+    try {
+      await stage();
+      // One event-loop turn, not just microtasks: Node reports unhandled
+      // errors between macrotasks, so this is the earliest they show.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      return unhandled;
+    } finally {
+      process.removeListener("uncaughtException", capture);
+      process.removeListener("unhandledRejection", capture);
+    }
+  }
+
+  it("emits exactly one cancelled ack when the suppression-path dispose throws — no unhandled escape", async () => {
+    const harness = throwingDisposeServer();
+    const unhandled = await capturingUnhandledErrors(async () => {
+      harness.send({
+        protocolVersion: 1,
+        kind: "request",
+        requestId: "req_000001",
+        operation: "solid.createBox",
+        input: boxWireInput,
+      });
+      harness.send({
+        protocolVersion: 1,
+        kind: "cancel",
+        requestId: "req_000001",
+      });
+      await flush();
+    });
+
+    expect(unhandled).toEqual([]);
+    expect(harness.disposeAttempts()).toBe(1);
+    expect(harness.responses).toHaveLength(1);
+    const response = errorResponseAt(harness.responses, 0);
+    expect(response.requestId).toBe("req_000001");
+    expect(response.error.code).toBe("worker/cancelled");
+
+    // The ledger already burned the id to terminal and the ack was its one
+    // terminal response: a retry under the same id is a duplicate refusal,
+    // proving no second terminal message can appear for it.
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000001",
+      operation: "solid.createBox",
+      input: boxWireInput,
+    });
+    await flush();
+    expect(errorResponseAt(harness.responses, 1).error.code).toBe(
+      "worker/duplicate-request",
+    );
+  });
+
+  it("continues per handle when a suppressed import's disposals throw — every release attempted, one ack", async () => {
+    const harness = throwingDisposeServer({ importTwoSolids: true });
+    const unhandled = await capturingUnhandledErrors(async () => {
+      harness.send({
+        protocolVersion: 1,
+        kind: "request",
+        requestId: "req_000001",
+        operation: "step.import",
+        input: { data: "SSBXLUhPTEU=" },
+      });
+      harness.send({
+        protocolVersion: 1,
+        kind: "cancel",
+        requestId: "req_000001",
+      });
+      await flush();
+    });
+
+    expect(unhandled).toEqual([]);
+    // Per-handle continuation: the first throwing release did not save the
+    // second imported handle from its own release attempt.
+    expect(harness.disposeAttempts()).toBe(2);
+    expect(harness.responses).toHaveLength(1);
+    const response = errorResponseAt(harness.responses, 0);
+    expect(response.requestId).toBe("req_000001");
+    expect(response.error.code).toBe("worker/cancelled");
+  });
+});

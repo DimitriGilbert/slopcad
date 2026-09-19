@@ -1,7 +1,12 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
-import { saveArtifact, sha256, waitForSettledScene } from "./helpers";
+import {
+  dispatchedCount,
+  saveArtifact,
+  sha256,
+  waitForSettledScene,
+} from "./helpers";
 
 /**
  * Phase 20 e2e — feature history and robust regeneration on the composed
@@ -56,6 +61,14 @@ interface TimelineSurface {
   readonly rollback: { readonly afterFeatureId: string | null } | null;
   readonly entries: readonly TimelineEntrySurface[];
   readonly executed: readonly string[];
+}
+
+/** The parsed `data-history` view (undo/redo cursor metadata). */
+interface HistorySurface {
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly cursor: number;
+  readonly depth: number;
 }
 
 /**
@@ -181,6 +194,35 @@ async function waitForCommandCount(page: Page, count: number): Promise<void> {
 }
 
 /**
+ * Waits until the root's history surface equals `expected` exactly — the
+ * transition anchor the edit/undo/redo determinism test rides: the
+ * timeline surface is byte-identical across those phases (a translate edit
+ * leaves `executed: [T, R]` valid/valid on every path), but the history
+ * cursor genuinely moves with each commit (boot `{0, 0}` → edit
+ * `{1, 1}` → undo `{0, 1}` → redo `{1, 1}`).
+ */
+async function waitForHistory(
+  page: Page,
+  expected: HistorySurface,
+): Promise<void> {
+  await page.waitForFunction(
+    ({ check, id }) => {
+      const root = document.getElementById(id);
+      const raw = root?.getAttribute("data-history") ?? null;
+      if (raw === null) return false;
+      const surface = JSON.parse(raw) as HistorySurface;
+      return (
+        surface.canUndo === check.canUndo &&
+        surface.canRedo === check.canRedo &&
+        surface.cursor === check.cursor &&
+        surface.depth === check.depth
+      );
+    },
+    { check: expected, id: ROOT },
+  );
+}
+
+/**
  * Capture discipline for page shots: park the pointer off every surface
  * (no hover fills), drop focus (no caret or focus ring in the frame), and
  * let the CSS transitions (button opacity, row hover, chevron) run out.
@@ -233,12 +275,37 @@ test("an upstream parameter edit regenerates the downstream chain deterministica
 }) => {
   await page.goto("/workbench");
   const volume = await waitForSettledScene(page, ROOT);
+  // The boot anchor: the history surface starts at the empty pre-edit
+  // state. The timeline surface alone cannot anchor the phases below (it
+  // is byte-identical before and after a translate edit), so every phase
+  // also demands the history-cursor transition only its commit produces.
+  await waitForHistory(page, {
+    canUndo: false,
+    canRedo: false,
+    cursor: 0,
+    depth: 0,
+  });
 
   // The upstream edit: one canonical parameter.set, then the threaded loop
   // re-executes the translate feature AND its downstream rotate feature.
+  // The regeneration itself is proven by the dispatch-anchored settle: the
+  // document change, the scene surfaces, and the dispatch effect land in
+  // separate commits, so only a settle whose dispatch landed proves the
+  // chain actually re-ran (the command count and history cursor alone
+  // prove the commit, not the run).
+  const beforeEdit = await dispatchedCount(page, ROOT);
   await panelField(page, "translate_x").fill("4");
   await applyButton(page).click();
   await waitForCommandCount(page, 1);
+  await waitForHistory(page, {
+    canUndo: true,
+    canRedo: false,
+    cursor: 1,
+    depth: 1,
+  });
+  expect(
+    await waitForSettledScene(page, ROOT, { afterDispatch: beforeEdit }),
+  ).toBe(volume);
   const edited = await waitForTimeline(page, {
     executed: [TRANSLATE_FEATURE, ROTATE_FEATURE],
     rollbackAfter: null,
@@ -253,6 +320,12 @@ test("an upstream parameter edit regenerates the downstream chain deterministica
 
   // Undo reverts the parameter: the same chain re-executes, deterministically.
   await page.locator("#history-undo").click();
+  await waitForHistory(page, {
+    canUndo: false,
+    canRedo: true,
+    cursor: 0,
+    depth: 1,
+  });
   const undone = await waitForTimeline(page, {
     executed: [TRANSLATE_FEATURE, ROTATE_FEATURE],
     statuses: [
@@ -265,6 +338,12 @@ test("an upstream parameter edit regenerates the downstream chain deterministica
   // Redo re-applies the edit: the identical executed sequence once more —
   // the same change applied twice yields the same outcome sequence.
   await page.locator("#history-redo").click();
+  await waitForHistory(page, {
+    canUndo: true,
+    canRedo: false,
+    cursor: 1,
+    depth: 1,
+  });
   const redone = await waitForTimeline(page, {
     executed: [TRANSLATE_FEATURE, ROTATE_FEATURE],
     statuses: [

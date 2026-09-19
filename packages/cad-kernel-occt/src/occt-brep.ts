@@ -87,11 +87,7 @@ import {
   fail,
   ok,
 } from "@slopcad/cad-core";
-import type {
-  OpenCascadeInstance,
-  TopoDS_Compound,
-  TopoDS_Shape,
-} from "replicad-opencascadejs";
+import type { OpenCascadeInstance, TopoDS_Shape } from "replicad-opencascadejs";
 
 /**
  * Stable failure codes produced when BREP export rejects its input. There is
@@ -210,13 +206,40 @@ function extractSolids(
 }
 
 /**
+ * Writes one already-built carrier shape into a BREP file's bytes, refusing
+ * an empty writer output (no observable failure status exists on the string
+ * API, so an empty output is rejected rather than shipped as a success).
+ */
+function writeBrepFile(
+  oc: OpenCascadeInstance,
+  carrier: TopoDS_Shape,
+): ParseResult<Uint8Array, BrepExportError> {
+  const text = oc.BRepToolsWrapper.Write(carrier);
+  if (text === "") {
+    return fail(
+      brepExportError(
+        BREP_EXPORT_ERROR_CODES.writeFailed,
+        "The OCCT BREP writer produced an empty string; refusing to ship it as a file.",
+      ),
+    );
+  }
+  // Pure ASCII (probed) — UTF-8 encoding is byte-exact for it.
+  return ok(new TextEncoder().encode(text));
+}
+
+/**
  * Exports `shapes` — one or more owned BREP shapes — into ONE deterministic
  * OCCT ASCII BREP file's bytes: a single shape writes itself (the format's
  * canonical single-shape form), two or more ride inside a `TopoDS_Compound`
  * (see the module doc's multi-shape decision). Total: any input either
  * exports or fails with a structured `brep-export/*` code — never a throw —
  * and no filesystem state is touched on any path (the string API bypasses
- * the virtual filesystem entirely).
+ * the virtual filesystem entirely). The compound's deleting span opens
+ * immediately after its allocation, so the whole build (`MakeCompound`,
+ * `Add`) and the write run inside it: a binding throw anywhere in the span
+ * deletes the wrapper on the way out (delete-on-partially-built is safe —
+ * OCCT shapes are reference-counted handles and the input shapes are
+ * caller-owned) instead of leaking it past the outer catch.
  */
 export function exportBrepShapes(
   oc: OpenCascadeInstance,
@@ -231,9 +254,6 @@ export function exportBrepShapes(
     );
   }
   try {
-    let carrier: TopoDS_Shape;
-    let compound: TopoDS_Compound | undefined;
-    let builder: InstanceType<typeof oc.TopoDS_Builder> | undefined;
     if (shapes.length === 1) {
       const only = shapes[0];
       if (only === undefined) {
@@ -241,10 +261,11 @@ export function exportBrepShapes(
           "Invariant violation: a non-empty shape list is dense.",
         );
       }
-      carrier = only;
-    } else {
-      compound = new oc.TopoDS_Compound();
-      builder = new oc.TopoDS_Builder();
+      return writeBrepFile(oc, only);
+    }
+    const compound = new oc.TopoDS_Compound();
+    try {
+      const builder = new oc.TopoDS_Builder();
       try {
         builder.MakeCompound(compound);
         for (const shape of shapes) {
@@ -253,22 +274,9 @@ export function exportBrepShapes(
       } finally {
         builder.delete();
       }
-      carrier = compound;
-    }
-    try {
-      const text = oc.BRepToolsWrapper.Write(carrier);
-      if (text === "") {
-        return fail(
-          brepExportError(
-            BREP_EXPORT_ERROR_CODES.writeFailed,
-            "The OCCT BREP writer produced an empty string; refusing to ship it as a file.",
-          ),
-        );
-      }
-      // Pure ASCII (probed) — UTF-8 encoding is byte-exact for it.
-      return ok(new TextEncoder().encode(text));
+      return writeBrepFile(oc, compound);
     } finally {
-      compound?.delete();
+      compound.delete();
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

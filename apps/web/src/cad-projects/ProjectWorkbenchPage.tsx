@@ -44,6 +44,7 @@ import {
   useWorkbenchEngine,
   WorkbenchStoreProvider,
 } from "../cad-workbench/workbench-engine";
+import { shouldApplyLatestContent } from "./latest-content-gate";
 import {
   parseNativeTextToSession,
   serializeSessionToNativeText,
@@ -156,6 +157,10 @@ function PersistenceBar({
       }
       store.replaceSession(parsed.session);
       engine.setActiveScene(parsed.scene);
+      // The persisted marker rides with the content: a reopened document
+      // executes the same parked timeline that was saved (and a marker-free
+      // file clears whatever the previously loaded content left behind).
+      engine.setRollback(parsed.rollback ?? null);
       milestonesRef.current = {
         loadedFrom: text,
         savedDocument: parsed.document,
@@ -170,7 +175,10 @@ function PersistenceBar({
 
   // OPEN: the latest persisted content enters the store exactly once per
   // distinct text; an explicit version pick (pinned) is never displaced by
-  // a background refetch of the latest pointer.
+  // a background refetch of the latest pointer — and neither is a DIRTY
+  // session: a concurrent save from another tab plus a refocus must not
+  // silently wipe unsaved edits (the gate leaves milestones and pin state
+  // untouched, so the guard re-evaluates once the user saves or reverts).
   useEffect(() => {
     if (!documentQuery.isSuccess) return;
     const latest = documentQuery.data.latest;
@@ -187,12 +195,16 @@ function PersistenceBar({
       return;
     }
     if (
-      !milestonesRef.current.pinned &&
-      milestonesRef.current.loadedFrom !== latest.nativeContent
+      shouldApplyLatestContent({
+        pinned: milestonesRef.current.pinned,
+        loadedFrom: milestonesRef.current.loadedFrom,
+        latestContent: latest.nativeContent,
+        isDirty: document !== milestonesRef.current.savedDocument,
+      })
     ) {
       applyContent(latest.nativeContent, latest.version, false);
     }
-  }, [documentQuery.isSuccess, documentQuery.data, applyContent]);
+  }, [documentQuery.isSuccess, documentQuery.data, applyContent, document]);
 
   // SAVE: serialize the live session through the native bridge. The server
   // validates the payload with the same machinery before it becomes a

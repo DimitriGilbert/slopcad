@@ -1097,6 +1097,49 @@ describe("repair", () => {
     expect(repaired.error.code).toBe(REFERENCE_ERROR_CODES.repairNoCandidate);
   });
 
+  it("refuses a snapshot of another body — never re-anchors across bodies", () => {
+    // The cross-body hole: body B's snapshot carries a face of the SAME
+    // shape as the reference's recorded geometry (equal area and both
+    // centroids), so the geometric narrowing alone would match it and
+    // silently re-anchor the reference onto the foreign body — the repaired
+    // reference keeps bodyId "body_plate" while minting transient
+    // selections that address the foreign body's topology. The body-identity
+    // guard must refuse field-invalid, exactly the boundary resolution and
+    // the re-executed strategy already hold.
+    const minted = mintedReference(6);
+    if (!minted.ok) throw new Error(minted.error.message);
+    const missing: TopologyEntityReference = {
+      ...minted.value,
+      validity: { state: "missing", regeneration: 1 },
+    };
+    const sameShapeFace = entityOf({
+      kind: "face",
+      ordinal: 0,
+      hash: 9007,
+      areaMm2: 251.32,
+      centroidAbsoluteMm: [15, 10, 5],
+      centroidRelativeMm: [0, 0, 0],
+    });
+    const foreign = snapshotOf([sameShapeFace], {
+      bodyId: toolBodyId,
+      regeneration: 9,
+    });
+    const repaired = repairTopologyReference(missing, foreign);
+    expect(repaired.ok).toBe(false);
+    if (repaired.ok) return;
+    expect(repaired.error.code).toBe(REFERENCE_ERROR_CODES.fieldInvalid);
+    // Control: the identical same-shape entity on the reference's OWN body
+    // still re-anchors by the geometric heuristic.
+    const own = snapshotOf([sameShapeFace], { regeneration: 9 });
+    const ownRepaired = repairTopologyReference(missing, own);
+    expect(ownRepaired.ok).toBe(true);
+    if (!ownRepaired.ok) return;
+    expect(ownRepaired.value.validity.repair?.strategy).toBe(
+      "geometric-reattach",
+    );
+    expect(ownRepaired.value.identity.data.hash).toBe(9007);
+  });
+
   it("requires the missing precondition", () => {
     const minted = mintedReference(6);
     if (!minted.ok) throw new Error(minted.error.message);

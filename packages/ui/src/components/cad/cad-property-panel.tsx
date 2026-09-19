@@ -54,6 +54,7 @@ import type { ReactElement } from "react";
 import {
   CadProviderError,
   removeFeatureTransaction,
+  selectionReferenceKey,
   useCadDocument,
   useCadSelection,
   useCadStore,
@@ -586,13 +587,10 @@ export function CadPropertyPanel({
                   : undefined
               }
               index={index}
-              key={
-                reference.kind === "feature"
-                  ? `feature:${String(reference.featureId)}`
-                  : reference.kind === "body" || reference.kind === "solid"
-                    ? `${reference.kind}:${String(reference.bodyId)}`
-                    : `${reference.kind}:${String(reference.bodyId)}:${String(reference.regeneration)}`
-              }
+              // The domain's canonical key (includes the topology index), so
+              // two same-kind synthetic references of one body at one
+              // regeneration stay distinct siblings — same rule as the tree.
+              key={selectionReferenceKey(reference)}
               labels={labels}
               onRemove={removeFeature}
               reference={reference}

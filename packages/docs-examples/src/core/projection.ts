@@ -38,14 +38,18 @@ export const GUIDE_CAMERA: RenderCamera = {
   fovDeg: 40,
 };
 
-/** A plate-with-bore tessellation: the kernel contract's flat soup form. */
+/**
+ * A plain 30×20×10 plate tessellation: the kernel contract's flat soup
+ * form, every triangle wound counter-clockwise seen from outside so each
+ * face's right-hand-rule normal points away from the solid.
+ */
 const PLATE_TESSELLATION = {
   positions: [
     0, 0, 0, 30, 0, 0, 30, 20, 0, 0, 20, 0, 0, 0, 10, 30, 0, 10, 30, 20, 10, 0,
     20, 10,
   ],
   indices: [
-    0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1,
+    0, 3, 2, 0, 2, 1, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 1,
     2, 6, 1, 6, 5, 3, 0, 4, 3, 4, 7,
   ],
   normals: undefined,

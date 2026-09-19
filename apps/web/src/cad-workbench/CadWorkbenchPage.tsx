@@ -63,7 +63,7 @@
  * for).
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import type { ReactElement } from "react";
 import {
   serializeSelectionReference,
@@ -81,6 +81,7 @@ import { completionJson } from "../render-fixture/fixture-session";
 import { SketchMode } from "./SketchMode";
 import { FeatureTimelineStrip } from "./feature-timeline-strip";
 import { WorkbenchMeasurementSection } from "./measurement-section";
+import { honestSceneFallback } from "./scene-fallback";
 import {
   useWorkbenchEngine,
   WorkbenchStoreProvider,
@@ -151,6 +152,26 @@ export function WorkbenchLayout({
   const boundsState = engine.boundsState;
   const radiusState = engine.radiusState;
   const massPropertiesState = engine.massPropertiesState;
+
+  // The honest scene fallback (the engine's own documented contract, shared
+  // by every page that renders this layout): an authoring move that REMOVES
+  // document data — an undo that reverts the anchored solid feature, a
+  // reopened older version — can invalidate the active scene's request, and
+  // the engine's dispatch then silently no-ops while the viewport keeps the
+  // removed solid's stale pixels and `data-scene-kind`. When the active
+  // scene stops resolving over the live document, re-point the dispatch at
+  // the highest scene the document still resolves (hole over revolve over
+  // extrude, then the plate) — the same fallback the complete workbench
+  // implements. The effect only ever FALLS BACK: a newly created deeper
+  // scene wins through its action's own scene switch, never through this.
+  const activeScene = engine.activeScene;
+  const workbenchDocument = engine.documentApi.document;
+  useEffect(() => {
+    const fallback = honestSceneFallback(workbenchDocument, activeScene);
+    if (fallback !== null) {
+      engine.setActiveScene(fallback);
+    }
+  }, [activeScene, engine, workbenchDocument]);
 
   const selectionKey = useMemo(
     () => selectionApi.selected.map(selectionReferenceKey).join(";"),

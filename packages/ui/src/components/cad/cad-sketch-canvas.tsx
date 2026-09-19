@@ -295,15 +295,17 @@ export function CadSketchCanvas({
               entity.radius,
           );
         } else if (entity.kind === "arc") {
+          // Rim distance restricted to the sweep — feeding the same
+          // screen-pixel gate below as lines, circles, and points (the
+          // module's documented hit-testing contract).
           const rim = Math.hypot(point.x - entity.cx, point.y - entity.cy);
-          const onRim =
-            Math.abs(rim - entity.radius) <= 0.5 &&
-            withinSweep(
-              angleAbout(point, { x: entity.cx, y: entity.cy }),
-              entity.startAngle,
-              entity.endAngle,
-            );
-          distance = onRim ? 0 : Number.POSITIVE_INFINITY;
+          distance = withinSweep(
+            angleAbout(point, { x: entity.cx, y: entity.cy }),
+            entity.startAngle,
+            entity.endAngle,
+          )
+            ? Math.abs(rim - entity.radius)
+            : Number.POSITIVE_INFINITY;
         } else {
           distance = Math.hypot(point.x - entity.x, point.y - entity.y);
         }

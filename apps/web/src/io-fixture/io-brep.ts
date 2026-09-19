@@ -25,7 +25,11 @@ import {
   projectTessellation,
   type RenderProjection,
 } from "@slopcad/cad-core";
-import type { Tessellation, WorkerClient } from "@slopcad/cad-kernel";
+import type {
+  Tessellation,
+  WorkerClient,
+  WorkerSolidId,
+} from "@slopcad/cad-kernel";
 
 import {
   fitCameraToBounds,
@@ -64,12 +68,32 @@ export async function importBrepBytesOverWorker(
 ): Promise<ImportedBrepFlow> {
   const imported = await client.request("brep.import", { data: bytes });
   const soups: Tessellation[] = [];
-  for (const ref of imported.solids) {
-    const tessellated = await client.request("solid.tessellate", {
-      solid: ref.solid,
-    });
-    soups.push(tessellated.tessellation);
-    await client.request("solid.dispose", { solid: ref.solid });
+  // The import minted every session solid at once, so the disposal
+  // obligation covers the whole list from here on — including the solids
+  // the loop never reaches when a tessellate rejects. A `solid.dispose`
+  // of an already-disposed id is refused by the session before the kernel
+  // is called, so each id is released exactly once: the set remembers what
+  // the loop already released, and the finally releases the rest.
+  const released = new Set<WorkerSolidId>();
+  const release = async (id: WorkerSolidId): Promise<void> => {
+    if (released.has(id)) {
+      return;
+    }
+    released.add(id);
+    await client.request("solid.dispose", { solid: id });
+  };
+  try {
+    for (const ref of imported.solids) {
+      const tessellated = await client.request("solid.tessellate", {
+        solid: ref.solid,
+      });
+      soups.push(tessellated.tessellation);
+      await release(ref.solid);
+    }
+  } finally {
+    for (const ref of imported.solids) {
+      await release(ref.solid);
+    }
   }
   return { refs: imported.solids, soups };
 }
@@ -155,24 +179,34 @@ export async function exportPlateBrepOverWorker(
   client: WorkerClient,
 ): Promise<Uint8Array> {
   const [boreX, boreY] = EXPORT_PLATE.boreCenterXyMm;
-  const plate = await client.request("solid.createBox", {
-    width: mm(EXPORT_PLATE.widthMm),
-    depth: mm(EXPORT_PLATE.depthMm),
-    height: mm(EXPORT_PLATE.heightMm),
-  });
-  const boreAtOrigin = await client.request("solid.createCylinder", {
-    radius: mm(EXPORT_PLATE.boreRadiusMm),
-    height: mm(EXPORT_PLATE.heightMm),
-  });
-  const bore = await client.request("solid.transform", {
-    solid: boreAtOrigin.solid,
-    translation: { x: mm(boreX), y: mm(boreY), z: mm(0) },
-  });
-  const drilled = await client.request("solid.subtract", {
-    target: plate.solid,
-    tools: [bore.solid],
-  });
+  // The disposal obligation starts at the FIRST minting request: a
+  // rejection of any later build step must not leak the solids already
+  // minted. Every id the flow mints is collected — `solid.transform` mints
+  // a NEW solid while the source stays owned, so both are session-owned —
+  // and released in the finally.
+  const minted: WorkerSolidId[] = [];
   try {
+    const plate = await client.request("solid.createBox", {
+      width: mm(EXPORT_PLATE.widthMm),
+      depth: mm(EXPORT_PLATE.depthMm),
+      height: mm(EXPORT_PLATE.heightMm),
+    });
+    minted.push(plate.solid);
+    const boreAtOrigin = await client.request("solid.createCylinder", {
+      radius: mm(EXPORT_PLATE.boreRadiusMm),
+      height: mm(EXPORT_PLATE.heightMm),
+    });
+    minted.push(boreAtOrigin.solid);
+    const bore = await client.request("solid.transform", {
+      solid: boreAtOrigin.solid,
+      translation: { x: mm(boreX), y: mm(boreY), z: mm(0) },
+    });
+    minted.push(bore.solid);
+    const drilled = await client.request("solid.subtract", {
+      target: plate.solid,
+      tools: [bore.solid],
+    });
+    minted.push(drilled.solid);
     const exported = await client.request("brep.export", {
       solids: [drilled.solid],
     });
@@ -180,12 +214,7 @@ export async function exportPlateBrepOverWorker(
   } finally {
     // The session keeps nothing: every minted build solid is released,
     // export outcome notwithstanding.
-    for (const id of [
-      plate.solid,
-      boreAtOrigin.solid,
-      bore.solid,
-      drilled.solid,
-    ]) {
+    for (const id of minted) {
       await client.request("solid.dispose", { solid: id });
     }
   }

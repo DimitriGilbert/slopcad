@@ -20,7 +20,10 @@
  * when the projection has no normals at all — exists only so unlit data can
  * still shade under lit materials, and it inherits that smoothing caveat by
  * construction (an averaged normal is still well-defined and unit; a missing
- * normal attribute renders black under standard materials).
+ * normal attribute renders black under standard materials). The fallback is
+ * re-derived on every in-place update that changes the buffers: it is a
+ * function of the positions and the index, so leaving it in place would
+ * shade moved geometry with the previous geometry's normals.
  *
  * ## Update semantics: replace by stable id, write in place when sensible
  *
@@ -205,6 +208,15 @@ function identity(value: number): number {
  * Writes a same-shape render object into an existing geometry in place.
  * Returns whether anything changed; unchanged data leaves the geometry
  * completely untouched (no `needsUpdate`, no bounds recompute, no upload).
+ *
+ * The index is written BEFORE any normals handling: three's indexed
+ * crease-averaging `computeVertexNormals` (the fallback for normals-less
+ * data) reads the geometry's CURRENT index, so the fallback must be
+ * re-derived from the NEW positions and index whenever an in-place update
+ * changes either — a normals-less object shading with normals from the
+ * previous geometry is stale by construction. Kernel normals are never
+ * recomputed; they are overwritten verbatim from the projection (the module
+ * header's law).
  */
 function writeObjectIntoGeometry(
   object: RenderObject,
@@ -215,13 +227,6 @@ function writeObjectIntoGeometry(
   if (!attributeMatchesSource(position, object.positions, quantizeFloat32)) {
     overwriteAttribute(position, object.positions);
     changed = true;
-  }
-  if (object.normals !== undefined) {
-    const normal = geometry.getAttribute("normal");
-    if (!attributeMatchesSource(normal, object.normals, quantizeFloat32)) {
-      overwriteAttribute(normal, object.normals);
-      changed = true;
-    }
   }
   const index = geometry.getIndex();
   if (index === null) {
@@ -234,6 +239,18 @@ function writeObjectIntoGeometry(
   if (!attributeMatchesSource(index, object.indices, identity)) {
     overwriteAttribute(index, object.indices);
     changed = true;
+  }
+  if (object.normals !== undefined) {
+    const normal = geometry.getAttribute("normal");
+    if (!attributeMatchesSource(normal, object.normals, quantizeFloat32)) {
+      overwriteAttribute(normal, object.normals);
+      changed = true;
+    }
+  } else if (changed) {
+    // Fallback rule, same as at build time: only when the kernel provided
+    // no normals, and only now that the new positions AND index are both in
+    // place (the averaging follows the new index's creases).
+    geometry.computeVertexNormals();
   }
   if (changed) {
     geometry.computeBoundingBox();

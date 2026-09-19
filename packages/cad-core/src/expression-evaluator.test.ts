@@ -351,3 +351,56 @@ describe("evaluateExpression safety and determinism", () => {
     );
   });
 });
+
+describe("evaluateExpression canonical-conversion overflow", () => {
+  // 1e308 m: a finite magnitude whose conversion to the canonical mm
+  // overflows — every path below must return the structured non-finite
+  // failure, never the dimensional layer's validation throw.
+  const hugeMeters = `1${"0".repeat(308)}.0m`;
+  const overflowing = environmentOf({ width: length(1e308, "m") });
+  const overflowingArea = environmentOf({ plate: area(1e308, "m2") });
+
+  it("returns a structured failure for overflowing unit literals", () => {
+    expectFailure(
+      hugeMeters,
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+    );
+    expectFailure(
+      `min(${hugeMeters}, 5mm)`,
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+    );
+  });
+
+  it("returns a structured failure for overflowing environment values on every consumer path", () => {
+    expectFailure(
+      "-width",
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+      overflowing,
+    );
+    expectFailure(
+      "width % 3mm",
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+      overflowing,
+    );
+    expectFailure(
+      "width ^ 1",
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+      overflowing,
+    );
+    expectFailure(
+      "min(width, 5mm)",
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+      overflowing,
+    );
+    expectFailure(
+      "max(5mm, width)",
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+      overflowing,
+    );
+    expectFailure(
+      "sqrt(plate)",
+      EXPRESSION_EVALUATION_ERROR_CODES.nonFiniteResult,
+      overflowingArea,
+    );
+  });
+});

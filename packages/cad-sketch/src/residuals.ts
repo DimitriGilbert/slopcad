@@ -156,16 +156,27 @@ export function unpackSolvedParameters(
           cy: offset(1),
           radius: offset(2),
         };
-      case "arc":
+      case "arc": {
+        const startAngle = offset(3);
+        const endAngle = offset(4);
+        // Guard the independent canonicalization: a tiny negative raw sweep
+        // would wrap endAngle forward into a near-full circle (2π − ε)
+        // while the arc's own invariant demands a non-degenerate sweep.
+        if (solvedArcSweepIsDegenerate(startAngle, endAngle)) {
+          throw new RangeError(
+            `Solved arc parameters for entity ${entity.id} are degenerate: the sweep from ${String(startAngle)} to ${String(endAngle)} collapses or wraps to a near-full circle; an arc must sweep a positive angle away from 0 and 2π.`,
+          );
+        }
         return {
           id: entity.id,
           kind: "arc",
           cx: offset(0),
           cy: offset(1),
           radius: offset(2),
-          startAngle: canonicalAngle(offset(3)),
-          endAngle: canonicalAngle(offset(4)),
+          startAngle: canonicalAngle(startAngle),
+          endAngle: canonicalAngle(endAngle),
         };
+      }
       case "rectangle":
         return { id: entity.id, kind: "rectangle" };
     }
@@ -177,6 +188,35 @@ function canonicalAngle(angle: number): number {
   const twoPi = Math.PI * 2;
   const wrapped = angle % twoPi;
   return wrapped < 0 ? wrapped + twoPi : wrapped;
+}
+
+/**
+ * How far (rad) a solved arc's forward sweep must stay from 0 and 2π: a
+ * sweep within this of either end is numerically degenerate — it either
+ * collapses the arc to (near) zero sweep or, for a tiny negative raw
+ * remainder, wraps the independent canonicalization into a near-full
+ * circle. Matches the convergence-tolerance scale the solver judges
+ * residuals at.
+ */
+const SOLVED_ARC_DEGENERATE_SWEEP_EPSILON = 1e-9;
+
+/**
+ * Whether raw solved arc angles carry a degenerate forward sweep: the
+ * canonicalized `endAngle − startAngle` lies within
+ * {@link SOLVED_ARC_DEGENERATE_SWEEP_EPSILON} of 0 (a collapsed arc) or of
+ * 2π (a tiny negative raw remainder that canonicalization would wrap into a
+ * near-full circle).
+ */
+export function solvedArcSweepIsDegenerate(
+  startAngle: number,
+  endAngle: number,
+): boolean {
+  const sweep = canonicalAngle(endAngle - startAngle);
+  const twoPi = Math.PI * 2;
+  return (
+    sweep < SOLVED_ARC_DEGENERATE_SWEEP_EPSILON ||
+    sweep > twoPi - SOLVED_ARC_DEGENERATE_SWEEP_EPSILON
+  );
 }
 
 /** A residual value plus its sparse analytic gradient. */
@@ -564,40 +604,34 @@ function angleRow(
     evaluate: (parameters) => {
       const g1 = lineGeom(parameters, lineSlotsOf(first, context));
       const g2 = lineGeom(parameters, lineSlotsOf(second, context));
-      const sin = Math.sin(target);
       const cos = Math.cos(target);
-      // N = sinθ·dot − cosθ·cross; r = N / (L1·L2) = sin(θ − φ) where φ is
-      // the angle between the lines — smooth, π-periodic, scale-free.
+      // r = dot/(L1·L2) − cosθ = cos φ − cos θ, where φ is the unsigned
+      // angle between the lines (either rotational sense) — smooth,
+      // scale-free, and its zero set on the unsigned domain [0, π] is
+      // exactly φ = θ: the supplementary angle (φ = π − θ) is never a
+      // false zero the way sin(θ − φ)'s is.
       const dot = g1.dx * g2.dx + g1.dy * g2.dy;
-      const cross = g1.dx * g2.dy - g1.dy * g2.dx;
-      const n = sin * dot - cos * cross;
       const lengthProduct = g1.length * g2.length;
-      const value = n / lengthProduct;
+      const value = dot / lengthProduct - cos;
       const grad = new Map<number, number>();
-      // ∂value = (∂N·L − N·∂L) / L² with ∂N = sinθ·∂dot − cosθ·∂cross.
+      // ∂value = (∂dot·L − dot·∂L) / L² with L = L1·L2.
       const dDot = new Map<number, number>();
       addInto(dDot, g1.ddx, g2.dx);
       addInto(dDot, g1.ddy, g2.dy);
       addInto(dDot, g2.ddx, g1.dx);
       addInto(dDot, g2.ddy, g1.dy);
-      const dCross = new Map<number, number>();
-      addInto(dCross, g1.ddx, g2.dy);
-      addInto(dCross, g1.ddy, -g2.dx);
-      addInto(dCross, g2.ddy, g1.dx);
-      addInto(dCross, g2.ddx, -g1.dy);
-      const dN = chain(sin, dDot, -cos, dCross);
       const dLengthProduct = chain(
         g2.length,
         g1.dLength,
         g1.length,
         g2.dLength,
       );
-      for (const slot of new Set([...dN.keys(), ...dLengthProduct.keys()])) {
-        const dn = dN.get(slot) ?? 0;
+      for (const slot of new Set([...dDot.keys(), ...dLengthProduct.keys()])) {
+        const dd = dDot.get(slot) ?? 0;
         const dl = dLengthProduct.get(slot) ?? 0;
         grad.set(
           slot,
-          (dn * lengthProduct - n * dl) / (lengthProduct * lengthProduct),
+          (dd * lengthProduct - dot * dl) / (lengthProduct * lengthProduct),
         );
       }
       return { value, grad };

@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
+import type { SettleAnchor } from "../e2e-render/helpers";
 
-import { waitForSettledScene } from "../e2e-render/helpers";
+import { dispatchedCount, waitForSettledScene } from "../e2e-render/helpers";
 import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
 import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
 
@@ -90,8 +91,11 @@ async function activateSketchTool(page: Page, toolId: string): Promise<void> {
 }
 
 /** Waits until the workbench root's settle stamp agrees with the volume. */
-async function waitForRootSettle(page: Page): Promise<string> {
-  return waitForSettledScene(page, ROOT);
+async function waitForRootSettle(
+  page: Page,
+  anchor?: SettleAnchor,
+): Promise<string> {
+  return waitForSettledScene(page, ROOT, anchor);
 }
 
 test("persistence: register, create project and document, model, save, reload, reopen, walk history", async ({
@@ -167,7 +171,11 @@ test("persistence: register, create project and document, model, save, reload, r
   await expect(page.locator(STATE_TEXT)).toHaveText("saved v1");
 
   // MODEL — sketch a rectangle and extrude it (the sketch → solid bridge),
-  // then verify the scene settled at the analytic volume.
+  // then verify the scene settled at the analytic volume. The settle is
+  // ANCHORED on the dispatch counter captured before the Extrude click:
+  // the bridge's document commit and the scene's dispatch effect land in
+  // separate commits, so an unanchored wait could accept the pre-extrude
+  // settled state.
   await page.locator(MODE_TOGGLE).click();
   await expect(page.locator(SKETCH)).toBeVisible();
   await activateSketchTool(page, "rectangle");
@@ -176,6 +184,7 @@ test("persistence: register, create project and document, model, save, reload, r
   const second = canvasPoint(RECT.x1, RECT.y1);
   await surface.click({ position: first });
   await surface.click({ position: second });
+  const beforeExtrude = await dispatchedCount(page, ROOT);
   await page.locator(EXTRUDE_BUTTON).click();
   await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
     "data-sketch-mode",
@@ -185,7 +194,9 @@ test("persistence: register, create project and document, model, save, reload, r
     "data-scene-kind",
     "extrude",
   );
-  const extrudedVolume = await waitForRootSettle(page);
+  const extrudedVolume = await waitForRootSettle(page, {
+    afterDispatch: beforeExtrude,
+  });
   const analytic =
     (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * EXTRUDE_DEFAULT_DEPTH_MM;
   expect(

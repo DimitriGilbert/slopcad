@@ -125,6 +125,7 @@ export {
   multiplyValues,
   parseDimensionalValue,
   serializeDimensionalValue,
+  serializeDimensionalValueResult,
   subtract,
   subtractValues,
   toCanonical,

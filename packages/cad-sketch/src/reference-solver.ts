@@ -64,6 +64,7 @@ import {
   ParameterLayout,
   compileConstraintSystem,
   packInitialParameters,
+  solvedArcSweepIsDegenerate,
   unpackSolvedParameters,
 } from "./residuals";
 import { SKETCH_DIAGNOSTIC_CODES } from "./diagnostics";
@@ -229,10 +230,23 @@ function solvedParametersAreFinite(
       const value = parameters[slot + offset];
       if (value === undefined || !Number.isFinite(value)) return false;
     }
-    // Radii must stay physical (positive) for circles and arcs.
+    // Radii must stay physical (positive) for circles and arcs, and an
+    // arc's forward sweep must stay away from 0 and 2π — a collapsed or
+    // near-full-circle sweep is degenerate (mirrors the entity invariant).
     if (entity.kind === "circle" || entity.kind === "arc") {
       const radius = parameters[slot + 2];
       if (radius === undefined || !(radius > 0)) return false;
+    }
+    if (entity.kind === "arc") {
+      const startAngle = parameters[slot + 3];
+      const endAngle = parameters[slot + 4];
+      if (
+        startAngle === undefined ||
+        endAngle === undefined ||
+        solvedArcSweepIsDegenerate(startAngle, endAngle)
+      ) {
+        return false;
+      }
     }
     slot += width;
   }
@@ -299,7 +313,7 @@ export function createReferenceSketchSolver(): SketchSolver {
           status: "failed",
           diagnostics: [
             notConvergedDiagnostic(
-              "The iteration diverged to non-finite or non-physical parameters (a radius at or below zero).",
+              "The iteration diverged to non-finite or non-physical parameters (a radius at or below zero, or an arc whose sweep collapses to zero or a near-full circle).",
             ),
           ],
         };

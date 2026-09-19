@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { angle, length } from "@slopcad/cad-core";
+import { angle, length, type LengthValue } from "@slopcad/cad-core";
 
 import {
   KERNEL_ERROR_CODES,
@@ -477,6 +477,111 @@ describe("fake kernel tessellation counts and validity", () => {
     );
     const soup = unwrapKernelResult(kernel.tessellate(cut), "tessellate");
     expect(tessellationTriangleCount(soup)).toBe(FAKE_BOX_TRIANGLE_COUNT);
+  });
+
+  it("tessellates a corner-overlap intersection above zero triangles (zero triangles exactly for empty solids)", () => {
+    // Two 10×10×10 boxes offset by (9,9,9) intersect in a unit cube: volume
+    // 1, yet every operand-mesh triangle has a corner outside the node box,
+    // so the every-corner keep-filter alone would emit an EMPTY soup for a
+    // positive-volume solid — the any-corner fallback is the contract's
+    // "zero triangles exactly for empty solids" biconditional.
+    const kernel = createFakeKernel();
+    const a = unwrapKernelResult(
+      kernel.createBox({
+        width: length(10),
+        depth: length(10),
+        height: length(10),
+      }),
+      "box a",
+    );
+    const b = unwrapKernelResult(
+      kernel.transform(
+        unwrapKernelResult(
+          kernel.createBox({
+            width: length(10),
+            depth: length(10),
+            height: length(10),
+          }),
+          "box b",
+        ),
+        { x: length(9), y: length(9), z: length(9) },
+      ),
+      "place b",
+    );
+    const corner = unwrapKernelResult(kernel.intersect([a, b]), "intersect");
+    expect(unwrapKernelResult(kernel.volume(corner), "corner volume")).toBe(1);
+    const soup = unwrapKernelResult(kernel.tessellate(corner), "tessellate");
+    expect(tessellationTriangleCount(soup)).toBeGreaterThan(0);
+    assertTessellationValid(soup);
+  });
+});
+
+describe("fake kernel no-throw length normalization (non-finite magnitudes)", () => {
+  // `length(Infinity)` is refused at construction, but a structurally valid
+  // LengthValue carrying a non-finite magnitude reaches the kernel through
+  // dynamic boundaries (JSON round-trips) — the contract's never-a-throw
+  // boundary must answer with structured kernel/invalid-length, exactly the
+  // normalization mirror already applies to the same seam.
+  const infLen: LengthValue = {
+    dimension: "length",
+    unit: "mm",
+    value: Number.POSITIVE_INFINITY,
+  };
+
+  it("transform normalizes a non-finite offset (never a raw throw)", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: length(10),
+        depth: length(10),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const failure = expectKernelFailure(
+      kernel.transform(solid, { x: infLen, y: length(0), z: length(0) }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "transform",
+    );
+    expect(failure.message).toContain("finite");
+  });
+
+  it("createBox and createSphere normalize non-finite lengths (never a raw throw)", () => {
+    const kernel = createFakeKernel();
+    const box = expectKernelFailure(
+      kernel.createBox({
+        width: infLen,
+        depth: length(10),
+        height: length(10),
+      }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "createBox",
+    );
+    expect(box.message).toContain("finite");
+    const sphere = expectKernelFailure(
+      kernel.createSphere({ radius: infLen }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "createSphere",
+    );
+    expect(sphere.message).toContain("finite");
+  });
+
+  it("mirror keeps its existing structured normalization (the control)", () => {
+    const kernel = createFakeKernel();
+    const solid = unwrapKernelResult(
+      kernel.createBox({
+        width: length(10),
+        depth: length(10),
+        height: length(10),
+      }),
+      "createBox",
+    );
+    const failure = expectKernelFailure(
+      kernel.mirror(solid, { axis: "x", offset: infLen }),
+      KERNEL_ERROR_CODES.invalidLength,
+      "mirror",
+    );
+    expect(failure.message).toContain("finite");
   });
 });
 

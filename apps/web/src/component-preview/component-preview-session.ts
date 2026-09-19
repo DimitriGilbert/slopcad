@@ -68,6 +68,15 @@ export interface ComponentPreviewState {
   readonly componentId: string;
   readonly values: ComponentParameterValues;
   readonly bodies: readonly ComponentPreviewBody[];
+  /**
+   * The seated assembly's union bounds (each body's RAW kernel-measured
+   * bounds plus its seating offset) — the same extent the camera frames.
+   * The bounds readout reports THIS, not a re-union of the raw per-body
+   * bounds, so the "bounds = X × Y × Z mm" line agrees with the seated
+   * geometry actually rendered (the review fix for the readout
+   * disagreeing with the projection).
+   */
+  readonly assemblyBounds: RenderBounds;
   /** The sum of the bodies' kernel-measured volumes. */
   readonly totalVolumeMm3: number;
   /** The analytic-truth total (the fixtures' closed forms at `values`). */
@@ -103,8 +112,13 @@ function seatedOffsetMm(
   return [0, 0, 0];
 }
 
-/** The union bounds of every seated body's measured bounds. */
-function assemblyBounds(
+/**
+ * The union bounds of every SEATED body: each body's raw kernel-measured
+ * bounds offset by its seating placement — the assembly extent the
+ * camera frames and the bounds readout reports. Pure function of the
+ * measurements and offsets, so identical builds always agree.
+ */
+export function assemblyBounds(
   bodies: readonly ComponentPreviewBody[],
   offsets: readonly (readonly [number, number, number])[],
 ): RenderBounds {
@@ -157,6 +171,22 @@ export function previewCamera(bounds: RenderBounds): RenderCamera {
     up: [0, 0, 1],
     fovDeg: 40,
   };
+}
+
+/** The "X × Y × Z" extents text of an assembly's bounds, in millimetres. */
+function boundsExtentTextMm(bounds: RenderBounds): string {
+  return `${(bounds.max[0] - bounds.min[0]).toFixed(3)} × ${(bounds.max[1] - bounds.min[1]).toFixed(3)} × ${(bounds.max[2] - bounds.min[2]).toFixed(3)}`;
+}
+
+/**
+ * The preview state's bounds readout: the SEATED assembly's extents — the
+ * same union the camera frames — never a re-union of the raw per-body
+ * kernel bounds (which would ignore the seating offsets and disagree
+ * with the rendered geometry, e.g. the enclosure lid's below-origin
+ * bosses inflating the reported z extent).
+ */
+export function previewBoundsReadoutMm(state: ComponentPreviewState): string {
+  return boundsExtentTextMm(state.assemblyBounds);
 }
 
 /** Shifts a tessellation's positions by a world offset (rigid placement). */
@@ -249,6 +279,7 @@ export async function computeComponentPreview(
   if (!projection.ok) throw projectionFailure(projection.error.message);
 
   return {
+    assemblyBounds: bounds,
     bodies,
     componentId: component.definition.id,
     expectedVolumeMm3: analyticTotalVolumeMm3(component.definition.id, values),
@@ -360,28 +391,9 @@ export function bootComponentPreviewSession(
         surface.expectedVolumeId,
         visible.state.expectedVolumeMm3.toFixed(3),
       );
-      const bounds = visible.state.bodies.reduce(
-        (acc, body) => ({
-          max: [
-            Math.max(acc.max[0], body.bounds.max[0]),
-            Math.max(acc.max[1], body.bounds.max[1]),
-            Math.max(acc.max[2], body.bounds.max[2]),
-          ],
-          min: [
-            Math.min(acc.min[0], body.bounds.min[0]),
-            Math.min(acc.min[1], body.bounds.min[1]),
-            Math.min(acc.min[2], body.bounds.min[2]),
-          ],
-        }),
-        visible.state.bodies[0]?.bounds ?? {
-          max: [0, 0, 0],
-          min: [0, 0, 0],
-        },
-      );
-      setText(
-        surface.boundsId,
-        `${(bounds.max[0] - bounds.min[0]).toFixed(3)} × ${(bounds.max[1] - bounds.min[1]).toFixed(3)} × ${(bounds.max[2] - bounds.min[2]).toFixed(3)}`,
-      );
+      // The readout reports the SEATED assembly's extents (the same union
+      // the camera frames), not a re-union of the raw per-body bounds.
+      setText(surface.boundsId, previewBoundsReadoutMm(visible.state));
       setText(surface.trianglesId, String(visible.state.triangles));
     }
     setText(surface.errorId, errorText);

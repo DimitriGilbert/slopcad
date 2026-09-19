@@ -141,12 +141,15 @@ import {
   CHAIN_FILLET_DEFAULT_RADIUS_MM,
   documentChainSceneRequest,
   filletBaseFeatureOf,
+  nextExtrudeInvalidatesChain,
+  nextHoleInvalidatesChain,
 } from "./chain";
 import {
   EXTRUDE_DEFAULT_DEPTH_MM,
   SketchMode,
   type SketchExtrudeSubmission,
 } from "./SketchMode";
+import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
 import { FeatureTimelineStrip } from "./feature-timeline-strip";
 
 /** The chain page's root id — the settle surface's host. */
@@ -360,6 +363,19 @@ function CadChainWorkbenchBody({
   const previousRef = useRef<DerivationPrevious | null>(null);
 
   const workbenchDocument = documentApi.document;
+  // The chain page's action guards (the composition rule made visible): the
+  // scene request composes ONE extrude as the base and targets the newest
+  // solid stage, so an extrude committed over holes (the base changes under
+  // them) or over a fillet (the fillet's target stops being the last
+  // extrude), and a hole committed over a fillet (the fillet's target stops
+  // being the last hole), would leave `documentChainSceneRequest` null —
+  // the dispatch effect would silently freeze on the last settled scene.
+  // The buttons state that instead of committing the freeze; everything
+  // else stays enabled (multiple holes without fillets compose legally),
+  // and the dispatch effect's own null check remains as the
+  // belt-and-braces invariant.
+  const extrudeGuarded = nextExtrudeInvalidatesChain(workbenchDocument);
+  const holeGuarded = nextHoleInvalidatesChain(workbenchDocument);
   const suppressedKey = useMemo(
     () =>
       [...suppressed]
@@ -368,8 +384,7 @@ function CadChainWorkbenchBody({
         .join(","),
     [suppressed],
   );
-  const rollbackKey =
-    rollback === null ? "" : `after:${String(rollback.afterFeatureId)}`;
+  const rollbackKey = rollbackMarkerKey(rollback);
 
   useEffect(() => {
     const previous = previousRef.current;
@@ -383,6 +398,16 @@ function CadChainWorkbenchBody({
       return;
     }
     const features = workbenchDocument.features;
+    // The stale-marker clamp (the workbench engine's identical rule): a
+    // marker whose anchor the document no longer declares (an undo removed
+    // the anchored feature) clears itself and this pass runs the FULL
+    // timeline instead of hard-failing every future pass on the dead
+    // anchor. Start-of-timeline markers ({afterFeatureId: null}) never go
+    // stale; valid markers keep today's parking semantics exactly.
+    const rollbackPoint = clampedRollbackMarker(features, rollback);
+    if (rollbackPoint === null && rollback !== null) {
+      setRollback(null);
+    }
     const changedNodes =
       previous === null || previous.document === workbenchDocument
         ? []
@@ -406,7 +431,7 @@ function CadChainWorkbenchBody({
         const recorded = outcomes.get(feature.id);
         return recorded ?? structuralOutcome(workbenchDocument, feature);
       },
-      rollbackPoint: rollback,
+      rollbackPoint,
       results: previous?.results,
     });
     if (!run.ok) {
@@ -422,7 +447,10 @@ function CadChainWorkbenchBody({
     previousRef.current = {
       document: workbenchDocument,
       suppressedKey,
-      rollbackKey,
+      // The CLAMPED key: the pass above ran with this marker, so the diff
+      // baseline must say so — the state update that clears the stale
+      // marker then lands as a no-op instead of a second pass.
+      rollbackKey: rollbackMarkerKey(rollbackPoint),
       outcomes,
       states: run.value.states,
       results: run.value.results,
@@ -913,9 +941,11 @@ function CadChainWorkbenchBody({
           title={
             holeBase === undefined
               ? "Sketch and extrude a profile first — a hole cuts an existing solid."
-              : "Cut a hole into the latest extrusion (defaults on the top face's center; edit holeDiameter/holeDepth/holeX/holeY in the parameter panel)."
+              : holeGuarded
+                ? "The chain rounds the newest solid stage — undo the fillet before cutting another hole."
+                : "Cut a hole into the latest extrusion (defaults on the top face's center; edit holeDiameter/holeDepth/holeX/holeY in the parameter panel)."
           }
-          disabled={holeBase === undefined}
+          disabled={holeBase === undefined || holeGuarded}
           onClick={handleHole}
           size="xs"
           type="button"
@@ -954,6 +984,8 @@ function CadChainWorkbenchBody({
       </div>
       {mode === "sketch" ? (
         <SketchMode
+          extrudeDisabled={extrudeGuarded}
+          extrudeDisabledTitle="The chain composes one extrusion as the solid stages' base — undo the holes and fillets built on it before extruding a new profile."
           onExit={() => {
             onModeChange("model");
           }}

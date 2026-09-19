@@ -214,4 +214,53 @@ describe("createContextKernel over the worker protocol", () => {
       client.close();
     }
   });
+
+  it("rejects a sibling context kernel's handle through the local did-not-mint guard", async () => {
+    // Per-instance solid tags: kernel A mints in its own session (and
+    // transforms its own handle fine — the control); a sibling kernel B
+    // over a different channel must reject A's handle LOCALLY, before
+    // any request reaches B's worker. Before per-instance tags the
+    // shared module-global tag routed the request to B's remote, which
+    // answered a resolved structured failure instead of the guard's
+    // local rejection.
+    const sessionA = await bootSession<KernelSolid | null>();
+    const sessionB = await bootSession<ComponentKernelResult<KernelSolid>>();
+    try {
+      const minted = await sessionA.coordinator.update(async (context) => {
+        const kernelA = createContextKernel(context);
+        const box = await kernelA.createBox({
+          depth: length(10),
+          height: length(10),
+          width: length(10),
+        });
+        if (!box.ok) return null;
+        const moved = await kernelA.transform(box.value, {
+          x: length(1),
+          y: length(0),
+          z: length(0),
+        });
+        if (!moved.ok) return null;
+        await kernelA.dispose(moved.value);
+        return box.value;
+      });
+      expect(minted.outcome).toBe("applied");
+      if (minted.outcome !== "applied") return;
+      const handle = minted.result;
+      expect(handle).not.toBeNull();
+      if (handle === null) return;
+
+      await expect(
+        sessionB.coordinator.update((context) =>
+          createContextKernel(context).transform(handle, {
+            x: length(1),
+            y: length(0),
+            z: length(0),
+          }),
+        ),
+      ).rejects.toThrow("did not mint");
+    } finally {
+      sessionA.client.close();
+      sessionB.client.close();
+    }
+  });
 });

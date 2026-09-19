@@ -10,6 +10,7 @@ import {
   applySessionTransaction,
   createFeatureId,
   createParameterId,
+  createSession,
   length,
   SELECT_TOOL_ID,
   serializeTransaction,
@@ -139,6 +140,71 @@ describe("CadStore notifications", () => {
     expect(store.redo().ok).toBe(true);
     expect(store.getHistoryView().cursor).toBe(2);
     expect(onHistory).toHaveBeenCalledTimes(4);
+  });
+
+  it("notifies history subscribers for an empty commit that preserves document identity", () => {
+    const store = createTestStore();
+    const onHistory = vi.fn();
+    const onDocument = vi.fn();
+    store.subscribeHistory(onHistory);
+    store.subscribeDocument(onDocument);
+
+    // One real commit, then undo: the undo branch is the only truth left.
+    expect(store.applyTransaction(setWidth(12)).ok).toBe(true);
+    expect(store.undo().ok).toBe(true);
+    expect(store.getHistoryView()).toEqual({
+      canUndo: false,
+      canRedo: true,
+      cursor: 0,
+      depth: 1,
+    });
+    onHistory.mockClear();
+    onDocument.mockClear();
+
+    // An empty transaction commits to the IDENTICAL document value (the fold
+    // of zero commands) while the session still records it as a history
+    // entry — a history-only session change the sync pass must mirror.
+    const documentBefore = store.getDocument();
+    expect(store.applyTransaction({ commands: [] }).ok).toBe(true);
+
+    expect(store.getDocument()).toBe(documentBefore);
+    expect(onDocument).not.toHaveBeenCalled();
+    expect(onHistory).toHaveBeenCalledTimes(1);
+    // The commit truncates the redo branch and records the empty entry, so
+    // the truth is cursor 1 / depth 1 — NOT the pre-change inverted view
+    // ({ canUndo: false, canRedo: true, cursor: 0 }).
+    expect(store.getHistoryView()).toEqual({
+      canUndo: true,
+      canRedo: false,
+      cursor: 1,
+      depth: 1,
+    });
+    // The mirrored view agrees with the domain truth, not the pre-change one.
+    expect(store.getSession().history.cursor).toBe(1);
+    expect(store.getSession().history.entries).toHaveLength(1);
+  });
+
+  it("notifies history subscribers when replaceSession re-seats history over the same document", () => {
+    const store = createTestStore();
+    expect(store.applyTransaction(setWidth(12)).ok).toBe(true);
+    const onHistory = vi.fn();
+    const onDocument = vi.fn();
+    store.subscribeHistory(onHistory);
+    store.subscribeDocument(onDocument);
+
+    // External-undo style reset: the SAME document object, a fresh empty
+    // history — the session changes, the document identity does not.
+    store.replaceSession(createSession(store.getDocument()));
+
+    expect(onDocument).not.toHaveBeenCalled();
+    expect(onHistory).toHaveBeenCalledTimes(1);
+    expect(store.getHistoryView()).toEqual({
+      canUndo: false,
+      canRedo: false,
+      cursor: 0,
+      depth: 0,
+    });
+    expect(store.getSession().history.entries).toHaveLength(0);
   });
 
   it("notifies tools subscribers when the manager surface changes, including tool-issued selection ops", () => {

@@ -38,7 +38,10 @@
  *   straight-polygon profile is EXACT; a curved segment's chord
  *   fan undercuts the analytic area by the measured ≈0.166% (see
  *   PROFILE_MAX_SEGMENT_ANGLE_RAD's n=63 derivation), the documented
- *   deviation from OCCT's exact prism), fed to `Manifold.extrude` (z ∈
+ *   deviation from OCCT's exact prism), wound CCW (the same winding-
+ *   independence every profile op applies — Manifold's Positive fill rule
+ *   treats a CW outer contour as unfilled, so an authored-CW loop is
+ *   normalized before the engine sees it), fed to `Manifold.extrude` (z ∈
  *   [0,h], or translated to [−h,0] for the negative direction), and placed
  *   by one `Mat4.transform` composing the axis-angle rotation (Rodrigues,
  *   column-major 4×4) with the translation. Self-intersection is NOT
@@ -147,6 +150,7 @@ import {
   profileLoopProblem,
   revolveCrossesAxis,
   revolvePappusVolume,
+  REVOLVE_AXIS_TOUCH_TOLERANCE_MM,
   revolveSignedExtremes,
   revolutionMeshTransform,
   tessellateProfileLoop,
@@ -599,7 +603,14 @@ export function manifoldKernelFromRuntime(
             ),
           );
         }
-        const contour = polygon.map(
+        // Winding: normalize CCW (the same convention every profile op
+        // applies) — Manifold.extrude wraps raw polygons in its Positive
+        // fill rule, which treats a CW outer contour as unfilled and would
+        // silently yield an EMPTY solid for a legally clockwise-authored
+        // loop (probed: CW square → isEmpty, volume 0).
+        const ordered =
+          polygonSignedArea(polygon) > 0 ? polygon : [...polygon].reverse();
+        const contour = ordered.map(
           (point: ProfilePoint2) => [point.x, point.y] as [number, number],
         );
         // Manifold.extrude spans z ∈ [0, height]; the negative direction
@@ -761,8 +772,14 @@ export function manifoldKernelFromRuntime(
             ),
           );
         }
+        // The shared touch tolerance (not an exact >= 0): a legal touching
+        // profile whose on-axis vertex rounds to −ε (oblique axes, decimal
+        // arithmetic) passes the crossing validator yet would take the
+        // π-rotated −v-side placement here — 180° from the contract's
+        // sweep-start semantics.
         const positiveSide =
-          Math.min(...axisPolygon.map((point) => point.y)) >= 0;
+          Math.min(...axisPolygon.map((point) => point.y)) >=
+          -REVOLVE_AXIS_TOUCH_TOLERANCE_MM;
         // Winding: CCW in the (radial, axial) plane keeps the engine's
         // orientation convention (the mirroring above can flip it).
         const mirrored = axisPolygon.map((point) => ({

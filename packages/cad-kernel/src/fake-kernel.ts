@@ -110,6 +110,7 @@ import {
   profileLoopProblem,
   revolveCrossesAxis,
   revolvePappusVolume,
+  REVOLVE_AXIS_TOUCH_TOLERANCE_MM,
   revolveSignedExtremes,
   sweepAnalyticVolume,
   type SweepPiece,
@@ -808,9 +809,9 @@ function sweepBounds(shape: SweepNode): KernelBounds {
   for (let axis = 0 as 0 | 1 | 2; axis < 3; axis += 1) {
     for (const sign of [1, -1] as const) {
       const direction: Vec3 = [
-        sign * (shape.rotation[0]?.[axis] ?? 0),
-        sign * (shape.rotation[1]?.[axis] ?? 0),
-        sign * (shape.rotation[2]?.[axis] ?? 0),
+        sign * (shape.rotation[axis]?.[0] ?? 0),
+        sign * (shape.rotation[axis]?.[1] ?? 0),
+        sign * (shape.rotation[axis]?.[2] ?? 0),
       ];
       let support = -Infinity;
       for (const piece of shape.pieces) {
@@ -2870,7 +2871,7 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
   const bounds = shapeBounds(shape);
   const leaves: Leaf[] = [];
   collectLeaves(shape, [], leaves);
-  const kept: Triangle[] = [];
+  const candidates: Triangle[] = [];
   for (const leaf of leaves) {
     for (const triangle of primitiveTriangles(leaf.primitive)) {
       // Apply the leaf's affine chain innermost-first: the steps array is
@@ -2884,12 +2885,21 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
             ? shiftedTriangle(candidate, step.offset)
             : reflectedTriangle(candidate, step.axis, step.planeOffset);
       }
-      if (candidate.every((corner) => pointWithinBox(corner, bounds))) {
-        kept.push(candidate);
-      }
+      candidates.push(candidate);
     }
   }
-  return kept;
+  // The every-corner filter keeps the deterministic subset soup; when it
+  // keeps NOTHING for a positive-volume boolean (a small corner-overlap
+  // intersection whose every operand triangle has a corner outside the
+  // node box), fall back to any-corner so the contract's "zero triangles
+  // exactly for empty solids" biconditional holds.
+  const kept = candidates.filter((triangle) =>
+    triangle.every((corner) => pointWithinBox(corner, bounds)),
+  );
+  if (kept.length > 0) return kept;
+  return candidates.filter((triangle) =>
+    triangle.some((corner) => pointWithinBox(corner, bounds)),
+  );
 }
 
 /**
@@ -2992,16 +3002,28 @@ export function createFakeKernel(): GeometryKernel {
     name: string,
     operation: string,
   ): KernelResult<number> => {
-    const mm = valueIn(value, "mm");
-    if (!(mm > 0)) {
+    // The throwing seam is only valueIn's non-finite-magnitude parse; the
+    // same normalization mirror applies (mirror's documented discipline).
+    try {
+      const mm = valueIn(value, "mm");
+      if (!(mm > 0)) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `${operation} rejected ${name} ${mm} mm: it must be strictly positive.`,
+          ),
+        );
+      }
+      return ok(mm);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
       return fail(
         kernelError(
           KERNEL_ERROR_CODES.invalidLength,
-          `${operation} rejected ${name} ${mm} mm: it must be strictly positive.`,
+          `${operation} rejected ${name}: ${detail}`,
         ),
       );
     }
-    return ok(mm);
   };
 
   const nonNegativeLength = (
@@ -3009,16 +3031,27 @@ export function createFakeKernel(): GeometryKernel {
     name: string,
     operation: string,
   ): KernelResult<number> => {
-    const mm = valueIn(value, "mm");
-    if (!(mm >= 0)) {
+    // The same no-throw normalization as positiveLength.
+    try {
+      const mm = valueIn(value, "mm");
+      if (!(mm >= 0)) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `${operation} rejected ${name} ${mm} mm: it must not be negative.`,
+          ),
+        );
+      }
+      return ok(mm);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
       return fail(
         kernelError(
           KERNEL_ERROR_CODES.invalidLength,
-          `${operation} rejected ${name} ${mm} mm: it must not be negative.`,
+          `${operation} rejected ${name}: ${detail}`,
         ),
       );
     }
-    return ok(mm);
   };
 
   /**
@@ -3753,7 +3786,12 @@ export function createFakeKernel(): GeometryKernel {
             ),
           );
         }
-        const positiveSide = Math.min(...ccw.map((vertex) => vertex.y)) >= 0;
+        // The shared touch tolerance (not an exact >= 0): a legal touching
+        // profile whose on-axis vertex rounds to −ε must keep the +v-side
+        // placement — the same tolerance revolveCrossesAxis admits it by.
+        const positiveSide =
+          Math.min(...ccw.map((vertex) => vertex.y)) >=
+          -REVOLVE_AXIS_TOUCH_TOLERANCE_MM;
         return ok(
           tag.wrap({
             kind: "revolution",
@@ -4033,12 +4071,25 @@ export function createFakeKernel(): GeometryKernel {
           ),
         );
       }
-      const offset: Vec3 = [
-        valueIn(input.x, "mm"),
-        valueIn(input.y, "mm"),
-        valueIn(input.z, "mm"),
-      ];
-      return ok(tag.wrap({ kind: "translate", source: shape.value, offset }));
+      // The same discipline as mirror: the throwing seam is only the
+      // offset's valueIn parse (non-finite magnitudes), normalized into
+      // the invalid-length failure every degenerate transform input shares.
+      try {
+        const offset: Vec3 = [
+          valueIn(input.x, "mm"),
+          valueIn(input.y, "mm"),
+          valueIn(input.z, "mm"),
+        ];
+        return ok(tag.wrap({ kind: "translate", source: shape.value, offset }));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `transform rejected its input: ${detail}`,
+          ),
+        );
+      }
     },
 
     mirror(solid: KernelSolid, input: MirrorInput): KernelResult<KernelSolid> {

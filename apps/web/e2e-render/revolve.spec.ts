@@ -1,7 +1,12 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
-import { saveArtifact, sha256, waitForSettledScene } from "./helpers";
+import {
+  dispatchedCount,
+  saveArtifact,
+  sha256,
+  waitForSettledScene,
+} from "./helpers";
 import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
 import {
   REVOLVE_AXIS_X_RAD,
@@ -220,11 +225,19 @@ test("a partial sweep parameter edit halves the volume", async ({ page }) => {
 
   // FULL / PARTIAL: the sweep parameter edits in its canonical unit (rad)
   // through the same `parameter.set` surface every dimension edit rides.
+  // The settle is ANCHORED on the dispatch counter captured before the
+  // Apply click (the edit and its dispatch effect land in separate
+  // commits), so the wait can never accept the pre-edit settled state.
+  const beforeSweep = await dispatchedCount(page, "workbench-root");
   await page
     .getByLabel("revolveSweep", { exact: true })
     .fill(HALF_SWEEP_RAD_TEXT);
   await page.getByRole("button", { name: "Apply" }).click();
-  const regenerated = Number(await waitForSettledScene(page, "workbench-root"));
+  const regenerated = Number(
+    await waitForSettledScene(page, "workbench-root", {
+      afterDispatch: beforeSweep,
+    }),
+  );
   const analytic = CYLINDER_VOLUME / 2;
   expect(
     Math.abs(regenerated - analytic) / analytic,

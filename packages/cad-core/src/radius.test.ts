@@ -36,6 +36,7 @@ import {
   storedRadius,
   valueIn,
 } from "./index";
+import { jacobiEigenDecomposition } from "./radius";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -357,6 +358,58 @@ describe("fitCylindricalRadius — the fit path", () => {
     expect(Math.abs(fitted.value.fit?.axis[0] ?? 0)).toBeCloseTo(1, 9);
   });
 
+  it("reports the fitted centre as the frame-lifted world point of an off-origin cylinder", () => {
+    // A cylinder along +x whose centre line runs through (·, 20, 5):
+    // radius 4, x ∈ [0, 6], the mesh convention's on-surface vertices. The
+    // fitted centre must be the INVERSE projection of the fitted circle's
+    // (centerU, centerV) through the fit's orthonormal frame — for axis
+    // [1, 0, 0] the frame is e1 = [0, 0, 1], e2 = [0, −1, 0], so the
+    // projection of the centre line is (u, v) = (5, −20) — carried back at
+    // the vertices' mean axial coordinate 3 to the true centre [3, 20, 5].
+    // A component-wise reconstruction onto the world axes instead reports
+    // ≈[8, −20, 0], 40.6 mm off the true centre.
+    const segments = 63;
+    const positions: number[] = [];
+    const indices: number[] = [];
+    for (const x of [0, 6]) {
+      for (let i = 0; i < segments; i += 1) {
+        const angle = (2 * Math.PI * i) / segments;
+        positions.push(x, 20 + 4 * Math.cos(angle), 5 + 4 * Math.sin(angle));
+      }
+    }
+    for (let i = 0; i < segments; i += 1) {
+      const next = (i + 1) % segments;
+      const nearRing = i;
+      const nearNext = next;
+      const farRing = segments + i;
+      const farNext = segments + next;
+      indices.push(nearRing, nearNext, farNext, nearRing, farNext, farRing);
+    }
+    const fitted = fitCylindricalRadius(positions, indices);
+    expect(fitted.ok).toBe(true);
+    if (!fitted.ok) return;
+    expect(valueIn(fitted.value.radius, "mm")).toBeCloseTo(4, 9);
+    expect(fitted.value.fit?.axis[0]).toBeCloseTo(1, 9);
+    expect(fitted.value.fit?.axis[1]).toBeCloseTo(0, 9);
+    expect(fitted.value.fit?.axis[2]).toBeCloseTo(0, 9);
+    expect(fitted.value.fit?.centerMm[0]).toBeCloseTo(3, 9);
+    expect(fitted.value.fit?.centerMm[1]).toBeCloseTo(20, 9);
+    expect(fitted.value.fit?.centerMm[2]).toBeCloseTo(5, 9);
+  });
+
+  it("keeps reporting the origin-centred wall's centre at the vertices' mean height", () => {
+    // The origin-centred fixture — the case where the fitted (u, v) centre
+    // is (0, 0) and every reconstruction formula coincides: the centre
+    // stays [0, 0, 5] (the wall's half height along z).
+    const wall = boreWallObject();
+    const fitted = fitCylindricalRadius(wall.positions, wall.indices);
+    expect(fitted.ok).toBe(true);
+    if (!fitted.ok) return;
+    expect(fitted.value.fit?.centerMm[0]).toBeCloseTo(0, 9);
+    expect(fitted.value.fit?.centerMm[1]).toBeCloseTo(0, 9);
+    expect(fitted.value.fit?.centerMm[2]).toBeCloseTo(5, 9);
+  });
+
   it("measures only the referenced vertices — a face slice may share its object's positions buffer", () => {
     // The synthetic-face slice carries its own triangle indices over the
     // OBJECT's positions (the real kernel meshes hold every face's
@@ -408,6 +461,102 @@ describe("fitCylindricalRadius — the fit path", () => {
     if (!badPositions.ok) {
       expect(badPositions.error.code).toBe(RADIUS_ERROR_CODES.geometryInvalid);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The eigen decomposition's pair contract: values ascending, vectors aligned
+// ---------------------------------------------------------------------------
+
+describe("jacobiEigenDecomposition — the eigen pair contract", () => {
+  type FixtureMatrix = [
+    [number, number, number],
+    [number, number, number],
+    [number, number, number],
+  ];
+
+  /** Computes A·v for a fixture matrix (rows destructured, no indexing). */
+  const applyRows = (
+    matrix: FixtureMatrix,
+    vector: readonly [number, number, number],
+  ): readonly [number, number, number] => {
+    const [r0, r1, r2] = matrix;
+    if (r0 === undefined || r1 === undefined || r2 === undefined) {
+      throw new RangeError("eigen fixture lost a row");
+    }
+    const dot = (row: readonly [number, number, number]): number =>
+      row[0] * vector[0] + row[1] * vector[1] + row[2] * vector[2];
+    return [dot(r0), dot(r1), dot(r2)];
+  };
+
+  /** Asserts A·v_i = λ_i·v_i for every returned pair, component-wise. */
+  const expectPairsConsistent = (
+    matrix: FixtureMatrix,
+    eigen: ReturnType<typeof jacobiEigenDecomposition>,
+  ): void => {
+    for (const index of [0, 1, 2] as const) {
+      const lambda = eigen.values[index];
+      const vector = eigen.vectors[index];
+      if (lambda === undefined || vector === undefined) {
+        throw new RangeError("eigen pair out of range");
+      }
+      const applied = applyRows(matrix, vector);
+      expect(applied[0]).toBeCloseTo(lambda * vector[0], 9);
+      expect(applied[1]).toBeCloseTo(lambda * vector[1], 9);
+      expect(applied[2]).toBeCloseTo(lambda * vector[2], 9);
+    }
+  };
+
+  it("returns ascending eigenvalues paired with the eigenvector columns for a non-ascending diagonal", () => {
+    // diag(2, 1, 3): the converged diagonal is NOT ascending, so a
+    // fixed-position `values` would pair eigenvalue 2 with the ŷ column
+    // (eigenvalue 1). The ordering permutation applied to the vectors must
+    // reach the values too.
+    const matrix: FixtureMatrix = [
+      [2, 0, 0],
+      [0, 1, 0],
+      [0, 0, 3],
+    ];
+    const eigen = jacobiEigenDecomposition(matrix);
+    expect([...eigen.values]).toEqual([1, 2, 3]);
+    expectPairsConsistent(matrix, eigen);
+  });
+
+  it("pairs the cylinder scatter's vanishing eigenvalue with the axis (diag(k, k, 0))", () => {
+    // The fit's real input shape: a z-axis cylinder wall's normals are all
+    // perpendicular to z, so the normal scatter is diag(k, k, 0). The axis
+    // eigenvector ẑ must sit at index 0 PAIRED with eigenvalue 0 — the
+    // fixed-position pairing bug reported values[0] = k against it.
+    const matrix: FixtureMatrix = [
+      [5, 0, 0],
+      [0, 5, 0],
+      [0, 0, 0],
+    ];
+    const eigen = jacobiEigenDecomposition(matrix);
+    expect(eigen.values[0]).toBeCloseTo(0, 9);
+    expect(eigen.values[1]).toBeCloseTo(5, 9);
+    expect(eigen.values[2]).toBeCloseTo(5, 9);
+    expect(eigen.vectors[0]?.[0]).toBeCloseTo(0, 9);
+    expect(eigen.vectors[0]?.[1]).toBeCloseTo(0, 9);
+    expect(eigen.vectors[0]?.[2]).toBeCloseTo(1, 9);
+    expectPairsConsistent(matrix, eigen);
+  });
+
+  it("keeps the pairs aligned after real Givens rotations", () => {
+    // A symmetric matrix whose decomposition requires actual rotations
+    // (true eigenvalues 3, 1, 0.5; the converged diagonal comes out
+    // [3, 1, 0.5]): the fixed-position pairing bug's residuals here were
+    // [2.5, ~0, 2.5] — ẑ (eigenvalue 0.5) was paired with 3.
+    const matrix: FixtureMatrix = [
+      [2, -1, 0],
+      [-1, 2, 0],
+      [0, 0, 0.5],
+    ];
+    const eigen = jacobiEigenDecomposition(matrix);
+    expect(eigen.values[0]).toBeCloseTo(0.5, 9);
+    expect(eigen.values[1]).toBeCloseTo(1, 9);
+    expect(eigen.values[2]).toBeCloseTo(3, 9);
+    expectPairsConsistent(matrix, eigen);
   });
 });
 

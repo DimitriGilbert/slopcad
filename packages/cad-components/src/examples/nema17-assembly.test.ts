@@ -15,11 +15,12 @@ import {
   componentAnalyticVolumesMm3,
   nema17Analytic,
 } from "../component-fixtures";
-import { COMPONENT_KERNEL_CASES } from "../kernel-cases";
+import { COMPONENT_KERNEL_CASES, countKernelSolids } from "../kernel-cases";
+import { directComponentKernel } from "../component-kernel";
 import { ARDUINO_MOUNT_DEFAULT_PARAMETERS } from "../arduino-mount";
 import { ENCLOSURE_DEFAULT_PARAMETERS } from "../enclosure";
 import { NEMA17_MOUNT_DEFAULT_PARAMETERS } from "../nema17-mount";
-import { assemblyStudyDirect } from "./nema17-assembly";
+import { assemblyStudy, assemblyStudyDirect } from "./nema17-assembly";
 
 /** The study's expected per-body volumes at the default parameter sets. */
 function expectedVolumes(): ReadonlyMap<string, number> {
@@ -151,6 +152,51 @@ describe.for(COMPONENT_KERNEL_CASES)(
       if (result.ok) return;
       expect(result.error.step).toBe("nema17-mount");
       expect(result.error.code).toBe("component/parameter-conflict");
+    });
+  },
+);
+
+describe.for(COMPONENT_KERNEL_CASES)(
+  "nema17-assembly dispose accounting on %s",
+  (case_) => {
+    it("strands nothing on the default study: every mint except the four placed bodies is disposed", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await case_.create()),
+      );
+      const result = await assemblyStudy(counter.kernel, {});
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      const returned = new Set(result.value.bodies.map((body) => body.solid));
+      expect(returned.size).toBe(4);
+      // The three builds' internal mints (15 + 19 + 22) plus the four
+      // placement transforms; each build's returned original is disposed
+      // the moment its placed copy exists.
+      expect(counter.minted).toHaveLength(60);
+      expect(counter.disposed).toHaveLength(counter.minted.length - 4);
+      expect(new Set(counter.disposed).size).toBe(counter.disposed.length);
+      for (const solid of counter.disposed) {
+        expect(returned.has(solid)).toBe(false);
+      }
+      // The placed bodies stay caller-owned: release them through the
+      // same kernel.
+      for (const solid of returned) {
+        await counter.kernel.dispose(solid);
+      }
+    });
+
+    it("releases every mint when the kernel refuses mid-study", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await case_.create()),
+        { failNthMint: 40 },
+      );
+      const result = await assemblyStudy(counter.kernel, {});
+      expect(result.ok).toBe(false);
+      // The refusal lands inside the enclosure build (the 40th mint): the
+      // two completed builds' returned bodies included, every mint up to
+      // the refusal is released exactly once.
+      expect(counter.minted).toHaveLength(39);
+      expect(counter.disposed).toHaveLength(counter.minted.length);
+      expect(new Set(counter.disposed).size).toBe(counter.disposed.length);
     });
   },
 );

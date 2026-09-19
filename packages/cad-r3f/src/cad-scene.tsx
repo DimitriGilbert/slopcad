@@ -27,11 +27,17 @@
  * ## Settle protocols
  *
  * `onSettled` fires once per projection change, from `useFrame` on the
- * first frame that frame-loops after the new geometry is committed — the
- * same timing the Phase 1.6 spike used to stamp rendered-volume markers,
- * now owned by the scene package (the spike handed the app a page-level
- * convention; this is the package-level equivalent). Pixels may only be
- * compared once a settle consumer has reported.
+ * first frame that frame-loops after the projection's CONTENT is applied —
+ * its geometry synced through the model's geometry controller AND its
+ * camera mapped onto the scene camera. The probe gates on a settle ledger
+ * of what has actually been applied, not on the projection prop's
+ * identity: R3F can schedule a demand frame between a commit and the
+ * passive effects that apply it (geometry sync, camera application), and a
+ * prop-identity probe would certify pixels that frame has not drawn. This
+ * is the same timing the Phase 1.6 spike used to stamp rendered-volume
+ * markers, now owned by the scene package (the spike handed the app a
+ * page-level convention; this is the package-level equivalent). Pixels may
+ * only be compared once a settle consumer has reported.
  *
  * `onSelectionRendered` is the Phase 12 counterpart for the highlight
  * layer: it fires with the canonical selection key (the references joined
@@ -44,12 +50,13 @@
  */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   selectionReferenceKey,
   type RenderCamera,
   type RenderProjection,
+  type RenderVector3,
   type SelectionReference,
 } from "@slopcad/cad-core";
 import type { CadPick, CadPickCategory } from "./picking";
@@ -70,12 +77,55 @@ import { CadSceneLights } from "./scene-lights";
  */
 export const CAD_SCENE_BACKGROUND = "#111827";
 
+/**
+ * The content ledger the settle probe gates on: what has actually been
+ * APPLIED to the scene, as opposed to what the props say. `SceneModel`
+ * marks {@link SettleLedger.syncedProjection} once the geometry controller
+ * has committed that projection's buffers, and `SceneCameraRig` marks
+ * {@link SettleLedger.appliedCamera} once it has mapped that spec onto the
+ * scene camera. `SettleProbe` reports a projection only on the first frame
+ * where both entries cover it — prop identity alone proves nothing about
+ * the pixels a frame will draw.
+ */
+export interface SettleLedger {
+  /** The projection whose geometry the model has actually synced. */
+  syncedProjection: RenderProjection | null;
+  /** The camera spec the rig has actually applied (compared by content). */
+  appliedCamera: RenderCamera | null;
+}
+
+function vectorsEqual(a: RenderVector3, b: RenderVector3): boolean {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+/**
+ * Whether two camera specs carry the same view: kind, framing vectors, and
+ * the kind's projection parameters, compared by VALUE. Projections rebuild
+ * their camera object on every change, and a host may equally share one
+ * memoized spec across projections — the settle gate must care about the
+ * camera content on screen, never about object identity.
+ */
+export function camerasEqual(a: RenderCamera, b: RenderCamera): boolean {
+  if (a.kind !== b.kind) return false;
+  if (!vectorsEqual(a.position, b.position)) return false;
+  if (!vectorsEqual(a.target, b.target)) return false;
+  if (!vectorsEqual(a.up, b.up)) return false;
+  if (a.kind === "perspective" && b.kind === "perspective") {
+    return a.fovDeg === b.fovDeg;
+  }
+  if (a.kind === "orthographic" && b.kind === "orthographic") {
+    return a.viewWidth === b.viewWidth && a.viewHeight === b.viewHeight;
+  }
+  return false;
+}
+
 export interface CadSceneProps {
   /** The validated render projection, camera spec included. */
   readonly projection: RenderProjection;
   /**
    * Fires once per projection change, on the first demand frame after its
-   * geometry is committed (see the settle protocol above).
+   * geometry is committed AND its camera applied (see the settle protocol
+   * above).
    */
   readonly onSettled?: () => void;
   /**
@@ -113,7 +163,13 @@ export interface CadSceneProps {
  * KIND changes); spec content and viewport size re-apply through an effect,
  * so no render ever constructs render-loop churn. Runs inside the Canvas.
  */
-function SceneCameraRig({ spec }: { spec: RenderCamera }): null {
+function SceneCameraRig({
+  settle,
+  spec,
+}: {
+  settle: SettleLedger;
+  spec: RenderCamera;
+}): null {
   const size = useThree((state) => state.size);
   const set = useThree((state) => state.set);
   const invalidate = useThree((state) => state.invalidate);
@@ -132,7 +188,11 @@ function SceneCameraRig({ spec }: { spec: RenderCamera }): null {
     applySceneCamera(camera, spec, size.width / size.height);
     set({ camera });
     invalidate();
-  }, [camera, invalidate, set, size.height, size.width, spec]);
+    // Settle gate (b): record the spec this effect actually applied. Marked
+    // after the application so the probe can never see a camera as applied
+    // before it is.
+    settle.appliedCamera = spec;
+  }, [camera, invalidate, set, settle, size.height, size.width, spec]);
   return null;
 }
 
@@ -151,6 +211,7 @@ function SceneModel({
   projection,
   regeneration,
   selection,
+  settle,
 }: {
   onPick?: (pick: CadPick) => void;
   onPickDown?: (pick: CadPick) => void;
@@ -160,8 +221,17 @@ function SceneModel({
   projection: RenderProjection;
   regeneration?: number;
   selection?: readonly SelectionReference[];
+  settle: SettleLedger;
 }): ReactElement {
   const invalidate = useThree((state) => state.invalidate);
+  // Settle gate (a), the totality half: CadModel's geometry effects run
+  // before this component's own (children first in the passive flush), so by
+  // the time this effect runs, the controller has committed this
+  // projection's buffers — including the content-equal update whose diff was
+  // a no-op and whose `onSync` therefore stayed silent.
+  useEffect(() => {
+    settle.syncedProjection = projection;
+  }, [settle, projection]);
   useEffect(() => {
     invalidate();
   }, [invalidate, pickCategory, regeneration, selection]);
@@ -171,7 +241,13 @@ function SceneModel({
       onPick={onPick}
       onPickDown={onPickDown}
       onPickUp={onPickUp}
-      onSync={() => invalidate()}
+      onSync={() => {
+        // Settle gate (a), the geometry-sync path's own report: the
+        // snapshot instance changed, so this projection's content was
+        // written into the buffers.
+        settle.syncedProjection = projection;
+        invalidate();
+      }}
       pickCategory={pickCategory}
       projection={projection}
       regeneration={regeneration}
@@ -182,14 +258,19 @@ function SceneModel({
 
 /**
  * The settle probe: reports the current projection once, on the first frame
- * the demand loop runs after it became the scene's content (module doc).
+ * the demand loop runs after that projection's content is applied — its
+ * geometry synced through the model's controller AND its camera applied by
+ * the rig (the settle ledger), not merely after the projection prop
+ * arrived (module doc).
  */
-function SettleProbe({
+export function SettleProbe({
   onSettled,
   projection,
+  settle,
 }: {
   onSettled?: () => void;
   projection: RenderProjection;
+  settle: SettleLedger;
 }): null {
   const reportedRef = useRef<RenderProjection | null>(null);
   const onSettledRef = useRef(onSettled);
@@ -201,6 +282,19 @@ function SettleProbe({
   });
   useFrame(() => {
     if (reportedRef.current === projection) {
+      return;
+    }
+    // Content gate: a frame scheduled during the projection's commit can run
+    // before the passive effects apply its geometry and camera, so prop
+    // identity is not evidence the frame will draw this projection.
+    if (settle.syncedProjection !== projection) {
+      return;
+    }
+    const appliedCamera = settle.appliedCamera;
+    if (
+      appliedCamera === null ||
+      !camerasEqual(appliedCamera, projection.camera)
+    ) {
       return;
     }
     reportedRef.current = projection;
@@ -256,6 +350,12 @@ export function CadScene({
   selection,
   showGround = true,
 }: CadSceneProps): ReactElement {
+  // One settle ledger per mounted scene, shared by the appliers (the model's
+  // geometry sync, the rig's camera effect) and the probe that gates on them.
+  const [settle] = useState<SettleLedger>(() => ({
+    syncedProjection: null,
+    appliedCamera: null,
+  }));
   return (
     <Canvas
       frameloop="demand"
@@ -263,7 +363,7 @@ export function CadScene({
       gl={{ antialias: false, preserveDrawingBuffer: true }}
     >
       <color attach="background" args={[CAD_SCENE_BACKGROUND]} />
-      <SceneCameraRig spec={projection.camera} />
+      <SceneCameraRig settle={settle} spec={projection.camera} />
       <CadSceneLights />
       {showGround ? <CadSceneGround target={projection.camera.target} /> : null}
       <SceneModel
@@ -275,12 +375,17 @@ export function CadScene({
         projection={projection}
         regeneration={regeneration}
         selection={selection}
+        settle={settle}
       />
       <SelectionProbe
         onSelectionRendered={onSelectionRendered}
         selection={selection}
       />
-      <SettleProbe onSettled={onSettled} projection={projection} />
+      <SettleProbe
+        onSettled={onSettled}
+        projection={projection}
+        settle={settle}
+      />
     </Canvas>
   );
 }

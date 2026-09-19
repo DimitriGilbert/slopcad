@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
+import type { SettleAnchor } from "../e2e-render/helpers";
 
-import { waitForSettledScene } from "../e2e-render/helpers";
+import { dispatchedCount, waitForSettledScene } from "../e2e-render/helpers";
 import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
 import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
 
@@ -92,8 +93,11 @@ async function openWorkbench(page: Page): Promise<string> {
 }
 
 /** Waits until the root's settle stamp agrees with the settled volume. */
-async function waitForRootSettle(page: Page): Promise<string> {
-  return waitForSettledScene(page, ROOT);
+async function waitForRootSettle(
+  page: Page,
+  anchor?: SettleAnchor,
+): Promise<string> {
+  return waitForSettledScene(page, ROOT, anchor);
 }
 
 /**
@@ -326,14 +330,21 @@ test("select, inspect, edit, regenerate, undo, and redo", async ({ page }) => {
     await page.screenshot(),
   );
 
-  // EDIT through the parameter panel (one parameter.set transaction).
+  // EDIT through the parameter panel (one parameter.set transaction). The
+  // settle is ANCHORED on the dispatch counter captured before the Apply
+  // click: the panel's submit pipeline and the scene's dispatch effect
+  // land in separate commits, so an unanchored wait could accept the
+  // pre-edit settled state.
+  const beforeEdit = await dispatchedCount(page, ROOT);
   await page.getByLabel("holeDiameter", { exact: true }).fill("10");
   await page.getByRole("button", { name: "Apply" }).click();
   await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
     "data-hole-diameter",
     "10",
   );
-  const editedVolume = await waitForRootSettle(page);
+  const editedVolume = await waitForRootSettle(page, {
+    afterDispatch: beforeEdit,
+  });
   expect(volumeNear(Number(editedVolume), Number(bootVolume))).toBe(false);
 
   // The history grew; undo reverts the volume exactly; redo re-applies.

@@ -1118,6 +1118,10 @@ function anchorOf(reference: TopologyEntityReference): ReferenceAnchor {
  *    different entity and silent re-attach across a move is the ambiguity
  *    trap this model forbids (see {@link narrowGeometryCandidates}).
  *
+ * Both snapshot inputs must describe the reference's body — the current
+ * snapshot and the re-executed provenance each fail
+ * `reference/field-invalid` otherwise, the same body boundary
+ * {@link resolveTopologyReference} holds.
  * Refusals are structured, never guesses: several candidates →
  * `reference/repair-ambiguous` carrying the candidates; none →
  * `reference/repair-no-candidate` (the reference stays missing — explicit
@@ -1188,6 +1192,19 @@ export function repairTopologyReference(
         reexecuted.regeneration,
       );
     }
+  }
+  // The snapshot must describe the reference's body — the same boundary
+  // resolveTopologyReference and the re-executed guard above hold. Without
+  // it, a wrong-body snapshot carrying a same-shape entity would silently
+  // re-anchor the reference across bodies.
+  if (snapshot.bodyId !== reference.bodyId) {
+    return fail(
+      referenceError(
+        REFERENCE_ERROR_CODES.fieldInvalid,
+        `The snapshot describes body "${snapshot.bodyId}", but the reference addresses body "${reference.bodyId}".`,
+        snapshot,
+      ),
+    );
   }
   // Strategy 2: the documented geometric heuristic against current topology —
   // the ordered narrowing chain (primary measure first, position ALWAYS

@@ -1,7 +1,12 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
-import { saveArtifact, sha256, waitForSettledScene } from "./helpers";
+import {
+  dispatchedCount,
+  saveArtifact,
+  sha256,
+  waitForSettledScene,
+} from "./helpers";
 import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
 import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
 
@@ -202,10 +207,18 @@ test("a negative parameter edit flips the extrusion below the plane at unchanged
   );
 
   // NEGATIVE DIRECTION: sign flip through the parameter panel (the same
-  // `parameter.set` surface every dimension edit rides).
+  // `parameter.set` surface every dimension edit rides). The settle is
+  // ANCHORED on the dispatch counter captured before the Apply click: the
+  // edit's document change and its dispatch effect land in separate
+  // commits, so an unanchored wait could accept the pre-edit settled state.
+  const beforeFlip = await dispatchedCount(page, "workbench-root");
   await page.getByLabel("extrudeDepth", { exact: true }).fill("-10");
   await page.getByRole("button", { name: "Apply" }).click();
-  const flipped = Number(await waitForSettledScene(page, "workbench-root"));
+  const flipped = Number(
+    await waitForSettledScene(page, "workbench-root", {
+      afterDispatch: beforeFlip,
+    }),
+  );
   expect(Math.abs(flipped - analytic) / analytic).toBeLessThan(
     VOLUME_REL_TOLERANCE,
   );
@@ -251,9 +264,16 @@ test("a positive parameter edit regenerates the solid at the new distance", asyn
 }) => {
   await runRectangleExtrudeJourney(page);
 
+  // Same anchored discipline as the negative edit: the settle must belong
+  // to the dispatch this edit triggers, never the pre-edit state.
+  const beforeEdit = await dispatchedCount(page, "workbench-root");
   await page.getByLabel("extrudeDepth", { exact: true }).fill("15");
   await page.getByRole("button", { name: "Apply" }).click();
-  const regenerated = Number(await waitForSettledScene(page, "workbench-root"));
+  const regenerated = Number(
+    await waitForSettledScene(page, "workbench-root", {
+      afterDispatch: beforeEdit,
+    }),
+  );
   const analytic = RECT_VOLUME(15);
   expect(
     Math.abs(regenerated - analytic) / analytic,

@@ -47,13 +47,47 @@ import {
   OCCT_KERNEL_CAPABILITIES,
   occtKernelFromRuntime,
 } from "./occt-kernel";
-import { createOcctRuntime, type OcctRuntime } from "./occt-runtime";
+import {
+  createOcctRuntime,
+  RUNTIME_BRAND,
+  type OcctRuntime,
+} from "./occt-runtime";
 
 let runtime: OcctRuntime;
 
 beforeAll(async () => {
   runtime = await createOcctRuntime();
 });
+
+/**
+ * A runtime whose `oc[namespace][member]` throws — the WASM binding-throw
+ * seam the no-throw boundary must normalize into a structured failure.
+ * Everything else is the real binding, so the operation under test still
+ * mints and resolves real shapes around the throwing call.
+ */
+function runtimeWithThrowingBinding(
+  namespace: "BRepBndLib" | "BRepGProp" | "ReplicadMeshExtractor",
+  member: string,
+): OcctRuntime {
+  const oc = runtime[RUNTIME_BRAND];
+  // The stub namespace carries only the shadowed member — the sole entry
+  // point the operation under test reaches into that namespace for.
+  const overridden: Record<string, unknown> = {
+    [member]: (): never => {
+      throw new Error(`${namespace}.${member} binding boom`);
+    },
+  };
+  const throwing = new Proxy(oc, {
+    get(target, property, receiver) {
+      if (property === namespace) {
+        return overridden;
+      }
+      const value: unknown = Reflect.get(target, property, receiver);
+      return value;
+    },
+  });
+  return { [RUNTIME_BRAND]: throwing };
+}
 
 function makeKernel() {
   return occtKernelFromRuntime(runtime);
@@ -756,6 +790,69 @@ describe("occt error paths (validation is load-bearing)", () => {
       mine.subtract(box(mine, 10, 10, 10), [foreign]),
       KERNEL_ERROR_CODES.solidNotOwned,
       "foreign instance subtract tool",
+    );
+  });
+});
+
+describe("the no-throw boundary covers the measurement operations", () => {
+  // The four measurement ops route through `run()` like their 17 siblings:
+  // a raw WASM/binding throw (the seam-edge chamfer precedent) must come
+  // back as a structured KernelResult failure, never escape the kernel.
+  it("normalizes a throwing AddOptimal into a structured bounds failure", () => {
+    const kernel = occtKernelFromRuntime(
+      runtimeWithThrowingBinding("BRepBndLib", "AddOptimal"),
+    );
+    const solid = box(kernel, 10, 10, 10);
+    const failure = expectKernelFailure(
+      kernel.bounds(solid),
+      KERNEL_ERROR_CODES.invalidOperands,
+      "throwing AddOptimal bounds",
+    );
+    expect(failure.message).toContain("BRepBndLib.AddOptimal binding boom");
+  });
+
+  it("normalizes a throwing VolumeProperties into a structured volume failure", () => {
+    const kernel = occtKernelFromRuntime(
+      runtimeWithThrowingBinding("BRepGProp", "VolumeProperties"),
+    );
+    const solid = box(kernel, 10, 10, 10);
+    const failure = expectKernelFailure(
+      kernel.volume(solid),
+      KERNEL_ERROR_CODES.invalidOperands,
+      "throwing VolumeProperties volume",
+    );
+    expect(failure.message).toContain(
+      "BRepGProp.VolumeProperties binding boom",
+    );
+  });
+
+  it("normalizes a throwing SurfaceProperties into a structured area failure", () => {
+    const kernel = occtKernelFromRuntime(
+      runtimeWithThrowingBinding("BRepGProp", "SurfaceProperties"),
+    );
+    const solid = box(kernel, 10, 10, 10);
+    const failure = expectKernelFailure(
+      kernel.area(solid),
+      KERNEL_ERROR_CODES.invalidOperands,
+      "throwing SurfaceProperties area",
+    );
+    expect(failure.message).toContain(
+      "BRepGProp.SurfaceProperties binding boom",
+    );
+  });
+
+  it("normalizes a throwing mesh extraction into a structured tessellate failure", () => {
+    const kernel = occtKernelFromRuntime(
+      runtimeWithThrowingBinding("ReplicadMeshExtractor", "extract"),
+    );
+    const solid = box(kernel, 10, 10, 10);
+    const failure = expectKernelFailure(
+      kernel.tessellate(solid),
+      KERNEL_ERROR_CODES.invalidOperands,
+      "throwing extractor tessellate",
+    );
+    expect(failure.message).toContain(
+      "ReplicadMeshExtractor.extract binding boom",
     );
   });
 });

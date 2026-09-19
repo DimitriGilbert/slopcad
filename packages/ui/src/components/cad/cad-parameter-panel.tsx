@@ -363,7 +363,13 @@ export function CadParameterPanel({
         );
         return applied.ok ? { ok: true } : { ok: false, error: applied.error };
       }
-      const evaluated = evaluateAgainst(collection, edit.expression);
+      // The submit loop applies several edits in ONE synchronous pass, each
+      // committing immediately — so an expression edit is evaluated against
+      // the LIVE parameter collection (`store.getParameters()`), letting it
+      // see the literal edits committed earlier in the same submit. The
+      // memoized `collection` stays the PRE-submit snapshot and serves only
+      // the field-validation evaluator above.
+      const evaluated = evaluateAgainst(store.getParameters(), edit.expression);
       if (!evaluated.ok) {
         return {
           ok: false,

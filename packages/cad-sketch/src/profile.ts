@@ -489,6 +489,28 @@ function firstSelfCrossing(loop: ProfileLoop): {
 }
 
 /**
+ * Counts a closed chain's distinct WALK vertices: each entry's walk-start
+ * joint (`entry.reversed ? segmentEnd : segmentStart` — the joint the walk
+ * actually connects through; a closed chain's vertex cycle is exactly these
+ * starts), deduplicated with the module's endpoint-adjacency tolerance.
+ * Stored draw-direction starts are not the walk's joints — entities carry
+ * no direction guarantee, so keying on them miscounts loops whose segments
+ * are drawn emanating from a shared point.
+ */
+function distinctWalkVertexCount(entries: readonly ChainEntry[]): number {
+  const corners: ProfilePoint[] = [];
+  for (const entry of entries) {
+    const joint = entry.reversed
+      ? segmentEnd(entry.segment)
+      : segmentStart(entry.segment);
+    if (!corners.some((corner) => samePoint(corner, joint))) {
+      corners.push(joint);
+    }
+  }
+  return corners.length;
+}
+
+/**
  * Resolves a sketch's entities into every closed profile loop, with the
  * structured failures of the module doc. Construction geometry, points,
  * and rectangle records contribute nothing; circles are loops of their own;
@@ -602,12 +624,10 @@ export function resolveProfileLoops(
       }
     }
     const area = Math.abs(loop.signedArea);
-    const distinctCorners = new Set(
-      loop.segments.map(
-        (segment) => `${segmentStart(segment).x}:${segmentStart(segment).y}`,
-      ),
-    );
-    if (area <= PROFILE_MIN_AREA_MM2 || distinctCorners.size < 3) {
+    if (
+      area <= PROFILE_MIN_AREA_MM2 ||
+      distinctWalkVertexCount(chain.entries) < 3
+    ) {
       return profileError(
         SKETCH_DIAGNOSTIC_CODES.profileDegenerate,
         `The closed chain through "${String(
