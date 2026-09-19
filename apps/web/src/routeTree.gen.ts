@@ -24,6 +24,9 @@ import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
+import { Route as AuthDocumentsDocumentIdRouteImport } from './routes/_auth/documents.$documentId'
+import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
+import { Route as AuthProjectsProjectIdRouteImport } from './routes/_auth/projects.$projectId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiIoImport3mfRouteImport } from './routes/api/io/import-3mf'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
@@ -102,6 +105,21 @@ const AuthDashboardRoute = AuthDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthRouteRoute,
 } as any)
+const AuthDocumentsDocumentIdRoute = AuthDocumentsDocumentIdRouteImport.update({
+  id: '/documents/$documentId',
+  path: '/documents/$documentId',
+  getParentRoute: () => AuthRouteRoute,
+} as any)
+const AuthProjectsIndexRoute = AuthProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => AuthRouteRoute,
+} as any)
+const AuthProjectsProjectIdRoute = AuthProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
+  getParentRoute: () => AuthRouteRoute,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -133,9 +151,12 @@ export interface FileRoutesByFullPath {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
+  '/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
+  '/projects/': typeof AuthProjectsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -152,9 +173,12 @@ export interface FileRoutesByTo {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
+  '/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
+  '/projects': typeof AuthProjectsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -173,9 +197,12 @@ export interface FileRoutesById {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
+  '/_auth/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
+  '/_auth/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
+  '/_auth/projects/': typeof AuthProjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -194,9 +221,12 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/documents/$documentId'
+    | '/projects/$projectId'
     | '/api/auth/$'
     | '/api/io/import-3mf'
     | '/api/trpc/$'
+    | '/projects/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -213,9 +243,12 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/documents/$documentId'
+    | '/projects/$projectId'
     | '/api/auth/$'
     | '/api/io/import-3mf'
     | '/api/trpc/$'
+    | '/projects'
   id:
     | '__root__'
     | '/'
@@ -233,9 +266,12 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/_auth/dashboard'
+    | '/_auth/documents/$documentId'
+    | '/_auth/projects/$projectId'
     | '/api/auth/$'
     | '/api/io/import-3mf'
     | '/api/trpc/$'
+    | '/_auth/projects/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -365,6 +401,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthDashboardRouteImport
       parentRoute: typeof AuthRouteRoute
     }
+    '/_auth/documents/$documentId': {
+      id: '/_auth/documents/$documentId'
+      path: '/documents/$documentId'
+      fullPath: '/documents/$documentId'
+      preLoaderRoute: typeof AuthDocumentsDocumentIdRouteImport
+      parentRoute: typeof AuthRouteRoute
+    }
+    '/_auth/projects/': {
+      id: '/_auth/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof AuthProjectsIndexRouteImport
+      parentRoute: typeof AuthRouteRoute
+    }
+    '/_auth/projects/$projectId': {
+      id: '/_auth/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof AuthProjectsProjectIdRouteImport
+      parentRoute: typeof AuthRouteRoute
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -391,10 +448,16 @@ declare module '@tanstack/react-router' {
 
 interface AuthRouteRouteChildren {
   AuthDashboardRoute: typeof AuthDashboardRoute
+  AuthDocumentsDocumentIdRoute: typeof AuthDocumentsDocumentIdRoute
+  AuthProjectsProjectIdRoute: typeof AuthProjectsProjectIdRoute
+  AuthProjectsIndexRoute: typeof AuthProjectsIndexRoute
 }
 
 const AuthRouteRouteChildren: AuthRouteRouteChildren = {
   AuthDashboardRoute: AuthDashboardRoute,
+  AuthDocumentsDocumentIdRoute: AuthDocumentsDocumentIdRoute,
+  AuthProjectsProjectIdRoute: AuthProjectsProjectIdRoute,
+  AuthProjectsIndexRoute: AuthProjectsIndexRoute,
 }
 
 const AuthRouteRouteWithChildren = AuthRouteRoute._addFileChildren(

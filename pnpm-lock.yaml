@@ -292,6 +292,9 @@ importers:
       '@slopcad/auth':
         specifier: workspace:*
         version: link:../auth
+      '@slopcad/cad-core':
+        specifier: workspace:*
+        version: link:../cad-core
       '@slopcad/db':
         specifier: workspace:*
         version: link:../db
@@ -307,6 +310,9 @@ importers:
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@libsql/client@0.17.4)(kysely@0.29.5)
       zod:
         specifier: 'catalog:'
         version: 4.5.4
