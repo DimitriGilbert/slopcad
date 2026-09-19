@@ -32,11 +32,19 @@ import type {
   WorkerRequestId,
   WorkerSolidId,
 } from "./worker-ids";
-import type { WorkerSolidResult } from "./worker-operations";
+import type {
+  WorkerSolidResult,
+  WorkerVolumeResult,
+} from "./worker-operations";
 import type { WorkerRequestMessage } from "./worker-protocol";
 
 import { createFakeKernel } from "./fake-kernel";
 import { DIAGNOSTIC_LOG_CAPACITY } from "./diagnostic-log";
+import {
+  bootWorkerChannel,
+  type WorkerBootFailure,
+  type WorkerCrashPort,
+} from "./worker-boot";
 import { createStaleResultCoordinator } from "./stale-result-coordinator";
 import { createWorkerClient, WorkerRequestFailure } from "./worker-client";
 import { workerError } from "./worker-errors";
@@ -581,6 +589,53 @@ describe("coordinator over hand-delivered resolutions", () => {
     expect(harness.coordinator.visible()?.state.solid).toBe(solidIdOf(total));
   });
 
+  it("sinks the coordinator's own cancellation of a fire-and-forget request — no unhandled rejection", async () => {
+    const harness = handDeliveryHarness("cancel");
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const pipeline = (
+        context: ComputationContext,
+      ): Promise<WorkerSolidResult> => {
+        // The first request is fired and never awaited — a supported
+        // scenario by this module's own contract — while the second is the
+        // computation's returned promise.
+        void context.request("solid.createBox", boxInput);
+        return context.request("solid.createSphere", { radius: mm(1) });
+      };
+      const a = harness.coordinator.update(pipeline);
+      await flush();
+
+      // B dispatches: the default policy's cancel loop voids BOTH of A's
+      // request ids — including the never-awaited one — and the rejection
+      // the coordinator itself causes must land in a sink it owes, not in
+      // an unhandled rejection.
+      const b = harness.coordinator.update(boxComputation);
+      await flush();
+      expect(harness.cancelled).toEqual([requestIdOf(1), requestIdOf(2)]);
+
+      deliverBoxResult(harness, 1, 1); // B's own box request applies
+      const [outcomeA, outcomeB] = await Promise.all([a, b]);
+      const dropped = droppedOf(outcomeA);
+      expect(dropped.failure?.error.code).toBe("worker/cancelled");
+      expect(outcomeB).toEqual({
+        outcome: "applied",
+        revision: 2,
+        result: { solid: solidIdOf(1) },
+      });
+      // One event-loop turn, not just microtasks: Node decides unhandled
+      // rejections between macrotasks, so this is the earliest a would-be
+      // unhandled rejection is observable at all.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.removeListener("unhandledRejection", onUnhandled);
+    }
+  });
+
   it("stays healthy after a burst: a follow-up request still succeeds", async () => {
     const harness = handDeliveryHarness("complete");
     const outcomes: Array<Promise<ComputationOutcome<WorkerSolidResult>>> = [];
@@ -912,5 +967,118 @@ describe("coordinator over the real in-memory session", () => {
     expect(await solidState(harness, solidIdOf(3))).toBe("owned");
     expect(coordinator.disposalFailures()).toEqual([]);
     expect(coordinator.drops()).toHaveLength(5); // A plus the four burst drops
+  });
+});
+
+/**
+ * The fake main-thread end of a booted dedicated-worker channel whose fake
+ * responder answers `solid.createBox` synchronously and stays silent for
+ * everything else — so a computation's first request succeeds (its mint is
+ * recorded) while its second is still in flight when the thread "crashes",
+ * driving the real `bootWorkerChannel` crash settlement end to end (the
+ * `worker-boot` testing pattern, with a responder bolted on).
+ */
+class RespondingFakeWorkerPort implements WorkerCrashPort {
+  terminated = false;
+  /** Everything the client posted, in order — the wire. */
+  readonly posted: unknown[] = [];
+  private readonly messageListeners = new Set<
+    (event: { readonly data: unknown }) => void
+  >();
+  private readonly errorListeners = new Set<
+    (event: { readonly message: string }) => void
+  >();
+  private readonly messageErrorListeners = new Set<() => void>();
+
+  postMessage(data: unknown): void {
+    this.posted.push(data);
+    const parsed = parseWorkerMessage(data);
+    if (!parsed.ok || parsed.value.kind !== "request") return;
+    if (parsed.value.operation !== "solid.createBox") return;
+    this.dispatch(
+      createWorkerSuccessResponse(parsed.value.requestId, "solid.createBox", {
+        solid: solidIdOf(1),
+      }),
+    );
+  }
+
+  removeEventListener(
+    type: "message",
+    listener: (event: { readonly data: unknown }) => void,
+  ): void {
+    if (type === "message") this.messageListeners.delete(listener);
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+
+  addEventListener(
+    type: "message" | "error" | "messageerror",
+    listener: (event: never) => void,
+  ): void {
+    if (type === "message") {
+      this.messageListeners.add(
+        listener as (event: { readonly data: unknown }) => void,
+      );
+    } else if (type === "error") {
+      this.errorListeners.add(
+        listener as (event: { readonly message: string }) => void,
+      );
+    } else {
+      this.messageErrorListeners.add(listener as () => void);
+    }
+  }
+
+  /** Stages the thread's `error` event (an uncaught crash). */
+  crash(message: string): void {
+    for (const listener of [...this.errorListeners]) listener({ message });
+  }
+
+  /** Delivers a worker-to-main message exactly as the DOM event would. */
+  private dispatch(data: unknown): void {
+    for (const listener of [...this.messageListeners]) listener({ data });
+  }
+}
+
+describe("coordinator crash settlement through the real boot wiring", () => {
+  it("settles an update whose channel crashes mid-flight — the mint's release cannot hang it", async () => {
+    const port = new RespondingFakeWorkerPort();
+    const crashes: WorkerBootFailure[] = [];
+    const boot = bootWorkerChannel(port, (failure) => crashes.push(failure));
+    const coordinator = createStaleResultCoordinator<WorkerVolumeResult>({
+      client: boot.client,
+    });
+
+    const pipeline = async (
+      context: ComputationContext,
+    ): Promise<WorkerVolumeResult> => {
+      // The first request succeeds in-turn (its mint is recorded on the
+      // computation); the second is still in flight when the thread dies.
+      const box = await context.request("solid.createBox", boxInput);
+      return context.request("solid.volume", { solid: box.solid });
+    };
+    const update = coordinator.update(pipeline);
+    await flush();
+    expect(port.posted).toHaveLength(2); // the box and the volume, no more
+
+    port.crash("Uncaught boom");
+
+    // The crash settlement closes the client: the in-flight volume request
+    // rejects with worker/transport-closed, and the failure path's release
+    // of the recorded mint must not hang the update on the dead channel —
+    // it settles (here: rejects with the structured crash failure).
+    const failure = await failureOf(update);
+    expect(failure.error.code).toBe("worker/transport-closed");
+    expect(crashes).toEqual([{ kind: "error", message: "Uncaught boom" }]);
+    expect(port.terminated).toBe(true);
+    await flush();
+
+    // The post-crash disposal of the recorded mint was refused locally by
+    // the closed client (it never crossed the wire) and treated as
+    // best-effort silence — not a disposal refusal worth reporting.
+    expect(port.posted).toHaveLength(2);
+    expect(coordinator.disposalFailures()).toEqual([]);
+    expect(coordinator.visible()).toBeNull();
   });
 });

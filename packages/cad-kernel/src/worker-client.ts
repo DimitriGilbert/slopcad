@@ -56,6 +56,12 @@
  * channel can never deliver a response, so an in-flight promise must not stay
  * pending forever (the termination rule a real-worker host relies on when its
  * thread exits). A response arriving after close correlates with nothing.
+ *
+ * Closure is terminal for the whole client, not just for what was in flight:
+ * a `request()` issued after `close()` is refused locally with the same
+ * structured `worker/transport-closed` failure — never registered as pending,
+ * never sent — so the termination rule cannot be defeated one call later by a
+ * request that no surviving message could ever settle.
  */
 
 import type { WorkerIdGenerator, WorkerRequestId } from "./worker-ids";
@@ -128,7 +134,11 @@ export interface WorkerClient {
    * discards any late success for it. A no-op for unknown or settled ids.
    */
   cancel(requestId: WorkerRequestId): void;
-  /** Unsubscribes from the transport; later responses are dropped. */
+  /**
+   * Unsubscribes from the transport and settles every still-pending request
+   * with `worker/transport-closed`; later responses are dropped, and later
+   * requests are refused locally with the same structured failure.
+   */
   close(): void;
 }
 
@@ -154,12 +164,30 @@ export function createWorkerClient(options: WorkerClientOptions): WorkerClient {
   // responder suppressed it) — bookkeeping bounded by the channel's
   // cancellation traffic, mirroring `spent`.
   const voided = new Map<WorkerRequestId, WorkerOperationId>();
+  // Terminal once close() runs: a closed channel can never deliver a
+  // response, so no request issued afterwards may register a pending entry
+  // (nothing could ever settle it). Idempotent by construction.
+  let closed = false;
 
   function issue<O extends WorkerOperationId>(
     operation: O,
     input: WorkerOperationInput<O>,
     id: WorkerRequestId,
   ): Promise<WorkerOperationResult<O>> {
+    if (closed) {
+      // The channel is gone: refuse locally with the same structured
+      // settlement close() gives in-flight requests, instead of stranding a
+      // pending entry no surviving message can ever settle. The request is
+      // void and never sent.
+      return Promise.reject(
+        new WorkerRequestFailure(
+          workerError(
+            WORKER_PROTOCOL_ERROR_CODES.transportClosed,
+            `The transport is closed; the request "${id}" was refused locally and never sent, so its outcome is void.`,
+          ),
+        ),
+      );
+    }
     if (spent.has(id)) {
       return Promise.reject(
         new WorkerRequestFailure(
@@ -280,6 +308,9 @@ export function createWorkerClient(options: WorkerClientOptions): WorkerClient {
       );
     },
     close(): void {
+      // Closed from here on, forever: requests issued after this line are
+      // refused locally instead of pending (see `issue`).
+      closed = true;
       unsubscribe();
       // Closing the channel orphans every in-flight request: no response can
       // ever arrive for it anymore. Each settles now with the structured
