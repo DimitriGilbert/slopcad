@@ -17,13 +17,15 @@
     "test:projects": "playwright test -c playwright.projects.config.ts",
     "test:worker": "playwright test -c playwright.worker.config.ts",
     "test:perf": "playwright test -c playwright.perf.config.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:components": "playwright test -c playwright.components.config.ts"
   },
   "dependencies": {
     "@libsql/client": "catalog:",
     "@react-three/fiber": "9.7.0",
     "@slopcad/api": "workspace:*",
     "@slopcad/auth": "workspace:*",
+    "@slopcad/cad-components": "workspace:*",
     "@slopcad/cad-core": "workspace:*",
     "@slopcad/cad-io": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
