@@ -364,6 +364,28 @@ describe("CadParameterPanel", () => {
     expect(store.commandLog).toHaveLength(0);
   });
 
+  it("surfaces an overflowing unit literal as the structured non-finite failure, not a crash", async () => {
+    const store = buildProviderStore();
+    render(<PanelInProvider store={store} />);
+
+    // 1e308 m: finite in meters, but its conversion to the canonical mm
+    // overflows. Evaluation returns the structured failure, which the
+    // panel's field validation renders through formatDomainError — before
+    // the evaluator's never-throw fix this escaped as an uncaught
+    // DimensionalValueValidationError inside the validator.
+    fireEvent.change(screen.getByLabelText("derivedDepth"), {
+      target: { value: `1${"0".repeat(308)}.0m` },
+    });
+    fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+
+    expect(
+      await screen.findByText(
+        "expression/non-finite-result: The length value 1e+308 m does not convert to a finite magnitude in the canonical unit mm of its dimension.",
+      ),
+    ).toBeTruthy();
+    expect(store.commandLog).toHaveLength(0);
+  });
+
   // -------------------------------------------------------------------------
   // Prop-driven precedence and providerless behavior
   // -------------------------------------------------------------------------

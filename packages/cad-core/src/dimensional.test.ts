@@ -25,6 +25,7 @@ import {
   parseDimensionalValue,
   type ParseResult,
   serializeDimensionalValue,
+  serializeDimensionalValueResult,
   subtract,
   subtractValues,
   toCanonical,
@@ -536,6 +537,56 @@ describe("serialization", () => {
         expect(result.error.code).toBe(code);
         expect(result.error.input).toBe(input);
       }
+    }
+  });
+
+  it("rejects finite magnitudes with no finite canonical magnitude", () => {
+    // 1e308 is finite in m/m2/m3, but the conversion to the canonical
+    // mm/mm2/mm3 overflows — such a value has no canonical serialization,
+    // so the persistence boundary rejects it structurally instead of
+    // letting the next save fail on it.
+    for (const input of [
+      { dimension: "length", unit: "m", value: 1e308 },
+      { dimension: "area", unit: "m2", value: 1e308 },
+      { dimension: "volume", unit: "m3", value: 1e308 },
+      { dimension: "length", unit: "in", value: 1e308 },
+    ]) {
+      const result = parseDimensionalValue(input);
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.error.code).toBe("value/non-finite-magnitude");
+      expect(result.error.input).toBe(input);
+    }
+    // The same magnitude in a canonical unit stays parseable and
+    // serializable (the canonical conversion is the identity).
+    const canonical = parseDimensionalValue({
+      dimension: "length",
+      unit: "mm",
+      value: 1e308,
+    });
+    expect(canonical.ok).toBe(true);
+    if (canonical.ok) {
+      expect(serializeDimensionalValue(canonical.value).value).toBe(1e308);
+    }
+  });
+
+  it("fails the structured serializer on canonical-conversion overflow instead of throwing", () => {
+    const result = serializeDimensionalValueResult(length(1e308, "m"));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("value/non-finite-magnitude");
+    expect(result.error.message.length).toBeGreaterThan(0);
+    // The eager serializer keeps its throwing contract and carries the same
+    // structured failure on its typed validation error.
+    let thrown: unknown;
+    try {
+      serializeDimensionalValue(length(1e308, "m"));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DimensionalValueValidationError);
+    if (thrown instanceof DimensionalValueValidationError) {
+      expect(thrown.error.code).toBe("value/non-finite-magnitude");
     }
   });
 });

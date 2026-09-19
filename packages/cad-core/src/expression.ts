@@ -356,8 +356,50 @@ function nodePrecedence(node: ExpressionNode): number {
   }
 }
 
+/**
+ * A decimal-only rendering of a finite magnitude. The V1 number token has no
+ * exponent syntax, so the exponential forms `String` emits below 1e-6 and at
+ * or above 1e21 are expanded to the same number written as a plain decimal
+ * (`5e-7` → `0.0000005`, `1e+21` → `1000000000000000000000.0`), and plain
+ * integers beyond the safe-integer range — which the lexer refuses as
+ * integers — gain a `.0` decimal tail. Everyday magnitudes (plain decimals
+ * and safe integers) print byte-identically to `String(value)`.
+ */
 function formatMagnitude(value: number): string {
-  return String(value);
+  const text = String(value);
+  if (text.includes("e")) return expandExponential(text);
+  if (!text.includes(".") && !Number.isSafeInteger(value)) {
+    return `${text}.0`;
+  }
+  return text;
+}
+
+/**
+ * Expands `String(value)`'s exponential form into the same number as a plain
+ * decimal: the digit string is unchanged, only the decimal point moves. An
+ * expansion that lands on a whole number keeps a `.0` tail unless the result
+ * is a safe integer (every double `String` renders exponentially at 1e21 and
+ * above is beyond the safe-integer range, so the tail is the norm there).
+ */
+function expandExponential(text: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (match === null) return text;
+  const sign = match[1] ?? "";
+  const integer = match[2] ?? "0";
+  const fraction = match[3] ?? "";
+  const exponent = Number(match[4] ?? "0");
+  const digits = `${integer}${fraction}`;
+  const point = integer.length + exponent;
+  const body =
+    point <= 0
+      ? `0.${"0".repeat(-point)}${digits}`
+      : point >= digits.length
+        ? `${digits}${"0".repeat(point - digits.length)}`
+        : `${digits.slice(0, point)}.${digits.slice(point)}`;
+  if (body.includes(".")) return `${sign}${body}`;
+  return Number.isSafeInteger(Number(`${sign}${body}`))
+    ? `${sign}${body}`
+    : `${sign}${body}.0`;
 }
 
 /**

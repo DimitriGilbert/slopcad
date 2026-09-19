@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   type ExpressionNode,
   EXPRESSION_PARSE_ERROR_CODES,
+  MAX_EXPRESSION_DEPTH,
   parseExpression,
+  parseExpressionAst,
   printExpression,
 } from "./index";
 
@@ -262,6 +264,13 @@ describe("parseExpression round-trips", () => {
     "max(min(a, b), 1)",
     "width * 2 + 10mm",
     "100mm2 / 10mm - 1mm",
+    // Magnitudes whose String() form is exponential or a non-safe
+    // integer: printing must stay re-parseable (decimal-only output).
+    "0.0000005",
+    "0.0000005mm",
+    "0.000001",
+    "9007199254740992.0",
+    "1000000000000000000000.5",
   ];
 
   it("re-parses printed ASTs to identical ASTs", () => {
@@ -287,5 +296,73 @@ describe("parseExpression round-trips", () => {
       if (!left.ok || !right.ok) continue;
       expect(JSON.stringify(left.value)).toBe(JSON.stringify(right.value));
     }
+  });
+});
+
+describe("parseExpression operator-chain depth", () => {
+  const chain = (terms: number, operand: string, operator: string): string =>
+    Array.from({ length: terms }, () => operand).join(` ${operator} `);
+
+  it("parses and revalidates flat chains at exactly the depth limit", () => {
+    for (const source of [
+      chain(MAX_EXPRESSION_DEPTH, "1", "+"),
+      chain(MAX_EXPRESSION_DEPTH, "2", "*"),
+    ]) {
+      const parsed = parseExpression(source);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) continue;
+      expect(parseExpressionAst(parsed.value).ok).toBe(true);
+    }
+  });
+
+  it("rejects one operand past the limit at parse with the too-deep code", () => {
+    for (const source of [
+      chain(MAX_EXPRESSION_DEPTH + 1, "1", "+"),
+      chain(MAX_EXPRESSION_DEPTH + 1, "2", "*"),
+    ]) {
+      const parsed = parseExpression(source);
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) continue;
+      expect(parsed.error.code).toBe(EXPRESSION_PARSE_ERROR_CODES.tooDeep);
+      expect(parsed.error.message).toContain("chain");
+    }
+  });
+
+  it("counts a wrapped max-height operand against the same limit", () => {
+    // A multiplicative chain of 127 terms plus the wrapping additive fold
+    // reaches exactly 128 path nodes and must parse AND validate.
+    const atLimit = `${chain(127, "1", "*")} + 1`;
+    const parsed = parseExpression(atLimit);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parseExpressionAst(parsed.value).ok).toBe(true);
+    }
+    // One more multiplicative term tips the wrapped chain past the limit —
+    // the fold loops alone cannot see it, so the finished tree's height is
+    // the authority.
+    const overLimit = `${chain(128, "1", "*")} + 1`;
+    const rejected = parseExpression(overLimit);
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.error.code).toBe(EXPRESSION_PARSE_ERROR_CODES.tooDeep);
+  });
+
+  it("counts mixed-precedence chains against the same limit", () => {
+    // Alternating leaf and multiplicative-pair operands: n additive terms
+    // give a deepest path of (n − 1) additive binaries + the pair's binary
+    // + its leaf, so 127 terms reach exactly 128 and 128 terms tip over.
+    const mixed = (terms: number): string =>
+      Array.from({ length: terms }, (_, index) =>
+        index % 2 === 0 ? "1" : "2 * 3",
+      ).join(" + ");
+    const atLimit = parseExpression(mixed(127));
+    expect(atLimit.ok).toBe(true);
+    if (atLimit.ok) {
+      expect(parseExpressionAst(atLimit.value).ok).toBe(true);
+    }
+    const overLimit = parseExpression(mixed(128));
+    expect(overLimit.ok).toBe(false);
+    if (overLimit.ok) return;
+    expect(overLimit.error.code).toBe(EXPRESSION_PARSE_ERROR_CODES.tooDeep);
   });
 });
