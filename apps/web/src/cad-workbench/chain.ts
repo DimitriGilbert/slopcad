@@ -201,3 +201,33 @@ export function documentChainSceneRequest(
     bodyId,
   };
 }
+
+/**
+ * Whether ONE more extrude action would invalidate the chain scene request
+ * for the document it lands on (the chain page's extrude action guard):
+ * the new extrude becomes the base, so every existing hole — cut into the
+ * previous last extrude — mismatches the base check, and with no holes an
+ * existing fillet — targeted at the previous newest stage — mismatches the
+ * fillet-target check the same way. A document with neither holes nor
+ * fillets composes the new extrude cleanly (a fresh base with nothing
+ * built on the old one). Guarding the action keeps the page from
+ * committing a valid transaction the dispatch could no longer resolve —
+ * the viewport would silently freeze on the last settled scene.
+ */
+export function nextExtrudeInvalidatesChain(document: CadDocument): boolean {
+  return document.features.some(
+    (feature) => feature.kind === "hole" || feature.kind === "fillet",
+  );
+}
+
+/**
+ * Whether ONE more hole action would invalidate the chain scene request
+ * for the document it lands on (the chain page's hole action guard): the
+ * new hole becomes the fillet target (the newest solid stage), so an
+ * existing fillet — targeted at the previous newest stage — no longer
+ * matches it. Holes without fillets compose legally (every hole cuts the
+ * same base), so only a fillet guards the action.
+ */
+export function nextHoleInvalidatesChain(document: CadDocument): boolean {
+  return document.features.some((feature) => feature.kind === "fillet");
+}

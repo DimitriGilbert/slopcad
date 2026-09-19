@@ -141,6 +141,8 @@ import {
   CHAIN_FILLET_DEFAULT_RADIUS_MM,
   documentChainSceneRequest,
   filletBaseFeatureOf,
+  nextExtrudeInvalidatesChain,
+  nextHoleInvalidatesChain,
 } from "./chain";
 import {
   EXTRUDE_DEFAULT_DEPTH_MM,
@@ -361,6 +363,19 @@ function CadChainWorkbenchBody({
   const previousRef = useRef<DerivationPrevious | null>(null);
 
   const workbenchDocument = documentApi.document;
+  // The chain page's action guards (the composition rule made visible): the
+  // scene request composes ONE extrude as the base and targets the newest
+  // solid stage, so an extrude committed over holes (the base changes under
+  // them) or over a fillet (the fillet's target stops being the last
+  // extrude), and a hole committed over a fillet (the fillet's target stops
+  // being the last hole), would leave `documentChainSceneRequest` null —
+  // the dispatch effect would silently freeze on the last settled scene.
+  // The buttons state that instead of committing the freeze; everything
+  // else stays enabled (multiple holes without fillets compose legally),
+  // and the dispatch effect's own null check remains as the
+  // belt-and-braces invariant.
+  const extrudeGuarded = nextExtrudeInvalidatesChain(workbenchDocument);
+  const holeGuarded = nextHoleInvalidatesChain(workbenchDocument);
   const suppressedKey = useMemo(
     () =>
       [...suppressed]
@@ -926,9 +941,11 @@ function CadChainWorkbenchBody({
           title={
             holeBase === undefined
               ? "Sketch and extrude a profile first — a hole cuts an existing solid."
-              : "Cut a hole into the latest extrusion (defaults on the top face's center; edit holeDiameter/holeDepth/holeX/holeY in the parameter panel)."
+              : holeGuarded
+                ? "The chain rounds the newest solid stage — undo the fillet before cutting another hole."
+                : "Cut a hole into the latest extrusion (defaults on the top face's center; edit holeDiameter/holeDepth/holeX/holeY in the parameter panel)."
           }
-          disabled={holeBase === undefined}
+          disabled={holeBase === undefined || holeGuarded}
           onClick={handleHole}
           size="xs"
           type="button"
@@ -967,6 +984,8 @@ function CadChainWorkbenchBody({
       </div>
       {mode === "sketch" ? (
         <SketchMode
+          extrudeDisabled={extrudeGuarded}
+          extrudeDisabledTitle="The chain composes one extrusion as the solid stages' base — undo the holes and fillets built on it before extruding a new profile."
           onExit={() => {
             onModeChange("model");
           }}

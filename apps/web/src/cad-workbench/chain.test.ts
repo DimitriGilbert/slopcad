@@ -62,8 +62,11 @@ import {
   documentChainSceneRequest,
   filletBaseFeatureOf,
   CHAIN_FILLET_DEFAULT_RADIUS_MM,
+  nextExtrudeInvalidatesChain,
+  nextHoleInvalidatesChain,
 } from "./chain";
 import {
+  holeBaseFeatureOf,
   HOLE_DEFAULT_AXIS,
   HOLE_DEFAULT_DEPTH_MM,
   HOLE_DEFAULT_DIAMETER_MM,
@@ -237,6 +240,164 @@ function featureOf(document: CadDocument, id: typeof FILLET): FeatureRecord {
   return feature;
 }
 
+/** Adds one parameter, failing the test on refusal. */
+function withParameter(
+  document: CadDocument,
+  id: ParameterIdLike,
+  name: string,
+  value: AnyDimensionalValue,
+): CadDocument {
+  const parameter = addDocumentParameter(document, { id, name, value });
+  if (!parameter.ok) throw new Error(parameter.error.message);
+  return parameter.value.document;
+}
+
+/** Adds one body, failing the test on refusal. */
+function withBody(
+  document: CadDocument,
+  id: ReturnType<typeof createBodyId>,
+  name: string,
+): CadDocument {
+  const body = addBody(document, { id, name });
+  if (!body.ok) throw new Error(body.error.message);
+  return body.value.document;
+}
+
+/** Adds one feature, failing the test on refusal. */
+function withFeature(
+  document: CadDocument,
+  id: ReturnType<typeof createFeatureId>,
+  kind: string,
+  inputs: FeatureInputRefList,
+  outputs: readonly BodyId[],
+): CadDocument {
+  const featured = addFeature(document, { id, kind, inputs, outputs });
+  if (!featured.ok) throw new Error(featured.error.message);
+  return featured.value.document;
+}
+
+/** Builds the sketch → extrude document (the first solid stage). */
+function buildExtrudeOnlyDocument(): CadDocument {
+  let document = createDocument(DOC);
+  const sketched = addDocumentSketch(document, {
+    id: SKETCH,
+    name: "profile",
+    sketch: rectangleSketchPayload(),
+  });
+  if (!sketched.ok) throw new Error(sketched.error.message);
+  document = sketched.value.document;
+  document = withParameter(document, DEPTH, "extrudeDepth", length(10));
+  document = withBody(document, BASE_BODY, "pad");
+  return withFeature(
+    document,
+    EXTRUDE,
+    "extrude",
+    [
+      { kind: "sketch", id: SKETCH },
+      { kind: "parameter", id: DEPTH },
+    ],
+    [BASE_BODY],
+  );
+}
+
+/**
+ * Builds the extrude → fillet document WITHOUT any hole: the fillet stage
+ * the chain reaches when the corner is rounded before any hole is cut (the
+ * fillet targets the pad itself).
+ */
+function buildNoHoleFilletDocument(): CadDocument {
+  let document = buildExtrudeOnlyDocument();
+  document = withParameter(
+    document,
+    pRadius,
+    "filletRadius",
+    length(CHAIN_FILLET_DEFAULT_RADIUS_MM),
+  );
+  document = withParameter(document, pEdge, "filletEdge", dimensionless(2));
+  document = withBody(document, FILLET_BODY, "rounded");
+  return withFeature(
+    document,
+    FILLET,
+    "fillet",
+    [
+      { kind: "feature", id: EXTRUDE },
+      { kind: "parameter", id: pRadius },
+      { kind: "parameter", id: pEdge },
+    ],
+    [FILLET_BODY],
+  );
+}
+
+/**
+ * Commits one more extrude action onto the document — the page action's
+ * second-extrude transaction (fresh sketch, depth, body, feature ids).
+ */
+function withSecondExtrude(document: CadDocument): CadDocument {
+  const sketch = createSketchDocumentId("skd_profile2");
+  const depth = createParameterId("param_extrude_depth2");
+  const body = createBodyId("body_pad2");
+  const extrude = createFeatureId("feat_extrude2");
+  let next = document;
+  const sketched = addDocumentSketch(next, {
+    id: sketch,
+    name: "extrude sketch 2",
+    sketch: rectangleSketchPayload(),
+  });
+  if (!sketched.ok) throw new Error(sketched.error.message);
+  next = sketched.value.document;
+  next = withParameter(next, depth, "extrudeDepth2", length(10));
+  next = withBody(next, body, "pad 2");
+  return withFeature(
+    next,
+    extrude,
+    "extrude",
+    [
+      { kind: "sketch", id: sketch },
+      { kind: "parameter", id: depth },
+    ],
+    [body],
+  );
+}
+
+/** Commits one more hole action onto the document (the page's transaction). */
+function withSecondHole(document: CadDocument): CadDocument {
+  const base = holeBaseFeatureOf(document);
+  if (base === undefined) throw new Error("The base extrude is missing.");
+  const diameter = createParameterId("param_hole_diameter2");
+  const depth = createParameterId("param_hole_depth2");
+  const x = createParameterId("param_hole_x2");
+  const y = createParameterId("param_hole_y2");
+  const axis = createParameterId("param_hole_axis2");
+  const body = createBodyId("body_hole2");
+  const hole = createFeatureId("feat_hole2");
+  let next = document;
+  next = withParameter(next, diameter, "holeDiameter2", length(6));
+  next = withParameter(next, depth, "holeDepth2", length(3));
+  next = withParameter(next, x, "holeX2", length(15));
+  next = withParameter(next, y, "holeY2", length(12));
+  next = withParameter(
+    next,
+    axis,
+    "holeAxis2",
+    dimensionless(HOLE_DEFAULT_AXIS),
+  );
+  next = withBody(next, body, "holed 2");
+  return withFeature(
+    next,
+    hole,
+    "hole",
+    [
+      { kind: "feature", id: base.id },
+      { kind: "parameter", id: diameter },
+      { kind: "parameter", id: depth },
+      { kind: "parameter", id: x },
+      { kind: "parameter", id: y },
+      { kind: "parameter", id: axis },
+    ],
+    [body],
+  );
+}
+
 describe("filletBaseFeatureOf", () => {
   it("names the last hole's output when holes exist", () => {
     const base = filletBaseFeatureOf(buildDocument());
@@ -406,6 +567,61 @@ describe("documentChainSceneRequest", () => {
       },
     };
     expect(documentChainSceneRequest(dropped)).toBeNull();
+  });
+});
+
+describe("nextExtrudeInvalidatesChain (the chain page's extrude action guard)", () => {
+  it("keeps the extrude action enabled while nothing builds on the base", () => {
+    expect(nextExtrudeInvalidatesChain(createDocument(DOC))).toBe(false);
+    const extrudeOnly = buildExtrudeOnlyDocument();
+    expect(nextExtrudeInvalidatesChain(extrudeOnly)).toBe(false);
+    // The guard's honesty: a second extrude over the bare chain really
+    // composes (the fresh base, nothing left on the old one).
+    expect(
+      documentChainSceneRequest(withSecondExtrude(extrudeOnly)),
+    ).not.toBeNull();
+  });
+
+  it("guards the extrude action once a hole exists (the base changes under it)", () => {
+    const holed = buildDocument(null);
+    expect(nextExtrudeInvalidatesChain(holed)).toBe(true);
+    // The guarded transaction really would invalidate the request.
+    expect(documentChainSceneRequest(withSecondExtrude(holed))).toBeNull();
+  });
+
+  it("guards the extrude action once a fillet exists, holes or not (the fillet target changes)", () => {
+    // Holes AND a fillet: the hole mismatch fires first.
+    expect(nextExtrudeInvalidatesChain(buildDocument())).toBe(true);
+    // A fillet with NO hole: the new extrude becomes the fillet target,
+    // so the existing fillet's target no longer matches (chain.ts:176).
+    const noHole = buildNoHoleFilletDocument();
+    expect(nextExtrudeInvalidatesChain(noHole)).toBe(true);
+    expect(documentChainSceneRequest(withSecondExtrude(noHole))).toBeNull();
+  });
+});
+
+describe("nextHoleInvalidatesChain (the chain page's hole action guard)", () => {
+  it("keeps the hole action enabled without a fillet — multiple holes compose", () => {
+    const extrudeOnly = buildExtrudeOnlyDocument();
+    expect(nextHoleInvalidatesChain(extrudeOnly)).toBe(false);
+    const holed = buildDocument(null);
+    expect(nextHoleInvalidatesChain(holed)).toBe(false);
+    // The guard's honesty: a second hole over the fillet-free chain
+    // really composes (every hole cuts the same base).
+    expect(documentChainSceneRequest(withSecondHole(holed))).not.toBeNull();
+  });
+
+  it("guards the hole action once a fillet exists (its target stops being the last hole)", () => {
+    const filleted = buildDocument();
+    expect(nextHoleInvalidatesChain(filleted)).toBe(true);
+    // The guarded transaction really would invalidate the request.
+    expect(documentChainSceneRequest(withSecondHole(filleted))).toBeNull();
+  });
+
+  it("guards the hole action when a fillet targets the bare extrude (no holes yet)", () => {
+    const noHole = buildNoHoleFilletDocument();
+    expect(nextHoleInvalidatesChain(noHole)).toBe(true);
+    expect(documentChainSceneRequest(withSecondHole(noHole))).toBeNull();
   });
 });
 
