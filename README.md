@@ -97,6 +97,9 @@ If you want to add app-specific blocks instead of shared primitives, run the sha
 Environment variables are read from each app's `.env` file (baked into web builds for public variables) and overridden in `docker-compose.yml` for container networking.
 
 Docker Compose uses the local `./.data/local.db` file. Run `pnpm run db:push` before starting the stack.
+The container runs as the `node` user (uid 1000) and Compose will not create `./.data` for you
+(`create_host_path: false`), so the directory must already exist and be writable by the host user
+matching that uid — running `pnpm run db:push` as your own user beforehand already leaves it correct.
 
 For more details, see the guide on [Deploying with Docker Compose](https://www.better-t-stack.dev/docs/guides/docker).
 
