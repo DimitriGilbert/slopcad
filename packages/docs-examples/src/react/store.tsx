@@ -105,8 +105,13 @@ export function GuideParameterPanel(): React.JSX.Element {
 
 /** The example's mounted composition (provider + panel). */
 export function GuideReactExample(): React.JSX.Element {
+  // Lazy once-per-lifetime state: a store built in the render body would be
+  // replaced by a fresh one on every parent re-render, silently discarding
+  // the document, its edits, and its history (the mounting pattern the
+  // React-integration guide teaches).
+  const [store] = useState(createGuideStore);
   return (
-    <CadProvider store={createGuideStore()}>
+    <CadProvider store={store}>
       <GuideParameterPanel />
     </CadProvider>
   );
