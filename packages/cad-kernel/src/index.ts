@@ -126,7 +126,11 @@ export type {
 } from "./profile-geometry";
 export type { SolidTag } from "./opaque";
 
-export { defineKernelContractSuite } from "./contract-suite";
+// NOTE: `./contract-suite`'s `defineKernelContractSuite` (and the suite's
+// tolerance constants) is deliberately NOT re-exported here: the contract
+// suite is test tooling that imports vitest, and the runtime index must
+// stay importable by browsers/consumers without a test runner. Import it
+// from the `@slopcad/cad-kernel/contract-suite` subpath instead.
 
 export {
   createKernelFeatureExecutor,
@@ -300,15 +304,11 @@ export type {
 export { createNodeWorkerTransport } from "./worker-node-transport";
 export type { NodeWorkerMessagePort } from "./worker-node-transport";
 
-export {
-  createNodeWorkerChannel,
-  nodeWorkerThreadEcho,
-} from "./node-worker-channel";
-export type {
-  NodeWorkerChannel,
-  NodeWorkerChannelExit,
-  NodeWorkerChannelOptions,
-} from "./node-worker-channel";
+// NOTE: `./node-worker-channel` (the node:worker_threads channel factory)
+// is deliberately NOT re-exported here: the runtime index must stay
+// importable by browsers/consumers without node builtins. Import it from
+// the `@slopcad/cad-kernel/node-worker-channel` subpath instead (the
+// node-side worker entries of the kernel backends do).
 
 export {
   createWebWorkerTransport,

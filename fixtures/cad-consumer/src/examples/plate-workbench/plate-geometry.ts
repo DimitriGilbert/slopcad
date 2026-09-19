@@ -1,13 +1,3 @@
-/**
- * The consumer's real geometry pipeline: the parametric plate computed on
- * the main thread through the Manifold kernel adapter — box minus bore,
- * translated by the document's translate components — projected into the
- * renderer-neutral `RenderProjection` the installed `CadViewport` draws.
- * The camera is DATA: the plate's CAD home view (eye in the (+x, −y, +z)
- * octant, z-up), framing the plate's `[0,30] × [0,20] × [0,10]` kernel
- * placement at a ~40° elevation in the viewport's default size.
- */
-
 import {
   createRenderProjection,
   length,
@@ -25,10 +15,11 @@ import type { GeometryKernel, Tessellation } from "@slopcad/cad-kernel";
 // Vite asset pin: the dependency optimizer breaks manifold.js's own
 // `new URL("manifold.wasm", import.meta.url)` resolution, so the runtime
 // receives an explicit `locateFile` (the same approach the app's worker
-// entry documents).
+// entry documents). The `?url` suffix is a Vite client-types asset
+// import; `./manifold-wasm.d.ts` declares it for non-Vite typechecks.
 import wasmUrl from "manifold-3d/manifold.wasm?url";
 
-import { PLATE_BODY_ID } from "./consumer-document";
+import { PLATE_BODY_ID } from "./plate-document";
 
 /** The plate's x extent (mm). */
 const PLATE_WIDTH_MM = 30;
@@ -56,6 +47,7 @@ let kernelPromise: Promise<GeometryKernel> | null = null;
 /**
  * Initializes the Manifold kernel once per page (the WASM heap is a
  * per-realm singleton; the runtime module memoizes behind this promise).
+ * Shared by every example/consumer composition on the page.
  */
 export function getPlateKernel(): Promise<GeometryKernel> {
   kernelPromise ??= createManifoldRuntime({

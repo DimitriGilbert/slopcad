@@ -23,6 +23,7 @@ export default defineConfig({
       "@slopcad/cad-kernel-manifold",
       "@slopcad/cad-react",
       "@slopcad/cad-r3f",
+      "@slopcad/cad-sketch",
     ],
   },
 });

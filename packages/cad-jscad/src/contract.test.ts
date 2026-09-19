@@ -16,8 +16,8 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { defineKernelContractSuite } from "@slopcad/cad-kernel/contract-suite";
 import {
-  defineKernelContractSuite,
   type GeometryKernel,
   type Tessellation,
   unwrapKernelResult,

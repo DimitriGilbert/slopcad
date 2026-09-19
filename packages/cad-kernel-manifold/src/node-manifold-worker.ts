@@ -18,11 +18,11 @@
 import type {
   NodeWorkerChannel,
   NodeWorkerChannelExit,
-} from "@slopcad/cad-kernel";
+} from "@slopcad/cad-kernel/node-worker-channel";
 import {
   createNodeWorkerChannel,
   nodeWorkerThreadEcho,
-} from "@slopcad/cad-kernel";
+} from "@slopcad/cad-kernel/node-worker-channel";
 
 /**
  * Environment variable enabling the node entry's test-only thread echo (see

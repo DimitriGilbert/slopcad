@@ -1,0 +1,115 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "slopcad-tools",
+  "homepage": "https://github.com/slopcad/slopcad",
+  "items": [
+    {
+      "name": "bounds-inspection-tool",
+      "type": "registry:lib",
+      "title": "Bounds Inspection Tool",
+      "description": "Headless measurement readout: the selected body's axis-aligned bounds from the settled scene's kernel measurement, with the kernel's declared tightness and honest null semantics.",
+      "dependencies": ["@slopcad/cad-core"],
+      "files": [
+        {
+          "path": "src/cad-workbench/bounds-inspection.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/bounds-inspection.ts"
+        }
+      ]
+    },
+    {
+      "name": "distance-inspection-tool",
+      "type": "registry:lib",
+      "title": "Distance Inspection Tool",
+      "description": "Headless measurement readout: the distance between the selection's references, distinguishing 'not requested' from 'declined' with the domain's structured refusal codes.",
+      "dependencies": ["@slopcad/cad-core"],
+      "files": [
+        {
+          "path": "src/cad-workbench/distance-inspection.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/distance-inspection.ts"
+        }
+      ]
+    },
+    {
+      "name": "mass-properties-inspection-tool",
+      "type": "registry:lib",
+      "title": "Mass Properties Inspection Tool",
+      "description": "Headless measurement readout: volume, area, and centroid of the selected body from the settled scene's kernel measurements.",
+      "dependencies": ["@slopcad/cad-core"],
+      "files": [
+        {
+          "path": "src/cad-workbench/mass-properties-inspection.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/mass-properties-inspection.ts"
+        }
+      ]
+    },
+    {
+      "name": "radius-inspection-tool",
+      "type": "registry:lib",
+      "title": "Radius Inspection Tool",
+      "description": "Headless measurement readout: the cylindrical face radius under the selection — a selected face that fits no cylinder reports nothing rather than a wrong number.",
+      "dependencies": ["@slopcad/cad-core"],
+      "files": [
+        {
+          "path": "src/cad-workbench/radius-inspection.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/radius-inspection.ts"
+        }
+      ]
+    },
+    {
+      "name": "extrude-tool",
+      "type": "registry:lib",
+      "title": "Extrude Tool",
+      "description": "Headless feature executor: turns a document's extrude feature (sketch profile, height, direction) into the kernel scene request the solid build consumes.",
+      "dependencies": [
+        "@slopcad/cad-core",
+        "@slopcad/cad-kernel",
+        "@slopcad/cad-sketch"
+      ],
+      "files": [
+        {
+          "path": "src/cad-workbench/extrude.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/extrude.ts"
+        }
+      ]
+    },
+    {
+      "name": "revolve-tool",
+      "type": "registry:lib",
+      "title": "Revolve Tool",
+      "description": "Headless feature executor: turns a document's revolve feature (sketch profile, axis, angle) into the kernel scene request the solid build consumes.",
+      "registryDependencies": ["@slopcad/extrude-tool"],
+      "dependencies": [
+        "@slopcad/cad-core",
+        "@slopcad/cad-kernel",
+        "@slopcad/cad-sketch"
+      ],
+      "files": [
+        {
+          "path": "src/cad-workbench/revolve.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/revolve.ts"
+        }
+      ]
+    },
+    {
+      "name": "hole-tool",
+      "type": "registry:lib",
+      "title": "Hole Tool",
+      "description": "Headless feature executor: turns a document's hole feature (diameter, depth, placement on the extruded base) into the boolean cut the solid build consumes.",
+      "registryDependencies": ["@slopcad/extrude-tool"],
+      "dependencies": ["@slopcad/cad-core"],
+      "files": [
+        {
+          "path": "src/cad-workbench/hole.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/hole.ts"
+        }
+      ]
+    }
+  ]
+}

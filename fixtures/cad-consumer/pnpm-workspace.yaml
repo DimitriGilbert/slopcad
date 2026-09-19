@@ -1,5 +1,5 @@
 # The consumer fixture is its OWN pnpm workspace (not a member of the
-# monorepo's). The five CAD packages plus the shared config package are
+# monorepo's). The six CAD packages plus the shared config package are
 # registered as members by path so their internal `workspace:*` and
 # `catalog:` manifest protocols resolve locally — the stand-in for real
 # published packages, which need none of this. The consumer itself is the
@@ -11,6 +11,7 @@ packages:
   - "../../packages/cad-kernel-manifold"
   - "../../packages/cad-r3f"
   - "../../packages/cad-react"
+  - "../../packages/cad-sketch"
   - "../../packages/config"
 
 # Mirrored from the monorepo catalog: the protocol versions the linked

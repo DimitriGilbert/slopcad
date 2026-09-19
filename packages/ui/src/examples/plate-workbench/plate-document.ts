@@ -1,11 +1,11 @@
 /**
- * The consumer's own document (Phase 16 consumer fixture): the parametric
- * plate the installed CAD components render and edit — one body, the
- * `holeDiameter` parameter that drives the real geometry, the translate
- * feature (with its three component parameters), and an expression-driven
- * `volumeHint` parameter so the parameter panel has expression data.
- * Built entirely through the public `@slopcad/cad-react` document API;
- * explicit ids keep every boot deterministic.
+ * The plate-workbench example's document: the parametric plate the
+ * installed CAD components render and edit — one body, the `holeDiameter`
+ * parameter that drives real geometry, the translate feature (with its
+ * three component parameters), and an expression-driven `volumeHint`
+ * parameter so the parameter panel has expression data. Built entirely
+ * through the public `@slopcad/cad-react` document API; explicit ids keep
+ * every boot deterministic.
  */
 
 import {
@@ -33,7 +33,7 @@ export const PLATE_BODY_ID = createBodyId("body_plate");
 /** The bore diameter parameter the panel edits and the kernel consumes. */
 export const HOLE_DIAMETER_PARAMETER = createParameterId("param_hole_diameter");
 
-/** The translate feature's id in the consumer document. */
+/** The translate feature's id in the example document. */
 export const TRANSLATE_FEATURE_ID = createFeatureId("feat_translate_plate");
 
 /** The translate component parameter ids, in x, y, z order. */
@@ -65,19 +65,19 @@ function unwrap<T>(
 ): T {
   if (!result.ok) {
     throw new Error(
-      `Consumer document rejected ${what}: ${result.error.message}`,
+      `The example document rejected ${what}: ${result.error.message}`,
     );
   }
   return result.value;
 }
 
 /**
- * Builds the consumer's session: plate body, the hole diameter (at the
+ * Builds the example's session: plate body, the hole diameter (at the
  * default), the translate components, the translate feature, and the
  * expression-driven volume hint (cached at the matching 16 mm value).
  */
-export function createConsumerSession(): CadSession {
-  let document = createDocument(createDocumentId("doc_consumer_fixture"));
+export function createPlateSession(): CadSession {
+  let document = createDocument(createDocumentId("doc_plate_workbench"));
   document = unwrap(
     addBody(document, { id: PLATE_BODY_ID, name: "plate" }),
     "the plate body",
@@ -117,7 +117,7 @@ export function createConsumerSession(): CadSession {
   const expression = parseExpression("holeDiameter * 2");
   if (!expression.ok) {
     throw new Error(
-      `Consumer document rejected the volume hint expression: ${expression.error.message}`,
+      `The example document rejected the volume hint expression: ${expression.error.message}`,
     );
   }
   document = unwrap(
@@ -159,5 +159,9 @@ export function translateComponentsMmOf(
     }
     components.push(valueIn(parameter.value, "mm"));
   }
-  return [components[0], components[1], components[2]];
+  const [x, y, z] = components;
+  if (x === undefined || y === undefined || z === undefined) {
+    return null;
+  }
+  return [x, y, z];
 }
