@@ -580,12 +580,10 @@ export {
 } from "./tool-translate";
 export type { RotateTarget, RotateToolState } from "./tool-rotate";
 export {
-  bodyBoundsCenter,
   resolveRotateTarget,
   ROTATE_FEATURE_KIND,
   ROTATE_TOOL_ID,
   rotateTool,
-  sweptAngleAboutZ,
 } from "./tool-rotate";
 export type {
   NativeFormatMigration,
@@ -652,7 +650,6 @@ export {
   pointEntity,
   selectionDistance,
   surfaceEntity,
-  surfaceOfRenderObject,
   vertexEntity,
 } from "./distance";
 export type {

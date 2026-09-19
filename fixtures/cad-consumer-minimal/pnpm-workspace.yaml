@@ -1,0 +1,32 @@
+# The MINIMAL consumer fixture is its OWN pnpm workspace, mirroring the
+# full consumer's stand-in discipline: the CAD packages the minimal install
+# needs are registered as members by path so their internal `workspace:*`
+# and `catalog:` manifest protocols resolve locally — the stand-in for real
+# published packages.
+packages:
+  - "."
+  - "../../packages/cad-core"
+  - "../../packages/cad-kernel"
+  - "../../packages/cad-kernel-manifold"
+  - "../../packages/cad-r3f"
+  - "../../packages/cad-react"
+  - "../../packages/config"
+
+# Mirrored from the monorepo catalog: the protocol versions the linked
+# packages' manifests reference.
+catalog:
+  "@testing-library/dom": ^10.4.1
+  "@testing-library/react": ^16.3.2
+  "@types/node": ^26.2.0
+  "@types/react": ^19.2.17
+  "@types/react-dom": ^19.2.3
+  "@vitest/coverage-istanbul": ^4.1.11
+  jsdom: ^30.0.0
+  react: ^19.2.8
+  react-dom: ^19.2.8
+  typescript: ^6.0.3
+  vitest: ^4.1.11
+
+allowBuilds:
+  esbuild: true
+  sharp: true

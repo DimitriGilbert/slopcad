@@ -30,8 +30,9 @@ This directory is the documentation home. Two rules govern it:
 
 The `/docs` route of `apps/web` renders this map with the live examples
 (gate: `pnpm test:docs`). The architecture record lives in
-[architecture/](architecture/) — the dependency map, ADRs, baselines, and
-spike findings.
+[architecture/](architecture/) — the dependency map, ADRs, baselines,
+spike findings, and the Phase 35
+[public API audit](architecture/api-audit.md).
 
 ## How the examples are gated
 

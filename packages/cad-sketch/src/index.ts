@@ -221,7 +221,6 @@ export {
   PROFILE_ENDPOINT_TOLERANCE_MM,
   PROFILE_MIN_AREA_MM2,
   profileLoopSignedArea,
-  profileSegmentSweep,
   resolveExtrudeProfile,
   resolveProfileLoops,
 } from "./profile";

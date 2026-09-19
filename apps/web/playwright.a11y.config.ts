@@ -74,18 +74,18 @@ export default defineConfig({
 });
 
 /*
- * WebKit decline (Phase 30, this machine): Playwright's WebKit 26.6
- * (webkit-2359) cannot launch here. The download and the icu soname gap
- * resolve, but the bundled WPE MiniBrowser then fails with:
- *
- *   MiniBrowser: error while loading shared libraries: libjpeg.so.8:
- *   cannot open shared object file
- *   → after a libjpeg.so.8 shim: version `LIBJPEG_8.0' not found
- *     (required by .../minibrowser-wpe/lib/libWPEWebKit-2.0.so.1)
- *
- * The host has no libjpeg v8-ABI library (Fedora ships libjpeg.so.62
- * only), plus no gstreamer1-libav, and the session has no sudo (and no
- * cmake) to provide them. Re-add a `webkit` project with the same shape
- * as `firefox` above once those system packages exist; the specs are
- * browser-agnostic and need no changes.
+ * WebKit (historical note, Phase 30 → overturned in Phase 35): Playwright's
+ * WebKit could not launch here — the bundled WPE MiniBrowser died on
+ * `libjpeg.so.8: LIBJPEG_8.0 not found` (Fedora ships libjpeg.so.62 only),
+ * and the Phase 30 icu soname shims failed symbol lookup once libjpeg was
+ * satisfied. Phase 35 overturned the decline WITHOUT sudo: real Ubuntu
+ * `libjpeg8` (turbo, 8-ABI) and `libicu74` packages extracted user-space
+ * into the browser bundle's own lib dirs (`pnpm webkit:deps`), plus
+ * PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS for the unused
+ * gstreamer1.0-libav media-codec check. WebKit now drives DOM AND software
+ * WebGL headlessly — the browser compatibility matrix
+ * (`pnpm test:matrix`, playwright.matrix.config.ts) runs the core
+ * workbench workflows on all three engines. This a11y harness keeps its
+ * chromium + firefox baseline (37+1skip) unchanged; a webkit project here
+ * would need only the same shape as `firefox` above.
  */

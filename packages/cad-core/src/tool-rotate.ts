@@ -111,7 +111,7 @@ export function resolveRotateTarget(
  * the render object's axis-aligned bounding box. `undefined` when the
  * projection is absent or carries no object for the body.
  */
-export function bodyBoundsCenter(
+function bodyBoundsCenter(
   projection: RenderProjection | null,
   bodyId: BodyId,
 ): RenderVector3 | undefined {
@@ -133,7 +133,7 @@ export function bodyBoundsCenter(
  * in the XY plane, or `null` when either radial direction is the zero
  * vector (degenerate).
  */
-export function sweptAngleAboutZ(
+function sweptAngleAboutZ(
   center: RenderVector3,
   from: RenderVector3,
   to: RenderVector3,
