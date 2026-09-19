@@ -1,0 +1,82 @@
+# Native files
+
+The native `slopcad` document format (`packages/cad-core/src/native-format.ts`,
+Phase 17) is the ONE serialization that preserves parametric history:
+same parameters (with expressions), same feature graph, same bodies,
+same undo/redo reach, same regeneration picture, same metadata.
+
+## The shape (v1, fixed key order)
+
+```jsonc
+{
+  "formatVersion": 1, // CAD_NATIVE_FORMAT_VERSION
+  "metadata": {/* sorted JSON-safe scalars */},
+  "document": {/* SerializedCadDocument — state at the history cursor */},
+  "history": {
+    "base": {/* the document the log starts from */},
+    "transactions": [/* the applied transaction log, incl. redo branch */],
+    "cursor": 3,
+  },
+  "regeneration": {/* loadable states, not recomputed */},
+  "rollback": { "afterFeatureId": null }, // optional envelope field (Phase 20)
+}
+```
+
+## The three persistence decisions
+
+1. **History: log AND state, dual-persisted with a replay check.** The
+   format stores the transaction log and the current document; loading
+   replays the log over the base through the single `applyTransaction`
+   interpreter and verifies the replay reaches a serialization-equal
+   state (`native-format/history-mismatch` otherwise). Belt and braces:
+   corruption fails structurally instead of loading quietly.
+2. **Regeneration states are loadable state, not recomputed.** They
+   record the last executor run's outcomes — recomputing them at load
+   would mean executing geometry before the document is even visible.
+3. **Derived kernel objects never become canonical.** Bodies persist as
+   `{ id, name }`; geometry is rebuilt by regeneration. Nothing derived
+   from a kernel appears in the file.
+
+## The API
+
+```ts
+import {
+  createNativeCadDocument,
+  serializeNativeCadDocument,
+  stringifyNativeCadDocument,
+  encodeNativeCadDocument,
+  parseNativeCadDocumentFromString,
+  parseNativeCadDocumentFromBytes,
+  validateNativeCadDocument,
+  migrateNativeCadDocument,
+} from "@slopcad/cad-core";
+
+const text = stringifyNativeCadDocument(serializeNativeCadDocument(native)); // 2-space JSON + \n
+const bytes = encodeNativeCadDocument(native); // UTF-8 of the same
+const reopened = parseNativeCadDocumentFromString(text); // replays + verifies
+const validation = validateNativeCadDocument(JSON.parse(text)); // structural, no replay,
+// collects every issue
+```
+
+Deterministic: the same document serializes to identical bytes (the
+suite pins a resave being byte-identical). Versioning is gated through
+the migration framework (`native-migration.ts`): current parses
+directly, older migrates (`planNativeFormatMigrations`), future is
+rejected predictably. The app's persistence bridge
+(`apps/web/src/cad-projects/native-document-bridge.ts`) is the one place
+the live session meets this format.
+
+## The runnable example
+
+`packages/docs-examples/src/core/native.ts`: a three-transaction session
+saved, reopened (hole parameter 12 mm restored, log replayed, 3
+transactions), validated (0 issues), and resaved byte-identically — the
+suite pins each fact.
+
+## What does NOT preserve history
+
+Every exchange format is geometry-only — see
+[mesh-exchange.md](mesh-exchange.md) and [step-iges.md](step-iges.md),
+and the table the `/docs` page renders. STEP import even marks the fact
+in data: imported solids carry `origin: "imported-step"`, so a consumer
+can always tell geometry-only imports from feature-built solids.

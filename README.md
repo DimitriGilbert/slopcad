@@ -1,6 +1,15 @@
 # slopcad
 
-This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Start, Self, TRPC, and more.
+A browser-native parametric CAD stack, built with
+[Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack)
+(TypeScript, TanStack Start, tRPC, Drizzle, Better Auth).
+
+**Start with the documentation:** [`docs/README.md`](docs/README.md) maps
+every topic (installation, the CAD core, kernels, workers, rendering,
+exchange formats, sketches, components, the registry, testing, package
+boundaries) with runnable, gate-verified examples in
+`packages/docs-examples`, and the `/docs` route of the web app executes
+the browser-safe examples live.
 
 ## Features
 
