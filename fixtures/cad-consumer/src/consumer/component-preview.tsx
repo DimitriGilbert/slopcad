@@ -86,39 +86,48 @@ export function ComponentPreview(): ReactElement {
         setBuildError("the mount builds one body");
         return;
       }
-      const volume = await componentKernel.volume(body.solid);
-      const tessellation = await componentKernel.tessellate(body.solid);
-      if (cancelled) return;
-      if (!volume.ok || !tessellation.ok) {
-        setBuildStatus("failed");
-        setBuildError("kernel measurement failed");
-        return;
-      }
-      const object = projectTessellation(MOUNT_BODY_ID, tessellation.value);
-      if (!object.ok) {
-        setBuildStatus("failed");
-        setBuildError(object.error.message);
-        return;
-      }
-      const scene = createRenderProjection([object.value], MOUNT_CAMERA);
-      if (!scene.ok) {
-        setBuildStatus("failed");
-        setBuildError(scene.error.message);
-        return;
-      }
-      setVolumeText(`${volume.value.toFixed(2)} mm³`);
-      setProjection(scene.value);
-      setBuildError("");
-      setBuildStatus("ok");
-      // The installed example runs on the same kernel with the current
-      // mount values; its total covers all four laid-out bodies.
-      const study = await assemblyStudyDirect(kernel, { nema17: values });
-      if (cancelled) return;
-      if (study.ok) {
-        setAssemblyTotalText(`${study.value.totalVolumeMm3.toFixed(2)} mm³`);
-        for (const studyBody of study.value.bodies) {
-          await componentKernel.dispose(studyBody.solid);
+      // Ownership: the built solid is real kernel-owned geometry whose
+      // WASM payload is freed only in `dispose`, so every path from here —
+      // success, cancellation, refusal — releases it through the kernel
+      // that minted it (the projection copies all values out of the WASM
+      // heap, so post-tessellate disposal is safe).
+      try {
+        const volume = await componentKernel.volume(body.solid);
+        const tessellation = await componentKernel.tessellate(body.solid);
+        if (cancelled) return;
+        if (!volume.ok || !tessellation.ok) {
+          setBuildStatus("failed");
+          setBuildError("kernel measurement failed");
+          return;
         }
+        const object = projectTessellation(MOUNT_BODY_ID, tessellation.value);
+        if (!object.ok) {
+          setBuildStatus("failed");
+          setBuildError(object.error.message);
+          return;
+        }
+        const scene = createRenderProjection([object.value], MOUNT_CAMERA);
+        if (!scene.ok) {
+          setBuildStatus("failed");
+          setBuildError(scene.error.message);
+          return;
+        }
+        setVolumeText(`${volume.value.toFixed(2)} mm³`);
+        setProjection(scene.value);
+        setBuildError("");
+        setBuildStatus("ok");
+        // The installed example runs on the same kernel with the current
+        // mount values; its total covers all four laid-out bodies.
+        const study = await assemblyStudyDirect(kernel, { nema17: values });
+        if (cancelled) return;
+        if (study.ok) {
+          setAssemblyTotalText(`${study.value.totalVolumeMm3.toFixed(2)} mm³`);
+          for (const studyBody of study.value.bodies) {
+            await componentKernel.dispose(studyBody.solid);
+          }
+        }
+      } finally {
+        await componentKernel.dispose(body.solid);
       }
     })();
     return () => {
@@ -140,6 +149,28 @@ export function ComponentPreview(): ReactElement {
           error: {
             code: "consumer/component-preview",
             message: "Component parameters are literal values.",
+          },
+        };
+      }
+      // The panel's own field gate checks finiteness only; the definition's
+      // descriptors carry the contract's min/max. Refusing a finite-but-
+      // out-of-range edit HERE keeps the panel mounted with its inline
+      // error (the only UI that can change these values) — instead of
+      // committing the value and unmounting the panel when the collection
+      // stops resolving against the contract.
+      const descriptor = NEMA17_MOUNT_DEFINITION.parameters.find(
+        (candidate) => candidate.name === parameter.name,
+      );
+      if (
+        descriptor !== undefined &&
+        (edit.value < (descriptor.min ?? Number.NEGATIVE_INFINITY) ||
+          edit.value > (descriptor.max ?? Number.POSITIVE_INFINITY))
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: "consumer/component-preview",
+            message: `${parameter.name} is out of range: it must stay between ${String(descriptor.min)} and ${String(descriptor.max)} (edit was ${String(edit.value)}).`,
           },
         };
       }

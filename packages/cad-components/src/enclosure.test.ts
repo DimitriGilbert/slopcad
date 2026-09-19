@@ -25,7 +25,11 @@ import {
   seatedLidZMm,
 } from "./enclosure";
 import { enclosureAnalytic } from "./component-fixtures";
-import { COMPONENT_KERNEL_CASES, unwrapComponentResult } from "./kernel-cases";
+import {
+  COMPONENT_KERNEL_CASES,
+  countKernelSolids,
+  unwrapComponentResult,
+} from "./kernel-cases";
 
 /** Builds at `values`, refusing anything but success. */
 async function buildOrThrow(
@@ -331,3 +335,58 @@ describe("electronics-enclosure ports and refusals (kernel-free)", () => {
     }
   });
 });
+
+describe.for(COMPONENT_KERNEL_CASES)(
+  "enclosure dispose accounting on %s",
+  (kernelCase) => {
+    it("strands nothing on the default build: every mint except the two returned bodies is disposed", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await kernelCase.create()),
+      );
+      const build = await buildOrThrow(
+        counter.kernel,
+        ENCLOSURE_DEFAULT_PARAMETERS,
+      );
+      const returned = new Set(build.bodies.map((body) => body.solid));
+      expect(returned.size).toBe(2);
+      // The default build's mints: shell block, cavity, hollowed shell,
+      // lid block, four boss pairs, their union, four pilot pairs, and the
+      // drilled lid.
+      expect(counter.minted).toHaveLength(22);
+      expect(counter.disposed).toHaveLength(
+        counter.minted.length - returned.size,
+      );
+      expect(new Set(counter.disposed).size).toBe(counter.disposed.length);
+      for (const solid of counter.disposed) {
+        expect(returned.has(solid)).toBe(false);
+      }
+      // The returned bodies stay caller-owned: release them through the
+      // same kernel.
+      for (const solid of returned) {
+        await counter.kernel.dispose(solid);
+      }
+    });
+
+    it("releases every mint when the kernel refuses mid-build", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await kernelCase.create()),
+        { failNthMint: 5 },
+      );
+      const build = await enclosure.build(
+        counter.kernel,
+        ENCLOSURE_DEFAULT_PARAMETERS,
+      );
+      expect(build.ok).toBe(false);
+      if (!build.ok) {
+        expect(build.error.code).toBe("test/injected-mint-refusal");
+      }
+      // The first boss cylinder refused: the four prior mints (shell
+      // block, cavity, hollowed shell, lid block) are all released — the
+      // would-be returned shell included, because nothing is returned on a
+      // refusal.
+      expect(counter.minted).toHaveLength(4);
+      expect(counter.disposed).toHaveLength(4);
+      expect(new Set(counter.disposed).size).toBe(4);
+    });
+  },
+);

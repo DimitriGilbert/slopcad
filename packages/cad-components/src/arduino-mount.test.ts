@@ -23,7 +23,11 @@ import {
   boardHoleCentersMm,
 } from "./arduino-mount";
 import { arduinoAnalytic } from "./component-fixtures";
-import { COMPONENT_KERNEL_CASES, unwrapComponentResult } from "./kernel-cases";
+import {
+  COMPONENT_KERNEL_CASES,
+  countKernelSolids,
+  unwrapComponentResult,
+} from "./kernel-cases";
 
 /** Builds at `values`, refusing anything but success. */
 async function buildOrThrow(
@@ -250,3 +254,55 @@ describe("arduino-uno-mount ports and refusals (kernel-free)", () => {
     }
   });
 });
+
+describe.for(COMPONENT_KERNEL_CASES)(
+  "arduino-mount dispose accounting on %s",
+  (kernelCase) => {
+    it("strands nothing on the default build: every mint except the returned body is disposed", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await kernelCase.create()),
+      );
+      const build = await buildOrThrow(
+        counter.kernel,
+        ARDUINO_MOUNT_DEFAULT_PARAMETERS,
+      );
+      const returned = new Set(build.bodies.map((body) => body.solid));
+      expect(returned.size).toBe(1);
+      // The default build's mints: plate, four standoff pairs, their
+      // union, four hole pairs, and the drilled result.
+      expect(counter.minted).toHaveLength(19);
+      expect(counter.disposed).toHaveLength(
+        counter.minted.length - returned.size,
+      );
+      expect(new Set(counter.disposed).size).toBe(counter.disposed.length);
+      for (const solid of counter.disposed) {
+        expect(returned.has(solid)).toBe(false);
+      }
+      // The returned body stays caller-owned: release it through the same
+      // kernel.
+      for (const solid of returned) {
+        await counter.kernel.dispose(solid);
+      }
+    });
+
+    it("releases every mint when the kernel refuses mid-build", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await kernelCase.create()),
+        { failNthMint: 11 },
+      );
+      const build = await arduinoMount.build(
+        counter.kernel,
+        ARDUINO_MOUNT_DEFAULT_PARAMETERS,
+      );
+      expect(build.ok).toBe(false);
+      if (!build.ok) {
+        expect(build.error.code).toBe("test/injected-mint-refusal");
+      }
+      // The first board hole refused: the ten prior mints (plate, four
+      // standoff pairs, the union) are all released.
+      expect(counter.minted).toHaveLength(10);
+      expect(counter.disposed).toHaveLength(10);
+      expect(new Set(counter.disposed).size).toBe(10);
+    });
+  },
+);

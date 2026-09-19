@@ -144,6 +144,22 @@ test("the installed NEMA 17 component builds, renders, and rebuilds", async ({
     .poll(async () => page.getByTestId("component-volume").textContent())
     .not.toBe(volumeDefault);
 
+  // A finite-but-out-of-range edit is refused by the apply gate itself:
+  // the panel STAYS MOUNTED and renders its inline error, and the last
+  // committed build is untouched (no unmounting to an unrecoverable
+  // alert, no rebuild).
+  await plateSizeInput.fill("10");
+  await componentPanel.getByRole("button", { name: "Rebuild" }).click();
+  const panelError = componentPanel.locator("[data-cad-param-panel-error]");
+  await expect(panelError).toBeVisible();
+  await expect(panelError).toContainText("plateSizeMm");
+  await expect(panelError).toContainText("out of range");
+  await expect(componentPanel).toBeVisible();
+  await expect(page.getByTestId("component-build-status")).toHaveText("ok");
+  await expect(
+    page.getByTestId("component-volume").textContent(),
+  ).resolves.not.toBe(volumeDefault);
+
   // 33.4: the installed headless tools list renders with real outcomes.
   await expect(page.locator("#installed-tools-root")).toBeVisible();
   const outcomes = page.locator('[data-testid="tool-outcome"]');

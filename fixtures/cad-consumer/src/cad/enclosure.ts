@@ -506,87 +506,117 @@ export const enclosure: CadComponent = {
     if (constrained !== null) return constrained;
     const derived = deriveEnclosure(p);
 
-    const shellBlock = await extrudeFootprint(
-      kernel,
-      derived.outerWidthMm,
-      derived.outerDepthMm,
-      derived.outerRadiusMm,
-      derived.outerHeightMm,
-      { x: 0, y: 0, z: 0 },
-    );
-    if (!shellBlock.ok) return shellBlock;
+    // Dispose discipline: every intermediate solid the build mints is
+    // released through the kernel that minted it — refusal paths included
+    // — and only the two returned bodies' solids survive the build
+    // (`dispose` is the release path for WASM-backed kernels; disposing
+    // operands after a boolean is proven safe by the kernel's own contract
+    // suite).
+    const minted: KernelSolid[] = [];
+    const returned: KernelSolid[] = [];
+    try {
+      const shellBlock = await extrudeFootprint(
+        kernel,
+        derived.outerWidthMm,
+        derived.outerDepthMm,
+        derived.outerRadiusMm,
+        derived.outerHeightMm,
+        { x: 0, y: 0, z: 0 },
+      );
+      if (!shellBlock.ok) return shellBlock;
+      minted.push(shellBlock.value);
 
-    const cavity = await extrudeFootprint(
-      kernel,
-      p.innerWidthMm,
-      p.innerDepthMm,
-      derived.innerRadiusMm,
-      p.innerHeightMm + CAVITY_OVERSHOOT_MM,
-      { x: p.wallThicknessMm, y: p.wallThicknessMm, z: p.floorThicknessMm },
-    );
-    if (!cavity.ok) return cavity;
+      const cavity = await extrudeFootprint(
+        kernel,
+        p.innerWidthMm,
+        p.innerDepthMm,
+        derived.innerRadiusMm,
+        p.innerHeightMm + CAVITY_OVERSHOOT_MM,
+        { x: p.wallThicknessMm, y: p.wallThicknessMm, z: p.floorThicknessMm },
+      );
+      if (!cavity.ok) return cavity;
+      minted.push(cavity.value);
 
-    const hollowed = await kernel.subtract(shellBlock.value, [cavity.value]);
-    if (!hollowed.ok) return hollowed;
+      const hollowed = await kernel.subtract(shellBlock.value, [cavity.value]);
+      if (!hollowed.ok) return hollowed;
+      minted.push(hollowed.value);
 
-    const lidBlock = await extrudeFootprint(
-      kernel,
-      derived.lidWidthMm,
-      derived.lidDepthMm,
-      derived.lidRadiusMm,
-      p.lidThicknessMm,
-      { x: 0, y: 0, z: 0 },
-    );
-    if (!lidBlock.ok) return lidBlock;
+      const lidBlock = await extrudeFootprint(
+        kernel,
+        derived.lidWidthMm,
+        derived.lidDepthMm,
+        derived.lidRadiusMm,
+        p.lidThicknessMm,
+        { x: 0, y: 0, z: 0 },
+      );
+      if (!lidBlock.ok) return lidBlock;
+      minted.push(lidBlock.value);
 
-    const bossCenters = lidBossCentersMm(p);
-    const bosses: KernelSolid[] = [];
-    for (const [x, y] of bossCenters) {
-      const boss = await kernel.createCylinder({
-        height: length(p.bossHeightMm),
-        radius: length(p.bossDiameterMm / 2),
-      });
-      if (!boss.ok) return boss;
-      const placed = await kernel.transform(boss.value, {
-        x: length(x),
-        y: length(y),
-        z: length(-p.bossHeightMm),
-      });
-      if (!placed.ok) return placed;
-      bosses.push(placed.value);
+      const bossCenters = lidBossCentersMm(p);
+      const bosses: KernelSolid[] = [];
+      for (const [x, y] of bossCenters) {
+        const boss = await kernel.createCylinder({
+          height: length(p.bossHeightMm),
+          radius: length(p.bossDiameterMm / 2),
+        });
+        if (!boss.ok) return boss;
+        minted.push(boss.value);
+        const placed = await kernel.transform(boss.value, {
+          x: length(x),
+          y: length(y),
+          z: length(-p.bossHeightMm),
+        });
+        if (!placed.ok) return placed;
+        minted.push(placed.value);
+        bosses.push(placed.value);
+      }
+      const lidWithBosses = await kernel.union([lidBlock.value, ...bosses]);
+      if (!lidWithBosses.ok) return lidWithBosses;
+      minted.push(lidWithBosses.value);
+
+      const pilots: KernelSolid[] = [];
+      const pilotHeightMm = p.lidThicknessMm + p.bossHeightMm;
+      for (const [x, y] of bossCenters) {
+        const pilot = await kernel.createCylinder({
+          height: length(pilotHeightMm),
+          radius: length(p.bossPilotDiameterMm / 2),
+        });
+        if (!pilot.ok) return pilot;
+        minted.push(pilot.value);
+        const placed = await kernel.transform(pilot.value, {
+          x: length(x),
+          y: length(y),
+          z: length(-p.bossHeightMm),
+        });
+        if (!placed.ok) return placed;
+        minted.push(placed.value);
+        pilots.push(placed.value);
+      }
+      const lid = await kernel.subtract(lidWithBosses.value, pilots);
+      if (!lid.ok) return lid;
+      minted.push(lid.value);
+      // Only the success return carries bodies: the returned-solely mark
+      // happens here, so a later failure disposes everything minted.
+      returned.push(hollowed.value, lid.value);
+
+      const bodyIds = ENCLOSURE_DEFINITION.preview.bodyIds;
+      return {
+        ok: true,
+        value: {
+          bodies: [
+            { bodyId: bodyIds[0] ?? "", name: "shell", solid: hollowed.value },
+            { bodyId: bodyIds[1] ?? "", name: "lid", solid: lid.value },
+          ],
+        },
+      };
+    } finally {
+      for (const solid of minted) {
+        if (returned.includes(solid)) {
+          continue;
+        }
+        await kernel.dispose(solid);
+      }
     }
-    const lidWithBosses = await kernel.union([lidBlock.value, ...bosses]);
-    if (!lidWithBosses.ok) return lidWithBosses;
-
-    const pilots: KernelSolid[] = [];
-    const pilotHeightMm = p.lidThicknessMm + p.bossHeightMm;
-    for (const [x, y] of bossCenters) {
-      const pilot = await kernel.createCylinder({
-        height: length(pilotHeightMm),
-        radius: length(p.bossPilotDiameterMm / 2),
-      });
-      if (!pilot.ok) return pilot;
-      const placed = await kernel.transform(pilot.value, {
-        x: length(x),
-        y: length(y),
-        z: length(-p.bossHeightMm),
-      });
-      if (!placed.ok) return placed;
-      pilots.push(placed.value);
-    }
-    const lid = await kernel.subtract(lidWithBosses.value, pilots);
-    if (!lid.ok) return lid;
-
-    const bodyIds = ENCLOSURE_DEFINITION.preview.bodyIds;
-    return {
-      ok: true,
-      value: {
-        bodies: [
-          { bodyId: bodyIds[0] ?? "", name: "shell", solid: hollowed.value },
-          { bodyId: bodyIds[1] ?? "", name: "lid", solid: lid.value },
-        ],
-      },
-    };
   },
 
   ports(values: ComponentParameterValues): readonly ComponentPortInstance[] {

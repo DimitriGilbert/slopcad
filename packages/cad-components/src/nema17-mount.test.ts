@@ -22,7 +22,11 @@ import {
   NEMA17_MOUNT_DEFINITION,
 } from "./nema17-mount";
 import { nema17Analytic } from "./component-fixtures";
-import { COMPONENT_KERNEL_CASES, unwrapComponentResult } from "./kernel-cases";
+import {
+  COMPONENT_KERNEL_CASES,
+  countKernelSolids,
+  unwrapComponentResult,
+} from "./kernel-cases";
 
 /** Builds at `values` and refuses to return anything but success. */
 async function buildOrThrow(
@@ -252,3 +256,55 @@ describe("nema17-mount ports and refusals (kernel-free)", () => {
     }
   });
 });
+
+describe.for(COMPONENT_KERNEL_CASES)(
+  "nema17-mount dispose accounting on %s",
+  (kernelCase) => {
+    it("strands nothing on the default build: every mint except the returned body is disposed", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await kernelCase.create()),
+      );
+      const build = await buildOrThrow(
+        counter.kernel,
+        NEMA17_MOUNT_DEFAULT_PARAMETERS,
+      );
+      const returned = new Set(build.bodies.map((body) => body.solid));
+      expect(returned.size).toBe(1);
+      // The default build's mints: plate, collar branch (collar, placed,
+      // union), bore pair, four screw pairs, and the drilled result.
+      expect(counter.minted).toHaveLength(15);
+      expect(counter.disposed).toHaveLength(
+        counter.minted.length - returned.size,
+      );
+      expect(new Set(counter.disposed).size).toBe(counter.disposed.length);
+      for (const solid of counter.disposed) {
+        expect(returned.has(solid)).toBe(false);
+      }
+      // The returned body stays caller-owned: release it through the same
+      // kernel.
+      for (const solid of returned) {
+        await counter.kernel.dispose(solid);
+      }
+    });
+
+    it("releases every mint when the kernel refuses mid-build", async () => {
+      const counter = countKernelSolids(
+        directComponentKernel(await kernelCase.create()),
+        { failNthMint: 4 },
+      );
+      const build = await nema17Mount.build(
+        counter.kernel,
+        NEMA17_MOUNT_DEFAULT_PARAMETERS,
+      );
+      expect(build.ok).toBe(false);
+      if (!build.ok) {
+        expect(build.error.code).toBe("test/injected-mint-refusal");
+      }
+      // The union of plate+collar refused: the three prior mints are all
+      // released, none survives the refusal.
+      expect(counter.minted).toHaveLength(3);
+      expect(counter.disposed).toHaveLength(3);
+      expect(new Set(counter.disposed).size).toBe(3);
+    });
+  },
+);

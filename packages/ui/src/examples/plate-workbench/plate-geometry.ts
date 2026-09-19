@@ -22,7 +22,11 @@ import {
   createManifoldRuntime,
   manifoldKernelFromRuntime,
 } from "@slopcad/cad-kernel-manifold";
-import type { GeometryKernel, Tessellation } from "@slopcad/cad-kernel";
+import type {
+  GeometryKernel,
+  KernelSolid,
+  Tessellation,
+} from "@slopcad/cad-kernel";
 // Vite asset pin: the dependency optimizer breaks manifold.js's own
 // `new URL("manifold.wasm", import.meta.url)` resolution, so the runtime
 // receives an explicit `locateFile` (the same approach the app's worker
@@ -63,7 +67,16 @@ let kernelPromise: Promise<GeometryKernel> | null = null;
 export function getPlateKernel(): Promise<GeometryKernel> {
   kernelPromise ??= createManifoldRuntime({
     locateFile: () => wasmUrl,
-  }).then(manifoldKernelFromRuntime);
+  })
+    .then(manifoldKernelFromRuntime)
+    .catch((error: unknown) => {
+      // A failed initialization clears the memo so an environment fix can
+      // be retried — the same semantics the runtime's own memo implements
+      // (a cached rejection would otherwise brick every plate build and
+      // consumer composition on the page until reload).
+      kernelPromise = null;
+      throw error;
+    });
   return kernelPromise;
 }
 
@@ -87,48 +100,74 @@ export async function buildPlateProjection(parameters: {
 }): Promise<PlateBuild> {
   try {
     const kernel = await getPlateKernel();
-    const plate = kernel.createBox({
-      width: length(PLATE_WIDTH_MM),
-      depth: length(PLATE_DEPTH_MM),
-      height: length(PLATE_HEIGHT_MM),
-    });
-    if (!plate.ok) return { ok: false, error: plate.error.message };
-    const boreRadiusMm = parameters.holeDiameterMm / 2;
-    const bore = kernel.createCylinder({
-      radius: length(boreRadiusMm),
-      height: length(PLATE_HEIGHT_MM),
-    });
-    if (!bore.ok) return { ok: false, error: bore.error.message };
-    const placedBore = kernel.transform(bore.value, {
-      x: length(PLATE_WIDTH_MM / 2),
-      y: length(PLATE_DEPTH_MM / 2),
-      z: length(0),
-    });
-    if (!placedBore.ok) return { ok: false, error: placedBore.error.message };
-    const drilled = kernel.subtract(plate.value, [placedBore.value]);
-    if (!drilled.ok) return { ok: false, error: drilled.error.message };
-    const [tx, ty, tz] = parameters.translateMm;
-    const moved =
-      tx === 0 && ty === 0 && tz === 0
-        ? drilled
-        : kernel.transform(drilled.value, {
-            x: length(tx),
-            y: length(ty),
-            z: length(tz),
-          });
-    if (!moved.ok) return { ok: false, error: moved.error.message };
-    const tessellated = kernel.tessellate(moved.value);
-    if (!tessellated.ok) return { ok: false, error: tessellated.error.message };
-    const tessellation: Tessellation = tessellated.value;
-    const object = unwrap(
-      projectTessellation(PLATE_BODY_ID, tessellation),
-      "The plate projection",
-    );
-    const projection = unwrap(
-      createRenderProjection([object], PLATE_CAMERA),
-      "The plate scene",
-    );
-    return { ok: true, projection };
+    // The kernel's ownership rule frees WASM payloads only in `dispose`,
+    // so every handle this build mints is released before the build
+    // returns — refusal paths included — and each exactly once: the
+    // identity set guards the moved/drilled alias of a zero translate,
+    // where `moved` IS `drilled`.
+    const minted: KernelSolid[] = [];
+    const released = new Set<KernelSolid>();
+    const releaseMinted = (): void => {
+      for (const handle of minted) {
+        if (released.has(handle)) {
+          continue;
+        }
+        released.add(handle);
+        kernel.dispose(handle);
+      }
+    };
+    try {
+      const plate = kernel.createBox({
+        width: length(PLATE_WIDTH_MM),
+        depth: length(PLATE_DEPTH_MM),
+        height: length(PLATE_HEIGHT_MM),
+      });
+      if (!plate.ok) return { ok: false, error: plate.error.message };
+      minted.push(plate.value);
+      const boreRadiusMm = parameters.holeDiameterMm / 2;
+      const bore = kernel.createCylinder({
+        radius: length(boreRadiusMm),
+        height: length(PLATE_HEIGHT_MM),
+      });
+      if (!bore.ok) return { ok: false, error: bore.error.message };
+      minted.push(bore.value);
+      const placedBore = kernel.transform(bore.value, {
+        x: length(PLATE_WIDTH_MM / 2),
+        y: length(PLATE_DEPTH_MM / 2),
+        z: length(0),
+      });
+      if (!placedBore.ok) return { ok: false, error: placedBore.error.message };
+      minted.push(placedBore.value);
+      const drilled = kernel.subtract(plate.value, [placedBore.value]);
+      if (!drilled.ok) return { ok: false, error: drilled.error.message };
+      minted.push(drilled.value);
+      const [tx, ty, tz] = parameters.translateMm;
+      const moved =
+        tx === 0 && ty === 0 && tz === 0
+          ? drilled
+          : kernel.transform(drilled.value, {
+              x: length(tx),
+              y: length(ty),
+              z: length(tz),
+            });
+      if (!moved.ok) return { ok: false, error: moved.error.message };
+      minted.push(moved.value);
+      const tessellated = kernel.tessellate(moved.value);
+      if (!tessellated.ok)
+        return { ok: false, error: tessellated.error.message };
+      const tessellation: Tessellation = tessellated.value;
+      const object = unwrap(
+        projectTessellation(PLATE_BODY_ID, tessellation),
+        "The plate projection",
+      );
+      const projection = unwrap(
+        createRenderProjection([object], PLATE_CAMERA),
+        "The plate scene",
+      );
+      return { ok: true, projection };
+    } finally {
+      releaseMinted();
+    }
   } catch (error) {
     return {
       ok: false,
