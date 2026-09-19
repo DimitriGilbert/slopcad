@@ -104,6 +104,7 @@ import { boundsReadout } from "./bounds-inspection";
 import { distanceReadout } from "./distance-inspection";
 import { massPropertiesReadout } from "./mass-properties-inspection";
 import { radiusReadout } from "./radius-inspection";
+import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
 import { WORKBENCH_SESSION_BACKEND } from "../render-fixture/session-backend";
 
 /** The workbench's top-level modes: the 3D model workspace or the sketch. */
@@ -315,8 +316,7 @@ export function useWorkbenchEngine(
         .join(","),
     [suppressed],
   );
-  const rollbackKey =
-    rollback === null ? "" : `after:${String(rollback.afterFeatureId)}`;
+  const rollbackKey = rollbackMarkerKey(rollback);
 
   useEffect(() => {
     const previous = previousRef.current;
@@ -329,6 +329,16 @@ export function useWorkbenchEngine(
       return;
     }
     const features = workbenchDocument.features;
+    // The stale-marker clamp: a marker whose anchor the document no longer
+    // declares (an undo removed the anchored feature, an older version was
+    // opened) clears itself and this pass runs the FULL timeline instead of
+    // hard-failing every future pass on the dead anchor. Start-of-timeline
+    // markers ({afterFeatureId: null}) never go stale; valid markers keep
+    // today's parking semantics exactly.
+    const rollbackPoint = clampedRollbackMarker(features, rollback);
+    if (rollbackPoint === null && rollback !== null) {
+      setRollback(null);
+    }
     const changedNodes =
       previous === null || previous.document === workbenchDocument
         ? []
@@ -342,7 +352,7 @@ export function useWorkbenchEngine(
       states,
       suppressed: [...suppressed],
       execute: workbenchExecutor(workbenchDocument),
-      rollbackPoint: rollback,
+      rollbackPoint,
       results: previous?.results,
     });
     if (!applied.ok) {
@@ -358,7 +368,10 @@ export function useWorkbenchEngine(
     previousRef.current = {
       document: workbenchDocument,
       suppressedKey,
-      rollbackKey,
+      // The CLAMPED key: the pass above ran with this marker, so the diff
+      // baseline must say so — the state update that clears the stale
+      // marker then lands as a no-op instead of a second pass.
+      rollbackKey: rollbackMarkerKey(rollbackPoint),
       states: applied.value.states,
       results: applied.value.results,
     };

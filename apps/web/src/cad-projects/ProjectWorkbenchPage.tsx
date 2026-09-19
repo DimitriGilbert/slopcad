@@ -156,6 +156,10 @@ function PersistenceBar({
       }
       store.replaceSession(parsed.session);
       engine.setActiveScene(parsed.scene);
+      // The persisted marker rides with the content: a reopened document
+      // executes the same parked timeline that was saved (and a marker-free
+      // file clears whatever the previously loaded content left behind).
+      engine.setRollback(parsed.rollback ?? null);
       milestonesRef.current = {
         loadedFrom: text,
         savedDocument: parsed.document,
