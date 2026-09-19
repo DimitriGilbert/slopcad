@@ -22,6 +22,7 @@ const SETTLE_POLL_MS = 50;
 
 /** One read of the fixture's state surface (attribute values or absence). */
 interface SettleState {
+  readonly dispatched: string | null;
   readonly inFlight: string | null;
   readonly applied: string | null;
   readonly current: string | null;
@@ -69,6 +70,45 @@ async function forceAnimationFrame(page: Page): Promise<void> {
 }
 
 /**
+ * The session's dispatch counter on a fixture root (`data-dispatched`,
+ * published by the render-fixture session's `writeSurface`). Capture it
+ * BEFORE the triggering action — the Apply click, the Extrude button — and
+ * hand it to {@link waitForSettledScene} as the settle anchor.
+ */
+export async function dispatchedCount(
+  page: Page,
+  rootId = "render-root",
+): Promise<number> {
+  const raw = await page
+    .locator(`#${rootId}`)
+    .getAttribute("data-dispatched")
+    .then((value) => value ?? "0");
+  const value = Number(raw);
+  expect(
+    Number.isInteger(value) && value >= 0,
+    `data-dispatched="${raw}"`,
+  ).toBe(true);
+  return value;
+}
+
+/**
+ * The anchored-settle baseline of {@link waitForSettledScene}: the dispatch
+ * counter ({@link dispatchedCount}) captured BEFORE the triggering action.
+ * With an anchor, the wait only accepts a settle whose dispatch has
+ * actually landed (`data-dispatched` past the baseline) — never the
+ * PRE-action settled state.
+ */
+export interface SettleAnchor {
+  readonly afterDispatch: number;
+}
+
+/** True when the surface's dispatch counter has passed the anchor's baseline. */
+function dispatchAdvanced(state: SettleState, anchor: SettleAnchor): boolean {
+  const dispatched = Number(state.dispatched ?? "0");
+  return Number.isInteger(dispatched) && dispatched > anchor.afterDispatch;
+}
+
+/**
  * Waits until the fixture's state surface proves a quiescent scene whose
  * pixels provably belong to the displayed numbers: no computation in
  * flight, the visible state at the newest revision, and the scene's
@@ -78,10 +118,22 @@ async function forceAnimationFrame(page: Page): Promise<void> {
  * has not, the loop nudges a frame (see `forceAnimationFrame`) instead of
  * waiting for one to arrive on its own; genuine non-settlement still
  * fails at the deadline.
+ *
+ * ANCHORED MODE: pass a {@link SettleAnchor} whose baseline was captured
+ * BEFORE the triggering action. The document change, the scene surfaces,
+ * and the dispatch effect land in separate commits, so a bare wait raced
+ * against the effect flush can return the PRE-action settled state; with
+ * an anchor, a settle is only accepted once the new dispatch itself has
+ * landed (the discipline `e2e-render/workflow.spec.ts`'s
+ * `waitForNextDispatch` pioneered). Prefer the anchor after every action
+ * whose dispatch rides a passive effect (panel Apply, extrude/hole/revolve
+ * bridges); synchronous dispatchers (fillet APPLY, the /render panel
+ * inputs) do not need it.
  */
 export async function waitForSettledScene(
   page: Page,
   rootId = "render-root",
+  anchor?: SettleAnchor,
 ): Promise<string> {
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
   let observed: string | SettleState = "the render-root element never appeared";
@@ -90,6 +142,7 @@ export async function waitForSettledScene(
       const root = document.getElementById(id);
       if (root === null) return null;
       return {
+        dispatched: root.getAttribute("data-dispatched"),
         inFlight: root.getAttribute("data-in-flight"),
         applied: root.getAttribute("data-applied-revision"),
         current: root.getAttribute("data-current-revision"),
@@ -99,6 +152,14 @@ export async function waitForSettledScene(
     }, rootId);
     if (state !== null) {
       observed = state;
+      if (anchor !== undefined && !dispatchAdvanced(state, anchor)) {
+        // The triggering action's dispatch has not landed yet: the surface
+        // still shows the pre-action state, which can read as fully
+        // settled. Never accept it — the anchored wait starts at the
+        // dispatch itself.
+        await page.waitForTimeout(SETTLE_POLL_MS);
+        continue;
+      }
       const status = classifySettle(state);
       if (status.settled) return status.volume;
       if (status.numericSettled) {

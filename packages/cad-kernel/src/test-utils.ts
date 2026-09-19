@@ -117,6 +117,17 @@ export function assertBoundsEqual(
       `Malformed bounds: expected ${formatBounds(expected)}, got ${formatBounds(actual)}.`,
     );
   }
+  // The actual side must be finite before any tolerance comparison: every
+  // comparison against NaN evaluates to false, so a NaN component would
+  // never trip the mismatch check below (the contract promises no
+  // NaN/Infinity in outputs — a violation must fail loudly).
+  for (const actualValue of [aMinX, aMaxX, aMinY, aMaxY, aMinZ, aMaxZ]) {
+    if (!Number.isFinite(actualValue)) {
+      throw new Error(
+        `Actual bounds ${formatBounds(actual)} carry a non-finite component (${String(actualValue)}).`,
+      );
+    }
+  }
   const axes: readonly (readonly [string, number, number])[] = [
     ["x", aMinX, eMinX],
     ["x", aMaxX, eMaxX],
@@ -144,6 +155,16 @@ function withinBox(
     const min = box.min[axis];
     const max = box.max[axis];
     if (value === undefined || min === undefined || max === undefined) {
+      return false;
+    }
+    // Non-finite values are never inside a box: every comparison against
+    // NaN is false, so without this check a NaN point would sit "inside"
+    // every box and a NaN box would "contain" every point.
+    if (
+      !Number.isFinite(value) ||
+      !Number.isFinite(min) ||
+      !Number.isFinite(max)
+    ) {
       return false;
     }
     if (value < min - toleranceMm || value > max + toleranceMm) return false;
@@ -213,6 +234,15 @@ export function assertVolumeClose(
   expectedMm3: number,
   relativeTolerance: number,
 ): void {
+  // The actual side must be finite before the tolerance comparison: every
+  // comparison against NaN is false (and an Infinity allowance catch is
+  // incidental, not explicit) — the contract promises no NaN/Infinity in
+  // outputs, so a non-finite measurement fails loudly here.
+  if (!Number.isFinite(actualMm3)) {
+    throw new Error(
+      `Volume ${String(actualMm3)} mm³ is not a finite number (the contract promises no NaN/Infinity in outputs).`,
+    );
+  }
   const allowance = Math.max(relativeTolerance * Math.abs(expectedMm3), 1e-9);
   if (Math.abs(actualMm3 - expectedMm3) > allowance) {
     throw new Error(
@@ -233,6 +263,13 @@ export function assertAreaClose(
   expectedMm2: number,
   relativeTolerance: number,
 ): void {
+  // Same finiteness discipline as `assertVolumeClose`: a NaN area would
+  // silently pass every `>`-form comparison.
+  if (!Number.isFinite(actualMm2)) {
+    throw new Error(
+      `Surface area ${String(actualMm2)} mm² is not a finite number (the contract promises no NaN/Infinity in outputs).`,
+    );
+  }
   const allowance = Math.max(relativeTolerance * Math.abs(expectedMm2), 1e-9);
   if (Math.abs(actualMm2 - expectedMm2) > allowance) {
     throw new Error(

@@ -11,7 +11,7 @@ import { defineConfig } from "@playwright/test";
  * run via `pnpm test:docs`.
  */
 
-const PORT = 3007;
+const PORT = 3011;
 const baseURL = process.env.DOCS_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({

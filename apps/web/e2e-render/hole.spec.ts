@@ -1,7 +1,12 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
-import { saveArtifact, sha256, waitForSettledScene } from "./helpers";
+import {
+  dispatchedCount,
+  saveArtifact,
+  sha256,
+  waitForSettledScene,
+} from "./helpers";
 import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
 import {
   HOLE_DEFAULT_DEPTH_MM,
@@ -112,16 +117,22 @@ async function drawRectangle(page: Page): Promise<void> {
   );
 }
 
-/** Fills one hole parameter through the panel and applies it. The first
- *  hole's parameters carry their index too (the plate fixture document
- *  owns the unsuffixed `holeDiameter` name), so `holeDiameter1` etc. */
+/** Fills one hole parameter through the panel and applies it, returning the
+ *  dispatch count captured BEFORE the Apply click (the settle anchor: the
+ *  panel's submit pipeline and the scene's dispatch effect land in separate
+ *  commits, so the caller's settle wait must be anchored on this baseline).
+ *  The first hole's parameters carry their index too (the plate fixture
+ *  document owns the unsuffixed `holeDiameter` name), so `holeDiameter1`
+ *  etc. */
 async function editHoleParameter(
   page: Page,
   name: string,
   value: string,
-): Promise<void> {
+): Promise<number> {
+  const afterDispatch = await dispatchedCount(page, "workbench-root");
   await page.getByLabel(`${name}1`, { exact: true }).fill(value);
   await page.getByRole("button", { name: "Apply" }).click();
+  return afterDispatch;
 }
 
 /**
@@ -218,8 +229,10 @@ test("a diameter edit regenerates the hole at the new analytic volume", async ({
 }) => {
   await runHoleJourney(page);
 
-  await editHoleParameter(page, "holeDiameter", "12");
-  const regenerated = Number(await waitForSettledScene(page, "workbench-root"));
+  const afterDispatch = await editHoleParameter(page, "holeDiameter", "12");
+  const regenerated = Number(
+    await waitForSettledScene(page, "workbench-root", { afterDispatch }),
+  );
   const analytic = blindVolume(12, HOLE_DEFAULT_DEPTH_MM);
   expect(
     Math.abs(regenerated - analytic) / analytic,
@@ -231,8 +244,10 @@ test("a depth edit reaching the thickness drills through", async ({ page }) => {
   await runHoleJourney(page);
 
   // Depth 12 ≥ the pad's 10 mm thickness: the documented through semantic.
-  await editHoleParameter(page, "holeDepth", "12");
-  const regenerated = Number(await waitForSettledScene(page, "workbench-root"));
+  const afterDispatch = await editHoleParameter(page, "holeDepth", "12");
+  const regenerated = Number(
+    await waitForSettledScene(page, "workbench-root", { afterDispatch }),
+  );
   const analytic = throughVolume(HOLE_DEFAULT_DIAMETER_MM);
   expect(
     Math.abs(regenerated - analytic) / analytic,
@@ -249,8 +264,14 @@ test("a position edit slides the hole out over the side face", async ({
   // Center 2 mm inside the +x face (r = 4, so the circle pokes 2 mm past
   // it): the removed area is the full disk MINUS the circular segment
   // beyond the face — r²·acos(d/r) − d·√(r²−d²).
-  await editHoleParameter(page, "holeX", String(bounds.max[0] - 2));
-  const regenerated = Number(await waitForSettledScene(page, "workbench-root"));
+  const afterDispatch = await editHoleParameter(
+    page,
+    "holeX",
+    String(bounds.max[0] - 2),
+  );
+  const regenerated = Number(
+    await waitForSettledScene(page, "workbench-root", { afterDispatch }),
+  );
   const radius = HOLE_DEFAULT_DIAMETER_MM / 2;
   const inFace = 2;
   const segmentArea =
