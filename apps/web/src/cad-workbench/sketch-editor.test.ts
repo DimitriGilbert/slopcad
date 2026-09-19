@@ -9,9 +9,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  applySketchTransaction,
   createCircleEntity,
   createHorizontalConstraint,
   createLineEntity,
+  createParallelConstraint,
   createPointEntity,
   createRectangleEntity,
   createSketch,
@@ -300,6 +302,38 @@ describe("sketch editor trim, construction, delete", () => {
     expect(refused.state.status.code).toBe("sketch/no-intersection");
   });
 
+  it("refuses trim when the nearest intersection sits exactly on the far endpoint", () => {
+    const a = createSketchEntityId("skent_a");
+    const b = createSketchEntityId("skent_b");
+    const sketch = createSketch(
+      xyWorkplane(),
+      [
+        createLineEntity(a, { x: 0, y: 0 }, { x: 30, y: 0 }),
+        // skent_b crosses skent_a exactly at skent_a's far endpoint (30, 0).
+        createLineEntity(b, { x: 30, y: -10 }, { x: 30, y: 10 }),
+      ],
+      [],
+    );
+    if (!sketch.ok) throw new Error(sketch.error.message);
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "trim", type: "activate-tool" },
+      sketch.value,
+    ).state;
+    // Click skent_a near its left end: the nearest intersection IS the far
+    // endpoint itself, so the trim must refuse, not commit a zero-length
+    // replacement line.
+    const refused = sketchEditorReducer(
+      state,
+      { point: { x: 1, y: 0 }, entityId: a, type: "canvas-pick" },
+      sketch.value,
+    );
+    expect(refused.transaction).toBeNull();
+    expect(refused.state.status.severity).toBe("error");
+    expect(refused.state.status.code).toBe("sketch/no-intersection");
+  });
+
   it("toggles construction geometry via entity.update", () => {
     let state = createSketchEditorState();
     state = sketchEditorReducer(
@@ -338,6 +372,92 @@ describe("sketch editor trim, construction, delete", () => {
       type: "sketch.constraint.delete",
     });
     expect(result.commands[1]).toMatchObject({ type: "sketch.entity.delete" });
+  });
+
+  it("clears the constraint selection on delete so a repeated Delete emits nothing", () => {
+    const a = createSketchEntityId("skent_a");
+    const constraintId = createSketchConstraintId("skcon_h");
+    const sketch = createSketch(
+      xyWorkplane(),
+      [createLineEntity(a, { x: 0, y: 0 }, { x: 60, y: 0 })],
+      [createHorizontalConstraint(constraintId, a)],
+    );
+    if (!sketch.ok) throw new Error(sketch.error.message);
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { constraintId, type: "select-constraint" },
+      sketch.value,
+    ).state;
+    const first = sketchEditorReducer(
+      state,
+      { type: "delete-selection" },
+      sketch.value,
+    );
+    // The selection is cleared alongside the emitted delete (mirroring the
+    // entity branch), so the id cannot dangle after the host applies it.
+    expect(first.state.selectedConstraintId).toBeNull();
+    expect(first.transaction?.commands).toEqual([
+      { constraintId, type: "sketch.constraint.delete" },
+    ]);
+    if (first.transaction === null) throw new Error("expected a transaction");
+    const applied = applySketchTransaction(sketch.value, first.transaction);
+    if (!applied.ok) throw new Error(applied.error.message);
+    const second = sketchEditorReducer(
+      first.state,
+      { type: "delete-selection" },
+      applied.value,
+    );
+    // The repeated Delete finds nothing selected: no transaction is emitted
+    // (nothing for the host to fail with sketch-command/constraint-unknown)
+    // and the status carries no error code — the designed nothing-selected
+    // branch, not a failure surfacing.
+    expect(second.transaction).toBeNull();
+    expect(second.state.status.code).toBeNull();
+    expect(second.state.status.message).toBe(
+      SKETCH_EDITOR_STATUS_TEXT.noSelection,
+    );
+  });
+
+  it("deletes a shared constraint once when both of its entities are selected", () => {
+    const a = createSketchEntityId("skent_a");
+    const b = createSketchEntityId("skent_b");
+    const constraintId = createSketchConstraintId("skcon_p");
+    const sketch = createSketch(
+      xyWorkplane(),
+      [
+        createLineEntity(a, { x: 0, y: 0 }, { x: 30, y: 0 }),
+        createLineEntity(b, { x: 0, y: 10 }, { x: 30, y: 10 }),
+      ],
+      [createParallelConstraint(constraintId, a, b)],
+    );
+    if (!sketch.ok) throw new Error(sketch.error.message);
+    // A multi-entity selection is the plural field's designed domain (reducer
+    // consumers build it); both selected lines share the parallel constraint.
+    const state = {
+      ...createSketchEditorState(),
+      selectedEntityIds: [a, b],
+    };
+    const transition = sketchEditorReducer(
+      state,
+      { type: "delete-selection" },
+      sketch.value,
+    );
+    const transaction = transition.transaction;
+    if (transaction === null) throw new Error("expected a transaction");
+    // One constraint delete for the shared constraint, then both entity
+    // deletes — a duplicated constraint delete would fail the batch
+    // atomically (constraint-unknown on the second occurrence).
+    expect(transaction.commands).toEqual([
+      { constraintId, type: "sketch.constraint.delete" },
+      { entityId: a, type: "sketch.entity.delete" },
+      { entityId: b, type: "sketch.entity.delete" },
+    ]);
+    const applied = applySketchTransaction(sketch.value, transaction);
+    if (!applied.ok) throw new Error(applied.error.message);
+    expect(applied.value.entities).toHaveLength(0);
+    expect(applied.value.constraints).toHaveLength(0);
+    expect(transition.state.selectedEntityIds).toEqual([]);
   });
 
   it("refuses deleting a rectangle edge", () => {

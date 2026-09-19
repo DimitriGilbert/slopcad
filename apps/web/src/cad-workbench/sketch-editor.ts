@@ -665,8 +665,14 @@ function trimEntity(
     }
   }
   // distance === 0: the near endpoint already sits on the intersection, so
-  // trimming would commit a degenerate (zero-length) update — refuse it.
+  // trimming would commit a degenerate (zero-length) update — refuse it. The
+  // far endpoint needs the same refusal: the intersection helpers accept hits
+  // exactly at the far end (t === 1), where the replacement line would also
+  // collapse to zero length.
   if (best === null || best.distance === 0) return null;
+  if (Math.hypot(best.point.x - far.x, best.point.y - far.y) === 0) {
+    return null;
+  }
   return nearEnd.which === "start"
     ? createLineEntity(lineId, best.point, far, {
         construction: line.construction,
@@ -922,7 +928,11 @@ export function sketchEditorReducer(
     case "delete-selection": {
       if (state.selectedConstraintId !== null) {
         return {
-          state,
+          // Clear the selection alongside the emitted delete — mirroring
+          // the entity branch clearing selectedEntityIds — so the id cannot
+          // dangle after the host applies the transaction and a repeated
+          // Delete does not target a nonexistent constraint.
+          state: { ...state, selectedConstraintId: null },
           transaction: {
             commands: [
               {
@@ -942,7 +952,15 @@ export function sketchEditorReducer(
           transaction: null,
         };
       }
-      const commands: SketchCommand[] = [];
+      // Each entity's constraint deletes are computed against the same
+      // pre-transaction sketch, so a constraint referencing two selected
+      // entities would be deleted twice — and the atomic applier rejects the
+      // second delete (constraint-unknown), refusing the whole batch. Collect
+      // one constraint delete per constraint id across entities, still before
+      // every entity delete (an entity cannot be deleted while referenced).
+      const constraintDeletes: SketchCommand[] = [];
+      const seenConstraintIds = new Set<SketchConstraintId>();
+      const entityDeletes: SketchCommand[] = [];
       for (const entityId of state.selectedEntityIds) {
         const result = deleteEntityCommands(sketch, entityId);
         if ("problem" in result) {
@@ -958,11 +976,18 @@ export function sketchEditorReducer(
             transaction: null,
           };
         }
-        commands.push(...result.commands);
+        for (const command of result.commands) {
+          if (command.type !== "sketch.constraint.delete") {
+            entityDeletes.push(command);
+          } else if (!seenConstraintIds.has(command.constraintId)) {
+            seenConstraintIds.add(command.constraintId);
+            constraintDeletes.push(command);
+          }
+        }
       }
       return {
         state: { ...state, selectedEntityIds: [] },
-        transaction: { commands },
+        transaction: { commands: [...constraintDeletes, ...entityDeletes] },
       };
     }
     case "canvas-pick":
