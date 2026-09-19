@@ -6,12 +6,15 @@
 # the documented contributor setup (install + copy .env.example to .env).
 #
 # How the clean tree is built honestly WITHOUT committing (courier commits
-# only after validation): the script stages the entire working tree
+# only after validation): the script snapshots the caller's current index
+# (`git write-tree` — side-effect-free), stages the entire working tree
 # (`git add -A`), materializes it as a tree object (`git write-tree` — no
 # commit object), exports exactly that tree (`git archive`) into a temp
-# directory, then UNSTAGES (plain `git reset`, which never touches working
-# files). The export therefore equals what the courier will commit —
-# gitignored state (node_modules, .data, e2e-artifacts, .output, coverage,
+# directory, then restores the caller's index from the snapshot (so any
+# staged selection that predated the run survives — plain `git reset`
+# would have wiped it; working files are never touched). The export
+# therefore equals what the courier will commit — gitignored state
+# (node_modules, .data, e2e-artifacts, .output, coverage,
 # packages/ui/public, .env, dist, reports) is excluded by construction.
 #
 # The battery run inside the clean tree (each step must succeed):
@@ -49,12 +52,27 @@ cleanup() {
   else
     rm -rf "$CLEAN"
   fi
-  # Unstage whatever this script staged; plain reset never touches files.
-  git -C "$ROOT" reset -q -- >/dev/null 2>&1 || true
+  # Restore the index EXACTLY as this script found it: PRIOR_TREE is the
+  # caller's staged selection snapshotted as a tree object before the
+  # script staged anything, so this reset un-stages only what the script
+  # staged. A plain `git reset --` would reset the whole index to HEAD and
+  # wipe pre-existing staged state. The explicit "." pathspec selects the
+  # tree-ish form (an empty pathspec would demand a commit, and PRIOR_TREE
+  # is a bare tree). (PRIOR_TREE is unset only when the script exited
+  # before its first staging step — nothing to restore.)
+  if [[ -n "${PRIOR_TREE:-}" ]]; then
+    git -C "$ROOT" reset -q "$PRIOR_TREE" -- . >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
 step "1/12 Export the exact working tree (stage → write-tree → archive)"
+# Snapshot the caller's index first. `git write-tree` is side-effect-free
+# (it materializes a tree object but touches neither index nor working
+# tree) and fails fast on an unmerged (mid-merge-conflict) index — which
+# is exactly when `git add -A` below must not run, because it would stage
+# conflict-marker resolutions the caller never made.
+PRIOR_TREE="$(git -C "$ROOT" write-tree)"
 git -C "$ROOT" add -A
 TREE="$(git -C "$ROOT" write-tree)"
 git -C "$ROOT" archive "$TREE" | tar -x -C "$CLEAN"

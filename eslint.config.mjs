@@ -54,6 +54,7 @@ export default tseslint.config(
       "apps/web/**/*.{ts,tsx}",
       "packages/ui/**/*.{ts,tsx}",
       "packages/cad-r3f/**/*.{ts,tsx}",
+      "packages/cad-react/**/*.{ts,tsx}",
     ],
     rules: reactHooks.configs.recommended.rules,
   },
