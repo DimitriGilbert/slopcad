@@ -73,12 +73,14 @@ import {
   type RegenerationStateMap,
 } from "@slopcad/cad-react";
 import {
+  bootWorkerChannel,
   createRevisionTag,
-  createWebWorkerTransport,
   createWorkerClient,
   resultMintsSolids,
   type ComputationContext,
+  type WorkerBootFailure,
   type WorkerClient,
+  type WorkerCrashPort,
   type WorkerSolidId,
   type WorkerTransport,
 } from "@slopcad/cad-kernel";
@@ -151,29 +153,39 @@ function readEnvironment(): PerfEnvironment {
   };
 }
 
-/** One fresh Manifold worker channel: the worker plus its raw transport. */
+/** One fresh Manifold worker channel: the worker, its transport and client. */
 interface FreshChannel {
-  readonly worker: Worker;
+  readonly worker: WorkerCrashPort;
   readonly transport: WorkerTransport;
+  readonly client: WorkerClient;
   dispose(): void;
 }
 
 /**
  * Boots the real Manifold worker entry (the same bundler-hosted module the
- * fixtures use). The raw port listener a caller adds FIRST sees every
- * message, including the plain non-protocol boot report that the worker
- * client's parse boundary drops.
+ * fixtures use), crash-settled (Phase 35 hardening): the boot's own client
+ * settles on a thread crash, and `onCrash` lets a probe that built ITS OWN
+ * client over the tapped transport close that client too, so a dead
+ * thread fails the probe honestly instead of hanging it. The raw port
+ * listener a caller adds FIRST sees every message, including the plain
+ * non-protocol boot report that the worker client's parse boundary drops.
  */
-function bootChannel(): FreshChannel {
-  const worker = new Worker(
-    new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
-    { type: "module" },
+function bootChannel(
+  onCrash: (failure: WorkerBootFailure) => void,
+): FreshChannel {
+  const boot = bootWorkerChannel(
+    new Worker(
+      new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
+      { type: "module" },
+    ),
+    onCrash,
   );
   return {
-    worker,
-    transport: createWebWorkerTransport(worker),
+    worker: boot.worker,
+    transport: boot.transport,
+    client: boot.client,
     dispose(): void {
-      worker.terminate();
+      boot.dispose();
     },
   };
 }
@@ -190,7 +202,7 @@ async function probeStartup(): Promise<Record<string, number[]>> {
   for (let boot = 0; boot < STARTUP_BOOT_COUNT; boot += 1) {
     const created = performance.now();
     let reportSeen = false;
-    const onMessage = (event: MessageEvent): void => {
+    const onMessage = (event: { readonly data: unknown }): void => {
       if (reportSeen) return;
       const report = manifoldWorkerBootReport(event.data);
       if (report === null) return;
@@ -198,9 +210,12 @@ async function probeStartup(): Promise<Record<string, number[]>> {
       workerSide.push(report.bootMs);
       reportArrival.push(performance.now() - created);
     };
-    const channel = bootChannel();
+    // This probe speaks through the boot's own client: a thread crash
+    // settles it (worker/transport-closed) and fails the probe honestly —
+    // no additional crash wiring needed.
+    const channel = bootChannel(() => {});
     channel.worker.addEventListener("message", onMessage);
-    const client = createWorkerClient({ transport: channel.transport });
+    const client = channel.client;
     const box = await client.request("solid.createBox", {
       width: length(30, "mm"),
       depth: length(20, "mm"),
@@ -243,7 +258,15 @@ async function probeOperations(): Promise<OperationCapture> {
   let tessellation: CapturedTessellation | null = null;
   let wireResponse: unknown = null;
 
-  const channel = bootChannel();
+  // This probe builds its OWN client over the tapped transport (the tap
+  // must sit between transport and client), so a thread crash must close
+  // THAT client: the boot terminates the thread, this handler settles the
+  // probe's in-flight requests (worker/transport-closed), and the probe
+  // fails honestly instead of hanging.
+  const tappedClient: { client?: WorkerClient } = {};
+  const channel = bootChannel(() => {
+    tappedClient.client?.close();
+  });
   const timed: WorkerTransport = {
     send(data: unknown): void {
       channel.transport.send(data);
@@ -278,6 +301,7 @@ async function probeOperations(): Promise<OperationCapture> {
     },
   };
   const client: WorkerClient = createWorkerClient({ transport: timed });
+  tappedClient.client = client;
 
   const context: ComputationContext = {
     revision: createRevisionTag(1),

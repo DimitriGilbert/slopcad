@@ -2,9 +2,9 @@
  * The Phase 10 browser fixture: the real Manifold kernel executing in a
  * real module Web Worker, wired exactly per the documented pattern — the
  * package's `manifold-worker.web` entry hosted through the bundler's
- * module-worker syntax (via `./manifold-worker-entry`), wrapped in
- * `createWebWorkerTransport`, spoken to through `createWorkerClient`, and
- * every parameter change dispatched through `createStaleResultCoordinator`
+ * module-worker syntax (via `./manifold-worker-entry`), booted through
+ * the crash-settling `bootWorkerChannel`, and every parameter change
+ * dispatched through `createStaleResultCoordinator`
  * so rapid updates leave exactly the newest revision's result visible.
  *
  * This is the production path, not the spike island: no geometry is
@@ -22,10 +22,8 @@ import { useEffect, useRef, useState } from "react";
 import { formatBoundsExtents } from "@slopcad/cad-core";
 import {
   createStaleResultCoordinator,
-  createWebWorkerTransport,
-  createWorkerClient,
+  bootWorkerChannel,
 } from "@slopcad/cad-kernel";
-import type { WorkerClient } from "@slopcad/cad-kernel";
 import type { PlateMeasurement } from "./plate-scene";
 
 import {
@@ -60,18 +58,23 @@ function setText(id: string, text: string): void {
  * hosts the real Manifold kernel off-thread.
  */
 function bootWorkerFixtureSession(): WorkerFixtureSession {
-  const worker = new Worker(
-    new URL("./manifold-worker-entry.ts", import.meta.url),
-    { type: "module" },
+  let errorText = "";
+  // The crash-settling boot (Phase 35 hardening): a dead thread settles
+  // in-flight requests (worker/transport-closed) instead of hanging, and
+  // the crash lands on the same error surface as computation failures.
+  const boot = bootWorkerChannel(
+    new Worker(new URL("./manifold-worker-entry.ts", import.meta.url), {
+      type: "module",
+    }),
+    (failure) => {
+      errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
+      writeSurface();
+    },
   );
-  const client: WorkerClient = createWorkerClient({
-    transport: createWebWorkerTransport(worker),
-  });
   const coordinator = createStaleResultCoordinator<PlateMeasurement>({
-    client,
+    client: boot.client,
   });
   const counters: FixtureCounters = { dispatched: 0, settled: 0 };
-  let errorText = "";
 
   /** Writes the whole state surface in one synchronous pass. */
   function writeSurface(): void {
@@ -159,8 +162,7 @@ function bootWorkerFixtureSession(): WorkerFixtureSession {
     },
     dispose(): void {
       cancelAnimationFrame(rafHandle);
-      client.close();
-      worker.terminate();
+      boot.dispose();
     },
   };
 }

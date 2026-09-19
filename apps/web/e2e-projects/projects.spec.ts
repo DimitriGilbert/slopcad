@@ -50,6 +50,22 @@ async function saveArtifact(name: string, bytes: Buffer): Promise<void> {
   await writeFile(`e2e-artifacts/projects/${name}`, bytes);
 }
 
+/**
+ * Registers a fresh session user through the public sign-up API.
+ * `page.request` shares the browser context's cookie jar, so the session
+ * cookie is live for the pages that follow.
+ */
+async function registerSessionUser(page: Page): Promise<void> {
+  const response = await page.request.post("/api/auth/sign-up/email", {
+    data: {
+      name: "Save Race E2E",
+      email: `save-race-e2e-${Date.now()}-${Math.round(Math.random() * 1e6)}@slopcad.dev`,
+      password: "supercalifragilistic",
+    },
+  });
+  expect(response.status()).toBeLessThan(400);
+}
+
 /** A point on the sketch canvas for workplane coordinates (documented transform). */
 function canvasPoint(x: number, y: number): { x: number; y: number } {
   return {
@@ -257,6 +273,112 @@ test("persistence: register, create project and document, model, save, reload, r
   ).toHaveCount(0);
   await saveArtifact(
     "workbench-reopened-version-1.png",
+    await page.screenshot(),
+  );
+});
+
+/**
+ * The save-race pin (Phase 35 hardening): Save serializes the document at
+ * CLICK time, and an edit that lands while the request is in flight must
+ * keep the surface dirty after the response settles — the persisted
+ * version contains the dispatched state, not the response-time state, so
+ * marking the later edit as saved would silently lose it on reload.
+ *
+ * Determinism: the save round trip is HELD by a route interception until
+ * the in-flight edit has visibly settled, so the ordering (edit lands
+ * before the response) is forced, not raced.
+ */
+test("an edit that lands during an in-flight save keeps the surface dirty", async ({
+  page,
+}) => {
+  await registerSessionUser(page);
+
+  // The journey's preamble: one project, one fresh document, opened.
+  await page.goto("/projects");
+  await page.getByLabel("Project name").fill("Save race");
+  await page.getByRole("button", { name: "Create project" }).click();
+  const projectLink = page.locator('[data-testid="project-list"] a', {
+    hasText: "Save race",
+  });
+  await expect(projectLink).toBeVisible();
+  await projectLink.click();
+  await page.getByLabel("Document name").fill("save-race-plate");
+  await page.getByRole("button", { name: "Create document" }).click();
+  const documentRow = page.locator('[data-testid="document-list"] li', {
+    hasText: "save-race-plate",
+  });
+  await expect(documentRow).toBeVisible();
+  await documentRow.getByRole("link", { name: "Open" }).click();
+  await expect(page.locator(PERSISTENCE_BAR)).toHaveAttribute(
+    "data-loaded",
+    "true",
+  );
+  await waitForRootSettle(page);
+
+  // SAVE 1 — the boot document becomes version 1; the bar turns clean.
+  await page.locator(SAVE_BUTTON).click();
+  await expect(page.locator(PERSISTENCE_BAR)).toHaveAttribute(
+    "data-live-version",
+    "1",
+  );
+  await expect(page.locator(PERSISTENCE_BAR)).toHaveAttribute(
+    "data-dirty",
+    "false",
+  );
+
+  // EDIT 1 — the panel's parameter edit makes the surface dirty.
+  const holeField = page.getByLabel("holeDiameter", { exact: true });
+  await holeField.fill("12");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await waitForRootSettle(page);
+  await expect(page.locator(PERSISTENCE_BAR)).toHaveAttribute(
+    "data-dirty",
+    "true",
+  );
+
+  // HOLD the save round trip: the server's response is not delivered
+  // until the in-flight edit below has settled.
+  let saveHeld = false;
+  let releaseSave: (() => void) | undefined;
+  await page.route("**/api/trpc/**", async (route) => {
+    if (route.request().url().includes("documents.save")) {
+      saveHeld = true;
+      await new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      });
+    }
+    await route.continue();
+  });
+
+  // SAVE 2 (dispatched at hole = 12) — the bar honestly shows saving…
+  await page.locator(SAVE_BUTTON).click();
+  await expect(page.locator(STATE_TEXT)).toHaveText("saving…");
+  await expect
+    .poll(() => saveHeld, { message: "the save request must be held" })
+    .toBe(true);
+
+  // EDIT 2 — lands while the save is in flight (dispatched state ≠ live).
+  await holeField.fill("14");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await waitForRootSettle(page);
+
+  // Release the round trip: version 2 lands with the DISPATCHED state.
+  releaseSave?.();
+  await expect(page.locator(PERSISTENCE_BAR)).toHaveAttribute(
+    "data-live-version",
+    "2",
+  );
+
+  // The pin: the in-flight edit is NOT the persisted state — the surface
+  // must stay dirty and Save must stay enabled after the settle.
+  await expect(page.locator(PERSISTENCE_BAR)).toHaveAttribute(
+    "data-dirty",
+    "true",
+  );
+  await expect(page.locator(STATE_TEXT)).toHaveText("unsaved changes");
+  await expect(page.locator(SAVE_BUTTON)).toBeEnabled();
+  await saveArtifact(
+    "save-race-dirty-after-in-flight-edit.png",
     await page.screenshot(),
   );
 });

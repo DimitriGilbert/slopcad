@@ -36,10 +36,8 @@ import {
 import type { ComputationContext, KernelBounds } from "@slopcad/cad-kernel";
 import {
   createStaleResultCoordinator,
-  createWebWorkerTransport,
-  createWorkerClient,
+  bootWorkerChannel,
 } from "@slopcad/cad-kernel";
-import type { WorkerClient } from "@slopcad/cad-kernel";
 import {
   createContextKernel,
   seatedLidOffsetMm,
@@ -297,18 +295,24 @@ export function bootComponentPreviewSession(
   surface: ComponentPreviewSurface,
   onApplied: (state: ComponentPreviewState) => void,
 ): ComponentPreviewSession {
-  const worker = new Worker(
-    new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
-    { type: "module" },
+  let errorText = "";
+  // The crash-settling boot (Phase 35 hardening): a dead thread settles
+  // in-flight requests (worker/transport-closed) instead of hanging, and
+  // the crash lands on the same error surface as build failures.
+  const boot = bootWorkerChannel(
+    new Worker(
+      new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
+      { type: "module" },
+    ),
+    (failure) => {
+      errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
+      writeSurface();
+    },
   );
-  const client: WorkerClient = createWorkerClient({
-    transport: createWebWorkerTransport(worker),
-  });
   const coordinator = createStaleResultCoordinator<ComponentPreviewState>({
-    client,
+    client: boot.client,
   });
   const counters = { dispatched: 0, settled: 0 };
-  let errorText = "";
 
   function setText(id: string, text: string): void {
     const element = document.getElementById(id);
@@ -408,8 +412,7 @@ export function bootComponentPreviewSession(
         );
     },
     dispose() {
-      client.close();
-      worker.terminate();
+      boot.dispose();
     },
   };
 }

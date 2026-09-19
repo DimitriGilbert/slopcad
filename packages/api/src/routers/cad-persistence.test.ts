@@ -45,6 +45,7 @@ import { user as userTable } from "@slopcad/db/schema/auth";
 import { describe, expect, it } from "vitest";
 
 import { router, t } from "../index";
+import { NATIVE_CONTENT_MAX_LENGTH } from "../limits";
 import { createDocumentsRouter } from "./documents";
 import { createProjectsRouter } from "./projects";
 
@@ -425,6 +426,23 @@ describe("native document round-trip", () => {
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     await expect(
       alice.documents.save({ documentId, nativeContent: "not json at all" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    expect(await alice.documents.listVersions({ documentId })).toEqual([]);
+  });
+
+  it("refuses an oversized native payload before parsing and leaves the store untouched", async () => {
+    const db = await createPersistenceFixture();
+    const alice = callerFor(ALICE_ID, db);
+    const projectId = await createOwnedProject(ALICE_ID, db);
+    const documentId = await createOwnedDocument(ALICE_ID, projectId, db);
+
+    // One character over the input cap: the input boundary must refuse it
+    // (BAD_REQUEST) without ever reaching the parse-and-replay machinery,
+    // and no version row may exist afterwards.
+    const oversized = "x".repeat(NATIVE_CONTENT_MAX_LENGTH + 1);
+    await expect(
+      alice.documents.save({ documentId, nativeContent: oversized }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
 
     expect(await alice.documents.listVersions({ documentId })).toEqual([]);

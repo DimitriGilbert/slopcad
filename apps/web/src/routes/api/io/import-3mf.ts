@@ -8,38 +8,26 @@
  * and projects the returned soup locally; STL import never touches this
  * endpoint (the STL adapter is pure JS and runs fully in the browser).
  *
- * Rejections are the adapter's own structured failures passed through
- * verbatim with HTTP 422 — the browser surfaces `three-mf-import/<cause>`
- * unchanged, so the server adds no failure vocabulary of its own.
+ * The handling itself lives in `@/io-fixture/import-3mf-endpoint`
+ * (Phase 35 hardening): a session gate (401) and a 64 MiB body cap (413)
+ * ahead of the buffering, then the adapter verbatim. The adapter's own
+ * structured failures still pass through with HTTP 422 — the browser
+ * surfaces `three-mf-import/<cause>` unchanged, so the parsing failure
+ * vocabulary stays the adapter's alone.
  */
 
-import { importThreeMf } from "@slopcad/cad-io";
+import { auth } from "@slopcad/auth";
 import { createFileRoute } from "@tanstack/react-router";
-import type { ThreeMfImportResponse } from "@/io-fixture/io-protocol";
+
+import { handleImportThreeMfRequest } from "@/io-fixture/import-3mf-endpoint";
 
 export const Route = createFileRoute("/api/io/import-3mf")({
   server: {
     handlers: {
-      POST: async ({ request }: { request: Request }): Promise<Response> => {
-        const bytes = new Uint8Array(await request.arrayBuffer());
-        const result = importThreeMf(bytes);
-        const payload: ThreeMfImportResponse = result.ok
-          ? {
-              ok: true,
-              units: result.value.units,
-              metadata: result.value.metadata,
-              positions: [...result.value.tessellation.positions],
-              indices: [...result.value.tessellation.indices],
-            }
-          : {
-              ok: false,
-              code: result.error.code,
-              message: result.error.message,
-            };
-        return Response.json(payload, {
-          status: result.ok ? 200 : 422,
-        });
-      },
+      POST: async ({ request }: { request: Request }): Promise<Response> =>
+        handleImportThreeMfRequest(request, (headers) =>
+          auth.api.getSession({ headers }),
+        ),
     },
   },
 });

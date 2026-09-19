@@ -2,9 +2,9 @@
  * The Phase 21.2 browser fixture: the real OpenCascade kernel executing in
  * a real module Web Worker, wired exactly like the Phase 10 Manifold
  * fixture — the package's `occt-worker.web` entry hosted through the
- * bundler's module-worker syntax (via `./occt-worker-entry`), wrapped in
- * `createWebWorkerTransport`, spoken to through `createWorkerClient`, every
- * parameter change dispatched through `createStaleResultCoordinator`.
+ * bundler's module-worker syntax (via `./occt-worker-entry`), booted
+ * through the crash-settling `bootWorkerChannel`, every parameter change
+ * dispatched through `createStaleResultCoordinator`.
  *
  * It differs from the Manifold fixture in three honest ways:
  *
@@ -34,12 +34,11 @@ import { useEffect, useRef, useState } from "react";
 import { formatBoundsExtents, length } from "@slopcad/cad-core";
 import {
   createStaleResultCoordinator,
-  createWebWorkerTransport,
-  createWorkerClient,
+  bootWorkerChannel,
   createWorkerRequestId,
   WorkerRequestFailure,
 } from "@slopcad/cad-kernel";
-import type { WorkerClient, ComputationContext } from "@slopcad/cad-kernel";
+import type { ComputationContext } from "@slopcad/cad-kernel";
 import { occtWorkerBootReport } from "@slopcad/cad-kernel-occt/occt-worker-boot-report";
 import type { OcctPlateMeasurement } from "./occt-plate-scene";
 
@@ -82,17 +81,24 @@ function setText(id: string, text: string): void {
  */
 function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
   const workerStartedAt = performance.now();
-  const worker = new Worker(
-    new URL("./occt-worker-entry.ts", import.meta.url),
-    { type: "module" },
+  let errorText = "";
+  // The crash-settling boot (Phase 35 hardening): a dead thread settles
+  // in-flight requests (worker/transport-closed) instead of hanging, and
+  // the crash lands on the same error surface as computation failures.
+  const boot = bootWorkerChannel(
+    new Worker(new URL("./occt-worker-entry.ts", import.meta.url), {
+      type: "module",
+    }),
+    (failure) => {
+      errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
+      writeSurface();
+    },
   );
-  const transport = createWebWorkerTransport(worker);
-  const client: WorkerClient = createWorkerClient({ transport });
+  const transport = boot.transport;
   const coordinator = createStaleResultCoordinator<OcctPlateMeasurement>({
-    client,
+    client: boot.client,
   });
   const counters: FixtureCounters = { dispatched: 0, settled: 0 };
-  let errorText = "";
   let bootMs: number | null = null;
   let readyMs: number | null = null;
   let wasmBytes: number | null = null;
@@ -252,7 +258,7 @@ function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
       // then the channel dies inside the same synchronous task: no response
       // can be processed before close, so the settlement below is
       // deterministic, not a race.
-      const inFlight = client.request(
+      const inFlight = boot.client.request(
         "solid.createSphere",
         { radius: length(1, "mm") },
         createWorkerRequestId("req_occt-dispose-probe"),
@@ -270,14 +276,12 @@ function bootOcctWorkerFixtureSession(): OcctWorkerFixtureSession {
           writeSurface();
         },
       );
-      client.close();
-      worker.terminate();
+      boot.dispose();
       writeSurface();
     },
     dispose(): void {
       cancelAnimationFrame(rafHandle);
-      client.close();
-      worker.terminate();
+      boot.dispose();
     },
   };
 }

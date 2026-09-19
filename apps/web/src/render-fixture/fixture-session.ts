@@ -18,10 +18,8 @@ import {
 } from "@slopcad/cad-core";
 import {
   createStaleResultCoordinator,
-  createWebWorkerTransport,
-  createWorkerClient,
+  bootWorkerChannel,
 } from "@slopcad/cad-kernel";
-import type { WorkerClient } from "@slopcad/cad-kernel";
 import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
 import type {
   ExtrudeSceneRequest,
@@ -180,18 +178,24 @@ export function bootRenderFixtureSession(
   targets: FixtureSurfaceTargets,
   onApplied: (state: PlateRenderState, revision: number) => void,
 ): RenderFixtureSession {
-  const worker = new Worker(
-    new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
-    { type: "module" },
+  let errorText = "";
+  // The crash-settling boot (Phase 35 hardening): a dead thread settles
+  // in-flight requests (worker/transport-closed) instead of hanging, and
+  // the crash lands on the same error surface as computation failures.
+  const boot = bootWorkerChannel(
+    new Worker(
+      new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
+      { type: "module" },
+    ),
+    (failure) => {
+      errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
+      writeSurface();
+    },
   );
-  const client: WorkerClient = createWorkerClient({
-    transport: createWebWorkerTransport(worker),
-  });
   const coordinator = createStaleResultCoordinator<PlateRenderState>({
-    client,
+    client: boot.client,
   });
   const counters = { dispatched: 0, settled: 0 };
-  let errorText = "";
 
   /** Writes the whole coordinator-driven state surface in one pass. */
   function writeSurface(): void {
@@ -318,8 +322,7 @@ export function bootRenderFixtureSession(
         });
     },
     dispose(): void {
-      client.close();
-      worker.terminate();
+      boot.dispose();
     },
   };
 }

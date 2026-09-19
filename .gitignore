@@ -64,3 +64,6 @@ e2e-artifacts
 .cache
 tmp
 temp
+
+# Live review-session artifacts (not repo content, never committed)
+.review

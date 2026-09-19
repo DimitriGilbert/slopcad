@@ -15,7 +15,9 @@
  *   transaction log over the base and checks it against the persisted
  *   state) — a payload that fails the format's machinery is refused with
  *   BAD_REQUEST, so what a load later reads is always a document the
- *   format accepts.
+ *   format accepts. The payload's size is capped at the input boundary
+ *   (see `../limits`), so the replay cost and the stored row are bounded
+ *   before the parser is ever reached.
  */
 
 import { randomUUID } from "node:crypto";
@@ -34,7 +36,7 @@ import { and, asc, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { protectedProcedure } from "../index";
-import { DOCUMENT_NAME_MAX_LENGTH } from "../limits";
+import { DOCUMENT_NAME_MAX_LENGTH, NATIVE_CONTENT_MAX_LENGTH } from "../limits";
 
 /** The wire form of a document row (no content — that is a version read). */
 export interface DocumentDto {
@@ -258,7 +260,9 @@ export function createDocumentsRouter(deps: { readonly db: SlopcadDatabase }) {
       .input(
         z.object({
           documentId: z.string().min(1),
-          nativeContent: z.string().min(1),
+          // Capped BEFORE the mutation runs: the full parse-and-replay
+          // validation below must never be an unbounded-cost oracle.
+          nativeContent: z.string().min(1).max(NATIVE_CONTENT_MAX_LENGTH),
         }),
       )
       .mutation(async ({ ctx, input }) => {
