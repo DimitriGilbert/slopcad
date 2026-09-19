@@ -72,23 +72,6 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   surfaceArea: true,
 });
 
-/** The payload behind the adapter's solid handles: the worker's solid id. */
-const tag = createSolidTag<WorkerSolidId>();
-
-function wrapWorkerSolid(id: WorkerSolidId): KernelSolid {
-  return tag.wrap(id);
-}
-
-function workerSolidId(solid: KernelSolid): WorkerSolidId {
-  const id = tag.unwrap(solid);
-  if (id === undefined) {
-    throw new Error(
-      "The context kernel rejected a solid handle it did not mint.",
-    );
-  }
-  return id;
-}
-
 /**
  * Recovers a structured kernel error from a failed worker request: the
  * kernel's own code rides `data.kernelCode` (the worker server's documented
@@ -147,6 +130,23 @@ export function createContextKernel(
   context: ComputationContext,
   options: ContextKernelOptions = {},
 ): ComponentKernel {
+  // The payload behind the adapter's solid handles is the worker's solid
+  // id, wrapped in a tag this instance owns. Handles are owned per kernel
+  // instance (the ownership model `opaque.ts` documents, and the convention
+  // of every other adapter): each `createContextKernel` call mints its own
+  // tag, so a handle from a sibling context kernel trips the local
+  // "did not mint" guard below instead of reaching the remote worker.
+  const tag = createSolidTag<WorkerSolidId>();
+  const wrapWorkerSolid = (id: WorkerSolidId): KernelSolid => tag.wrap(id);
+  const workerSolidId = (solid: KernelSolid): WorkerSolidId => {
+    const id = tag.unwrap(solid);
+    if (id === undefined) {
+      throw new Error(
+        "The context kernel rejected a solid handle it did not mint.",
+      );
+    }
+    return id;
+  };
   const unsupported = (operation: string): ComponentKernelResult<never> =>
     fail({
       code: KERNEL_ERROR_CODES.unsupportedOperation,

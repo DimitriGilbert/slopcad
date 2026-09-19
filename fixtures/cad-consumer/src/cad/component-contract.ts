@@ -23,6 +23,7 @@ import {
   type ParameterError,
   type ParameterId,
   type ParameterInput,
+  toCanonical,
   volume,
   ok,
 } from "@slopcad/cad-core";
@@ -767,7 +768,10 @@ export function componentParameterCollection(
 /**
  * The canonical parameter values behind a cad-core parameter collection
  * produced by {@link componentParameterCollection} — the apply path's
- * read-back (panel edit → values → rebuild).
+ * read-back (panel edit → values → rebuild). Stored values ride in their
+ * authored unit, so each one is normalized through `toCanonical` before
+ * it is handed back: an edit authored as `length(6, "cm")` reads back as
+ * the canonical 60, never the authored-unit magnitude 6.
  */
 export function parameterValuesOfCollection(
   definition: CadComponentDefinition,
@@ -778,7 +782,9 @@ export function parameterValuesOfCollection(
     const parameter = collection.parameters.find(
       (candidate) => candidate.name === descriptor.name,
     );
-    values[descriptor.name] = parameter?.value.value ?? descriptor.defaultValue;
+    values[descriptor.name] = parameter
+      ? toCanonical(parameter.value).value
+      : descriptor.defaultValue;
   }
   return Object.freeze(values);
 }

@@ -410,8 +410,9 @@ function parametersOf(
 /**
  * The component-specific constraints (structured
  * `component/parameter-conflict`): the corners fit the footprint, the
- * bosses stay clear of the walls and of each other, the bosses stop above
- * the floor, and the pilot leaves boss wall.
+ * bosses stay clear of the walls, of the cavity's rounded corner arcs,
+ * and of each other, the bosses stop above the floor, and the pilot
+ * leaves boss wall.
  */
 function validateConstraints(
   p: EnclosureParameters,
@@ -434,6 +435,45 @@ function validateConstraints(
       ok: false,
       error: parameterConflict(
         `The boss centers sit ${String(p.bossInsetMm)} mm from the inner walls, so a ⌀${String(p.bossDiameterMm)} boss crosses the wall (inset must be ≥ the boss radius).`,
+        p,
+      ),
+    };
+  }
+  // Corner-arc fit, in the seated frame (where the bosses actually meet
+  // the shell): the seated lid centers its bosses `lidFitClearance/2`
+  // past the cavity walls and the lid-local inset adds another
+  // `lidFitClearance/2`, so a corner boss center sits `bossInset +
+  // lidFitClearance` from both cavity walls — diagonally
+  // `√2 · |innerRadius − inset|` from every corner arc's center (a
+  // rounded rect's four corners are congruent, and the inner and outer
+  // corner arcs share that center). The obstacle is the WALL BAND
+  // between those concentric arcs — inner radius `innerRadius`, outer
+  // radius `innerRadius + wallThickness` — not the inner arc circle
+  // alone: a boss pushed past the inner arc embeds into band material,
+  // so "outside the arc circle and far enough" is never clear, and a
+  // boss center can even sit far outside the circle while its disk
+  // still crosses the band. The boss clears in exactly two shapes:
+  // wholly inside the inner arc circle (`dist + bossRadius ≤
+  // innerRadius`), or beyond the corner square entirely (`seatedInset −
+  // bossRadius ≥ innerRadius`, the plain-wall cavity region where no
+  // arc bounds the boss). Anything else puts disk material past the
+  // inner arc within the corner square, embedding the seated boss into
+  // the rounded shell wall.
+  const innerRadiusMm = Math.max(p.cornerRadiusMm - p.wallThicknessMm, 0);
+  const seatedBossInsetMm = p.bossInsetMm + p.lidFitClearanceMm;
+  const arcCenterDistanceMm =
+    Math.SQRT2 * Math.abs(innerRadiusMm - seatedBossInsetMm);
+  const clearsBeyondCornerSquare =
+    seatedBossInsetMm - bossRadius >= innerRadiusMm;
+  const clearsInsideArc = arcCenterDistanceMm + bossRadius <= innerRadiusMm;
+  if (!clearsBeyondCornerSquare && !clearsInsideArc) {
+    // How far the boss rim reaches past the inner arc, radially into
+    // the band (both numbers named: the reach and the band's thickness).
+    const rimReachPastArcMm = arcCenterDistanceMm + bossRadius - innerRadiusMm;
+    return {
+      ok: false,
+      error: parameterConflict(
+        `The corner bosses (⌀${String(p.bossDiameterMm)}) embed into the cavity's rounded corner arcs: at a ${String(p.cornerRadiusMm)} mm corner radius each seated boss rim reaches ${rimReachPastArcMm.toFixed(2)} mm past the inner arc into the ${String(p.wallThicknessMm)} mm thick wall band — lower the corner radius or the boss diameter, or raise the boss inset.`,
         p,
       ),
     };

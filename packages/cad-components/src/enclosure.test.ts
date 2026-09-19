@@ -13,6 +13,7 @@ import type { KernelBounds } from "@slopcad/cad-kernel";
 import { CURVED_VOLUME_TOLERANCE } from "@slopcad/cad-kernel/contract-suite";
 import type { ComponentBuild } from "./cad-component";
 import type { ComponentKernel } from "./component-kernel";
+import type { EnclosureParameters } from "./enclosure";
 
 import { directComponentKernel } from "./component-kernel";
 import {
@@ -272,6 +273,126 @@ describe("electronics-enclosure ports and refusals (kernel-free)", () => {
       expect(refused.error.code).toBe("component/parameter-conflict");
       expect(refused.error.message).toContain("corner radius");
     }
+  });
+
+  it("refuses corner bosses that embed into the cavity's corner arcs", async () => {
+    const counter = countKernelSolids(
+      directComponentKernel(await COMPONENT_KERNEL_CASES[0]!.create()),
+    );
+    // In-bounds corner radii whose inner arcs reach past the seated
+    // corner bosses: 13 clears by 2.96 mm of the required 3, 15 by
+    // 2.13, 20 by 0.06 (the review measured 238.11 mm³ of real seated
+    // lid/shell interference at 20 — now unreachable, because the
+    // refusal fires before any kernel call).
+    for (const cornerRadiusMm of [13, 15, 20]) {
+      const refused = await enclosure.build(counter.kernel, {
+        ...ENCLOSURE_DEFAULT_PARAMETERS,
+        cornerRadiusMm,
+      });
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) {
+        expect(refused.error.code).toBe("component/parameter-conflict");
+        expect(refused.error.message).toContain("corner bosses");
+        expect(refused.error.message).toContain("corner arcs");
+      }
+    }
+    // The refusal is pre-kernel on every path: nothing is minted.
+    expect(counter.minted).toHaveLength(0);
+    expect(counter.disposed).toHaveLength(0);
+  });
+
+  it("refuses bosses that pierce the corner wall band from the far side (the executed repros)", async () => {
+    const kernel = directComponentKernel(
+      await COMPONENT_KERNEL_CASES[0]!.create(),
+    );
+    // The hole in the superseded |dist − innerRadius| form, which
+    // treated the inner arc CIRCLE alone as the obstacle on both sides:
+    // the real obstacle is the WALL BAND between the concentric inner
+    // and outer corner arcs. Each config below is in-bounds and cleared
+    // the old form, yet executes with the seated bosses embedded in the
+    // band — radius 20/wall 6 measured 28.95 mm³ of seated
+    // interference, radius 18/wall 2.4 measured 3.88 mm³, and the
+    // analytic ⌀4 case at radius 16 reaches 4.52 mm past the inner arc
+    // clean through the 2.4 mm wall.
+    const wallBandRepros: readonly EnclosureParameters[] = [
+      {
+        ...ENCLOSURE_DEFAULT_PARAMETERS,
+        bossDiameterMm: 3,
+        bossInsetMm: 2,
+        cornerRadiusMm: 20,
+        lidFitClearanceMm: 0,
+        wallThicknessMm: 6,
+      },
+      {
+        ...ENCLOSURE_DEFAULT_PARAMETERS,
+        bossDiameterMm: 3,
+        bossInsetMm: 2,
+        cornerRadiusMm: 18,
+        lidFitClearanceMm: 0,
+      },
+      {
+        ...ENCLOSURE_DEFAULT_PARAMETERS,
+        bossDiameterMm: 4,
+        bossInsetMm: 2,
+        cornerRadiusMm: 16,
+      },
+    ];
+    for (const repro of wallBandRepros) {
+      const refused = await enclosure.build(kernel, repro);
+      expect(refused.ok, `cornerRadius ${String(repro.cornerRadiusMm)}`).toBe(
+        false,
+      );
+      if (!refused.ok) {
+        expect(refused.error.code).toBe("component/parameter-conflict");
+        expect(refused.error.message).toContain("corner bosses");
+        expect(refused.error.message).toContain("wall band");
+      }
+    }
+  });
+
+  it("keeps the corner bosses clear of the arcs at the defaults and at radius 12", async () => {
+    const kernel = directComponentKernel(
+      await COMPONENT_KERNEL_CASES[0]!.create(),
+    );
+    // Defaults (radius 3) and the largest passing radius (12, arc
+    // clearance 3.38 mm ≥ the 3 mm boss radius) both build.
+    const atTwelve = { ...ENCLOSURE_DEFAULT_PARAMETERS, cornerRadiusMm: 12 };
+    const measured = await measureAll(
+      kernel,
+      await buildOrThrow(kernel, ENCLOSURE_DEFAULT_PARAMETERS),
+    );
+    expect(measured).toHaveLength(2);
+    const analytic = enclosureAnalytic(atTwelve);
+    const measuredTwelve = await measureAll(
+      kernel,
+      await buildOrThrow(kernel, atTwelve),
+    );
+    const shell = measuredTwelve.find((body) => body.name === "shell");
+    if (shell === undefined) return;
+    assertVolumeClose(
+      shell.volumeMm3,
+      analytic.shellVolumeMm3,
+      CURVED_VOLUME_TOLERANCE,
+    );
+    assertBoundsEqual(shell.bounds, analytic.shellBounds);
+  });
+
+  it("builds when the bosses sit wholly beyond the corner square at a large radius", async () => {
+    const kernel = directComponentKernel(
+      await COMPONENT_KERNEL_CASES[0]!.create(),
+    );
+    // The far side's clear shape: at a 16 mm corner radius (inner arc
+    // 13.6) the defaults refuse, but raising the inset per the
+    // refusal's advice moves each boss past the corner square entirely
+    // (seated 16.7 − 3 ≥ 13.6), where no arc bounds it — the branch the
+    // old absolute-value form misrepresented as "clears on either
+    // side".
+    const beyond = await buildOrThrow(kernel, {
+      ...ENCLOSURE_DEFAULT_PARAMETERS,
+      bossInsetMm: 16.5,
+      cornerRadiusMm: 16,
+    });
+    expect(beyond.bodies).toHaveLength(2);
   });
 
   it("refuses bosses that cross the walls, overlap each other, outgrow the cavity, or lose their wall", async () => {
