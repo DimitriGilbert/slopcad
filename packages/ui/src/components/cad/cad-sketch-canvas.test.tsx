@@ -183,6 +183,37 @@ describe("CadSketchCanvas", () => {
     expect(missed.entityId).toBeNull();
   });
 
+  it("applies the shared 8 px screen tolerance to arc hits", () => {
+    // Same quarter arc about (0,0) r=25. A pick 1.5 mm off the rim inside
+    // the sweep is 6 px of rim distance at the harness scale 4 — a hit
+    // under the shared screen-pixel gate (and a miss under a fixed 0.5 mm
+    // workplane band, the asymmetric behavior the pixel gate replaces).
+    const arcOnly: readonly CadSketchCanvasEntity[] = [
+      {
+        id: "skent_arc",
+        kind: "arc",
+        cx: 0,
+        cy: 0,
+        radius: 25,
+        startAngle: 0,
+        endAngle: Math.PI / 2,
+        construction: false,
+        selected: false,
+        diagnostic: "none",
+      },
+    ];
+    const { onPick, svg } = renderCanvas({ entities: arcOnly });
+    const nearRim = (25 - 1.5) * Math.cos(Math.PI / 4) * 4;
+    firePointer(svg, "pointerdown", 100 + nearRim, 200 - nearRim);
+    const near = onPick.mock.calls[0]?.[0] as { entityId: string | null };
+    expect(near.entityId).toBe("skent_arc");
+    // 3 mm off the rim (12 px at scale 4) misses, even inside the sweep.
+    const farRim = (25 - 3) * Math.cos(Math.PI / 4) * 4;
+    firePointer(svg, "pointerdown", 100 + farRim, 200 - farRim);
+    const far = onPick.mock.calls[1]?.[0] as { entityId: string | null };
+    expect(far.entityId).toBeNull();
+  });
+
   it("renders picks, preview, regions, and annotations as machine-addressable nodes", () => {
     const { view } = renderCanvas({
       annotations: [

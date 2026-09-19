@@ -56,6 +56,8 @@ const TILT_ID = createParameterId("param_tilt");
 const REFERENCE_ID = createParameterId("param_reference");
 const DISPLACEMENT_ID = createParameterId("param_displacement");
 const DERIVED_ID = createParameterId("param_derived_depth");
+const HEIGHT_ID = createParameterId("param_height");
+const BRACE_ID = createParameterId("param_brace");
 
 /** Unwraps a source-text parse the test fixture depends on. */
 function requireExpression(source: string): ExpressionNode {
@@ -162,6 +164,31 @@ function requireDocumentParameter(
 
 function buildProviderStore(): CadStore {
   return createCadStore({ session: createSession(buildProviderDocument()) });
+}
+
+/**
+ * The batched-submit document: `height` (10 mm, literal) driving `brace`
+ * (`height * 2`, cached 20 mm) — one submit changes both at once.
+ */
+function buildBatchDocument(): CadDocument {
+  let document = createDocument(createDocumentId("doc_panel_batch_test"));
+  document = requireDocumentParameter(
+    addDocumentParameter(document, {
+      id: HEIGHT_ID,
+      name: "height",
+      value: length(10),
+    }),
+    "the height parameter",
+  );
+  return requireDocumentParameter(
+    addDocumentParameter(document, {
+      id: BRACE_ID,
+      name: "brace",
+      value: length(20),
+      expression: requireExpression("height * 2"),
+    }),
+    "the brace parameter",
+  );
 }
 
 /** Reads a labelled field as an input (the panel's fields are all inputs). */
@@ -331,6 +358,46 @@ describe("CadParameterPanel", () => {
       dimension: "length",
       unit: "mm",
       value: 24,
+    });
+  });
+
+  it("evaluates a batched expression edit against the literal committed earlier in the same submit", async () => {
+    const store = createCadStore({
+      session: createSession(buildBatchDocument()),
+    });
+    render(<PanelInProvider store={store} />);
+
+    // One submit carries both edits: the literal height 10→20 and the
+    // expression `height * 2`→`height * 3`. The literal is committed first,
+    // so the expression edit must evaluate against the LIVE collection
+    // (height 20) and commit brace=60 — not 30, the product of the
+    // pre-submit snapshot's height=10.
+    fireEvent.change(screen.getByLabelText("height"), {
+      target: { value: "20" },
+    });
+    fireEvent.change(screen.getByLabelText("brace"), {
+      target: { value: "height * 3" },
+    });
+    fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+
+    await waitFor(() => expect(store.commandLog).toHaveLength(2));
+    const heightEntry = JSON.parse(
+      JSON.stringify(store.commandLog[0]),
+    ) as SerializedCommandLogEntry;
+    expect(heightEntry.commands[0]?.id).toBe("param_height");
+    expect(heightEntry.commands[0]?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 20,
+    });
+    const braceEntry = JSON.parse(
+      JSON.stringify(store.commandLog[1]),
+    ) as SerializedCommandLogEntry;
+    expect(braceEntry.commands[0]?.id).toBe("param_brace");
+    expect(braceEntry.commands[0]?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 60,
     });
   });
 

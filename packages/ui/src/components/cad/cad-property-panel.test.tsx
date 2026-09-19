@@ -260,6 +260,55 @@ describe("CadPropertyPanel", () => {
     expect(section.textContent).toContain("3");
   });
 
+  it("renders two same-kind synthetic references of one body as distinct sections", () => {
+    // Two faces of one body at one regeneration differ only by topology
+    // index: the domain's canonical key (index included) must keep them
+    // distinct siblings. React reports duplicate sibling keys as a
+    // development error, so pinning that report keeps the assertion on the
+    // reconciliation, not just the rendered count.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      render(
+        <CadPropertyPanel
+          document={buildPanelDocument()}
+          selection={[
+            {
+              kind: "face",
+              bodyId: PLATE_BODY,
+              regeneration: 3,
+              faceIndex: 1,
+            },
+            {
+              kind: "face",
+              bodyId: PLATE_BODY,
+              regeneration: 3,
+              faceIndex: 2,
+            },
+          ]}
+        />,
+      );
+      const sections = document.querySelectorAll("[data-cad-property-section]");
+      expect(sections.length).toBe(2);
+      expect(sections[0]?.getAttribute("data-reference-kind")).toBe("face");
+      expect(sections[1]?.getAttribute("data-reference-kind")).toBe("face");
+      // Each section carries its own topology index (1, then 2) with the
+      // shared regeneration identity (3).
+      expect(sections[0]?.textContent).toContain("1");
+      expect(sections[1]?.textContent).toContain("2");
+      expect(sections[0]?.textContent).toContain("3");
+      expect(sections[1]?.textContent).toContain("3");
+      expect(
+        consoleError.mock.calls.some((call) =>
+          String(call[0]).includes("same key"),
+        ),
+      ).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("commits feature.delete through the store and the selection survives", () => {
     const store = storeOf();
     act(() => {
