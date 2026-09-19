@@ -45,6 +45,24 @@ const STL_VOLUME_REL_TOLERANCE = 1e-6;
 /** GLB float32 positions quantize like STL's; the same 1e-6 slack applies. */
 const GLB_VOLUME_REL_TOLERANCE = 1e-6;
 
+/**
+ * Registers a fresh session user through the public sign-up API so the
+ * SERVER-side 3MF import (session-gated since the Phase 35 hardening)
+ * accepts the page's in-page posts. `page.request` shares the browser
+ * context's cookie jar, so the page's same-origin fetch carries the
+ * session cookie from here on.
+ */
+async function registerSessionUser(page: Page): Promise<void> {
+  const response = await page.request.post("/api/auth/sign-up/email", {
+    data: {
+      name: "IO 3MF E2E",
+      email: `io-3mf-e2e-${Date.now()}-${Math.round(Math.random() * 1e6)}@slopcad.dev`,
+      password: "supercalifragilistic",
+    },
+  });
+  expect(response.status()).toBeLessThan(400);
+}
+
 /** The settled plate's extents under the kernel placement conventions. */
 const PLATE_EXTENTS_TEXT = "30.000 × 20.000 × 10.000";
 
@@ -233,6 +251,12 @@ for (const format of ["3mf", "stl"] as const) {
   test(`${format} round trip: export → import → the imported mesh renders and agrees semantically`, async ({
     page,
   }) => {
+    // The 3MF leg parses on the app's server, whose endpoint is
+    // session-gated: sign the browser context in first. STL stays
+    // entirely in the browser.
+    if (format === "3mf") {
+      await registerSessionUser(page);
+    }
     const first = await roundTrip(page, format);
     await saveArtifact(`io-import-${format}-run1.png`, first.shot);
     await saveArtifact(`round-trip.${format}`, first.fileBytes);
@@ -397,9 +421,35 @@ test("glb round trip: export → GLTFLoader reference viewer → the loaded GLB 
   await saveArtifact("io-glb-viewer-run2.png", second.shot);
 });
 
-test("the 3MF import endpoint rejects malformed bytes with a structured failure", async ({
+test("the 3MF import endpoint is session-gated and rejects malformed bytes with a structured failure", async ({
   request,
 }) => {
+  // Cookie-less: the endpoint's Phase 35 hardening refuses unauthenticated
+  // uploads outright — the body is never read or parsed.
+  const anonymousResponse = await request.post("/api/io/import-3mf", {
+    data: Buffer.from("this is not a zip archive, let alone a 3MF document"),
+  });
+  expect(anonymousResponse.status()).toBe(401);
+  const anonymousPayload = (await anonymousResponse.json()) as {
+    ok: unknown;
+    code?: unknown;
+  };
+  expect(anonymousPayload.ok).toBe(false);
+  expect(String(anonymousPayload.code)).toBe(
+    "io-import/authentication-required",
+  );
+
+  // With a session (the API context stores the sign-up cookie): the same
+  // malformed bytes reach the parser and come back as its own structured
+  // 422 rejection, exactly as before the gate.
+  const signUp = await request.post("/api/auth/sign-up/email", {
+    data: {
+      name: "IO 3MF E2E",
+      email: `io-3mf-e2e-endpoint-${Date.now()}-${Math.round(Math.random() * 1e6)}@slopcad.dev`,
+      password: "supercalifragilistic",
+    },
+  });
+  expect(signUp.status()).toBeLessThan(400);
   const response = await request.post("/api/io/import-3mf", {
     data: Buffer.from("this is not a zip archive, let alone a 3MF document"),
   });

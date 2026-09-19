@@ -2,7 +2,7 @@
  * The Phase 26.5 browser fixture: the real OpenCascade kernel executing the
  * box → topology → fillet chain in a real module Web Worker, on the same
  * hosting pattern as the Phase 21.2 `/worker-occt` fixture (the package's
- * web worker entry, `createWebWorkerTransport`, `createWorkerClient`,
+ * web worker entry, the crash-settling `bootWorkerChannel`,
  * `createStaleResultCoordinator` — every apply is a fresh dispatch,
  * newest-wins).
  *
@@ -39,11 +39,9 @@ import type { ReactElement } from "react";
 import { CadScene, renderCameraScreenPoint } from "@slopcad/cad-r3f";
 import {
   createStaleResultCoordinator,
-  createWebWorkerTransport,
-  createWorkerClient,
+  bootWorkerChannel,
   WorkerRequestFailure,
 } from "@slopcad/cad-kernel";
-import type { WorkerClient } from "@slopcad/cad-kernel";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
 import {
@@ -140,18 +138,23 @@ export function edgeAnchorSurface(scene: FilletScene): string {
 function bootOcctFilletSession(
   onApplied: (applied: AppliedFilletView) => void,
 ): OcctFilletSession {
-  const worker = new Worker(
-    new URL("./occt-worker-entry.ts", import.meta.url),
-    { type: "module" },
+  let errorText = "";
+  // The crash-settling boot (Phase 35 hardening): a dead thread settles
+  // in-flight requests (worker/transport-closed) instead of hanging, and
+  // the crash lands on the same error surface as fillet failures.
+  const boot = bootWorkerChannel(
+    new Worker(new URL("./occt-worker-entry.ts", import.meta.url), {
+      type: "module",
+    }),
+    (failure) => {
+      errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
+      writeSurface();
+    },
   );
-  const client: WorkerClient = createWorkerClient({
-    transport: createWebWorkerTransport(worker),
-  });
   const coordinator = createStaleResultCoordinator<FilletSceneView>({
-    client,
+    client: boot.client,
   });
   const counters = { dispatched: 0, settled: 0 };
-  let errorText = "";
 
   function writeSurface(): void {
     const visible = coordinator.visible();
@@ -238,8 +241,7 @@ function bootOcctFilletSession(
         );
     },
     dispose(): void {
-      client.close();
-      worker.terminate();
+      boot.dispose();
     },
   };
 }

@@ -46,11 +46,7 @@ import { importStl } from "@slopcad/cad-io/stl-import";
 import type { ImportedStlMesh } from "@slopcad/cad-io/stl-import";
 import type { ImportedThreeMfMesh } from "@slopcad/cad-io/three-mf-import";
 import { formatBoundsExtents } from "@slopcad/cad-core";
-import {
-  createWebWorkerTransport,
-  createWorkerClient,
-  WorkerRequestFailure,
-} from "@slopcad/cad-kernel";
+import { bootWorkerChannel, WorkerRequestFailure } from "@slopcad/cad-kernel";
 import type { WorkerClient } from "@slopcad/cad-kernel";
 import type {
   CadExportEntry,
@@ -150,7 +146,7 @@ type ImportedState =
 
 /** The lazily-booted OCCT worker session behind STEP and BREP imports. */
 interface OcctWorkerSession {
-  readonly worker: Worker;
+  readonly dispose: () => void;
   readonly client: WorkerClient;
 }
 
@@ -192,7 +188,7 @@ function CompleteWorkbenchBody(): ReactElement {
   useEffect(() => {
     return () => {
       // The lazily-booted OCCT worker dies with the page.
-      occtWorkerRef.current?.worker.terminate();
+      occtWorkerRef.current?.dispose();
       occtWorkerRef.current = null;
     };
   }, []);
@@ -201,20 +197,34 @@ function CompleteWorkbenchBody(): ReactElement {
    * Boots the OCCT worker on the FIRST STEP or BREP exchange — the ~22 MB
    * kernel is not paid by pages that never use it — and reuses it after.
    * The worker entry buffers requests that race its WASM boot, so no
-   * readiness handshake is needed.
+   * readiness handshake is needed. The crash-settling boot (Phase 35
+   * hardening) settles in-flight requests if the thread ever dies; a
+   * crashed channel is forgotten so the next exchange boots a fresh
+   * worker, and the failure surfaces through the import error state.
    */
   const bootOcctWorker = useCallback((): WorkerClient => {
     const existing = occtWorkerRef.current;
     if (existing !== null) return existing.client;
-    const worker = new Worker(
-      new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
-      { type: "module" },
+    const boot = bootWorkerChannel(
+      new Worker(
+        new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
+        {
+          type: "module",
+        },
+      ),
+      (failure) => {
+        if (occtWorkerRef.current === session) occtWorkerRef.current = null;
+        setImportError(
+          `worker channel failed (${failure.kind}): ${failure.message}`,
+        );
+      },
     );
-    const client = createWorkerClient({
-      transport: createWebWorkerTransport(worker),
-    });
-    occtWorkerRef.current = { worker, client };
-    return client;
+    const session: OcctWorkerSession = {
+      dispose: () => boot.dispose(),
+      client: boot.client,
+    };
+    occtWorkerRef.current = session;
+    return session.client;
   }, []);
 
   const adoptPreview = useCallback(

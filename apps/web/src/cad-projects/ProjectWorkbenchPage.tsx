@@ -196,13 +196,21 @@ function PersistenceBar({
 
   // SAVE: serialize the live session through the native bridge. The server
   // validates the payload with the same machinery before it becomes a
-  // version row.
+  // version row. The dispatch-time DOCUMENT identity rides the mutation's
+  // context: `onSuccess` must compare against what was DISPATCHED, not what
+  // the store holds at RESPONSE time — an edit that lands while the save is
+  // in flight keeps the surface dirty afterwards (the old code snapshotted
+  // the response-time document, silently marking that in-flight edit as
+  // persisted when only the dispatched state reached the server).
   const saveMutation = useMutation(
     trpc.documents.save.mutationOptions({
-      onSuccess: (result, variables) => {
+      onMutate: () => ({
+        dispatchedDocument: store.getSession().document,
+      }),
+      onSuccess: (result, variables, context) => {
         milestonesRef.current = {
           loadedFrom: variables.nativeContent,
-          savedDocument: store.getSession().document,
+          savedDocument: context.dispatchedDocument,
           liveVersion: result.version,
           pinned: false,
         };

@@ -316,6 +316,13 @@ export {
 } from "./worker-web-transport";
 export type { WebWorkerMessagePort } from "./worker-web-transport";
 
+export { bootWorkerChannel } from "./worker-boot";
+export type {
+  BootedWorkerChannel,
+  WorkerBootFailure,
+  WorkerCrashPort,
+} from "./worker-boot";
+
 export { createWorkerServer } from "./worker-server";
 export type { WorkerServer, WorkerServerOptions } from "./worker-server";
 

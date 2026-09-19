@@ -3,10 +3,10 @@
  * worker hosting the WHOLE cross-feature chain, on the exact hosting
  * pattern of the shared render fixture session and the /worker-fillet
  * fixture — the package's web worker entry (`occt-worker-entry.ts`, the
- * ~22 MB pinned OpenCascade WASM), `createWebWorkerTransport`,
- * `createWorkerClient`, `createStaleResultCoordinator` (every apply is a
- * fresh dispatch, newest-wins; a FAILED dispatch never becomes visible, so
- * the last-known-valid scene stays up).
+ * ~22 MB pinned OpenCascade WASM), the crash-settling `bootWorkerChannel`,
+ * `createStaleResultCoordinator` (every apply is a fresh dispatch,
+ * newest-wins; a FAILED dispatch never becomes visible, so the
+ * last-known-valid scene stays up).
  *
  * ## Machine surface (settle protocol parity)
  *
@@ -23,11 +23,9 @@
 
 import {
   createStaleResultCoordinator,
-  createWebWorkerTransport,
-  createWorkerClient,
+  bootWorkerChannel,
   WorkerRequestFailure,
 } from "@slopcad/cad-kernel";
-import type { WorkerClient } from "@slopcad/cad-kernel";
 import type { PlateRenderState } from "./plate-render-scene";
 import type {
   ChainScene,
@@ -86,18 +84,26 @@ export function bootChainFixtureSession(
   onApplied: (applied: AppliedChainScene) => void,
   onStageFailure: (failure: ChainStageFailure) => void,
 ): ChainFixtureSession {
-  const worker = new Worker(
-    new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
-    { type: "module" },
+  let errorText = "";
+  // The crash-settling boot (Phase 35 hardening): a dead thread settles
+  // in-flight requests (worker/transport-closed) instead of hanging, and
+  // the crash lands on the same error surface as stage failures.
+  const boot = bootWorkerChannel(
+    new Worker(
+      new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
+      {
+        type: "module",
+      },
+    ),
+    (failure) => {
+      errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
+      writeSurface();
+    },
   );
-  const client: WorkerClient = createWorkerClient({
-    transport: createWebWorkerTransport(worker),
-  });
   const coordinator = createStaleResultCoordinator<AppliedChainScene>({
-    client,
+    client: boot.client,
   });
   const counters = { dispatched: 0, settled: 0 };
-  let errorText = "";
 
   /** Writes the whole coordinator-driven state surface in one pass. */
   function writeSurface(): void {
@@ -184,8 +190,7 @@ export function bootChainFixtureSession(
         );
     },
     dispose(): void {
-      client.close();
-      worker.terminate();
+      boot.dispose();
     },
   };
 }

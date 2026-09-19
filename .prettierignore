@@ -14,3 +14,5 @@ local.db-*
 # Pinned-byte golden fixtures (Phase 17 native documents) — serialized
 # documents committed as-is, never reformatted.
 packages/cad-core/fixtures/
+# Live review-session artifacts, not source.
+.review/
