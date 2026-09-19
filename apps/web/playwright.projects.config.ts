@@ -18,7 +18,7 @@ import { defineConfig } from "@playwright/test";
  * via `pnpm test:projects`.
  */
 
-const PORT = 3009;
+const PORT = 3209;
 const baseURL = process.env.PROJECTS_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({

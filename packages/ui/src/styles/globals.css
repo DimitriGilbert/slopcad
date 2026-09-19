@@ -1,3 +1,23 @@
+/*
+ * slopcad design tokens — "Machinist".
+ *
+ * One identity for three surfaces (workbench cockpit, component spec
+ * sheets, engineering docs): graphite neutrals with a breath of blue, a
+ * single machinist-amber accent (the machine-tool signal color: stack
+ * lamps, DRO readouts, selection states), and IBM Plex engineering
+ * typography. Both themes are first-class: dark is the workshop at
+ * night, light is the drafting room — cool paper, never beige.
+ *
+ * Contrast: every text pair below is verified WCAG AA (4.5:1 body,
+ * 3:1 large/accent) in BOTH themes; the ambers are tuned per theme so
+ * the accent stays loud on graphite and the bronze stays legible on
+ * paper.
+ */
+
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -7,76 +27,92 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Drafting room: cool paper, ink, bronze. */
+  --background: oklch(0.977 0.003 240);
+  --foreground: oklch(0.215 0.014 250);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.215 0.014 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.215 0.014 250);
+  /* The accent as a deep bronze: amber darkened until it passes AA as
+   * text and stays rich as a fill (5.9:1 with its near-white ink). */
+  --primary: oklch(0.51 0.115 65);
+  --primary-foreground: oklch(0.985 0.002 240);
+  --secondary: oklch(0.945 0.005 245);
+  --secondary-foreground: oklch(0.3 0.012 250);
+  --muted: oklch(0.945 0.005 245);
+  --muted-foreground: oklch(0.48 0.014 250);
+  /* Selection wash: a highlighter-amber tint over paper. */
+  --accent: oklch(0.95 0.032 88);
+  --accent-foreground: oklch(0.335 0.055 70);
+  --destructive: oklch(0.505 0.2 27);
+  --destructive-foreground: oklch(0.985 0.002 240);
+  --border: oklch(0.885 0.006 245);
+  --input: oklch(0.86 0.008 245);
+  --ring: oklch(0.62 0.115 68);
+  /* The raw signal color: status lamps, live markers, kbd caps. The
+   * bronze variant for light chrome, the amber for dark. */
+  --signal: oklch(0.56 0.125 65);
+  --chart-1: oklch(0.62 0.13 60);
+  --chart-2: oklch(0.55 0.09 245);
+  --chart-3: oklch(0.58 0.09 150);
+  --chart-4: oklch(0.55 0.12 20);
+  --chart-5: oklch(0.45 0.02 250);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.962 0.004 243);
+  --sidebar-foreground: oklch(0.215 0.014 250);
+  --sidebar-primary: oklch(0.51 0.115 65);
+  --sidebar-primary-foreground: oklch(0.985 0.002 240);
+  --sidebar-accent: oklch(0.93 0.012 243);
+  --sidebar-accent-foreground: oklch(0.3 0.012 250);
+  --sidebar-border: oklch(0.885 0.006 245);
+  --sidebar-ring: oklch(0.62 0.115 68);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.87 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Workshop at night: layered graphite, machinist amber. */
+  --background: oklch(0.165 0.008 250);
+  --foreground: oklch(0.945 0.004 250);
+  --card: oklch(0.198 0.009 250);
+  --card-foreground: oklch(0.945 0.004 250);
+  --popover: oklch(0.218 0.01 250);
+  --popover-foreground: oklch(0.945 0.004 250);
+  /* Amber as the primary fill: 9.9:1 with its near-black ink. */
+  --primary: oklch(0.8 0.145 78);
+  --primary-foreground: oklch(0.185 0.02 70);
+  --secondary: oklch(0.255 0.01 250);
+  --secondary-foreground: oklch(0.9 0.004 250);
+  --muted: oklch(0.245 0.01 250);
+  --muted-foreground: oklch(0.7 0.01 250);
+  /* Selection wash: amber-steeped graphite, warm-white text. */
+  --accent: oklch(0.295 0.055 80);
+  --accent-foreground: oklch(0.955 0.015 85);
+  --destructive: oklch(0.68 0.19 25);
+  --destructive-foreground: oklch(0.13 0.02 25);
+  --border: oklch(0.295 0.01 250);
+  --input: oklch(0.33 0.012 250);
+  --ring: oklch(0.74 0.12 75);
+  --signal: oklch(0.8 0.145 78);
+  --chart-1: oklch(0.8 0.145 78);
+  --chart-2: oklch(0.68 0.09 245);
+  --chart-3: oklch(0.7 0.1 150);
+  --chart-4: oklch(0.68 0.15 20);
+  --chart-5: oklch(0.6 0.015 250);
+  --sidebar: oklch(0.182 0.008 250);
+  --sidebar-foreground: oklch(0.945 0.004 250);
+  --sidebar-primary: oklch(0.8 0.145 78);
+  --sidebar-primary-foreground: oklch(0.185 0.02 70);
+  --sidebar-accent: oklch(0.26 0.01 250);
+  --sidebar-accent-foreground: oklch(0.945 0.004 250);
+  --sidebar-border: oklch(0.295 0.01 250);
+  --sidebar-ring: oklch(0.74 0.12 75);
 }
 
 @theme inline {
-  --font-sans: "Inter Variable", sans-serif;
+  --font-sans:
+    "IBM Plex Sans Variable", "IBM Plex Sans", ui-sans-serif, system-ui,
+    sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -85,6 +121,8 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-signal: var(--signal);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -108,6 +146,7 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  /* Corner system: controls 4px, panels 6px, cards 8px, dialogs 12px. */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -121,10 +160,42 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply font-sans bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply font-sans bg-background text-foreground antialiased;
+  }
+  /* The amber selection wash: the accent's most visible daily act. */
+  ::selection {
+    background: color-mix(in oklch, var(--signal) 30%, transparent);
+  }
+  /* Instrument scrollbars: thin, trackless, themed. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent)
+      transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--foreground) 20%, transparent);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--foreground) 32%, transparent);
+  }
+  /* Numbers never reflow: every mono context is tabular. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 }

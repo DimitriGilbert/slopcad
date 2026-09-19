@@ -20,7 +20,7 @@ import { defineConfig } from "@playwright/test";
  * `pnpm test:matrix`.
  */
 
-const PORT = 3010;
+const PORT = 3210;
 const baseURL = process.env.MATRIX_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 // WebKit's remaining host check (gstreamer1.0-libav — media codecs) is not

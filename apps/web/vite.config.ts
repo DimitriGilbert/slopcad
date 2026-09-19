@@ -12,7 +12,7 @@ export default defineConfig({
   // checkout verification — can boot their own dev server beside a live
   // one without reuse ambiguity.
   server: {
-    port: Number(process.env.DEV_PORT ?? 3001),
+    port: Number(process.env.DEV_PORT ?? 3201),
     host: true,
   },
   preview: {

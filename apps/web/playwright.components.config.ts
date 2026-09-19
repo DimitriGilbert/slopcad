@@ -9,7 +9,7 @@ import { defineConfig } from "@playwright/test";
  * video on. Run via `pnpm test:components`.
  */
 
-const PORT = 3008;
+const PORT = 3208;
 const baseURL =
   process.env.COMPONENTS_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 

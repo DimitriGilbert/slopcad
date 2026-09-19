@@ -12,7 +12,7 @@ import { defineConfig } from "@playwright/test";
  * `pnpm test:worker`.
  */
 
-const PORT = 3003;
+const PORT = 3203;
 const baseURL = process.env.WORKER_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({

@@ -12,7 +12,9 @@ import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
 import Header from "../components/header";
+import { THEME_BOOTSTRAP_SCRIPT } from "../theme";
 import appCss from "../index.css?url";
+
 interface RouterAppContext {
   trpc: TRPCOptionsProxy<AppRouter>;
   queryClient: QueryClient;
@@ -29,13 +31,23 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "My App",
+        title: "slopcad: parametric CAD workbench",
+      },
+      {
+        name: "description",
+        content:
+          "A parametric CAD workbench: kernel-neutral geometry, documents with real history, and reusable components.",
       },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
+      },
+    ],
+    scripts: [
+      {
+        children: THEME_BOOTSTRAP_SCRIPT,
       },
     ],
   }),
@@ -45,7 +57,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 
 function RootDocument() {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

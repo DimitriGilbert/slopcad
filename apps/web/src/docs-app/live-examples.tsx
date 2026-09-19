@@ -88,21 +88,37 @@ export function ExampleCard({
 }: ExampleCardProps): React.JSX.Element {
   return (
     <article
-      className="rounded-lg border bg-card text-card-foreground shadow-xs"
+      className="border-border bg-card/60 data-[status=failed]:border-destructive/50 overflow-hidden rounded-lg border"
       data-status={status}
     >
-      <header className="flex items-start justify-between gap-3 border-b px-4 py-3">
+      <header className="border-border bg-background/40 flex items-start justify-between gap-3 border-b px-4 py-3">
         <div>
           <h3 className="text-sm font-medium">{title}</h3>
-          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+          <p className="text-muted-foreground/80 mt-0.5 font-mono text-[11px]">
             {source}
           </p>
         </div>
         <p
-          className="shrink-0 font-mono text-[11px] tracking-wide"
+          className="mt-0.5 flex shrink-0 items-center gap-1.5 font-mono text-[11px] tracking-wide"
           data-testid="docs-example-status"
         >
-          {status === "running" ? "running…" : status}
+          <span
+            aria-hidden="true"
+            className={`size-1.5 shrink-0 rounded-full ${
+              status === "ok"
+                ? "bg-chart-3"
+                : status === "running"
+                  ? "bg-signal motion-safe:animate-pulse"
+                  : "bg-destructive"
+            }`}
+          />
+          <span
+            className={
+              status === "failed" ? "text-destructive" : "text-muted-foreground"
+            }
+          >
+            {status === "running" ? "running…" : status}
+          </span>
         </p>
       </header>
       <div className="px-4 py-3">
@@ -117,11 +133,11 @@ export function ExampleCard({
                 key={fact.label}
                 className="col-span-2 grid grid-cols-subgrid items-baseline"
               >
-                <dt className="truncate text-xs text-muted-foreground">
+                <dt className="text-muted-foreground truncate text-xs">
                   {fact.label}
                 </dt>
                 <dd
-                  className="text-right font-mono text-xs"
+                  className="text-right font-mono text-xs tabular-nums"
                   data-testid={`docs-fact-${slug(fact.label)}`}
                 >
                   {fact.value}
@@ -238,7 +254,7 @@ export function KernelExampleCard(): React.JSX.Element {
   const state = useKernelExample(compute);
   return (
     <ExampleCard
-      title="Primitives and booleans — real Manifold geometry"
+      title="Primitives and booleans: real Manifold geometry"
       source="packages/docs-examples/src/kernel/primitives.ts"
       status={state.status}
       facts={state.facts}
@@ -324,7 +340,7 @@ export function ComponentsExampleCard(): React.JSX.Element {
   }, []);
   return (
     <ExampleCard
-      title="Reusable components — contract + kernel build"
+      title="Reusable components: contract + kernel build"
       source="packages/docs-examples/src/components/components.ts"
       status={state.status}
       facts={state.facts}
@@ -356,7 +372,7 @@ export function MeshExampleCard(): React.JSX.Element {
   }, [downloadUrl]);
   return (
     <ExampleCard
-      title="STL / 3MF / GLB — deterministic bytes"
+      title="STL / 3MF / GLB: deterministic bytes"
       source="packages/docs-examples/src/io/mesh.ts"
       status={state.status}
       facts={
@@ -406,7 +422,7 @@ export function SketchExampleCard(): React.JSX.Element {
   });
   return (
     <ExampleCard
-      title="Sketch solve — degrees of freedom, honestly counted"
+      title="Sketch solve: degrees of freedom, honestly counted"
       source="packages/docs-examples/src/sketch/sketch.ts"
       status={state.status}
       facts={
@@ -452,7 +468,7 @@ export function NativeFormatExampleCard(): React.JSX.Element {
   });
   return (
     <ExampleCard
-      title="Native format — the one that keeps history"
+      title="Native format: the one that keeps history"
       source="packages/docs-examples/src/core/native.ts"
       status={state.status}
       facts={
@@ -487,7 +503,7 @@ export function ReactExampleCard(): React.JSX.Element {
   const store = useMemo(() => createGuideStore(), []);
   return (
     <ExampleCard
-      title="React integration — live parameter edit"
+      title="React integration: live parameter edit"
       source="packages/docs-examples/src/react/store.tsx"
       status="ok"
       facts={[{ label: "interaction", value: "click the button" }]}

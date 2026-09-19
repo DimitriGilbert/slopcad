@@ -10,7 +10,7 @@ import { defineConfig } from "@playwright/test";
  * `pnpm verify` — run via `pnpm test:render`.
  */
 
-const PORT = 3004;
+const PORT = 3204;
 const baseURL = process.env.RENDER_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({

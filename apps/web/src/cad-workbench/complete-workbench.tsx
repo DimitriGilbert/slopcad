@@ -463,7 +463,7 @@ export function CompleteCadWorkbench({
       data-testid="complete-feature-timeline"
       role="group"
     >
-      <span className="text-muted-foreground mr-1 shrink-0 text-xs font-medium tracking-wider uppercase">
+      <span className="text-muted-foreground/70 mr-1.5 shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         Timeline
       </span>
       {timeline === null ? (
@@ -523,60 +523,62 @@ export function CompleteCadWorkbench({
 
   const defaultViewport = (
     <div
-      className="relative shrink-0"
+      className="border-border/80 bg-background/50 relative shrink-0 rounded-lg border p-1 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_4%,transparent),0_1px_2px_color-mix(in_oklch,var(--foreground)_10%,transparent)]"
       data-viewport-showing={showingPreview ? "import" : "document"}
       id="workbench-complete-viewport"
     >
-      <CadViewport
-        className={VIEWPORT_CLASS}
-        projection={
-          showingPreview
-            ? (ioSurface.preview?.projection ?? null)
-            : applied === null
-              ? null
-              : applied.state.projection
-        }
-        onSettled={() => {
-          if (showingPreview) {
-            // The imported frame stamps the IMPORT surface, never the
-            // document's — an imported mesh is not the parametric model.
+      <div className="relative overflow-hidden rounded-[6px]">
+        <CadViewport
+          className={VIEWPORT_CLASS}
+          projection={
+            showingPreview
+              ? (ioSurface.preview?.projection ?? null)
+              : applied === null
+                ? null
+                : applied.state.projection
+          }
+          onSettled={() => {
+            if (showingPreview) {
+              // The imported frame stamps the IMPORT surface, never the
+              // document's — an imported mesh is not the parametric model.
+              document
+                .getElementById(rootId)
+                ?.setAttribute(
+                  "data-cad-imported-volume",
+                  ioSurface.preview?.volumeText ?? "",
+                );
+              setImportedFrames((frames) => frames + 1);
+              return;
+            }
+            // Settle protocol: pixels may be compared only once this stamp
+            // agrees with the settled volume, written synchronously.
+            noteRenderedFrame(documentVolumeText);
+          }}
+          onSelectionRendered={(key) => {
             document
               .getElementById(rootId)
-              ?.setAttribute(
-                "data-cad-imported-volume",
-                ioSurface.preview?.volumeText ?? "",
-              );
-            setImportedFrames((frames) => frames + 1);
-            return;
+              ?.setAttribute("data-cad-selection-frame", key);
+          }}
+          overlay={
+            showingPreview ? (
+              <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-2 rounded-sm border border-border bg-background/95 px-2 py-1 text-xs shadow-sm">
+                <span className="text-muted-foreground font-mono text-[11px]">
+                  {`preview: ${ioSurface.preview?.source ?? ""} mesh: geometry only, not in the document`}
+                </span>
+                <Button
+                  data-testid="complete-clear-import"
+                  onClick={ioSurface.onClearPreview}
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  Back to model
+                </Button>
+              </div>
+            ) : undefined
           }
-          // Settle protocol: pixels may be compared only once this stamp
-          // agrees with the settled volume, written synchronously.
-          noteRenderedFrame(documentVolumeText);
-        }}
-        onSelectionRendered={(key) => {
-          document
-            .getElementById(rootId)
-            ?.setAttribute("data-cad-selection-frame", key);
-        }}
-        overlay={
-          showingPreview ? (
-            <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-2 border border-border bg-background/95 px-2 py-1 text-xs">
-              <span className="font-mono text-muted-foreground">
-                {`preview: ${ioSurface.preview?.source ?? ""} mesh — geometry only, not in the document`}
-              </span>
-              <Button
-                data-testid="complete-clear-import"
-                onClick={ioSurface.onClearPreview}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                Back to model
-              </Button>
-            </div>
-          ) : undefined
-        }
-      />
+        />
+      </div>
     </div>
   );
 
@@ -725,7 +727,7 @@ export function CompleteCadWorkbench({
           row; the model surfaces stay MOUNTED but hidden so the session's
           surface writer keeps their ids. */}
       <div
-        className={`border-border bg-background h-10 shrink-0 items-center gap-2 border-b px-2 ${
+        className={`border-border bg-card/50 h-10 shrink-0 items-center gap-2 border-b px-2 ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
@@ -789,7 +791,7 @@ export function CompleteCadWorkbench({
                 size="xs"
                 title={
                   applied === null
-                    ? "The scene settles first — nothing is exportable before that."
+                    ? "The scene settles first; nothing is exportable before that."
                     : "Export the settled model geometry."
                 }
                 type="button"
@@ -806,7 +808,7 @@ export function CompleteCadWorkbench({
             size="xs"
             title={
               holeBase === undefined
-                ? "Sketch and extrude a profile first — a hole cuts an existing solid."
+                ? "Sketch and extrude a profile first; a hole cuts an existing solid."
                 : "Cut a hole into the latest extrusion; edit its five parameters in the panel."
             }
             type="button"
@@ -839,7 +841,7 @@ export function CompleteCadWorkbench({
       {/* The workspace: tree dock left, viewport dominant, property +
           parameter docks right. Hidden (not unmounted) in sketch mode. */}
       <div
-        className={`border-border/60 min-h-0 flex-1 items-start gap-3 border-b p-2 ${
+        className={`bg-background/30 min-h-0 flex-1 items-start gap-2 border-b p-2 ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >

@@ -641,10 +641,10 @@ export function CadModelTree({
         aria-level={row.depth + 1}
         aria-selected={selected}
         className={cn(
-          "outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
-          "cursor-default rounded-none",
+          "outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
+          "cursor-default rounded-[3px]",
           selected
-            ? "bg-accent text-accent-foreground"
+            ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
             : pick === undefined
               ? "opacity-80"
               : "hover:bg-muted",
@@ -720,16 +720,16 @@ export function CadModelTree({
   return (
     <div
       className={cn(
-        "border-border bg-background w-56 border text-sm",
+        "border-border bg-card/60 w-56 overflow-hidden rounded-md border text-sm",
         className,
       )}
       data-slot="cad-model-tree"
     >
-      <div className="text-muted-foreground border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground/80 border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         {labels.treeLabel}
       </div>
       {rows.length === 0 ? (
-        <div className="text-muted-foreground px-2 py-2">
+        <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {labels.emptyDocument}
         </div>
       ) : (

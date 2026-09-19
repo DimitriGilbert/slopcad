@@ -492,27 +492,27 @@ export function CadParameterPanel({
   return (
     <div
       className={cn(
-        "border-border bg-background w-72 border text-sm",
+        "border-border bg-card/60 w-72 overflow-hidden rounded-md border text-sm",
         className,
       )}
       data-slot="cad-parameter-panel"
     >
-      <div className="text-muted-foreground border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground/80 border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         {mergedLabels.title}
       </div>
       {!hasParameters ? (
-        <div className="text-muted-foreground px-2 py-2">
+        <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {mergedLabels.empty}
         </div>
       ) : (
         <>
           <parameterForm.Form
             aria-label={mergedLabels.title}
-            className="space-y-3 p-2"
+            className="space-y-3 p-2.5"
           />
           {applyFailure !== undefined ? (
             <div
-              className="text-destructive border-t px-2 py-1.5 text-xs leading-4"
+              className="text-destructive border-border border-t px-2.5 py-1.5 text-xs leading-4"
               data-cad-param-panel-error=""
               role="alert"
             >

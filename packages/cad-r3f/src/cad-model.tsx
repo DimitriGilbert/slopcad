@@ -84,11 +84,12 @@ export type CadModelMaterialProps = Pick<
 >;
 
 /**
- * The documented default material: the deterministic parameters from the
- * Phase 1.6 architecture spike scene, applied identically to every mesh.
+ * The documented default material: a light machinist steel that reads
+ * clearly against the studio-graphite scene background (the Phase 1.6
+ * spike's deterministic parameter set, recolored with the scene).
  */
 const DEFAULT_MATERIAL: CadModelMaterialProps = {
-  color: "#8aadf4",
+  color: "#aabdd6",
   metalness: 0.15,
   roughness: 0.55,
 };

@@ -579,7 +579,7 @@ export function SketchMode({
       tabIndex={-1}
     >
       {/* The sketch command row: mode exit, tool strip, undo/redo. */}
-      <div className="border-border bg-background flex shrink-0 items-center gap-2 border-b px-2 py-1.5">
+      <div className="border-border bg-card/50 flex shrink-0 items-center gap-2 border-b px-2 py-1.5">
         <Button
           data-testid="workbench-mode-toggle"
           onClick={onExit}
@@ -741,7 +741,7 @@ export function SketchMode({
       </div>
       {/* The sketch status line: the editor status plus the solver readout. */}
       <div
-        className="border-border bg-background text-muted-foreground flex h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs"
+        className="border-border bg-card/50 text-muted-foreground flex h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-[11px]"
         data-testid="sketch-status"
       >
         <span

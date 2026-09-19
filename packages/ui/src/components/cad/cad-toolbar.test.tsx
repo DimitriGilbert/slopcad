@@ -102,11 +102,12 @@ describe("CadToolbar", () => {
     renderInProvider(store);
     const active = toolButton(MEASURE_TOOL_ID);
     expect(active.getAttribute("aria-pressed")).toBe("true");
-    expect(active.classList.contains("bg-primary")).toBe(true);
+    // The pressed variant rides the data-active attribute over the
+    // strip's shared data-[active=true]:bg-accent class.
+    expect(active.getAttribute("data-active")).toBe("true");
     const inactive = toolButton(SELECT_TOOL_ID);
     expect(inactive.getAttribute("aria-pressed")).toBe("false");
-    expect(inactive.classList.contains("bg-primary")).toBe(false);
-    expect(inactive.classList.contains("bg-background")).toBe(true);
+    expect(inactive.hasAttribute("data-active")).toBe(false);
   });
 
   it("un-presses every button once no tool is live", () => {

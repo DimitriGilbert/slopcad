@@ -98,7 +98,7 @@ export const DOCS_GROUPS: readonly DocsGroup[] = [
         id: "booleans",
         title: "Booleans",
         summary:
-          "Union, subtract, intersect — exact for mesh kernels, banded for the fake.",
+          "Union, subtract, intersect: exact for mesh kernels, banded for the fake.",
         guide: "docs/guides/booleans.md",
         example: `${kernel}/primitives.ts`,
       },

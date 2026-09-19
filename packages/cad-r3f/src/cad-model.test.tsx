@@ -86,7 +86,7 @@ describe("CadModel", () => {
     expect(meshes.length).toBe(2);
     for (const mesh of meshes) {
       const material = mesh.querySelector("meshstandardmaterial");
-      expect(material?.getAttribute("color")).toBe("#8aadf4");
+      expect(material?.getAttribute("color")).toBe("#aabdd6");
       expect(material?.getAttribute("metalness")).toBe("0.15");
       expect(material?.getAttribute("roughness")).toBe("0.55");
     }
@@ -269,7 +269,7 @@ describe("CadModel selection highlight", () => {
     expect(highlighted[0]?.getAttribute("emissiveintensity")).toBe("0.35");
     // The unselected block keeps the documented defaults.
     const untouched = materials.find((material) => material !== highlighted[0]);
-    expect(untouched?.getAttribute("color")).toBe("#8aadf4");
+    expect(untouched?.getAttribute("color")).toBe("#aabdd6");
     expect(untouched?.getAttribute("emissive")).toBeNull();
   });
 

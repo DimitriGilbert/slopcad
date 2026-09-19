@@ -61,10 +61,10 @@ function PortRow({
 }): ReactElement {
   const [x, y, z] = port.position;
   return (
-    <tr className="border-border/60 border-t">
-      <td className="py-1.5 pr-2 font-mono text-xs">{port.name}</td>
+    <tr className="border-border/60 hover:bg-muted/50 border-t transition-colors">
+      <td className="py-1.5 pr-2 pl-3 font-mono text-xs">{port.name}</td>
       <td className="text-muted-foreground py-1.5 pr-2 text-xs">{port.kind}</td>
-      <td className="text-muted-foreground py-1.5 text-right font-mono text-xs whitespace-nowrap">
+      <td className="text-muted-foreground py-1.5 pr-3 text-right font-mono text-xs whitespace-nowrap">
         {x.toFixed(2)}, {y.toFixed(2)}, {z.toFixed(2)}
         {port.diameter !== undefined ? ` · ⌀${port.diameter.toFixed(1)}` : ""}
       </td>
@@ -180,7 +180,7 @@ export function ComponentPreviewPage({
   if (component === undefined) {
     return (
       <div className="container mx-auto max-w-3xl px-4 py-16">
-        <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+        <p className="text-muted-foreground/80 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
           Component preview
         </p>
         <h1 className="mb-4 text-2xl font-semibold tracking-tight">
@@ -195,7 +195,7 @@ export function ComponentPreviewPage({
           {PHASE32_COMPONENTS.map((c) => (
             <li key={c.definition.id}>
               <Link
-                className="underline"
+                className="text-primary underline underline-offset-4"
                 to="/components/$componentId"
                 params={{ componentId: c.definition.id }}
               >
@@ -239,16 +239,16 @@ export function ComponentPreviewPage({
       )}
       data-bodies={bodiesJson}
     >
-      <header className="space-y-3">
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+      <header className="space-y-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <p className="text-muted-foreground/80 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
             Reusable parametric CAD components
           </p>
-          <p className="text-muted-foreground font-mono text-xs">
+          <p className="border-border text-muted-foreground rounded-sm border bg-card/60 px-1.5 py-0.5 font-mono text-[11px]">
             {definition.id} · v{definition.version}
           </p>
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-3xl font-semibold tracking-tight">
           {definition.name}
         </h1>
         <p className="text-muted-foreground max-w-4xl text-sm leading-relaxed">
@@ -260,9 +260,12 @@ export function ComponentPreviewPage({
               key={sibling.definition.id}
               to="/components/$componentId"
               params={{ componentId: sibling.definition.id }}
-              className="border-border hover:bg-accent border px-3 py-1.5 font-mono text-xs"
+              className="border-border text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 font-mono text-xs transition-colors"
             >
-              {sibling.definition.name} →
+              {sibling.definition.name}
+              <span aria-hidden="true" className="leading-none">
+                →
+              </span>
             </Link>
           ))}
         </nav>
@@ -272,17 +275,17 @@ export function ComponentPreviewPage({
         <div className="flex w-96 shrink-0 flex-col gap-4">
           <section
             aria-label="Component parameters"
-            className="border-border bg-card border p-4"
+            className="border-border bg-card/60 overflow-hidden rounded-lg border"
           >
             {parameters !== null && parameters.ok ? (
               <CadParameterPanel
-                className="w-full"
+                className="w-full border-0 bg-transparent"
                 parameters={parameters.value.parameters}
                 onApply={onApply}
                 labels={{ submit: "Rebuild" }}
               />
             ) : (
-              <p className="text-destructive text-sm" role="alert">
+              <p className="text-destructive p-4 text-sm" role="alert">
                 {parameters === null
                   ? "The submitted values no longer resolve against the definition."
                   : parameters.error.message}
@@ -292,10 +295,10 @@ export function ComponentPreviewPage({
 
           <section
             aria-label="Interface"
-            className="border-border bg-card border p-4"
+            className="border-border bg-card/60 overflow-hidden rounded-lg border"
           >
-            <h2 className="text-muted-foreground mb-3 text-xs font-medium tracking-wider uppercase">
-              Interface — {String(ports.length)} ports
+            <h2 className="text-muted-foreground/80 border-border bg-background/40 border-b px-3 py-2 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+              Interface: {String(ports.length)} ports
             </h2>
             <table className="w-full">
               <tbody>
@@ -308,12 +311,12 @@ export function ComponentPreviewPage({
 
           <section
             aria-label="Build readouts"
-            className="border-border bg-card border p-4"
+            className="border-border bg-card/60 overflow-hidden rounded-lg border"
           >
-            <h2 className="text-muted-foreground mb-3 text-xs font-medium tracking-wider uppercase">
+            <h2 className="text-muted-foreground/80 border-border bg-background/40 border-b px-3 py-2 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
               Build
             </h2>
-            <ul className="space-y-1 font-mono text-xs">
+            <ul className="space-y-1 p-3 font-mono text-xs">
               <li>
                 status ={" "}
                 <span id="component-preview-status" className="text-foreground">
@@ -374,45 +377,50 @@ export function ComponentPreviewPage({
             Capped at the viewport's 800px so the caption wraps under it
             instead of inflating the column past the row's width. */}
         <div className="max-w-[800px] space-y-2">
-          <div id="component-preview-viewport">
-            <CadViewport
-              className="h-[520px] w-[800px]"
-              projection={preview === null ? null : preview.projection}
-              regeneration={preview === null ? undefined : 1}
-              onSettled={() => {
-                document
-                  .getElementById("component-preview-root")
-                  ?.setAttribute(
-                    "data-cad-rendered-volume",
-                    preview === null ? "" : preview.totalVolumeMm3.toFixed(3),
-                  );
-                setRenderedFrames((frames) => frames + 1);
-              }}
-              overlay={
-                <div className="pointer-events-none absolute top-2 left-2 flex gap-2 font-mono text-[11px]">
-                  <span className="border-border bg-background/85 border px-2 py-1">
-                    {definition.id} ·{" "}
-                    {String(preview === null ? 0 : preview.bodies.length)}{" "}
-                    {preview !== null && preview.bodies.length === 1
-                      ? "body"
-                      : "bodies"}
-                  </span>
-                  {preview !== null && preview.bodies.length > 1 ? (
-                    <span className="border-border bg-background/85 border px-2 py-1">
-                      {preview.bodies
-                        .map(
-                          (body) =>
-                            `${bodyLabel(body.bodyId)} ${body.volumeMm3.toFixed(0)}mm³`,
-                        )
-                        .join(" · ")}
+          <div
+            id="component-preview-viewport"
+            className="border-border/80 bg-background/50 rounded-lg border p-1 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_4%,transparent),0_1px_2px_color-mix(in_oklch,var(--foreground)_10%,transparent)]"
+          >
+            <div className="overflow-hidden rounded-[6px]">
+              <CadViewport
+                className="h-[520px] w-[800px]"
+                projection={preview === null ? null : preview.projection}
+                regeneration={preview === null ? undefined : 1}
+                onSettled={() => {
+                  document
+                    .getElementById("component-preview-root")
+                    ?.setAttribute(
+                      "data-cad-rendered-volume",
+                      preview === null ? "" : preview.totalVolumeMm3.toFixed(3),
+                    );
+                  setRenderedFrames((frames) => frames + 1);
+                }}
+                overlay={
+                  <div className="pointer-events-none absolute top-2 left-2 flex flex-wrap gap-2 font-mono text-[11px]">
+                    <span className="border-border bg-background/85 rounded-sm border px-2 py-1">
+                      {definition.id} ·{" "}
+                      {String(preview === null ? 0 : preview.bodies.length)}{" "}
+                      {preview !== null && preview.bodies.length === 1
+                        ? "body"
+                        : "bodies"}
                     </span>
-                  ) : null}
-                </div>
-              }
-            />
+                    {preview !== null && preview.bodies.length > 1 ? (
+                      <span className="border-border bg-background/85 rounded-sm border px-2 py-1">
+                        {preview.bodies
+                          .map(
+                            (body) =>
+                              `${bodyLabel(body.bodyId)} ${body.volumeMm3.toFixed(0)}mm³`,
+                          )
+                          .join(" · ")}
+                      </span>
+                    ) : null}
+                  </div>
+                }
+              />
+            </div>
           </div>
           <p className="text-muted-foreground text-xs">
-            Real Manifold kernel in a module worker — the build rides the same
+            Real Manifold kernel in a module worker. The build rides the same
             `solid.*` operation vocabulary as the workbench. Volume is the
             kernel&apos;s divergence-theorem measurement; the analytic value is
             the component&apos;s closed-form fixture at the current parameters.

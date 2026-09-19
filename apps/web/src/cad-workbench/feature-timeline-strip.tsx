@@ -32,27 +32,27 @@ const TIMELINE_STATUS_PRESENTATION: Readonly<
   valid: Object.freeze({
     dot: "bg-muted-foreground/40",
     text: "text-muted-foreground",
-    chip: "border-border",
+    chip: "border-border bg-card/70",
   }),
   stale: Object.freeze({
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
-    chip: "border-border",
+    dot: "bg-signal",
+    text: "text-signal",
+    chip: "border-signal/40 bg-signal/8",
   }),
   failed: Object.freeze({
     dot: "bg-destructive",
     text: "text-destructive font-medium",
-    chip: "border-destructive/60",
+    chip: "border-destructive/60 bg-destructive/8",
   }),
   suppressed: Object.freeze({
     dot: "border border-muted-foreground/60 bg-transparent",
     text: "text-muted-foreground italic",
-    chip: "border-dashed border-border",
+    chip: "border-dashed border-border bg-transparent",
   }),
   "beyond-rollback": Object.freeze({
-    dot: "bg-sky-500",
-    text: "text-sky-600 dark:text-sky-400",
-    chip: "border-dashed border-sky-500/60",
+    dot: "bg-chart-2",
+    text: "text-chart-2",
+    chip: "border-dashed border-chart-2/50 bg-transparent",
   }),
 });
 
@@ -249,7 +249,7 @@ function TimelineFragment({
         onClear={onClearRollback}
       />
       <span
-        className={`flex shrink-0 items-center gap-1.5 border px-2 py-1 text-xs ${presentation.chip}`}
+        className={`flex h-6 shrink-0 items-center gap-1.5 rounded-[4px] border px-1.5 ${presentation.chip}`}
         data-testid="timeline-chip"
         data-timeline-id={entry.id}
         data-timeline-status={entry.status}
@@ -265,8 +265,12 @@ function TimelineFragment({
           aria-hidden="true"
           className={`size-1.5 shrink-0 rounded-full ${presentation.dot}`}
         />
-        <span className={presentation.text}>{entry.kind}</span>
-        <span className={`text-[11px] leading-none ${presentation.text}`}>
+        <span
+          className={`font-mono text-[11px] font-medium leading-none ${presentation.text}`}
+        >
+          {entry.kind}
+        </span>
+        <span className={`text-[10px] leading-none ${presentation.text}`}>
           {TIMELINE_STATUS_LABELS[entry.status]}
         </span>
         <button
@@ -275,7 +279,7 @@ function TimelineFragment({
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
           aria-pressed={suppressed}
-          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-[3px] outline-none transition-colors hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50"
           title={
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
@@ -315,7 +319,7 @@ function TimelineGap({
       type="button"
       aria-label={active ? `Remove rollback point — ${label}` : label}
       aria-pressed={active}
-      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-[3px] outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
       title={active ? `Remove rollback point — ${label}` : label}
       onClick={() => {
         if (active) {
@@ -328,7 +332,7 @@ function TimelineGap({
       {active ? (
         <span
           aria-hidden="true"
-          className="bg-amber-500 absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2"
+          className="bg-signal absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full"
           data-testid="rollback-marker"
         />
       ) : null}

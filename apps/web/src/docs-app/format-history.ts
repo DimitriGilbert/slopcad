@@ -49,7 +49,7 @@ export const FORMAT_ROWS: readonly FormatRow[] = [
     format: "IGES",
     direction: "import",
     carries:
-      "Meshes only (the occt-import-js fallback reads tessellations, never BREP solids) — the same class of body an STL import produces",
+      "Meshes only (the occt-import-js fallback reads tessellations, never BREP solids), the same class of body an STL import produces",
     history: false,
     source: "packages/cad-kernel-occt/src/occt-iges-import.ts",
   },

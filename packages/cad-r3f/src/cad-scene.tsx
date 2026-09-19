@@ -71,11 +71,11 @@ import { CadSceneGround } from "./scene-ground";
 import { CadSceneLights } from "./scene-lights";
 
 /**
- * The scene's clear color. Dark neutral gray, chosen so the grid grays, the
- * RGB axis colors, and the default CadModel material all read at AA-off,
- * DPR-1 rasterization.
+ * The scene's clear color. Studio graphite (the Machinist dark token
+ * family), chosen so the grid grays, the RGB axis colors, and the
+ * default CadModel material all read at AA-off, DPR-1 rasterization.
  */
-export const CAD_SCENE_BACKGROUND = "#111827";
+export const CAD_SCENE_BACKGROUND = "#101318";
 
 /**
  * The content ledger the settle probe gates on: what has actually been
