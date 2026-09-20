@@ -50,7 +50,7 @@
  */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   selectionReferenceKey,
@@ -67,7 +67,15 @@ import {
   createSceneCamera,
   type SceneCamera,
 } from "./scene-camera";
-import { CadSceneGround } from "./scene-ground";
+import {
+  CadSceneGround,
+  CAD_SCENE_AXIS_X_COLOR,
+  CAD_SCENE_AXIS_Y_COLOR,
+  CAD_SCENE_AXIS_Z_COLOR,
+  CAD_SCENE_GRID_CENTER_COLOR,
+  CAD_SCENE_GRID_COLOR,
+  CAD_SCENE_ORIGIN_MARKER_COLOR,
+} from "./scene-ground";
 import { CadSceneLights } from "./scene-lights";
 
 /**
@@ -76,6 +84,45 @@ import { CadSceneLights } from "./scene-lights";
  * default CadModel material all read at AA-off, DPR-1 rasterization.
  */
 export const CAD_SCENE_BACKGROUND = "#101318";
+
+/** The default model material color (mirrors cad-model's constant). */
+const CAD_SCENE_DEFAULT_MODEL_COLOR = "#aabdd6";
+
+/**
+ * The studio display palette: everything theme-carrying in the scene's
+ * ink. The amber SELECTION highlight is deliberately absent — it is a
+ * deterministic domain signal, not studio ink (see selection-highlight).
+ */
+export interface CadScenePalette {
+  /** The backdrop (the `<color attach="background">` clear color). */
+  readonly background: string;
+  /** Minor grid line color. */
+  readonly gridMinor: string;
+  /** Major (centre-line) grid color. */
+  readonly gridMajor: string;
+  /** The X axis's convention color. */
+  readonly axisX: string;
+  /** The Y axis's convention color. */
+  readonly axisY: string;
+  /** The Z axis's convention color. */
+  readonly axisZ: string;
+  /** The origin marker's color. */
+  readonly originMarker: string;
+  /** The model's base material color (metalness/roughness unchanged). */
+  readonly model: string;
+}
+
+/** The default palette: the documented Machinist night-bed constants. */
+export const CAD_SCENE_DEFAULT_PALETTE: CadScenePalette = Object.freeze({
+  background: CAD_SCENE_BACKGROUND,
+  gridMinor: CAD_SCENE_GRID_COLOR,
+  gridMajor: CAD_SCENE_GRID_CENTER_COLOR,
+  axisX: CAD_SCENE_AXIS_X_COLOR,
+  axisY: CAD_SCENE_AXIS_Y_COLOR,
+  axisZ: CAD_SCENE_AXIS_Z_COLOR,
+  originMarker: CAD_SCENE_ORIGIN_MARKER_COLOR,
+  model: CAD_SCENE_DEFAULT_MODEL_COLOR,
+} satisfies CadScenePalette);
 
 /**
  * The content ledger the settle probe gates on: what has actually been
@@ -138,6 +185,17 @@ export interface CadSceneProps {
    * reference tagging and stale-highlight rejection. Defaults to 0.
    */
   readonly regeneration?: number;
+  /**
+   * The studio display palette: backdrop, ground ink, and the model's base
+   * material color. Defaults to {@link CAD_SCENE_DEFAULT_PALETTE} (the
+   * documented Machinist night-bed constants); a chrome-carrying host
+   * resolves its own scheme+mode and passes the matching palette —
+   * geometry, camera, and the amber selection highlight stay deterministic
+   * either way. The palette object should be identity-stable per scheme
+   * and mode (the host exports it) so ordinary renders never swap scene
+   * ink.
+   */
+  readonly palette?: CadScenePalette;
   /** The selected references; drives the selection highlight. */
   readonly selection?: readonly SelectionReference[];
   /** Which domain reference a click resolves to. Defaults to `"face"`. */
@@ -203,6 +261,7 @@ function SceneCameraRig({
  * highlight or material change reaches the next demand frame.
  */
 function SceneModel({
+  material,
   onPick,
   onPickDown,
   onPickUp,
@@ -213,6 +272,7 @@ function SceneModel({
   selection,
   settle,
 }: {
+  material?: { readonly color: string };
   onPick?: (pick: CadPick) => void;
   onPickDown?: (pick: CadPick) => void;
   onPickUp?: (pick: CadPick) => void;
@@ -234,9 +294,10 @@ function SceneModel({
   }, [settle, projection]);
   useEffect(() => {
     invalidate();
-  }, [invalidate, pickCategory, regeneration, selection]);
+  }, [invalidate, material, pickCategory, regeneration, selection]);
   return (
     <CadModel
+      material={material}
       onHover={onHover}
       onPick={onPick}
       onPickDown={onPickDown}
@@ -344,6 +405,7 @@ export function CadScene({
   onPickUp,
   onSelectionRendered,
   onSettled,
+  palette = CAD_SCENE_DEFAULT_PALETTE,
   pickCategory,
   projection,
   regeneration,
@@ -356,17 +418,44 @@ export function CadScene({
     syncedProjection: null,
     appliedCamera: null,
   }));
+  // Identity-stable per palette so the model's material prop and the
+  // ground's memoized geometry never churn across ordinary renders.
+  const groundColors = useMemo(
+    () => ({
+      minor: palette.gridMinor,
+      major: palette.gridMajor,
+      axisX: palette.axisX,
+      axisY: palette.axisY,
+      axisZ: palette.axisZ,
+      origin: palette.originMarker,
+    }),
+    [
+      palette.axisX,
+      palette.axisY,
+      palette.axisZ,
+      palette.gridMajor,
+      palette.gridMinor,
+      palette.originMarker,
+    ],
+  );
+  const material = useMemo(() => ({ color: palette.model }), [palette.model]);
   return (
     <Canvas
       frameloop="demand"
       dpr={1}
       gl={{ antialias: false, preserveDrawingBuffer: true }}
     >
-      <color attach="background" args={[CAD_SCENE_BACKGROUND]} />
+      <color attach="background" args={[palette.background]} />
       <SceneCameraRig settle={settle} spec={projection.camera} />
       <CadSceneLights />
-      {showGround ? <CadSceneGround target={projection.camera.target} /> : null}
+      {showGround ? (
+        <CadSceneGround
+          colors={groundColors}
+          target={projection.camera.target}
+        />
+      ) : null}
       <SceneModel
+        material={material}
         onHover={onHover}
         onPick={onPick}
         onPickDown={onPickDown}

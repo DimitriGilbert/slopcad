@@ -55,6 +55,15 @@ function panelField(page: Page, name: string) {
   return page.getByLabel(name, { exact: true });
 }
 
+/** The unit tag rendered inside a literal field's control right edge:
+ * the field head carries the name, the input the magnitude, the tag the
+ * canonical unit (the accessible name stays the bare parameter name). */
+function panelFieldUnit(page: Page, name: string) {
+  return panelField(page, name).locator(
+    'xpath=following-sibling::span[@data-slot="field-suffix"]',
+  );
+}
+
 /** One serialized command-log entry (the store's canonical transaction form). */
 interface SerializedCommandLogEntry {
   readonly formatVersion: number;
@@ -172,19 +181,18 @@ test("the panel renders the fixture document's parameters, byte-stably across tw
     "holeDiameter * 2",
   );
 
-  await expect(
-    page.locator(PANEL).getByText("Current value: 8 mm"),
-  ).toBeVisible();
-  await expect(
-    page.locator(PANEL).getByText("Current value: 0 mm"),
-  ).toHaveCount(3);
+  // The literal fields wear their canonical unit INSIDE the control (the
+  // value itself is asserted above through the inputs).
+  await expect(panelFieldUnit(page, "holeDiameter")).toHaveText("mm");
+  await expect(panelFieldUnit(page, "translate_x")).toHaveText("mm");
+  await expect(panelFieldUnit(page, "translate_y")).toHaveText("mm");
+  await expect(panelFieldUnit(page, "translate_z")).toHaveText("mm");
   // The rotate angle reads in the CANONICAL unit of its dimension.
+  await expect(panelFieldUnit(page, "rotate_z")).toHaveText("rad");
+  // The expression-driven parameter shows its evaluated quantity — its
+  // one data line, the expression's current result.
   await expect(
-    page.locator(PANEL).getByText("Current value: 0 rad"),
-  ).toBeVisible();
-  // The expression-driven parameter shows its current cached quantity.
-  await expect(
-    page.locator(PANEL).getByText("Current value: 16 mm"),
+    page.locator(PANEL).getByText("= 16 mm", { exact: true }),
   ).toBeVisible();
 
   await settleForCapture(page);
@@ -231,10 +239,11 @@ test("editing a value through the panel commits parameter.set and settles a new 
     value: 6,
   });
 
-  // The panel's mirror followed the commit.
+  // The panel's mirror followed the commit: the sr-only current-quantity
+  // sentence re-derived (one per field, still exactly one 6 mm sentence).
   await expect(
     page.locator(PANEL).getByText("Current value: 6 mm"),
-  ).toBeVisible();
+  ).toHaveCount(1);
 
   // The executor stand-in followed the document: a settled NEW volume.
   const editedVolume = await waitForSettledScene(page, "ui-viewport-root");

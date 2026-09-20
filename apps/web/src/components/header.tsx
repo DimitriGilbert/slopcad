@@ -14,6 +14,7 @@
 import { Link, useLocation } from "@tanstack/react-router";
 
 import UserMenu from "./user-menu";
+import { SchemePicker } from "./scheme-picker";
 import { ThemeToggle } from "./theme-toggle";
 
 /** Route prefixes that own their top chrome (no app bar above them). */
@@ -49,7 +50,7 @@ export default function Header() {
           >
             <span className="border-primary absolute -top-[3px] -left-[3px] size-1.5 rounded-[2px] border" />
           </span>
-          <span className="text-foreground font-mono text-sm font-semibold tracking-tight">
+          <span className="font-display text-foreground text-sm font-semibold tracking-tight">
             slopcad
           </span>
         </Link>
@@ -70,6 +71,7 @@ export default function Header() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-2">
+          <SchemePicker />
           <ThemeToggle />
           <UserMenu />
         </div>

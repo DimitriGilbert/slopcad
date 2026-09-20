@@ -23,6 +23,14 @@
  * All geometry is generated from the constants below — no randomness, no
  * per-frame work, no disposal churn (`args` arrays are module-stable so R3F
  * never reconstructs the helpers across renders).
+ *
+ * ## Studio ink
+ *
+ * The furniture's DISPLAY COLORS are a `CadSceneGroundColors` prop: the
+ * exported constants below are the documented defaults (the Machinist
+ * night bed), and a host whose chrome carries its own studio palette
+ * passes the equivalent fields so the furniture follows it — geometry,
+ * dodges, and layout never change, only ink.
  */
 
 import { useMemo } from "react";
@@ -62,13 +70,36 @@ export const CAD_SCENE_ORIGIN_MARKER_RADIUS_MM = 0.9;
 /** Origin marker color (light gray, independent of the light rig). */
 export const CAD_SCENE_ORIGIN_MARKER_COLOR = "#e5e7eb";
 
-/** Module-stable gridHelper args, so R3F never reconstructs across renders. */
-const GRID_HELPER_ARGS: ConstructorParameters<typeof THREE.GridHelper> = [
-  CAD_SCENE_GRID_SIZE_MM,
-  CAD_SCENE_GRID_DIVISIONS,
-  CAD_SCENE_GRID_CENTER_COLOR,
-  CAD_SCENE_GRID_COLOR,
-];
+/**
+ * The ground furniture's display colors. The exported constants above are
+ * the documented defaults (the Machinist night bed); a host whose chrome
+ * carries its own studio palette passes the equivalent fields and the
+ * furniture follows it — geometry and layout never change, only ink.
+ */
+export interface CadSceneGroundColors {
+  /** Minor grid line color. */
+  readonly minor: string;
+  /** Major (centre-line) grid color. */
+  readonly major: string;
+  /** The X axis's convention color. */
+  readonly axisX: string;
+  /** The Y axis's convention color. */
+  readonly axisY: string;
+  /** The Z axis's convention color. */
+  readonly axisZ: string;
+  /** The origin marker's color. */
+  readonly origin: string;
+}
+
+/** The default ground colors: the module's documented constants. */
+export const CAD_SCENE_GROUND_DEFAULT_COLORS: CadSceneGroundColors = {
+  minor: CAD_SCENE_GRID_COLOR,
+  major: CAD_SCENE_GRID_CENTER_COLOR,
+  axisX: CAD_SCENE_AXIS_X_COLOR,
+  axisY: CAD_SCENE_AXIS_Y_COLOR,
+  axisZ: CAD_SCENE_AXIS_Z_COLOR,
+  origin: CAD_SCENE_ORIGIN_MARKER_COLOR,
+};
 
 /** Module-stable octahedron args for the origin marker. */
 const ORIGIN_MARKER_ARGS: ConstructorParameters<
@@ -79,8 +110,16 @@ const ORIGIN_MARKER_ARGS: ConstructorParameters<
  * Builds the world-axes line geometry: one segment per axis through the
  * origin, dodged per the coplanarity rules, with per-vertex colors carrying
  * each axis's convention color (two vertices per axis, one draw call).
+ * Colors default to the documented constants; a palette-carrying host
+ * passes its own.
  */
-export function createAxesGeometry(): THREE.BufferGeometry {
+export function createAxesGeometry(
+  colors: Pick<CadSceneGroundColors, "axisX" | "axisY" | "axisZ"> = {
+    axisX: CAD_SCENE_AXIS_X_COLOR,
+    axisY: CAD_SCENE_AXIS_Y_COLOR,
+    axisZ: CAD_SCENE_AXIS_Z_COLOR,
+  },
+): THREE.BufferGeometry {
   const clearance = CAD_SCENE_AXIS_CLEARANCE_MM;
   const length = CAD_SCENE_AXIS_LENGTH_MM;
   const positions = new Float32Array([
@@ -104,11 +143,11 @@ export function createAxesGeometry(): THREE.BufferGeometry {
     length,
   ]);
   const axisColors = [
-    new THREE.Color(CAD_SCENE_AXIS_X_COLOR),
-    new THREE.Color(CAD_SCENE_AXIS_Y_COLOR),
-    new THREE.Color(CAD_SCENE_AXIS_Z_COLOR),
+    new THREE.Color(colors.axisX),
+    new THREE.Color(colors.axisY),
+    new THREE.Color(colors.axisZ),
   ];
-  const colors = new Float32Array(18);
+  const colorBuffer = new Float32Array(18);
   for (let axis = 0; axis < axisColors.length; axis += 1) {
     const color = axisColors[axis];
     if (color === undefined) {
@@ -116,14 +155,14 @@ export function createAxesGeometry(): THREE.BufferGeometry {
     }
     for (let vertex = 0; vertex < 2; vertex += 1) {
       const offset = (axis * 2 + vertex) * 3;
-      colors[offset] = color.r;
-      colors[offset + 1] = color.g;
-      colors[offset + 2] = color.b;
+      colorBuffer[offset] = color.r;
+      colorBuffer[offset + 1] = color.g;
+      colorBuffer[offset + 2] = color.b;
     }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colorBuffer, 3));
   return geometry;
 }
 
@@ -131,18 +170,35 @@ export function createAxesGeometry(): THREE.BufferGeometry {
  * Renders the ground furniture. `target` is the projection camera's target:
  * the grid centres on its xy so the framed model always stands over the
  * grid's centre lines, while the axes and origin marker stay at the world
- * origin — their meaning, not the camera's.
+ * origin — their meaning, not the camera's. `colors` defaults to the
+ * documented constants; an identity-stable object per palette keeps the
+ * memoized geometry and material props churn-free across ordinary renders.
  */
 export function CadSceneGround({
+  colors = CAD_SCENE_GROUND_DEFAULT_COLORS,
   target,
 }: {
+  colors?: CadSceneGroundColors;
   target: RenderVector3;
 }): ReactElement {
-  const axesGeometry = useMemo(createAxesGeometry, []);
+  const gridHelperArgs = useMemo(
+    () =>
+      [
+        CAD_SCENE_GRID_SIZE_MM,
+        CAD_SCENE_GRID_DIVISIONS,
+        colors.major,
+        colors.minor,
+      ] satisfies ConstructorParameters<typeof THREE.GridHelper>,
+    [colors.major, colors.minor],
+  );
+  const axesGeometry = useMemo(
+    () => createAxesGeometry(colors),
+    [colors.axisX, colors.axisY, colors.axisZ],
+  );
   return (
     <>
       <gridHelper
-        args={GRID_HELPER_ARGS}
+        args={gridHelperArgs}
         rotation-x={Math.PI / 2}
         position={[target[0], target[1], -CAD_SCENE_GRID_DROP_MM]}
       />
@@ -151,7 +207,7 @@ export function CadSceneGround({
       </lineSegments>
       <mesh>
         <octahedronGeometry args={ORIGIN_MARKER_ARGS} />
-        <meshBasicMaterial color={CAD_SCENE_ORIGIN_MARKER_COLOR} />
+        <meshBasicMaterial color={colors.origin} />
       </mesh>
     </>
   );

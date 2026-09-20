@@ -12,7 +12,7 @@ import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
 
 import Header from "../components/header";
-import { THEME_BOOTSTRAP_SCRIPT } from "../theme";
+import { APPEARANCE_BOOTSTRAP_SCRIPT } from "../theme";
 import appCss from "../index.css?url";
 
 interface RouterAppContext {
@@ -47,7 +47,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
     ],
     scripts: [
       {
-        children: THEME_BOOTSTRAP_SCRIPT,
+        children: APPEARANCE_BOOTSTRAP_SCRIPT,
       },
     ],
   }),

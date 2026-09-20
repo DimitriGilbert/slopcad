@@ -86,16 +86,19 @@ const EXPORT_FORMATS: readonly CadExportFormatOption[] = [
     id: "stl",
     label: "STL",
     description: "Binary triangle soup of the settled solid.",
+    meta: "mesh / binary",
   },
   {
     id: "3mf",
     label: "3MF",
     description: "XML mesh package; import parses on the app server.",
+    meta: "mesh / zip+xml",
   },
   {
     id: "glb",
     label: "GLB",
     description: "The render projection as a glTF scene, one node per body.",
+    meta: "scene / binary",
   },
 ];
 
@@ -106,30 +109,35 @@ const IMPORT_FORMATS: readonly CadImportFormatOption[] = [
     label: "STL",
     description: "Mesh import fully in the browser.",
     extensions: [".stl"],
+    meta: "mesh / browser",
   },
   {
     id: "3mf",
     label: "3MF",
     description: "Parsed by the app server (the importer is Node-targeted).",
     extensions: [".3mf"],
+    meta: "mesh / server",
   },
   {
     id: "step",
     label: "STEP",
     description: "BREP solids through the OpenCascade worker (boots on use).",
     extensions: [".step", ".stp"],
+    meta: "brep / worker",
   },
   {
     id: "brep",
     label: "BREP",
     description: "OCCT's native form through the same worker.",
     extensions: [".brep"],
+    meta: "brep / worker",
   },
   {
     id: "iges",
     label: "IGES",
     description: "Mesh bodies on the main thread (fallback engine).",
     extensions: [".igs", ".iges"],
+    meta: "mesh / main thread",
   },
 ];
 

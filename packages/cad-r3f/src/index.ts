@@ -20,6 +20,8 @@
 export { CAD_DOCUMENT_FORMAT_VERSION } from "@slopcad/cad-react";
 export {
   CAD_SCENE_BACKGROUND,
+  CAD_SCENE_DEFAULT_PALETTE,
+  type CadScenePalette,
   CadScene,
   type CadSceneProps,
 } from "./cad-scene";
@@ -88,6 +90,8 @@ export {
   CAD_SCENE_GRID_SIZE_MM,
   CAD_SCENE_ORIGIN_MARKER_COLOR,
   CAD_SCENE_ORIGIN_MARKER_RADIUS_MM,
+  CAD_SCENE_GROUND_DEFAULT_COLORS,
+  type CadSceneGroundColors,
   CadSceneGround,
   createAxesGeometry,
 } from "./scene-ground";

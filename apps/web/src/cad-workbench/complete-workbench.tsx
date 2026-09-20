@@ -167,7 +167,7 @@ export type CadWorkbenchSlot = (context: CadWorkbenchSlotContext) => ReactNode;
 export interface CadWorkbenchSlots {
   /** The command row's tool strip. */
   readonly toolbar?: CadWorkbenchSlot;
-  /** The command row's history timeline. */
+  /** The feature band's history timeline (full width, below the workspace). */
   readonly historyTimeline?: CadWorkbenchSlot;
   /** The command menu (trigger + palette; the palette is portal-mounted). */
   readonly commandMenu?: CadWorkbenchSlot;
@@ -262,6 +262,12 @@ export function CompleteCadWorkbench({
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importedFrames, setImportedFrames] = useState(0);
+  // The settle lamp's honest state: the document whose pixels the last
+  // settled frame actually rendered. A commit flips the lamp to "waiting"
+  // the instant the document identity changes (the pixels now lag the
+  // document) and back to "settled" when the regenerated scene's first
+  // settled frame stamps. An import preview never settles the document.
+  const [settledDocument, setSettledDocument] = useState<unknown>(null);
   // Below the dock breakpoint the docks become overlay drawers: one DOM
   // instance per dock, slid in and out by transform, returned to the flex
   // flow at `xl` — so the machine surfaces never unmount at any width.
@@ -332,6 +338,13 @@ export function CompleteCadWorkbench({
   const showingPreview = ioSurface.preview !== null;
   const documentVolumeText =
     applied === null ? null : applied.state.measurement.volume.toFixed(3);
+  // Settled = the last settled frame rendered THIS document (and no
+  // import preview is on the stage — a preview's pixels are never the
+  // document's).
+  const settled =
+    !showingPreview &&
+    settledDocument !== null &&
+    settledDocument === engine.documentApi.document;
 
   // A successful import closes the dialog: the result IS the preview, now
   // visible in the viewport under its truth-telling chip. A failed import
@@ -504,11 +517,11 @@ export function CompleteCadWorkbench({
   const defaultHistoryTimeline = (
     <div
       aria-label="Feature timeline"
-      className="flex h-full min-w-[92px] flex-1 items-center gap-1 overflow-hidden pl-2"
+      className="border-border bg-card/40 flex h-9 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-t px-3"
       data-testid="complete-feature-timeline"
       role="group"
     >
-      <span className="text-muted-foreground mr-1.5 hidden shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase xl:inline">
+      <span className="text-muted-foreground shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         Timeline
       </span>
       {timeline === null ? (
@@ -517,14 +530,15 @@ export function CompleteCadWorkbench({
         </span>
       ) : (
         <>
-          {/* The chain scrolls HERE alone; the counter sits outside the
-              scrolled content, so a long feature chain can never clip it
-              mid-word (nor can the counter squeeze the chips). Scroll snap
-              keeps every rest position whole-chip, and the container query
-              collapses the chips entirely once the window can no longer
-              host one — the strip never rests on a bisected glyph. The
-              row sheds labels before it ever clips a control: the pinned
-              end toggles are the last thing to go, never clipped. */}
+          {/* The document's history gets the FULL frame width: the feature
+              band is its own row below the workspace (the silhouette CAD
+              engineers already trust), so the chain stops competing with
+              the command row for pixels. The chain scrolls HERE alone; the
+              counter sits outside the scrolled content, so a long feature
+              chain can never clip it mid-word (nor can the counter squeeze
+              the chips). Scroll snap keeps every rest position whole-chip,
+              the edges fade, and the container query collapses the chips
+              entirely once the window can no longer host one. */}
           <div className="h-full min-w-0 flex-1 @container">
             <div className="no-scrollbar flex h-full w-full snap-x snap-mandatory items-center gap-1 overflow-x-auto @max-[150px]:hidden [mask-image:linear-gradient(to_right,transparent_0,black_10px,black_calc(100%_-_14px),transparent)]">
               <FeatureTimelineChips
@@ -606,8 +620,11 @@ export function CompleteCadWorkbench({
               return;
             }
             // Settle protocol: pixels may be compared only once this stamp
-            // agrees with the settled volume, written synchronously.
+            // agrees with the settled volume, written synchronously. The
+            // settle lamp reads the same agreement: this frame rendered
+            // THIS document.
             noteRenderedFrame(documentVolumeText);
+            setSettledDocument(engine.documentApi.document);
           }}
           onSelectionRendered={(key) => {
             document
@@ -615,22 +632,36 @@ export function CompleteCadWorkbench({
               ?.setAttribute("data-cad-selection-frame", key);
           }}
           overlay={
-            showingPreview ? (
-              <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-2 rounded-sm border border-border bg-background/95 px-2 py-1 text-xs shadow-sm">
-                <span className="text-muted-foreground font-mono text-[11px]">
-                  {`preview: ${ioSurface.preview?.source ?? ""} mesh: geometry only, not in the document`}
-                </span>
-                <Button
-                  data-testid="complete-clear-import"
-                  onClick={ioSurface.onClearPreview}
-                  size="xs"
-                  type="button"
-                  variant="outline"
-                >
-                  Back to model
-                </Button>
+            <>
+              {/* The registration brackets: the stage's corners are framed
+                  like a drawing sheet around the workpiece — the same
+                  "captured region" language as the DRO band below it. */}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
+              >
+                <span className="border-muted-foreground absolute top-1.5 left-1.5 size-2.5 border-t border-l" />
+                <span className="border-muted-foreground absolute top-1.5 right-1.5 size-2.5 border-t border-r" />
+                <span className="border-muted-foreground absolute bottom-1.5 left-1.5 size-2.5 border-b border-l" />
+                <span className="border-muted-foreground absolute right-1.5 bottom-1.5 size-2.5 border-r border-b" />
               </div>
-            ) : undefined
+              {showingPreview ? (
+                <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-2 rounded-sm border border-border bg-background/95 px-2 py-1 text-xs shadow-sm">
+                  <span className="text-muted-foreground font-mono text-[11px]">
+                    {`preview: ${ioSurface.preview?.source ?? ""} mesh: geometry only, not in the document`}
+                  </span>
+                  <Button
+                    data-testid="complete-clear-import"
+                    onClick={ioSurface.onClearPreview}
+                    size="xs"
+                    type="button"
+                    variant="outline"
+                  >
+                    Back to model
+                  </Button>
+                </div>
+              ) : null}
+            </>
           }
         />
       </div>
@@ -877,15 +908,17 @@ export function CompleteCadWorkbench({
       id={rootId}
     >
       {/* The command row, grouped like a machine headstock: the document
-          plate (what this document IS, live), the tool group, the
-          scrolling timeline, then the pinned terminal actions — history,
-          the command menu, and the file/mode verbs — separated by real
-          group dividers so a long feature chain scrolls INSIDE the
-          timeline and never pushes an action off the row. Below the dock
-          breakpoint the two drawer toggles appear at the row's ends. In
-          sketch mode it yields to the sketch editor's own command row;
-          the model surfaces stay MOUNTED but hidden so the session's
-          surface writer keeps their ids. */}
+          plate (what this document IS, live), the tool group, then the
+          pinned terminal actions — history, the command menu, and the
+          file/mode verbs — separated by real group dividers. The feature
+          timeline is NOT here: it owns its own full-width band below the
+          workspace (the silhouette CAD engineers already trust), so the
+          chain never competes with this row for pixels and never clips a
+          control at any width. Below the dock breakpoint the two drawer
+          toggles appear at the row's ends. In sketch mode it yields to
+          the sketch editor's own command row; the model surfaces stay
+          MOUNTED but hidden so the session's surface writer keeps their
+          ids. */}
       <div
         className={`border-border bg-card/40 h-10 shrink-0 items-center gap-1 border-b pr-2 ${
           mode === "sketch" ? "hidden" : "flex"
@@ -939,7 +972,6 @@ export function CompleteCadWorkbench({
         <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
         {toolbar}
         <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
-        {historyTimeline}
         <div
           aria-label="History"
           className="flex shrink-0 items-center gap-0.5"
@@ -1138,7 +1170,40 @@ export function CompleteCadWorkbench({
           </div>
         </div>
       </div>
-      {statusBar}
+      {/* The feature band: the document's history as its own full-width
+          row between the workspace and the status bar (hidden, like every
+          model surface, in sketch mode). The timeline's chips and health
+          counter are the same joined-status surfaces as ever — only their
+          host row changed. */}
+      <div className={mode === "sketch" ? "hidden" : "contents"}>
+        {historyTimeline}
+      </div>
+      {/* The status frame: the settle lamp rides the status bar's left
+          edge — the settle protocol made glanceable and machine-readable
+          (`data-settle-lamp`). Lit (signal, soft glow in dark) while the
+          rendered pixels agree with the document; a hollow ring while the
+          scene settles or an import preview owns the stage. */}
+      <div className="relative shrink-0 [&_[data-slot='cad-status-bar']]:pl-9">
+        <span
+          className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2"
+          data-settle-lamp={settled ? "settled" : "waiting"}
+          title={
+            settled
+              ? "Scene settled — the rendered pixels agree with the document."
+              : "Scene settling — the rendered pixels are not yet comparable."
+          }
+        >
+          <span
+            aria-hidden="true"
+            className={`block size-2 transition-colors duration-200 ${
+              settled
+                ? "bg-signal dark:shadow-[0_0_8px_1px] dark:shadow-signal/50"
+                : "border-muted-foreground/70 border"
+            }`}
+          />
+        </span>
+        {statusBar}
+      </div>
       {ioDialogs}
     </div>
   );

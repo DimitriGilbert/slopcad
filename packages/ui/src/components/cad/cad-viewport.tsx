@@ -71,7 +71,6 @@ import {
   type SelectionReference,
 } from "@slopcad/cad-react";
 import {
-  CAD_SCENE_BACKGROUND,
   CadScene,
   toolKeyEvent,
   toolModifiersFromNative,
@@ -80,6 +79,8 @@ import {
   type CadPickCategory,
 } from "@slopcad/cad-r3f";
 import { cn } from "cn";
+
+import { useCadStudioPalette } from "./cad-studio-palette";
 
 /** The user-facing strings of {@link CadViewport}. Overridable via props. */
 export interface CadViewportLabels {
@@ -190,6 +191,10 @@ export function CadViewport({
     ...CAD_VIEWPORT_LABELS,
     ...labelOverrides,
   };
+  // The studio ink follows the app's scheme + register (see
+  // cad-studio-palette); the selection highlight inside the scene stays
+  // deterministic amber.
+  const studioPalette = useCadStudioPalette();
   const selectionApi = useOptionalCadSelection();
   const toolsApi = useOptionalCadTools();
 
@@ -329,7 +334,7 @@ export function CadViewport({
         className,
       )}
       role="group"
-      style={{ backgroundColor: CAD_SCENE_BACKGROUND }}
+      style={{ backgroundColor: studioPalette.background }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
@@ -355,6 +360,7 @@ export function CadViewport({
         <CadScene
           onSelectionRendered={onSelectionRendered}
           onSettled={onSettled}
+          palette={studioPalette}
           pickCategory={pickCategory}
           projection={projection}
           regeneration={regeneration}

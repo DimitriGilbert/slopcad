@@ -20,6 +20,7 @@ import { Badge } from "@slopcad/ui/components/badge";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 
 import UserMenu from "../components/user-menu";
+import { SchemePicker } from "../components/scheme-picker";
 import { ThemeToggle } from "../components/theme-toggle";
 import { FORMAT_ROWS } from "./format-history";
 import {
@@ -262,6 +263,7 @@ export function DocsPage(): React.JSX.Element {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            <SchemePicker />
             <ThemeToggle />
             <UserMenu />
           </div>

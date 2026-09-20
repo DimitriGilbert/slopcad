@@ -21,16 +21,22 @@ import type {
 } from "@slopcad/cad-react";
 import { Eye, EyeOff } from "lucide-react";
 
-/** Visual presentation of one joined timeline status. */
+/** Visual presentation of one joined timeline status. The healthy state
+ * carries NO dot and quiet ink — failures are the only loud chips (the
+ * quiet-when-valid rule); the dot column exists only for states that
+ * need a marker. */
 const TIMELINE_STATUS_PRESENTATION: Readonly<
   Record<
     FeatureTimelineStatus,
-    { readonly dot: string; readonly text: string; readonly chip: string }
+    {
+      readonly dot: string | null;
+      readonly text: string;
+      readonly chip: string;
+    }
   >
 > = Object.freeze({
-  // The healthy state stays quiet; failures are the only loud chip.
   valid: Object.freeze({
-    dot: "bg-muted-foreground/40",
+    dot: null,
     text: "text-muted-foreground",
     chip: "border-border bg-card/70",
   }),
@@ -258,10 +264,12 @@ function TimelineFragment({
                 .join("\n")
         }
       >
-        <span
-          aria-hidden="true"
-          className={`size-1.5 shrink-0 rounded-full ${presentation.dot}`}
-        />
+        {presentation.dot !== null ? (
+          <span
+            aria-hidden="true"
+            className={`size-1.5 shrink-0 rounded-full ${presentation.dot}`}
+          />
+        ) : null}
         <span
           className={`font-mono text-[11px] font-medium leading-none ${presentation.text}`}
         >

@@ -27,12 +27,16 @@
  *   (see `useCadParameters`), so a committed expression edit is honestly a
  *   `parameter.set` of what the expression currently produces — the stored
  *   expression is domain substrate and is never written from the UI.
- * - Every field's label IS the parameter name (domain data, not prose), and
- *   its description carries the current quantity in the canonical unit of
- *   the parameter's dimension (`mm`, `rad`, `mm2`, `mm3`, `1` — the unit
- *   registry's canonical tokens; magnitudes render with the domain's own
- *   magnitude formatting, the same `String(number)` rule `printExpression`
- *   uses).
+ * - Every field's label IS the parameter name (domain data, not prose).
+ *   The current quantity never renders as a third row under the input:
+ *   a LITERAL field wears its canonical unit INSIDE the control (the
+ *   number field's `suffix`), and an EXPRESSION field prints its
+ *   evaluated quantity as the field's one data line (`= 16 mm`) — the
+ *   canonical unit of the parameter's dimension (`mm`, `rad`, `mm2`,
+ *   `mm3`, `1` — the unit registry's canonical tokens; magnitudes render
+ *   with the domain's own magnitude formatting, the same `String(number)`
+ *   rule `printExpression` uses). The full current-quantity sentence
+ *   rides along as a screen-reader-only description.
  *
  * Unchanged edits are filtered before anything is issued: a submitted value
  * that is `equalQuantity` to the current one, or an expression whose text
@@ -406,7 +410,18 @@ export function CadParameterPanel({
     const fields: FormedibleFieldConfig<CadParameterPanelFormValues>[] = [];
 
     for (const parameter of parameterList) {
-      const quantity = `${mergedLabels.currentValue}: ${currentQuantityText(parameter)}`;
+      // The field's quantity lives in the field HEAD, not a third row:
+      // literal fields wear their canonical unit INSIDE the control (the
+      // suffix), expression fields print their evaluated quantity as the
+      // one data line (`= 16 mm`). The full current-quantity sentence
+      // rides along as a screen-reader-only description — same words as
+      // ever, zero extra visual rows.
+      const quantity = currentQuantityText(parameter);
+      const srQuantity = (
+        <span className="sr-only">
+          {`${mergedLabels.currentValue}: ${quantity}`}
+        </span>
+      );
       if (parameter.expression === null) {
         defaultValues[valueKey(parameter.id)] = toCanonical(
           parameter.value,
@@ -415,7 +430,8 @@ export function CadParameterPanel({
           name: valueKey(parameter.id),
           type: "number",
           label: parameter.name,
-          description: quantity,
+          description: srQuantity,
+          suffix: CANONICAL_UNITS[parameter.value.dimension],
           inputClassName: "font-mono",
           // A finite-number gate with the externalized message; a refused
           // field blocks submit, so nothing is issued from it.
@@ -433,7 +449,14 @@ export function CadParameterPanel({
         name: expressionKey(parameter.id),
         type: "text",
         label: parameter.name,
-        description: quantity,
+        description: (
+          <>
+            {srQuantity}
+            <span aria-hidden="true" className="font-mono">
+              {`= ${quantity}`}
+            </span>
+          </>
+        ),
         inputClassName: "font-mono",
         // The domain owns expression correctness: this validator returns the
         // domain's structured failure verbatim — the grammar is never
