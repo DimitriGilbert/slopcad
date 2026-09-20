@@ -145,7 +145,7 @@ function StatusField({
 }): ReactElement {
   return (
     <span className="text-muted-foreground flex items-center whitespace-nowrap">
-      <span className="text-muted-foreground/70">{label}</span>
+      <span className="text-muted-foreground">{label}</span>
       {" = "}
       <span className="text-foreground">{children}</span>
     </span>

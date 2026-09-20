@@ -16,7 +16,7 @@ const SURFACES = [
   },
   {
     to: "/components/$componentId",
-    params: { componentId: "nema17" } as const,
+    params: { componentId: "nema17-mount" } as const,
     title: "Components",
     body: "Reusable parametric parts, rebuilt live by the Manifold kernel with their analytic proofs.",
   },
@@ -72,7 +72,7 @@ function HomeComponent() {
                 healthCheck.isPending
                   ? "bg-signal motion-safe:animate-pulse"
                   : healthCheck.data
-                    ? "bg-chart-3"
+                    ? "bg-status-ok"
                     : "bg-destructive"
               }`}
             />
@@ -88,7 +88,7 @@ function HomeComponent() {
           {SURFACES.map((surface) => (
             <Link
               key={surface.title}
-              className="border-border bg-card/60 group hover:border-primary/40 hover:bg-primary/5 rounded-lg border p-4 transition-colors"
+              className="border-border bg-card/60 group hover:border-input hover:bg-card rounded-lg border p-4 transition-colors"
               params={"params" in surface ? surface.params : undefined}
               to={surface.to}
             >
@@ -96,7 +96,7 @@ function HomeComponent() {
                 <h2 className="text-sm font-semibold">{surface.title}</h2>
                 <span
                   aria-hidden="true"
-                  className="text-muted-foreground group-hover:text-primary font-mono text-xs transition-colors"
+                  className="text-muted-foreground group-hover:text-foreground font-mono text-xs transition-colors"
                 >
                   →
                 </span>

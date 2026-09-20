@@ -2,42 +2,45 @@
 
 ## The vision in three sentences
 
-slopcad is a precision instrument, and its interface should feel like one: a graphite cockpit where every readout is mono, every state has one honest color, and the 3D viewport sits framed like the instrument screen it is. The identity is **machinist amber on workshop graphite** (dark) and **bronze on cool drafting paper** (light) — the machine-tool signal language (stack lamps, DRO readouts, selection washes), not another blueLinear clone. Nothing decorative survives: every amber pixel means "active, selected, or live," and everything else is hairline, ink, and whitespace.
+Lead with the light register, because it is where this system is genuinely ahead: **bronze on cool drafting paper** — a highlighter-amber selection wash over white instrument cards, deep-bronze primaries that pass AA as both text and fill, and the graphite 3D viewport set into the page like a scope on a light table. Dark is the same instrument at night: layered graphite, machinist amber, hairline chrome. The cockpit's signature is the **DRO strip** fused to the viewport bezel — a live `scene · extents · volume · triangles` readout no generic admin-tool vocabulary has — plus a physically pressed amber key (`:active` ink insets into the button) and pinned dock footers so the primary action never leaves the frame.
 
-## Identity system
+## The two registers
 
-**One accent, two inks.** The accent is the machinist amber family. In dark it is a lamp: `oklch(0.80 0.145 78)` (`#f0b13f`) as primary fill with near-black ink (9.9:1). In light it is the same hue deepened into bronze `oklch(0.51 0.115 65)` (`#8a580c`) so it passes AA as both text on paper (5.7:1) and fill with near-white ink (5.9:1). The brand reads as one color across themes because it is one hue — only lightness adapts.
+**Light leads (the drafting room).** Cool paper `oklch(0.977 0.003 240)`, never beige; white cards delineated by a strengthened hairline border (`oklch 0.855`) so docks keep their silhouette on dim screens; bronze primary `oklch(0.51 0.115 65)` with near-white ink (5.9:1) and as text on paper (5.7:1); the selection wash is a highlighter amber over paper. This register is co-designed, not inverted: every pair was verified AA in light first.
 
-**Neutrals with a breath of blue, never gray-mush.** Dark layers graphite in three steps (background 0.165, card 0.198, popover 0.218) with hairline borders at 0.295. Light uses cool paper (`#f6f8f9`) with white cards — deliberately _not_ beige, _not_ warm cream: this is a drafting room, not a bakery.
+**Dark follows (the workshop at night).** Graphite in three steps (background 0.165 / card 0.198 / popover 0.218), amber lamp `#f0b13f` as primary with near-black ink (9.9:1), amber-steeped selection wash, the same hairline discipline.
 
-**Typography: IBM Plex, the engineering document face.** IBM Plex Sans Variable for UI, IBM Plex Mono for every number, id, path, and status (`font-variant-numeric: tabular-nums` globally on mono so readouts never reflow). Plex has genuine engineering-document heritage, distinctive letterforms at 11–13px, and a mono that pairs natively. Self-hosted via Fontsource — no network dependency, e2e-safe.
+## The rules that make it an instrument
 
-**Corner system (shape lock).** Controls and chips 4px, panels 6px, cards 8px, dialogs/palette 12px. Documented and applied everywhere — no mixed radii.
-
-**The viewport is an instrument screen.** The 3D scene stays in its authored studio graphite in both themes (deterministic, the settle contract untouched), framed in a 1px bezel with inset highlight — in light theme it reads as a scope set into a paper page. The model material was retuned to light steel `#aabdd6` so geometry separates cleanly from the background.
+- **Amber is semantic — brand excepted.** Amber/bronze means active, selected, live, or primary action. Brand marks (the machinist plate, the wordmark tick) are the documented exception. Hovers ride the neutral tier (`muted` wash, `border-input`), never the accent.
+- **One input voice: mono.** Every field — parameter panels, the command palette query, import dialogs — is IBM Plex Mono with tabular numerals. Prose is Plex Sans; data is Plex Mono; nothing in between.
+- **Corner lock.** Controls 4px, panels 6px, cards 8px, dialogs and the palette 12px — including the IO dialogs (real scrim: `black/40` + 2px blur, so the busy cockpit recedes behind a modal).
+- **Labels at the smallest tier carry full contrast.** DRO labels, panel headers, and status-bar fields use `muted-foreground` unmodified (7.2:1 dark / 6.15:1 light) — no opacity modifiers at 10.5–11px. Softness comes from case, size, and tracking, never from contrast.
+- **Status has its own tokens.** `--status-ok` (lamp green) and `--status-parked` (steel) are semantic; the chart family only draws charts.
+- **Focus is never the shyest signal.** Focus rings ride `ring/70`–`ring/80` — brighter than any decorative element in the system.
+- **Primary actions stay in frame.** Parameter docks scroll their fields and pin Apply/Rebuild as a footer; Enter still commits from any field (the form restores implicit submission itself).
 
 ## What was built
 
-- **Token system** (`packages/ui/src/styles/globals.css`): complete rewrite of the default shadcn palette; both themes first-class; new `--signal` token (the raw state color), `--destructive-foreground`, amber-tinted `--accent` selection washes per theme, chart family anchored on the accent; thin instrument scrollbars; amber `::selection`; tabular mono.
-- **Theme mechanism** (`apps/web/src/theme.ts`, `components/theme-toggle.tsx`, `__root.tsx`): inline no-flash bootstrap script (defaults dark, persisted in localStorage, `color-scheme` set for native controls), event-synced toggles in the app header and the docs rail, `suppressHydrationWarning` on `<html>`.
-- **Workbench cockpit**: segmented tool strip with amber pressed state and digit keycaps; timeline chips with status dots and mono kinds; panel chrome unified under 10.5px mono uppercase headers with hairline dividers; status bar as a `label = value` machine readout (28px contract kept); viewport bezel; command palette with grouped mono headings, amber selection wash, and kbd shortcut chips.
-- **Component preview**: spec-sheet layout — name/identity header, bordered id chip, three instrument cards (Parameters via Formedible, Interface port map, Build readouts), viewport in the shared bezel.
-- **Docs**: engineering-manual structure — sticky in-page bar with section jumps and theme toggle, IntersectionObserver-driven topic rail (no scroll listeners), example cards with semantic status lamps (running pulses amber, ok glows green, failed red), capability matrix and format tables with bronze ✓ glyphs, guide paths as mono chips.
-- **Home**: the front door — brand mark, one headline, two CTAs, live api lamp, and a three-surface index.
-- **Primitives**: Button (amber primary with inset highlight, hairline outline, 4px), Input (mono, tabular, focus ring), Badge (tinted, bordered), Command (rounded palette), scene background `#101318`.
+- **Token system** (`packages/ui/src/styles/globals.css`): bespoke palette, both registers first-class, status tokens, tabular mono, thin scrollbars, amber `::selection`.
+- **Theme mechanism** (`apps/web/src/theme.ts`, `theme-toggle.tsx`, `__root.tsx`): no-flash bootstrap, persisted, event-synced toggles. Routes that own their chrome (docs) carry the toggle themselves — the app bar yields so pages never stack two headers or two toggles.
+- **Workbench cockpit**: segmented toolbar with amber pressed state and digit keycaps; the **DRO strip** under the viewport (document and import-preview states); timeline chips with status dots; unified mono panel headers; `label = value` status bar (28px contract kept); 12px IO dialogs over a real scrim; command palette with mono query, grouped mono headings, kbd chips.
+- **Component preview**: spec sheet with the Build readout promoted to a strip directly under the identity (same span ids, same session writer), pinned Rebuild footer, port map, viewport in the shared bezel, and a designed registry index for unknown ids.
+- **Docs**: engineering manual — single sticky bar (brand, section jumps, toggle, session), IntersectionObserver topic rail, status-lamped example cards, bronze-glyph capability matrix.
+- **Auth + home**: composed login stage (brand plate + instrument card; field contracts untouched) and the home front door with a live api lamp; per-route titles on docs, workbench, components, login, projects.
 
 ## Machine surfaces
 
-Every `data-testid`, `data-*` attribute, aria contract, label, and role the suites assert is intact. The one intentional suite-visible change: the a11y suite's screenshots now capture the new skin (they are artifacts, not baselines). One unit test's class assertion (`bg-primary` on the armed tool) was updated to the new distinct-variant contract (`data-active` attribute), preserving the test's intent. Scene background and material constants changed value (render baselines shift, as sanctioned); the settle protocol, determinism, and behavior are untouched.
+Every `data-testid`, `data-*` attribute, aria contract, label, and role the suites assert is intact. Honest suite-visible updates on this branch: the toolbar's pressed-variant unit assertion moved from `bg-primary` to the `data-active` attribute contract; the sign-in heading copy test follows the new sentence-case heading ("Welcome back"); the parameter panel's visible Apply moved out of the `<form>` as a pinned footer that rides the same Formedible submit lifecycle, with form-level Enter submission restored (the a11y keyboard journey proves it). Scene background and material constants changed value (render baselines shift, as sanctioned); the settle protocol, determinism, and behavior are untouched.
 
 ## Gates
 
-`pnpm run verify` exit 0 (check-types, lint, test, build) · workbench 6/6 · components 12/12 · docs 14/14 · projects 2/2 · a11y 37 passed + 1 skipped.
+`pnpm run verify` exit 0 · workbench 6/6 · components 12/12 · docs 14/14 · projects 2/2 · a11y 37 passed + 1 skipped.
 
 ## Screenshots
 
-`design-shots/`: workbench-fresh, workbench-midflow (timeline populated, hole feature selected), workbench-command-menu, component-nema17, docs, home — each in both themes where named.
+`design-shots/` — all captured from the production build (`vite build` + node server), devtools-free: workbench-fresh, workbench-midflow (timeline populated, feature selected), workbench-command-menu, workbench-export-dialog, component-nema17, docs, home, login — each in both themes where named.
 
 ## Honest self-assessment
 
-The strongest surfaces are the workbench cockpit and the command palette — they look like a real, shippable CAD product with a point of view. The light theme is genuinely co-designed (bronze-on-paper with equal contrast rigor), not an inversion. The weakest link is the auth/projects surface: it inherits the system (tokens, forms, buttons) but got no bespoke composition — acceptable coherence, not a showcase. The dev-mode-only zlib externalization on `/docs` predates this branch (same barrel import at HEAD); the production build and all suites are green.
+The ownable ground: the light drafting register, the DRO strip, the pinned dock footers, the docs manual, the NEMA17 spec sheet, and the timeline chips. The dark cockpit's chrome deliberately speaks a denser genre dialect; its differentiation lives in the DRO, the pressed-key feel, and the mono-everywhere data voice. Weakest remaining surface: the dashboard route still inherits without bespoke composition. The dev-mode-only `node:zlib` externalization on `/docs` predates this branch (same barrel import at HEAD); production and every suite are green.

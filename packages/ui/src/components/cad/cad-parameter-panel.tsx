@@ -105,6 +105,7 @@ import {
 import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
+import { Button } from "../button";
 import { useFormedible } from "../formedible/hooks/use-formedible";
 
 /** The user-facing strings of {@link CadParameterPanel}. Overridable via props. */
@@ -482,22 +483,31 @@ export function CadParameterPanel({
     // the fields to the committed document state on the next render.
     resetOnSubmitSuccess: false,
     submitLabel: mergedLabels.submit,
-    // The apply is the panel's one terminal action — full width, deliberate.
-    submitButtonClassName: "w-full",
     // Inert discipline: no apply surface, no submit button, disabled fields.
-    showSubmitButton: apply !== undefined && hasParameters,
+    showSubmitButton: false,
     disabled: apply === undefined,
   });
+
+  // The apply action is pinned as the dock's footer: the FIELDS scroll, the
+  // terminal action never leaves the viewport. It rides the Formedible
+  // form's own submit lifecycle (`form.handleSubmit` — the same path the
+  // in-form button took), so validation, touched-marking, and the onSubmit
+  // config are unchanged.
+  const submitApply = (): void => {
+    parameterForm.form
+      .handleSubmit()
+      .catch((error: unknown) => console.error(error));
+  };
 
   return (
     <div
       className={cn(
-        "border-border bg-card/60 w-72 overflow-hidden rounded-md border text-sm",
+        "border-border bg-card/60 flex max-h-full min-h-0 flex-col overflow-hidden rounded-md border text-sm",
         className,
       )}
       data-slot="cad-parameter-panel"
     >
-      <div className="text-muted-foreground/80 border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+      <div className="text-muted-foreground border-border bg-background/40 shrink-0 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         {mergedLabels.title}
       </div>
       {!hasParameters ? (
@@ -508,16 +518,55 @@ export function CadParameterPanel({
         <>
           <parameterForm.Form
             aria-label={mergedLabels.title}
-            className="space-y-3 p-2.5"
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto p-2.5"
+            onKeyDown={(event) => {
+              // The pinned footer carries the form's only visible submit,
+              // so the form restores HTML's implicit Enter submission
+              // itself: Enter inside a field commits, exactly as it did
+              // with the in-form button. Buttons and links keep their
+              // native key handling; textareas keep Shift+Enter.
+              if (event.key !== "Enter" || event.shiftKey) return;
+              const target = event.target;
+              if (
+                target instanceof HTMLButtonElement ||
+                target instanceof HTMLTextAreaElement ||
+                target instanceof HTMLAnchorElement ||
+                (target instanceof HTMLElement && target.isContentEditable)
+              ) {
+                return;
+              }
+              event.preventDefault();
+              submitApply();
+            }}
           />
           {applyFailure !== undefined ? (
             <div
-              className="text-destructive border-border border-t px-2.5 py-1.5 text-xs leading-4"
+              className="text-destructive border-border shrink-0 border-t px-2.5 py-1.5 text-xs leading-4"
               data-cad-param-panel-error=""
               role="alert"
             >
               {applyFailure}
             </div>
+          ) : null}
+          {apply !== undefined ? (
+            <parameterForm.form.Subscribe
+              selector={(state) => ({
+                canSubmit: Boolean(state.canSubmit),
+                isSubmitting: Boolean(state.isSubmitting),
+              })}
+            >
+              {(state) => (
+                <Button
+                  className="w-full rounded-none border-t border-t-border"
+                  disabled={!state.canSubmit || state.isSubmitting}
+                  onClick={submitApply}
+                  type="button"
+                  variant="default"
+                >
+                  {mergedLabels.submit}
+                </Button>
+              )}
+            </parameterForm.form.Subscribe>
           ) : null}
         </>
       )}

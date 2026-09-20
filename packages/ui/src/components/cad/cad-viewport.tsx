@@ -325,7 +325,7 @@ export function CadViewport({
     <div
       aria-label={labels.viewportLabel}
       className={cn(
-        "relative h-80 w-full overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
+        "relative h-80 w-full overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-ring/80",
         className,
       )}
       role="group"

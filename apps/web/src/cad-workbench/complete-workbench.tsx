@@ -463,7 +463,7 @@ export function CompleteCadWorkbench({
       data-testid="complete-feature-timeline"
       role="group"
     >
-      <span className="text-muted-foreground/70 mr-1.5 shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+      <span className="text-muted-foreground mr-1.5 shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         Timeline
       </span>
       {timeline === null ? (
@@ -578,6 +578,63 @@ export function CompleteCadWorkbench({
             ) : undefined
           }
         />
+      </div>
+      {/* The DRO strip: the instrument's readout, fused to the bezel's
+          bottom edge — the same honest engine numbers the machine
+          surfaces carry (scene kind, extents, volume, triangles), never
+          a second source of truth. */}
+      <div
+        className="text-muted-foreground mt-1 flex h-6 items-center gap-4 overflow-hidden rounded-[4px] bg-[color-mix(in_oklch,var(--background)_75%,transparent)] px-2 font-mono text-[10.5px] whitespace-nowrap"
+        data-testid="viewport-dro"
+      >
+        {showingPreview ? (
+          <>
+            <span className="text-signal">
+              import · {ioSurface.preview?.source ?? ""}
+            </span>
+            <span>
+              tris{" "}
+              <span className="text-foreground">
+                {ioSurface.preview === null
+                  ? "…"
+                  : String(ioSurface.preview.triangles)}
+              </span>
+            </span>
+            <span>
+              vol{" "}
+              <span className="text-foreground">
+                {ioSurface.preview === null
+                  ? "…"
+                  : `${ioSurface.preview.volumeText} mm³`}
+              </span>
+            </span>
+            <span>geometry only, not in the document</span>
+          </>
+        ) : applied === null ? (
+          <span className="text-signal">computing…</span>
+        ) : (
+          <>
+            <span className="text-signal">{engine.activeScene}</span>
+            <span>
+              extents{" "}
+              <span className="text-foreground">
+                {formatBoundsExtents(applied.state.measurement.bounds)}
+              </span>
+            </span>
+            <span>
+              vol{" "}
+              <span className="text-foreground">
+                {`${applied.state.measurement.volume.toFixed(3)} mm³`}
+              </span>
+            </span>
+            <span>
+              tris{" "}
+              <span className="text-foreground">
+                {String(applied.state.measurement.triangles)}
+              </span>
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -858,7 +915,9 @@ export function CompleteCadWorkbench({
         {viewport}
         <div className="flex min-h-0 w-60 shrink-0 flex-col gap-2 self-stretch">
           <div className="shrink-0">{propertyPanel}</div>
-          <div className="min-h-0 flex-1 overflow-y-auto">{parameterPanel}</div>
+          {/* The parameter dock: the panel owns its internal scroll so
+              the pinned Apply footer stays on screen at any height. */}
+          <div className="flex min-h-0 flex-1 flex-col">{parameterPanel}</div>
         </div>
       </div>
       {statusBar}

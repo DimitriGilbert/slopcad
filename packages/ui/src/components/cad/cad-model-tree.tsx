@@ -641,7 +641,7 @@ export function CadModelTree({
         aria-level={row.depth + 1}
         aria-selected={selected}
         className={cn(
-          "outline-none focus-visible:ring-1 focus-visible:ring-ring/60",
+          "outline-none focus-visible:ring-1 focus-visible:ring-ring/80",
           "cursor-default rounded-[3px]",
           selected
             ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
@@ -725,7 +725,7 @@ export function CadModelTree({
       )}
       data-slot="cad-model-tree"
     >
-      <div className="text-muted-foreground/80 border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+      <div className="text-muted-foreground border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         {labels.treeLabel}
       </div>
       {rows.length === 0 ? (

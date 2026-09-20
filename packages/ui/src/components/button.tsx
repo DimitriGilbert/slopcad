@@ -9,12 +9,12 @@ import { cva, type VariantProps } from "class-variance-authority";
  * (near-black on amber, near-white on bronze).
  */
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-sm border border-transparent bg-clip-padding text-xs font-medium whitespace-nowrap transition-colors duration-150 outline-none select-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/60 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-45 aria-invalid:border-destructive aria-invalid:ring-1 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-sm border border-transparent bg-clip-padding text-xs font-medium whitespace-nowrap transition-colors duration-150 outline-none select-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/70 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-45 aria-invalid:border-destructive aria-invalid:ring-1 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground hover:bg-primary/85 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--primary-foreground)_14%,transparent)]",
+          "bg-primary text-primary-foreground hover:bg-primary/85 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--primary-foreground)_14%,transparent)] active:shadow-[inset_0_2px_6px_color-mix(in_oklch,var(--primary-foreground)_28%,transparent)]",
         outline:
           "border-border bg-card text-foreground hover:border-input hover:bg-muted dark:bg-card/60 dark:hover:bg-muted aria-expanded:bg-muted",
         secondary:

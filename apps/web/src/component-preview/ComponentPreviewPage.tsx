@@ -180,26 +180,35 @@ export function ComponentPreviewPage({
   if (component === undefined) {
     return (
       <div className="container mx-auto max-w-3xl px-4 py-16">
-        <p className="text-muted-foreground/80 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+        <p className="text-muted-foreground font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
           Component preview
         </p>
-        <h1 className="mb-4 text-2xl font-semibold tracking-tight">
-          Unknown component
+        <h1 className="mt-2 text-2xl font-semibold tracking-tight">
+          Not in the registry
         </h1>
-        <p className="text-muted-foreground text-sm">
+        <p className="text-muted-foreground mt-3 max-w-prose text-sm leading-relaxed">
           No reusable component is registered under{" "}
-          <span className="font-mono">{componentId}</span>. The Phase 32
-          registry serves:
+          <span className="border-border bg-muted/60 rounded-sm border px-1.5 py-0.5 font-mono text-xs">
+            {componentId}
+          </span>
+          . The registry serves three components, each rebuilt live by the real
+          kernel with its analytic proof:
         </p>
-        <ul className="mt-4 space-y-1 font-mono text-sm">
+        <ul className="mt-6 grid gap-3 sm:grid-cols-3">
           {PHASE32_COMPONENTS.map((c) => (
             <li key={c.definition.id}>
               <Link
-                className="text-primary underline underline-offset-4"
+                className="border-border bg-card/60 hover:border-input hover:bg-muted flex h-full flex-col gap-2 rounded-lg border p-4 transition-colors"
                 to="/components/$componentId"
                 params={{ componentId: c.definition.id }}
               >
-                {c.definition.id}
+                <span className="text-primary font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+                  {c.definition.id}
+                </span>
+                <span className="text-sm font-medium">{c.definition.name}</span>
+                <span className="text-muted-foreground line-clamp-3 text-xs leading-relaxed">
+                  {c.definition.description}
+                </span>
               </Link>
             </li>
           ))}
@@ -241,7 +250,7 @@ export function ComponentPreviewPage({
     >
       <header className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <p className="text-muted-foreground/80 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+          <p className="text-muted-foreground font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
             Reusable parametric CAD components
           </p>
           <p className="border-border text-muted-foreground rounded-sm border bg-card/60 px-1.5 py-0.5 font-mono text-[11px]">
@@ -260,7 +269,7 @@ export function ComponentPreviewPage({
               key={sibling.definition.id}
               to="/components/$componentId"
               params={{ componentId: sibling.definition.id }}
-              className="border-border text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 font-mono text-xs transition-colors"
+              className="border-border text-muted-foreground hover:border-input hover:bg-muted hover:text-foreground inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 font-mono text-xs transition-colors"
             >
               {sibling.definition.name}
               <span aria-hidden="true" className="leading-none">
@@ -271,33 +280,90 @@ export function ComponentPreviewPage({
         </nav>
       </header>
 
+      {/* The build readout, promoted: the spec sheet's signature numbers
+          live one line under the identity, not below the fold. The span
+          ids are the session writer's targets (unchanged). */}
+      <section
+        aria-label="Build readouts"
+        className="border-border bg-card/60 flex flex-wrap items-baseline gap-x-5 gap-y-1.5 overflow-hidden rounded-lg border px-4 py-2.5 font-mono text-xs"
+      >
+        <span className="text-muted-foreground">
+          status ={" "}
+          <span id="component-preview-status" className="text-foreground">
+            boot
+          </span>
+        </span>
+        <span className="text-muted-foreground">
+          volume ={" "}
+          <span id="component-preview-volume" className="text-foreground">
+            …
+          </span>{" "}
+          mm³
+        </span>
+        <span className="text-muted-foreground">
+          analytic ={" "}
+          <span
+            id="component-preview-expected-volume"
+            className="text-foreground"
+          >
+            …
+          </span>{" "}
+          mm³
+        </span>
+        <span className="text-muted-foreground">
+          bounds ={" "}
+          <span id="component-preview-bounds" className="text-foreground">
+            …
+          </span>{" "}
+          mm
+        </span>
+        <span className="text-muted-foreground">
+          triangles ={" "}
+          <span id="component-preview-triangles" className="text-foreground">
+            …
+          </span>
+        </span>
+        <span className="text-muted-foreground">
+          frames ={" "}
+          <span id="component-preview-frames" className="text-foreground">
+            {String(renderedFrames)}
+          </span>
+        </span>
+        <span
+          data-testid="component-preview-error"
+          className="text-destructive"
+        >
+          <span id="component-preview-error" />
+        </span>
+      </section>
+
       <div className="flex flex-wrap items-start gap-6">
         <div className="flex w-96 shrink-0 flex-col gap-4">
-          <section
-            aria-label="Component parameters"
-            className="border-border bg-card/60 overflow-hidden rounded-lg border"
-          >
-            {parameters !== null && parameters.ok ? (
-              <CadParameterPanel
-                className="w-full border-0 bg-transparent"
-                parameters={parameters.value.parameters}
-                onApply={onApply}
-                labels={{ submit: "Rebuild" }}
-              />
-            ) : (
+          {parameters !== null && parameters.ok ? (
+            <CadParameterPanel
+              className="w-full"
+              parameters={parameters.value.parameters}
+              onApply={onApply}
+              labels={{ submit: "Rebuild" }}
+            />
+          ) : (
+            <section
+              aria-label="Component parameters"
+              className="border-border bg-card/60 overflow-hidden rounded-lg border"
+            >
               <p className="text-destructive p-4 text-sm" role="alert">
                 {parameters === null
                   ? "The submitted values no longer resolve against the definition."
                   : parameters.error.message}
               </p>
-            )}
-          </section>
+            </section>
+          )}
 
           <section
             aria-label="Interface"
             className="border-border bg-card/60 overflow-hidden rounded-lg border"
           >
-            <h2 className="text-muted-foreground/80 border-border bg-background/40 border-b px-3 py-2 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+            <h2 className="text-muted-foreground border-border bg-background/40 border-b px-3 py-2 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
               Interface: {String(ports.length)} ports
             </h2>
             <table className="w-full">
@@ -307,68 +373,6 @@ export function ComponentPreviewPage({
                 ))}
               </tbody>
             </table>
-          </section>
-
-          <section
-            aria-label="Build readouts"
-            className="border-border bg-card/60 overflow-hidden rounded-lg border"
-          >
-            <h2 className="text-muted-foreground/80 border-border bg-background/40 border-b px-3 py-2 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
-              Build
-            </h2>
-            <ul className="space-y-1 p-3 font-mono text-xs">
-              <li>
-                status ={" "}
-                <span id="component-preview-status" className="text-foreground">
-                  boot
-                </span>
-              </li>
-              <li>
-                volume ={" "}
-                <span id="component-preview-volume" className="text-foreground">
-                  …
-                </span>{" "}
-                mm³
-              </li>
-              <li>
-                analytic ={" "}
-                <span
-                  id="component-preview-expected-volume"
-                  className="text-foreground"
-                >
-                  …
-                </span>{" "}
-                mm³
-              </li>
-              <li>
-                bounds ={" "}
-                <span id="component-preview-bounds" className="text-foreground">
-                  …
-                </span>{" "}
-                mm
-              </li>
-              <li>
-                triangles ={" "}
-                <span
-                  id="component-preview-triangles"
-                  className="text-foreground"
-                >
-                  …
-                </span>
-              </li>
-              <li>
-                frames ={" "}
-                <span id="component-preview-frames" className="text-foreground">
-                  {String(renderedFrames)}
-                </span>
-              </li>
-              <li
-                data-testid="component-preview-error"
-                className="text-destructive"
-              >
-                <span id="component-preview-error" />
-              </li>
-            </ul>
           </section>
         </div>
 

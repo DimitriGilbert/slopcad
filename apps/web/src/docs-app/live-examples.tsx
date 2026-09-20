@@ -94,7 +94,7 @@ export function ExampleCard({
       <header className="border-border bg-background/40 flex items-start justify-between gap-3 border-b px-4 py-3">
         <div>
           <h3 className="text-sm font-medium">{title}</h3>
-          <p className="text-muted-foreground/80 mt-0.5 font-mono text-[11px]">
+          <p className="text-muted-foreground mt-0.5 font-mono text-[11px]">
             {source}
           </p>
         </div>
@@ -106,7 +106,7 @@ export function ExampleCard({
             aria-hidden="true"
             className={`size-1.5 shrink-0 rounded-full ${
               status === "ok"
-                ? "bg-chart-3"
+                ? "bg-status-ok"
                 : status === "running"
                   ? "bg-signal motion-safe:animate-pulse"
                   : "bg-destructive"

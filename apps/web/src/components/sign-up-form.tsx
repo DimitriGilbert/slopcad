@@ -60,8 +60,11 @@ export default function SignUpForm({
   }
 
   return (
-    <div className="mx-auto w-full mt-10 max-w-md p-6">
-      <h1 className="mb-6 text-center text-3xl font-bold">Create Account</h1>
+    <div className="w-full max-w-sm">
+      <h1 className="text-xl font-semibold tracking-tight">Create account</h1>
+      <p className="text-muted-foreground mt-1 mb-5 text-xs">
+        One account keeps your projects, documents, and edit history.
+      </p>
 
       <form
         onSubmit={(e) => {
@@ -84,7 +87,7 @@ export default function SignUpForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-red-500">
+                  <p key={error?.message} className="text-destructive text-xs">
                     {error?.message}
                   </p>
                 ))}
@@ -107,7 +110,7 @@ export default function SignUpForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-red-500">
+                  <p key={error?.message} className="text-destructive text-xs">
                     {error?.message}
                   </p>
                 ))}
@@ -130,7 +133,7 @@ export default function SignUpForm({
                   onChange={(e) => field.handleChange(e.target.value)}
                 />
                 {field.state.meta.errors.map((error) => (
-                  <p key={error?.message} className="text-red-500">
+                  <p key={error?.message} className="text-destructive text-xs">
                     {error?.message}
                   </p>
                 ))}
@@ -158,11 +161,7 @@ export default function SignUpForm({
       </form>
 
       <div className="mt-4 text-center">
-        <Button
-          variant="link"
-          onClick={onSwitchToSignIn}
-          className="text-indigo-600 hover:text-indigo-800"
-        >
+        <Button variant="link" onClick={onSwitchToSignIn} className="text-xs">
           Already have an account? Sign In
         </Button>
       </div>

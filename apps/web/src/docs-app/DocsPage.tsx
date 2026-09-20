@@ -9,6 +9,7 @@
  * repo's fixture conventions: deterministic, testable, no network.
  */
 
+import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KernelCapabilities } from "@slopcad/cad-kernel";
 import {
@@ -18,6 +19,7 @@ import {
 import { Badge } from "@slopcad/ui/components/badge";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 
+import UserMenu from "../components/user-menu";
 import { ThemeToggle } from "../components/theme-toggle";
 import { FORMAT_ROWS } from "./format-history";
 import {
@@ -193,7 +195,7 @@ function TopicRail(): React.JSX.Element {
                 className={`block font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase transition-colors ${
                   groupActive
                     ? "text-primary"
-                    : "text-muted-foreground/80 hover:text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {group.title}
@@ -234,8 +236,12 @@ export function DocsPage(): React.JSX.Element {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-border bg-background/90 sticky top-0 z-10 border-b backdrop-blur-sm">
-        <div className="mx-auto flex h-12 max-w-6xl items-center gap-4 px-6">
-          <p className="flex items-center gap-2 font-mono text-sm font-semibold tracking-tight">
+        <div className="mx-auto flex h-12 max-w-6xl items-center gap-6 px-6">
+          <Link
+            className="flex items-center gap-2 font-mono text-sm font-semibold tracking-tight"
+            title="slopcad home"
+            to="/"
+          >
             <span
               aria-hidden="true"
               className="border-primary/70 bg-primary/15 relative size-3 rounded-[3px] border"
@@ -243,8 +249,8 @@ export function DocsPage(): React.JSX.Element {
               <span className="border-primary absolute -top-[3px] -left-[3px] size-1.5 rounded-[2px] border" />
             </span>
             slopcad <span className="text-muted-foreground">/docs</span>
-          </p>
-          <nav aria-label="Sections" className="ml-auto hidden gap-1 sm:flex">
+          </Link>
+          <nav aria-label="Sections" className="hidden gap-1 sm:flex">
             {SECTION_LINKS.map((link) => (
               <a
                 key={link.id}
@@ -255,8 +261,9 @@ export function DocsPage(): React.JSX.Element {
               </a>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2 sm:ml-0">
+          <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
+            <UserMenu />
           </div>
         </div>
       </header>
@@ -264,7 +271,7 @@ export function DocsPage(): React.JSX.Element {
         <TopicRail />
         <main className="min-w-0 space-y-10">
           <section className="border-t-0 pt-0">
-            <p className="text-muted-foreground/80 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+            <p className="text-muted-foreground font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
               Documentation
             </p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">
@@ -378,7 +385,7 @@ export function DocsPage(): React.JSX.Element {
                 </tbody>
               </table>
             </div>
-            <p className="text-muted-foreground/80 mt-2 font-mono text-[11px]">
+            <p className="text-muted-foreground mt-2 font-mono text-[11px]">
               ✓ declared · — declined (answers kernel/unsupported-operation)
             </p>
           </Section>
@@ -464,7 +471,7 @@ export function DocsPage(): React.JSX.Element {
                   >
                     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                       <h3 className="text-sm font-medium">{topic.title}</h3>
-                      <code className="border-border text-muted-foreground/80 rounded-sm border bg-background/50 px-1.5 py-0.5 font-mono text-[11px]">
+                      <code className="border-border text-muted-foreground rounded-sm border bg-background/50 px-1.5 py-0.5 font-mono text-[11px]">
                         {topic.guide}
                       </code>
                     </div>
@@ -472,7 +479,7 @@ export function DocsPage(): React.JSX.Element {
                       {topic.summary}
                     </p>
                     {topic.example !== null ? (
-                      <p className="text-primary/90 mt-1.5 font-mono text-[11px]">
+                      <p className="text-muted-foreground mt-1.5 font-mono text-[11px]">
                         example: {topic.example}
                       </p>
                     ) : null}

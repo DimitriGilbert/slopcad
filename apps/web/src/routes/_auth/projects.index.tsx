@@ -11,6 +11,13 @@ import {
 import { useTRPC } from "@/utils/trpc";
 
 export const Route = createFileRoute("/_auth/projects/")({
+  head: () => ({
+    meta: [
+      {
+        title: "Projects · slopcad",
+      },
+    ],
+  }),
   component: ProjectsPage,
 });
 

@@ -19,7 +19,7 @@ describe("SignInForm", () => {
   it("renders the heading, both labelled fields, and the submit button", () => {
     render(<SignInForm onSwitchToSignUp={() => {}} />);
 
-    expect(screen.getByRole("heading", { name: "Welcome Back" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Welcome back" })).toBeTruthy();
     expect(screen.getByLabelText("Email")).toBeTruthy();
     expect(screen.getByLabelText("Password")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign In" })).toBeTruthy();

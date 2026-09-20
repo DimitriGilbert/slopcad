@@ -50,9 +50,9 @@ const TIMELINE_STATUS_PRESENTATION: Readonly<
     chip: "border-dashed border-border bg-transparent",
   }),
   "beyond-rollback": Object.freeze({
-    dot: "bg-chart-2",
-    text: "text-chart-2",
-    chip: "border-dashed border-chart-2/50 bg-transparent",
+    dot: "bg-status-parked",
+    text: "text-status-parked",
+    chip: "border-dashed border-status-parked/50 bg-transparent",
   }),
 });
 
@@ -319,7 +319,7 @@ function TimelineGap({
       type="button"
       aria-label={active ? `Remove rollback point — ${label}` : label}
       aria-pressed={active}
-      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-[3px] outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-[3px] outline-none focus-visible:ring-1 focus-visible:ring-ring/80"
       title={active ? `Remove rollback point — ${label}` : label}
       onClick={() => {
         if (active) {

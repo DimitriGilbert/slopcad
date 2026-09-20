@@ -560,7 +560,7 @@ export function CadPropertyPanel({
       )}
       data-slot="cad-property-panel"
     >
-      <div className="text-muted-foreground/80 border-border bg-background/40 flex items-baseline justify-between border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+      <div className="text-muted-foreground border-border bg-background/40 flex items-baseline justify-between border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         <span>{labels.title}</span>
         {cadDocument !== undefined ? (
           <span className="text-signal font-mono normal-case">

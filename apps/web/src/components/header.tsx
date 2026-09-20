@@ -4,14 +4,28 @@
  * engraved lowercase wordmark), primary destinations center, session
  * and the theme switch right. One line at every width that matters,
  * 44px tall — chrome, not a hero.
+ *
+ * Routes that carry their own full-width chrome (the docs manual's
+ * sticky bar: brand, section jumps, theme toggle) take over the top of
+ * the page; this bar yields to them so the page never stacks two
+ * headers or two theme toggles.
  */
 
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 
 import UserMenu from "./user-menu";
 import { ThemeToggle } from "./theme-toggle";
 
+/** Route prefixes that own their top chrome (no app bar above them). */
+const SELF_CHROMED_ROUTES = ["/docs"] as const;
+
 export default function Header() {
+  const location = useLocation();
+  const selfChromed = SELF_CHROMED_ROUTES.some((prefix) =>
+    location.pathname.startsWith(prefix),
+  );
+  if (selfChromed) return null;
+
   const links = [
     { to: "/", label: "Home" },
     { to: "/dashboard", label: "Dashboard" },
