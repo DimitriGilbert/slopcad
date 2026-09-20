@@ -61,7 +61,7 @@ import {
   SELECT_TOOL_ID,
 } from "@slopcad/cad-react";
 import { formatBoundsExtents } from "@slopcad/cad-core";
-import { Redo2, Undo2 } from "lucide-react";
+import { PanelLeft, PanelRight, Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
   CadCommandMenu,
@@ -96,9 +96,9 @@ import {
 import { WorkbenchMeasurementSection } from "./measurement-section";
 import { useWorkbenchEngine, type WorkbenchEngine } from "./workbench-engine";
 
-/** The viewport's fixed box: the determinism contract (the camera spec is
- * authored for exactly this size; the scene runs at dpr 1). */
-const VIEWPORT_CLASS = "h-[520px] w-[800px]";
+/** The viewport fills its workspace region at every width (the camera
+ * rig re-applies the spec's aspect on resize; the scene stays dpr 1). */
+const VIEWPORT_CLASS = "h-full w-full";
 
 /** The imported-mesh preview the composition renders in the viewport. */
 export interface CadImportPreview {
@@ -246,6 +246,11 @@ export function CompleteCadWorkbench({
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importedFrames, setImportedFrames] = useState(0);
+  // Below the dock breakpoint the docks become overlay drawers: one DOM
+  // instance per dock, slid in and out by transform, returned to the flex
+  // flow at `xl` — so the machine surfaces never unmount at any width.
+  const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
+  const [panelsDrawerOpen, setPanelsDrawerOpen] = useState(false);
   // The dialog trigger buttons: the dialogs open from state (these buttons,
   // the palette's File commands), so the primitive cannot track the opener
   // itself — these refs are the documented focus-restoration points.
@@ -459,7 +464,7 @@ export function CompleteCadWorkbench({
   const defaultHistoryTimeline = (
     <div
       aria-label="Feature timeline"
-      className="border-border flex h-full min-w-0 flex-1 items-center gap-1 border-l pl-3 [contain:inline-size]"
+      className="flex h-full min-w-0 flex-1 items-center gap-1 pl-2 [contain:inline-size]"
       data-testid="complete-feature-timeline"
       role="group"
     >
@@ -523,11 +528,14 @@ export function CompleteCadWorkbench({
 
   const defaultViewport = (
     <div
-      className="border-border/80 bg-background/50 relative shrink-0 rounded-lg border p-1 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--foreground)_4%,transparent),0_1px_2px_color-mix(in_oklch,var(--foreground)_10%,transparent)]"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       data-viewport-showing={showingPreview ? "import" : "document"}
       id="workbench-complete-viewport"
     >
-      <div className="relative overflow-hidden rounded-[6px]">
+      {/* The canvas owns every pixel the docks leave it: full-bleed, no
+          bezel, no stage — the machine fills its frame. The settle and
+          selection stamps are unchanged. */}
+      <div className="relative min-h-0 flex-1">
         <CadViewport
           className={VIEWPORT_CLASS}
           projection={
@@ -579,14 +587,22 @@ export function CompleteCadWorkbench({
           }
         />
       </div>
-      {/* The DRO strip: the instrument's readout, fused to the bezel's
-          bottom edge — the same honest engine numbers the machine
-          surfaces carry (scene kind, extents, volume, triangles), never
-          a second source of truth. */}
+      {/* The DRO band: the viewport region's readout, edge to edge along
+          its bottom — the same honest engine numbers the machine surfaces
+          carry (scene kind, extents, volume, triangles), plus the settle
+          lamp and the live tool state. Never a second source of truth. */}
       <div
-        className="text-muted-foreground mt-1 flex h-6 items-center gap-4 overflow-hidden rounded-[4px] bg-[color-mix(in_oklch,var(--background)_75%,transparent)] px-2 font-mono text-[10.5px] whitespace-nowrap"
+        className="border-border bg-card/50 text-muted-foreground flex h-7 shrink-0 items-center gap-4 overflow-hidden border-t px-3 font-mono text-[11px] whitespace-nowrap"
         data-testid="viewport-dro"
       >
+        <span
+          aria-hidden="true"
+          className={`size-1.5 shrink-0 rounded-full ${
+            showingPreview || applied === null
+              ? "bg-signal motion-safe:animate-pulse"
+              : "bg-status-ok"
+          }`}
+        />
         {showingPreview ? (
           <>
             <span className="text-signal">
@@ -608,7 +624,9 @@ export function CompleteCadWorkbench({
                   : `${ioSurface.preview.volumeText} mm³`}
               </span>
             </span>
-            <span>geometry only, not in the document</span>
+            <span className="hidden xl:inline">
+              geometry only, not in the document
+            </span>
           </>
         ) : applied === null ? (
           <span className="text-signal">computing…</span>
@@ -635,23 +653,48 @@ export function CompleteCadWorkbench({
             </span>
           </>
         )}
+        {/* The live tool state rides the DRO's right end: what is armed,
+            and how it cancels. */}
+        <span className="text-muted-foreground ml-auto hidden items-center gap-4 sm:flex">
+          {toolsApi.phase === "active" && toolsApi.activeToolId !== null ? (
+            <span>
+              tool <span className="text-signal">{toolsApi.activeToolId}</span>{" "}
+              · Esc cancels
+            </span>
+          ) : null}
+          <span>
+            sel{" "}
+            <span className="text-foreground">
+              {String(selectionApi.selected.length)}
+            </span>
+          </span>
+        </span>
       </div>
     </div>
   );
 
+  // Inside the docks the panels shed their floating-card chrome: the dock
+  // IS the chrome (flush sections, hairline dividers, no radius), while the
+  // components keep their standalone card look everywhere else.
+  const flushPanel = "w-full shrink-0 rounded-none border-0 bg-transparent";
   const defaultModelTree =
     regenerationStates === null ? null : (
-      <CadModelTree regenerationStates={regenerationStates} className="w-48" />
+      <CadModelTree
+        regenerationStates={regenerationStates}
+        className="w-full rounded-none border-0 bg-transparent"
+      />
     );
 
   const defaultPropertyPanel = (
     <CadPropertyPanel
       regenerationStates={regenerationStates ?? undefined}
-      className="w-60 shrink-0"
+      className={flushPanel}
     />
   );
 
-  const defaultParameterPanel = <CadParameterPanel className="w-60 shrink-0" />;
+  const defaultParameterPanel = (
+    <CadParameterPanel className="w-full min-h-0 flex-1 rounded-none border-0 bg-transparent" />
+  );
 
   const defaultStatusBar = (
     <CadStatusBar
@@ -776,115 +819,179 @@ export function CompleteCadWorkbench({
       data-viewport-showing={showingPreview ? "import" : "document"}
       id={rootId}
     >
-      {/* The command row: tool strip, the scrolling timeline, then the
-          pinned actions — history, the command menu trigger, and the
-          file/mode actions in one shrink-0 group, so a long feature chain
-          scrolls INSIDE the timeline and never pushes an action off the
-          row. In sketch mode it yields to the sketch editor's own command
-          row; the model surfaces stay MOUNTED but hidden so the session's
+      {/* The command row, grouped like a machine headstock: the document
+          plate (what this document IS, live), the tool group, the
+          scrolling timeline, then the pinned terminal actions — history,
+          the command menu, and the file/mode verbs — separated by real
+          group dividers so a long feature chain scrolls INSIDE the
+          timeline and never pushes an action off the row. Below the dock
+          breakpoint the two drawer toggles appear at the row's ends. In
+          sketch mode it yields to the sketch editor's own command row;
+          the model surfaces stay MOUNTED but hidden so the session's
           surface writer keeps their ids. */}
       <div
-        className={`border-border bg-card/50 h-10 shrink-0 items-center gap-2 border-b px-2 ${
+        className={`border-border bg-card/40 h-10 shrink-0 items-center gap-1 border-b pr-2 ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
+        {/* The drawer toggles (below xl only; display-none keeps them out
+            of the tab order once the docks are inline). */}
+        <Button
+          aria-label="Toggle model tree"
+          aria-expanded={treeDrawerOpen}
+          className="xl:hidden"
+          data-testid="workbench-toggle-tree"
+          onClick={() => {
+            setPanelsDrawerOpen(false);
+            setTreeDrawerOpen((open) => !open);
+          }}
+          size="icon-xs"
+          title="Toggle the model tree dock"
+          type="button"
+          variant="ghost"
+        >
+          <PanelLeft />
+        </Button>
+        {/* The document plate: scene, extents, feature count — the row's
+            identity block, engraved-plate style. */}
+        <div
+          aria-label="Document"
+          className="flex h-full shrink-0 items-center gap-2.5 pr-2 pl-1"
+          role="group"
+        >
+          <span
+            aria-hidden="true"
+            className={`size-1.5 shrink-0 rounded-full ${
+              applied === null
+                ? "bg-signal motion-safe:animate-pulse"
+                : "bg-status-ok"
+            }`}
+          />
+          <span className="text-signal font-mono text-[11px]">
+            {showingPreview ? "import" : engine.activeScene}
+          </span>
+          <span className="text-muted-foreground hidden font-mono text-[11px] xl:inline">
+            {applied === null
+              ? "computing…"
+              : formatBoundsExtents(applied.state.measurement.bounds)}
+          </span>
+          <span className="text-muted-foreground hidden font-mono text-[11px] 2xl:inline">
+            {timeline === null ? "" : `${String(timeline.length)} features`}
+          </span>
+        </div>
+        <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
         {toolbar}
+        <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
         {historyTimeline}
-        <div className="flex shrink-0 items-center gap-2">
-          <div
-            aria-label="History"
-            className="flex items-center gap-1"
-            role="group"
-          >
-            <Button
-              aria-label="Undo"
-              disabled={!historyApi.canUndo}
-              onClick={() => {
-                historyApi.undo();
-              }}
-              size="icon-xs"
-              title="Undo (the document history's cursor step)"
-              type="button"
-              variant="ghost"
-            >
-              <Undo2 />
-            </Button>
-            <Button
-              aria-label="Redo"
-              disabled={!historyApi.canRedo}
-              onClick={() => {
-                historyApi.redo();
-              }}
-              size="icon-xs"
-              title="Redo (the document history's cursor step)"
-              type="button"
-              variant="ghost"
-            >
-              <Redo2 />
-            </Button>
-          </div>
-          {commandMenu}
-          {!hasIo ? null : (
-            <>
-              <Button
-                data-testid="complete-import"
-                onClick={() => {
-                  setImportDialogOpen(true);
-                }}
-                ref={importTriggerRef}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                {LABELS.import}
-              </Button>
-              <Button
-                data-testid="complete-export"
-                disabled={applied === null}
-                onClick={() => {
-                  setExportDialogOpen(true);
-                }}
-                ref={exportTriggerRef}
-                size="xs"
-                title={
-                  applied === null
-                    ? "The scene settles first; nothing is exportable before that."
-                    : "Export the settled model geometry."
-                }
-                type="button"
-                variant="outline"
-              >
-                {LABELS.export}
-              </Button>
-            </>
-          )}
+        <div
+          aria-label="History"
+          className="flex shrink-0 items-center gap-0.5"
+          role="group"
+        >
           <Button
-            data-testid="complete-hole"
-            disabled={holeBase === undefined}
-            onClick={handleHole}
-            size="xs"
-            title={
-              holeBase === undefined
-                ? "Sketch and extrude a profile first; a hole cuts an existing solid."
-                : "Cut a hole into the latest extrusion; edit its five parameters in the panel."
-            }
+            aria-label="Undo"
+            disabled={!historyApi.canUndo}
+            onClick={() => {
+              historyApi.undo();
+            }}
+            size="icon-xs"
+            title="Undo (the document history's cursor step)"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
-            Hole
+            <Undo2 />
           </Button>
           <Button
-            data-testid="complete-mode-toggle"
+            aria-label="Redo"
+            disabled={!historyApi.canRedo}
             onClick={() => {
-              setMode("sketch");
+              historyApi.redo();
             }}
-            size="xs"
+            size="icon-xs"
+            title="Redo (the document history's cursor step)"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
-            Sketch
+            <Redo2 />
           </Button>
         </div>
+        {commandMenu}
+        {!hasIo ? null : (
+          <>
+            <Button
+              data-testid="complete-import"
+              onClick={() => {
+                setImportDialogOpen(true);
+              }}
+              ref={importTriggerRef}
+              size="xs"
+              type="button"
+              variant="outline"
+            >
+              {LABELS.import}
+            </Button>
+            <Button
+              data-testid="complete-export"
+              disabled={applied === null}
+              onClick={() => {
+                setExportDialogOpen(true);
+              }}
+              ref={exportTriggerRef}
+              size="xs"
+              title={
+                applied === null
+                  ? "The scene settles first; nothing is exportable before that."
+                  : "Export the settled model geometry."
+              }
+              type="button"
+              variant="outline"
+            >
+              {LABELS.export}
+            </Button>
+          </>
+        )}
+        <Button
+          data-testid="complete-hole"
+          disabled={holeBase === undefined}
+          onClick={handleHole}
+          size="xs"
+          title={
+            holeBase === undefined
+              ? "Sketch and extrude a profile first; a hole cuts an existing solid."
+              : "Cut a hole into the latest extrusion; edit its five parameters in the panel."
+          }
+          type="button"
+          variant="outline"
+        >
+          Hole
+        </Button>
+        <Button
+          data-testid="complete-mode-toggle"
+          onClick={() => {
+            setMode("sketch");
+          }}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          Sketch
+        </Button>
+        <Button
+          aria-label="Toggle panels"
+          aria-expanded={panelsDrawerOpen}
+          className="xl:hidden"
+          data-testid="workbench-toggle-panels"
+          onClick={() => {
+            setTreeDrawerOpen(false);
+            setPanelsDrawerOpen((open) => !open);
+          }}
+          size="icon-xs"
+          title="Toggle the properties and parameters dock"
+          type="button"
+          variant="ghost"
+        >
+          <PanelRight />
+        </Button>
       </div>
       {mode === "sketch" ? (
         <SketchMode
@@ -895,29 +1002,74 @@ export function CompleteCadWorkbench({
           onRevolve={handleRevolve}
         />
       ) : null}
-      {/* The workspace: tree dock left, viewport dominant, property +
-          parameter docks right. Hidden (not unmounted) in sketch mode. */}
+      {/* The workspace: an edge-to-edge machine bed. Tree dock flush
+          left, the viewport owning every remaining pixel, properties and
+          parameters flush right — regions divided by hairlines, not
+          floating cards. Below `xl` the docks slide out as overlay
+          drawers (one DOM instance each: translated off-canvas when
+          closed, returned to the flex flow at the breakpoint), and the
+          viewport keeps the whole bed to itself. Hidden (not unmounted)
+          in sketch mode. */}
       <div
-        className={`bg-background/30 min-h-0 flex-1 items-start gap-2 border-b p-2 ${
+        className={`relative flex min-h-0 flex-1 overflow-hidden ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
-        <div className="flex w-48 shrink-0 flex-col gap-2">
-          {modelTree}
-          <WorkbenchMeasurementSection
-            boundsState={engine.boundsState}
-            distanceSource={distanceSource}
-            distanceText={distanceText}
-            massPropertiesState={engine.massPropertiesState}
-            radiusState={engine.radiusState}
+        {/* The drawer scrim (below xl only). */}
+        {(treeDrawerOpen || panelsDrawerOpen) && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 z-20 bg-black/40 xl:hidden"
+            onClick={() => {
+              setTreeDrawerOpen(false);
+              setPanelsDrawerOpen(false);
+            }}
           />
+        )}
+        {/* Left dock: the model tree over the measurement readouts, one
+            scrolling column, full height. As a drawer it slides from the
+            left; closed it is `invisible`, so its fields never sit in the
+            tab order off-screen (visibility flips at the transition's
+            end on close, start on open — the slide survives). */}
+        <div
+          className={`border-border bg-card absolute inset-y-0 left-0 z-30 flex w-60 shrink-0 flex-col border-r shadow-2xl transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:bg-card/40 xl:shadow-none ${
+            treeDrawerOpen
+              ? "visible translate-x-0"
+              : "invisible -translate-x-full xl:visible xl:translate-x-0"
+          }`}
+          data-testid="workbench-tree-dock"
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {modelTree}
+            <WorkbenchMeasurementSection
+              boundsState={engine.boundsState}
+              distanceSource={distanceSource}
+              distanceText={distanceText}
+              massPropertiesState={engine.massPropertiesState}
+              radiusState={engine.radiusState}
+            />
+          </div>
         </div>
         {viewport}
-        <div className="flex min-h-0 w-60 shrink-0 flex-col gap-2 self-stretch">
-          <div className="shrink-0">{propertyPanel}</div>
+        {/* Right dock: properties over parameters, each section its own
+            scroll, the parameter footer pinned. Same drawer discipline as
+            the left dock: invisible (out of the tab order) while closed. */}
+        <div
+          className={`border-border bg-card absolute inset-y-0 right-0 z-30 flex w-[272px] shrink-0 flex-col border-l shadow-2xl transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:bg-card/40 xl:shadow-none ${
+            panelsDrawerOpen
+              ? "visible translate-x-0"
+              : "invisible translate-x-full xl:visible xl:translate-x-0"
+          }`}
+          data-testid="workbench-panels-dock"
+        >
+          <div className="max-h-[55%] min-h-0 shrink-0 overflow-y-auto">
+            {propertyPanel}
+          </div>
           {/* The parameter dock: the panel owns its internal scroll so
               the pinned Apply footer stays on screen at any height. */}
-          <div className="flex min-h-0 flex-1 flex-col">{parameterPanel}</div>
+          <div className="flex min-h-0 flex-1 flex-col border-t border-border">
+            {parameterPanel}
+          </div>
         </div>
       </div>
       {statusBar}

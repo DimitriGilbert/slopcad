@@ -112,11 +112,22 @@ test("the toolbar renders byte-stable across two runs with the booted tool press
     );
   }
   // The pressed button must be VISIBLY distinct, not just semantically:
-  // the pressed variant paints the primary fill the outline variant lacks.
+  // the pressed state rides the data-active attribute (the unit contract)
+  // and paints the accent fill the outline variant lacks.
+  await expect(toolButton(page, "select")).toHaveAttribute(
+    "data-active",
+    "true",
+  );
   const pressedClasses = await toolButton(page, "select").getAttribute("class");
-  expect(pressedClasses, "pressed button classes").toContain("bg-primary");
+  expect(pressedClasses, "pressed button classes").toContain(
+    "data-[active=true]:bg-accent",
+  );
+  const idleAttr = await toolButton(page, "measure").getAttribute(
+    "data-active",
+  );
+  expect(idleAttr, "the idle button carries no pressed state").toBeNull();
   const idleClasses = await toolButton(page, "measure").getAttribute("class");
-  expect(idleClasses, "idle button classes").toContain("bg-background");
+  expect(idleClasses, "idle button classes").toContain("text-muted-foreground");
 
   await settleToolbarForCapture(page);
   const first = await toolbar.screenshot();

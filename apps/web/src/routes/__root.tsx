@@ -62,7 +62,10 @@ function RootDocument() {
         <HeadContent />
       </head>
       <body>
-        <div className="grid h-svh grid-rows-[auto_1fr]">
+        {/* The column track floors at 0 (never the content's min-width), so
+            a dense nowrap surface — the workbench DRO, a long breadcrumb —
+            can never widen the document past the viewport. */}
+        <div className="grid h-svh grid-cols-[minmax(0,1fr)] grid-rows-[auto_1fr]">
           <Header />
           <Outlet />
         </div>

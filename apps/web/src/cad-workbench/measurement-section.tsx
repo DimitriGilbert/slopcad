@@ -62,9 +62,9 @@ export function WorkbenchMeasurementSection({
   return (
     <section
       aria-label="Measurement"
-      className="border-border bg-card/60 w-48 overflow-hidden rounded-md border"
+      className="border-border w-full shrink-0 border-t"
     >
-      <div className="text-muted-foreground border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+      <div className="text-muted-foreground border-border bg-background/30 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         Measurement
       </div>
       <div className="flex flex-col gap-2 px-2.5 py-2.5 text-xs">

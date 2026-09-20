@@ -691,7 +691,7 @@ export function SketchMode({
         </div>
       </div>
       {/* The workspace: canvas dominant, inspector docked right. */}
-      <div className="flex min-h-0 flex-1 items-start justify-center gap-3 p-3">
+      <div className="flex min-h-0 flex-1 flex-wrap items-start justify-center gap-3 overflow-y-auto p-3">
         <CadSketchCanvas
           annotations={view.annotations}
           entities={view.entities}

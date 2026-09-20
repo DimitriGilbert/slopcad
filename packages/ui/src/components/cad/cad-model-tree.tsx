@@ -691,17 +691,31 @@ export function CadModelTree({
             >
               <ChevronIcon expanded={expanded} />
             </span>
-          ) : null}
-          <span className="min-w-0 flex-1 truncate">{row.label}</span>
+          ) : (
+            <span
+              aria-hidden="true"
+              className="text-muted-foreground/40 inline-flex size-4 shrink-0 items-center justify-center font-mono text-[10px]"
+            >
+              {row.depth > 0 ? "·" : ""}
+            </span>
+          )}
+          {/* Hierarchy typography: feature rows carry the weight (the
+              document's structure); the bodies they produce read lighter
+              and indented under the depth guide. */}
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              row.depth === 0 ? "font-medium" : "text-muted-foreground",
+            )}
+          >
+            {row.label}
+          </span>
           {row.status !== undefined ? (
             <StatusChip labels={labels} status={row.status} />
           ) : null}
         </div>
         {collapsible && expanded ? (
-          <div
-            className="border-border/60 ml-[11px] border-l pl-1"
-            role="group"
-          >
+          <div className="border-border ml-[11px] border-l pl-1" role="group">
             {row.children.map((child) => renderRow(child))}
           </div>
         ) : null}
