@@ -66,9 +66,11 @@ import {
   Download,
   PanelLeft,
   PanelRight,
+  PencilLine,
   Redo2,
   Undo2,
   Upload,
+  X,
 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
@@ -210,6 +212,21 @@ const LABELS = {
 } as const;
 
 /**
+ * The first-run sketch hint's persistence: dismissed once per browser
+ * (entering sketch mode counts as dismissed — the discovery worked).
+ */
+const SKETCH_HINT_STORAGE_KEY = "slopcad.sketch-hint.dismissed";
+
+/** Reads the hint's persisted dismissal, tolerating stripped storage. */
+function sketchHintStoredDismissal(): boolean {
+  try {
+    return window.localStorage.getItem(SKETCH_HINT_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The DRO's value ink. In the dark register the digits read as an emissive
  * machine readout — amber over the near-black band with a soft glow — the
  * cockpit's glance-mark; in light the values are plain instrument ink on
@@ -278,6 +295,12 @@ export function CompleteCadWorkbench({
   // itself — these refs are the documented focus-restoration points.
   const importTriggerRef = useRef<HTMLButtonElement | null>(null);
   const exportTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // The first-run sketch hint: visible until dismissed or until the user
+  // actually enters sketch mode (either is the discovery win). Dismissal
+  // persists per browser; the initial render shows the hint on server and
+  // client alike (hydration-safe) and the stored dismissal applies in an
+  // effect, so the markup never depends on storage at hydration time.
+  const [sketchHintDismissed, setSketchHintDismissed] = useState(false);
   // The last import outcome the auto-close has seen (identity-tracked: the
   // builder-built io surface re-mints the outcome object every render).
   const seenOutcomeRef = useRef<CadImportOutcome | null>(null);
@@ -360,6 +383,30 @@ export function CompleteCadWorkbench({
   const clearSelection = useCallback(() => {
     selectionApi.clear();
   }, [selectionApi]);
+
+  const dismissSketchHint = useCallback(() => {
+    setSketchHintDismissed(true);
+    try {
+      window.localStorage.setItem(SKETCH_HINT_STORAGE_KEY, "1");
+    } catch {
+      // A stripped context cannot persist; dismissal still holds for the
+      // session (the state above), which is the honest best effort.
+    }
+  }, []);
+
+  // The stored dismissal (and the mode switch's own) apply after
+  // hydration: the first-run hint never depends on storage at render time.
+  useEffect(() => {
+    if (sketchHintStoredDismissal()) {
+      setSketchHintDismissed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === "sketch") {
+      dismissSketchHint();
+    }
+  }, [dismissSketchHint, mode]);
 
   // The honest scene fallback: an authoring action that REMOVES document
   // data (a feature deletion through the property panel, an undo) can
@@ -512,6 +559,16 @@ export function CompleteCadWorkbench({
 
   // -- Default pieces (each exactly what its slot replaces) -----------------
 
+  // Left-drag-orbit yields only to an armed tool whose gesture vocabulary
+  // owns model drags (rotate). The armed-at-rest click tools — select and
+  // measure — coexist with orbiting: the drag threshold separates a camera
+  // gesture from a pick.
+  const cameraOrbitDragAvailable =
+    toolsApi.phase !== "active" ||
+    toolsApi.activeToolId === null ||
+    toolsApi.activeToolId === SELECT_TOOL_ID ||
+    toolsApi.activeToolId === MEASURE_TOOL_ID;
+
   const defaultToolbar = <CadToolbar className="border-0 bg-transparent p-0" />;
 
   const defaultHistoryTimeline = (
@@ -598,6 +655,8 @@ export function CompleteCadWorkbench({
           selection stamps are unchanged. */}
       <div className="relative min-h-0 flex-1">
         <CadViewport
+          cameraControls
+          cameraOrbitDragEnabled={cameraOrbitDragAvailable}
           className={VIEWPORT_CLASS}
           projection={
             showingPreview
@@ -659,6 +718,63 @@ export function CompleteCadWorkbench({
                   >
                     Back to model
                   </Button>
+                </div>
+              ) : null}
+              {!showingPreview && !sketchHintDismissed ? (
+                <div
+                  className="pointer-events-auto absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1rem)] -translate-x-1/2"
+                  data-testid="workbench-sketch-hint"
+                >
+                  <div className="border-signal/40 bg-background/95 flex items-start gap-2.5 rounded-md border px-3 py-2 shadow-lg shadow-black/25">
+                    <span
+                      aria-hidden="true"
+                      className="border-signal/40 bg-signal/15 text-signal mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border"
+                    >
+                      <PencilLine className="size-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-foreground text-xs leading-snug">
+                        Start a sketch to build geometry — draw a profile,
+                        then{" "}
+                        <span className="text-signal font-medium">
+                          Extrude
+                        </span>
+                        .
+                      </p>
+                      <p className="text-muted-foreground mt-0.5 text-[11px] leading-snug">
+                        The guide plate is your starter document. Or press{" "}
+                        <kbd className="border-current/40 border px-1 font-mono text-[10px]">
+                          Ctrl+K
+                        </kbd>{" "}
+                        and run “Sketch workspace”.
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        className="border-signal/50 hover:bg-signal/10"
+                        data-testid="workbench-sketch-hint-start"
+                        onClick={() => {
+                          setMode("sketch");
+                        }}
+                        size="xs"
+                        type="button"
+                        variant="outline"
+                      >
+                        Start a sketch
+                      </Button>
+                      <Button
+                        aria-label="Dismiss the getting-started hint"
+                        data-testid="workbench-sketch-hint-dismiss"
+                        onClick={dismissSketchHint}
+                        size="icon-xs"
+                        title="Dismiss"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </>
@@ -894,6 +1010,7 @@ export function CompleteCadWorkbench({
         .map(selectionReferenceKey)
         .join(";")}
       data-selection-regeneration={String(selectionApi.regeneration)}
+      data-sketch-hint={sketchHintDismissed ? "dismissed" : "open"}
       data-sketch-mode={mode}
       data-tool-completion={
         toolsApi.completion === null ? "" : completionJson(toolsApi.completion)
@@ -1063,16 +1180,24 @@ export function CompleteCadWorkbench({
         >
           Hole
         </Button>
+        {/* THE creation affordance: the one verb that adds geometry. The
+            signal-amber border and mark make it the only tinted control in
+            the row — the eye lands here first (the label stays foreground
+            ink in every scheme; the amber rides border and icon only). */}
         <Button
+          aria-label="Sketch"
+          className="border-signal/60 hover:bg-signal/10"
           data-testid="complete-mode-toggle"
           onClick={() => {
             setMode("sketch");
           }}
           size="xs"
+          title="Start a sketch: draw a profile, then extrude it into a solid."
           type="button"
           variant="outline"
         >
-          Sketch
+          <PencilLine aria-hidden="true" className="text-signal" />
+          <span className="max-xl:hidden">Sketch</span>
         </Button>
         <Button
           aria-label="Toggle panels"

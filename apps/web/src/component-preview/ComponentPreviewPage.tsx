@@ -387,6 +387,7 @@ export function ComponentPreviewPage({
           >
             <div className="overflow-hidden rounded-[6px]">
               <CadViewport
+                cameraControls
                 className="h-[520px] w-[800px]"
                 projection={preview === null ? null : preview.projection}
                 regeneration={preview === null ? undefined : 1}

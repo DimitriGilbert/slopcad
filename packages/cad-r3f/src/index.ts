@@ -25,6 +25,26 @@ export {
   CadScene,
   type CadSceneProps,
 } from "./cad-scene";
+export type { SceneCameraStateSnapshot } from "./scene-camera-controls";
+export {
+  CAD_ORBIT_DRAG_THRESHOLD_PX,
+  CAD_ORBIT_DISTANCE_MAX_MM,
+  CAD_ORBIT_DISTANCE_MIN_MM,
+  CAD_ORBIT_KEY_STEP_DEG,
+  CAD_ORBIT_MAX_ELEVATION_DEG,
+  CAD_ORBIT_MIN_ELEVATION_DEG,
+  CAD_ORBIT_WHEEL_FACTOR,
+  createOrbitState,
+  orbitByKeys,
+  orbitByPixels,
+  orbitPosition,
+  orbitSnapshot,
+  panByPixels,
+  sceneCameraStateFromSpec,
+  zoomByWheel,
+  type OrbitSeed,
+  type OrbitState,
+} from "./orbit-controls";
 export {
   CadModel,
   type CadModelMaterialProps,

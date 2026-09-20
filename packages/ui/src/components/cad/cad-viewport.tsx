@@ -55,7 +55,7 @@
  * window level, scoped to the viewport.
  */
 
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
@@ -77,6 +77,7 @@ import {
   toolPointerEvent,
   type CadPick,
   type CadPickCategory,
+  type SceneCameraStateSnapshot,
 } from "@slopcad/cad-r3f";
 import { cn } from "cn";
 
@@ -119,6 +120,30 @@ export interface CadViewportProps {
   readonly labels?: Partial<CadViewportLabels>;
   /** Extends the container classes; sizes the viewport (default 320px tall). */
   readonly className?: string;
+  /**
+   * Opts the viewport into INTERACTIVE camera controls (left-drag orbit,
+   * wheel dolly, middle/shift-drag pan, arrow-key orbit when the viewport
+   * has focus). Default `false` — the deterministic spec camera the
+   * byte-pinned fixtures render with. With controls on, the boot camera is
+   * still the projection's spec camera: pixels change only after a real
+   * user gesture, and a camera state is published on the container as
+   * `data-camera-mode` / `data-camera-azimuth-deg` /
+   * `data-camera-elevation-deg` / `data-camera-distance-mm` ("spec" until
+   * the first gesture takes over). While a provider tool is ARMED,
+   * left-drag belongs to the tool; camera access rides wheel, pan, and
+   * keys until it is cancelled.
+   */
+  readonly cameraControls?: boolean;
+  /**
+   * Whether left-drag-orbit is currently available (camera controls only).
+   * The default `true` fits every host without provider tools; a host with
+   * an armed tool whose gesture vocabulary owns model drags (rotate,
+   * translate) passes `false` while that tool is live — the tool keeps its
+   * gesture, and wheel zoom, pan, and the arrow keys still move the
+   * camera. Click tools (select, measure) do NOT need this: orbiting and
+   * clicking coexist (the drag threshold separates them).
+   */
+  readonly cameraOrbitDragEnabled?: boolean;
   /** Fires once per projection change, on its first settled demand frame. */
   readonly onSettled?: () => void;
   /** Fires when new selection content reached a rendered frame. */
@@ -173,6 +198,8 @@ function insideOverlay(
  * (the fixture camera specs are authored for their exact viewport).
  */
 export function CadViewport({
+  cameraControls = false,
+  cameraOrbitDragEnabled = true,
   className,
   labels: labelOverrides,
   onHover,
@@ -212,6 +239,33 @@ export function CadViewport({
   /** The latest pointer down resolved no pick (empty space). */
   const emptyDownRef = useRef(false);
   const overlayLayerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Publishes the camera state on the container's machine surface
+   * (`data-camera-*`), directly — a camera drag writes attributes, it
+   * never re-renders the viewport.
+   */
+  const handleCameraState = useCallback(
+    (snapshot: SceneCameraStateSnapshot): void => {
+      const container = containerRef.current;
+      if (container === null) return;
+      container.setAttribute("data-camera-mode", snapshot.mode);
+      container.setAttribute(
+        "data-camera-azimuth-deg",
+        String(snapshot.azimuthDeg),
+      );
+      container.setAttribute(
+        "data-camera-elevation-deg",
+        String(snapshot.elevationDeg),
+      );
+      container.setAttribute(
+        "data-camera-distance-mm",
+        String(snapshot.distanceMm),
+      );
+    },
+    [],
+  );
 
   const toolActive = toolsApi !== null && toolsApi.phase === "active";
   const explicitInteraction =
@@ -333,6 +387,7 @@ export function CadViewport({
         "relative h-80 w-full overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-ring/80",
         className,
       )}
+      ref={containerRef}
       role="group"
       style={{ backgroundColor: studioPalette.background }}
       tabIndex={0}
@@ -358,6 +413,9 @@ export function CadViewport({
         </div>
       ) : (
         <CadScene
+          cameraControls={cameraControls}
+          cameraOrbitDragEnabled={cameraOrbitDragEnabled}
+          onCameraState={handleCameraState}
           onSelectionRendered={onSelectionRendered}
           onSettled={onSettled}
           palette={studioPalette}

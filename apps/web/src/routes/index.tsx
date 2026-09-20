@@ -106,9 +106,14 @@ function HomeComponent() {
             </div>
           </div>
           <div className="border-border bg-card rounded-lg border p-2">
-            <CadViewport className="h-[340px] w-full" projection={projection} />
+            <CadViewport
+              cameraControls
+              className="h-[340px] w-full"
+              projection={projection}
+            />
             <p className="text-muted-foreground px-1 pt-1.5 pb-0.5 font-mono text-[11px]">
-              the guide plate, rendered live by the deterministic scene
+              the guide plate, rendered live by the deterministic scene — drag
+              to orbit, scroll to zoom
             </p>
           </div>
         </section>

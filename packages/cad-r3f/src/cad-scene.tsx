@@ -11,10 +11,12 @@
  *
  * - `frameloop="demand"`: pixels change only after an explicit
  *   `invalidate()` — one per applied projection sync (`SceneModel`), one
- *   per camera application (`SceneCameraRig`), and one per selection/
+ *   per camera application (`SceneCameraRig`), one per selection/
  *   picking-prop change (`SceneModel`'s effect; a freshly mounted face
  *   highlight or a material change is otherwise invisible until the next
- *   frame). No rAF drift, no animation, no controls.
+ *   frame), and — on OPT-IN interactive camera hosts only — one per
+ *   applied camera gesture (`SceneCameraControls`). No rAF drift, no
+ *   animation, no unscheduled frames.
  * - `dpr={1}` and `antialias: false`: no GPU-dependent resolve or MSAA.
  * - `preserveDrawingBuffer: true`: the canvas survives compositing for
  *   byte-exact screenshot capture.
@@ -50,13 +52,19 @@
  */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactElement } from "react";
 import {
   selectionReferenceKey,
   type RenderCamera,
   type RenderProjection,
-  type RenderVector3,
   type SelectionReference,
 } from "@slopcad/cad-core";
 import type { CadPick, CadPickCategory } from "./picking";
@@ -64,9 +72,14 @@ import type { CadPick, CadPickCategory } from "./picking";
 import { CadModel } from "./cad-model";
 import {
   applySceneCamera,
+  camerasEqual,
   createSceneCamera,
   type SceneCamera,
 } from "./scene-camera";
+import {
+  SceneCameraControls,
+  type SceneCameraStateSnapshot,
+} from "./scene-camera-controls";
 import {
   CadSceneGround,
   CAD_SCENE_AXIS_X_COLOR,
@@ -77,6 +90,11 @@ import {
   CAD_SCENE_ORIGIN_MARKER_COLOR,
 } from "./scene-ground";
 import { CadSceneLights } from "./scene-lights";
+
+// The camera-spec value comparison stays public from here (its original
+// home) — the canonical definition lives beside the camera mapping.
+export { camerasEqual } from "./scene-camera";
+export type { SceneCameraStateSnapshot } from "./scene-camera-controls";
 
 /**
  * The scene's clear color. Studio graphite (the Machinist dark token
@@ -141,31 +159,6 @@ export interface SettleLedger {
   appliedCamera: RenderCamera | null;
 }
 
-function vectorsEqual(a: RenderVector3, b: RenderVector3): boolean {
-  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
-}
-
-/**
- * Whether two camera specs carry the same view: kind, framing vectors, and
- * the kind's projection parameters, compared by VALUE. Projections rebuild
- * their camera object on every change, and a host may equally share one
- * memoized spec across projections — the settle gate must care about the
- * camera content on screen, never about object identity.
- */
-export function camerasEqual(a: RenderCamera, b: RenderCamera): boolean {
-  if (a.kind !== b.kind) return false;
-  if (!vectorsEqual(a.position, b.position)) return false;
-  if (!vectorsEqual(a.target, b.target)) return false;
-  if (!vectorsEqual(a.up, b.up)) return false;
-  if (a.kind === "perspective" && b.kind === "perspective") {
-    return a.fovDeg === b.fovDeg;
-  }
-  if (a.kind === "orthographic" && b.kind === "orthographic") {
-    return a.viewWidth === b.viewWidth && a.viewHeight === b.viewHeight;
-  }
-  return false;
-}
-
 export interface CadSceneProps {
   /** The validated render projection, camera spec included. */
   readonly projection: RenderProjection;
@@ -213,6 +206,30 @@ export interface CadSceneProps {
    * its canonical key — the highlight-layer settle signal.
    */
   readonly onSelectionRendered?: (selectionKey: string) => void;
+  /**
+   * Opts the scene into INTERACTIVE camera controls (left-drag orbit,
+   * wheel dolly, middle/shift-drag pan, arrow-key orbit). Default `false`
+   * — the deterministic spec camera, unchanged for every fixture that
+   * pins bytes. With controls on, the boot camera is still the spec's
+   * (applied by the rig, untouched until the first gesture), so a page
+   * with controls renders byte-identically to one without until a user
+   * actually moves the camera.
+   */
+  readonly cameraControls?: boolean;
+  /**
+   * Whether left-drag-orbit is currently available (camera controls only).
+   * A host with an armed tool that owns model drags passes `false` while
+   * the tool is live — the tool keeps its gesture; wheel zoom, pan, and
+   * the arrow keys still move the camera. Default `true`.
+   */
+  readonly cameraOrbitDragEnabled?: boolean;
+  /**
+   * Receives the camera state (mode + azimuth/elevation/distance) once at
+   * boot and after every applied camera change — the host's machine
+   * surface for tests and readouts. Called outside render; a camera drag
+   * never re-renders the host.
+   */
+  readonly onCameraState?: (snapshot: SceneCameraStateSnapshot) => void;
 }
 
 /**
@@ -399,6 +416,9 @@ function SelectionProbe({
  * the parent a fixed size for fixed-viewport pixel evidence.
  */
 export function CadScene({
+  cameraControls = false,
+  cameraOrbitDragEnabled = true,
+  onCameraState,
   onHover,
   onPick,
   onPickDown,
@@ -418,6 +438,18 @@ export function CadScene({
     syncedProjection: null,
     appliedCamera: null,
   }));
+  // The camera-state reporter, identity-stable so the controls' listener
+  // wiring never re-runs because the host passed an inline closure.
+  const onCameraStateRef = useRef(onCameraState);
+  useEffect(() => {
+    onCameraStateRef.current = onCameraState;
+  });
+  const handleCameraState = useCallback(
+    (snapshot: SceneCameraStateSnapshot): void => {
+      onCameraStateRef.current?.(snapshot);
+    },
+    [],
+  );
   // Identity-stable per palette so the model's material prop and the
   // ground's memoized geometry never churn across ordinary renders.
   const groundColors = useMemo(
@@ -447,6 +479,13 @@ export function CadScene({
     >
       <color attach="background" args={[palette.background]} />
       <SceneCameraRig settle={settle} spec={projection.camera} />
+      {cameraControls ? (
+        <SceneCameraControls
+          onCameraState={handleCameraState}
+          orbitDragEnabled={cameraOrbitDragEnabled}
+          spec={projection.camera}
+        />
+      ) : null}
       <CadSceneLights />
       {showGround ? (
         <CadSceneGround
