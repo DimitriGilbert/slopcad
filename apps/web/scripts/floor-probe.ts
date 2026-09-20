@@ -9,8 +9,9 @@
  * tokens and the corner radius — never metrics), so the DEFAULT scheme
  * (machinist) takes the full 16px-step sweep (the responsive proof tool's
  * own discipline), and the other schemes take a coarse sweep to verify
- * nothing scheme-conditional leaks into layout. Pass scheme names as
- * arguments to sweep specific schemes; FLOOR_STEP overrides the step
+ * nothing scheme-conditional leaks into layout. The judged widths (768,
+ * 900) are always probed explicitly, whatever the step. Pass scheme names
+ * as arguments to sweep specific schemes; FLOOR_STEP overrides the step
  * (16 = full, 96 = coarse).
  *
  * Usage: `pnpm --filter web probe:floor` (or `pnpm test:floor-probe`) with
@@ -53,7 +54,16 @@ async function main(): Promise<void> {
           `— ${scheme} / ${mode} / ${workbenchMode} mode (${String(STEP)}px steps) —`,
         );
         let failures = 0;
+        // The judged widths are ALWAYS probed explicitly: neither grid
+        // (16px from 640, 96px coarse) lands on 900, and the coarse grid
+        // never lands on 768 either.
+        const widths = new Set<number>();
         for (let width = 640; width <= 2560; width += STEP) {
+          widths.add(width);
+        }
+        widths.add(768);
+        widths.add(900);
+        for (const width of [...widths].sort((a, b) => a - b)) {
           const context = await browser.newContext({
             viewport: { width, height: 900 },
             deviceScaleFactor: 1,

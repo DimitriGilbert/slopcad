@@ -410,13 +410,28 @@ export function CadParameterPanel({
     const fields: FormedibleFieldConfig<CadParameterPanelFormValues>[] = [];
 
     for (const parameter of parameterList) {
+      // The preview quantity: for an EXPRESSION parameter the cached
+      // `parameter.value` can lag the collection — a foreign parameter.set
+      // commit (an edit to a DIFFERENT parameter this expression reads) does
+      // not rewrite this parameter's cached value, so the stale number would
+      // contradict the settled document. The preview therefore re-evaluates
+      // the defining expression against the CURRENT environment on every
+      // collection change; the cached value is the fallback when no
+      // evaluator is available or the expression does not evaluate.
+      let quantity = currentQuantityText(parameter);
+      if (parameter.expression !== null && evaluate !== undefined) {
+        const evaluated = evaluate(printExpression(parameter.expression));
+        if (evaluated.ok) {
+          const canonical = toCanonical(evaluated.value);
+          quantity = `${String(canonical.value)} ${CANONICAL_UNITS[canonical.dimension]}`;
+        }
+      }
       // The field's quantity lives in the field HEAD, not a third row:
       // literal fields wear their canonical unit INSIDE the control (the
       // suffix), expression fields print their evaluated quantity as the
       // one data line (`= 16 mm`). The full current-quantity sentence
       // rides along as a screen-reader-only description — same words as
       // ever, zero extra visual rows.
-      const quantity = currentQuantityText(parameter);
       const srQuantity = (
         <span className="sr-only">
           {`${mergedLabels.currentValue}: ${quantity}`}

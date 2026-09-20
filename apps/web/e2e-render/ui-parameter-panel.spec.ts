@@ -244,6 +244,16 @@ test("editing a value through the panel commits parameter.set and settles a new 
   await expect(
     page.locator(PANEL).getByText("Current value: 6 mm"),
   ).toHaveCount(1);
+  // The EXPRESSION preview re-derived with the commit: `holeDiameter * 2`
+  // now evaluates to 12, so the expression field's one data line reads
+  // `= 12 mm` — and the stale `= 16 mm` line is gone. A preview that kept
+  // the pre-commit number would contradict the settled document.
+  await expect(
+    page.locator(PANEL).getByText("= 12 mm", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(PANEL).getByText("= 16 mm", { exact: true }),
+  ).toHaveCount(0);
 
   // The executor stand-in followed the document: a settled NEW volume.
   const editedVolume = await waitForSettledScene(page, "ui-viewport-root");
@@ -271,6 +281,19 @@ test("editing a value through the panel commits parameter.set and settles a new 
     editedShotReplay.equals(editedShot),
     `edited sha256=${sha256(editedShot)} vs replay sha256=${sha256(editedShotReplay)}`,
   ).toBe(true);
+
+  // AFTER the byte comparisons: a SECOND commit re-derives the preview
+  // again (6 -> 9, `holeDiameter * 2` = 18) — the line tracks the
+  // document on every commit, not just the first derivation.
+  await panelField(page, "holeDiameter").fill("9");
+  await applyButton(page).click();
+  await waitForCommandCount(page, 2);
+  await expect(
+    page.locator(PANEL).getByText("= 18 mm", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(PANEL).getByText("= 12 mm", { exact: true }),
+  ).toHaveCount(0);
 });
 
 test("an invalid expression shows the domain's error state and issues nothing", async ({

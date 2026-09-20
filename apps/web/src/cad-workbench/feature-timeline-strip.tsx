@@ -252,7 +252,7 @@ function TimelineFragment({
         onClear={onClearRollback}
       />
       <span
-        className={`flex h-6 shrink-0 snap-start items-center gap-1.5 rounded-[4px] border px-1.5 ${presentation.chip}`}
+        className={`flex h-6 shrink-0 snap-start items-center gap-1.5 rounded-sm border px-1.5 ${presentation.chip}`}
         data-testid="timeline-chip"
         data-timeline-id={entry.id}
         data-timeline-status={entry.status}
@@ -284,7 +284,7 @@ function TimelineFragment({
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
           aria-pressed={suppressed}
-          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-[3px] outline-none transition-colors hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50"
+          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-sm outline-none transition-colors hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50"
           title={
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
@@ -324,7 +324,7 @@ function TimelineGap({
       type="button"
       aria-label={active ? `Remove rollback point — ${label}` : label}
       aria-pressed={active}
-      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-[3px] outline-none snap-start focus-visible:ring-1 focus-visible:ring-ring/80"
+      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-sm outline-none snap-start focus-visible:ring-1 focus-visible:ring-ring/80"
       title={active ? `Remove rollback point — ${label}` : label}
       onClick={() => {
         if (active) {
