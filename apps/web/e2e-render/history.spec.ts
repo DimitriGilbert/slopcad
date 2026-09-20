@@ -255,7 +255,7 @@ test("the feature timeline boots byte-stable, in document order, all valid", asy
   ]);
   // The boot run executed the whole document, in evaluation order.
   expect(surface.executed).toEqual([TRANSLATE_FEATURE, ROTATE_FEATURE]);
-  await expect(page.getByTestId("timeline-summary")).toHaveText("2 executed");
+  await expect(page.getByTestId("timeline-summary")).toHaveText("2 valid");
   const shotFirst = await page.screenshot();
 
   // A full second run: the same composed page, so the same settled bytes.
@@ -387,7 +387,7 @@ test("the rollback marker parks downstream features; removing it re-executes the
     page.locator(`${TREE} [data-node-key="feature|${ROTATE_FEATURE}"]`),
   ).toHaveAttribute("data-status", "stale");
   await expect(page.getByTestId("timeline-summary")).toHaveText(
-    "rollback · 0 executed · 1 parked",
+    "rollback · 1 valid · 1 parked",
   );
   await expect(page.getByTestId("rollback-marker")).toHaveCount(1);
 
@@ -472,7 +472,7 @@ test("a failed feature is visible, gates its downstream, and recovers", async ({
   );
   await expect(failedTreeRow).toHaveAttribute("data-status", "failed");
   await expect(failedTreeRow).toContainText("negative");
-  await expect(page.getByTestId("timeline-summary")).toHaveText("1 executed");
+  await expect(page.getByTestId("timeline-summary")).toHaveText("0 valid");
 
   // The recovery: correcting the parameter regenerates the whole chain green.
   await panelField(page, "translate_x").fill("1");
@@ -486,7 +486,7 @@ test("a failed feature is visible, gates its downstream, and recovers", async ({
     ],
   });
   await expect(failedTreeRow).toHaveAttribute("data-status", "valid");
-  await expect(page.getByTestId("timeline-summary")).toHaveText("2 executed");
+  await expect(page.getByTestId("timeline-summary")).toHaveText("2 valid");
 });
 
 test("the history+error state is a byte-stable screenshot baseline", async ({

@@ -125,7 +125,6 @@ export function WorkbenchLayout({
 }): ReactElement {
   const {
     applied,
-    executed,
     historyApi,
     holeBase,
     mode,
@@ -295,7 +294,6 @@ export function WorkbenchLayout({
           ) : (
             <FeatureTimelineStrip
               entries={timeline}
-              executed={executed}
               rollback={rollback}
               onRollback={setRollback}
               onToggleSuppressed={toggleSuppressed}

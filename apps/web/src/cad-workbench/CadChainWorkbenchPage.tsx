@@ -897,7 +897,6 @@ function CadChainWorkbenchBody({
             <FeatureTimelineStrip
               entries={timeline}
               rollback={rollback}
-              executed={runState === null ? [] : runState.executed}
               onRollback={setRollback}
               onToggleSuppressed={toggleSuppressed}
             />

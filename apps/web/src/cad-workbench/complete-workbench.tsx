@@ -61,7 +61,15 @@ import {
   SELECT_TOOL_ID,
 } from "@slopcad/cad-react";
 import { formatBoundsExtents } from "@slopcad/cad-core";
-import { PanelLeft, PanelRight, Redo2, Undo2 } from "lucide-react";
+import {
+  Command,
+  Download,
+  PanelLeft,
+  PanelRight,
+  Redo2,
+  Undo2,
+  Upload,
+} from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
   CadCommandMenu,
@@ -202,6 +210,15 @@ const LABELS = {
 } as const;
 
 /**
+ * The DRO's value ink. In the dark register the digits read as an emissive
+ * machine readout — amber over the near-black band with a soft glow — the
+ * cockpit's glance-mark; in light the values are plain instrument ink on
+ * paper and nothing glows.
+ */
+const DRO_VALUE =
+  "text-foreground dark:text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]";
+
+/**
  * The complete CAD workbench: all eight plan surfaces composed over the
  * shared engine, every piece replaceable by slot, every interaction routed
  * through the public CAD APIs.
@@ -219,7 +236,6 @@ export function CompleteCadWorkbench({
   });
   const {
     applied,
-    executed,
     historyApi,
     holeBase,
     mode,
@@ -259,6 +275,30 @@ export function CompleteCadWorkbench({
   // The last import outcome the auto-close has seen (identity-tracked: the
   // builder-built io surface re-mints the outcome object every render).
   const seenOutcomeRef = useRef<CadImportOutcome | null>(null);
+  // A scrimmed overlay answers Escape: an open drawer closes on the key at
+  // window level — unless a tool is live, because the viewport's documented
+  // Escape surface (cancel the armed tool) owns the key first.
+  useEffect(() => {
+    if (!treeDrawerOpen && !panelsDrawerOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      // A genuinely armed tool (not the resting select) owns Escape first —
+      // the viewport's documented cancel surface.
+      if (toolsApi.phase === "active" && toolsApi.activeToolId !== "select") {
+        return;
+      }
+      setTreeDrawerOpen(false);
+      setPanelsDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [panelsDrawerOpen, toolsApi.activeToolId, toolsApi.phase, treeDrawerOpen]);
 
   const ioSurface: CadWorkbenchIo = useMemo(
     () =>
@@ -464,11 +504,11 @@ export function CompleteCadWorkbench({
   const defaultHistoryTimeline = (
     <div
       aria-label="Feature timeline"
-      className="flex h-full min-w-0 flex-1 items-center gap-1 pl-2 [contain:inline-size]"
+      className="flex h-full min-w-[92px] flex-1 items-center gap-1 overflow-hidden pl-2"
       data-testid="complete-feature-timeline"
       role="group"
     >
-      <span className="text-muted-foreground mr-1.5 shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+      <span className="text-muted-foreground mr-1.5 hidden shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase xl:inline">
         Timeline
       </span>
       {timeline === null ? (
@@ -479,20 +519,23 @@ export function CompleteCadWorkbench({
         <>
           {/* The chain scrolls HERE alone; the counter sits outside the
               scrolled content, so a long feature chain can never clip it
-              mid-word (nor can the counter squeeze the chips). */}
-          <div className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            <FeatureTimelineChips
-              entries={timeline}
-              rollback={rollback}
-              onRollback={setRollback}
-              onToggleSuppressed={toggleSuppressed}
-            />
+              mid-word (nor can the counter squeeze the chips). Scroll snap
+              keeps every rest position whole-chip, and the container query
+              collapses the chips entirely once the window can no longer
+              host one — the strip never rests on a bisected glyph. The
+              row sheds labels before it ever clips a control: the pinned
+              end toggles are the last thing to go, never clipped. */}
+          <div className="h-full min-w-0 flex-1 @container">
+            <div className="no-scrollbar flex h-full w-full snap-x snap-mandatory items-center gap-1 overflow-x-auto @max-[150px]:hidden [mask-image:linear-gradient(to_right,transparent_0,black_10px,black_calc(100%_-_14px),transparent)]">
+              <FeatureTimelineChips
+                entries={timeline}
+                rollback={rollback}
+                onRollback={setRollback}
+                onToggleSuppressed={toggleSuppressed}
+              />
+            </div>
           </div>
-          <FeatureTimelineSummary
-            entries={timeline}
-            executed={executed}
-            rollback={rollback}
-          />
+          <FeatureTimelineSummary entries={timeline} rollback={rollback} />
         </>
       )}
     </div>
@@ -501,6 +544,7 @@ export function CompleteCadWorkbench({
   const defaultCommandMenu = (
     <>
       <Button
+        aria-label="Open the command menu (Ctrl+K)"
         data-testid="complete-command-menu-trigger"
         onClick={() => {
           setCommandMenuOpen(true);
@@ -510,10 +554,13 @@ export function CompleteCadWorkbench({
         type="button"
         variant="outline"
       >
-        {LABELS.commandMenuTrigger}
+        {/* Below `xl` the row sheds labels before it ever clips a control:
+            the trigger collapses to its mark, the hint lives in the title. */}
+        <Command aria-hidden="true" className="xl:hidden" />
+        <span className="max-xl:hidden">{LABELS.commandMenuTrigger}</span>
         <kbd
           aria-hidden="true"
-          className="border-current/40 border px-1 font-mono text-[10px] font-normal leading-4"
+          className="border-current/40 border max-xl:hidden px-1 font-mono text-[10px] font-normal leading-4"
         >
           {LABELS.commandMenuHint}
         </kbd>
@@ -590,9 +637,12 @@ export function CompleteCadWorkbench({
       {/* The DRO band: the viewport region's readout, edge to edge along
           its bottom — the same honest engine numbers the machine surfaces
           carry (scene kind, extents, volume, triangles), plus the settle
-          lamp and the live tool state. Never a second source of truth. */}
+          lamp and the live tool state. Never a second source of truth. In
+          the dark register the band reads as an emissive instrument: amber
+          digits over near-black glass (the cockpit's glance-mark); light
+          stays plain ink on paper. */}
       <div
-        className="border-border bg-card/50 text-muted-foreground flex h-7 shrink-0 items-center gap-4 overflow-hidden border-t px-3 font-mono text-[11px] whitespace-nowrap"
+        className="border-border bg-card/50 text-muted-foreground dark:border-signal/20 dark:bg-black/60 flex h-7 shrink-0 items-center gap-4 overflow-hidden border-t px-3 font-mono text-[11px] whitespace-nowrap"
         data-testid="viewport-dro"
       >
         <span
@@ -605,12 +655,12 @@ export function CompleteCadWorkbench({
         />
         {showingPreview ? (
           <>
-            <span className="text-signal">
+            <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
               import · {ioSurface.preview?.source ?? ""}
             </span>
             <span>
               tris{" "}
-              <span className="text-foreground">
+              <span className={DRO_VALUE}>
                 {ioSurface.preview === null
                   ? "…"
                   : String(ioSurface.preview.triangles)}
@@ -618,7 +668,7 @@ export function CompleteCadWorkbench({
             </span>
             <span>
               vol{" "}
-              <span className="text-foreground">
+              <span className={DRO_VALUE}>
                 {ioSurface.preview === null
                   ? "…"
                   : `${ioSurface.preview.volumeText} mm³`}
@@ -629,25 +679,29 @@ export function CompleteCadWorkbench({
             </span>
           </>
         ) : applied === null ? (
-          <span className="text-signal">computing…</span>
+          <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+            computing…
+          </span>
         ) : (
           <>
-            <span className="text-signal">{engine.activeScene}</span>
+            <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+              {engine.activeScene}
+            </span>
             <span>
               extents{" "}
-              <span className="text-foreground">
+              <span className={DRO_VALUE}>
                 {formatBoundsExtents(applied.state.measurement.bounds)}
               </span>
             </span>
             <span>
               vol{" "}
-              <span className="text-foreground">
+              <span className={DRO_VALUE}>
                 {`${applied.state.measurement.volume.toFixed(3)} mm³`}
               </span>
             </span>
             <span>
               tris{" "}
-              <span className="text-foreground">
+              <span className={DRO_VALUE}>
                 {String(applied.state.measurement.triangles)}
               </span>
             </span>
@@ -658,13 +712,16 @@ export function CompleteCadWorkbench({
         <span className="text-muted-foreground ml-auto hidden items-center gap-4 sm:flex">
           {toolsApi.phase === "active" && toolsApi.activeToolId !== null ? (
             <span>
-              tool <span className="text-signal">{toolsApi.activeToolId}</span>{" "}
+              tool{" "}
+              <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+                {toolsApi.activeToolId}
+              </span>{" "}
               · Esc cancels
             </span>
           ) : null}
           <span>
             sel{" "}
-            <span className="text-foreground">
+            <span className={DRO_VALUE}>
               {String(selectionApi.selected.length)}
             </span>
           </span>
@@ -870,12 +927,12 @@ export function CompleteCadWorkbench({
           <span className="text-signal font-mono text-[11px]">
             {showingPreview ? "import" : engine.activeScene}
           </span>
-          <span className="text-muted-foreground hidden font-mono text-[11px] xl:inline">
+          <span className="text-muted-foreground hidden font-mono text-[11px] 2xl:inline">
             {applied === null
               ? "computing…"
               : formatBoundsExtents(applied.state.measurement.bounds)}
           </span>
-          <span className="text-muted-foreground hidden font-mono text-[11px] 2xl:inline">
+          <span className="text-muted-foreground hidden font-mono text-[11px] xl:inline">
             {timeline === null ? "" : `${String(timeline.length)} features`}
           </span>
         </div>
@@ -919,18 +976,22 @@ export function CompleteCadWorkbench({
         {!hasIo ? null : (
           <>
             <Button
+              aria-label={LABELS.import}
               data-testid="complete-import"
               onClick={() => {
                 setImportDialogOpen(true);
               }}
               ref={importTriggerRef}
               size="xs"
+              title="Import model files."
               type="button"
               variant="outline"
             >
-              {LABELS.import}
+              <Upload aria-hidden="true" className="xl:hidden" />
+              <span className="max-xl:hidden">{LABELS.import}</span>
             </Button>
             <Button
+              aria-label={LABELS.export}
               data-testid="complete-export"
               disabled={applied === null}
               onClick={() => {
@@ -946,11 +1007,16 @@ export function CompleteCadWorkbench({
               type="button"
               variant="outline"
             >
-              {LABELS.export}
+              <Download aria-hidden="true" className="xl:hidden" />
+              <span className="max-xl:hidden">{LABELS.export}</span>
             </Button>
           </>
         )}
+        {/* The hole verb is contextual (it needs an extrusion to cut), so
+            below `lg` it yields its row width entirely — it stays in the
+            command menu and returns with the full row. */}
         <Button
+          className="max-xl:hidden"
           data-testid="complete-hole"
           disabled={holeBase === undefined}
           onClick={handleHole}
