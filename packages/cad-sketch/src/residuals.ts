@@ -27,6 +27,11 @@ import type { SketchConstraintId, SketchEntityId } from "./sketch-ids";
 import type { SolvedEntityParameters, SolvedSketchParameters } from "./solver";
 
 import {
+  bezierChainOfSpline,
+  projectOntoSpline,
+  splinePointGradient,
+} from "./spline-math";
+import {
   type PointTarget,
   type SketchConstraint,
   validateConstraintReferences,
@@ -41,7 +46,11 @@ interface EntitySlots {
 /**
  * Maps entities to parameter slots. `offsets` follows the entity's documented
  * parameter order: point (x, y); line (x1, y1, x2, y2); circle (cx, cy, r);
- * arc (cx, cy, r, a0, a1). Rectangles carry no slots.
+ * arc (cx, cy, r, a0, a1); ellipse (cx, cy, a, b, ρ); ellipticalArc
+ * (cx, cy, a, b, ρ, a0, a1); spline (x, y per stored point, in point order);
+ * polygon (cx, cy, r, ρ — the side count and fit are discrete parameters);
+ * slot straight (x1, y1, x2, y2, r); slot arc3 (x1, y1, x2, y2, x3, y3, r).
+ * Rectangles carry no slots.
  */
 export class ParameterLayout {
   private readonly slotsByEntity: ReadonlyMap<SketchEntityId, EntitySlots>;
@@ -68,6 +77,30 @@ export class ParameterLayout {
           break;
         case "arc":
           slotsByEntity.set(entity.id, { kind: "arc", offsets: take(5) });
+          break;
+        case "ellipse":
+          slotsByEntity.set(entity.id, { kind: "ellipse", offsets: take(5) });
+          break;
+        case "ellipticalArc":
+          slotsByEntity.set(entity.id, {
+            kind: "ellipticalArc",
+            offsets: take(7),
+          });
+          break;
+        case "spline":
+          slotsByEntity.set(entity.id, {
+            kind: "spline",
+            offsets: take(2 * entity.points.length),
+          });
+          break;
+        case "polygon":
+          slotsByEntity.set(entity.id, { kind: "polygon", offsets: take(4) });
+          break;
+        case "slot":
+          slotsByEntity.set(entity.id, {
+            kind: "slot",
+            offsets: take(entity.variant === "arc3" ? 7 : 5),
+          });
           break;
         case "rectangle":
           slotsByEntity.set(entity.id, { kind: "rectangle", offsets: [] });
@@ -108,11 +141,62 @@ export function packInitialParameters(
           entity.endAngle,
         );
         break;
+      case "ellipse":
+        values.push(
+          entity.cx,
+          entity.cy,
+          entity.radiusX,
+          entity.radiusY,
+          entity.rotation,
+        );
+        break;
+      case "ellipticalArc":
+        values.push(
+          entity.cx,
+          entity.cy,
+          entity.radiusX,
+          entity.radiusY,
+          entity.rotation,
+          entity.startAngle,
+          entity.endAngle,
+        );
+        break;
+      case "spline":
+        for (const point of entity.points) values.push(point.x, point.y);
+        break;
+      case "polygon":
+        values.push(entity.cx, entity.cy, entity.radius, entity.rotation);
+        break;
+      case "slot":
+        values.push(entity.x1, entity.y1, entity.x2, entity.y2);
+        if (entity.variant === "arc3") {
+          values.push(arc3EndOf(entity).x, arc3EndOf(entity).y);
+        }
+        values.push(entity.radius);
+        break;
       case "rectangle":
         break;
     }
   }
   return values;
+}
+
+/**
+ * The arc3 slot's end point — always present on validated entities; a
+ * missing field is a structural corruption that must fail loudly.
+ */
+function arc3EndOf(entity: {
+  readonly id: SketchEntityId;
+  readonly variant: string;
+  readonly x3?: number;
+  readonly y3?: number;
+}): { readonly x: number; readonly y: number } {
+  if (entity.x3 === undefined || entity.y3 === undefined) {
+    throw new RangeError(
+      `Arc3 slot ${entity.id} is missing its x3/y3 fields; arc3 slots always carry x1..y3.`,
+    );
+  }
+  return { x: entity.x3, y: entity.y3 };
 }
 
 /** Unpacks a solved vector back into per-entity parameters. */
@@ -179,6 +263,79 @@ export function unpackSolvedParameters(
       }
       case "rectangle":
         return { id: entity.id, kind: "rectangle" };
+      case "ellipse":
+        return {
+          id: entity.id,
+          kind: "ellipse",
+          cx: offset(0),
+          cy: offset(1),
+          radiusX: offset(2),
+          radiusY: offset(3),
+          rotation: canonicalAngle(offset(4)),
+        };
+      case "ellipticalArc": {
+        const startAngle = offset(5);
+        const endAngle = offset(6);
+        // The same degenerate-sweep guard arcs carry: a collapsed or
+        // wrapped-near-full parametric sweep is not a physical arc.
+        if (solvedArcSweepIsDegenerate(startAngle, endAngle)) {
+          throw new RangeError(
+            `Solved elliptical arc parameters for entity ${entity.id} are degenerate: the parametric sweep from ${String(startAngle)} to ${String(endAngle)} collapses or wraps to a near-full ellipse.`,
+          );
+        }
+        return {
+          id: entity.id,
+          kind: "ellipticalArc",
+          cx: offset(0),
+          cy: offset(1),
+          radiusX: offset(2),
+          radiusY: offset(3),
+          rotation: canonicalAngle(offset(4)),
+          startAngle: canonicalAngle(startAngle),
+          endAngle: canonicalAngle(endAngle),
+        };
+      }
+      case "spline": {
+        const points = entity.points.map((_, index) => ({
+          x: offset(2 * index),
+          y: offset(2 * index + 1),
+        }));
+        return { id: entity.id, kind: "spline", points };
+      }
+      case "polygon":
+        return {
+          id: entity.id,
+          kind: "polygon",
+          cx: offset(0),
+          cy: offset(1),
+          radius: offset(2),
+          rotation: canonicalAngle(offset(3)),
+        };
+      case "slot":
+        if (entity.variant === "straight") {
+          return {
+            id: entity.id,
+            kind: "slot",
+            variant: entity.variant,
+            x1: offset(0),
+            y1: offset(1),
+            x2: offset(2),
+            y2: offset(3),
+            radius: offset(4),
+          };
+        }
+        return {
+          id: entity.id,
+          kind: "slot",
+          variant: entity.variant,
+          x1: offset(0),
+          y1: offset(1),
+          x2: offset(2),
+          y2: offset(3),
+          x3: offset(4),
+          y3: offset(5),
+          radius: offset(6),
+        };
     }
   });
   return { entities: solved };
@@ -450,6 +607,186 @@ function pointExpr(
       throw new RangeError(
         `Point target references rectangle ${target.entity}; rectangles have no point targets.`,
       );
+    case "ellipse":
+      switch (target.point) {
+        case "center":
+          return {
+            value: value(axis === "x" ? 0 : 1),
+            grad: slotGrad(axis === "x" ? 0 : 1, 1),
+          };
+        case "start":
+        case "end": {
+          // `start` is the major-axis end: center + R(ρ)·(a, 0); `end` is
+          // the minor-axis end: center + R(ρ)·(0, b).
+          const major = target.point === "start";
+          const cosRho = Math.cos(value(4));
+          const sinRho = Math.sin(value(4));
+          const length = value(major ? 2 : 3);
+          const grad = new Map<number, number>();
+          const centerLocal = axis === "x" ? 0 : 1;
+          grad.set(slot(centerLocal), 1);
+          if (major) {
+            grad.set(slot(2), axis === "x" ? cosRho : sinRho);
+            grad.set(
+              slot(4),
+              axis === "x" ? -sinRho * length : cosRho * length,
+            );
+          } else {
+            grad.set(slot(3), axis === "x" ? -sinRho : cosRho);
+            grad.set(
+              slot(4),
+              axis === "x" ? -cosRho * length : -sinRho * length,
+            );
+          }
+          return {
+            value:
+              value(centerLocal) +
+              (major
+                ? axis === "x"
+                  ? cosRho * length
+                  : sinRho * length
+                : axis === "x"
+                  ? -sinRho * length
+                  : cosRho * length),
+            grad,
+          };
+        }
+      }
+      break;
+    case "ellipticalArc":
+      switch (target.point) {
+        case "center":
+          return {
+            value: value(axis === "x" ? 0 : 1),
+            grad: slotGrad(axis === "x" ? 0 : 1, 1),
+          };
+        case "start":
+        case "end": {
+          // The parametric point at t: center + R(ρ)·(a·cos t, b·sin t),
+          // with its exact gradient over (cx, cy, a, b, ρ, t).
+          const angleLocal = target.point === "start" ? 5 : 6;
+          const t = value(angleLocal);
+          const a = value(2);
+          const b = value(3);
+          const rho = value(4);
+          const cosRho = Math.cos(rho);
+          const sinRho = Math.sin(rho);
+          const cosT = Math.cos(t);
+          const sinT = Math.sin(t);
+          const u = a * cosT;
+          const v = b * sinT;
+          const grad = new Map<number, number>();
+          const centerLocal = axis === "x" ? 0 : 1;
+          grad.set(slot(centerLocal), 1);
+          grad.set(slot(2), axis === "x" ? cosRho * cosT : sinRho * cosT);
+          grad.set(slot(3), axis === "x" ? -sinRho * sinT : cosRho * sinT);
+          grad.set(
+            slot(4),
+            axis === "x" ? -sinRho * u - cosRho * v : cosRho * u - sinRho * v,
+          );
+          grad.set(
+            slot(angleLocal),
+            axis === "x"
+              ? cosRho * -a * sinT - sinRho * b * cosT
+              : sinRho * -a * sinT + cosRho * b * cosT,
+          );
+          return {
+            value:
+              value(centerLocal) +
+              (axis === "x"
+                ? cosRho * u - sinRho * v
+                : sinRho * u + cosRho * v),
+            grad,
+          };
+        }
+      }
+      break;
+    case "spline": {
+      // Start = the first stored point (slots 0, 1); end = the last.
+      const pointCount = slots.offsets.length / 2;
+      const local =
+        target.point === "start"
+          ? axis === "x"
+            ? 0
+            : 1
+          : axis === "x"
+            ? 2 * (pointCount - 1)
+            : 2 * (pointCount - 1) + 1;
+      return { value: value(local), grad: slotGrad(local, 1) };
+    }
+    case "polygon": {
+      // Layout (cx, cy, r, ρ). `start` is vertex 0 (at the rotation), `end`
+      // vertex 1; the effective circumradius scales the authored radius by
+      // 1/cos(π/n) for the circumscribed fit.
+      const entity = context.entitiesById.get(target.entity);
+      if (
+        entity === undefined ||
+        entity.kind !== "polygon" ||
+        slots.offsets.length !== 4
+      ) {
+        throw new RangeError(
+          `Point target references unknown polygon ${target.entity}.`,
+        );
+      }
+      const centerLocal = axis === "x" ? 0 : 1;
+      if (target.point === "center") {
+        return {
+          value: value(centerLocal),
+          grad: slotGrad(centerLocal, 1),
+        };
+      }
+      const k = target.point === "start" ? 0 : 1;
+      const theta = value(3) + (Math.PI * 2 * k) / entity.sides;
+      const scale =
+        entity.fit === "inscribed" ? 1 : 1 / Math.cos(Math.PI / entity.sides);
+      const effective = scale * value(2);
+      const cosT = Math.cos(theta);
+      const sinT = Math.sin(theta);
+      const grad = new Map<number, number>();
+      grad.set(slot(centerLocal), 1);
+      grad.set(slot(2), scale * (axis === "x" ? cosT : sinT));
+      grad.set(slot(3), axis === "x" ? -effective * sinT : effective * cosT);
+      return {
+        value:
+          value(centerLocal) +
+          (axis === "x" ? effective * cosT : effective * sinT),
+        grad,
+      };
+    }
+    case "slot": {
+      // Straight layout (x1, y1, x2, y2, r): start = (x1, y1), end =
+      // (x2, y2), center = the cap-center midpoint. Arc3 layout adds
+      // (x3, y3) before r: start = (x1, y1), end = (x3, y3), center =
+      // the through point (x2, y2).
+      const straight = slots.offsets.length === 5;
+      switch (target.point) {
+        case "start":
+          return {
+            value: value(axis === "x" ? 0 : 1),
+            grad: slotGrad(axis === "x" ? 0 : 1, 1),
+          };
+        case "end": {
+          const endX = straight ? 2 : 4;
+          const local = axis === "x" ? endX : endX + 1;
+          return { value: value(local), grad: slotGrad(local, 1) };
+        }
+        case "center": {
+          if (straight) {
+            const a = axis === "x" ? 0 : 1;
+            const b = axis === "x" ? 2 : 3;
+            return combineExpr(
+              { value: value(a), grad: slotGrad(a, 1) },
+              { value: value(b), grad: slotGrad(b, 1) },
+              0.5,
+              0.5,
+            );
+          }
+          const local = axis === "x" ? 2 : 3;
+          return { value: value(local), grad: slotGrad(local, 1) };
+        }
+      }
+      break;
+    }
   }
 }
 
@@ -479,6 +816,372 @@ function circularSlotsOf(
     throw new RangeError(`Constraint references unknown circle/arc ${id}.`);
   }
   return slots;
+}
+
+/**
+ * Point-on-line: the signed distance from the point target to the line's
+ * INFINITE line (the tangency convention — segment clipping is the
+ * profile domain's business).
+ */
+function pointOnLineRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  lineId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const line = lineGeom(parameters, lineSlotsOf(lineId, context));
+      const px = pointExpr(target, context, parameters, "x");
+      const py = pointExpr(target, context, parameters, "y");
+      const [x1Slot, y1Slot] = lineSlotsOf(lineId, context).offsets;
+      if (x1Slot === undefined || y1Slot === undefined) {
+        throw new RangeError("Point-on-line line operand is missing slots.");
+      }
+      const x1 = parameters[x1Slot];
+      const y1 = parameters[y1Slot];
+      if (x1 === undefined || y1 === undefined) {
+        throw new RangeError("Point-on-line line operand is missing values.");
+      }
+      const wx = px.value - x1;
+      const wy = py.value - y1;
+      // cross = dx·wy − dy·wx (mm²); distance = cross / L (mm).
+      const cross = line.dx * wy - line.dy * wx;
+      const distance = cross / line.length;
+      const dCross = new Map<number, number>();
+      addInto(dCross, line.ddx, wy);
+      addInto(dCross, line.ddy, -wx);
+      addInto(dCross, px.grad, -line.dy);
+      addInto(dCross, py.grad, line.dx);
+      const grad = chain(
+        1 / line.length,
+        dCross,
+        -cross / (line.length * line.length),
+        line.dLength,
+      );
+      return { value: distance, grad };
+    },
+  };
+}
+
+/** Point-on-circle/arc: radial distance to the (full) circle (mm). */
+function pointOnCircularRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  circularId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const slots = circularSlotsOf(circularId, context);
+      const [cxSlot, cySlot, rSlot] = slots.offsets;
+      if (cxSlot === undefined || cySlot === undefined || rSlot === undefined) {
+        throw new RangeError("Point-on-circle operand is missing slots.");
+      }
+      const cx = parameters[cxSlot];
+      const cy = parameters[cySlot];
+      const radius = parameters[rSlot];
+      if (cx === undefined || cy === undefined || radius === undefined) {
+        throw new RangeError("Point-on-circle operand is missing values.");
+      }
+      const px = pointExpr(target, context, parameters, "x");
+      const py = pointExpr(target, context, parameters, "y");
+      const wx = px.value - cx;
+      const wy = py.value - cy;
+      const distance = Math.hypot(wx, wy);
+      // At the center the direction is undefined; the zero subgradient
+      // delegates to the other constraints of the system.
+      if (distance === 0) {
+        return { value: -radius, grad: new Map() };
+      }
+      const ux = wx / distance;
+      const uy = wy / distance;
+      const grad = new Map<number, number>();
+      addInto(grad, px.grad, ux);
+      addInto(grad, py.grad, uy);
+      grad.set(cxSlot, (grad.get(cxSlot) ?? 0) - ux);
+      grad.set(cySlot, (grad.get(cySlot) ?? 0) - uy);
+      grad.set(rSlot, -1);
+      return { value: distance - radius, grad };
+    },
+  };
+}
+
+/**
+ * Point-on-ellipse (arcs as their full ellipse): the EXACT implicit
+ * residual `(ex/a)² + (ey/b)² − 1` over the point's ellipse-local frame
+ * offset — dimensionless, smooth, and its zero set is exactly the ellipse.
+ */
+function pointOnEllipseRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  ellipseId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const entity = context.entitiesById.get(ellipseId);
+      const slots = context.layout.slotsOf(ellipseId);
+      if (
+        entity === undefined ||
+        (entity.kind !== "ellipse" && entity.kind !== "ellipticalArc") ||
+        slots === undefined
+      ) {
+        throw new RangeError(
+          `Constraint references unknown ellipse ${ellipseId}.`,
+        );
+      }
+      const [cxSlot, cySlot, aSlot, bSlot, rhoSlot] = slots.offsets;
+      if (
+        cxSlot === undefined ||
+        cySlot === undefined ||
+        aSlot === undefined ||
+        bSlot === undefined ||
+        rhoSlot === undefined
+      ) {
+        throw new RangeError("Point-on-ellipse operand is missing slots.");
+      }
+      const cx = parameters[cxSlot];
+      const cy = parameters[cySlot];
+      const a = parameters[aSlot];
+      const b = parameters[bSlot];
+      const rho = parameters[rhoSlot];
+      if (
+        cx === undefined ||
+        cy === undefined ||
+        a === undefined ||
+        b === undefined ||
+        rho === undefined
+      ) {
+        throw new RangeError("Point-on-ellipse operand is missing values.");
+      }
+      const px = pointExpr(target, context, parameters, "x");
+      const py = pointExpr(target, context, parameters, "y");
+      const wx = px.value - cx;
+      const wy = py.value - cy;
+      const cosRho = Math.cos(rho);
+      const sinRho = Math.sin(rho);
+      // Local-frame offset: rotate the world offset by −ρ.
+      const ex = cosRho * wx + sinRho * wy;
+      const ey = -sinRho * wx + cosRho * wy;
+      const value = (ex * ex) / (a * a) + (ey * ey) / (b * b) - 1;
+      // ∂r/∂ex = 2ex/a², ∂r/∂ey = 2ey/b²; then the frame chain:
+      // (∂ex, ∂ey) = R(−ρ)·(∂wx, ∂wy) + (∂R)·(wx, wy) with
+      // ∂(R(−ρ))/∂ρ·(wx, wy) = (ey, −ex).
+      const drdx = (2 * ex) / (a * a);
+      const drdy = (2 * ey) / (b * b);
+      const grad = new Map<number, number>();
+      const into = (map: ReadonlyMap<number, number>, dx: number, dy: number) =>
+        addInto(
+          grad,
+          map,
+          drdx * (cosRho * dx + sinRho * dy) +
+            drdy * (-sinRho * dx + cosRho * dy),
+        );
+      into(px.grad, 1, 0);
+      into(py.grad, 0, 1);
+      grad.set(
+        cxSlot,
+        (grad.get(cxSlot) ?? 0) - (drdx * cosRho - drdy * sinRho),
+      );
+      grad.set(
+        cySlot,
+        (grad.get(cySlot) ?? 0) - (drdx * sinRho + drdy * cosRho),
+      );
+      grad.set(aSlot, (grad.get(aSlot) ?? 0) - (2 * ex * ex) / (a * a * a));
+      grad.set(bSlot, (grad.get(bSlot) ?? 0) - (2 * ey * ey) / (b * b * b));
+      grad.set(rhoSlot, (grad.get(rhoSlot) ?? 0) + drdx * ey - drdy * ex);
+      return { value, grad };
+    },
+  };
+}
+
+/**
+ * Point-on-spline: the distance from the point target to the curve's
+ * tessellated chord form, with the gradient FROZEN at the projection's
+ * curve parameter — the pinned honesty (see `spline-math.ts`): the
+ * projection parameter's own derivative is dropped, so each Gauss-Newton
+ * step is exact for the current parameter and converges linearly in it;
+ * the chord form keeps every evaluated point within the documented
+ * deflection of the true curve.
+ */
+function pointOnSplineRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  splineId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const entity = context.entitiesById.get(splineId);
+      const slots = context.layout.slotsOf(splineId);
+      if (
+        entity === undefined ||
+        entity.kind !== "spline" ||
+        slots === undefined
+      ) {
+        throw new RangeError(
+          `Constraint references unknown spline ${splineId}.`,
+        );
+      }
+      const points = slots.offsets
+        .filter((_, index) => index % 2 === 0)
+        .map((xSlot) => {
+          const x = parameters[xSlot];
+          const y = parameters[xSlot + 1];
+          if (x === undefined || y === undefined) {
+            throw new RangeError("Point-on-spline spline is missing values.");
+          }
+          return { x, y };
+        });
+      const px = pointExpr(target, context, parameters, "x");
+      const py = pointExpr(target, context, parameters, "y");
+      const projection = projectOntoSpline(
+        { flavor: entity.flavor, points },
+        { x: px.value, y: py.value },
+      );
+      if (projection === null || projection.distance === 0) {
+        return { value: 0, grad: new Map() };
+      }
+      const ux = (projection.point.x - px.value) / projection.distance;
+      const uy = (projection.point.y - py.value) / projection.distance;
+      const grad = new Map<number, number>();
+      addInto(grad, px.grad, -ux);
+      addInto(grad, py.grad, -uy);
+      const chain = bezierChainOfSpline({ flavor: entity.flavor, points });
+      const pointGrad = splinePointGradient(
+        chain,
+        projection.segment,
+        projection.t,
+      );
+      for (const [pointIndex, weight] of pointGrad) {
+        const xSlot = slots.offsets[2 * pointIndex];
+        const ySlot = slots.offsets[2 * pointIndex + 1];
+        if (xSlot === undefined || ySlot === undefined) continue;
+        grad.set(xSlot, (grad.get(xSlot) ?? 0) + ux * weight);
+        grad.set(ySlot, (grad.get(ySlot) ?? 0) + uy * weight);
+      }
+      return { value: projection.distance, grad };
+    },
+  };
+}
+
+/** Point-on-entity, dispatched over the supported operand kinds. */
+function pointOnEntityRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  entityId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  const entity = context.entitiesById.get(entityId);
+  switch (entity?.kind) {
+    case "line":
+      return pointOnLineRow(label, origin, target, entityId, context);
+    case "circle":
+    case "arc":
+      return pointOnCircularRow(label, origin, target, entityId, context);
+    case "ellipse":
+    case "ellipticalArc":
+      return pointOnEllipseRow(label, origin, target, entityId, context);
+    case "spline":
+      return pointOnSplineRow(label, origin, target, entityId, context);
+    default:
+      throw new RangeError(
+        `pointOnEntity references entity ${entityId} of unsupported kind.`,
+      );
+  }
+}
+
+/**
+ * Collinear: both endpoints of `second` sit on `first`'s infinite line —
+ * two signed-distance rows, removing exactly the two degrees of freedom a
+ * line-on-line coincidence has.
+ */
+function collinearRows(
+  label: string,
+  origin: ResidualOrigin,
+  first: SketchEntityId,
+  second: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow[] {
+  // The second line's endpoint expressions read its own slots through the
+  // generic point machinery pointOnLineRow evaluates from the vector.
+  return [
+    pointOnLineRow(
+      `${label}/start`,
+      origin,
+      { entity: second, point: "start" },
+      first,
+      context,
+    ),
+    pointOnLineRow(
+      `${label}/end`,
+      origin,
+      { entity: second, point: "end" },
+      first,
+      context,
+    ),
+  ];
+}
+
+/** Point-pair axis alignment: the two point targets share one coordinate. */
+function pointPairAxisRow(
+  label: string,
+  origin: ResidualOrigin,
+  first: PointTarget,
+  second: PointTarget,
+  context: CompiledContext,
+  axis: "x" | "y",
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const a = pointExpr(first, context, parameters, axis);
+      const b = pointExpr(second, context, parameters, axis);
+      return {
+        value: a.value - b.value,
+        grad: combineExpr(a, b, 1, -1).grad,
+      };
+    },
+  };
+}
+
+/** Signed axis separation with a target value (`distanceX`/`distanceY`). */
+function signedAxisDistanceRow(
+  label: string,
+  origin: ResidualOrigin,
+  first: PointTarget,
+  second: PointTarget,
+  context: CompiledContext,
+  axis: "x" | "y",
+  target: number,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const a = pointExpr(first, context, parameters, axis);
+      const b = pointExpr(second, context, parameters, axis);
+      return {
+        value: b.value - a.value - target,
+        grad: combineExpr(b, a, 1, -1).grad,
+      };
+    },
+  };
 }
 
 function distanceRow(
@@ -639,6 +1342,33 @@ function angleRow(
   };
 }
 
+/** The parameter slot of an entity's radial dimension, by kind. */
+function radialRadiusSlotOf(
+  id: SketchEntityId,
+  context: CompiledContext,
+): number {
+  const entity = context.entitiesById.get(id);
+  const slots = context.layout.slotsOf(id);
+  if (slots === undefined || entity === undefined) {
+    throw new RangeError(`Constraint references unknown radial entity ${id}.`);
+  }
+  const local =
+    entity.kind === "circle" ||
+    entity.kind === "arc" ||
+    entity.kind === "polygon"
+      ? 2
+      : entity.kind === "slot"
+        ? entity.variant === "arc3"
+          ? 6
+          : 4
+        : -1;
+  const slot = slots.offsets[local];
+  if (slot === undefined) {
+    throw new RangeError(`Entity ${id} is missing its radius slot.`);
+  }
+  return slot;
+}
+
 function radiusRow(
   label: string,
   origin: ResidualOrigin,
@@ -651,11 +1381,7 @@ function radiusRow(
     label,
     origin,
     evaluate: (parameters) => {
-      const slots = circularSlotsOf(entity, context);
-      const radiusSlot = slots.offsets[2];
-      if (radiusSlot === undefined) {
-        throw new RangeError(`Entity ${entity} is missing its radius slot.`);
-      }
+      const radiusSlot = radialRadiusSlotOf(entity, context);
       const radius = parameters[radiusSlot];
       if (radius === undefined) {
         throw new RangeError(`Entity ${entity} is missing its radius value.`);
@@ -1122,6 +1848,78 @@ export function compileConstraintSystem(
             constraint.second,
             constraint.about,
             context,
+          ),
+        );
+        break;
+      case "pointOnEntity":
+        rows.push(
+          pointOnEntityRow(
+            "pointOnEntity",
+            origin,
+            constraint.point,
+            constraint.entity,
+            context,
+          ),
+        );
+        break;
+      case "collinear":
+        rows.push(
+          ...collinearRows(
+            "collinear",
+            origin,
+            constraint.first,
+            constraint.second,
+            context,
+          ),
+        );
+        break;
+      case "horizontalPair":
+        rows.push(
+          pointPairAxisRow(
+            "horizontalPair",
+            origin,
+            constraint.first,
+            constraint.second,
+            context,
+            "y",
+          ),
+        );
+        break;
+      case "verticalPair":
+        rows.push(
+          pointPairAxisRow(
+            "verticalPair",
+            origin,
+            constraint.first,
+            constraint.second,
+            context,
+            "x",
+          ),
+        );
+        break;
+      case "distanceX":
+        rows.push(
+          signedAxisDistanceRow(
+            "distanceX",
+            origin,
+            constraint.first,
+            constraint.second,
+            context,
+            "x",
+            valueIn(constraint.value, "mm"),
+          ),
+        );
+        break;
+      case "distanceY":
+        rows.push(
+          signedAxisDistanceRow(
+            "distanceY",
+            origin,
+            constraint.first,
+            constraint.second,
+            context,
+            "y",
+            valueIn(constraint.value, "mm"),
           ),
         );
         break;

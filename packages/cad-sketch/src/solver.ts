@@ -42,9 +42,15 @@ import type { SketchEntityId } from "./sketch-ids";
 /**
  * Solved parameter values for one entity, mirroring its parametric form:
  * point `(x, y)`; line `(x1, y1, x2, y2)`; circle `(cx, cy, radius)`; arc
- * `(cx, cy, radius, startAngle, endAngle)` with angles in [0, 2π). A
- * rectangle carries no parameters of its own — its shape is its four edge
- * lines, each of which appears in the list.
+ * `(cx, cy, radius, startAngle, endAngle)` with angles in [0, 2π); ellipse
+ * `(cx, cy, radiusX, radiusY, rotation)`; ellipticalArc the same plus the
+ * parametric start/end angles in [0, 2π); spline the stored points verbatim
+ * (fit or control, per flavor); polygon `(cx, cy, radius, rotation)` (the
+ * side count and fit are discrete parameters carried by the authored
+ * entity); slot straight `(x1, y1, x2, y2, radius)` and arc3
+ * `(x1, y1, x2, y2, x3, y3, radius)`. A rectangle carries no parameters of
+ * its own — its shape is its four edge lines, each of which appears in the
+ * list.
  */
 export type SolvedEntityParameters =
   | {
@@ -77,7 +83,55 @@ export type SolvedEntityParameters =
       readonly startAngle: number;
       readonly endAngle: number;
     }
-  | { readonly id: SketchEntityId; readonly kind: "rectangle" };
+  | {
+      readonly id: SketchEntityId;
+      readonly kind: "rectangle";
+    }
+  | {
+      readonly id: SketchEntityId;
+      readonly kind: "ellipse";
+      readonly cx: number;
+      readonly cy: number;
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: number;
+    }
+  | {
+      readonly id: SketchEntityId;
+      readonly kind: "ellipticalArc";
+      readonly cx: number;
+      readonly cy: number;
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: number;
+      readonly startAngle: number;
+      readonly endAngle: number;
+    }
+  | {
+      readonly id: SketchEntityId;
+      readonly kind: "spline";
+      readonly points: readonly { readonly x: number; readonly y: number }[];
+    }
+  | {
+      readonly id: SketchEntityId;
+      readonly kind: "polygon";
+      readonly cx: number;
+      readonly cy: number;
+      readonly radius: number;
+      readonly rotation: number;
+    }
+  | {
+      readonly id: SketchEntityId;
+      readonly kind: "slot";
+      readonly variant: "straight" | "arc3";
+      readonly x1: number;
+      readonly y1: number;
+      readonly x2: number;
+      readonly y2: number;
+      readonly x3?: number;
+      readonly y3?: number;
+      readonly radius: number;
+    };
 
 /** Solved parameters for every entity, in the entity order given to the solver. */
 export interface SolvedSketchParameters {

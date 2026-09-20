@@ -32,6 +32,7 @@ import {
   NativeFormatExampleCard,
   ReactExampleCard,
   SketchExampleCard,
+  SketchVocabularyExampleCard,
 } from "./live-examples";
 import { DOCS_GROUPS } from "./topics";
 
@@ -316,6 +317,7 @@ export function DocsPage(): React.JSX.Element {
               <NativeFormatExampleCard />
               <MeshExampleCard />
               <SketchExampleCard />
+              <SketchVocabularyExampleCard />
               <ReactExampleCard />
             </div>
           </Section>

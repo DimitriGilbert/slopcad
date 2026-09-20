@@ -55,6 +55,7 @@ import type {
 } from "./solver";
 import type { SketchConstraintId } from "./sketch-ids";
 
+import { circumcircleOf } from "./entities";
 import {
   dependentRowFlags,
   rankOf,
@@ -210,22 +211,39 @@ function gaussNewton(
   return { parameters, rms: evaluation.rms, exit: "max-iterations" };
 }
 
+/** The parameter width of one entity inside the solved vector. */
+function entityParameterWidth(entity: SketchEntity): number {
+  switch (entity.kind) {
+    case "point":
+      return 2;
+    case "line":
+      return 4;
+    case "circle":
+      return 3;
+    case "arc":
+      return 5;
+    case "ellipse":
+      return 5;
+    case "ellipticalArc":
+      return 7;
+    case "spline":
+      return 2 * entity.points.length;
+    case "polygon":
+      return 4;
+    case "slot":
+      return entity.variant === "arc3" ? 7 : 5;
+    case "rectangle":
+      return 0;
+  }
+}
+
 function solvedParametersAreFinite(
   entities: readonly SketchEntity[],
   parameters: readonly number[],
 ): boolean {
   let slot = 0;
   for (const entity of entities) {
-    const width =
-      entity.kind === "point"
-        ? 2
-        : entity.kind === "line"
-          ? 4
-          : entity.kind === "circle"
-            ? 3
-            : entity.kind === "arc"
-              ? 5
-              : 0;
+    const width = entityParameterWidth(entity);
     for (let offset = 0; offset < width; offset += 1) {
       const value = parameters[slot + offset];
       if (value === undefined || !Number.isFinite(value)) return false;
@@ -246,6 +264,62 @@ function solvedParametersAreFinite(
         solvedArcSweepIsDegenerate(startAngle, endAngle)
       ) {
         return false;
+      }
+    }
+    // The Phase 36 entities carry the same class of physicality: positive
+    // semi-axes/radii, non-degenerate parametric sweeps, and — for the
+    // arc3 slot — a centerline whose circumcircle still exists and still
+    // clears the cap radius.
+    if (entity.kind === "ellipse" || entity.kind === "ellipticalArc") {
+      const radiusX = parameters[slot + 2];
+      const radiusY = parameters[slot + 3];
+      if (radiusX === undefined || radiusY === undefined) return false;
+      if (!(radiusX > 0) || !(radiusY > 0)) return false;
+    }
+    if (entity.kind === "ellipticalArc") {
+      const startAngle = parameters[slot + 5];
+      const endAngle = parameters[slot + 6];
+      if (
+        startAngle === undefined ||
+        endAngle === undefined ||
+        solvedArcSweepIsDegenerate(startAngle, endAngle)
+      ) {
+        return false;
+      }
+    }
+    if (entity.kind === "polygon") {
+      const radius = parameters[slot + 2];
+      if (radius === undefined || !(radius > 0)) return false;
+    }
+    if (entity.kind === "slot") {
+      const radiusSlot = entity.variant === "arc3" ? 6 : 4;
+      const radius = parameters[slot + radiusSlot];
+      if (radius === undefined || !(radius > 0)) return false;
+      if (entity.variant === "arc3") {
+        const x1 = parameters[slot];
+        const y1 = parameters[slot + 1];
+        const x2 = parameters[slot + 2];
+        const y2 = parameters[slot + 3];
+        const x3 = parameters[slot + 4];
+        const y3 = parameters[slot + 5];
+        if (
+          x1 === undefined ||
+          y1 === undefined ||
+          x2 === undefined ||
+          y2 === undefined ||
+          x3 === undefined ||
+          y3 === undefined
+        ) {
+          return false;
+        }
+        const circumcircle = circumcircleOf(
+          { x: x1, y: y1 },
+          { x: x2, y: y2 },
+          { x: x3, y: y3 },
+        );
+        if (circumcircle === null || !(circumcircle.radius > radius)) {
+          return false;
+        }
       }
     }
     slot += width;

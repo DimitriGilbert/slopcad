@@ -734,11 +734,8 @@ export function CompleteCadWorkbench({
                     </span>
                     <div className="min-w-0">
                       <p className="text-foreground text-xs leading-snug">
-                        Start a sketch to build geometry — draw a profile,
-                        then{" "}
-                        <span className="text-signal font-medium">
-                          Extrude
-                        </span>
+                        Start a sketch to build geometry — draw a profile, then{" "}
+                        <span className="text-signal font-medium">Extrude</span>
                         .
                       </p>
                       <p className="text-muted-foreground mt-0.5 text-[11px] leading-snug">

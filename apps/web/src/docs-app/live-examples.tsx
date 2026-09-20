@@ -21,6 +21,7 @@ import {
   runKernelExample,
   runMeshExchangeExample,
   runSketchExample,
+  runSketchVocabularyExample,
   runUnitsExample,
   unwrapKernel,
 } from "@slopcad/docs-examples";
@@ -443,6 +444,52 @@ export function SketchExampleCard(): React.JSX.Element {
               {
                 label: "profile signed area",
                 value: `${state.summary.profileSignedAreaMm2.toFixed(3)} mm²`,
+              },
+              {
+                label: "serialize round trip",
+                value: state.summary.serializedRoundTripExact
+                  ? "exact"
+                  : "differs",
+              },
+            ]
+          : []
+      }
+    />
+  );
+}
+
+/** The Phase 36 sketch-vocabulary example (synchronous solve). */
+export function SketchVocabularyExampleCard(): React.JSX.Element {
+  const [state] = useState(() => {
+    try {
+      return { status: "ok" as const, summary: runSketchVocabularyExample() };
+    } catch {
+      return { status: "failed" as const };
+    }
+  });
+  return (
+    <ExampleCard
+      title="Sketch vocabulary: ellipses, splines, and slots"
+      source="packages/docs-examples/src/sketch/vocabulary.ts"
+      status={state.status}
+      facts={
+        state.status === "ok"
+          ? [
+              {
+                label: "ellipse dof bare → constrained",
+                value: `${String(state.summary.ellipseDof)} → ${String(state.summary.ellipseConstrainedDof)}`,
+              },
+              {
+                label: "solved semi-axes",
+                value: `${state.summary.solvedRadiusXMm.toFixed(6)} × ${state.summary.solvedRadiusYMm.toFixed(6)} mm`,
+              },
+              {
+                label: "spline interior dof (endpoints pinned)",
+                value: String(state.summary.splineInteriorDof),
+              },
+              {
+                label: "slot loop area (πr² + 2rL)",
+                value: `${state.summary.slotLoopAreaMm2.toFixed(3)} mm²`,
               },
               {
                 label: "serialize round trip",

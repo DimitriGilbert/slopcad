@@ -1140,6 +1140,27 @@ export type SerializedProfileSegment =
       readonly kind: "circle";
       readonly center: readonly [number, number];
       readonly radius: number;
+    }
+  | {
+      readonly kind: "ellipse";
+      readonly center: readonly [number, number];
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: SerializedDimensionalValue;
+    }
+  | {
+      readonly kind: "ellipticalArc";
+      readonly center: readonly [number, number];
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: SerializedDimensionalValue;
+      readonly startAngle: SerializedDimensionalValue;
+      readonly endAngle: SerializedDimensionalValue;
+    }
+  | {
+      readonly kind: "spline";
+      readonly flavor: "control" | "interpolated";
+      readonly points: readonly (readonly [number, number])[];
     };
 
 /** Serializes one profile segment to its canonical wire form. */
@@ -1160,6 +1181,33 @@ function serializeProfileSegment(
       radius: segment.radius,
       startAngle: serializeDimensionalValue(segment.startAngle),
       endAngle: serializeDimensionalValue(segment.endAngle),
+    };
+  }
+  if (segment.kind === "ellipse") {
+    return {
+      kind: "ellipse",
+      center: [...segment.center],
+      radiusX: segment.radiusX,
+      radiusY: segment.radiusY,
+      rotation: serializeDimensionalValue(segment.rotation),
+    };
+  }
+  if (segment.kind === "ellipticalArc") {
+    return {
+      kind: "ellipticalArc",
+      center: [...segment.center],
+      radiusX: segment.radiusX,
+      radiusY: segment.radiusY,
+      rotation: serializeDimensionalValue(segment.rotation),
+      startAngle: serializeDimensionalValue(segment.startAngle),
+      endAngle: serializeDimensionalValue(segment.endAngle),
+    };
+  }
+  if (segment.kind === "spline") {
+    return {
+      kind: "spline",
+      flavor: segment.flavor,
+      points: segment.points.map((point) => [...point]),
     };
   }
   return {
@@ -1247,8 +1295,87 @@ function parseProfileSegment(
       endAngle: endAngle.value,
     });
   }
+  if (input.kind === "ellipse" || input.kind === "ellipticalArc") {
+    const center = parseProfilePoint2(
+      operation,
+      `${input.kind}.center`,
+      input.center,
+    );
+    if (!center.ok) return center;
+    const radiusX = input.radiusX;
+    if (!isFiniteNumber(radiusX) || radiusX <= 0) {
+      return payloadError(
+        `The "${operation}" ${input.kind} radiusX must be a positive finite number.`,
+        radiusX,
+      );
+    }
+    const radiusY = input.radiusY;
+    if (!isFiniteNumber(radiusY) || radiusY <= 0) {
+      return payloadError(
+        `The "${operation}" ${input.kind} radiusY must be a positive finite number.`,
+        radiusY,
+      );
+    }
+    const rotation = requireAngleField(
+      operation,
+      `${input.kind}.rotation`,
+      input.rotation,
+    );
+    if (!rotation.ok) return rotation;
+    if (input.kind === "ellipse") {
+      return ok({
+        kind: "ellipse",
+        center: center.value,
+        radiusX,
+        radiusY,
+        rotation: rotation.value,
+      });
+    }
+    const startAngle = requireAngleField(
+      operation,
+      "ellipticalArc.startAngle",
+      input.startAngle,
+    );
+    if (!startAngle.ok) return startAngle;
+    const endAngle = requireAngleField(
+      operation,
+      "ellipticalArc.endAngle",
+      input.endAngle,
+    );
+    if (!endAngle.ok) return endAngle;
+    return ok({
+      kind: "ellipticalArc",
+      center: center.value,
+      radiusX,
+      radiusY,
+      rotation: rotation.value,
+      startAngle: startAngle.value,
+      endAngle: endAngle.value,
+    });
+  }
+  if (input.kind === "spline") {
+    if (input.flavor !== "control" && input.flavor !== "interpolated") {
+      return payloadError(
+        `The "${operation}" spline flavor must be "control" or "interpolated".`,
+        input.flavor,
+      );
+    }
+    if (!Array.isArray(input.points) || input.points.length < 2) {
+      return payloadError(
+        `The "${operation}" spline points must be an array of at least two [x, y] pairs.`,
+        input.points,
+      );
+    }
+    const points: (readonly [number, number])[] = [];
+    for (const entry of input.points) {
+      const point = parseProfilePoint2(operation, "spline.points", entry);
+      if (!point.ok) return point;
+      points.push(point.value);
+    }
+    return ok({ kind: "spline", flavor: input.flavor, points });
+  }
   return payloadError(
-    `The "${operation}" profile segment kind must be "line", "arc", or "circle".`,
+    `The "${operation}" profile segment kind must be "line", "arc", "circle", "ellipse", "ellipticalArc", or "spline".`,
     input.kind,
   );
 }

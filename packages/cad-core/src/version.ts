@@ -22,8 +22,19 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * only when the envelope itself changes shape. It must remain a positive
  * integer and only ever move forward; older versions reach the current one
  * through the migration registry in `native-migration.ts`.
+ *
+ * v2 (Phase 36): the embedded sketch payloads' vocabulary grew — the sketch
+ * domain's format v2 adds the entity kinds `ellipse`, `ellipticalArc`,
+ * `spline`, `polygon`, and `slot` and the constraint kinds `pointOnEntity`,
+ * `collinear`, `horizontalPair`, `verticalPair`, `distanceX`, and
+ * `distanceY`. The envelope's own shape is unchanged; the version moves
+ * because an old reader handed a v2 document would reject the embedded
+ * sketch payloads, so the envelope stamp is the reader's only gate. The
+ * v1→v2 migration carries old documents forward by bumping every embedded
+ * sketch payload's stamp (the growth is additive — v1 payload content is
+ * valid v2 content).
  */
-export const CAD_NATIVE_FORMAT_VERSION = 1;
+export const CAD_NATIVE_FORMAT_VERSION = 2;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

@@ -299,6 +299,24 @@ export interface RotationInput {
  * run from `start` to `end`; arcs sweep counter-clockwise from `startAngle`
  * to `endAngle` about `center` (the sweep is `(end − start) mod 2π`, never
  * zero); a circle is the closed full-radius loop at `center`.
+ *
+ * Phase 36 adds the analytic curved kinds: `ellipse` (the closed full
+ * ellipse; center + semi-axes + the rotation of the radiusX axis) and
+ * `ellipticalArc` (the same parameterization with the CCW parametric sweep
+ * `(end − start) mod 2π`, never zero); and `spline` (a cubic Bézier chain —
+ * `flavor: "control"` points number 4, 7, 10, … with segment k spanning
+ * points `3k…3k+3`; `flavor: "interpolated"` points are fit points the
+ * uniform Catmull-Rom spline passes through, converted per-span to its exact
+ * Bézier equivalent by every consumer). Fidelity is per-kernel and
+ * documented on each profile op: the OCCT adapter builds exact
+ * `gp_Elips`/`Geom_BezierCurve` edges (probed: exact ellipse areas and
+ * volumes); the mesh kernels (Manifold, JSCAD) and the fake kernel chord
+ * the curve at their shared deflection discipline — ellipses at the
+ * turning-bounded parametric step (dφ/dt ≤ max(a/b, b/a), so every chord's
+ * turning stays within `PROFILE_MAX_SEGMENT_ANGLE_RAD`), splines at the
+ * convex-hull flatness bound (curve within
+ * `PROFILE_SPLINE_DEFLECTION_MM` of every chord, vertices on the true
+ * curve) — the same class of curved band the circular segments carry.
  */
 export type ProfileSegmentInput =
   | {
@@ -317,7 +335,33 @@ export type ProfileSegmentInput =
       readonly kind: "circle";
       readonly center: readonly [number, number];
       readonly radius: number;
+    }
+  | {
+      readonly kind: "ellipse";
+      readonly center: readonly [number, number];
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: AngleValue;
+    }
+  | {
+      readonly kind: "ellipticalArc";
+      readonly center: readonly [number, number];
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: AngleValue;
+      readonly startAngle: AngleValue;
+      readonly endAngle: AngleValue;
+    }
+  | {
+      readonly kind: "spline";
+      readonly flavor: "control" | "interpolated";
+      readonly points: readonly (readonly [number, number])[];
     };
+
+/** The spline flavors a `spline` profile segment carries. */
+export const PROFILE_SPLINE_FLAVORS = ["control", "interpolated"] as const;
+
+export type ProfileSplineFlavor = (typeof PROFILE_SPLINE_FLAVORS)[number];
 
 /**
  * The placement of an extrusion or revolution: a rotation about the world

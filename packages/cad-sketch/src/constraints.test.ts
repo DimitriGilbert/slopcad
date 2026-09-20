@@ -8,13 +8,19 @@ import {
   SketchConstraintValidationError,
   createAngleConstraint,
   createCoincidentConstraint,
+  createCollinearConstraint,
   createDiameterConstraint,
+  createDistanceXConstraint,
+  createDistanceYConstraint,
   createDistanceConstraint,
   createEqualConstraint,
   createHorizontalConstraint,
   createMidpointConstraint,
   createParallelConstraint,
   createPerpendicularConstraint,
+  createPointOnEntityConstraint,
+  createHorizontalPairConstraint,
+  createVerticalPairConstraint,
   createRadiusConstraint,
   createSymmetryAboutLineConstraint,
   createSymmetryAboutPointConstraint,
@@ -29,9 +35,13 @@ import {
 import {
   createArcEntity,
   createCircleEntity,
+  createEllipseEntity,
   createLineEntity,
   createPointEntity,
+  createPolygonEntity,
   createRectangleEntity,
+  createSplineEntity,
+  createStraightSlotEntity,
 } from "./entities";
 import { createSketchConstraintId, createSketchEntityId } from "./sketch-ids";
 
@@ -129,7 +139,7 @@ describe("constraint builders", () => {
   });
 
   it("exposes the constraint kind list and type guard", () => {
-    expect(SKETCH_CONSTRAINT_KINDS).toHaveLength(13);
+    expect(SKETCH_CONSTRAINT_KINDS).toHaveLength(19);
     expect(SKETCH_CONSTRAINT_KINDS).toContain("coincident");
     expect(SKETCH_CONSTRAINT_KINDS).toContain("symmetry");
     expect(isSketchConstraintKind("tangent")).toBe(true);
@@ -408,5 +418,188 @@ describe("constraint reference validation", () => {
         entities,
       ),
     ).toBeNull();
+  });
+});
+
+describe("phase 36 constraints", () => {
+  const ellipseA = eid("skent_ellipse-a");
+  const splineA = eid("skent_spline-a");
+  const polygonA = eid("skent_polygon-a");
+  const slotA = eid("skent_slot-a");
+  const newEntities = [
+    createLineEntity(lineA, { x: 0, y: 0 }, { x: 10, y: 0 }),
+    createLineEntity(lineB, { x: 0, y: 5 }, { x: 10, y: 5 }),
+    createPointEntity(pointA, { x: 3, y: 4 }),
+    createCircleEntity(circleA, { x: 0, y: 0 }, 5),
+    createEllipseEntity(ellipseA, { x: 0, y: 0 }, 8, 4, 0),
+    createSplineEntity(splineA, "control", [
+      { x: 0, y: 0 },
+      { x: 2, y: 6 },
+      { x: 6, y: -6 },
+      { x: 10, y: 0 },
+    ]),
+    createPolygonEntity(polygonA, { x: 0, y: 0 }, 6, 5, 0, "inscribed"),
+    createStraightSlotEntity(slotA, { x: 0, y: 0 }, { x: 12, y: 0 }, 3),
+  ];
+
+  it("round-trips every new constraint kind exactly", () => {
+    const samples: SketchConstraint[] = [
+      createPointOnEntityConstraint(
+        cid("skcon_poe"),
+        pointTarget(pointA, "center"),
+        circleA,
+      ),
+      createCollinearConstraint(cid("skcon_col"), lineA, lineB),
+      createHorizontalPairConstraint(
+        cid("skcon_hp"),
+        pointTarget(lineA, "start"),
+        pointTarget(lineB, "end"),
+      ),
+      createVerticalPairConstraint(
+        cid("skcon_vp"),
+        pointTarget(lineA, "start"),
+        pointTarget(lineB, "start"),
+      ),
+      createDistanceXConstraint(
+        cid("skcon_dx"),
+        pointTarget(lineA, "start"),
+        pointTarget(lineB, "end"),
+        length(-12.5),
+      ),
+      createDistanceYConstraint(
+        cid("skcon_dy"),
+        pointTarget(lineA, "start"),
+        pointTarget(lineB, "end"),
+        length(0),
+      ),
+    ];
+    for (const constraint of samples) {
+      const serialized = serializeSketchConstraint(constraint);
+      const parsed = parseSketchConstraint(
+        JSON.parse(JSON.stringify(serialized)),
+      );
+      expect(parsed.ok, JSON.stringify(serialized)).toBe(true);
+      if (!parsed.ok) continue;
+      expect(parsed.value).toEqual(constraint);
+      expect(serializeSketchConstraint(parsed.value)).toEqual(serialized);
+    }
+  });
+
+  it("accepts signed distanceX/distanceY values and rejects non-lengths", () => {
+    expect(() =>
+      createDistanceXConstraint(
+        cid("skcon_dx"),
+        pointTarget(lineA, "start"),
+        pointTarget(lineB, "start"),
+        length(-3),
+      ),
+    ).not.toThrow();
+    expect(
+      parseSketchConstraint({
+        id: "skcon_dy",
+        kind: "distanceY",
+        first: { entity: "skent_line-a", point: "start" },
+        second: { entity: "skent_line-b", point: "start" },
+        value: { dimension: "angle", unit: "rad", value: 1 },
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("validates pointOnEntity operand kinds", () => {
+    expect(
+      validateConstraintReferences(
+        createPointOnEntityConstraint(
+          cid("skcon_poe"),
+          pointTarget(pointA, "center"),
+          ellipseA,
+        ),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createPointOnEntityConstraint(
+          cid("skcon_poe"),
+          pointTarget(pointA, "center"),
+          splineA,
+        ),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createPointOnEntityConstraint(
+          cid("skcon_poe"),
+          pointTarget(pointA, "center"),
+          polygonA,
+        ),
+        newEntities,
+      ),
+    ).not.toBeNull();
+  });
+
+  it("declines out-of-scope spline operands with constraint-unsupported", () => {
+    const diagnostic = validateConstraintReferences(
+      createParallelConstraint(cid("skcon_par"), lineA, splineA),
+      newEntities,
+    );
+    expect(diagnostic).not.toBeNull();
+    expect(diagnostic?.code).toBe(
+      SKETCH_DIAGNOSTIC_CODES.constraintUnsupported,
+    );
+    expect(
+      validateConstraintReferences(
+        createTangentConstraint(cid("skcon_tan"), splineA, circleA),
+        newEntities,
+      )?.code,
+    ).toBe(SKETCH_DIAGNOSTIC_CODES.constraintUnsupported);
+    // In-scope point-target kinds still accept spline endpoints.
+    expect(
+      validateConstraintReferences(
+        createDistanceConstraint(
+          cid("skcon_d"),
+          pointTarget(splineA, "start"),
+          pointTarget(lineA, "start"),
+          length(4),
+        ),
+        newEntities,
+      ),
+    ).toBeNull();
+  });
+
+  it("dimensions radial polygons and slots through radius constraints", () => {
+    expect(
+      validateConstraintReferences(
+        createRadiusConstraint(cid("skcon_r"), polygonA, length(6)),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createRadiusConstraint(cid("skcon_r"), slotA, length(3)),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createRadiusConstraint(cid("skcon_r"), ellipseA, length(3)),
+        newEntities,
+      ),
+    ).not.toBeNull();
+  });
+
+  it("validates collinear needs two lines", () => {
+    expect(
+      validateConstraintReferences(
+        createCollinearConstraint(cid("skcon_col"), lineA, lineB),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createCollinearConstraint(cid("skcon_col"), lineA, circleA),
+        newEntities,
+      ),
+    ).not.toBeNull();
   });
 });

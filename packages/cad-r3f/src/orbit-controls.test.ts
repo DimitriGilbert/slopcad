@@ -66,9 +66,7 @@ describe("orbit state seeding", () => {
     const first = createOrbitState(seedFixture());
     const second = createOrbitState(seedFixture());
     expect(orbitPosition(first)).toEqual(orbitPosition(second));
-    expect(orbitSnapshot(first, "spec")).toEqual(
-      orbitSnapshot(second, "spec"),
-    );
+    expect(orbitSnapshot(first, "spec")).toEqual(orbitSnapshot(second, "spec"));
   });
 
   it("seeds the elevation above the ground plane for a z-up camera", () => {
@@ -86,9 +84,9 @@ describe("orbit state seeding", () => {
         position: FIXTURE_CAMERA.target,
       }),
     ).toThrow(RangeError);
-    expect(() =>
-      createOrbitState({ ...seedFixture(), up: [0, 0, 0] }),
-    ).toThrow(RangeError);
+    expect(() => createOrbitState({ ...seedFixture(), up: [0, 0, 0] })).toThrow(
+      RangeError,
+    );
   });
 });
 
@@ -103,7 +101,9 @@ describe("orbit gestures", () => {
     expect(state.distanceMm).toBe(distance);
     // ...and the eye stays exactly the clamped distance from that target.
     const [x, y, z] = orbitPosition(state);
-    expect(Math.hypot(x - state.targetX, y - state.targetY, z - state.targetZ)).toBeCloseTo(distance, 6);
+    expect(
+      Math.hypot(x - state.targetX, y - state.targetY, z - state.targetZ),
+    ).toBeCloseTo(distance, 6);
   });
 
   it("changes the view (the orbit actually orbits)", () => {
@@ -257,14 +257,10 @@ describe("the machine-surface snapshot", () => {
     orbitByPixels(state, 33, 17);
     const snapshot = orbitSnapshot(state, "user");
     expect(snapshot.mode).toBe("user");
-    expect(snapshot.azimuthDeg).toBe(
-      Number(snapshot.azimuthDeg.toFixed(1)),
-    );
+    expect(snapshot.azimuthDeg).toBe(Number(snapshot.azimuthDeg.toFixed(1)));
     expect(snapshot.elevationDeg).toBe(
       Number(snapshot.elevationDeg.toFixed(1)),
     );
-    expect(snapshot.distanceMm).toBe(
-      Number(snapshot.distanceMm.toFixed(1)),
-    );
+    expect(snapshot.distanceMm).toBe(Number(snapshot.distanceMm.toFixed(1)));
   });
 });

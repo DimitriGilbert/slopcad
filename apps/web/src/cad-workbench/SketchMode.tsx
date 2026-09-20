@@ -48,11 +48,14 @@ import {
 } from "@slopcad/cad-core";
 import {
   applySolvedParameters,
+  createSketchEntityId,
   applySketchSessionTransaction,
   canRedoSketch,
   canUndoSketch,
   createReferenceSketchSolver,
   createSketchSession,
+  createStraightSlotEntity,
+  entityPolyline,
   isDimensionalConstraint,
   redoSketchSession,
   resolveExtrudeProfile,
@@ -70,6 +73,7 @@ import { Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
   CadSketchCanvas,
+  type CadSketchCanvasPreview,
   type CadSketchPoint,
 } from "@slopcad/ui/components/cad/cad-sketch-canvas";
 import {
@@ -79,6 +83,7 @@ import {
 } from "@slopcad/ui/components/cad/cad-sketch-inspector";
 import { CadSketchToolbar } from "@slopcad/ui/components/cad/cad-sketch-toolbar";
 
+import { kernelSegment } from "./extrude";
 import {
   constraintLabel,
   constraintOperandIds,
@@ -307,29 +312,7 @@ export function SketchMode({
     setExtrudeOutcome({ status: "resolved" });
     onExtrude({
       sketch: serializeSketch(sketch),
-      loop: profile.value.segments.map((segment) => {
-        if (segment.kind === "line") {
-          return {
-            kind: "line" as const,
-            start: [segment.start.x, segment.start.y] as const,
-            end: [segment.end.x, segment.end.y] as const,
-          };
-        }
-        if (segment.kind === "arc") {
-          return {
-            kind: "arc" as const,
-            center: [segment.center.x, segment.center.y] as const,
-            radius: segment.radius,
-            startAngle: angle(segment.startAngle, "rad"),
-            endAngle: angle(segment.endAngle, "rad"),
-          };
-        }
-        return {
-          kind: "circle" as const,
-          center: [segment.center.x, segment.center.y] as const,
-          radius: segment.radius,
-        };
-      }),
+      loop: profile.value.segments.map(kernelSegment),
       placement: {
         rotation: {
           axis: placement.rotation.axis,
@@ -490,8 +473,8 @@ export function SketchMode({
     return position ?? { x: 0, y: 0 };
   });
 
-  const preview = (() => {
-    if (pointer === null) return { kind: "none" } as const;
+  const preview: CadSketchCanvasPreview = (() => {
+    if (pointer === null) return { kind: "none" };
     switch (editor.gesture.kind) {
       case "line":
         return {
@@ -514,6 +497,62 @@ export function SketchMode({
           kind: "rectangle",
           to: pointer,
         } as const;
+      case "ellipse": {
+        const { center, axis } = editor.gesture;
+        const rotation = Math.atan2(axis.y - center.y, axis.x - center.x);
+        const cosR = Math.cos(rotation);
+        const sinR = Math.sin(rotation);
+        const radiusY = Math.abs(
+          -sinR * (pointer.x - center.x) + cosR * (pointer.y - center.y),
+        );
+        return {
+          center: { x: center.x, y: center.y },
+          kind: "ellipse" as const,
+          radiusX: Math.hypot(axis.x - center.x, axis.y - center.y),
+          radiusY,
+          rotation,
+        };
+      }
+      case "slot": {
+        // The provisional stadium preview reuses the domain's own boundary
+        // derivation on a transient entity (the deflection-disciplined
+        // polyline the committed slot will render as).
+        const { start, end } = editor.gesture;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const lengthSquared = dx * dx + dy * dy;
+        const radius =
+          Math.abs((pointer.x - start.x) * dy - (pointer.y - start.y) * dx) /
+          Math.sqrt(lengthSquared);
+        if (!(radius > 0)) return { kind: "none" } as const;
+        const provisional = createStraightSlotEntity(
+          createSketchEntityId("skent_preview"),
+          start,
+          end,
+          radius,
+        );
+        const points = entityPolyline(provisional);
+        if (points === null) return { kind: "none" } as const;
+        return {
+          kind: "polyline",
+          points: points.map((point) => ({ x: point.x, y: point.y })),
+        } as const;
+      }
+      case "pick":
+        return editor.gesture.tool === "ellipse"
+          ? {
+              center: editor.gesture.point,
+              kind: "circle",
+              radius: Math.hypot(
+                pointer.x - editor.gesture.point.x,
+                pointer.y - editor.gesture.point.y,
+              ),
+            }
+          : {
+              from: editor.gesture.point,
+              kind: "line",
+              to: pointer,
+            };
       default:
         return { kind: "none" } as const;
     }

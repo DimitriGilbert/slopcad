@@ -226,6 +226,7 @@ import type {
 } from "@slopcad/cad-core";
 import { fail, ok, valueIn } from "@slopcad/cad-core";
 import type {
+  BRepBuilderAPI_MakeEdge,
   TopoDS_Edge,
   TopoDS_Shape,
   TopoDS_Wire,
@@ -265,6 +266,7 @@ import {
   profileLoopProblem,
   revolveCrossesAxis,
   revolveSignedExtremes,
+  splineBezierChain,
   sweepArcSignedSweep,
   sweepPathProblem,
   sweepPathSelfIntersects,
@@ -877,13 +879,22 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
-   * Builds the closed profile wire (Phase 26.1): profile segments → exact
-   * edges (lines, angularly-trimmed arcs, full circles on the local frame's
-   * gp_Ax2) in the plane at station `z` (0 for the prism/revolve/pipe
-   * paths; a loft's sections build directly at their own stations, no
-   * transform round trip). Shared by the prism, revolution, pipe, and loft
-   * paths; every intermediate is deleted exactly once on the success path,
-   * and failures throw inside the caller's no-throw boundary.
+   * Builds the closed profile wire (Phase 26.1; Phase 36 curved kinds):
+   * profile segments → exact edges (lines, angularly-trimmed arcs, full
+   * circles on the local frame's gp_Ax2, full ellipses and trimmed
+   * elliptical arcs on gp_Elips, and cubic Bézier pieces as
+   * Geom_BezierCurve edges — the interpolated spline flavor converts to
+   * its exact per-span Bézier equivalent first) in the plane at station `z`
+   * (0 for the prism/revolve/pipe paths; a loft's sections build directly
+   * at their own stations, no transform round trip). Shared by the prism,
+   * revolution, pipe, and loft paths; every intermediate is deleted exactly
+   * once on the success path, and failures throw inside the caller's
+   * no-throw boundary.
+   *
+   * Probed exactness (the Phase 36 probe): an 8×4.5 ellipse prisms to
+   * πab·h at 1e-13 relative error; a Bézier bow's face area matches the
+   * analytic Green's theorem value exactly. The wire stays analytic
+   * geometry — no tessellation crosses this boundary.
    */
   const profileWire = (
     loop: ProfileExtrudeInput["loop"],
@@ -895,17 +906,60 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       mkWire.delete();
       for (const edge of edges) edge.delete();
     };
+    const addEdge = (mkEdge: BRepBuilderAPI_MakeEdge): void => {
+      const edge = mkEdge.Edge();
+      mkEdge.delete();
+      mkWire.Add(edge);
+      edges.push(edge);
+    };
     for (const segment of loop) {
       if (segment.kind === "line") {
         const p1 = new oc.gp_Pnt(segment.start[0], segment.start[1], z);
         const p2 = new oc.gp_Pnt(segment.end[0], segment.end[1], z);
-        const mkEdge = new oc.BRepBuilderAPI_MakeEdge(p1, p2);
+        addEdge(new oc.BRepBuilderAPI_MakeEdge(p1, p2));
         p1.delete();
         p2.delete();
-        const edge = mkEdge.Edge();
-        mkEdge.delete();
-        mkWire.Add(edge);
-        edges.push(edge);
+        continue;
+      }
+      if (segment.kind === "ellipse" || segment.kind === "ellipticalArc") {
+        const rotation = valueIn(segment.rotation, "rad");
+        const origin = new oc.gp_Pnt(segment.center[0], segment.center[1], z);
+        const normal = new oc.gp_Dir(0, 0, 1);
+        const xDir = new oc.gp_Dir(Math.cos(rotation), Math.sin(rotation), 0);
+        const ax2 = new oc.gp_Ax2(origin, normal, xDir);
+        const elips = new oc.gp_Elips(ax2, segment.radiusX, segment.radiusY);
+        origin.delete();
+        normal.delete();
+        xDir.delete();
+        ax2.delete();
+        if (segment.kind === "ellipse") {
+          addEdge(new oc.BRepBuilderAPI_MakeEdge(elips));
+          elips.delete();
+          continue;
+        }
+        const a0 = valueIn(segment.startAngle, "rad");
+        const a1 = valueIn(segment.endAngle, "rad");
+        const mkArc = new oc.GC_MakeArcOfEllipse(elips, a0, a1, true);
+        elips.delete();
+        const curve = mkArc.Value();
+        mkArc.delete();
+        addEdge(new oc.BRepBuilderAPI_MakeEdge(curve));
+        curve.delete();
+        continue;
+      }
+      if (segment.kind === "spline") {
+        const chain = splineBezierChain(segment.flavor, segment.points);
+        for (const piece of chain) {
+          const array = new oc.NCollection_Array1_gp_Pnt(1, 4);
+          array.SetValue(1, new oc.gp_Pnt(piece.b0.x, piece.b0.y, z));
+          array.SetValue(2, new oc.gp_Pnt(piece.b1.x, piece.b1.y, z));
+          array.SetValue(3, new oc.gp_Pnt(piece.b2.x, piece.b2.y, z));
+          array.SetValue(4, new oc.gp_Pnt(piece.b3.x, piece.b3.y, z));
+          const curve = new oc.Geom_BezierCurve(array);
+          array.delete();
+          addEdge(new oc.BRepBuilderAPI_MakeEdge(curve));
+          curve.delete();
+        }
         continue;
       }
       const origin = new oc.gp_Pnt(segment.center[0], segment.center[1], z);
@@ -918,12 +972,8 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       xDir.delete();
       ax2.delete();
       if (segment.kind === "circle") {
-        const mkEdge = new oc.BRepBuilderAPI_MakeEdge(circle);
-        const edge = mkEdge.Edge();
-        mkEdge.delete();
+        addEdge(new oc.BRepBuilderAPI_MakeEdge(circle));
         circle.delete();
-        mkWire.Add(edge);
-        edges.push(edge);
         continue;
       }
       const a0 = valueIn(segment.startAngle, "rad");
@@ -932,12 +982,8 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       circle.delete();
       const curve = mkArc.Value();
       mkArc.delete();
-      const mkEdge = new oc.BRepBuilderAPI_MakeEdge(curve);
+      addEdge(new oc.BRepBuilderAPI_MakeEdge(curve));
       curve.delete();
-      const edge = mkEdge.Edge();
-      mkEdge.delete();
-      mkWire.Add(edge);
-      edges.push(edge);
     }
     if (!mkWire.IsDone()) {
       disposeWireAndEdges();

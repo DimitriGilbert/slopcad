@@ -33,6 +33,31 @@
  * - `symmetry(first, second, about)` — two point targets symmetric about a
  *   third point (point symmetry), or about a line (midpoint on the line and
  *   the connecting segment perpendicular to it; 2 equations each way).
+ * - `pointOnEntity(point, entity)` — the point target lies on the entity's
+ *   curve (1 equation). Operand kinds: line (the infinite line, like
+ *   tangency), circle, arc (as its full circle — the tangency convention),
+ *   ellipse/ellipticalArc (the exact implicit ellipse — arcs participate as
+ *   their full ellipse), and spline (the frozen-parameter projection onto
+ *   the tessellated chord form; see `residuals.ts` for the pinned honesty).
+ * - `collinear(first, second)` — two lines lie on one infinite line (2
+ *   equations: both endpoints of `second` sit on `first`'s line).
+ * - `horizontalPair(first, second)` — two point targets share y (1
+ *   equation).
+ * - `verticalPair(first, second)` — two point targets share x (1 equation).
+ * - `distanceX(first, second, value)` — SIGNED mm from first to second
+ *   along workplane x: `x_second − x_first = value` (1 equation; any finite
+ *   value — negative and zero included, unlike `distance`).
+ * - `distanceY(first, second, value)` — the same along workplane y.
+ *
+ * ## The spline operand subset (Phase 36's pinned scope)
+ *
+ * Spline entities accept point-target constraints on their `start`/`end`
+ * (coincident, distance, distanceX/Y, horizontalPair/verticalPair,
+ * midpoint, symmetry), `pointOnEntity` onto them, and the `fixed` pin.
+ * Every other constraint kind with a spline operand — tangency, equality,
+ * parallelism, perpendicularity, angle, radius/diameter — is OUTSIDE the
+ * pinned solving scope and declines at validation with
+ * `sketch/constraint-unsupported`, never a silent mis-solve.
  */
 
 import {
@@ -50,7 +75,10 @@ import type {
   ArcEntity,
   CircleEntity,
   LineEntity,
+  PolygonEntity,
   SketchEntity,
+  SlotEntity,
+  SplineEntity,
 } from "./entities";
 
 import { SKETCH_DIAGNOSTIC_CODES } from "./diagnostics";
@@ -76,6 +104,12 @@ export const SKETCH_CONSTRAINT_KINDS = [
   "tangent",
   "midpoint",
   "symmetry",
+  "pointOnEntity",
+  "collinear",
+  "horizontalPair",
+  "verticalPair",
+  "distanceX",
+  "distanceY",
 ] as const;
 
 export type SketchConstraintKind = (typeof SKETCH_CONSTRAINT_KINDS)[number];
@@ -93,8 +127,17 @@ export function isSketchConstraintKind(
 /**
  * Where on an entity a constraint attaches. `start`/`end` are a line's or an
  * arc's endpoints (an arc's endpoints lie on the arc at its start/end
- * angles); `center` is a point entity's position, a line's midpoint, or a
- * circle/arc center.
+ * angles); `center` is a point entity's position, a line's midpoint, a
+ * circle/arc center, an ellipse's center, a polygon's center, or a slot's
+ * anchor (the cap-center midpoint for `straight`, the through point for
+ * `arc3`). New-entity targets: an elliptical arc's `start`/`end` lie on the
+ * curve at its start/end PARAMETERS (the parametric point, not a polar
+ * angle); a full ellipse's `start` is its major-axis end (the radiusX
+ * direction) and `end` its minor-axis end; a spline offers only
+ * `start`/`end` (its first/last stored point — the curve passes through
+ * both); a polygon's `start`/`end` are its first and second vertices (the
+ * first sits at the entity's `rotation`); a slot's `start`/`end` are its
+ * cap centers.
  */
 export interface PointTarget {
   readonly entity: SketchEntityId;
@@ -180,14 +223,18 @@ export interface AngleConstraint extends ConstraintBase {
   readonly value: AngleValue;
 }
 
-/** A circle/arc's radius must equal `value`. */
+/**
+ * A radial entity's radius must equal `value`: a circle's or arc's own
+ * radius, a polygon's authored radius (circumradius when `inscribed`,
+ * inradius when `circumscribed`), or a slot's cap radius.
+ */
 export interface RadiusConstraint extends ConstraintBase {
   readonly kind: "radius";
   readonly entity: SketchEntityId;
   readonly value: LengthValue;
 }
 
-/** A circle/arc's diameter must equal `value`. */
+/** A radial entity's diameter must equal `value` (2× the radius). */
 export interface DiameterConstraint extends ConstraintBase {
   readonly kind: "diameter";
   readonly entity: SketchEntityId;
@@ -229,6 +276,60 @@ export interface SymmetryConstraint extends ConstraintBase {
   readonly about: SymmetryAbout;
 }
 
+/**
+ * A point target must lie on an entity's curve: line (infinite line),
+ * circle, arc (as its full circle), ellipse/ellipticalArc (the exact
+ * implicit ellipse), or spline (frozen-parameter projection — see the
+ * module's spline scope note).
+ */
+export interface PointOnEntityConstraint extends ConstraintBase {
+  readonly kind: "pointOnEntity";
+  readonly point: PointTarget;
+  readonly entity: SketchEntityId;
+}
+
+/** Two lines must lie on one infinite line. */
+export interface CollinearConstraint extends ConstraintBase {
+  readonly kind: "collinear";
+  readonly first: SketchEntityId;
+  readonly second: SketchEntityId;
+}
+
+/** Two point targets must share y. */
+export interface HorizontalPairConstraint extends ConstraintBase {
+  readonly kind: "horizontalPair";
+  readonly first: PointTarget;
+  readonly second: PointTarget;
+}
+
+/** Two point targets must share x. */
+export interface VerticalPairConstraint extends ConstraintBase {
+  readonly kind: "verticalPair";
+  readonly first: PointTarget;
+  readonly second: PointTarget;
+}
+/**
+ * Signed workplane-x separation of two point targets:
+ * `x_second − x_first = value` (any finite mm, negative and zero included).
+ */
+export interface DistanceXConstraint extends ConstraintBase {
+  readonly kind: "distanceX";
+  readonly first: PointTarget;
+  readonly second: PointTarget;
+  readonly value: LengthValue;
+}
+
+/**
+ * Signed workplane-y separation of two point targets:
+ * `y_second − y_first = value` (any finite mm, negative and zero included).
+ */
+export interface DistanceYConstraint extends ConstraintBase {
+  readonly kind: "distanceY";
+  readonly first: PointTarget;
+  readonly second: PointTarget;
+  readonly value: LengthValue;
+}
+
 /** Union of every sketch constraint. */
 export type SketchConstraint =
   | CoincidentConstraint
@@ -243,7 +344,13 @@ export type SketchConstraint =
   | EqualConstraint
   | TangentConstraint
   | MidpointConstraint
-  | SymmetryConstraint;
+  | SymmetryConstraint
+  | PointOnEntityConstraint
+  | CollinearConstraint
+  | HorizontalPairConstraint
+  | VerticalPairConstraint
+  | DistanceXConstraint
+  | DistanceYConstraint;
 
 /** Structured failure describing why input was rejected as a constraint. */
 export interface SketchConstraintError {
@@ -295,6 +402,26 @@ function requireOpenAngle(kind: SketchConstraintKind, value: AngleValue): void {
       constraintError(
         SKETCH_DIAGNOSTIC_CODES.constraintValueInvalid,
         `An ${kind} constraint value must be strictly between 0° and 180° (use parallel or perpendicular at the limits), received ${String(degrees)}°.`,
+        value,
+      ),
+    );
+  }
+}
+
+/**
+ * Signed dimensional values (`distanceX`/`distanceY`): any finite mm —
+ * negative and zero are legal (the separation is signed first→second),
+ * non-finite is not.
+ */
+function requireFiniteSignedLength(
+  kind: SketchConstraintKind,
+  value: LengthValue,
+): void {
+  if (!Number.isFinite(valueIn(value, "mm"))) {
+    throw new SketchConstraintValidationError(
+      constraintError(
+        SKETCH_DIAGNOSTIC_CODES.constraintValueInvalid,
+        `A ${kind} constraint value must be a finite number of mm, received ${String(valueIn(value, "mm"))}.`,
         value,
       ),
     );
@@ -452,6 +579,64 @@ export function createSymmetryAboutLineConstraint(
   };
 }
 
+/** Builds a point-on-entity constraint (see {@link PointOnEntityConstraint}). */
+export function createPointOnEntityConstraint(
+  id: SketchConstraintId,
+  point: PointTarget,
+  entity: SketchEntityId,
+): PointOnEntityConstraint {
+  return { id, kind: "pointOnEntity", point, entity };
+}
+
+/** Builds a collinear constraint between two lines. */
+export function createCollinearConstraint(
+  id: SketchConstraintId,
+  first: SketchEntityId,
+  second: SketchEntityId,
+): CollinearConstraint {
+  return { id, kind: "collinear", first, second };
+}
+
+/** Builds a horizontal point-pair constraint (two point targets share y). */
+export function createHorizontalPairConstraint(
+  id: SketchConstraintId,
+  first: PointTarget,
+  second: PointTarget,
+): HorizontalPairConstraint {
+  return { id, kind: "horizontalPair", first, second };
+}
+
+/** Builds a vertical point-pair constraint (two point targets share x). */
+export function createVerticalPairConstraint(
+  id: SketchConstraintId,
+  first: PointTarget,
+  second: PointTarget,
+): VerticalPairConstraint {
+  return { id, kind: "verticalPair", first, second };
+}
+
+/** Builds a signed distanceX constraint (any finite mm, first→second). */
+export function createDistanceXConstraint(
+  id: SketchConstraintId,
+  first: PointTarget,
+  second: PointTarget,
+  value: LengthValue,
+): DistanceXConstraint {
+  requireFiniteSignedLength("distanceX", value);
+  return { id, kind: "distanceX", first, second, value };
+}
+
+/** Builds a signed distanceY constraint (any finite mm, first→second). */
+export function createDistanceYConstraint(
+  id: SketchConstraintId,
+  first: PointTarget,
+  second: PointTarget,
+  value: LengthValue,
+): DistanceYConstraint {
+  requireFiniteSignedLength("distanceY", value);
+  return { id, kind: "distanceY", first, second, value };
+}
+
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
 }
@@ -579,6 +764,42 @@ function parseOpenAngleValue(
     );
   }
   return ok(value as AngleValue);
+}
+
+function parseSignedLengthValue(
+  kind: SketchConstraintKind,
+  input: unknown,
+): ParseResult<LengthValue, SketchConstraintError> {
+  const parsed = parseDimensionalValue(input);
+  if (!parsed.ok) {
+    return fail(
+      constraintError(
+        SKETCH_DIAGNOSTIC_CODES.constraintMalformed,
+        `A ${kind} constraint value must be a serialized dimensional value: ${parsed.error.message}`,
+        input,
+      ),
+    );
+  }
+  const value = parsed.value;
+  if (value.dimension !== "length") {
+    return fail(
+      constraintError(
+        SKETCH_DIAGNOSTIC_CODES.constraintValueInvalid,
+        `A ${kind} constraint value must be a length, received dimension "${value.dimension}".`,
+        input,
+      ),
+    );
+  }
+  if (!Number.isFinite(valueIn(value, "mm"))) {
+    return fail(
+      constraintError(
+        SKETCH_DIAGNOSTIC_CODES.constraintValueInvalid,
+        `A ${kind} constraint value must be a finite number of mm, received ${String(valueIn(value, "mm"))}.`,
+        input,
+      ),
+    );
+  }
+  return ok(value as LengthValue);
 }
 
 function parseSymmetryAbout(
@@ -786,6 +1007,59 @@ export function parseSketchConstraint(
         about: about.value,
       });
     }
+    case "pointOnEntity": {
+      const point = parsePointTarget(input.point);
+      if (!point.ok) return point;
+      const entity = parseEntityField("entity", input.entity, input);
+      if (!entity.ok) return entity;
+      return ok({
+        id: id.value,
+        kind: "pointOnEntity",
+        point: point.value,
+        entity: entity.value,
+      });
+    }
+    case "collinear": {
+      const first = parseEntityField("first", input.first, input);
+      if (!first.ok) return first;
+      const second = parseEntityField("second", input.second, input);
+      if (!second.ok) return second;
+      return ok({
+        id: id.value,
+        kind: "collinear",
+        first: first.value,
+        second: second.value,
+      });
+    }
+    case "horizontalPair":
+    case "verticalPair": {
+      const first = parsePointTarget(input.first);
+      if (!first.ok) return first;
+      const second = parsePointTarget(input.second);
+      if (!second.ok) return second;
+      return ok({
+        id: id.value,
+        kind: input.kind,
+        first: first.value,
+        second: second.value,
+      });
+    }
+    case "distanceX":
+    case "distanceY": {
+      const first = parsePointTarget(input.first);
+      if (!first.ok) return first;
+      const second = parsePointTarget(input.second);
+      if (!second.ok) return second;
+      const value = parseSignedLengthValue(input.kind, input.value);
+      if (!value.ok) return value;
+      return ok({
+        id: id.value,
+        kind: input.kind,
+        first: first.value,
+        second: second.value,
+        value: value.value,
+      });
+    }
   }
 }
 
@@ -881,6 +1155,37 @@ export function serializeSketchConstraint(
         about,
       };
     }
+    case "pointOnEntity":
+      return {
+        id: constraint.id,
+        kind: constraint.kind,
+        point: serializePointTarget(constraint.point),
+        entity: constraint.entity,
+      };
+    case "collinear":
+      return {
+        id: constraint.id,
+        kind: constraint.kind,
+        first: constraint.first,
+        second: constraint.second,
+      };
+    case "horizontalPair":
+    case "verticalPair":
+      return {
+        id: constraint.id,
+        kind: constraint.kind,
+        first: serializePointTarget(constraint.first),
+        second: serializePointTarget(constraint.second),
+      };
+    case "distanceX":
+    case "distanceY":
+      return {
+        id: constraint.id,
+        kind: constraint.kind,
+        first: serializePointTarget(constraint.first),
+        second: serializePointTarget(constraint.second),
+        value: serializeDimensionalValue(constraint.value),
+      };
   }
 }
 
@@ -890,6 +1195,51 @@ function isLine(entity: SketchEntity): entity is LineEntity {
 
 function isCircular(entity: SketchEntity): entity is CircleEntity | ArcEntity {
   return entity.kind === "circle" || entity.kind === "arc";
+}
+
+/**
+ * Entity kinds the `radius`/`diameter` constraints dimension: circles and
+ * arcs (their own radius), polygons (the authored radius — circumradius
+ * when `inscribed`, inradius when `circumscribed`), and slots (the cap
+ * radius both variants carry).
+ */
+function isRadial(
+  entity: SketchEntity,
+): entity is CircleEntity | ArcEntity | PolygonEntity | SlotEntity {
+  return (
+    entity.kind === "circle" ||
+    entity.kind === "arc" ||
+    entity.kind === "polygon" ||
+    entity.kind === "slot"
+  );
+}
+
+function isSpline(entity: SketchEntity): entity is SplineEntity {
+  return entity.kind === "spline";
+}
+
+/**
+ * Entity kinds `pointOnEntity` accepts: line (infinite line), circle, arc
+ * (as its full circle), ellipse/ellipticalArc (the implicit ellipse), and
+ * spline (frozen-parameter projection).
+ */
+function pointOnEntityKindProblem(entity: SketchEntity): string | null {
+  switch (entity.kind) {
+    case "line":
+    case "circle":
+    case "arc":
+    case "ellipse":
+    case "ellipticalArc":
+    case "spline":
+      return null;
+    case "point":
+      return "a point has no curve to lie on (use coincident)";
+    case "rectangle":
+      return "a rectangle has no curve of its own; constrain its edge lines";
+    case "polygon":
+    case "slot":
+      return `a ${entity.kind} has no single curve operand yet; constrain its resolved boundary via the profile domain`;
+  }
 }
 
 function targetKindProblem(
@@ -904,7 +1254,15 @@ function targetKindProblem(
         : `a ${entity.kind} only offers its "center"`;
     case "line":
     case "arc":
+    case "ellipse":
+    case "ellipticalArc":
+    case "polygon":
+    case "slot":
       return null;
+    case "spline":
+      return target.point === "center"
+        ? 'a spline has no "center"; it offers "start" and "end" (its first/last stored point)'
+        : null;
     case "rectangle":
       return "a rectangle has no point targets; constrain its edge lines";
   }
@@ -918,6 +1276,69 @@ function targetKindProblem(
  * The solver runs the same validation so it can reject malformed input with
  * structured diagnostics instead of throwing.
  */
+/**
+ * Constraint kinds outside the pinned spline scope (module docs): a spline
+ * operand on one of these declines with `sketch/constraint-unsupported`
+ * instead of the malformed-reference failure — the constraint is
+ * well-formed; the solver surface does not reach splines for it.
+ */
+const SPLINE_SCOPE_UNSUPPORTED: ReadonlySet<SketchConstraintKind> =
+  new Set<SketchConstraintKind>([
+    "parallel",
+    "perpendicular",
+    "angle",
+    "radius",
+    "diameter",
+    "equal",
+    "tangent",
+    "collinear",
+    "horizontal",
+    "vertical",
+  ]);
+
+/** The entity ids a constraint's operands mention, in operand order. */
+function constraintEntityOperands(
+  constraint: SketchConstraint,
+): readonly SketchEntityId[] {
+  switch (constraint.kind) {
+    case "coincident":
+    case "distance":
+    case "distanceX":
+    case "distanceY":
+    case "horizontalPair":
+    case "verticalPair":
+      return [constraint.first.entity, constraint.second.entity];
+    case "symmetry":
+      return constraint.about.type === "point"
+        ? [
+            constraint.first.entity,
+            constraint.second.entity,
+            constraint.about.point.entity,
+          ]
+        : [
+            constraint.first.entity,
+            constraint.second.entity,
+            constraint.about.entity,
+          ];
+    case "midpoint":
+      return [constraint.point.entity, constraint.line];
+    case "horizontal":
+    case "vertical":
+    case "radius":
+    case "diameter":
+      return [constraint.entity];
+    case "parallel":
+    case "perpendicular":
+    case "angle":
+    case "equal":
+    case "tangent":
+    case "collinear":
+      return [constraint.first, constraint.second];
+    case "pointOnEntity":
+      return [constraint.point.entity, constraint.entity];
+  }
+}
+
 export function validateConstraintReferences(
   constraint: SketchConstraint,
   entities: readonly SketchEntity[],
@@ -925,6 +1346,22 @@ export function validateConstraintReferences(
   const byId = new Map<string, SketchEntity>(
     entities.map((entity) => [entity.id, entity]),
   );
+  if (SPLINE_SCOPE_UNSUPPORTED.has(constraint.kind)) {
+    const splineOperand = constraintEntityOperands(constraint).find(
+      (operand) => {
+        const entity = byId.get(operand);
+        return entity !== undefined && isSpline(entity);
+      },
+    );
+    if (splineOperand !== undefined) {
+      return {
+        severity: "error",
+        code: SKETCH_DIAGNOSTIC_CODES.constraintUnsupported,
+        message: `Constraint ${constraint.id} (${constraint.kind}) references spline ${splineOperand}; spline solving is pinned to endpoint point-targets and point-on-spline, and ${constraint.kind} on a spline operand is outside that subset.`,
+        location: { primary: constraint.id, related: [splineOperand] },
+      };
+    }
+  }
   const find = (id: SketchEntityId): SketchEntity | undefined => byId.get(id);
   const checkTarget = (target: PointTarget): string | null => {
     const entity = find(target.entity);
@@ -940,12 +1377,15 @@ export function validateConstraintReferences(
       ? null
       : `${name} must reference a line, found ${entity.kind}`;
   };
-  const requireCircular = (name: string, id: SketchEntityId): string | null => {
+  const requireRadialOperand = (
+    name: string,
+    id: SketchEntityId,
+  ): string | null => {
     const entity = find(id);
     if (entity === undefined) return `${name} references missing entity ${id}`;
-    return isCircular(entity)
+    return isRadial(entity)
       ? null
-      : `${name} must reference a circle or arc, found ${entity.kind}`;
+      : `${name} must reference a circle, arc, polygon, or slot, found ${entity.kind}`;
   };
   let problem: string | null = null;
   switch (constraint.kind) {
@@ -972,7 +1412,7 @@ export function validateConstraintReferences(
       break;
     case "radius":
     case "diameter":
-      problem = requireCircular("entity", constraint.entity);
+      problem = requireRadialOperand("entity", constraint.entity);
       break;
     case "equal": {
       const first = find(constraint.first);
@@ -1018,6 +1458,29 @@ export function validateConstraintReferences(
             ? checkTarget(constraint.about.point)
             : requireLine("about", constraint.about.entity);
       }
+      break;
+    case "pointOnEntity": {
+      problem = checkTarget(constraint.point);
+      if (problem === null) {
+        const entity = find(constraint.entity);
+        if (entity === undefined) {
+          problem = `entity references missing entity ${constraint.entity}`;
+        } else {
+          problem = pointOnEntityKindProblem(entity);
+        }
+      }
+      break;
+    }
+    case "collinear":
+      problem =
+        requireLine("first", constraint.first) ??
+        requireLine("second", constraint.second);
+      break;
+    case "horizontalPair":
+    case "verticalPair":
+    case "distanceX":
+    case "distanceY":
+      problem = checkTarget(constraint.first) ?? checkTarget(constraint.second);
       break;
   }
   return problem === null ? null : referenceDiagnostic(constraint, problem);

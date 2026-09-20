@@ -19,6 +19,7 @@ import {
   createSketch,
   createSketchConstraintId,
   createSketchEntityId,
+  createSplineEntity,
   xyWorkplane,
   type Sketch,
 } from "@slopcad/cad-sketch";
@@ -540,5 +541,269 @@ describe("sketch view model", () => {
       x: 30,
       y: 0,
     });
+  });
+});
+
+describe("sketch editor phase 36 gestures and constraints", () => {
+  it("draws an ellipse in three picks (center, axis end, minor extent)", () => {
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "ellipse", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
+    const center = sketchEditorReducer(
+      state,
+      { point: { x: 0, y: 0 }, entityId: null, type: "canvas-pick" },
+      sketchWithLines(),
+    );
+    expect(center.state.gesture).toMatchObject({
+      kind: "pick",
+      tool: "ellipse",
+    });
+    const axis = sketchEditorReducer(
+      center.state,
+      { point: { x: 8, y: 0 }, entityId: null, type: "canvas-pick" },
+      sketchWithLines(),
+    );
+    expect(axis.state.gesture).toMatchObject({ kind: "ellipse" });
+    const minor = sketchEditorReducer(
+      axis.state,
+      { point: { x: 0, y: 5 }, entityId: null, type: "canvas-pick" },
+      sketchWithLines(),
+    );
+    expect(minor.transaction).not.toBeNull();
+    expect(minor.transaction?.commands[0]).toMatchObject({
+      type: "sketch.entity.create",
+      entity: {
+        kind: "ellipse",
+        radiusX: 8,
+        radiusY: 5,
+        rotation: 0,
+      },
+    });
+  });
+
+  it("draws a straight slot in three picks (two cap centers, radius)", () => {
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "slot", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
+    const start = sketchEditorReducer(
+      state,
+      { point: { x: -10, y: 0 }, entityId: null, type: "canvas-pick" },
+      sketchWithLines(),
+    );
+    const end = sketchEditorReducer(
+      start.state,
+      { point: { x: 10, y: 0 }, entityId: null, type: "canvas-pick" },
+      sketchWithLines(),
+    );
+    expect(end.state.gesture).toMatchObject({ kind: "slot" });
+    const radius = sketchEditorReducer(
+      end.state,
+      { point: { x: 0, y: 3 }, entityId: null, type: "canvas-pick" },
+      sketchWithLines(),
+    );
+    expect(radius.transaction?.commands[0]).toMatchObject({
+      type: "sketch.entity.create",
+      entity: {
+        kind: "slot",
+        variant: "straight",
+        radius: 3,
+      },
+    });
+  });
+
+  it("commits collinear, pair alignments, and signed axis dimensions at arity", () => {
+    const sketch = sketchWithLines();
+    const commit = (
+      tool: string,
+      picks: readonly { x: number; y: number; entityId: string }[],
+    ): { transaction: unknown } => {
+      let state = createSketchEditorState();
+      state = sketchEditorReducer(
+        state,
+        { tool: tool as never, type: "activate-tool" },
+        sketch,
+      ).state;
+      let last = { transaction: null } as unknown as {
+        transaction: unknown;
+        state: ReturnType<typeof createSketchEditorState>;
+      };
+      for (const pick of picks) {
+        last = sketchEditorReducer(
+          state,
+          { point: pick, entityId: pick.entityId, type: "canvas-pick" },
+          sketch,
+        );
+        state = last.state;
+      }
+      return last;
+    };
+    const collinear = commit("collinear", [
+      { x: 10, y: 0, entityId: "skent_a" },
+      { x: 30, y: 10, entityId: "skent_b" },
+    ]);
+    expect(collinear.transaction).toMatchObject({
+      commands: [
+        {
+          type: "sketch.constraint.create",
+          constraint: { kind: "collinear" },
+        },
+      ],
+    });
+    const horizontalPair = commit("horizontalPair", [
+      { x: 0, y: 0, entityId: "skent_a" },
+      { x: 30, y: 10, entityId: "skent_b" },
+    ]);
+    expect(horizontalPair.transaction).toMatchObject({
+      commands: [{ constraint: { kind: "horizontalPair" } }],
+    });
+    // distanceX measures the SIGNED x separation (b.start − a.start = 30).
+    const distanceX = commit("distanceX", [
+      { x: 0, y: 0, entityId: "skent_a" },
+      { x: 30, y: -20, entityId: "skent_b" },
+    ]);
+    expect(distanceX.transaction).toMatchObject({
+      commands: [
+        {
+          type: "sketch.constraint.create",
+          constraint: { kind: "distanceX" },
+        },
+      ],
+    });
+    const command = (
+      distanceX.transaction as {
+        commands: { constraint: { value: { value: number } } }[];
+      }
+    ).commands[0];
+    expect(command?.constraint.value.value).toBe(30);
+  });
+
+  it("applies pointOnEntity from a point pick and a curve pick in either order", () => {
+    const point = createSketchEntityId("skent_p");
+    const circle = createSketchEntityId("skent_c");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createPointEntity(point, { x: 3, y: 4 }),
+        createCircleEntity(circle, { x: 0, y: 0 }, 5),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const sketch = created.value;
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "pointOnEntity", type: "activate-tool" },
+      sketch,
+    ).state;
+    state = sketchEditorReducer(
+      state,
+      { point: { x: 3, y: 4 }, entityId: "skent_p", type: "canvas-pick" },
+      sketch,
+    ).state;
+    const commit = sketchEditorReducer(
+      state,
+      { point: { x: 0, y: 5 }, entityId: "skent_c", type: "canvas-pick" },
+      sketch,
+    );
+    expect(commit.transaction).toMatchObject({
+      commands: [
+        {
+          type: "sketch.constraint.create",
+          constraint: {
+            kind: "pointOnEntity",
+            entity: "skent_c",
+          },
+        },
+      ],
+    });
+  });
+
+  it("refuses a pointOnEntity curve pick that is not a curve", () => {
+    const sketch = sketchWithLines();
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "pointOnEntity", type: "activate-tool" },
+      sketch,
+    ).state;
+    // First pick on a line (a valid curve) — fine.
+    state = sketchEditorReducer(
+      state,
+      { point: { x: 10, y: 0 }, entityId: "skent_a", type: "canvas-pick" },
+      sketch,
+    ).state;
+    // A rectangle record is not a curve — refused before accumulating.
+    const edges = [
+      createSketchEntityId("skent_e0"),
+      createSketchEntityId("skent_e1"),
+      createSketchEntityId("skent_e2"),
+      createSketchEntityId("skent_e3"),
+    ];
+    const rectId = createSketchEntityId("skent_rect");
+    const withRect = createSketch(
+      xyWorkplane(),
+      [
+        ...sketch.entities,
+        createLineEntity(edges[0]!, { x: 0, y: 0 }, { x: 1, y: 0 }),
+        createLineEntity(edges[1]!, { x: 1, y: 0 }, { x: 1, y: 1 }),
+        createLineEntity(edges[2]!, { x: 1, y: 1 }, { x: 0, y: 1 }),
+        createLineEntity(edges[3]!, { x: 0, y: 1 }, { x: 0, y: 0 }),
+        createRectangleEntity(rectId, [
+          edges[0]!,
+          edges[1]!,
+          edges[2]!,
+          edges[3]!,
+        ]),
+      ],
+      [],
+    );
+    if (!withRect.ok) throw new Error(withRect.error.message);
+    const refused = sketchEditorReducer(
+      state,
+      {
+        point: { x: 0.5, y: 0.5 },
+        entityId: "skent_rect",
+        type: "canvas-pick",
+      },
+      withRect.value,
+    );
+    expect(refused.transaction).toBeNull();
+    expect(refused.state.status.severity).toBe("error");
+  });
+
+  it("maps polyline entities into the canvas view model", () => {
+    const splineId = createSketchEntityId("skent_s");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createSplineEntity(splineId, "control", [
+          { x: 0, y: 0 },
+          { x: 2, y: 8 },
+          { x: 6, y: 8 },
+          { x: 10, y: 0 },
+        ]),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const model = sketchViewModel(created.value, null, { entityIds: [] }, []);
+    expect(model.entities).toHaveLength(1);
+    expect(model.entities[0]).toMatchObject({
+      id: "skent_s",
+      kind: "polyline",
+    });
+    const points = (
+      model.entities[0] as { points: readonly { x: number; y: number }[] }
+    ).points;
+    expect(points.length).toBeGreaterThan(5);
+    expect(points[0]).toEqual({ x: 0, y: 0 });
+    expect(points[points.length - 1]).toEqual({ x: 10, y: 0 });
   });
 });

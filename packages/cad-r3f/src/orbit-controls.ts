@@ -120,8 +120,14 @@ function elevationClamp(state: OrbitState): {
   readonly max: number;
 } {
   return {
-    min: Math.min(state.seedElevationRad, degreesToRad(CAD_ORBIT_MIN_ELEVATION_DEG)),
-    max: Math.max(state.seedElevationRad, degreesToRad(CAD_ORBIT_MAX_ELEVATION_DEG)),
+    min: Math.min(
+      state.seedElevationRad,
+      degreesToRad(CAD_ORBIT_MIN_ELEVATION_DEG),
+    ),
+    max: Math.max(
+      state.seedElevationRad,
+      degreesToRad(CAD_ORBIT_MAX_ELEVATION_DEG),
+    ),
   };
 }
 
@@ -303,7 +309,9 @@ export function panByPixels(
     (2 * state.distanceMm * Math.tan(state.verticalFovRad / 2)) /
     state.viewportHeight;
   const [fX, fY, fZ] = orbitForward(state);
-  const right = normalize3(...cross3([fX, fY, fZ], [state.poleX, state.poleY, state.poleZ]));
+  const right = normalize3(
+    ...cross3([fX, fY, fZ], [state.poleX, state.poleY, state.poleZ]),
+  );
   const up = normalize3(
     right[1] * fZ - right[2] * fY,
     right[2] * fX - right[0] * fZ,
@@ -338,10 +346,7 @@ export function orbitSnapshot(
   mode: "spec" | "user",
 ): SceneCameraStateSnapshot {
   const azimuthDeg =
-    ((Math.atan2(
-      Math.sin(state.azimuthRad),
-      Math.cos(state.azimuthRad),
-    ) *
+    ((Math.atan2(Math.sin(state.azimuthRad), Math.cos(state.azimuthRad)) *
       180) /
       Math.PI +
       360) %
@@ -349,9 +354,7 @@ export function orbitSnapshot(
   return {
     azimuthDeg: Number(azimuthDeg.toFixed(1)),
     distanceMm: Number(state.distanceMm.toFixed(1)),
-    elevationDeg: Number(
-      ((state.elevationRad * 180) / Math.PI).toFixed(1),
-    ),
+    elevationDeg: Number(((state.elevationRad * 180) / Math.PI).toFixed(1)),
     mode,
   };
 }
@@ -368,11 +371,16 @@ export function sceneCameraStateFromSpec(
   const verticalFovRad =
     spec.kind === "perspective"
       ? (spec.fovDeg * Math.PI) / 180
-      : 2 * Math.atan(spec.viewHeight / 2 / Math.hypot(
-          spec.position[0] - spec.target[0],
-          spec.position[1] - spec.target[1],
-          spec.position[2] - spec.target[2],
-        ));
+      : 2 *
+        Math.atan(
+          spec.viewHeight /
+            2 /
+            Math.hypot(
+              spec.position[0] - spec.target[0],
+              spec.position[1] - spec.target[1],
+              spec.position[2] - spec.target[2],
+            ),
+        );
   const state = createOrbitState({
     position: spec.position,
     target: spec.target,

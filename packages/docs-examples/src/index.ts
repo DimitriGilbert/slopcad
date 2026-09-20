@@ -80,6 +80,10 @@ export {
 // -- Sketch -------------------------------------------------------------------
 
 export { runSketchExample, type SketchExampleSummary } from "./sketch/sketch";
+export {
+  runSketchVocabularyExample,
+  type SketchVocabularySummary,
+} from "./sketch/vocabulary";
 
 // -- Components ---------------------------------------------------------------
 

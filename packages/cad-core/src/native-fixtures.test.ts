@@ -81,7 +81,7 @@ for (const name of [
       const validation = validateNativeCadDocument(JSON.parse(text));
       expect(validation.valid).toBe(true);
       expect(validation.issues).toEqual([]);
-      expect(validation.formatVersion).toBe(1);
+      expect(validation.formatVersion).toBe(2);
     });
 
     it("round-trips to byte-identical output", async () => {

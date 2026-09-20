@@ -65,10 +65,37 @@ export function kernelSegment(
       endAngle: angle(segment.endAngle, "rad"),
     };
   }
+  if (segment.kind === "circle") {
+    return {
+      kind: "circle",
+      center: [segment.center.x, segment.center.y],
+      radius: segment.radius,
+    };
+  }
+  if (segment.kind === "ellipse") {
+    return {
+      kind: "ellipse",
+      center: [segment.center.x, segment.center.y],
+      radiusX: segment.radiusX,
+      radiusY: segment.radiusY,
+      rotation: angle(segment.rotation, "rad"),
+    };
+  }
+  if (segment.kind === "ellipticalArc") {
+    return {
+      kind: "ellipticalArc",
+      center: [segment.center.x, segment.center.y],
+      radiusX: segment.radiusX,
+      radiusY: segment.radiusY,
+      rotation: angle(segment.rotation, "rad"),
+      startAngle: angle(segment.startAngle, "rad"),
+      endAngle: angle(segment.endAngle, "rad"),
+    };
+  }
   return {
-    kind: "circle",
-    center: [segment.center.x, segment.center.y],
-    radius: segment.radius,
+    kind: "spline",
+    flavor: segment.flavor,
+    points: segment.points.map((point) => [point.x, point.y] as const),
   };
 }
 

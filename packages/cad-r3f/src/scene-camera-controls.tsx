@@ -312,7 +312,12 @@ export function SceneCameraControls({
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!enabledRef.current) return;
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+      if (
+        event.key !== "ArrowLeft" &&
+        event.key !== "ArrowRight" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowDown"
+      ) {
         return;
       }
       if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) {
@@ -337,7 +342,11 @@ export function SceneCameraControls({
       const step = CAD_ORBIT_KEY_STEP_DEG;
       orbitByKeys(
         state,
-        event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0,
+        event.key === "ArrowLeft"
+          ? -step
+          : event.key === "ArrowRight"
+            ? step
+            : 0,
         event.key === "ArrowUp" ? step : event.key === "ArrowDown" ? -step : 0,
       );
       applyAndReport();

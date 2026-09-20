@@ -28,10 +28,7 @@
  */
 
 import * as THREE from "three";
-import type {
-  RenderCamera,
-  RenderVector3,
-} from "@slopcad/cad-core";
+import type { RenderCamera, RenderVector3 } from "@slopcad/cad-core";
 
 function vectorsEqual(a: RenderVector3, b: RenderVector3): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];

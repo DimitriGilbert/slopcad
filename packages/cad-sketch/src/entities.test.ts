@@ -6,11 +6,17 @@ import {
   SKETCH_ENTITY_KINDS,
   SketchEntityValidationError,
   arcSweep,
+  createArc3SlotEntity,
   createArcEntity,
   createCircleEntity,
+  createEllipseEntity,
+  createEllipticalArcEntity,
   createLineEntity,
   createPointEntity,
+  createPolygonEntity,
   createRectangleEntity,
+  createSplineEntity,
+  createStraightSlotEntity,
   isSketchEntityKind,
   parseSketchEntity,
   serializeSketchEntity,
@@ -134,9 +140,15 @@ describe("entity builders", () => {
       "circle",
       "arc",
       "rectangle",
+      "ellipse",
+      "ellipticalArc",
+      "spline",
+      "polygon",
+      "slot",
     ]);
     expect(isSketchEntityKind("arc")).toBe(true);
-    expect(isSketchEntityKind("ellipse")).toBe(false);
+    expect(isSketchEntityKind("ellipse")).toBe(true);
+    expect(isSketchEntityKind("glue")).toBe(false);
   });
 });
 
@@ -205,7 +217,7 @@ describe("entity serialization", () => {
   });
 
   it("parses strictly: unknown kind, bad ids, bad numbers, bad rectangles", () => {
-    const unknownKind = parseSketchEntity({ id: "skent_x", kind: "ellipse" });
+    const unknownKind = parseSketchEntity({ id: "skent_x", kind: "glue" });
     expect(!unknownKind.ok && unknownKind.error.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.entityUnknownKind,
     );
@@ -282,5 +294,401 @@ describe("entity serialization", () => {
     expect(
       parsed.ok && parsed.value.kind === "arc" && parsed.value.endAngle,
     ).toBe(6.0);
+  });
+});
+
+describe("phase 36 entity builders", () => {
+  it("builds an ellipse and canonicalizes its rotation", () => {
+    const ellipse = createEllipseEntity(
+      id("skent_e"),
+      { x: 1, y: -2 },
+      8,
+      5,
+      -Math.PI / 4,
+    );
+    expect(ellipse).toMatchObject({
+      cx: 1,
+      cy: -2,
+      kind: "ellipse",
+      radiusX: 8,
+      radiusY: 5,
+      rotation: (2 * Math.PI * 7) / 8,
+    });
+    expect(() =>
+      createEllipseEntity(id("skent_e"), { x: 0, y: 0 }, -1, 5, 0),
+    ).toThrow(SketchEntityValidationError);
+  });
+
+  it("builds an elliptical arc and rejects degenerate sweeps", () => {
+    const arc = createEllipticalArcEntity(
+      id("skent_ea"),
+      { x: 0, y: 0 },
+      6,
+      3,
+      0.2,
+      0.5,
+      2.5,
+    );
+    expect(arc).toMatchObject({
+      kind: "ellipticalArc",
+      radiusX: 6,
+      radiusY: 3,
+      startAngle: 0.5,
+      endAngle: 2.5,
+    });
+    expect(() =>
+      createEllipticalArcEntity(
+        id("skent_ea"),
+        { x: 0, y: 0 },
+        6,
+        3,
+        0,
+        1,
+        1 + 2 * Math.PI,
+      ),
+    ).toThrow(SketchEntityValidationError);
+  });
+
+  it("builds both spline flavors and rejects malformed point lists", () => {
+    const control = createSplineEntity(
+      id("skent_s"),
+      "control",
+      [
+        { x: 0, y: 0 },
+        { x: 2, y: 6 },
+        { x: 6, y: -6 },
+        { x: 10, y: 0 },
+      ],
+      { construction: true },
+    );
+    expect(control).toMatchObject({ construction: true, flavor: "control" });
+    const fit = createSplineEntity(id("skent_s"), "interpolated", [
+      { x: 0, y: 0 },
+      { x: 5, y: 5 },
+    ]);
+    expect(fit.flavor).toBe("interpolated");
+    expect(() =>
+      createSplineEntity(id("skent_s"), "control", [
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ]),
+    ).toThrow(SketchEntityValidationError);
+    expect(() =>
+      createSplineEntity(id("skent_s"), "interpolated", [
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+      ]),
+    ).toThrow(SketchEntityValidationError);
+  });
+
+  it("builds polygons with fit modes and bounds the side count", () => {
+    const hex = createPolygonEntity(
+      id("skent_pg"),
+      { x: 0, y: 0 },
+      10,
+      6,
+      Math.PI / 6,
+      "inscribed",
+    );
+    expect(hex).toMatchObject({ fit: "inscribed", radius: 10, sides: 6 });
+    expect(() =>
+      createPolygonEntity(
+        id("skent_pg"),
+        { x: 0, y: 0 },
+        10,
+        2,
+        0,
+        "inscribed",
+      ),
+    ).toThrow(SketchEntityValidationError);
+    expect(() =>
+      createPolygonEntity(
+        id("skent_pg"),
+        { x: 0, y: 0 },
+        10,
+        6,
+        0,
+        "round" as "inscribed",
+      ),
+    ).toThrow(SketchEntityValidationError);
+  });
+
+  it("builds straight and 3-point-arc slots with their invariants", () => {
+    const straight = createStraightSlotEntity(
+      id("skent_sl"),
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+      3,
+    );
+    expect(straight).toMatchObject({
+      kind: "slot",
+      radius: 3,
+      variant: "straight",
+    });
+    expect(() =>
+      createStraightSlotEntity(
+        id("skent_sl"),
+        { x: 1, y: 1 },
+        { x: 1, y: 1 },
+        3,
+      ),
+    ).toThrow(SketchEntityValidationError);
+    const arc3 = createArc3SlotEntity(
+      id("skent_sl"),
+      { x: -10, y: 0 },
+      { x: 0, y: 6 },
+      { x: 10, y: 0 },
+      2,
+    );
+    expect(arc3).toMatchObject({ kind: "slot", radius: 2, variant: "arc3" });
+    // Collinear centerline → the straight slot's job, refused here.
+    expect(() =>
+      createArc3SlotEntity(
+        id("skent_sl"),
+        { x: -10, y: 0 },
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        2,
+      ),
+    ).toThrow(SketchEntityValidationError);
+    // A cap radius that would invert the inner offset arc (the centerline's
+    // circumradius is 50.5 mm here).
+    expect(() =>
+      createArc3SlotEntity(
+        id("skent_sl"),
+        { x: -10, y: 0 },
+        { x: 0, y: 1 },
+        { x: 10, y: 0 },
+        60,
+      ),
+    ).toThrow(SketchEntityValidationError);
+  });
+});
+
+describe("phase 36 entity serialization", () => {
+  it("round-trips every new entity kind exactly", () => {
+    expectRoundTrip(
+      createEllipseEntity(id("skent_e"), { x: 1, y: 2 }, 8, 5, 0.3),
+    );
+    expectRoundTrip(
+      createEllipticalArcEntity(
+        id("skent_ea"),
+        { x: 1, y: 2 },
+        8,
+        5,
+        0.3,
+        0.5,
+        1.5,
+      ),
+    );
+    expectRoundTrip(
+      createSplineEntity(id("skent_s"), "control", [
+        { x: 0, y: 0 },
+        { x: 2, y: 6 },
+        { x: 6, y: -6 },
+        { x: 10, y: 0 },
+      ]),
+    );
+    expectRoundTrip(
+      createSplineEntity(id("skent_s"), "interpolated", [
+        { x: 0, y: 0 },
+        { x: 5, y: 5 },
+        { x: 10, y: 0 },
+      ]),
+    );
+    expectRoundTrip(
+      createPolygonEntity(
+        id("skent_pg"),
+        { x: -3, y: 4 },
+        7,
+        5,
+        1.1,
+        "circumscribed",
+      ),
+    );
+    expectRoundTrip(
+      createStraightSlotEntity(
+        id("skent_sl"),
+        { x: 0, y: 0 },
+        { x: 20, y: 4 },
+        3,
+      ),
+    );
+    expectRoundTrip(
+      createArc3SlotEntity(
+        id("skent_sl"),
+        { x: -10, y: 0 },
+        { x: 0, y: 6 },
+        { x: 10, y: 0 },
+        2,
+      ),
+    );
+  });
+
+  it("emits fixed key order for the new kinds", () => {
+    expect(
+      Object.keys(
+        serializeSketchEntity(
+          createEllipseEntity(id("skent_e"), { x: 0, y: 0 }, 1, 2, 0),
+        ),
+      ),
+    ).toEqual([
+      "id",
+      "kind",
+      "construction",
+      "fixed",
+      "cx",
+      "cy",
+      "radiusX",
+      "radiusY",
+      "rotation",
+    ]);
+    expect(
+      Object.keys(
+        serializeSketchEntity(
+          createSplineEntity(id("skent_s"), "control", [
+            { x: 0, y: 0 },
+            { x: 1, y: 1 },
+            { x: 2, y: -1 },
+            { x: 3, y: 0 },
+          ]),
+        ),
+      ),
+    ).toEqual(["id", "kind", "construction", "fixed", "flavor", "points"]);
+    expect(
+      Object.keys(
+        serializeSketchEntity(
+          createStraightSlotEntity(
+            id("skent_sl"),
+            { x: 0, y: 0 },
+            { x: 5, y: 0 },
+            1,
+          ),
+        ),
+      ),
+    ).toEqual([
+      "id",
+      "kind",
+      "construction",
+      "fixed",
+      "variant",
+      "x1",
+      "y1",
+      "x2",
+      "y2",
+      "radius",
+    ]);
+    expect(
+      Object.keys(
+        serializeSketchEntity(
+          createArc3SlotEntity(
+            id("skent_sl"),
+            { x: -10, y: 0 },
+            { x: 0, y: 6 },
+            { x: 10, y: 0 },
+            2,
+          ),
+        ),
+      ),
+    ).toEqual([
+      "id",
+      "kind",
+      "construction",
+      "fixed",
+      "variant",
+      "x1",
+      "y1",
+      "x2",
+      "y2",
+      "x3",
+      "y3",
+      "radius",
+    ]);
+    expect(
+      Object.keys(
+        serializeSketchEntity(
+          createPolygonEntity(
+            id("skent_pg"),
+            { x: 0, y: 0 },
+            1,
+            3,
+            0,
+            "inscribed",
+          ),
+        ),
+      ),
+    ).toEqual([
+      "id",
+      "kind",
+      "construction",
+      "fixed",
+      "cx",
+      "cy",
+      "radius",
+      "sides",
+      "rotation",
+      "fit",
+    ]);
+  });
+
+  it("parses the new kinds strictly", () => {
+    expect(
+      !parseSketchEntity({
+        id: "skent_e",
+        kind: "ellipse",
+        cx: 0,
+        cy: 0,
+        radiusX: 0,
+        radiusY: 5,
+        rotation: 0,
+      }).ok,
+    ).toBe(true);
+    expect(
+      !parseSketchEntity({
+        id: "skent_s",
+        kind: "spline",
+        flavor: "control",
+        points: [
+          { x: 0, y: 0 },
+          { x: 1, y: 1 },
+        ],
+      }).ok,
+    ).toBe(true);
+    expect(
+      !parseSketchEntity({
+        id: "skent_pg",
+        kind: "polygon",
+        cx: 0,
+        cy: 0,
+        radius: 5,
+        sides: 2.5,
+        rotation: 0,
+        fit: "inscribed",
+      }).ok,
+    ).toBe(true);
+    expect(
+      !parseSketchEntity({
+        id: "skent_sl",
+        kind: "slot",
+        variant: "arc3",
+        x1: -10,
+        y1: 0,
+        x2: 0,
+        y2: 6,
+        radius: 2,
+      }).ok,
+    ).toBe(true);
+    expect(
+      parseSketchEntity({
+        id: "skent_sl",
+        kind: "slot",
+        variant: "straight",
+        x1: 0,
+        y1: 0,
+        x2: 5,
+        y2: 0,
+        radius: 1,
+      }).ok,
+    ).toBe(true);
   });
 });

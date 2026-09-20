@@ -29,6 +29,12 @@ import {
   type ProfileSegmentInput,
   type SweepPathSegmentInput,
 } from "./contract";
+import {
+  splineEndPoint,
+  splinePointsProblem,
+  splineStartPoint,
+  tessellateSplineSegment,
+} from "./profile-splines";
 
 /** A 2D point in the profile's local frame (mm). */
 export interface ProfilePoint2 {
@@ -62,6 +68,32 @@ export function profileSegmentSweepRad(
   return sweep <= 0 ? sweep + Math.PI * 2 : sweep;
 }
 
+/** The CCW PARAMETRIC sweep of an elliptical arc segment in (0, 2π). */
+export function profileEllipticalSweepRad(
+  segment: Extract<ProfileSegmentInput, { kind: "ellipticalArc" }>,
+): number {
+  const start = valueIn(segment.startAngle, "rad");
+  const end = valueIn(segment.endAngle, "rad");
+  const sweep = (end - start) % (Math.PI * 2);
+  return sweep <= 0 ? sweep + Math.PI * 2 : sweep;
+}
+
+/** The parametric point of an ellipse-family segment at parameter `t` (rad). */
+export function profileEllipsePoint(
+  segment: Extract<ProfileSegmentInput, { kind: "ellipse" | "ellipticalArc" }>,
+  t: number,
+): ProfilePoint2 {
+  const rotation = valueIn(segment.rotation, "rad");
+  const u = segment.radiusX * Math.cos(t);
+  const v = segment.radiusY * Math.sin(t);
+  const c = Math.cos(rotation);
+  const s = Math.sin(rotation);
+  return {
+    x: segment.center[0] + c * u - s * v,
+    y: segment.center[1] + s * u + c * v,
+  };
+}
+
 function arcPoint(
   center: readonly [number, number],
   radius: number,
@@ -77,7 +109,12 @@ function arcPoint(
  * Tessellates one profile loop into the chord polygon the mesh kernels
  * extrude: line segments contribute their endpoints; arc/circle segments
  * are subdivided at {@link PROFILE_MAX_SEGMENT_ANGLE_RAD} with vertices on
- * the true circle. Shared endpoints collapse to one polygon vertex each.
+ * the true circle; ellipse-family segments subdivide the PARAMETER at the
+ * turning-bounded step `0.1 / max(a/b, b/a)` (dφ/dt ≤ the axis-ratio bound,
+ * so every chord's turning stays within the shared angular deflection,
+ * vertices on the true ellipse); spline segments flatten by the convex-hull
+ * bound at {@link PROFILE_SPLINE_DEFLECTION_MM} (vertices on the true
+ * curve). Shared endpoints collapse to one polygon vertex each.
  */
 export function tessellateProfileLoop(
   loop: readonly ProfileSegmentInput[],
@@ -97,6 +134,33 @@ export function tessellateProfileLoop(
     if (segment.kind === "line") {
       push({ x: segment.start[0], y: segment.start[1] });
       push({ x: segment.end[0], y: segment.end[1] });
+      continue;
+    }
+    if (segment.kind === "spline") {
+      for (const point of tessellateSplineSegment(
+        segment.flavor,
+        segment.points,
+      )) {
+        push(point);
+      }
+      continue;
+    }
+    if (segment.kind === "ellipse" || segment.kind === "ellipticalArc") {
+      const sweep =
+        segment.kind === "ellipse"
+          ? Math.PI * 2
+          : profileEllipticalSweepRad(segment);
+      const ratio = Math.max(
+        segment.radiusX / segment.radiusY,
+        segment.radiusY / segment.radiusX,
+      );
+      const step = PROFILE_MAX_SEGMENT_ANGLE_RAD / ratio;
+      const divisions = Math.max(1, Math.ceil(sweep / step));
+      const t0 =
+        segment.kind === "ellipse" ? 0 : valueIn(segment.startAngle, "rad");
+      for (let i = 0; i <= divisions; i += 1) {
+        push(profileEllipsePoint(segment, t0 + (sweep * i) / divisions));
+      }
       continue;
     }
     const sweep = profileSegmentSweepRad(segment);
@@ -245,6 +309,57 @@ export function profileLoopProblem(
       });
       continue;
     }
+    if (segment.kind === "ellipse" || segment.kind === "ellipticalArc") {
+      if (
+        !Number.isFinite(segment.radiusX) ||
+        !Number.isFinite(segment.radiusY) ||
+        segment.radiusX <= 0 ||
+        segment.radiusY <= 0
+      ) {
+        return "an ellipse-family segment has a non-positive (or non-finite) semi-axis";
+      }
+      const [cx, cy] = segment.center;
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) {
+        return "an ellipse-family segment has a non-finite center";
+      }
+      if (!Number.isFinite(valueIn(segment.rotation, "rad"))) {
+        return "an ellipse-family segment has a non-finite rotation";
+      }
+      if (segment.kind === "ellipse") {
+        const point = profileEllipsePoint(segment, 0);
+        ends.push({ start: point, end: point });
+        continue;
+      }
+      if (
+        !Number.isFinite(segment.startAngle.value) ||
+        !Number.isFinite(segment.endAngle.value)
+      ) {
+        return "an elliptical arc has non-finite angles";
+      }
+      const sweep = profileEllipticalSweepRad(segment);
+      if (sweep === 0) {
+        return "an elliptical arc sweeps a zero parametric angle (a full ellipse must use an ellipse segment)";
+      }
+      ends.push({
+        start: profileEllipsePoint(segment, valueIn(segment.startAngle, "rad")),
+        end: profileEllipsePoint(
+          segment,
+          valueIn(segment.startAngle, "rad") + sweep,
+        ),
+      });
+      continue;
+    }
+    if (segment.kind === "spline") {
+      const problem = splinePointsProblem(segment.flavor, segment.points);
+      if (problem !== null) {
+        return `a spline segment is malformed: ${problem}`;
+      }
+      ends.push({
+        start: splineStartPoint(segment.points),
+        end: splineEndPoint(segment.points),
+      });
+      continue;
+    }
     if (!Number.isFinite(segment.radius) || segment.radius <= 0) {
       return "a circular segment has a non-positive (or non-finite) radius";
     }
@@ -368,6 +483,70 @@ function segmentSignedExtremes(
     const a = axisSignedDistance(frame, segment.start[0], segment.start[1]);
     const b = axisSignedDistance(frame, segment.end[0], segment.end[1]);
     return { min: Math.min(a, b), max: Math.max(a, b) };
+  }
+  if (segment.kind === "ellipse" || segment.kind === "ellipticalArc") {
+    // s(t) = K + A·cos t + B·sin t with (A, B) the ellipse axes' signed
+    // projections: K + Rm·sin(t + ψ) — the same exact form the arcs carry.
+    // Extremes sit at the endpoints and at the sin extrema the parametric
+    // sweep actually contains; a full ellipse always spans both.
+    const rotation = valueIn(segment.rotation, "rad");
+    const c = Math.cos(rotation);
+    const s = Math.sin(rotation);
+    // The parametric derivative (dx/dt, dy/dt) = R(ρ)·(−a sin t, b cos t);
+    // its signed projection on v gives s′(t) = v·R(ρ)·(−a sin t, b cos t),
+    // i.e. A = −a·(v·R(ρ)·x̂)·... — computed directly:
+    const vx = frame.v.x;
+    const vy = frame.v.y;
+    const ex0 = c * vx + s * vy;
+    const ey0 = -s * vx + c * vy;
+    const A = segment.radiusX * -ey0;
+    const B = segment.radiusY * ex0;
+    const K = axisSignedDistance(frame, segment.center[0], segment.center[1]);
+    const amplitude = Math.hypot(A, B);
+    const t0 =
+      segment.kind === "ellipse" ? 0 : valueIn(segment.startAngle, "rad");
+    const sweep =
+      segment.kind === "ellipse"
+        ? Math.PI * 2
+        : profileEllipticalSweepRad(segment);
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    const consider = (t: number): void => {
+      const value = K + A * Math.cos(t) + B * Math.sin(t);
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    };
+    consider(t0);
+    consider(t0 + sweep);
+    if (amplitude > 0) {
+      const psi = Math.atan2(B, A);
+      for (const peak of [Math.PI / 2 - psi, -Math.PI / 2 - psi]) {
+        for (const turn of [-2 * Math.PI, 0, 2 * Math.PI]) {
+          const candidate = peak + turn;
+          if (candidate >= t0 && candidate <= t0 + sweep) {
+            consider(candidate);
+          }
+        }
+      }
+    }
+    return { min, max };
+  }
+  if (segment.kind === "spline") {
+    // Deflection-banded: vertices sit ON the true curve, so the sampled
+    // extremes never exceed the true ones and can miss only a crossing
+    // confined strictly between adjacent stations within the deflection —
+    // the same honesty the tessellated mesh kernels carry.
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const point of tessellateSplineSegment(
+      segment.flavor,
+      segment.points,
+    )) {
+      const value = axisSignedDistance(frame, point.x, point.y);
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+    return { min, max };
   }
   // Circular geometry: s(θ) = C + r·sin(θ − φ) about the axis, with
   // C = signed distance of the center and φ = the axis direction's angle.

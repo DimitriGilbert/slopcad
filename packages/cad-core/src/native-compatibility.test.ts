@@ -238,4 +238,115 @@ describe("the native document compatibility suite", () => {
     const highest = NATIVE_FORMAT_MIGRATIONS.at(-1)?.to ?? 1;
     expect(highest).toBeLessThanOrEqual(CAD_NATIVE_FORMAT_VERSION);
   });
+
+  // The Phase 36 gate: a fixture at its v1 form migrates forward and
+  // resaves BYTE-IDENTICALLY to the committed v2 file. The v1 form is
+  // derived by inverting the registry's steps in order (each real step is
+  // stamp-additive, so the inverse is the same content walk with the
+  // decremented stamp) — no hand-maintained v1 copies.
+  it("migrates each fixture's v1 form to a byte-identical resave of the committed file", async () => {
+    for (const name of fixtureNames()) {
+      const { text } = await loadFixture(name);
+      const current = JSON.parse(text) as Record<string, unknown>;
+      expect(readNativeFormatVersion(current)).toBe(CAD_NATIVE_FORMAT_VERSION);
+      const v1 = downgradeToV1(current);
+      expect(readNativeFormatVersion(v1)).toBe(1);
+      const migrated = requireOk(
+        migrateNativeCadDocument(v1),
+        `migrating the v1 form of ${name}`,
+      );
+      const reparsed = requireOk(
+        parseNativeCadDocument(migrated),
+        `re-parsing the migrated v1 form of ${name}`,
+      );
+      const resaved = stringifyNativeCadDocument(
+        serializeNativeCadDocument(reparsed),
+      );
+      expect(resaved).toBe(text);
+    }
+  });
 });
+
+/** Lowers every embedded sketch stamp and the envelope one version (v2→v1). */
+function downgradeToV1(input: unknown): Record<string, unknown> {
+  const lowerSketch = (payload: unknown): unknown => {
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      !Array.isArray(payload) &&
+      (payload as Record<string, unknown>).formatVersion === 2
+    ) {
+      return { ...(payload as Record<string, unknown>), formatVersion: 1 };
+    }
+    return payload;
+  };
+  const lowerSection = (section: unknown): unknown => {
+    if (
+      typeof section !== "object" ||
+      section === null ||
+      Array.isArray(section)
+    ) {
+      return section;
+    }
+    const record = section as Record<string, unknown>;
+    if (!Array.isArray(record.sketches)) return section;
+    return {
+      ...record,
+      sketches: record.sketches.map((entry: unknown) =>
+        typeof entry === "object" && entry !== null && !Array.isArray(entry)
+          ? {
+              ...(entry as Record<string, unknown>),
+              sketch: lowerSketch((entry as Record<string, unknown>).sketch),
+            }
+          : entry,
+      ),
+    };
+  };
+  const record = input as Record<string, unknown>;
+  const out: Record<string, unknown> = {
+    ...record,
+    formatVersion: 1,
+    document: lowerSection(record.document),
+  };
+  if (
+    typeof record.history === "object" &&
+    record.history !== null &&
+    !Array.isArray(record.history)
+  ) {
+    const history = record.history as Record<string, unknown>;
+    out.history = {
+      ...history,
+      base: lowerSection(history.base),
+      transactions: Array.isArray(history.transactions)
+        ? history.transactions.map((transaction: unknown) => {
+            if (
+              typeof transaction !== "object" ||
+              transaction === null ||
+              Array.isArray(transaction)
+            ) {
+              return transaction;
+            }
+            const tx = transaction as Record<string, unknown>;
+            if (!Array.isArray(tx.commands)) return transaction;
+            return {
+              ...tx,
+              commands: tx.commands.map((command: unknown) =>
+                typeof command === "object" &&
+                command !== null &&
+                !Array.isArray(command) &&
+                (command as Record<string, unknown>).type === "sketch.create"
+                  ? {
+                      ...(command as Record<string, unknown>),
+                      sketch: lowerSketch(
+                        (command as Record<string, unknown>).sketch,
+                      ),
+                    }
+                  : command,
+              ),
+            };
+          })
+        : history.transactions,
+    };
+  }
+  return out;
+}

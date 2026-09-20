@@ -60,6 +60,7 @@ import {
   expectKernelFailure,
   unwrapKernelResult,
 } from "./test-utils";
+import { splineBezierChain, splineSegmentPoint } from "./profile-splines";
 
 /** See module docs; relative tolerance for curved/discretized volumes. */
 export const CURVED_VOLUME_TOLERANCE = 0.05;
@@ -196,6 +197,39 @@ function rectangleLoop(
     { kind: "line", start: [x0 + w, y0 + h], end: [x0, y0 + h] },
     { kind: "line", start: [x0, y0 + h], end: [x0, y0] },
   ];
+}
+
+/**
+ * The exact swept volume of the interpolated-spline bow fixture: Green's
+ * theorem over a 4000-vertex on-curve sampling of the Catmull-Rom chain
+ * (the shared evaluation), times the extrude height. The dense reference
+ * is within 1e-9 relative of the integral — every kernel's chord form must
+ * sit in the curved band of IT, not of a hand-typed number.
+ */
+function splineBowReferenceVolume(
+  fitPoints: readonly (readonly [number, number])[],
+  height: number,
+): number {
+  const chain = splineBezierChain("interpolated", fitPoints);
+  const points: { x: number; y: number }[] = [];
+  const perSegment = Math.ceil(4000 / chain.length);
+  for (let s = 0; s < chain.length; s += 1) {
+    const segment = chain[s];
+    if (segment === undefined) continue;
+    for (let i = 0; i < perSegment; i += 1) {
+      points.push(splineSegmentPoint(segment, i / perSegment));
+    }
+  }
+  const last = chain[chain.length - 1];
+  if (last !== undefined) points.push(last.b3);
+  let area = 0;
+  for (let i = 0; i + 1 < points.length; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (a === undefined || b === undefined) continue;
+    area += (a.x * b.y - b.x * a.y) / 2;
+  }
+  return Math.abs(area) * height;
 }
 
 function identityPlacement(): ProfilePlacementInput {
@@ -903,6 +937,153 @@ export function defineKernelContractSuite(
       assertTessellationValid(
         unwrapKernelResult(kernel.tessellate(solid), "circle extrude soup"),
         {},
+      );
+    });
+
+    it("extrudes an ellipse profile within the curved band (Phase 36)", () => {
+      const kernel = createKernel();
+      const solid = unwrapKernelResult(
+        kernel.extrude({
+          loop: [
+            {
+              kind: "ellipse",
+              center: [3, -2],
+              radiusX: 8,
+              radiusY: 4.5,
+              rotation: angle(0.7),
+            },
+          ],
+          height: length(6),
+          direction: 1,
+          placement: identityPlacement(),
+        }),
+        "ellipse extrude",
+      );
+      // πab·h — exact at OCCT (probed); the mesh kernels chord the ellipse
+      // at the turning-bounded step and sit in the curved band.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "ellipse extrude volume"),
+        Math.PI * 8 * 4.5 * 6,
+        CURVED_VOLUME_TOLERANCE,
+      );
+      assertTessellationValid(
+        unwrapKernelResult(kernel.tessellate(solid), "ellipse extrude soup"),
+        {},
+      );
+    });
+
+    it("extrudes a half-ellipse arc closed by chords within the curved band (Phase 36)", () => {
+      const kernel = createKernel();
+      const solid = unwrapKernelResult(
+        kernel.extrude({
+          loop: [
+            {
+              kind: "ellipticalArc",
+              center: [0, 0],
+              radiusX: 6,
+              radiusY: 3,
+              rotation: angle(0),
+              startAngle: angle(0),
+              endAngle: angle(Math.PI),
+            },
+            { kind: "line", start: [-6, 0], end: [0, 0] },
+            { kind: "line", start: [0, 0], end: [6, 0] },
+          ],
+          height: length(4),
+          direction: 1,
+          placement: identityPlacement(),
+        }),
+        "elliptical arc extrude",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(
+          kernel.volume(solid),
+          "elliptical arc extrude volume",
+        ),
+        ((Math.PI * 6 * 3) / 2) * 4,
+        CURVED_VOLUME_TOLERANCE,
+      );
+    });
+
+    it("extrudes a spline bow closed by chords within the curved band (Phase 36)", () => {
+      const kernel = createKernel();
+      const solid = unwrapKernelResult(
+        kernel.extrude({
+          loop: [
+            {
+              kind: "spline",
+              flavor: "control",
+              points: [
+                [0, 0],
+                [2, 8],
+                [6, 8],
+                [10, 0],
+              ],
+            },
+            { kind: "line", start: [10, 0], end: [5, 0] },
+            { kind: "line", start: [5, 0], end: [0, 0] },
+          ],
+          height: length(2),
+          direction: 1,
+          placement: identityPlacement(),
+        }),
+        "spline extrude",
+      );
+      // The analytic Bézier bow area is 40.8 mm² (Green's theorem over the
+      // parametric form — the OCCT probe certified the same value exactly);
+      // the mesh kernels carry the convex-hull deflection band.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "spline extrude volume"),
+        40.8 * 2,
+        CURVED_VOLUME_TOLERANCE,
+      );
+      assertTessellationValid(
+        unwrapKernelResult(kernel.tessellate(solid), "spline extrude soup"),
+        {},
+      );
+    });
+
+    it("extrudes an interpolated spline through its fit points within the curved band (Phase 36)", () => {
+      const kernel = createKernel();
+      const solid = unwrapKernelResult(
+        kernel.extrude({
+          loop: [
+            {
+              kind: "spline",
+              flavor: "interpolated",
+              points: [
+                [0, 0],
+                [5, 7],
+                [10, 0],
+              ],
+            },
+            { kind: "line", start: [10, 0], end: [5, 0] },
+            { kind: "line", start: [5, 0], end: [0, 0] },
+          ],
+          height: length(3),
+          direction: 1,
+          placement: identityPlacement(),
+        }),
+        "interpolated spline extrude",
+      );
+      // The Catmull-Rom reference area via the kernel's own exact Green
+      // sum over a dense on-curve sampling (shared constant math — the
+      // same number every kernel's chord form must sit within the band of).
+      const reference = splineBowReferenceVolume(
+        [
+          [0, 0],
+          [5, 7],
+          [10, 0],
+        ],
+        3,
+      );
+      assertVolumeClose(
+        unwrapKernelResult(
+          kernel.volume(solid),
+          "interpolated spline extrude volume",
+        ),
+        reference,
+        CURVED_VOLUME_TOLERANCE,
       );
     });
 

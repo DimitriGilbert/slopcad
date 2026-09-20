@@ -21,16 +21,11 @@
  *   naming both versions), and an older version must reach the current one
  *   through the registered chain.
  *
- * The production registry ({@link NATIVE_FORMAT_MIGRATIONS}) is empty: v1 is
- * the first native format version, so the only supported input version and
- * the current version coincide and the applied chain is always the empty
- * chain. The mechanism itself is real and exercised — composition, gap
- * failures, version gating, and the stamping contract are all proven by the
- * tests, which inject synthetic migrations (a v0→v1 test shape and a v1→v2
- * continuation) through the parameterized planning/running functions. Those
- * synthetic migrations exist in tests ONLY and are never registered in
- * production code: a migration in the production registry asserts that real
- * documents in the old shape exist in the wild, which is false today.
+ * The registry's first real step is v1→v2 (Phase 36): the embedded sketch
+ * payloads' additive vocabulary growth (see `version.ts`). The synthetic
+ * migrations the mechanism tests inject (a v0→v1 test shape and a v1→v2
+ * continuation) exist in tests ONLY and are never registered in production
+ * code alongside the real steps.
  */
 
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
@@ -84,13 +79,127 @@ export interface NativeFormatMigration {
 
 /**
  * The production migration registry, ordered or not — planning walks it by
- * version, not position. Currently empty because v1 is the first native
- * format version; the first future schema change appends its real step here
- * (and bumps `CAD_NATIVE_FORMAT_VERSION`), which is the only edit a future
- * migration requires.
+ * version, not position. The v1→v2 step (Phase 36) carries the first real
+ * schema growth: the embedded sketch payloads' vocabulary grew additive
+ * (new entity and constraint kinds), so the step bumps every embedded
+ * sketch payload's `formatVersion` from 1 to 2 — in the head document's
+ * sketch records, the history base's sketch records, and every
+ * `sketch.create` command payload in the transaction log — leaving all
+ * other content byte-identical. A payload already stamped 2 (impossible in
+ * the wild, tolerated in hand-made files) passes through unchanged.
  */
 export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
-  Object.freeze([]);
+  Object.freeze([
+    {
+      from: 1,
+      to: 2,
+      migrate: migrateV1ToV2,
+    },
+  ]);
+
+/** Bumps one embedded sketch payload's stamp from 1 to 2 (v1→v2 step). */
+function migrateSketchPayload(payload: unknown): unknown {
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Array.isArray(payload)
+  ) {
+    return payload;
+  }
+  const record = payload as Record<string, unknown>;
+  if (record.formatVersion !== 1) return payload;
+  return { ...record, formatVersion: 2 };
+}
+
+/** Rewrites one document section's sketch records (head or history base). */
+function migrateDocumentSketches(section: unknown): unknown {
+  if (
+    typeof section !== "object" ||
+    section === null ||
+    Array.isArray(section)
+  ) {
+    return section;
+  }
+  const record = section as Record<string, unknown>;
+  if (!Array.isArray(record.sketches)) return section;
+  return {
+    ...record,
+    sketches: record.sketches.map((entry: unknown) =>
+      typeof entry === "object" && entry !== null && !Array.isArray(entry)
+        ? {
+            ...(entry as Record<string, unknown>),
+            sketch: migrateSketchPayload(
+              (entry as Record<string, unknown>).sketch,
+            ),
+          }
+        : entry,
+    ),
+  };
+}
+
+/** Rewrites one serialized transaction's `sketch.create` payloads. */
+function migrateTransaction(transaction: unknown): unknown {
+  if (
+    typeof transaction !== "object" ||
+    transaction === null ||
+    Array.isArray(transaction)
+  ) {
+    return transaction;
+  }
+  const record = transaction as Record<string, unknown>;
+  if (!Array.isArray(record.commands)) return transaction;
+  return {
+    ...record,
+    commands: record.commands.map((command: unknown) =>
+      typeof command === "object" &&
+      command !== null &&
+      !Array.isArray(command) &&
+      (command as Record<string, unknown>).type === "sketch.create"
+        ? {
+            ...(command as Record<string, unknown>),
+            sketch: migrateSketchPayload(
+              (command as Record<string, unknown>).sketch,
+            ),
+          }
+        : command,
+    ),
+  };
+}
+
+/** The v1→v2 content transform (the framework stamps `formatVersion`). */
+function migrateV1ToV2(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v1→v2 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  const record = input as Record<string, unknown>;
+  const migrated: Record<string, unknown> = {
+    ...record,
+    document: migrateDocumentSketches(record.document),
+  };
+  if (
+    typeof record.history === "object" &&
+    record.history !== null &&
+    !Array.isArray(record.history)
+  ) {
+    const history = record.history as Record<string, unknown>;
+    migrated.history = {
+      ...history,
+      base: migrateDocumentSketches(history.base),
+      transactions: Array.isArray(history.transactions)
+        ? history.transactions.map(migrateTransaction)
+        : history.transactions,
+    };
+  }
+  return ok(migrated);
+}
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
