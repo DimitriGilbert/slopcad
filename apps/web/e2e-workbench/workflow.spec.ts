@@ -347,6 +347,12 @@ test("select, inspect, edit, regenerate, undo, and redo", async ({ page }) => {
   });
   expect(volumeNear(Number(editedVolume), Number(bootVolume))).toBe(false);
 
+  // The row never contradicts itself across a parameter edit: the summary
+  // counts the document's HEALTH (the same joined statuses the chips
+  // render), so an edit that re-runs nothing cannot flip it beside a
+  // chain of Valid chips.
+  await expect(page.getByTestId("timeline-summary")).toHaveText("2 valid");
+
   // The history grew; undo reverts the volume exactly; redo re-applies.
   await expect(page.locator(UNDO_BUTTON)).toBeEnabled();
   await page.locator(UNDO_BUTTON).click();

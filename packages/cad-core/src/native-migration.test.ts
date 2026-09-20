@@ -102,10 +102,107 @@ const SYNTHETIC_V1_TO_V2: NativeFormatMigration = {
   },
 };
 
-/** The production registry stays empty: v1 is the first native format version. */
+/**
+ * The production registry carries the real v1→v2 step (Phase 36: the
+ * embedded sketch payloads' additive vocabulary growth).
+ */
 describe("the production migration registry", () => {
-  it("is empty (v1 is the first version; the current chain is the no-op identity)", () => {
-    expect(NATIVE_FORMAT_MIGRATIONS).toEqual([]);
+  it("carries exactly the v1→v2 step with a pure deterministic transform", () => {
+    expect(NATIVE_FORMAT_MIGRATIONS).toHaveLength(1);
+    const step = NATIVE_FORMAT_MIGRATIONS[0];
+    expect(step).toMatchObject({ from: 1, to: 2 });
+    if (step === undefined) return;
+    const document = {
+      formatVersion: 1,
+      document: {
+        sketches: [
+          {
+            id: "skd_a",
+            name: "a",
+            sketch: { formatVersion: 1, entities: [] },
+          },
+        ],
+      },
+      history: {
+        base: {
+          sketches: [
+            {
+              id: "skd_a",
+              name: "a",
+              sketch: { formatVersion: 1, entities: [] },
+            },
+          ],
+        },
+        transactions: [
+          {
+            formatVersion: 1,
+            commands: [
+              {
+                formatVersion: 1,
+                type: "sketch.create",
+                id: "skd_a",
+                name: "a",
+                sketch: { formatVersion: 1, entities: [] },
+              },
+            ],
+          },
+        ],
+        cursor: 1,
+      },
+      regeneration: {},
+      metadata: {},
+    };
+    const first = step.migrate(document);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    // Every embedded sketch payload bumped; all other content identical.
+    expect(first.value).toEqual({
+      formatVersion: 1,
+      document: {
+        sketches: [
+          {
+            id: "skd_a",
+            name: "a",
+            sketch: { formatVersion: 2, entities: [] },
+          },
+        ],
+      },
+      history: {
+        base: {
+          sketches: [
+            {
+              id: "skd_a",
+              name: "a",
+              sketch: { formatVersion: 2, entities: [] },
+            },
+          ],
+        },
+        transactions: [
+          {
+            formatVersion: 1,
+            commands: [
+              {
+                formatVersion: 1,
+                type: "sketch.create",
+                id: "skd_a",
+                name: "a",
+                sketch: { formatVersion: 2, entities: [] },
+              },
+            ],
+          },
+        ],
+        cursor: 1,
+      },
+      regeneration: {},
+      metadata: {},
+    });
+    const again = step.migrate(first.value);
+    expect(again.ok).toBe(true);
+    if (again.ok) {
+      // Already-stamped-2 payloads pass through unchanged (idempotent
+      // content, the framework stamps the version).
+      expect(again.value).toEqual(first.value);
+    }
   });
 });
 
@@ -280,15 +377,15 @@ describe("migrateNativeCadDocument (the production front door)", () => {
   });
 
   it("rejects a future version predictably", () => {
-    const document = { ...currentDocument(), formatVersion: 2 };
+    const document = { ...currentDocument(), formatVersion: 3 };
     const result = migrateNativeCadDocument(document);
     expect(result).toMatchObject({
       ok: false,
       error: { code: "native-migration/version-unsupported" },
     });
     if (!result.ok) {
+      expect(result.error.message).toContain("3");
       expect(result.error.message).toContain("2");
-      expect(result.error.message).toContain("1");
     }
   });
 

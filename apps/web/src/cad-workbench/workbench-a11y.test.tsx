@@ -75,16 +75,10 @@ describe("FeatureTimelineChips accessibility", () => {
     ).toBe("true");
   });
 
-  it("announces the run counter as plain text", () => {
-    render(
-      <FeatureTimelineSummary
-        entries={[ENTRY]}
-        executed={[FEATURE_ID]}
-        rollback={null}
-      />,
-    );
+  it("announces the health counter as plain text", () => {
+    render(<FeatureTimelineSummary entries={[ENTRY]} rollback={null} />);
     expect(screen.getByTestId("timeline-summary").textContent).toContain(
-      "1 executed",
+      "1 valid",
     );
   });
 });

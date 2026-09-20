@@ -331,7 +331,7 @@ describe("sketch command wire format", () => {
 
   it("rejects unknown types, wrong versions, and malformed payloads", () => {
     const wrongType = parseSketchCommand({
-      formatVersion: 1,
+      formatVersion: 2,
       type: "feature.create",
     });
     expect(wrongType).toMatchObject({
@@ -348,7 +348,7 @@ describe("sketch command wire format", () => {
       error: { code: SKETCH_COMMAND_ERROR_CODES.versionUnsupported },
     });
     const malformed = parseSketchCommand({
-      formatVersion: 1,
+      formatVersion: 2,
       type: "sketch.dimension.set",
       constraintId: "skcon_distance",
       value: { dimension: "length", unit: "mm", value: -5 },

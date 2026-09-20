@@ -55,6 +55,15 @@ function panelField(page: Page, name: string) {
   return page.getByLabel(name, { exact: true });
 }
 
+/** The unit tag rendered inside a literal field's control right edge:
+ * the field head carries the name, the input the magnitude, the tag the
+ * canonical unit (the accessible name stays the bare parameter name). */
+function panelFieldUnit(page: Page, name: string) {
+  return panelField(page, name).locator(
+    'xpath=following-sibling::span[@data-slot="field-suffix"]',
+  );
+}
+
 /** One serialized command-log entry (the store's canonical transaction form). */
 interface SerializedCommandLogEntry {
   readonly formatVersion: number;
@@ -172,19 +181,18 @@ test("the panel renders the fixture document's parameters, byte-stably across tw
     "holeDiameter * 2",
   );
 
-  await expect(
-    page.locator(PANEL).getByText("Current value: 8 mm"),
-  ).toBeVisible();
-  await expect(
-    page.locator(PANEL).getByText("Current value: 0 mm"),
-  ).toHaveCount(3);
+  // The literal fields wear their canonical unit INSIDE the control (the
+  // value itself is asserted above through the inputs).
+  await expect(panelFieldUnit(page, "holeDiameter")).toHaveText("mm");
+  await expect(panelFieldUnit(page, "translate_x")).toHaveText("mm");
+  await expect(panelFieldUnit(page, "translate_y")).toHaveText("mm");
+  await expect(panelFieldUnit(page, "translate_z")).toHaveText("mm");
   // The rotate angle reads in the CANONICAL unit of its dimension.
+  await expect(panelFieldUnit(page, "rotate_z")).toHaveText("rad");
+  // The expression-driven parameter shows its evaluated quantity — its
+  // one data line, the expression's current result.
   await expect(
-    page.locator(PANEL).getByText("Current value: 0 rad"),
-  ).toBeVisible();
-  // The expression-driven parameter shows its current cached quantity.
-  await expect(
-    page.locator(PANEL).getByText("Current value: 16 mm"),
+    page.locator(PANEL).getByText("= 16 mm", { exact: true }),
   ).toBeVisible();
 
   await settleForCapture(page);
@@ -231,10 +239,21 @@ test("editing a value through the panel commits parameter.set and settles a new 
     value: 6,
   });
 
-  // The panel's mirror followed the commit.
+  // The panel's mirror followed the commit: the sr-only current-quantity
+  // sentence re-derived (one per field, still exactly one 6 mm sentence).
   await expect(
     page.locator(PANEL).getByText("Current value: 6 mm"),
+  ).toHaveCount(1);
+  // The EXPRESSION preview re-derived with the commit: `holeDiameter * 2`
+  // now evaluates to 12, so the expression field's one data line reads
+  // `= 12 mm` — and the stale `= 16 mm` line is gone. A preview that kept
+  // the pre-commit number would contradict the settled document.
+  await expect(
+    page.locator(PANEL).getByText("= 12 mm", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.locator(PANEL).getByText("= 16 mm", { exact: true }),
+  ).toHaveCount(0);
 
   // The executor stand-in followed the document: a settled NEW volume.
   const editedVolume = await waitForSettledScene(page, "ui-viewport-root");
@@ -262,6 +281,19 @@ test("editing a value through the panel commits parameter.set and settles a new 
     editedShotReplay.equals(editedShot),
     `edited sha256=${sha256(editedShot)} vs replay sha256=${sha256(editedShotReplay)}`,
   ).toBe(true);
+
+  // AFTER the byte comparisons: a SECOND commit re-derives the preview
+  // again (6 -> 9, `holeDiameter * 2` = 18) — the line tracks the
+  // document on every commit, not just the first derivation.
+  await panelField(page, "holeDiameter").fill("9");
+  await applyButton(page).click();
+  await waitForCommandCount(page, 2);
+  await expect(
+    page.locator(PANEL).getByText("= 18 mm", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(PANEL).getByText("= 12 mm", { exact: true }),
+  ).toHaveCount(0);
 });
 
 test("an invalid expression shows the domain's error state and issues nothing", async ({

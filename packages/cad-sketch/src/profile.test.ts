@@ -9,17 +9,27 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  SPLINE_TESSELLATION_DEFLECTION_MM,
+  bezierChainOfSpline,
+  createArc3SlotEntity,
   createArcEntity,
   createCircleEntity,
+  createEllipticalArcEntity,
+  createEllipseEntity,
   createLineEntity,
   createPointEntity,
+  createPolygonEntity,
   createRectangleEntity,
   createSketch,
   createSketchEntityId,
+  createSplineEntity,
+  createStraightSlotEntity,
   createWorkplane,
+  evaluateSplinePoint,
   frontWorkplane,
   parseWorkplane,
   serializeWorkplane,
+  tessellateSpline,
   workplaneBasis,
   xyWorkplane,
   type Sketch,
@@ -540,3 +550,288 @@ describe("workplaneToPlacement", () => {
     expect(placement.rotation.angleRad).toBeCloseTo(Math.PI / 2, 12);
   });
 });
+
+describe("resolveProfileLoops — phase 36 analytic fixtures", () => {
+  it("resolves a full ellipse into its own closed loop with the exact πab area", () => {
+    const ellipse = createEllipseEntity(
+      createSketchEntityId("skent_ellipse"),
+      { x: 3, y: -2 },
+      8,
+      4.5,
+      0.7,
+    );
+    const resolved = resolveProfileLoops([ellipse]);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.loops).toHaveLength(1);
+    expect(profileLoopSignedArea(resolved.value.loops[0]!)).toBeCloseTo(
+      Math.PI * 8 * 4.5,
+      9,
+    );
+  });
+
+  it("closes an elliptical arc with a two-piece chord at the exact half-ellipse area", () => {
+    const arc = createEllipticalArcEntity(
+      createSketchEntityId("skent_earc"),
+      { x: 0, y: 0 },
+      6,
+      3,
+      0,
+      0,
+      Math.PI,
+    );
+    // The chord splits into two collinear lines: the loop's walk needs
+    // three distinct vertices (the domain's degeneracy floor).
+    const chordA = createLineEntity(
+      createSketchEntityId("skent_chord-a"),
+      { x: -6, y: 0 },
+      { x: 0, y: 0 },
+    );
+    const chordB = createLineEntity(
+      createSketchEntityId("skent_chord-b"),
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+    );
+    const resolved = resolveProfileLoops([arc, chordA, chordB]);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(profileLoopSignedArea(resolved.value.loops[0]!)).toBeCloseTo(
+      (Math.PI * 6 * 3) / 2,
+      9,
+    );
+  });
+
+  it("resolves a polygon into its exact regular n-gon area for both fits", () => {
+    const inscribed = createPolygonEntity(
+      createSketchEntityId("skent_hex"),
+      { x: 1, y: 1 },
+      5,
+      6,
+      0.3,
+      "inscribed",
+    );
+    const resolved = resolveProfileLoops([inscribed]);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    // ½·n·r²·sin(2π/n) for the circumradius r.
+    expect(profileLoopSignedArea(resolved.value.loops[0]!)).toBeCloseTo(
+      0.5 * 6 * 25 * Math.sin((2 * Math.PI) / 6),
+      9,
+    );
+    const circumscribed = createPolygonEntity(
+      createSketchEntityId("skent_hex"),
+      { x: 0, y: 0 },
+      5,
+      6,
+      0,
+      "circumscribed",
+    );
+    const resolvedCircum = resolveProfileLoops([circumscribed]);
+    expect(resolvedCircum.ok).toBe(true);
+    if (!resolvedCircum.ok) return;
+    const effective = 5 / Math.cos(Math.PI / 6);
+    expect(profileLoopSignedArea(resolvedCircum.value.loops[0]!)).toBeCloseTo(
+      0.5 * 6 * effective * effective * Math.sin((2 * Math.PI) / 6),
+      9,
+    );
+  });
+
+  it("resolves a straight slot at the exact stadium area πr² + 2rL", () => {
+    const slot = createStraightSlotEntity(
+      createSketchEntityId("skent_slot"),
+      { x: -7, y: 2 },
+      { x: 7, y: 2 },
+      3,
+    );
+    const resolved = resolveProfileLoops([slot]);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(profileLoopSignedArea(resolved.value.loops[0]!)).toBeCloseTo(
+      Math.PI * 9 + 2 * 3 * 14,
+      9,
+    );
+  });
+
+  it("resolves a 3-point-arc slot at the exact annular-sector-plus-caps area", () => {
+    // Centerline arc: R = 10 about the origin, sweep π/2 from (10,0)
+    // through (10/√2, 10/√2) to (0,10); caps r = 2. Area = 2θRr + πr².
+    const slot = createArc3SlotEntity(
+      createSketchEntityId("skent_slot"),
+      { x: 10, y: 0 },
+      { x: 10 / Math.SQRT2, y: 10 / Math.SQRT2 },
+      { x: 0, y: 10 },
+      2,
+    );
+    const resolved = resolveProfileLoops([slot]);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(profileLoopSignedArea(resolved.value.loops[0]!)).toBeCloseTo(
+      2 * (Math.PI / 2) * 10 * 2 + Math.PI * 4,
+      9,
+    );
+  });
+
+  it("resolves a spline closed by a chord at the chord-form Green area within the documented band", () => {
+    // A positive-bow spline (crown ≈ y=6) closed by the two-piece chord:
+    // the walk runs CCW, so the signed area is positive.
+    const spline = createSplineEntity(
+      createSketchEntityId("skent_spline"),
+      "control",
+      [
+        { x: 0, y: 0 },
+        { x: 2, y: 8 },
+        { x: 6, y: 8 },
+        { x: 10, y: 0 },
+      ],
+    );
+    const chordA = createLineEntity(
+      createSketchEntityId("skent_chord-a"),
+      { x: 10, y: 0 },
+      { x: 5, y: 0 },
+    );
+    const chordB = createLineEntity(
+      createSketchEntityId("skent_chord-b"),
+      { x: 5, y: 0 },
+      { x: 0, y: 0 },
+    );
+    const resolved = resolveProfileLoops([spline, chordA, chordB]);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    const area = profileLoopSignedArea(resolved.value.loops[0]!);
+    // Winding is as drawn (the chain may traverse the bow backward); the
+    // magnitude is the bow's face (~2/3 · base · crown height).
+    expect(Math.abs(area)).toBeGreaterThan(30);
+    // The reference: Green's theorem on a 2000-vertex dense sampling of
+    // the true curve (vertices on the curve, like the tessellation but
+    // finer); the chord form must sit within the deflection band of it —
+    // bounded by perimeter × deflection (the convex-hull bound's area form).
+    const dense = tessellateSpline(
+      { flavor: "control", points: spline.points },
+      false,
+    ).length;
+    const fine = tessellateSplineFine(spline.points);
+    let fineArea = 0;
+    for (let i = 0; i + 1 < fine.length; i += 1) {
+      const a = fine[i]!;
+      const b = fine[i + 1]!;
+      fineArea += (a.x * b.y - b.x * a.y) / 2;
+    }
+    expect(dense).toBeGreaterThan(10);
+    const perimeter = 40;
+    expect(Math.abs(Math.abs(area) - Math.abs(fineArea))).toBeLessThanOrEqual(
+      perimeter * SPLINE_TESSELLATION_DEFLECTION_MM,
+    );
+  });
+
+  it("fails with sketch/profile-open-chain for a lone spline or elliptical arc", () => {
+    const spline = createSplineEntity(
+      createSketchEntityId("skent_spline"),
+      "interpolated",
+      [
+        { x: 0, y: 0 },
+        { x: 5, y: 5 },
+        { x: 10, y: 0 },
+      ],
+    );
+    const resolved = resolveProfileLoops([spline]);
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.error.code).toBe("sketch/profile-open-chain");
+    const arc = createEllipticalArcEntity(
+      createSketchEntityId("skent_earc"),
+      { x: 0, y: 0 },
+      6,
+      3,
+      0,
+      0,
+      1.5,
+    );
+    const arcResolved = resolveProfileLoops([arc]);
+    expect(arcResolved.ok).toBe(false);
+    if (arcResolved.ok) return;
+    expect(arcResolved.error.code).toBe("sketch/profile-open-chain");
+  });
+
+  it("detects a line crossing a spline bow (the tessellated battery)", () => {
+    // An up-bowed spline from (0,0) to (10,0) (crown ≈ y=6), closed by a
+    // rise, a diagonal at y ∈ [3,5], and a drop — the diagonal crosses the
+    // bow around x ≈ 7.
+    const spline = createSplineEntity(
+      createSketchEntityId("skent_spline"),
+      "control",
+      [
+        { x: 0, y: 0 },
+        { x: 2, y: 8 },
+        { x: 6, y: 8 },
+        { x: 10, y: 0 },
+      ],
+    );
+    const rise = createLineEntity(
+      createSketchEntityId("skent_rise"),
+      { x: 10, y: 0 },
+      { x: 10, y: 5 },
+    );
+    const diagonal = createLineEntity(
+      createSketchEntityId("skent_diagonal"),
+      { x: 10, y: 5 },
+      { x: 0, y: 3 },
+    );
+    const drop = createLineEntity(
+      createSketchEntityId("skent_drop"),
+      { x: 0, y: 3 },
+      { x: 0, y: 0 },
+    );
+    const resolved = resolveProfileLoops([spline, rise, diagonal, drop]);
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.error.code).toBe("sketch/profile-self-intersecting");
+    expect(resolved.error.related).toContain("skent_spline");
+  });
+
+  it("detects a line crossing a tessellated elliptical arc", () => {
+    // The upper half-ellipse (6×3) from (6,0) CCW to (−6,0); a rise from
+    // (−6,0) to (0,4) and a closing line (0,4) → (6,0) that cuts through
+    // the arc's interior — the chord-based battery names the crossing.
+    const arc = createEllipticalArcEntity(
+      createSketchEntityId("skent_earc"),
+      { x: 0, y: 0 },
+      6,
+      3,
+      0,
+      0,
+      Math.PI,
+    );
+    const rise = createLineEntity(
+      createSketchEntityId("skent_rise"),
+      { x: -6, y: 0 },
+      { x: 0, y: 4 },
+    );
+    const closing = createLineEntity(
+      createSketchEntityId("skent_closing"),
+      { x: 0, y: 4 },
+      { x: 6, y: 0 },
+    );
+    const resolved = resolveProfileLoops([arc, rise, closing]);
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.error.code).toBe("sketch/profile-self-intersecting");
+    expect(resolved.error.related).toContain("skent_earc");
+  });
+});
+
+/** A dense on-curve sampling (2000 vertices) for the spline area reference. */
+function tessellateSplineFine(
+  points: readonly { readonly x: number; readonly y: number }[],
+): readonly { readonly x: number; readonly y: number }[] {
+  const chain = bezierChainOfSpline({ flavor: "control", points });
+  const out: { x: number; y: number }[] = [];
+  const perSegment = Math.ceil(2000 / chain.segments.length);
+  for (let s = 0; s < chain.segments.length; s += 1) {
+    for (let i = 0; i < perSegment; i += 1) {
+      const point = evaluateSplinePoint(chain, s, i / perSegment);
+      out.push(point);
+    }
+  }
+  out.push(evaluateSplinePoint(chain, chain.segments.length - 1, 1));
+  return out;
+}

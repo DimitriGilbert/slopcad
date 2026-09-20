@@ -1,5 +1,5 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "metadata": {
     "name": "workbench-extrude",
     "unitSystem": "metric"
@@ -81,7 +81,7 @@
         "id": "skd_profile",
         "name": "profile",
         "sketch": {
-          "formatVersion": 1,
+          "formatVersion": 2,
           "workplane": {
             "origin": {
               "x": 0,
@@ -219,7 +219,7 @@
           "id": "skd_profile",
           "name": "profile",
           "sketch": {
-            "formatVersion": 1,
+            "formatVersion": 2,
             "workplane": {
               "origin": {
                 "x": 0,

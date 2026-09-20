@@ -18,7 +18,7 @@ import { defineConfig } from "@playwright/test";
  * decision and its stability evidence).
  */
 
-const PORT = 3006;
+const PORT = 3206;
 const baseURL = process.env.PERF_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({

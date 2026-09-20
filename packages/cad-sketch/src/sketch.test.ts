@@ -191,10 +191,10 @@ describe("sketch serialization", () => {
   });
 
   it("stamps and enforces the format version", () => {
-    expect(SKETCH_FORMAT_VERSION).toBe(1);
+    expect(SKETCH_FORMAT_VERSION).toBe(2);
     const sketch = createSketch(xyWorkplane(), [], []);
-    expect(sketch.ok && serializeSketch(sketch.value).formatVersion).toBe(1);
-    for (const formatVersion of [0, 2, "1", null]) {
+    expect(sketch.ok && serializeSketch(sketch.value).formatVersion).toBe(2);
+    for (const formatVersion of [0, 1, 3, "2", null]) {
       const result = parseSketch({
         formatVersion,
         workplane: null,

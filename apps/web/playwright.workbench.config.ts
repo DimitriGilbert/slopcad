@@ -10,7 +10,7 @@ import { defineConfig } from "@playwright/test";
  * Kept OUT of `pnpm verify` — run via `pnpm test:workbench`.
  */
 
-const PORT = 3005;
+const PORT = 3205;
 const baseURL =
   process.env.WORKBENCH_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 

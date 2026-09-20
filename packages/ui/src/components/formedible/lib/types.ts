@@ -329,6 +329,12 @@ export interface FormedibleFieldConfig<
   readonly inputClassName?: string;
   /** Class applied to the label of this field; the hook-level `labelClassName` is appended. */
   readonly labelClassName?: string;
+  /**
+   * Quiet unit tag rendered INSIDE the control's right edge (aria-hidden
+   * decoration; the value itself stays the input's). Consumed by the
+   * number field; other field types ignore it.
+   */
+  readonly suffix?: string;
   /** File acceptance filter; falls back to `fileConfig.accept`. */
   readonly accept?: string;
   /** Multiple selection flag for file inputs; falls back to `fileConfig.multiple`. */
@@ -410,6 +416,12 @@ export interface NormalizedFieldConfig<
   readonly inputClassName?: string;
   /** Class applied to the label of this field; the hook-level `labelClassName` is appended. */
   readonly labelClassName?: string;
+  /**
+   * Quiet unit tag rendered INSIDE the control's right edge (aria-hidden
+   * decoration; the value itself stays the input's). Consumed by the
+   * number field; other field types ignore it.
+   */
+  readonly suffix?: string;
   /** File acceptance filter; falls back to `fileConfig.accept`. */
   readonly accept?: string;
   /** Multiple selection flag for file inputs; falls back to `fileConfig.multiple`. */

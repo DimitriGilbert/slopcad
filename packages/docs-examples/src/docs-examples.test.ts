@@ -28,6 +28,7 @@ import { runProjectionExample } from "./core/projection";
 import { runUnitsExample } from "./core/units";
 import { runMeshExchangeExample } from "./io/mesh";
 import { runSketchExample } from "./sketch/sketch";
+import { runSketchVocabularyExample } from "./sketch/vocabulary";
 import { runKernelExample, unwrapKernel } from "./kernel/primitives";
 
 let runtime: ManifoldRuntime;
@@ -83,7 +84,7 @@ describe("guide example: history (transactions, undo, redo)", () => {
 describe("guide example: native format", () => {
   it("saves, reopens through the replaying parser, and resaves identically", () => {
     const summary = runNativeFormatExample();
-    expect(summary.formatVersion).toBe(1);
+    expect(summary.formatVersion).toBe(2);
     expect(summary.reopenedHoleMm).toBe(12);
     expect(summary.reopenedTransactionCount).toBe(3);
     expect(summary.validatorIssues).toBe(0);
@@ -268,6 +269,19 @@ describe("guide example: sketches and constraints", () => {
     expect(summary.profileLoopSegments).toBe(3);
     // Heron's area of the 50/30/40 triangle: 600 mm².
     expect(summary.profileSignedAreaMm2).toBeCloseTo(600, 6);
+  });
+
+  it("tours the Phase 36 vocabulary: ellipse dof, pinned spline, exact slot area", () => {
+    const summary = runSketchVocabularyExample();
+    expect(summary.ellipseDof).toBe(5);
+    expect(summary.ellipseConstrainedDof).toBe(0);
+    expect(summary.solvedRadiusXMm).toBeCloseTo(8, 9);
+    expect(summary.solvedRadiusYMm).toBeCloseTo(5, 9);
+    expect(summary.splineInteriorDof).toBe(4);
+    expect(summary.slotLoopSegments).toBe(4);
+    // The exact stadium area πr² + 2rL with r = 2, L = 10.
+    expect(summary.slotLoopAreaMm2).toBeCloseTo(Math.PI * 4 + 40, 9);
+    expect(summary.serializedRoundTripExact).toBe(true);
   });
 });
 

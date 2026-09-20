@@ -570,11 +570,15 @@
       "name": "cad-viewport",
       "type": "registry:component",
       "title": "CAD Viewport",
-      "description": "WebGL viewport composing the @slopcad/cad-r3f deterministic scene with @slopcad/cad-react tool wiring, selection mirroring, and an overlay slot.",
+      "description": "WebGL viewport composing the @slopcad/cad-r3f deterministic scene with @slopcad/cad-react tool wiring, selection mirroring, and an overlay slot; the scene's studio ink follows the app's scheme+register through the shipped studio palette.",
       "dependencies": ["@slopcad/cad-react", "@slopcad/cad-r3f", "cn"],
       "files": [
         {
           "path": "src/components/cad/cad-viewport.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/cad/cad-studio-palette.ts",
           "type": "registry:component"
         }
       ]

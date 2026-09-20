@@ -27,12 +27,16 @@
  *   (see `useCadParameters`), so a committed expression edit is honestly a
  *   `parameter.set` of what the expression currently produces — the stored
  *   expression is domain substrate and is never written from the UI.
- * - Every field's label IS the parameter name (domain data, not prose), and
- *   its description carries the current quantity in the canonical unit of
- *   the parameter's dimension (`mm`, `rad`, `mm2`, `mm3`, `1` — the unit
- *   registry's canonical tokens; magnitudes render with the domain's own
- *   magnitude formatting, the same `String(number)` rule `printExpression`
- *   uses).
+ * - Every field's label IS the parameter name (domain data, not prose).
+ *   The current quantity never renders as a third row under the input:
+ *   a LITERAL field wears its canonical unit INSIDE the control (the
+ *   number field's `suffix`), and an EXPRESSION field prints its
+ *   evaluated quantity as the field's one data line (`= 16 mm`) — the
+ *   canonical unit of the parameter's dimension (`mm`, `rad`, `mm2`,
+ *   `mm3`, `1` — the unit registry's canonical tokens; magnitudes render
+ *   with the domain's own magnitude formatting, the same `String(number)`
+ *   rule `printExpression` uses). The full current-quantity sentence
+ *   rides along as a screen-reader-only description.
  *
  * Unchanged edits are filtered before anything is issued: a submitted value
  * that is `equalQuantity` to the current one, or an expression whose text
@@ -105,6 +109,7 @@ import {
 import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
+import { Button } from "../button";
 import { useFormedible } from "../formedible/hooks/use-formedible";
 
 /** The user-facing strings of {@link CadParameterPanel}. Overridable via props. */
@@ -405,7 +410,33 @@ export function CadParameterPanel({
     const fields: FormedibleFieldConfig<CadParameterPanelFormValues>[] = [];
 
     for (const parameter of parameterList) {
-      const quantity = `${mergedLabels.currentValue}: ${currentQuantityText(parameter)}`;
+      // The preview quantity: for an EXPRESSION parameter the cached
+      // `parameter.value` can lag the collection — a foreign parameter.set
+      // commit (an edit to a DIFFERENT parameter this expression reads) does
+      // not rewrite this parameter's cached value, so the stale number would
+      // contradict the settled document. The preview therefore re-evaluates
+      // the defining expression against the CURRENT environment on every
+      // collection change; the cached value is the fallback when no
+      // evaluator is available or the expression does not evaluate.
+      let quantity = currentQuantityText(parameter);
+      if (parameter.expression !== null && evaluate !== undefined) {
+        const evaluated = evaluate(printExpression(parameter.expression));
+        if (evaluated.ok) {
+          const canonical = toCanonical(evaluated.value);
+          quantity = `${String(canonical.value)} ${CANONICAL_UNITS[canonical.dimension]}`;
+        }
+      }
+      // The field's quantity lives in the field HEAD, not a third row:
+      // literal fields wear their canonical unit INSIDE the control (the
+      // suffix), expression fields print their evaluated quantity as the
+      // one data line (`= 16 mm`). The full current-quantity sentence
+      // rides along as a screen-reader-only description — same words as
+      // ever, zero extra visual rows.
+      const srQuantity = (
+        <span className="sr-only">
+          {`${mergedLabels.currentValue}: ${quantity}`}
+        </span>
+      );
       if (parameter.expression === null) {
         defaultValues[valueKey(parameter.id)] = toCanonical(
           parameter.value,
@@ -414,7 +445,8 @@ export function CadParameterPanel({
           name: valueKey(parameter.id),
           type: "number",
           label: parameter.name,
-          description: quantity,
+          description: srQuantity,
+          suffix: CANONICAL_UNITS[parameter.value.dimension],
           inputClassName: "font-mono",
           // A finite-number gate with the externalized message; a refused
           // field blocks submit, so nothing is issued from it.
@@ -432,7 +464,14 @@ export function CadParameterPanel({
         name: expressionKey(parameter.id),
         type: "text",
         label: parameter.name,
-        description: quantity,
+        description: (
+          <>
+            {srQuantity}
+            <span aria-hidden="true" className="font-mono">
+              {`= ${quantity}`}
+            </span>
+          </>
+        ),
         inputClassName: "font-mono",
         // The domain owns expression correctness: this validator returns the
         // domain's structured failure verbatim — the grammar is never
@@ -482,42 +521,90 @@ export function CadParameterPanel({
     // the fields to the committed document state on the next render.
     resetOnSubmitSuccess: false,
     submitLabel: mergedLabels.submit,
-    // The apply is the panel's one terminal action — full width, deliberate.
-    submitButtonClassName: "w-full",
     // Inert discipline: no apply surface, no submit button, disabled fields.
-    showSubmitButton: apply !== undefined && hasParameters,
+    showSubmitButton: false,
     disabled: apply === undefined,
   });
+
+  // The apply action is pinned as the dock's footer: the FIELDS scroll, the
+  // terminal action never leaves the viewport. It rides the Formedible
+  // form's own submit lifecycle (`form.handleSubmit` — the same path the
+  // in-form button took), so validation, touched-marking, and the onSubmit
+  // config are unchanged.
+  const submitApply = (): void => {
+    parameterForm.form
+      .handleSubmit()
+      .catch((error: unknown) => console.error(error));
+  };
 
   return (
     <div
       className={cn(
-        "border-border bg-background w-72 border text-sm",
+        "border-border bg-card/60 flex max-h-full min-h-0 flex-col overflow-hidden rounded-md border text-sm",
         className,
       )}
       data-slot="cad-parameter-panel"
     >
-      <div className="text-muted-foreground border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground border-border bg-background/40 shrink-0 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         {mergedLabels.title}
       </div>
       {!hasParameters ? (
-        <div className="text-muted-foreground px-2 py-2">
+        <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {mergedLabels.empty}
         </div>
       ) : (
         <>
           <parameterForm.Form
             aria-label={mergedLabels.title}
-            className="space-y-3 p-2"
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto p-2.5"
+            onKeyDown={(event) => {
+              // The pinned footer carries the form's only visible submit,
+              // so the form restores HTML's implicit Enter submission
+              // itself: Enter inside a field commits, exactly as it did
+              // with the in-form button. Buttons and links keep their
+              // native key handling; textareas keep Shift+Enter.
+              if (event.key !== "Enter" || event.shiftKey) return;
+              const target = event.target;
+              if (
+                target instanceof HTMLButtonElement ||
+                target instanceof HTMLTextAreaElement ||
+                target instanceof HTMLAnchorElement ||
+                (target instanceof HTMLElement && target.isContentEditable)
+              ) {
+                return;
+              }
+              event.preventDefault();
+              submitApply();
+            }}
           />
           {applyFailure !== undefined ? (
             <div
-              className="text-destructive border-t px-2 py-1.5 text-xs leading-4"
+              className="text-destructive border-border shrink-0 border-t px-2.5 py-1.5 text-xs leading-4"
               data-cad-param-panel-error=""
               role="alert"
             >
               {applyFailure}
             </div>
+          ) : null}
+          {apply !== undefined ? (
+            <parameterForm.form.Subscribe
+              selector={(state) => ({
+                canSubmit: Boolean(state.canSubmit),
+                isSubmitting: Boolean(state.isSubmitting),
+              })}
+            >
+              {(state) => (
+                <Button
+                  className="w-full rounded-none border-t border-t-border"
+                  disabled={!state.canSubmit || state.isSubmitting}
+                  onClick={submitApply}
+                  type="button"
+                  variant="default"
+                >
+                  {mergedLabels.submit}
+                </Button>
+              )}
+            </parameterForm.form.Subscribe>
           ) : null}
         </>
       )}

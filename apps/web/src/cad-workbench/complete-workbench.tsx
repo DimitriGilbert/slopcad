@@ -61,7 +61,17 @@ import {
   SELECT_TOOL_ID,
 } from "@slopcad/cad-react";
 import { formatBoundsExtents } from "@slopcad/cad-core";
-import { Redo2, Undo2 } from "lucide-react";
+import {
+  Command,
+  Download,
+  PanelLeft,
+  PanelRight,
+  PencilLine,
+  Redo2,
+  Undo2,
+  Upload,
+  X,
+} from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
   CadCommandMenu,
@@ -96,9 +106,9 @@ import {
 import { WorkbenchMeasurementSection } from "./measurement-section";
 import { useWorkbenchEngine, type WorkbenchEngine } from "./workbench-engine";
 
-/** The viewport's fixed box: the determinism contract (the camera spec is
- * authored for exactly this size; the scene runs at dpr 1). */
-const VIEWPORT_CLASS = "h-[520px] w-[800px]";
+/** The viewport fills its workspace region at every width (the camera
+ * rig re-applies the spec's aspect on resize; the scene stays dpr 1). */
+const VIEWPORT_CLASS = "h-full w-full";
 
 /** The imported-mesh preview the composition renders in the viewport. */
 export interface CadImportPreview {
@@ -159,7 +169,7 @@ export type CadWorkbenchSlot = (context: CadWorkbenchSlotContext) => ReactNode;
 export interface CadWorkbenchSlots {
   /** The command row's tool strip. */
   readonly toolbar?: CadWorkbenchSlot;
-  /** The command row's history timeline. */
+  /** The feature band's history timeline (full width, below the workspace). */
   readonly historyTimeline?: CadWorkbenchSlot;
   /** The command menu (trigger + palette; the palette is portal-mounted). */
   readonly commandMenu?: CadWorkbenchSlot;
@@ -202,6 +212,30 @@ const LABELS = {
 } as const;
 
 /**
+ * The first-run sketch hint's persistence: dismissed once per browser
+ * (entering sketch mode counts as dismissed — the discovery worked).
+ */
+const SKETCH_HINT_STORAGE_KEY = "slopcad.sketch-hint.dismissed";
+
+/** Reads the hint's persisted dismissal, tolerating stripped storage. */
+function sketchHintStoredDismissal(): boolean {
+  try {
+    return window.localStorage.getItem(SKETCH_HINT_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The DRO's value ink. In the dark register the digits read as an emissive
+ * machine readout — amber over the near-black band with a soft glow — the
+ * cockpit's glance-mark; in light the values are plain instrument ink on
+ * paper and nothing glows.
+ */
+const DRO_VALUE =
+  "text-foreground dark:text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]";
+
+/**
  * The complete CAD workbench: all eight plan surfaces composed over the
  * shared engine, every piece replaceable by slot, every interaction routed
  * through the public CAD APIs.
@@ -219,7 +253,6 @@ export function CompleteCadWorkbench({
   });
   const {
     applied,
-    executed,
     historyApi,
     holeBase,
     mode,
@@ -246,14 +279,55 @@ export function CompleteCadWorkbench({
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importedFrames, setImportedFrames] = useState(0);
+  // The settle lamp's honest state: the document whose pixels the last
+  // settled frame actually rendered. A commit flips the lamp to "waiting"
+  // the instant the document identity changes (the pixels now lag the
+  // document) and back to "settled" when the regenerated scene's first
+  // settled frame stamps. An import preview never settles the document.
+  const [settledDocument, setSettledDocument] = useState<unknown>(null);
+  // Below the dock breakpoint the docks become overlay drawers: one DOM
+  // instance per dock, slid in and out by transform, returned to the flex
+  // flow at `xl` — so the machine surfaces never unmount at any width.
+  const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
+  const [panelsDrawerOpen, setPanelsDrawerOpen] = useState(false);
   // The dialog trigger buttons: the dialogs open from state (these buttons,
   // the palette's File commands), so the primitive cannot track the opener
   // itself — these refs are the documented focus-restoration points.
   const importTriggerRef = useRef<HTMLButtonElement | null>(null);
   const exportTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // The first-run sketch hint: visible until dismissed or until the user
+  // actually enters sketch mode (either is the discovery win). Dismissal
+  // persists per browser; the initial render shows the hint on server and
+  // client alike (hydration-safe) and the stored dismissal applies in an
+  // effect, so the markup never depends on storage at hydration time.
+  const [sketchHintDismissed, setSketchHintDismissed] = useState(false);
   // The last import outcome the auto-close has seen (identity-tracked: the
   // builder-built io surface re-mints the outcome object every render).
   const seenOutcomeRef = useRef<CadImportOutcome | null>(null);
+  // A scrimmed overlay answers Escape: an open drawer closes on the key at
+  // window level — unless a tool is live, because the viewport's documented
+  // Escape surface (cancel the armed tool) owns the key first.
+  useEffect(() => {
+    if (!treeDrawerOpen && !panelsDrawerOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      // A genuinely armed tool (not the resting select) owns Escape first —
+      // the viewport's documented cancel surface.
+      if (toolsApi.phase === "active" && toolsApi.activeToolId !== "select") {
+        return;
+      }
+      setTreeDrawerOpen(false);
+      setPanelsDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [panelsDrawerOpen, toolsApi.activeToolId, toolsApi.phase, treeDrawerOpen]);
 
   const ioSurface: CadWorkbenchIo = useMemo(
     () =>
@@ -287,6 +361,13 @@ export function CompleteCadWorkbench({
   const showingPreview = ioSurface.preview !== null;
   const documentVolumeText =
     applied === null ? null : applied.state.measurement.volume.toFixed(3);
+  // Settled = the last settled frame rendered THIS document (and no
+  // import preview is on the stage — a preview's pixels are never the
+  // document's).
+  const settled =
+    !showingPreview &&
+    settledDocument !== null &&
+    settledDocument === engine.documentApi.document;
 
   // A successful import closes the dialog: the result IS the preview, now
   // visible in the viewport under its truth-telling chip. A failed import
@@ -302,6 +383,30 @@ export function CompleteCadWorkbench({
   const clearSelection = useCallback(() => {
     selectionApi.clear();
   }, [selectionApi]);
+
+  const dismissSketchHint = useCallback(() => {
+    setSketchHintDismissed(true);
+    try {
+      window.localStorage.setItem(SKETCH_HINT_STORAGE_KEY, "1");
+    } catch {
+      // A stripped context cannot persist; dismissal still holds for the
+      // session (the state above), which is the honest best effort.
+    }
+  }, []);
+
+  // The stored dismissal (and the mode switch's own) apply after
+  // hydration: the first-run hint never depends on storage at render time.
+  useEffect(() => {
+    if (sketchHintStoredDismissal()) {
+      setSketchHintDismissed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mode === "sketch") {
+      dismissSketchHint();
+    }
+  }, [dismissSketchHint, mode]);
 
   // The honest scene fallback: an authoring action that REMOVES document
   // data (a feature deletion through the property panel, an undo) can
@@ -454,16 +559,26 @@ export function CompleteCadWorkbench({
 
   // -- Default pieces (each exactly what its slot replaces) -----------------
 
+  // Left-drag-orbit yields only to an armed tool whose gesture vocabulary
+  // owns model drags (rotate). The armed-at-rest click tools — select and
+  // measure — coexist with orbiting: the drag threshold separates a camera
+  // gesture from a pick.
+  const cameraOrbitDragAvailable =
+    toolsApi.phase !== "active" ||
+    toolsApi.activeToolId === null ||
+    toolsApi.activeToolId === SELECT_TOOL_ID ||
+    toolsApi.activeToolId === MEASURE_TOOL_ID;
+
   const defaultToolbar = <CadToolbar className="border-0 bg-transparent p-0" />;
 
   const defaultHistoryTimeline = (
     <div
       aria-label="Feature timeline"
-      className="border-border flex h-full min-w-0 flex-1 items-center gap-1 border-l pl-3 [contain:inline-size]"
+      className="border-border bg-card/40 flex h-9 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-t px-3"
       data-testid="complete-feature-timeline"
       role="group"
     >
-      <span className="text-muted-foreground mr-1 shrink-0 text-xs font-medium tracking-wider uppercase">
+      <span className="text-muted-foreground shrink-0 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         Timeline
       </span>
       {timeline === null ? (
@@ -472,22 +587,26 @@ export function CompleteCadWorkbench({
         </span>
       ) : (
         <>
-          {/* The chain scrolls HERE alone; the counter sits outside the
-              scrolled content, so a long feature chain can never clip it
-              mid-word (nor can the counter squeeze the chips). */}
-          <div className="no-scrollbar flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            <FeatureTimelineChips
-              entries={timeline}
-              rollback={rollback}
-              onRollback={setRollback}
-              onToggleSuppressed={toggleSuppressed}
-            />
+          {/* The document's history gets the FULL frame width: the feature
+              band is its own row below the workspace (the silhouette CAD
+              engineers already trust), so the chain stops competing with
+              the command row for pixels. The chain scrolls HERE alone; the
+              counter sits outside the scrolled content, so a long feature
+              chain can never clip it mid-word (nor can the counter squeeze
+              the chips). Scroll snap keeps every rest position whole-chip,
+              the edges fade, and the container query collapses the chips
+              entirely once the window can no longer host one. */}
+          <div className="h-full min-w-0 flex-1 @container">
+            <div className="no-scrollbar flex h-full w-full snap-x snap-mandatory items-center gap-1 overflow-x-auto @max-[150px]:hidden [mask-image:linear-gradient(to_right,transparent_0,black_10px,black_calc(100%_-_14px),transparent)]">
+              <FeatureTimelineChips
+                entries={timeline}
+                rollback={rollback}
+                onRollback={setRollback}
+                onToggleSuppressed={toggleSuppressed}
+              />
+            </div>
           </div>
-          <FeatureTimelineSummary
-            entries={timeline}
-            executed={executed}
-            rollback={rollback}
-          />
+          <FeatureTimelineSummary entries={timeline} rollback={rollback} />
         </>
       )}
     </div>
@@ -496,6 +615,7 @@ export function CompleteCadWorkbench({
   const defaultCommandMenu = (
     <>
       <Button
+        aria-label="Open the command menu (Ctrl+K)"
         data-testid="complete-command-menu-trigger"
         onClick={() => {
           setCommandMenuOpen(true);
@@ -505,10 +625,13 @@ export function CompleteCadWorkbench({
         type="button"
         variant="outline"
       >
-        {LABELS.commandMenuTrigger}
+        {/* Below `xl` the row sheds labels before it ever clips a control:
+            the trigger collapses to its mark, the hint lives in the title. */}
+        <Command aria-hidden="true" className="xl:hidden" />
+        <span className="max-xl:hidden">{LABELS.commandMenuTrigger}</span>
         <kbd
           aria-hidden="true"
-          className="border-current/40 border px-1 font-mono text-[10px] font-normal leading-4"
+          className="border-current/40 border max-xl:hidden px-1 font-mono text-[10px] font-normal leading-4"
         >
           {LABELS.commandMenuHint}
         </kbd>
@@ -523,76 +646,256 @@ export function CompleteCadWorkbench({
 
   const defaultViewport = (
     <div
-      className="relative shrink-0"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       data-viewport-showing={showingPreview ? "import" : "document"}
       id="workbench-complete-viewport"
     >
-      <CadViewport
-        className={VIEWPORT_CLASS}
-        projection={
-          showingPreview
-            ? (ioSurface.preview?.projection ?? null)
-            : applied === null
-              ? null
-              : applied.state.projection
-        }
-        onSettled={() => {
-          if (showingPreview) {
-            // The imported frame stamps the IMPORT surface, never the
-            // document's — an imported mesh is not the parametric model.
+      {/* The canvas owns every pixel the docks leave it: full-bleed, no
+          bezel, no stage — the machine fills its frame. The settle and
+          selection stamps are unchanged. */}
+      <div className="relative min-h-0 flex-1">
+        <CadViewport
+          cameraControls
+          cameraOrbitDragEnabled={cameraOrbitDragAvailable}
+          className={VIEWPORT_CLASS}
+          projection={
+            showingPreview
+              ? (ioSurface.preview?.projection ?? null)
+              : applied === null
+                ? null
+                : applied.state.projection
+          }
+          onSettled={() => {
+            if (showingPreview) {
+              // The imported frame stamps the IMPORT surface, never the
+              // document's — an imported mesh is not the parametric model.
+              document
+                .getElementById(rootId)
+                ?.setAttribute(
+                  "data-cad-imported-volume",
+                  ioSurface.preview?.volumeText ?? "",
+                );
+              setImportedFrames((frames) => frames + 1);
+              return;
+            }
+            // Settle protocol: pixels may be compared only once this stamp
+            // agrees with the settled volume, written synchronously. The
+            // settle lamp reads the same agreement: this frame rendered
+            // THIS document.
+            noteRenderedFrame(documentVolumeText);
+            setSettledDocument(engine.documentApi.document);
+          }}
+          onSelectionRendered={(key) => {
             document
               .getElementById(rootId)
-              ?.setAttribute(
-                "data-cad-imported-volume",
-                ioSurface.preview?.volumeText ?? "",
-              );
-            setImportedFrames((frames) => frames + 1);
-            return;
-          }
-          // Settle protocol: pixels may be compared only once this stamp
-          // agrees with the settled volume, written synchronously.
-          noteRenderedFrame(documentVolumeText);
-        }}
-        onSelectionRendered={(key) => {
-          document
-            .getElementById(rootId)
-            ?.setAttribute("data-cad-selection-frame", key);
-        }}
-        overlay={
-          showingPreview ? (
-            <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-2 border border-border bg-background/95 px-2 py-1 text-xs">
-              <span className="font-mono text-muted-foreground">
-                {`preview: ${ioSurface.preview?.source ?? ""} mesh — geometry only, not in the document`}
-              </span>
-              <Button
-                data-testid="complete-clear-import"
-                onClick={ioSurface.onClearPreview}
-                size="xs"
-                type="button"
-                variant="outline"
+              ?.setAttribute("data-cad-selection-frame", key);
+          }}
+          overlay={
+            <>
+              {/* The registration brackets: the stage's corners are framed
+                  like a drawing sheet around the workpiece — the same
+                  "captured region" language as the DRO band below it. */}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0"
               >
-                Back to model
-              </Button>
-            </div>
-          ) : undefined
-        }
-      />
+                <span className="border-muted-foreground absolute top-1.5 left-1.5 size-2.5 border-t border-l" />
+                <span className="border-muted-foreground absolute top-1.5 right-1.5 size-2.5 border-t border-r" />
+                <span className="border-muted-foreground absolute bottom-1.5 left-1.5 size-2.5 border-b border-l" />
+                <span className="border-muted-foreground absolute right-1.5 bottom-1.5 size-2.5 border-r border-b" />
+              </div>
+              {showingPreview ? (
+                <div className="pointer-events-auto absolute top-2 left-2 flex items-center gap-2 rounded-sm border border-border bg-background/95 px-2 py-1 text-xs shadow-sm">
+                  <span className="text-muted-foreground font-mono text-[11px]">
+                    {`preview: ${ioSurface.preview?.source ?? ""} mesh: geometry only, not in the document`}
+                  </span>
+                  <Button
+                    data-testid="complete-clear-import"
+                    onClick={ioSurface.onClearPreview}
+                    size="xs"
+                    type="button"
+                    variant="outline"
+                  >
+                    Back to model
+                  </Button>
+                </div>
+              ) : null}
+              {!showingPreview && !sketchHintDismissed ? (
+                <div
+                  className="pointer-events-auto absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1rem)] -translate-x-1/2"
+                  data-testid="workbench-sketch-hint"
+                >
+                  <div className="border-signal/40 bg-background/95 flex items-start gap-2.5 rounded-md border px-3 py-2 shadow-lg shadow-black/25">
+                    <span
+                      aria-hidden="true"
+                      className="border-signal/40 bg-signal/15 text-signal mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm border"
+                    >
+                      <PencilLine className="size-3.5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-foreground text-xs leading-snug">
+                        Start a sketch to build geometry — draw a profile, then{" "}
+                        <span className="text-signal font-medium">Extrude</span>
+                        .
+                      </p>
+                      <p className="text-muted-foreground mt-0.5 text-[11px] leading-snug">
+                        The guide plate is your starter document. Or press{" "}
+                        <kbd className="border-current/40 border px-1 font-mono text-[10px]">
+                          Ctrl+K
+                        </kbd>{" "}
+                        and run “Sketch workspace”.
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        className="border-signal/50 hover:bg-signal/10"
+                        data-testid="workbench-sketch-hint-start"
+                        onClick={() => {
+                          setMode("sketch");
+                        }}
+                        size="xs"
+                        type="button"
+                        variant="outline"
+                      >
+                        Start a sketch
+                      </Button>
+                      <Button
+                        aria-label="Dismiss the getting-started hint"
+                        data-testid="workbench-sketch-hint-dismiss"
+                        onClick={dismissSketchHint}
+                        size="icon-xs"
+                        title="Dismiss"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <X className="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          }
+        />
+      </div>
+      {/* The DRO band: the viewport region's readout, edge to edge along
+          its bottom — the same honest engine numbers the machine surfaces
+          carry (scene kind, extents, volume, triangles), plus the settle
+          lamp and the live tool state. Never a second source of truth. In
+          the dark register the band reads as an emissive instrument: amber
+          digits over near-black glass (the cockpit's glance-mark); light
+          stays plain ink on paper. */}
+      <div
+        className="border-border bg-card/50 text-muted-foreground dark:border-signal/20 dark:bg-black/60 flex h-7 shrink-0 items-center gap-4 overflow-hidden border-t px-3 font-mono text-[11px] whitespace-nowrap"
+        data-testid="viewport-dro"
+      >
+        <span
+          aria-hidden="true"
+          className={`size-1.5 shrink-0 rounded-full ${
+            showingPreview || applied === null
+              ? "bg-signal motion-safe:animate-pulse"
+              : "bg-status-ok"
+          }`}
+        />
+        {showingPreview ? (
+          <>
+            <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+              import · {ioSurface.preview?.source ?? ""}
+            </span>
+            <span>
+              tris{" "}
+              <span className={DRO_VALUE}>
+                {ioSurface.preview === null
+                  ? "…"
+                  : String(ioSurface.preview.triangles)}
+              </span>
+            </span>
+            <span>
+              vol{" "}
+              <span className={DRO_VALUE}>
+                {ioSurface.preview === null
+                  ? "…"
+                  : `${ioSurface.preview.volumeText} mm³`}
+              </span>
+            </span>
+            <span className="hidden xl:inline">
+              geometry only, not in the document
+            </span>
+          </>
+        ) : applied === null ? (
+          <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+            computing…
+          </span>
+        ) : (
+          <>
+            <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+              {engine.activeScene}
+            </span>
+            <span>
+              extents{" "}
+              <span className={DRO_VALUE}>
+                {formatBoundsExtents(applied.state.measurement.bounds)}
+              </span>
+            </span>
+            <span>
+              vol{" "}
+              <span className={DRO_VALUE}>
+                {`${applied.state.measurement.volume.toFixed(3)} mm³`}
+              </span>
+            </span>
+            <span>
+              tris{" "}
+              <span className={DRO_VALUE}>
+                {String(applied.state.measurement.triangles)}
+              </span>
+            </span>
+          </>
+        )}
+        {/* The live tool state rides the DRO's right end: what is armed,
+            and how it cancels. */}
+        <span className="text-muted-foreground ml-auto hidden items-center gap-4 sm:flex">
+          {toolsApi.phase === "active" && toolsApi.activeToolId !== null ? (
+            <span>
+              tool{" "}
+              <span className="text-signal dark:[text-shadow:0_0_12px_color-mix(in_oklch,var(--signal)_35%,transparent)]">
+                {toolsApi.activeToolId}
+              </span>{" "}
+              · Esc cancels
+            </span>
+          ) : null}
+          <span>
+            sel{" "}
+            <span className={DRO_VALUE}>
+              {String(selectionApi.selected.length)}
+            </span>
+          </span>
+        </span>
+      </div>
     </div>
   );
 
+  // Inside the docks the panels shed their floating-card chrome: the dock
+  // IS the chrome (flush sections, hairline dividers, no radius), while the
+  // components keep their standalone card look everywhere else.
+  const flushPanel = "w-full shrink-0 rounded-none border-0 bg-transparent";
   const defaultModelTree =
     regenerationStates === null ? null : (
-      <CadModelTree regenerationStates={regenerationStates} className="w-48" />
+      <CadModelTree
+        regenerationStates={regenerationStates}
+        className="w-full rounded-none border-0 bg-transparent"
+      />
     );
 
   const defaultPropertyPanel = (
     <CadPropertyPanel
       regenerationStates={regenerationStates ?? undefined}
-      className="w-60 shrink-0"
+      className={flushPanel}
     />
   );
 
-  const defaultParameterPanel = <CadParameterPanel className="w-60 shrink-0" />;
+  const defaultParameterPanel = (
+    <CadParameterPanel className="w-full min-h-0 flex-1 rounded-none border-0 bg-transparent" />
+  );
 
   const defaultStatusBar = (
     <CadStatusBar
@@ -704,6 +1007,7 @@ export function CompleteCadWorkbench({
         .map(selectionReferenceKey)
         .join(";")}
       data-selection-regeneration={String(selectionApi.regeneration)}
+      data-sketch-hint={sketchHintDismissed ? "dismissed" : "open"}
       data-sketch-mode={mode}
       data-tool-completion={
         toolsApi.completion === null ? "" : completionJson(toolsApi.completion)
@@ -717,115 +1021,197 @@ export function CompleteCadWorkbench({
       data-viewport-showing={showingPreview ? "import" : "document"}
       id={rootId}
     >
-      {/* The command row: tool strip, the scrolling timeline, then the
-          pinned actions — history, the command menu trigger, and the
-          file/mode actions in one shrink-0 group, so a long feature chain
-          scrolls INSIDE the timeline and never pushes an action off the
-          row. In sketch mode it yields to the sketch editor's own command
-          row; the model surfaces stay MOUNTED but hidden so the session's
-          surface writer keeps their ids. */}
+      {/* The command row, grouped like a machine headstock: the document
+          plate (what this document IS, live), the tool group, then the
+          pinned terminal actions — history, the command menu, and the
+          file/mode verbs — separated by real group dividers. The feature
+          timeline is NOT here: it owns its own full-width band below the
+          workspace (the silhouette CAD engineers already trust), so the
+          chain never competes with this row for pixels and never clips a
+          control at any width. Below the dock breakpoint the two drawer
+          toggles appear at the row's ends. In sketch mode it yields to
+          the sketch editor's own command row; the model surfaces stay
+          MOUNTED but hidden so the session's surface writer keeps their
+          ids. */}
       <div
-        className={`border-border bg-background h-10 shrink-0 items-center gap-2 border-b px-2 ${
+        className={`border-border bg-card/40 h-10 shrink-0 items-center gap-1 border-b pr-2 ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
+        {/* The drawer toggles (below xl only; display-none keeps them out
+            of the tab order once the docks are inline). */}
+        <Button
+          aria-label="Toggle model tree"
+          aria-expanded={treeDrawerOpen}
+          className="xl:hidden"
+          data-testid="workbench-toggle-tree"
+          onClick={() => {
+            setPanelsDrawerOpen(false);
+            setTreeDrawerOpen((open) => !open);
+          }}
+          size="icon-xs"
+          title="Toggle the model tree dock"
+          type="button"
+          variant="ghost"
+        >
+          <PanelLeft />
+        </Button>
+        {/* The document plate: scene, extents, feature count — the row's
+            identity block, engraved-plate style. */}
+        <div
+          aria-label="Document"
+          className="flex h-full shrink-0 items-center gap-2.5 pr-2 pl-1"
+          role="group"
+        >
+          <span
+            aria-hidden="true"
+            className={`size-1.5 shrink-0 rounded-full ${
+              applied === null
+                ? "bg-signal motion-safe:animate-pulse"
+                : "bg-status-ok"
+            }`}
+          />
+          <span className="text-signal font-mono text-[11px]">
+            {showingPreview ? "import" : engine.activeScene}
+          </span>
+          <span className="text-muted-foreground hidden font-mono text-[11px] 2xl:inline">
+            {applied === null
+              ? "computing…"
+              : formatBoundsExtents(applied.state.measurement.bounds)}
+          </span>
+          <span className="text-muted-foreground hidden font-mono text-[11px] xl:inline">
+            {timeline === null ? "" : `${String(timeline.length)} features`}
+          </span>
+        </div>
+        <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
         {toolbar}
-        {historyTimeline}
-        <div className="flex shrink-0 items-center gap-2">
-          <div
-            aria-label="History"
-            className="flex items-center gap-1"
-            role="group"
-          >
-            <Button
-              aria-label="Undo"
-              disabled={!historyApi.canUndo}
-              onClick={() => {
-                historyApi.undo();
-              }}
-              size="icon-xs"
-              title="Undo (the document history's cursor step)"
-              type="button"
-              variant="ghost"
-            >
-              <Undo2 />
-            </Button>
-            <Button
-              aria-label="Redo"
-              disabled={!historyApi.canRedo}
-              onClick={() => {
-                historyApi.redo();
-              }}
-              size="icon-xs"
-              title="Redo (the document history's cursor step)"
-              type="button"
-              variant="ghost"
-            >
-              <Redo2 />
-            </Button>
-          </div>
-          {commandMenu}
-          {!hasIo ? null : (
-            <>
-              <Button
-                data-testid="complete-import"
-                onClick={() => {
-                  setImportDialogOpen(true);
-                }}
-                ref={importTriggerRef}
-                size="xs"
-                type="button"
-                variant="outline"
-              >
-                {LABELS.import}
-              </Button>
-              <Button
-                data-testid="complete-export"
-                disabled={applied === null}
-                onClick={() => {
-                  setExportDialogOpen(true);
-                }}
-                ref={exportTriggerRef}
-                size="xs"
-                title={
-                  applied === null
-                    ? "The scene settles first — nothing is exportable before that."
-                    : "Export the settled model geometry."
-                }
-                type="button"
-                variant="outline"
-              >
-                {LABELS.export}
-              </Button>
-            </>
-          )}
+        <div aria-hidden="true" className="bg-border h-5 w-px shrink-0" />
+        <div
+          aria-label="History"
+          className="flex shrink-0 items-center gap-0.5"
+          role="group"
+        >
           <Button
-            data-testid="complete-hole"
-            disabled={holeBase === undefined}
-            onClick={handleHole}
-            size="xs"
-            title={
-              holeBase === undefined
-                ? "Sketch and extrude a profile first — a hole cuts an existing solid."
-                : "Cut a hole into the latest extrusion; edit its five parameters in the panel."
-            }
+            aria-label="Undo"
+            disabled={!historyApi.canUndo}
+            onClick={() => {
+              historyApi.undo();
+            }}
+            size="icon-xs"
+            title="Undo (the document history's cursor step)"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
-            Hole
+            <Undo2 />
           </Button>
           <Button
-            data-testid="complete-mode-toggle"
+            aria-label="Redo"
+            disabled={!historyApi.canRedo}
             onClick={() => {
-              setMode("sketch");
+              historyApi.redo();
             }}
-            size="xs"
+            size="icon-xs"
+            title="Redo (the document history's cursor step)"
             type="button"
-            variant="outline"
+            variant="ghost"
           >
-            Sketch
+            <Redo2 />
           </Button>
         </div>
+        {commandMenu}
+        {!hasIo ? null : (
+          <>
+            <Button
+              aria-label={LABELS.import}
+              data-testid="complete-import"
+              onClick={() => {
+                setImportDialogOpen(true);
+              }}
+              ref={importTriggerRef}
+              size="xs"
+              title="Import model files."
+              type="button"
+              variant="outline"
+            >
+              <Upload aria-hidden="true" className="xl:hidden" />
+              <span className="max-xl:hidden">{LABELS.import}</span>
+            </Button>
+            <Button
+              aria-label={LABELS.export}
+              data-testid="complete-export"
+              disabled={applied === null}
+              onClick={() => {
+                setExportDialogOpen(true);
+              }}
+              ref={exportTriggerRef}
+              size="xs"
+              title={
+                applied === null
+                  ? "The scene settles first; nothing is exportable before that."
+                  : "Export the settled model geometry."
+              }
+              type="button"
+              variant="outline"
+            >
+              <Download aria-hidden="true" className="xl:hidden" />
+              <span className="max-xl:hidden">{LABELS.export}</span>
+            </Button>
+          </>
+        )}
+        {/* The hole verb is contextual (it needs an extrusion to cut), so
+            below `lg` it yields its row width entirely — it stays in the
+            command menu and returns with the full row. */}
+        <Button
+          className="max-xl:hidden"
+          data-testid="complete-hole"
+          disabled={holeBase === undefined}
+          onClick={handleHole}
+          size="xs"
+          title={
+            holeBase === undefined
+              ? "Sketch and extrude a profile first; a hole cuts an existing solid."
+              : "Cut a hole into the latest extrusion; edit its five parameters in the panel."
+          }
+          type="button"
+          variant="outline"
+        >
+          Hole
+        </Button>
+        {/* THE creation affordance: the one verb that adds geometry. The
+            signal-amber border and mark make it the only tinted control in
+            the row — the eye lands here first (the label stays foreground
+            ink in every scheme; the amber rides border and icon only). */}
+        <Button
+          aria-label="Sketch"
+          className="border-signal/60 hover:bg-signal/10"
+          data-testid="complete-mode-toggle"
+          onClick={() => {
+            setMode("sketch");
+          }}
+          size="xs"
+          title="Start a sketch: draw a profile, then extrude it into a solid."
+          type="button"
+          variant="outline"
+        >
+          <PencilLine aria-hidden="true" className="text-signal" />
+          <span className="max-xl:hidden">Sketch</span>
+        </Button>
+        <Button
+          aria-label="Toggle panels"
+          aria-expanded={panelsDrawerOpen}
+          className="xl:hidden"
+          data-testid="workbench-toggle-panels"
+          onClick={() => {
+            setTreeDrawerOpen(false);
+            setPanelsDrawerOpen((open) => !open);
+          }}
+          size="icon-xs"
+          title="Toggle the properties and parameters dock"
+          type="button"
+          variant="ghost"
+        >
+          <PanelRight />
+        </Button>
       </div>
       {mode === "sketch" ? (
         <SketchMode
@@ -836,30 +1222,110 @@ export function CompleteCadWorkbench({
           onRevolve={handleRevolve}
         />
       ) : null}
-      {/* The workspace: tree dock left, viewport dominant, property +
-          parameter docks right. Hidden (not unmounted) in sketch mode. */}
+      {/* The workspace: an edge-to-edge machine bed. Tree dock flush
+          left, the viewport owning every remaining pixel, properties and
+          parameters flush right — regions divided by hairlines, not
+          floating cards. Below `xl` the docks slide out as overlay
+          drawers (one DOM instance each: translated off-canvas when
+          closed, returned to the flex flow at the breakpoint), and the
+          viewport keeps the whole bed to itself. Hidden (not unmounted)
+          in sketch mode. */}
       <div
-        className={`border-border/60 min-h-0 flex-1 items-start gap-3 border-b p-2 ${
+        className={`relative flex min-h-0 flex-1 overflow-hidden ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
-        <div className="flex w-48 shrink-0 flex-col gap-2">
-          {modelTree}
-          <WorkbenchMeasurementSection
-            boundsState={engine.boundsState}
-            distanceSource={distanceSource}
-            distanceText={distanceText}
-            massPropertiesState={engine.massPropertiesState}
-            radiusState={engine.radiusState}
+        {/* The drawer scrim (below xl only). */}
+        {(treeDrawerOpen || panelsDrawerOpen) && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 z-20 bg-black/40 xl:hidden"
+            onClick={() => {
+              setTreeDrawerOpen(false);
+              setPanelsDrawerOpen(false);
+            }}
           />
+        )}
+        {/* Left dock: the model tree over the measurement readouts, one
+            scrolling column, full height. As a drawer it slides from the
+            left; closed it is `invisible`, so its fields never sit in the
+            tab order off-screen (visibility flips at the transition's
+            end on close, start on open — the slide survives). */}
+        <div
+          className={`border-border bg-card absolute inset-y-0 left-0 z-30 flex w-60 shrink-0 flex-col border-r shadow-2xl transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:bg-card/40 xl:shadow-none ${
+            treeDrawerOpen
+              ? "visible translate-x-0"
+              : "invisible -translate-x-full xl:visible xl:translate-x-0"
+          }`}
+          data-testid="workbench-tree-dock"
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {modelTree}
+            <WorkbenchMeasurementSection
+              boundsState={engine.boundsState}
+              distanceSource={distanceSource}
+              distanceText={distanceText}
+              massPropertiesState={engine.massPropertiesState}
+              radiusState={engine.radiusState}
+            />
+          </div>
         </div>
         {viewport}
-        <div className="flex min-h-0 w-60 shrink-0 flex-col gap-2 self-stretch">
-          <div className="shrink-0">{propertyPanel}</div>
-          <div className="min-h-0 flex-1 overflow-y-auto">{parameterPanel}</div>
+        {/* Right dock: properties over parameters, each section its own
+            scroll, the parameter footer pinned. Same drawer discipline as
+            the left dock: invisible (out of the tab order) while closed. */}
+        <div
+          className={`border-border bg-card absolute inset-y-0 right-0 z-30 flex w-[272px] shrink-0 flex-col border-l shadow-2xl transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:bg-card/40 xl:shadow-none ${
+            panelsDrawerOpen
+              ? "visible translate-x-0"
+              : "invisible translate-x-full xl:visible xl:translate-x-0"
+          }`}
+          data-testid="workbench-panels-dock"
+        >
+          <div className="max-h-[55%] min-h-0 shrink-0 overflow-y-auto">
+            {propertyPanel}
+          </div>
+          {/* The parameter dock: the panel owns its internal scroll so
+              the pinned Apply footer stays on screen at any height. */}
+          <div className="flex min-h-0 flex-1 flex-col border-t border-border">
+            {parameterPanel}
+          </div>
         </div>
       </div>
-      {statusBar}
+      {/* The feature band: the document's history as its own full-width
+          row between the workspace and the status bar (hidden, like every
+          model surface, in sketch mode). The timeline's chips and health
+          counter are the same joined-status surfaces as ever — only their
+          host row changed. */}
+      <div className={mode === "sketch" ? "hidden" : "contents"}>
+        {historyTimeline}
+      </div>
+      {/* The status frame: the settle lamp rides the status bar's left
+          edge — the settle protocol made glanceable and machine-readable
+          (`data-settle-lamp`). Lit (signal, soft glow in dark) while the
+          rendered pixels agree with the document; a hollow ring while the
+          scene settles or an import preview owns the stage. */}
+      <div className="relative shrink-0 [&_[data-slot='cad-status-bar']]:pl-9">
+        <span
+          className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2"
+          data-settle-lamp={settled ? "settled" : "waiting"}
+          title={
+            settled
+              ? "Scene settled — the rendered pixels agree with the document."
+              : "Scene settling — the rendered pixels are not yet comparable."
+          }
+        >
+          <span
+            aria-hidden="true"
+            className={`block size-2 transition-colors duration-200 ${
+              settled
+                ? "bg-signal dark:shadow-[0_0_8px_1px] dark:shadow-signal/50"
+                : "border-muted-foreground/70 border"
+            }`}
+          />
+        </span>
+        {statusBar}
+      </div>
       {ioDialogs}
     </div>
   );

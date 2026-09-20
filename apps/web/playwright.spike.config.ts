@@ -9,7 +9,7 @@ import { defineConfig } from "@playwright/test";
  * viewport, DPR 1. Kept OUT of `pnpm verify` — run via `pnpm test:spike`.
  */
 
-const PORT = 3002;
+const PORT = 3202;
 const baseURL = process.env.SPIKE_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({

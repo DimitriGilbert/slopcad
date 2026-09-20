@@ -1,3 +1,33 @@
+/*
+ * slopcad design tokens — the Machinist system, four color schemes deep.
+ *
+ * The DEFAULT scheme is "Machinist": graphite neutrals with a breath of
+ * blue, a single machinist-amber accent (the machine-tool signal color:
+ * stack lamps, DRO readouts, selection states), and IBM Plex engineering
+ * typography. Three more full schemes ship beside it as named token-set
+ * variants — "Drafting Room" (graphite ink and vellum paper), "Studios"
+ * (blue-cast graphite, one gauge-amber needle), and "Ember" (machined
+ * graphite, one burnt-ember accent) — selected per browser through the
+ * `data-scheme` attribute on <html> and layered OVER the mode: the
+ * `.dark` class keeps owning dark/light, and each scheme block below
+ * defines BOTH registers with its own verified values. Every scheme
+ * carries its own `--radius` (Machinist 0.5rem, Drafting Room 0.25rem,
+ * Studios and Ember 0 — each scheme's own shape lock), so the corner
+ * system follows the palette. Structural components never change across
+ * schemes; only these tokens do.
+ *
+ * Contrast: every text pair was verified WCAG AA (4.5:1 body, 3:1
+ * large/accent) in BOTH registers — the Machinist, Studios and Ember
+ * values are ported verbatim from their verified design rounds, and the
+ * e2e-a11y scheme-contrast suite re-probes representative pairs for all
+ * four schemes in both registers against the rendered page.
+ */
+
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -6,77 +36,377 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ————————————————————————————————————————————————————————————————————
+ * Scheme 1 (default): Machinist — bronze on cool drafting paper (light),
+ * layered graphite with machinist amber (dark).
+ * ———————————————————————————————————————————————————————————————————— */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Drafting room: cool paper, ink, bronze. */
+  --background: oklch(0.977 0.003 240);
+  --foreground: oklch(0.215 0.014 250);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.215 0.014 250);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.58 0.22 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.215 0.014 250);
+  /* The accent as a deep bronze: amber darkened until it passes AA as
+   * text and stays rich as a fill (5.9:1 with its near-white ink). */
+  --primary: oklch(0.51 0.115 65);
+  --primary-foreground: oklch(0.985 0.002 240);
+  --secondary: oklch(0.945 0.005 245);
+  --secondary-foreground: oklch(0.3 0.012 250);
+  --muted: oklch(0.945 0.005 245);
+  --muted-foreground: oklch(0.48 0.014 250);
+  /* Selection wash: a highlighter-amber tint over paper. */
+  --accent: oklch(0.95 0.032 88);
+  --accent-foreground: oklch(0.335 0.055 70);
+  --destructive: oklch(0.505 0.2 27);
+  --destructive-foreground: oklch(0.985 0.002 240);
+  --border: oklch(0.855 0.008 245);
+  --input: oklch(0.835 0.01 245);
+  --ring: oklch(0.62 0.115 68);
+  /* The raw signal color: status lamps, live markers, kbd caps. The
+   * bronze variant for light chrome, the amber for dark. */
+  --signal: oklch(0.56 0.125 65);
+  /* Semantic state colors: ok lamps and the parked/rollback steel. The
+   * lamp green sits in its text-safe register (>= 4.5:1 on paper), so a
+   * status can be named in text as well as drawn as a dot. */
+  --status-ok: oklch(0.5 0.115 150);
+  --status-parked: oklch(0.52 0.09 245);
+  --chart-1: oklch(0.62 0.13 60);
+  --chart-2: oklch(0.55 0.09 245);
+  --chart-3: oklch(0.58 0.09 150);
+  --chart-4: oklch(0.55 0.12 20);
+  --chart-5: oklch(0.45 0.02 250);
+  --radius: 0.5rem;
+  --sidebar: oklch(0.962 0.004 243);
+  --sidebar-foreground: oklch(0.215 0.014 250);
+  --sidebar-primary: oklch(0.51 0.115 65);
+  --sidebar-primary-foreground: oklch(0.985 0.002 240);
+  --sidebar-accent: oklch(0.93 0.012 243);
+  --sidebar-accent-foreground: oklch(0.3 0.012 250);
+  --sidebar-border: oklch(0.855 0.008 245);
+  --sidebar-ring: oklch(0.62 0.115 68);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.87 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.809 0.105 251.813);
-  --chart-2: oklch(0.623 0.214 259.815);
-  --chart-3: oklch(0.546 0.245 262.881);
-  --chart-4: oklch(0.488 0.243 264.376);
-  --chart-5: oklch(0.424 0.199 265.638);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Workshop at night: layered graphite, machinist amber. */
+  --background: oklch(0.165 0.008 250);
+  --foreground: oklch(0.945 0.004 250);
+  --card: oklch(0.198 0.009 250);
+  --card-foreground: oklch(0.945 0.004 250);
+  --popover: oklch(0.218 0.01 250);
+  --popover-foreground: oklch(0.945 0.004 250);
+  /* Amber as the primary fill: 9.9:1 with its near-black ink. */
+  --primary: oklch(0.8 0.145 78);
+  --primary-foreground: oklch(0.185 0.02 70);
+  --secondary: oklch(0.255 0.01 250);
+  --secondary-foreground: oklch(0.9 0.004 250);
+  --muted: oklch(0.245 0.01 250);
+  --muted-foreground: oklch(0.7 0.01 250);
+  /* Selection wash: amber-steeped graphite, warm-white text. */
+  --accent: oklch(0.295 0.055 80);
+  --accent-foreground: oklch(0.955 0.015 85);
+  --destructive: oklch(0.68 0.19 25);
+  --destructive-foreground: oklch(0.13 0.02 25);
+  --border: oklch(0.295 0.01 250);
+  --input: oklch(0.33 0.012 250);
+  --ring: oklch(0.74 0.12 75);
+  --signal: oklch(0.8 0.145 78);
+  --status-ok: oklch(0.72 0.12 150);
+  --status-parked: oklch(0.7 0.09 245);
+  --chart-1: oklch(0.8 0.145 78);
+  --chart-2: oklch(0.68 0.09 245);
+  --chart-3: oklch(0.7 0.1 150);
+  --chart-4: oklch(0.68 0.15 20);
+  --chart-5: oklch(0.6 0.015 250);
+  --sidebar: oklch(0.182 0.008 250);
+  --sidebar-foreground: oklch(0.945 0.004 250);
+  --sidebar-primary: oklch(0.8 0.145 78);
+  --sidebar-primary-foreground: oklch(0.185 0.02 70);
+  --sidebar-accent: oklch(0.26 0.01 250);
+  --sidebar-accent-foreground: oklch(0.945 0.004 250);
+  --sidebar-border: oklch(0.295 0.01 250);
+  --sidebar-ring: oklch(0.74 0.12 75);
+}
+
+/* ————————————————————————————————————————————————————————————————————
+ * Scheme 2: Drafting Room — graphite ink and vellum paper as two
+ * independently designed materials. Neutrals are never pure gray: the
+ * dark ramp carries a faint blueprint-blue cast, the light ramp a faint
+ * paper warmth. Amber stays THE signal in both rooms; in light it is
+ * deepened to burnt umber to hold AA on vellum. (Ported from the
+ * verified Drafting Room design round.)
+ * ———————————————————————————————————————————————————————————————————— */
+:root[data-scheme="drafting"] {
+  --background: oklch(0.964 0.006 82);
+  --foreground: oklch(0.235 0.019 258);
+  --card: oklch(0.985 0.003 84);
+  --card-foreground: oklch(0.235 0.019 258);
+  --popover: oklch(0.995 0.002 84);
+  --popover-foreground: oklch(0.235 0.019 258);
+  --primary: oklch(0.52 0.14 70);
+  --primary-foreground: oklch(0.985 0.003 84);
+  --secondary: oklch(0.93 0.008 82);
+  --secondary-foreground: oklch(0.3 0.02 258);
+  --muted: oklch(0.925 0.008 82);
+  --muted-foreground: oklch(0.475 0.022 258);
+  --accent: color-mix(
+    in oklab,
+    oklch(0.7686 0.1647 70.08) 16%,
+    var(--background)
+  );
+  --accent-foreground: oklch(0.42 0.12 70);
+  --destructive: oklch(0.535 0.205 27);
+  --destructive-foreground: oklch(0.985 0.003 84);
+  --border: oklch(0.883 0.008 82);
+  --input: oklch(0.862 0.01 82);
+  --ring: oklch(0.62 0.14 70);
+  --signal: oklch(0.52 0.14 70);
+  --status-ok: oklch(0.51 0.115 150);
+  --status-parked: oklch(0.5 0.09 245);
+  --chart-1: oklch(0.62 0.13 60);
+  --chart-2: oklch(0.55 0.09 245);
+  --chart-3: oklch(0.58 0.09 150);
+  --chart-4: oklch(0.55 0.12 20);
+  --chart-5: oklch(0.45 0.02 250);
+  --radius: 0.25rem;
+  --sidebar: oklch(0.952 0.006 82);
+  --sidebar-foreground: oklch(0.235 0.019 258);
+  --sidebar-primary: oklch(0.52 0.14 70);
+  --sidebar-primary-foreground: oklch(0.985 0.003 84);
+  --sidebar-accent: color-mix(
+    in oklab,
+    oklch(0.72 0.13 75) 14%,
+    oklch(0.952 0.006 82)
+  );
+  --sidebar-accent-foreground: oklch(0.42 0.12 70);
+  --sidebar-border: oklch(0.883 0.008 82);
+  --sidebar-ring: oklch(0.62 0.14 70);
+}
+
+:root[data-scheme="drafting"].dark {
+  --background: oklch(0.155 0.012 254);
+  --foreground: oklch(0.925 0.008 250);
+  --card: oklch(0.185 0.012 254);
+  --card-foreground: oklch(0.925 0.008 250);
+  --popover: oklch(0.216 0.012 254);
+  --popover-foreground: oklch(0.925 0.008 250);
+  --primary: oklch(0.7686 0.1647 70.08);
+  --primary-foreground: oklch(0.185 0.035 70);
+  --secondary: oklch(0.242 0.012 254);
+  --secondary-foreground: oklch(0.925 0.008 250);
+  --muted: oklch(0.238 0.01 254);
+  --muted-foreground: oklch(0.648 0.017 254);
+  --accent: color-mix(
+    in oklab,
+    oklch(0.7686 0.1647 70.08) 13%,
+    var(--background)
+  );
+  --accent-foreground: oklch(0.85 0.115 72);
+  --destructive: oklch(0.63 0.195 25);
+  --destructive-foreground: oklch(0.145 0.02 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.7686 0.1647 70.08);
+  --signal: oklch(0.7686 0.1647 70.08);
+  --status-ok: oklch(0.72 0.12 150);
+  --status-parked: oklch(0.7 0.09 245);
+  --chart-1: oklch(0.8 0.145 78);
+  --chart-2: oklch(0.68 0.09 245);
+  --chart-3: oklch(0.7 0.1 150);
+  --chart-4: oklch(0.68 0.15 20);
+  --chart-5: oklch(0.6 0.015 250);
+  --sidebar: oklch(0.185 0.012 254);
+  --sidebar-foreground: oklch(0.925 0.008 250);
+  --sidebar-primary: oklch(0.7686 0.1647 70.08);
+  --sidebar-primary-foreground: oklch(0.185 0.035 70);
+  --sidebar-accent: color-mix(
+    in oklab,
+    oklch(0.775 0.152 75) 13%,
+    oklch(0.185 0.012 254)
+  );
+  --sidebar-accent-foreground: oklch(0.85 0.115 72);
+  --sidebar-border: oklch(1 0 0 / 9%);
+  --sidebar-ring: oklch(0.7686 0.1647 70.08);
+}
+
+/* ————————————————————————————————————————————————————————————————————
+ * Scheme 3: Studios — the night studio (blue-cast graphite, one
+ * phosphor-bright gauge-amber needle) and the daylight drafting table
+ * (cold vellum, the needle burnt to its paper-safe register). One
+ * neutral family, one signal color, square chrome. (Ported verbatim
+ * from the verified Studios design round.)
+ * ———————————————————————————————————————————————————————————————————— */
+:root[data-scheme="studios"] {
+  --background: oklch(0.971 0.0035 255);
+  --foreground: oklch(0.215 0.012 260);
+  --card: oklch(0.992 0.0018 255);
+  --card-foreground: oklch(0.215 0.012 260);
+  --popover: oklch(0.996 0.0015 255);
+  --popover-foreground: oklch(0.215 0.012 260);
+  --primary: oklch(0.52 0.135 52);
+  --primary-foreground: oklch(0.985 0.004 90);
+  --secondary: oklch(0.938 0.005 255);
+  --secondary-foreground: oklch(0.3 0.012 258);
+  --muted: oklch(0.947 0.0045 255);
+  --muted-foreground: oklch(0.452 0.014 258);
+  --accent: oklch(0.928 0.0065 253);
+  --accent-foreground: oklch(0.215 0.012 260);
+  --destructive: oklch(0.505 0.208 26);
+  --destructive-foreground: oklch(0.985 0.004 90);
+  --border: oklch(0.893 0.007 256);
+  --input: oklch(0.868 0.008 256);
+  --ring: oklch(0.55 0.14 55);
+  --signal: oklch(0.52 0.135 52);
+  --status-ok: oklch(0.5 0.1 150);
+  --status-parked: oklch(0.5 0.09 258);
+  --chart-1: oklch(0.62 0.15 52);
+  --chart-2: oklch(0.5 0.09 258);
+  --chart-3: oklch(0.66 0.12 190);
+  --chart-4: oklch(0.58 0.17 25);
+  --chart-5: oklch(0.4 0.05 260);
+  --radius: 0rem;
+  --sidebar: oklch(0.9835 0.0022 255);
+  --sidebar-foreground: oklch(0.215 0.012 260);
+  --sidebar-primary: oklch(0.52 0.135 52);
+  --sidebar-primary-foreground: oklch(0.985 0.004 90);
+  --sidebar-accent: oklch(0.928 0.0065 253);
+  --sidebar-accent-foreground: oklch(0.215 0.012 260);
+  --sidebar-border: oklch(0.893 0.007 256);
+  --sidebar-ring: oklch(0.55 0.14 55);
+}
+
+:root[data-scheme="studios"].dark {
+  --background: oklch(0.171 0.0085 262);
+  --foreground: oklch(0.935 0.005 260);
+  --card: oklch(0.205 0.009 262);
+  --card-foreground: oklch(0.935 0.005 260);
+  --popover: oklch(0.226 0.01 262);
+  --popover-foreground: oklch(0.935 0.005 260);
+  --primary: oklch(0.77 0.155 70);
+  --primary-foreground: oklch(0.205 0.05 70);
+  --secondary: oklch(0.253 0.01 262);
+  --secondary-foreground: oklch(0.9 0.005 260);
+  --muted: oklch(0.243 0.01 262);
+  --muted-foreground: oklch(0.648 0.014 262);
+  --accent: oklch(0.259 0.012 262);
+  --accent-foreground: oklch(0.935 0.005 260);
+  --destructive: oklch(0.665 0.19 25);
+  --destructive-foreground: oklch(0.16 0.02 25);
+  --border: oklch(1 0 0 / 8.5%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.72 0.14 68);
+  --signal: oklch(0.79 0.15 72);
+  --status-ok: oklch(0.72 0.12 155);
+  --status-parked: oklch(0.68 0.1 258);
+  --chart-1: oklch(0.77 0.155 70);
+  --chart-2: oklch(0.68 0.1 258);
+  --chart-3: oklch(0.7 0.12 190);
+  --chart-4: oklch(0.66 0.17 25);
+  --chart-5: oklch(0.55 0.05 260);
+  --sidebar: oklch(0.199 0.009 262);
+  --sidebar-foreground: oklch(0.935 0.005 260);
+  --sidebar-primary: oklch(0.77 0.155 70);
+  --sidebar-primary-foreground: oklch(0.205 0.05 70);
+  --sidebar-accent: oklch(0.259 0.012 262);
+  --sidebar-accent-foreground: oklch(0.935 0.005 260);
+  --sidebar-border: oklch(1 0 0 / 8.5%);
+  --sidebar-ring: oklch(0.72 0.14 68);
+}
+
+/* ————————————————————————————————————————————————————————————————————
+ * Scheme 4: Ember — machined cool graphite with one burnt-ember accent
+ * doubling as the CAD selection color, hairline borders, squared corners
+ * everywhere (radius 0 is the shape lock). (Ported verbatim from the
+ * verified Graphite & Ember design round.)
+ * ———————————————————————————————————————————————————————————————————— */
+:root[data-scheme="ember"] {
+  --background: oklch(0.982 0.003 255);
+  --foreground: oklch(0.24 0.012 260);
+  --card: oklch(0.992 0.002 255);
+  --card-foreground: oklch(0.24 0.012 260);
+  --popover: oklch(0.995 0.002 255);
+  --popover-foreground: oklch(0.24 0.012 260);
+  --primary: oklch(0.55 0.16 47);
+  --primary-foreground: oklch(0.99 0.005 90);
+  --secondary: oklch(0.955 0.004 255);
+  --secondary-foreground: oklch(0.32 0.012 260);
+  --muted: oklch(0.945 0.004 255);
+  --muted-foreground: oklch(0.5 0.012 258);
+  --accent: oklch(0.925 0.05 62);
+  --accent-foreground: oklch(0.33 0.09 45);
+  --destructive: oklch(0.55 0.21 27);
+  --destructive-foreground: oklch(0.99 0.005 90);
+  --border: oklch(0.902 0.005 255);
+  --input: oklch(0.9 0.005 255);
+  --ring: oklch(0.62 0.16 47);
+  --signal: oklch(0.55 0.16 47);
+  --status-ok: oklch(0.5 0.1 150);
+  --status-parked: oklch(0.5 0.14 240);
+  --chart-1: oklch(0.62 0.16 47);
+  --chart-2: oklch(0.5 0.14 240);
+  --chart-3: oklch(0.5 0.1 150);
+  --chart-4: oklch(0.55 0.14 90);
+  --chart-5: oklch(0.4 0.02 260);
+  --radius: 0rem;
+  --sidebar: oklch(0.968 0.003 255);
+  --sidebar-foreground: oklch(0.24 0.012 260);
+  --sidebar-primary: oklch(0.55 0.16 47);
+  --sidebar-primary-foreground: oklch(0.99 0.005 90);
+  --sidebar-accent: oklch(0.925 0.05 62);
+  --sidebar-accent-foreground: oklch(0.33 0.09 45);
+  --sidebar-border: oklch(0.902 0.005 255);
+  --sidebar-ring: oklch(0.62 0.16 47);
+}
+
+:root[data-scheme="ember"].dark {
+  --background: oklch(0.171 0.007 262);
+  --foreground: oklch(0.93 0.005 255);
+  --card: oklch(0.205 0.008 262);
+  --card-foreground: oklch(0.93 0.005 255);
+  --popover: oklch(0.219 0.008 262);
+  --popover-foreground: oklch(0.93 0.005 255);
+  --primary: oklch(0.76 0.15 62);
+  --primary-foreground: oklch(0.22 0.06 50);
+  --secondary: oklch(0.258 0.008 262);
+  --secondary-foreground: oklch(0.87 0.006 258);
+  --muted: oklch(0.243 0.008 262);
+  --muted-foreground: oklch(0.68 0.012 258);
+  --accent: oklch(0.295 0.055 55);
+  --accent-foreground: oklch(0.87 0.07 70);
+  --destructive: oklch(0.68 0.19 27);
+  --destructive-foreground: oklch(0.16 0.03 27);
+  --border: oklch(0.72 0.01 262 / 15%);
+  --input: oklch(0.72 0.01 262 / 18%);
+  --ring: oklch(0.76 0.15 62);
+  --signal: oklch(0.76 0.15 62);
+  --status-ok: oklch(0.72 0.12 155);
+  --status-parked: oklch(0.72 0.12 240);
+  --chart-1: oklch(0.76 0.15 62);
+  --chart-2: oklch(0.72 0.12 240);
+  --chart-3: oklch(0.72 0.12 155);
+  --chart-4: oklch(0.78 0.14 95);
+  --chart-5: oklch(0.6 0.015 260);
+  --sidebar: oklch(0.19 0.008 262);
+  --sidebar-foreground: oklch(0.93 0.005 255);
+  --sidebar-primary: oklch(0.76 0.15 62);
+  --sidebar-primary-foreground: oklch(0.22 0.06 50);
+  --sidebar-accent: oklch(0.295 0.055 55);
+  --sidebar-accent-foreground: oklch(0.87 0.07 70);
+  --sidebar-border: oklch(0.72 0.01 262 / 15%);
+  --sidebar-ring: oklch(0.76 0.15 62);
 }
 
 @theme inline {
-  --font-sans: "Inter Variable", sans-serif;
+  --font-sans:
+    "IBM Plex Sans Variable", "IBM Plex Sans", ui-sans-serif, system-ui,
+    sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* The display voice: the wordmark and the marketing front door only —
+   * the instrument chrome itself stays Plex. */
+  --font-display:
+    "Space Grotesk Variable", "IBM Plex Sans Variable", ui-sans-serif,
+    system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -85,6 +415,10 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  --color-signal: var(--signal);
+  --color-status-ok: var(--status-ok);
+  --color-status-parked: var(--status-parked);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -108,8 +442,12 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  /* Corner system: controls 4px, panels 6px, cards 8px, dialogs 12px —
+   * derived from --radius so a scheme's own shape lock rides along; the
+   * max() keeps the derived steps at 0 (never negative) for the square
+   * schemes (Studios, Ember) whose --radius is 0. */
+  --radius-sm: max(0rem, calc(var(--radius) - 4px));
+  --radius-md: max(0rem, calc(var(--radius) - 2px));
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
@@ -121,10 +459,42 @@
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply font-sans bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply font-sans bg-background text-foreground antialiased;
+  }
+  /* The accent selection wash: the signal color's most visible daily act. */
+  ::selection {
+    background: color-mix(in oklch, var(--signal) 30%, transparent);
+  }
+  /* Instrument scrollbars: thin, trackless, themed. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent)
+      transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--foreground) 20%, transparent);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--foreground) 32%, transparent);
+  }
+  /* Numbers never reflow: every mono context is tabular. */
+  .font-mono {
+    font-variant-numeric: tabular-nums;
   }
 }

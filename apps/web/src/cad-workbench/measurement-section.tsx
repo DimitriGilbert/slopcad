@@ -9,6 +9,12 @@
  * Volume/Area rows the selected body's kernel-measured mass properties.
  * All rows format their values through the same dimensional unit
  * infrastructure; every value is engine-derived, nothing is invented.
+ *
+ * Honesty rule: a row with no value does not exist. The boot state (no
+ * selection) is ONE quiet instruction line — never a wall of `n/a` under
+ * a status bar that is already reporting the document's volume. Each
+ * readout element mounts exactly when its value does (a pinned machine
+ * surface: the suites assert `toHaveCount(0)` on unmeasured states).
  */
 
 import type { ReactElement, ReactNode } from "react";
@@ -17,7 +23,7 @@ import type { MassPropertiesReadout } from "./mass-properties-inspection";
 import type { RadiusReadout } from "./radius-inspection";
 
 export interface WorkbenchMeasurementSectionProps {
-  /** The distance row's composed text, or `null` for the em-dash state. */
+  /** The distance row's composed text, or `null` for the no-value state. */
   readonly distanceText: string | null;
   /** The distance value's provenance (the readout's source or "point pair"). */
   readonly distanceSource: string | null;
@@ -29,7 +35,8 @@ export interface WorkbenchMeasurementSectionProps {
   readonly massPropertiesState: MassPropertiesReadout;
 }
 
-/** One labeled row: muted label left, mono value right (or an em-dash). */
+/** One labeled row: muted label left, mono value right. Rendered only
+ * when a value exists — an empty instrument row is a lie. */
 function MeasurementRow({
   label,
   text,
@@ -38,15 +45,12 @@ function MeasurementRow({
   readonly label: string;
   readonly text: string | null;
   readonly children: ReactNode;
-}): ReactElement {
+}): ReactElement | null {
+  if (text === null) return null;
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-muted-foreground">{label}</span>
-      {text === null ? (
-        <span className="text-muted-foreground font-mono">—</span>
-      ) : (
-        <span className="text-right font-mono">{children}</span>
-      )}
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="text-right font-mono">{children}</span>
     </div>
   );
 }
@@ -59,64 +63,76 @@ export function WorkbenchMeasurementSection({
   massPropertiesState,
   radiusState,
 }: WorkbenchMeasurementSectionProps): ReactElement {
+  const measured =
+    distanceText !== null ||
+    boundsState.text !== null ||
+    radiusState.text !== null ||
+    massPropertiesState.volumeText !== null ||
+    massPropertiesState.areaText !== null;
   return (
     <section
       aria-label="Measurement"
-      className="border-border bg-background w-48 border"
+      className="border-border w-full shrink-0 border-t"
     >
-      <div className="text-muted-foreground border-border border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground border-border bg-background/30 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         Measurement
       </div>
-      <div className="flex flex-col gap-1.5 px-2 py-2 text-xs">
-        <MeasurementRow label="Distance" text={distanceText}>
-          <span id="workbench-measure-readout" className="block break-words">
-            {distanceText}
-          </span>
-          <span
-            id="workbench-distance-source"
-            className="text-muted-foreground block"
-          >
-            {distanceSource}
-          </span>
-        </MeasurementRow>
-        <MeasurementRow label="Bounds" text={boundsState.text}>
-          <span id="workbench-bounds-readout" className="block break-words">
-            {boundsState.text}
-          </span>
-          <span
-            id="workbench-bounds-tightness"
-            className="text-muted-foreground block"
-          >
-            {boundsState.tightness === "tight"
-              ? "tight"
-              : "may be conservative"}
-          </span>
-        </MeasurementRow>
-        <MeasurementRow label="Radius" text={radiusState.text}>
-          <span id="workbench-radius-readout" className="block break-words">
-            {radiusState.text}
-          </span>
-          <span id="workbench-radius-diameter" className="block break-words">
-            {radiusState.diameterText}
-          </span>
-          <span
-            id="workbench-radius-source"
-            className="text-muted-foreground block"
-          >
-            {radiusState.source}
-          </span>
-        </MeasurementRow>
-        <MeasurementRow label="Volume" text={massPropertiesState.volumeText}>
-          <span id="workbench-volume-readout" className="block break-words">
-            {massPropertiesState.volumeText}
-          </span>
-        </MeasurementRow>
-        <MeasurementRow label="Area" text={massPropertiesState.areaText}>
-          <span id="workbench-area-readout" className="block break-words">
-            {massPropertiesState.areaText}
-          </span>
-        </MeasurementRow>
-      </div>
+      {measured ? (
+        <div className="flex flex-col gap-2 px-2.5 py-2.5 text-xs">
+          <MeasurementRow label="Distance" text={distanceText}>
+            <span id="workbench-measure-readout" className="block break-words">
+              {distanceText}
+            </span>
+            <span
+              id="workbench-distance-source"
+              className="text-muted-foreground block"
+            >
+              {distanceSource}
+            </span>
+          </MeasurementRow>
+          <MeasurementRow label="Bounds" text={boundsState.text}>
+            <span id="workbench-bounds-readout" className="block break-words">
+              {boundsState.text}
+            </span>
+            <span
+              id="workbench-bounds-tightness"
+              className="text-muted-foreground block"
+            >
+              {boundsState.tightness === "tight"
+                ? "tight"
+                : "may be conservative"}
+            </span>
+          </MeasurementRow>
+          <MeasurementRow label="Radius" text={radiusState.text}>
+            <span id="workbench-radius-readout" className="block break-words">
+              {radiusState.text}
+            </span>
+            <span id="workbench-radius-diameter" className="block break-words">
+              {radiusState.diameterText}
+            </span>
+            <span
+              id="workbench-radius-source"
+              className="text-muted-foreground block"
+            >
+              {radiusState.source}
+            </span>
+          </MeasurementRow>
+          <MeasurementRow label="Volume" text={massPropertiesState.volumeText}>
+            <span id="workbench-volume-readout" className="block break-words">
+              {massPropertiesState.volumeText}
+            </span>
+          </MeasurementRow>
+          <MeasurementRow label="Area" text={massPropertiesState.areaText}>
+            <span id="workbench-area-readout" className="block break-words">
+              {massPropertiesState.areaText}
+            </span>
+          </MeasurementRow>
+        </div>
+      ) : (
+        <p className="text-muted-foreground px-2.5 py-2.5 font-mono text-[11px]">
+          select a body to measure
+        </p>
+      )}
     </section>
   );
 }

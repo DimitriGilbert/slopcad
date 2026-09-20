@@ -11,6 +11,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:render": "playwright test -c playwright.render.config.ts",
+    "probe:floor": "tsx scripts/floor-probe.ts",
     "test:spike": "playwright test -c playwright.spike.config.ts",
     "test:workbench": "playwright test -c playwright.workbench.config.ts",
     "test:a11y": "playwright test -c playwright.a11y.config.ts",

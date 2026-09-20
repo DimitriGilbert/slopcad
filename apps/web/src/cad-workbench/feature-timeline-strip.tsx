@@ -4,7 +4,7 @@
  * in document order, joined five-way status per chip
  * (`valid`/`stale`/`failed`/`suppressed`/`beyond-rollback` — suppression
  * wins over parking), the rollback marker as a clickable element BETWEEN
- * chips, a suppress toggle per chip, and the run counter. Both workbench
+ * chips, a suppress toggle per chip, and the health counter. Both workbench
  * pages (the Phase 15 composition and the Phase 26 chain) mount this ONE
  * implementation over their own documents; the Phase 28 complete
  * workbench composes the exported parts ({@link FeatureTimelineChips},
@@ -21,38 +21,44 @@ import type {
 } from "@slopcad/cad-react";
 import { Eye, EyeOff } from "lucide-react";
 
-/** Visual presentation of one joined timeline status. */
+/** Visual presentation of one joined timeline status. The healthy state
+ * carries NO dot and quiet ink — failures are the only loud chips (the
+ * quiet-when-valid rule); the dot column exists only for states that
+ * need a marker. */
 const TIMELINE_STATUS_PRESENTATION: Readonly<
   Record<
     FeatureTimelineStatus,
-    { readonly dot: string; readonly text: string; readonly chip: string }
+    {
+      readonly dot: string | null;
+      readonly text: string;
+      readonly chip: string;
+    }
   >
 > = Object.freeze({
-  // The healthy state stays quiet; failures are the only loud chip.
   valid: Object.freeze({
-    dot: "bg-muted-foreground/40",
+    dot: null,
     text: "text-muted-foreground",
-    chip: "border-border",
+    chip: "border-border bg-card/70",
   }),
   stale: Object.freeze({
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
-    chip: "border-border",
+    dot: "bg-signal",
+    text: "text-signal",
+    chip: "border-signal/40 bg-signal/8",
   }),
   failed: Object.freeze({
     dot: "bg-destructive",
     text: "text-destructive font-medium",
-    chip: "border-destructive/60",
+    chip: "border-destructive/60 bg-destructive/8",
   }),
   suppressed: Object.freeze({
     dot: "border border-muted-foreground/60 bg-transparent",
     text: "text-muted-foreground italic",
-    chip: "border-dashed border-border",
+    chip: "border-dashed border-border bg-transparent",
   }),
   "beyond-rollback": Object.freeze({
-    dot: "bg-sky-500",
-    text: "text-sky-600 dark:text-sky-400",
-    chip: "border-dashed border-sky-500/60",
+    dot: "bg-status-parked",
+    text: "text-status-parked",
+    chip: "border-dashed border-status-parked/50 bg-transparent",
   }),
 });
 
@@ -69,7 +75,6 @@ const TIMELINE_STATUS_LABELS: Readonly<Record<FeatureTimelineStatus, string>> =
 export interface FeatureTimelineStripProps {
   readonly entries: readonly FeatureTimelineEntry[];
   readonly rollback: FeatureRollbackPoint | null;
-  readonly executed: readonly FeatureId[];
   readonly onRollback: (rollback: FeatureRollbackPoint | null) => void;
   readonly onToggleSuppressed: (id: FeatureId) => void;
 }
@@ -77,8 +82,8 @@ export interface FeatureTimelineStripProps {
 /**
  * The feature timeline strip: the one-stop composition of the timeline's
  * two surfaces — {@link FeatureTimelineChips} (the rollback gaps and the
- * chips) followed by {@link FeatureTimelineSummary} (the run counter).
- * Pages that give the timeline no scrolling region of its own mount this;
+ * chips) followed by {@link FeatureTimelineSummary} (the health counter).
+ * Pages that give the timeline no scrolling region of their own mount this;
  * a page that scrolls the chain inside a narrower region composes the two
  * parts directly, so the counter can sit OUTSIDE the scrolled content —
  * a summary that rides the scroll region clips mid-word exactly when the
@@ -86,7 +91,6 @@ export interface FeatureTimelineStripProps {
  */
 export function FeatureTimelineStrip({
   entries,
-  executed,
   rollback,
   onRollback,
   onToggleSuppressed,
@@ -99,11 +103,7 @@ export function FeatureTimelineStrip({
         onRollback={onRollback}
         onToggleSuppressed={onToggleSuppressed}
       />
-      <FeatureTimelineSummary
-        entries={entries}
-        executed={executed}
-        rollback={rollback}
-      />
+      <FeatureTimelineSummary entries={entries} rollback={rollback} />
     </>
   );
 }
@@ -180,36 +180,39 @@ export function FeatureTimelineChips({
 
 /** Props of {@link FeatureTimelineSummary}. */
 export interface FeatureTimelineSummaryProps {
-  /** The timeline entries, for the parked count. */
+  /** The timeline entries, for the healthy and parked counts. */
   readonly entries: readonly FeatureTimelineEntry[];
-  /** The last run's executed sequence, for the executed count. */
-  readonly executed: readonly FeatureId[];
   /** The current rollback marker, for the `rollback ·` prefix. */
   readonly rollback: FeatureRollbackPoint | null;
 }
 
 /**
  * The timeline's right-aligned summary: the marker's position and the
- * last run's executed/parked counts as one mono counter. `shrink-0` and
- * `whitespace-nowrap` keep it a single unclipped line wherever the host
+ * DOCUMENT's health — the count of features currently holding a valid
+ * result, plus the parked count — as one mono counter. The counts come
+ * from the same joined statuses the chips render, so the summary can
+ * never contradict the chain it summarizes (a per-run counter would:
+ * an edit that re-runs nothing would read "0 executed" beside a chain
+ * of Valid chips). `truncate` keeps it a single line wherever the host
  * places it — inside a plain flex row (the strip's own composition) or
- * outside a scrolling region (the complete workbench's).
+ * outside a scrolling region (the complete workbench's): squeezed, it
+ * ellipsizes at its own edge instead of painting into a neighbor.
  */
 export function FeatureTimelineSummary({
   entries,
-  executed,
   rollback,
 }: FeatureTimelineSummaryProps): ReactElement {
+  const validCount = entries.filter((entry) => entry.status === "valid").length;
   const parkedCount = entries.filter(
     (entry) => entry.status === "beyond-rollback",
   ).length;
   return (
     <span
-      className="text-muted-foreground ml-auto shrink-0 whitespace-nowrap pl-3 font-mono text-[11px]"
+      className="text-muted-foreground ml-auto min-w-0 truncate pl-3 font-mono text-[11px]"
       data-testid="timeline-summary"
     >
       {rollback === null ? "" : "rollback · "}
-      {` ${String(executed.length)} executed`}
+      {`${String(validCount)} valid`}
       {parkedCount > 0 ? ` · ${String(parkedCount)} parked` : ""}
     </span>
   );
@@ -249,7 +252,7 @@ function TimelineFragment({
         onClear={onClearRollback}
       />
       <span
-        className={`flex shrink-0 items-center gap-1.5 border px-2 py-1 text-xs ${presentation.chip}`}
+        className={`flex h-6 shrink-0 snap-start items-center gap-1.5 rounded-sm border px-1.5 ${presentation.chip}`}
         data-testid="timeline-chip"
         data-timeline-id={entry.id}
         data-timeline-status={entry.status}
@@ -261,12 +264,18 @@ function TimelineFragment({
                 .join("\n")
         }
       >
+        {presentation.dot !== null ? (
+          <span
+            aria-hidden="true"
+            className={`size-1.5 shrink-0 rounded-full ${presentation.dot}`}
+          />
+        ) : null}
         <span
-          aria-hidden="true"
-          className={`size-1.5 shrink-0 rounded-full ${presentation.dot}`}
-        />
-        <span className={presentation.text}>{entry.kind}</span>
-        <span className={`text-[11px] leading-none ${presentation.text}`}>
+          className={`font-mono text-[11px] font-medium leading-none ${presentation.text}`}
+        >
+          {entry.kind}
+        </span>
+        <span className={`text-[10px] leading-none ${presentation.text}`}>
           {TIMELINE_STATUS_LABELS[entry.status]}
         </span>
         <button
@@ -275,7 +284,7 @@ function TimelineFragment({
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
           aria-pressed={suppressed}
-          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+          className="text-muted-foreground hover:text-foreground ml-0.5 inline-flex size-4 cursor-pointer items-center justify-center rounded-sm outline-none transition-colors hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring/50"
           title={
             suppressed ? `Include ${entry.kind}` : `Suppress ${entry.kind}`
           }
@@ -315,7 +324,7 @@ function TimelineGap({
       type="button"
       aria-label={active ? `Remove rollback point — ${label}` : label}
       aria-pressed={active}
-      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-none outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
+      className="hover:bg-muted relative h-5 w-3 shrink-0 cursor-pointer rounded-sm outline-none snap-start focus-visible:ring-1 focus-visible:ring-ring/80"
       title={active ? `Remove rollback point — ${label}` : label}
       onClick={() => {
         if (active) {
@@ -328,7 +337,7 @@ function TimelineGap({
       {active ? (
         <span
           aria-hidden="true"
-          className="bg-amber-500 absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2"
+          className="bg-signal absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full"
           data-testid="rollback-marker"
         />
       ) : null}

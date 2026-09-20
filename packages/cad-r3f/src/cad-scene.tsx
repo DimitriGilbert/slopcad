@@ -11,10 +11,12 @@
  *
  * - `frameloop="demand"`: pixels change only after an explicit
  *   `invalidate()` — one per applied projection sync (`SceneModel`), one
- *   per camera application (`SceneCameraRig`), and one per selection/
+ *   per camera application (`SceneCameraRig`), one per selection/
  *   picking-prop change (`SceneModel`'s effect; a freshly mounted face
  *   highlight or a material change is otherwise invisible until the next
- *   frame). No rAF drift, no animation, no controls.
+ *   frame), and — on OPT-IN interactive camera hosts only — one per
+ *   applied camera gesture (`SceneCameraControls`). No rAF drift, no
+ *   animation, no unscheduled frames.
  * - `dpr={1}` and `antialias: false`: no GPU-dependent resolve or MSAA.
  * - `preserveDrawingBuffer: true`: the canvas survives compositing for
  *   byte-exact screenshot capture.
@@ -50,13 +52,19 @@
  */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactElement } from "react";
 import {
   selectionReferenceKey,
   type RenderCamera,
   type RenderProjection,
-  type RenderVector3,
   type SelectionReference,
 } from "@slopcad/cad-core";
 import type { CadPick, CadPickCategory } from "./picking";
@@ -64,18 +72,75 @@ import type { CadPick, CadPickCategory } from "./picking";
 import { CadModel } from "./cad-model";
 import {
   applySceneCamera,
+  camerasEqual,
   createSceneCamera,
   type SceneCamera,
 } from "./scene-camera";
-import { CadSceneGround } from "./scene-ground";
+import {
+  SceneCameraControls,
+  type SceneCameraStateSnapshot,
+} from "./scene-camera-controls";
+import {
+  CadSceneGround,
+  CAD_SCENE_AXIS_X_COLOR,
+  CAD_SCENE_AXIS_Y_COLOR,
+  CAD_SCENE_AXIS_Z_COLOR,
+  CAD_SCENE_GRID_CENTER_COLOR,
+  CAD_SCENE_GRID_COLOR,
+  CAD_SCENE_ORIGIN_MARKER_COLOR,
+} from "./scene-ground";
 import { CadSceneLights } from "./scene-lights";
 
+// The camera-spec value comparison stays public from here (its original
+// home) — the canonical definition lives beside the camera mapping.
+export { camerasEqual } from "./scene-camera";
+export type { SceneCameraStateSnapshot } from "./scene-camera-controls";
+
 /**
- * The scene's clear color. Dark neutral gray, chosen so the grid grays, the
- * RGB axis colors, and the default CadModel material all read at AA-off,
- * DPR-1 rasterization.
+ * The scene's clear color. Studio graphite (the Machinist dark token
+ * family), chosen so the grid grays, the RGB axis colors, and the
+ * default CadModel material all read at AA-off, DPR-1 rasterization.
  */
-export const CAD_SCENE_BACKGROUND = "#111827";
+export const CAD_SCENE_BACKGROUND = "#101318";
+
+/** The default model material color (mirrors cad-model's constant). */
+const CAD_SCENE_DEFAULT_MODEL_COLOR = "#aabdd6";
+
+/**
+ * The studio display palette: everything theme-carrying in the scene's
+ * ink. The amber SELECTION highlight is deliberately absent — it is a
+ * deterministic domain signal, not studio ink (see selection-highlight).
+ */
+export interface CadScenePalette {
+  /** The backdrop (the `<color attach="background">` clear color). */
+  readonly background: string;
+  /** Minor grid line color. */
+  readonly gridMinor: string;
+  /** Major (centre-line) grid color. */
+  readonly gridMajor: string;
+  /** The X axis's convention color. */
+  readonly axisX: string;
+  /** The Y axis's convention color. */
+  readonly axisY: string;
+  /** The Z axis's convention color. */
+  readonly axisZ: string;
+  /** The origin marker's color. */
+  readonly originMarker: string;
+  /** The model's base material color (metalness/roughness unchanged). */
+  readonly model: string;
+}
+
+/** The default palette: the documented Machinist night-bed constants. */
+export const CAD_SCENE_DEFAULT_PALETTE: CadScenePalette = Object.freeze({
+  background: CAD_SCENE_BACKGROUND,
+  gridMinor: CAD_SCENE_GRID_COLOR,
+  gridMajor: CAD_SCENE_GRID_CENTER_COLOR,
+  axisX: CAD_SCENE_AXIS_X_COLOR,
+  axisY: CAD_SCENE_AXIS_Y_COLOR,
+  axisZ: CAD_SCENE_AXIS_Z_COLOR,
+  originMarker: CAD_SCENE_ORIGIN_MARKER_COLOR,
+  model: CAD_SCENE_DEFAULT_MODEL_COLOR,
+} satisfies CadScenePalette);
 
 /**
  * The content ledger the settle probe gates on: what has actually been
@@ -92,31 +157,6 @@ export interface SettleLedger {
   syncedProjection: RenderProjection | null;
   /** The camera spec the rig has actually applied (compared by content). */
   appliedCamera: RenderCamera | null;
-}
-
-function vectorsEqual(a: RenderVector3, b: RenderVector3): boolean {
-  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
-}
-
-/**
- * Whether two camera specs carry the same view: kind, framing vectors, and
- * the kind's projection parameters, compared by VALUE. Projections rebuild
- * their camera object on every change, and a host may equally share one
- * memoized spec across projections — the settle gate must care about the
- * camera content on screen, never about object identity.
- */
-export function camerasEqual(a: RenderCamera, b: RenderCamera): boolean {
-  if (a.kind !== b.kind) return false;
-  if (!vectorsEqual(a.position, b.position)) return false;
-  if (!vectorsEqual(a.target, b.target)) return false;
-  if (!vectorsEqual(a.up, b.up)) return false;
-  if (a.kind === "perspective" && b.kind === "perspective") {
-    return a.fovDeg === b.fovDeg;
-  }
-  if (a.kind === "orthographic" && b.kind === "orthographic") {
-    return a.viewWidth === b.viewWidth && a.viewHeight === b.viewHeight;
-  }
-  return false;
 }
 
 export interface CadSceneProps {
@@ -138,6 +178,17 @@ export interface CadSceneProps {
    * reference tagging and stale-highlight rejection. Defaults to 0.
    */
   readonly regeneration?: number;
+  /**
+   * The studio display palette: backdrop, ground ink, and the model's base
+   * material color. Defaults to {@link CAD_SCENE_DEFAULT_PALETTE} (the
+   * documented Machinist night-bed constants); a chrome-carrying host
+   * resolves its own scheme+mode and passes the matching palette —
+   * geometry, camera, and the amber selection highlight stay deterministic
+   * either way. The palette object should be identity-stable per scheme
+   * and mode (the host exports it) so ordinary renders never swap scene
+   * ink.
+   */
+  readonly palette?: CadScenePalette;
   /** The selected references; drives the selection highlight. */
   readonly selection?: readonly SelectionReference[];
   /** Which domain reference a click resolves to. Defaults to `"face"`. */
@@ -155,6 +206,30 @@ export interface CadSceneProps {
    * its canonical key — the highlight-layer settle signal.
    */
   readonly onSelectionRendered?: (selectionKey: string) => void;
+  /**
+   * Opts the scene into INTERACTIVE camera controls (left-drag orbit,
+   * wheel dolly, middle/shift-drag pan, arrow-key orbit). Default `false`
+   * — the deterministic spec camera, unchanged for every fixture that
+   * pins bytes. With controls on, the boot camera is still the spec's
+   * (applied by the rig, untouched until the first gesture), so a page
+   * with controls renders byte-identically to one without until a user
+   * actually moves the camera.
+   */
+  readonly cameraControls?: boolean;
+  /**
+   * Whether left-drag-orbit is currently available (camera controls only).
+   * A host with an armed tool that owns model drags passes `false` while
+   * the tool is live — the tool keeps its gesture; wheel zoom, pan, and
+   * the arrow keys still move the camera. Default `true`.
+   */
+  readonly cameraOrbitDragEnabled?: boolean;
+  /**
+   * Receives the camera state (mode + azimuth/elevation/distance) once at
+   * boot and after every applied camera change — the host's machine
+   * surface for tests and readouts. Called outside render; a camera drag
+   * never re-renders the host.
+   */
+  readonly onCameraState?: (snapshot: SceneCameraStateSnapshot) => void;
 }
 
 /**
@@ -203,6 +278,7 @@ function SceneCameraRig({
  * highlight or material change reaches the next demand frame.
  */
 function SceneModel({
+  material,
   onPick,
   onPickDown,
   onPickUp,
@@ -213,6 +289,7 @@ function SceneModel({
   selection,
   settle,
 }: {
+  material?: { readonly color: string };
   onPick?: (pick: CadPick) => void;
   onPickDown?: (pick: CadPick) => void;
   onPickUp?: (pick: CadPick) => void;
@@ -234,9 +311,10 @@ function SceneModel({
   }, [settle, projection]);
   useEffect(() => {
     invalidate();
-  }, [invalidate, pickCategory, regeneration, selection]);
+  }, [invalidate, material, pickCategory, regeneration, selection]);
   return (
     <CadModel
+      material={material}
       onHover={onHover}
       onPick={onPick}
       onPickDown={onPickDown}
@@ -338,12 +416,16 @@ function SelectionProbe({
  * the parent a fixed size for fixed-viewport pixel evidence.
  */
 export function CadScene({
+  cameraControls = false,
+  cameraOrbitDragEnabled = true,
+  onCameraState,
   onHover,
   onPick,
   onPickDown,
   onPickUp,
   onSelectionRendered,
   onSettled,
+  palette = CAD_SCENE_DEFAULT_PALETTE,
   pickCategory,
   projection,
   regeneration,
@@ -356,17 +438,63 @@ export function CadScene({
     syncedProjection: null,
     appliedCamera: null,
   }));
+  // The camera-state reporter, identity-stable so the controls' listener
+  // wiring never re-runs because the host passed an inline closure.
+  const onCameraStateRef = useRef(onCameraState);
+  useEffect(() => {
+    onCameraStateRef.current = onCameraState;
+  });
+  const handleCameraState = useCallback(
+    (snapshot: SceneCameraStateSnapshot): void => {
+      onCameraStateRef.current?.(snapshot);
+    },
+    [],
+  );
+  // Identity-stable per palette so the model's material prop and the
+  // ground's memoized geometry never churn across ordinary renders.
+  const groundColors = useMemo(
+    () => ({
+      minor: palette.gridMinor,
+      major: palette.gridMajor,
+      axisX: palette.axisX,
+      axisY: palette.axisY,
+      axisZ: palette.axisZ,
+      origin: palette.originMarker,
+    }),
+    [
+      palette.axisX,
+      palette.axisY,
+      palette.axisZ,
+      palette.gridMajor,
+      palette.gridMinor,
+      palette.originMarker,
+    ],
+  );
+  const material = useMemo(() => ({ color: palette.model }), [palette.model]);
   return (
     <Canvas
       frameloop="demand"
       dpr={1}
       gl={{ antialias: false, preserveDrawingBuffer: true }}
     >
-      <color attach="background" args={[CAD_SCENE_BACKGROUND]} />
+      <color attach="background" args={[palette.background]} />
       <SceneCameraRig settle={settle} spec={projection.camera} />
+      {cameraControls ? (
+        <SceneCameraControls
+          onCameraState={handleCameraState}
+          orbitDragEnabled={cameraOrbitDragEnabled}
+          spec={projection.camera}
+        />
+      ) : null}
       <CadSceneLights />
-      {showGround ? <CadSceneGround target={projection.camera.target} /> : null}
+      {showGround ? (
+        <CadSceneGround
+          colors={groundColors}
+          target={projection.camera.target}
+        />
+      ) : null}
       <SceneModel
+        material={material}
         onHover={onHover}
         onPick={onPick}
         onPickDown={onPickDown}

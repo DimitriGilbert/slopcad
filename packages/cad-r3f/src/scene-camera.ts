@@ -28,7 +28,32 @@
  */
 
 import * as THREE from "three";
-import type { RenderCamera } from "@slopcad/cad-core";
+import type { RenderCamera, RenderVector3 } from "@slopcad/cad-core";
+
+function vectorsEqual(a: RenderVector3, b: RenderVector3): boolean {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+/**
+ * Whether two camera specs carry the same view: kind, framing vectors, and
+ * the kind's projection parameters, compared by VALUE. Projections rebuild
+ * their camera object on every change, and a host may equally share one
+ * memoized spec across projections — the settle gate must care about the
+ * camera content on screen, never about object identity.
+ */
+export function camerasEqual(a: RenderCamera, b: RenderCamera): boolean {
+  if (a.kind !== b.kind) return false;
+  if (!vectorsEqual(a.position, b.position)) return false;
+  if (!vectorsEqual(a.target, b.target)) return false;
+  if (!vectorsEqual(a.up, b.up)) return false;
+  if (a.kind === "perspective" && b.kind === "perspective") {
+    return a.fovDeg === b.fovDeg;
+  }
+  if (a.kind === "orthographic" && b.kind === "orthographic") {
+    return a.viewWidth === b.viewWidth && a.viewHeight === b.viewHeight;
+  }
+  return false;
+}
 
 /**
  * Near clip plane in millimetres, shared by both camera kinds. An order of

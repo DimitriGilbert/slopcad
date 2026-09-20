@@ -12,9 +12,28 @@ vocabulary lives in `@slopcad/cad-sketch`'s `constraints.ts`.
   perpendicular, tangent (`TANGENT_VARIANTS`: external | internal),
   midpoint, equal, symmetry — one kind whose two builders mirror about a
   point target (`createSymmetryAboutPointConstraint`) or about a line
-  (`createSymmetryAboutLineConstraint`).
+  (`createSymmetryAboutLineConstraint`). Phase 36 adds pointOnEntity (a
+  point on a line/circle/arc/ellipse/spline curve — arcs participate as
+  their full circles, the tangency convention), collinear (two lines on
+  one infinite line, 2 equations), and the point-pair alignments
+  horizontalPair / verticalPair (two point targets share y / x).
 - **Dimensional** (`DIMENSIONAL_CONSTRAINT_KINDS`): distance, radius,
-  diameter, angle — each carrying a dimensional value.
+  diameter, angle — each carrying a dimensional value — plus the Phase 36
+  signed axis dimensions distanceX / distanceY
+  (`x_second − x_first = value`, any finite mm, negative and zero
+  included). radius/diameter also dimension polygons (the authored
+  radius — circumradius or inradius per the fit) and slots (the cap
+  radius).
+
+### The spline scope (Phase 36's pinned honesty)
+
+Spline entities accept point-target constraints on their `start`/`end`
+(the curve passes through both), `pointOnEntity` onto them (a
+frozen-parameter projection onto the tessellated chord form — see
+`spline-math.ts`), and the `fixed` pin. Every other constraint kind
+with a spline operand — tangency, equality, parallelism,
+perpendicularity, angle, radius/diameter — declines at validation with
+`sketch/constraint-unsupported`, never a silent mis-solve.
 
 Points are addressed by `pointTarget(entityId, "start" | "end" |
 "center")` — constraints bind to an entity's endpoint or a point's

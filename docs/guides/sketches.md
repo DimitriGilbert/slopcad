@@ -17,8 +17,9 @@ extrude/revolve features consume.
 
 ## Entities
 
-Point, line, circle, arc, rectangle — each with a `create*Entity` builder
-that validates coordinates and freezes the result:
+Point, line, circle, arc, rectangle — and, since Phase 36, ellipse,
+elliptical arc, spline, regular polygon, and slot — each with a
+`create*Entity` builder that validates coordinates and freezes the result:
 
 ```ts
 import { createSketchEntityId, createLineEntity } from "@slopcad/cad-sketch";
@@ -29,6 +30,16 @@ const ab = createLineEntity(
 );
 ```
 
+Every entity documents its solver unknowns (the module docs of
+`entities.ts`): an ellipse is `(cx, cy, radiusX, radiusY, rotation)` —
+5 dof; an elliptical arc adds the parametric sweep (7); a spline carries
+2 dof per stored point; a regular polygon is `(cx, cy, radius, rotation)`
+— 4 dof, its `sides`/`fit` discrete; a slot is 5 dof (straight) or 7
+(arc3, its centerline an arc through three points). Polygons and slots
+resolve to their EXACT constituent primitives in profiles (n lines; cap
+arcs, offset arcs, and tangent lines); ellipses and splines keep their
+native segment kinds.
+
 Construction entities (`options.construction`) stay out of geometry;
 `fixed` points anchor solutions.
 
@@ -37,8 +48,10 @@ Construction entities (`options.construction`) stay out of geometry;
 `createSketch(workplane, entities, constraints)` validates integrity
 (entity/constraint cross-references); `serializeSketch` /
 `parseSketch` round-trip exactly (parse-the-serialize output → identical
-JSON — the suite pins it; `SKETCH_FORMAT_VERSION = 1`). Inside a
-document, a sketch persists through the `sketch.create` command.
+JSON — the suite pins it; `SKETCH_FORMAT_VERSION = 2`). Inside a
+document, a sketch persists through the `sketch.create` command; the
+native document's v1→v2 migration carries old embedded sketches forward
+(the growth is additive — see [native-files.md](native-files.md)).
 
 ## Profiles
 
@@ -47,7 +60,15 @@ closed loop — the loop an `extrude` feature consumes; several disjoint
 loops fail `sketch/profile-multiple-loops` (selecting among them is an
 interaction decision, not a silent default). `resolveProfileLoops` is
 the multi-loop resolver; `profileLoopSignedArea` is measured on the
-resolution walk.
+resolution walk. Since Phase 36: a full ellipse resolves to its own
+closed loop (area exactly πab — Green's theorem in closed form);
+elliptical arcs and splines chain by endpoint adjacency, the spline's
+area carried by its chord form within the documented deflection band
+(`SKETCH_PROFILE_DEFLECTIONS` — the fixed tessellation table every
+curved kind resolves through, vertices on the true curves). The
+self-intersection battery covers the tessellated kinds through their
+chord polylines. `entityPolyline(entity)` exposes the same
+deflection-disciplined boundary to renderers and hit-testers.
 
 ## Solving
 

@@ -93,6 +93,48 @@ export type CadSketchCanvasEntity =
       readonly construction: boolean;
       readonly selected: boolean;
       readonly diagnostic: CadSketchDiagnosticLevel;
+    }
+  | {
+      /** A full ellipse (native exact rendering). */
+      readonly id: string;
+      readonly kind: "ellipse";
+      readonly cx: number;
+      readonly cy: number;
+      readonly radiusX: number;
+      readonly radiusY: number;
+      /** Rotation of the radiusX axis from workplane +x (rad). */
+      readonly rotation: number;
+      readonly construction: boolean;
+      readonly selected: boolean;
+      readonly diagnostic: CadSketchDiagnosticLevel;
+    }
+  | {
+      /** An elliptical arc (native exact SVG-arc rendering). */
+      readonly id: string;
+      readonly kind: "ellipticalArc";
+      readonly cx: number;
+      readonly cy: number;
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: number;
+      readonly startAngle: number;
+      readonly endAngle: number;
+      readonly construction: boolean;
+      readonly selected: boolean;
+      readonly diagnostic: CadSketchDiagnosticLevel;
+    }
+  | {
+      /**
+       * A host-tessellated open polyline (splines, polygons, slots — the
+       * host derives the points from the domain's deflection discipline;
+       * the canvas stays curve-math-free).
+       */
+      readonly id: string;
+      readonly kind: "polyline";
+      readonly points: readonly CadSketchPoint[];
+      readonly construction: boolean;
+      readonly selected: boolean;
+      readonly diagnostic: CadSketchDiagnosticLevel;
     };
 
 /** View model of a closed region (a rectangle's face), workplane mm. */
@@ -134,6 +176,17 @@ export type CadSketchCanvasPreview =
       readonly kind: "circle";
       readonly center: CadSketchPoint;
       readonly radius: number;
+    }
+  | {
+      readonly kind: "ellipse";
+      readonly center: CadSketchPoint;
+      readonly radiusX: number;
+      readonly radiusY: number;
+      readonly rotation: number;
+    }
+  | {
+      readonly kind: "polyline";
+      readonly points: readonly CadSketchPoint[];
     }
   | { readonly kind: "none" };
 
@@ -227,6 +280,56 @@ function withinSweep(angle: number, start: number, end: number): boolean {
   return relative <= sweep;
 }
 
+/** The radial distance from `point` to an ellipse's curve (exact at the axes). */
+function radialDistanceToEllipse(
+  point: CadSketchPoint,
+  entity: Extract<CadSketchCanvasEntity, { kind: "ellipse" | "ellipticalArc" }>,
+): number {
+  // Into the ellipse's local frame.
+  const c = Math.cos(entity.rotation);
+  const s = Math.sin(entity.rotation);
+  const wx = point.x - entity.cx;
+  const wy = point.y - entity.cy;
+  const ex = c * wx + s * wy;
+  const ey = -s * wx + c * wy;
+  // Scale along the ray through the point to the normalized unit ellipse,
+  // then measure radially — exact on the principal axes, tight elsewhere.
+  const norm = Math.hypot(ex / entity.radiusX, ey / entity.radiusY);
+  if (norm === 0) return Math.min(entity.radiusX, entity.radiusY);
+  const k = 1 / norm;
+  return Math.hypot(ex * (1 - k), ey * (1 - k));
+}
+
+/** The parametric angle of a point about an ellipse's center ([0, 2π)). */
+function ellipseParameterOf(
+  point: CadSketchPoint,
+  entity: Extract<CadSketchCanvasEntity, { kind: "ellipse" | "ellipticalArc" }>,
+): number {
+  const c = Math.cos(entity.rotation);
+  const s = Math.sin(entity.rotation);
+  const wx = point.x - entity.cx;
+  const wy = point.y - entity.cy;
+  const ex = c * wx + s * wy;
+  const ey = -s * wx + c * wy;
+  const angle = Math.atan2(ey / entity.radiusY, ex / entity.radiusX);
+  return angle < 0 ? angle + Math.PI * 2 : angle;
+}
+
+/** The distance from `point` to an open polyline, over its segments. */
+function distanceToPolyline(
+  point: CadSketchPoint,
+  points: readonly CadSketchPoint[],
+): number {
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i + 1 < points.length; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (a === undefined || b === undefined) continue;
+    best = Math.min(best, distanceToSegment(point, a, b));
+  }
+  return best;
+}
+
 /**
  * The sketch canvas: the workplane's own deterministic 2D surface — grid,
  * axes, geometry, picks, preview, annotations — emitting semantic picks.
@@ -306,6 +409,18 @@ export function CadSketchCanvas({
           )
             ? Math.abs(rim - entity.radius)
             : Number.POSITIVE_INFINITY;
+        } else if (entity.kind === "ellipse") {
+          distance = radialDistanceToEllipse(point, entity);
+        } else if (entity.kind === "ellipticalArc") {
+          distance = withinSweep(
+            ellipseParameterOf(point, entity),
+            entity.startAngle,
+            entity.endAngle,
+          )
+            ? radialDistanceToEllipse(point, entity)
+            : Number.POSITIVE_INFINITY;
+        } else if (entity.kind === "polyline") {
+          distance = distanceToPolyline(point, entity.points);
         } else {
           distance = Math.hypot(point.x - entity.x, point.y - entity.y);
         }
@@ -514,6 +629,63 @@ export function CadSketchCanvas({
           />
         );
       }
+      case "ellipse": {
+        const center = toScreen({ x: entity.cx, y: entity.cy });
+        const rotationDegrees = (entity.rotation * 180) / Math.PI;
+        return (
+          <ellipse
+            key={entity.id}
+            {...common}
+            cx={center.x}
+            cy={center.y}
+            rx={entity.radiusX * scale}
+            ry={entity.radiusY * scale}
+            transform={`rotate(${-rotationDegrees} ${center.x} ${center.y})`}
+          />
+        );
+      }
+      case "ellipticalArc": {
+        // The parametric endpoints on the true curve; the SVG elliptical
+        // arc command carries the axes and rotation natively, with the
+        // workplane's CCW parametric sweep mapping to SVG sweep flag 0
+        // (screen y is flipped).
+        const c = Math.cos(entity.rotation);
+        const s = Math.sin(entity.rotation);
+        const param = (t: number): CadSketchPoint => {
+          const u = entity.radiusX * Math.cos(t);
+          const v = entity.radiusY * Math.sin(t);
+          return toScreen({
+            x: entity.cx + c * u - s * v,
+            y: entity.cy + s * u + c * v,
+          });
+        };
+        const start = param(entity.startAngle);
+        const end = param(entity.endAngle);
+        const sweep =
+          (((entity.endAngle - entity.startAngle) % (Math.PI * 2)) +
+            Math.PI * 2) %
+          (Math.PI * 2);
+        return (
+          <path
+            key={entity.id}
+            {...common}
+            d={`M ${start.x} ${start.y} A ${entity.radiusX * scale} ${entity.radiusY * scale} ${-(entity.rotation * 180) / Math.PI} ${sweep > Math.PI ? 1 : 0} 0 ${end.x} ${end.y}`}
+          />
+        );
+      }
+      case "polyline": {
+        if (entity.points.length < 2) return null;
+        const screenPoints = entity.points.map(toScreen);
+        return (
+          <polyline
+            key={entity.id}
+            {...common}
+            points={screenPoints
+              .map((point) => `${point.x},${point.y}`)
+              .join(" ")}
+          />
+        );
+      }
     }
   });
 
@@ -642,6 +814,39 @@ export function CadSketchCanvas({
           cy={center.y}
           fill="none"
           r={Math.max(preview.radius * scale, 0.01)}
+          stroke="var(--color-sky-400, #38bdf8)"
+          strokeDasharray="4 3"
+          strokeWidth={1.5}
+        />
+      );
+    }
+    if (preview.kind === "ellipse") {
+      const center = toScreen(preview.center);
+      const rotationDegrees = (preview.rotation * 180) / Math.PI;
+      return (
+        <ellipse
+          aria-hidden="true"
+          cx={center.x}
+          cy={center.y}
+          fill="none"
+          rx={Math.max(preview.radiusX * scale, 0.01)}
+          ry={Math.max(preview.radiusY * scale, 0.01)}
+          stroke="var(--color-sky-400, #38bdf8)"
+          strokeDasharray="4 3"
+          strokeWidth={1.5}
+          transform={`rotate(${-rotationDegrees} ${center.x} ${center.y})`}
+        />
+      );
+    }
+    if (preview.kind === "polyline" && preview.points.length >= 2) {
+      const screenPoints = preview.points.map(toScreen);
+      return (
+        <polyline
+          aria-hidden="true"
+          fill="none"
+          points={screenPoints
+            .map((point) => `${point.x},${point.y}`)
+            .join(" ")}
           stroke="var(--color-sky-400, #38bdf8)"
           strokeDasharray="4 3"
           strokeWidth={1.5}

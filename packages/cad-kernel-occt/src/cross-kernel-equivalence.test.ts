@@ -396,6 +396,90 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     );
   });
 
+  it("agrees on the Phase 36 curved profile kinds: OCCT exact, mesh kernels in the chord band", () => {
+    const occt = makeOcct();
+    const manifold = makeManifold();
+    const jscad = makeJscad();
+    const ellipseSolid = (kernel: GeometryKernel): KernelSolid =>
+      unwrapKernelResult(
+        kernel.extrude({
+          loop: [
+            {
+              kind: "ellipse",
+              center: [3, -2],
+              radiusX: 8,
+              radiusY: 4.5,
+              rotation: angle(0.7),
+            },
+          ],
+          height: length(6),
+          direction: 1,
+          placement: {
+            rotation: { axis: [0, 0, 1], angle: angle(0) },
+            translation: { x: length(0), y: length(0), z: length(0) },
+          },
+        }),
+        "ellipse extrude",
+      );
+    const ellipseVolume = (kernel: GeometryKernel): number =>
+      unwrapKernelResult(kernel.volume(ellipseSolid(kernel)), "volume");
+    // OCCT's ellipse prism is EXACT (probed at 1e-13: the gp_Elips wire
+    // stays analytic through prism and integration).
+    assertVolumeClose(
+      ellipseVolume(occt),
+      Math.PI * 8 * 4.5 * 6,
+      EXACT_VOLUME_TOLERANCE,
+    );
+    // The mesh kernels chord the ellipse at the turning-bounded step and
+    // sit in the curved band of the analytic volume.
+    assertVolumeClose(
+      ellipseVolume(manifold),
+      Math.PI * 8 * 4.5 * 6,
+      CURVED_VOLUME_TOLERANCE,
+    );
+    assertVolumeClose(
+      ellipseVolume(jscad),
+      Math.PI * 8 * 4.5 * 6,
+      CURVED_VOLUME_TOLERANCE,
+    );
+
+    const bowLoop = [
+      {
+        kind: "spline",
+        flavor: "control",
+        points: [
+          [0, 0],
+          [2, 8],
+          [6, 8],
+          [10, 0],
+        ],
+      },
+      { kind: "line", start: [10, 0], end: [5, 0] },
+      { kind: "line", start: [5, 0], end: [0, 0] },
+    ] as const;
+    const bowSolid = (kernel: GeometryKernel): KernelSolid =>
+      unwrapKernelResult(
+        kernel.extrude({
+          loop: bowLoop,
+          height: length(2),
+          direction: 1,
+          placement: {
+            rotation: { axis: [0, 0, 1], angle: angle(0) },
+            translation: { x: length(0), y: length(0), z: length(0) },
+          },
+        }),
+        "spline extrude",
+      );
+    const bowVolume = (kernel: GeometryKernel): number =>
+      unwrapKernelResult(kernel.volume(bowSolid(kernel)), "volume");
+    // The analytic Bézier bow area is 40.8 mm² (Green's theorem over the
+    // parametric form): OCCT's Geom_BezierCurve wire reproduces it EXACTLY
+    // (the probe); the mesh kernels carry the convex-hull deflection band.
+    assertVolumeClose(bowVolume(occt), 40.8 * 2, EXACT_VOLUME_TOLERANCE);
+    assertVolumeClose(bowVolume(manifold), 40.8 * 2, CURVED_VOLUME_TOLERANCE);
+    assertVolumeClose(bowVolume(jscad), 40.8 * 2, CURVED_VOLUME_TOLERANCE);
+  });
+
   it("builds the plate-with-hole on all three kernels: exact bounds, curved-band volumes, non-empty meshes", () => {
     const manifold = makeManifold();
     const occt = makeOcct();

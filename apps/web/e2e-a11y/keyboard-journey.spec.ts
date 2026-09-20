@@ -83,16 +83,19 @@ test("focus order runs row-to-docks and skips disabled controls", async ({
     .map((key) => key.toLowerCase());
   expect(toolKeys).toEqual(registry);
 
-  // A named timeline control sits between the tools and the history
-  // group (the gaps and suppress toggles are real, named buttons).
-  const historyStart = canUndo ? indexOf((key) => key === "Undo") : keys.length;
-  const timeline = keys
-    .slice(firstTool + 1, historyStart)
-    .filter((key) => /^(Suppress|Include|Roll back)/.test(key));
+  // The scheme picker is part of the app header's walk (before the
+  // workbench root's own surfaces).
+  const schemePicker = indexOf((key) => key === "scheme-picker");
   expect(
-    timeline.length,
-    "a named timeline control follows the tools",
-  ).toBeGreaterThan(0);
+    schemePicker,
+    "the scheme picker is reachable by Tab",
+  ).toBeGreaterThanOrEqual(0);
+  expect(schemePicker).toBeLessThan(firstTool);
+
+  // A named timeline control closes the walk: the feature band is its
+  // own full-width row BELOW the workspace, so the document's history
+  // controls follow the docks' fields (the gaps and suppress toggles
+  // are real, named buttons).
 
   // History (when enabled), commands, file actions, mode toggle — in
   // that order.
@@ -117,10 +120,20 @@ test("focus order runs row-to-docks and skips disabled controls", async ({
   const viewport = indexOf((key) => key === "CAD viewport");
   expect(viewport).toBeGreaterThan(sketch);
 
-  // …and the parameter fields close the walk (fresh plate document:
+  // …and the parameter fields close the workspace (fresh plate document:
   // translate_x/y/z then rotate_z).
   const translateX = indexOf((key) => key.startsWith("translate_x"));
   expect(translateX).toBeGreaterThan(viewport);
+
+  // The feature band's timeline controls follow the workspace: the band
+  // is its own full-width row below it, after the docks' fields.
+  const timeline = keys
+    .slice(translateX + 1)
+    .filter((key) => /^(Suppress|Include|Roll back)/.test(key));
+  expect(
+    timeline.length,
+    "a named timeline control follows the workspace",
+  ).toBeGreaterThan(0);
 
   // Disabled controls never appear as tab stops: on a fresh open the
   // hole action (no extrusion yet) and the history buttons are disabled.

@@ -68,6 +68,8 @@ import {
   type AngleConstraint,
   type DiameterConstraint,
   type DistanceConstraint,
+  type DistanceXConstraint,
+  type DistanceYConstraint,
   type RadiusConstraint,
   type SketchConstraint,
   parseSketchConstraint,
@@ -114,6 +116,8 @@ export const DIMENSIONAL_CONSTRAINT_KINDS = [
   "angle",
   "radius",
   "diameter",
+  "distanceX",
+  "distanceY",
 ] as const;
 
 export type DimensionalConstraintKind =
@@ -123,11 +127,8 @@ export type DimensionalConstraintKind =
 export function isDimensionalConstraintKind(
   input: unknown,
 ): input is DimensionalConstraintKind {
-  return (
-    input === "distance" ||
-    input === "angle" ||
-    input === "radius" ||
-    input === "diameter"
+  return (DIMENSIONAL_CONSTRAINT_KINDS as readonly string[]).includes(
+    input as string,
   );
 }
 
@@ -138,7 +139,12 @@ export function isDimensionalConstraintKind(
  * replacement value in typed.
  */
 export type DimensionalConstraint =
-  DistanceConstraint | AngleConstraint | RadiusConstraint | DiameterConstraint;
+  | DistanceConstraint
+  | AngleConstraint
+  | RadiusConstraint
+  | DiameterConstraint
+  | DistanceXConstraint
+  | DistanceYConstraint;
 
 /** Type guard narrowing a constraint to the dimensional shapes. */
 export function isDimensionalConstraint(
@@ -264,7 +270,20 @@ function constraintReferencesEntity(
     case "perpendicular":
     case "equal":
     case "tangent":
+    case "collinear":
       return constraint.first === entityId || constraint.second === entityId;
+    case "pointOnEntity":
+      return (
+        constraint.point.entity === entityId || constraint.entity === entityId
+      );
+    case "horizontalPair":
+    case "verticalPair":
+    case "distanceX":
+    case "distanceY":
+      return (
+        constraint.first.entity === entityId ||
+        constraint.second.entity === entityId
+      );
     case "distance":
       return (
         constraint.first.entity === entityId ||
@@ -527,11 +546,18 @@ export function applySketchCommand(
           );
         }
         const replacement = toCanonical(command.value);
-        if (!(valueIn(replacement, "mm") > 0)) {
+        const magnitude = valueIn(replacement, "mm");
+        // distanceX/distanceY are SIGNED first→second separations (any
+        // finite mm); the other length dimensions stay strictly positive.
+        const signedKind =
+          constraint.kind === "distanceX" || constraint.kind === "distanceY";
+        if (!(signedKind ? Number.isFinite(magnitude) : magnitude > 0)) {
           return fail(
             commandError(
               SKETCH_COMMAND_ERROR_CODES.integrity,
-              `Constraint ${constraint.id} replacement value must be strictly positive mm.`,
+              signedKind
+                ? `Constraint ${constraint.id} replacement value must be a finite number of mm (signed).`
+                : `Constraint ${constraint.id} replacement value must be strictly positive mm.`,
               command.value,
             ),
           );

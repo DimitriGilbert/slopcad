@@ -47,7 +47,15 @@ vi.mock("@slopcad/cad-r3f", async () => {
     "@slopcad/cad-r3f/tool-input",
   );
   return {
-    CAD_SCENE_BACKGROUND: "#111827",
+    CAD_SCENE_BACKGROUND: "#101318",
+    // The studio palette's constants (the Machinist night bed) — pure
+    // string values, no canvas needed.
+    CAD_SCENE_GRID_COLOR: "#374151",
+    CAD_SCENE_GRID_CENTER_COLOR: "#4b5563",
+    CAD_SCENE_AXIS_X_COLOR: "#ef4444",
+    CAD_SCENE_AXIS_Y_COLOR: "#22c55e",
+    CAD_SCENE_AXIS_Z_COLOR: "#3b82f6",
+    CAD_SCENE_ORIGIN_MARKER_COLOR: "#e5e7eb",
     CadScene: (props: CadSceneProps): ReactElement => {
       sceneSink.scenes.push(props);
       return createElement("div", { "data-testid": "cad-scene-stub" });

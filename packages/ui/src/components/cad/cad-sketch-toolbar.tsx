@@ -90,6 +90,15 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "Rectangle",
       tooltip: "Draw a rectangle: click two opposite corners",
     },
+    ellipse: {
+      label: "Ellipse",
+      tooltip:
+        "Draw an ellipse: click the center, the axis end, then the other extent",
+    },
+    slot: {
+      label: "Slot",
+      tooltip: "Draw a straight slot: click both cap centers, then the radius",
+    },
     trim: {
       label: "Trim",
       tooltip: "Trim a line to its nearest intersection: click the end to move",
@@ -101,6 +110,23 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
     coincident: { label: "Coincident", tooltip: "Make two points coincide" },
     horizontal: { label: "Horizontal", tooltip: "Make a line horizontal" },
     vertical: { label: "Vertical", tooltip: "Make a line vertical" },
+    pointOnEntity: {
+      label: "Point On",
+      tooltip:
+        "Pin a point onto a curve: click the point entity, then the curve (line, circle/arc, ellipse, spline)",
+    },
+    collinear: {
+      label: "Collinear",
+      tooltip: "Make two lines lie on one infinite line",
+    },
+    horizontalPair: {
+      label: "H Align",
+      tooltip: "Make two points share their y",
+    },
+    verticalPair: {
+      label: "V Align",
+      tooltip: "Make two points share their x",
+    },
     parallel: { label: "Parallel", tooltip: "Make two lines parallel" },
     perpendicular: {
       label: "Perpendicular",
@@ -118,6 +144,14 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
     distance: {
       label: "Distance",
       tooltip: "Dimension the distance between two points",
+    },
+    distanceX: {
+      label: "Dist X",
+      tooltip: "Dimension the signed x separation between two points",
+    },
+    distanceY: {
+      label: "Dist Y",
+      tooltip: "Dimension the signed y separation between two points",
     },
     radius: { label: "Radius", tooltip: "Dimension a circle or arc radius" },
     diameter: {

@@ -116,6 +116,17 @@ export {
   tessellateRevolveProfile,
   transpose3,
 } from "./profile-geometry";
+export {
+  PROFILE_SPLINE_DEFLECTION_MM,
+  PROFILE_SPLINE_MAX_DEPTH,
+  splineBezierChain,
+  splineEndPoint,
+  splinePointsProblem,
+  splineSegmentPoint,
+  splineStartPoint,
+  tessellateSplineSegment,
+} from "./profile-splines";
+export type { SplineBezierSegment, SplinePoint2 } from "./profile-splines";
 export type {
   LoftSectionsProblem,
   ProfilePoint2,

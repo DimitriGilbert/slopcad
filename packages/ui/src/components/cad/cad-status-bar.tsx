@@ -135,7 +135,7 @@ function useOptionalCadStore(): ReturnType<typeof useCadStore> | null {
   }
 }
 
-/** One labeled field of the bar: label, space, value. */
+/** One labeled field of the readout: dim label, `=`, then the value. */
 function StatusField({
   label,
   children,
@@ -144,8 +144,10 @@ function StatusField({
   readonly children: ReactNode;
 }): ReactElement {
   return (
-    <span>
-      {label} = {children}
+    <span className="text-muted-foreground flex items-center whitespace-nowrap">
+      <span className="text-muted-foreground">{label}</span>
+      {" = "}
+      <span className="text-foreground">{children}</span>
     </span>
   );
 }
@@ -188,7 +190,7 @@ export function CadStatusBar({
   return (
     <div
       className={cn(
-        "border-border bg-background text-muted-foreground flex h-7 shrink-0 items-center gap-4 border-t px-3 font-mono text-xs",
+        "border-border bg-card/50 text-muted-foreground flex h-7 shrink-0 items-center gap-4 overflow-hidden border-t px-3 font-mono text-[11px]",
         className,
       )}
       data-slot="cad-status-bar"

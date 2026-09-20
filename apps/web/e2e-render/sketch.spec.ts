@@ -687,3 +687,165 @@ test("full sketch workflow: rectangle, constraints, dimension edit, undo, redo",
     await page.locator(CANVAS).screenshot(),
   );
 });
+
+/** Phase 36 vocabulary e2e: the ellipse/slot drawing tools and the new
+ *  constraint kinds (pointOnEntity, collinear, distanceX) drive the same
+ *  machine surfaces the battery above pins — solver DoF, the solved
+ *  geometry, and the inspector's dimension editor. */
+test("phase 36: an ellipse is drawn in three picks, dimensioned with distanceX, and follows the edit", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  // Three clicks: center (5, 5), axis end (17, 5) → radiusX 12,
+  // rotation 0; minor extent (5, 13) → radiusY 8.
+  await activateTool(page, "ellipse");
+  await clickCanvas(page, 5, 5);
+  await clickCanvas(page, 17, 5);
+  await clickCanvas(page, 5, 13);
+
+  // One ellipse entity, exactly its 5 degrees of freedom.
+  const surface = await readSketchSurface(page);
+  expect(surface.entities).toHaveLength(1);
+  expect(surface.entities[0]).toMatchObject({
+    id: "skent_ellipse-1",
+    kind: "ellipse",
+  });
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 5, status: "under-constrained" }),
+  );
+
+  // distanceX from the center to the major-axis end: the LEFTMOST rim
+  // point targets the CENTER (its nearest point target — the center is 12
+  // away, the minor end 13.9, the major end 24); the rightmost rim point
+  // IS the START (the major-axis end).
+  await activateTool(page, "distanceX");
+  await clickCanvas(page, -7, 5);
+  await clickCanvas(page, 17, 5);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 4, status: "under-constrained" }),
+  );
+
+  // The measured dimension is the x separation (12 mm); edit it to 16
+  // and the constraint holds at the new value (the rotation's gradient is
+  // zero at rotation 0, so the whole correction lands on radiusX).
+  const input = page.getByRole("spinbutton");
+  await expect(input).toHaveValue("12");
+  await input.fill("16");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect
+    .poll(async () => {
+      const ellipse = await solvedEntity(page, "skent_ellipse-1");
+      // start.x − cx = radiusX·cos(rotation) — the exact quantity the
+      // signed distanceX constraint pins.
+      return Number(ellipse.radiusX) * Math.cos(Number(ellipse.rotation));
+    })
+    .toBeCloseTo(16, 6);
+  await saveArtifact(
+    "sketch-ellipse-dimension.png",
+    await page.locator(CANVAS).screenshot(),
+  );
+});
+
+test("phase 36: a straight slot is drawn in three picks and sized by its radius constraint", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  // Cap centers (−15, −10) and (5, −10); the radius pick sits 5 mm off
+  // the centerline.
+  await activateTool(page, "slot");
+  await clickCanvas(page, -15, -10);
+  await clickCanvas(page, 5, -10);
+  await clickCanvas(page, 0, -5);
+
+  const surface = await readSketchSurface(page);
+  expect(surface.entities).toHaveLength(1);
+  expect(surface.entities[0]).toMatchObject({
+    id: "skent_slot-1",
+    kind: "slot",
+  });
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 5, status: "under-constrained" }),
+  );
+
+  // Radius on the slot (the cap radius): measured 5 mm.
+  await activateTool(page, "radius");
+  await clickCanvas(page, -15, -6);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 4, status: "under-constrained" }),
+  );
+  const input = page.getByRole("spinbutton");
+  await expect(input).toHaveValue("5");
+  await input.fill("7");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect
+    .poll(async () => {
+      const slot = await solvedEntity(page, "skent_slot-1");
+      return Number(slot.radius);
+    })
+    .toBeCloseTo(7, 6);
+});
+
+test("phase 36: collinear flattens the second line onto the first's infinite line", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  // Both lines sit well inside the canvas (y = −10 keeps the clicks off
+  // the surface's bottom edge, where the container border intercepts).
+  await activateTool(page, "line");
+  await clickCanvas(page, 0, -10);
+  await clickCanvas(page, 30, -10);
+  await activateTool(page, "line");
+  await clickCanvas(page, 5, -6);
+  await clickCanvas(page, 25, -2);
+
+  await activateTool(page, "collinear");
+  await clickCanvas(page, 10, -10);
+  await clickCanvas(page, 15, -4);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 6, status: "under-constrained" }),
+  );
+  const second = await solvedEntity(page, "skent_line-2");
+  expect(Number(second.y1)).toBeCloseTo(-10, 6);
+  expect(Number(second.y2)).toBeCloseTo(-10, 6);
+});
+
+test("phase 36: pointOnEntity pulls a line endpoint onto a circle", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  await activateTool(page, "line");
+  await clickCanvas(page, 2, 20);
+  await clickCanvas(page, 30, 14);
+  await activateTool(page, "circle");
+  await clickCanvas(page, 20, 20);
+  await clickCanvas(page, 26, 20);
+
+  // Pin the line's START (the nearest point target at the click) onto
+  // the circle (the curve operand).
+  await activateTool(page, "pointOnEntity");
+  await clickCanvas(page, 2, 20);
+  await clickCanvas(page, 26, 20);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 6, status: "under-constrained" }),
+  );
+  await expect
+    .poll(async () => {
+      const line = await solvedEntity(page, "skent_line-1");
+      const circle = await solvedEntity(page, "skent_circle-1");
+      return Math.hypot(
+        Number(line.x1) - Number(circle.cx),
+        Number(line.y1) - Number(circle.cy),
+      );
+    })
+    .toBeCloseTo(6, 6);
+});

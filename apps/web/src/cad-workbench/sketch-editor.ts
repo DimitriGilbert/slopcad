@@ -45,21 +45,30 @@ import {
   createAngleConstraint,
   createCircleEntity,
   createCoincidentConstraint,
+  createCollinearConstraint,
   createDistanceConstraint,
+  createDistanceXConstraint,
+  createDistanceYConstraint,
   createDiameterConstraint,
+  createEllipseEntity,
   createEqualConstraint,
   createHorizontalConstraint,
+  createHorizontalPairConstraint,
   createLineEntity,
   createMidpointConstraint,
   createParallelConstraint,
   createPerpendicularConstraint,
+  createPointOnEntityConstraint,
   createRadiusConstraint,
   createRectangleEntity,
   createSketch,
   createSketchConstraintId,
   createSketchEntityId,
+  createStraightSlotEntity,
   createTangentConstraint,
   createVerticalConstraint,
+  createVerticalPairConstraint,
+  entityPolyline,
   isSketchConstraintKind,
   pointTarget,
   serializeSketchConstraint,
@@ -94,6 +103,8 @@ export const SKETCH_DRAWING_TOOLS = [
   "line",
   "circle",
   "rectangle",
+  "ellipse",
+  "slot",
   "trim",
   "construction",
 ] as const;
@@ -103,12 +114,18 @@ export const SKETCH_CONSTRAINT_TOOLS = [
   "coincident",
   "horizontal",
   "vertical",
+  "pointOnEntity",
+  "collinear",
+  "horizontalPair",
+  "verticalPair",
   "parallel",
   "perpendicular",
   "equal",
   "midpoint",
   "tangent",
   "distance",
+  "distanceX",
+  "distanceY",
   "radius",
   "diameter",
   "angle",
@@ -143,7 +160,25 @@ export type SketchGesture =
   | { readonly kind: "none" }
   | { readonly kind: "line"; readonly start: EditorPoint }
   | { readonly kind: "circle"; readonly center: EditorPoint }
-  | { readonly kind: "rectangle"; readonly corner: EditorPoint };
+  | { readonly kind: "rectangle"; readonly corner: EditorPoint }
+  | {
+      /** Ellipse after the center pick: the axis end sets radiusX + rotation. */
+      readonly kind: "ellipse";
+      readonly center: EditorPoint;
+      readonly axis: EditorPoint;
+    }
+  | {
+      /** Straight slot after the start-cap pick: the second pick is the end cap. */
+      readonly kind: "slot";
+      readonly start: EditorPoint;
+      readonly end: EditorPoint;
+    }
+  | {
+      /** The first pick of either multi-pick curve gesture. */
+      readonly kind: "pick";
+      readonly tool: "ellipse" | "slot";
+      readonly point: EditorPoint;
+    };
 
 /** One accumulated constraint pick: the entity plus its point target, if any. */
 export interface SketchEditorPick {
@@ -181,6 +216,13 @@ export const SKETCH_EDITOR_STATUS_TEXT = {
   circleRadius: "Circle: click to set the radius.",
   readyRectangle: "Rectangle: click the first corner.",
   rectangleSecond: "Rectangle: click the opposite corner.",
+  readyEllipse: "Ellipse: click the center.",
+  ellipseAxis: "Ellipse: click the axis end (sets the axis and its length).",
+  ellipseMinor: "Ellipse: click to set the other extent.",
+  readySlot: "Slot: click the first cap center.",
+  slotEnd: "Slot: click the second cap center.",
+  slotRadius:
+    "Slot: click to set the cap radius (distance from the centerline).",
   readyTrim:
     "Trim: click a line near the end to trim to the nearest intersection.",
   readyConstruction:
@@ -265,25 +307,65 @@ function pickArity(tool: SketchToolId): number {
     case "tangent":
     case "distance":
     case "angle":
+    case "pointOnEntity":
+    case "collinear":
+    case "horizontalPair":
+    case "verticalPair":
+    case "distanceX":
+    case "distanceY":
       return 2;
     default:
       return 0;
   }
 }
 
-/** Whether a tool's picks carry point targets. */
-function usesPointTargets(tool: SketchToolId): boolean {
-  return tool === "coincident" || tool === "distance" || tool === "midpoint";
+/**
+ * Whether a tool's picks carry point targets. `pointOnEntity` addresses a
+ * point only on its FIRST pick (the second is the curve operand).
+ */
+function pickUsesPointTarget(tool: SketchToolId, pickIndex: number): boolean {
+  switch (tool) {
+    case "coincident":
+    case "distance":
+    case "midpoint":
+    case "horizontalPair":
+    case "verticalPair":
+    case "distanceX":
+    case "distanceY":
+      return true;
+    case "pointOnEntity":
+      return pickIndex === 0;
+    default:
+      return false;
+  }
+}
+
+/** Whether `entity` offers point targets at all. */
+function isPointTargetable(entity: SketchEntity): boolean {
+  return entity.kind !== "rectangle";
+}
+
+/** Whether `entity` is a curve `pointOnEntity` can pin onto. */
+function isPointOnEntityCurve(entity: SketchEntity): boolean {
+  return (
+    entity.kind === "line" ||
+    entity.kind === "circle" ||
+    entity.kind === "arc" ||
+    entity.kind === "ellipse" ||
+    entity.kind === "ellipticalArc" ||
+    entity.kind === "spline"
+  );
 }
 
 /** The entity kinds a constraint tool accepts, per pick slot. */
 function pickKindProblem(
   tool: SketchToolId,
   entity: SketchEntity,
+  pickIndex: number,
 ): string | null {
   const isLine = entity.kind === "line";
   const isCircular = entity.kind === "circle" || entity.kind === "arc";
-  const isPoint = entity.kind === "point";
+  const isPointCapable = isPointTargetable(entity);
   switch (tool) {
     case "horizontal":
     case "vertical":
@@ -291,19 +373,33 @@ function pickKindProblem(
     case "perpendicular":
     case "angle":
       return isLine ? null : "needs a line";
+    case "collinear":
+      return isLine ? null : "needs a line";
     case "equal":
       return isLine || isCircular ? null : "needs a line or circle/arc";
     case "coincident":
     case "distance":
     case "midpoint":
-      return isLine || isCircular || isPoint
-        ? null
-        : "needs a point-capable entity";
+    case "horizontalPair":
+    case "verticalPair":
+    case "distanceX":
+    case "distanceY":
+      return isPointCapable ? null : "needs a point-capable entity";
+    case "pointOnEntity":
+      return pickIndex === 0
+        ? isPointCapable
+          ? null
+          : "needs a point-capable entity"
+        : isPointOnEntityCurve(entity)
+          ? null
+          : "needs a curve (line, circle/arc, ellipse, or spline)";
     case "tangent":
       return isLine || isCircular ? null : "needs a line or circle/arc";
     case "radius":
     case "diameter":
-      return isCircular ? null : "needs a circle or arc";
+      return isCircular || entity.kind === "polygon" || entity.kind === "slot"
+        ? null
+        : "needs a circle, arc, polygon, or slot";
     default:
       return null;
   }
@@ -329,6 +425,22 @@ function pairProblem(
       if (firstCircular && secondLine) return null;
       if (firstCircular && secondCircular) return null;
       return "tangent needs a line and a circle/arc, or two circles/arcs";
+    case "pointOnEntity": {
+      const curveKinds = new Set([
+        "line",
+        "circle",
+        "arc",
+        "ellipse",
+        "ellipticalArc",
+        "spline",
+      ]);
+      // Either orientation composes: the curve pick pins the other's point.
+      if (curveKinds.has(second.kind) && first.kind !== "rectangle")
+        return null;
+      if (curveKinds.has(first.kind) && second.kind !== "rectangle")
+        return null;
+      return "pointOnEntity needs a point-capable pick and a curve pick (line, circle/arc, ellipse, or spline)";
+    }
     default:
       return null;
   }
@@ -381,6 +493,80 @@ function nearestPointTarget(
         "end",
       );
       break;
+    case "ellipse":
+    case "ellipticalArc": {
+      consider({ x: entity.cx, y: entity.cy }, "center");
+      const axisEnd = (which: "start" | "end"): EditorPoint => {
+        const t = which === "start" ? 0 : Math.PI / 2;
+        const u = entity.radiusX * Math.cos(t);
+        const v = entity.radiusY * Math.sin(t);
+        const c = Math.cos(entity.rotation);
+        const s = Math.sin(entity.rotation);
+        return {
+          x: entity.cx + c * u - s * v,
+          y: entity.cy + s * u + c * v,
+        };
+      };
+      consider(axisEnd("start"), "start");
+      consider(axisEnd("end"), "end");
+      if (entity.kind === "ellipticalArc") {
+        const param = (t: number): EditorPoint => {
+          const u = entity.radiusX * Math.cos(t);
+          const v = entity.radiusY * Math.sin(t);
+          const c = Math.cos(entity.rotation);
+          const s = Math.sin(entity.rotation);
+          return {
+            x: entity.cx + c * u - s * v,
+            y: entity.cy + s * u + c * v,
+          };
+        };
+        consider(param(entity.startAngle), "start");
+        consider(param(entity.endAngle), "end");
+      }
+      break;
+    }
+    case "spline": {
+      const first = entity.points[0];
+      const last = entity.points[entity.points.length - 1];
+      if (first !== undefined) consider(first, "start");
+      if (last !== undefined) consider(last, "end");
+      break;
+    }
+    case "polygon": {
+      consider({ x: entity.cx, y: entity.cy }, "center");
+      const effective =
+        entity.fit === "inscribed"
+          ? entity.radius
+          : entity.radius / Math.cos(Math.PI / entity.sides);
+      const vertex = (k: number): EditorPoint => {
+        const angle = entity.rotation + (Math.PI * 2 * k) / entity.sides;
+        return {
+          x: entity.cx + effective * Math.cos(angle),
+          y: entity.cy + effective * Math.sin(angle),
+        };
+      };
+      consider(vertex(0), "start");
+      consider(vertex(1), "end");
+      break;
+    }
+    case "slot": {
+      consider({ x: entity.x1, y: entity.y1 }, "start");
+      const end =
+        entity.variant === "straight"
+          ? { x: entity.x2, y: entity.y2 }
+          : { x: entity.x3 ?? entity.x2, y: entity.y3 ?? entity.y2 };
+      consider(end, "end");
+      consider(
+        entity.variant === "straight"
+          ? {
+              x: (entity.x1 + entity.x2) / 2,
+              y: (entity.y1 + entity.y2) / 2,
+            }
+          : { x: entity.x2, y: entity.y2 },
+        "center",
+      );
+      break;
+    }
     case "rectangle":
       return null;
   }
@@ -429,6 +615,58 @@ export function pointTargetPosition(
         };
       }
       return { x: entity.cx, y: entity.cy };
+    }
+    case "ellipse":
+    case "ellipticalArc": {
+      const parametric = (t: number): EditorPoint => {
+        const u = entity.radiusX * Math.cos(t);
+        const v = entity.radiusY * Math.sin(t);
+        const c = Math.cos(entity.rotation);
+        const s = Math.sin(entity.rotation);
+        return {
+          x: entity.cx + c * u - s * v,
+          y: entity.cy + s * u + c * v,
+        };
+      };
+      if (entity.kind === "ellipse") {
+        if (target.point === "start") return parametric(0);
+        if (target.point === "end") return parametric(Math.PI / 2);
+        return { x: entity.cx, y: entity.cy };
+      }
+      if (target.point === "start") return parametric(entity.startAngle);
+      if (target.point === "end") return parametric(entity.endAngle);
+      return { x: entity.cx, y: entity.cy };
+    }
+    case "spline": {
+      const first = entity.points[0];
+      const last = entity.points[entity.points.length - 1];
+      if (target.point === "start" && first !== undefined) return first;
+      if (target.point === "end" && last !== undefined) return last;
+      return null;
+    }
+    case "polygon": {
+      if (target.point === "center") return { x: entity.cx, y: entity.cy };
+      const effective =
+        entity.fit === "inscribed"
+          ? entity.radius
+          : entity.radius / Math.cos(Math.PI / entity.sides);
+      const k = target.point === "start" ? 0 : 1;
+      const angle = entity.rotation + (Math.PI * 2 * k) / entity.sides;
+      return {
+        x: entity.cx + effective * Math.cos(angle),
+        y: entity.cy + effective * Math.sin(angle),
+      };
+    }
+    case "slot": {
+      if (target.point === "start") return { x: entity.x1, y: entity.y1 };
+      if (target.point === "end") {
+        return entity.variant === "straight"
+          ? { x: entity.x2, y: entity.y2 }
+          : { x: entity.x3 ?? entity.x2, y: entity.y3 ?? entity.y2 };
+      }
+      return entity.variant === "straight"
+        ? { x: (entity.x1 + entity.x2) / 2, y: (entity.y1 + entity.y2) / 2 }
+        : { x: entity.x2, y: entity.y2 };
     }
     case "rectangle":
       return null;
@@ -481,21 +719,10 @@ function angleBetweenDegrees(
   return delta;
 }
 
-/** Distance between two point targets in mm (the measured dimension value). */
-function measuredDistance(
-  entities: readonly SketchEntity[],
-  first: PointTarget,
-  second: PointTarget,
-): number | null {
-  const a = pointTargetPosition(entities, first);
-  const b = pointTargetPosition(entities, second);
-  if (a === null || b === null) return null;
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
-
 /**
  * The dimension tool's measured value from the accumulated picks, or `null`
- * when the geometry cannot provide one.
+ * when the geometry cannot provide one. distanceX/distanceY measure the
+ * SIGNED first→second axis separation (negative and zero legal).
  */
 function measuredDimensionValue(
   tool: SketchToolId,
@@ -509,23 +736,42 @@ function measuredDimensionValue(
   );
   if (firstEntity === undefined) return null;
   if (tool === "radius") {
-    return firstEntity.kind === "circle" || firstEntity.kind === "arc"
-      ? firstEntity.radius
-      : null;
+    if (
+      firstEntity.kind === "circle" ||
+      firstEntity.kind === "arc" ||
+      firstEntity.kind === "polygon" ||
+      firstEntity.kind === "slot"
+    ) {
+      return firstEntity.radius;
+    }
+    return null;
   }
   if (tool === "diameter") {
-    return firstEntity.kind === "circle" || firstEntity.kind === "arc"
-      ? firstEntity.radius * 2
-      : null;
+    if (
+      firstEntity.kind === "circle" ||
+      firstEntity.kind === "arc" ||
+      firstEntity.kind === "polygon" ||
+      firstEntity.kind === "slot"
+    ) {
+      return firstEntity.radius * 2;
+    }
+    return null;
   }
   const second = picks[1];
   if (second === undefined) return null;
-  if (tool === "distance") {
-    return measuredDistance(
-      sketch.entities,
-      pointTarget(first.entityId, first.point ?? "center"),
-      pointTarget(second.entityId, second.point ?? "center"),
-    );
+  if (tool === "distance" || tool === "distanceX" || tool === "distanceY") {
+    const a = pointTargetPosition(sketch.entities, {
+      entity: first.entityId,
+      point: first.point ?? "center",
+    });
+    const b = pointTargetPosition(sketch.entities, {
+      entity: second.entityId,
+      point: second.point ?? "center",
+    });
+    if (a === null || b === null) return null;
+    if (tool === "distance") return Math.hypot(a.x - b.x, a.y - b.y);
+    if (tool === "distanceX") return b.x - a.x;
+    return b.y - a.y;
   }
   if (tool === "angle") {
     if (firstEntity.kind !== "line") return null;
@@ -691,6 +937,10 @@ export function constraintOperandIds(
   switch (constraint.kind) {
     case "coincident":
     case "distance":
+    case "distanceX":
+    case "distanceY":
+    case "horizontalPair":
+    case "verticalPair":
       return [constraint.first.entity, constraint.second.entity];
     case "horizontal":
     case "vertical":
@@ -702,7 +952,10 @@ export function constraintOperandIds(
     case "equal":
     case "tangent":
     case "angle":
+    case "collinear":
       return [constraint.first, constraint.second];
+    case "pointOnEntity":
+      return [constraint.point.entity, constraint.entity];
     case "midpoint":
       return [constraint.point.entity, constraint.line];
     case "symmetry":
@@ -859,6 +1112,69 @@ function constraintCommand(
         ? createRadiusConstraint(id, first.entityId, dimensionValue)
         : createDiameterConstraint(id, first.entityId, dimensionValue);
     }
+    case "pointOnEntity": {
+      if (first === undefined || second === undefined) return null;
+      // Either orientation composes: the pick carrying a POINT TARGET is
+      // the point side (a line's start is a legitimate point operand even
+      // though a line is also a curve); the pick without one is the curve.
+      const pointPick =
+        first.point !== null && second.point === null
+          ? first
+          : second.point !== null && first.point === null
+            ? second
+            : null;
+      const curvePick = pointPick === first ? second : first;
+      if (pointPick === null) return null;
+      return createPointOnEntityConstraint(
+        createSketchConstraintId(mint("skcon", tool)),
+        pointTarget(pointPick.entityId, pointPick.point ?? "center"),
+        curvePick.entityId,
+      );
+    }
+    case "collinear": {
+      if (first === undefined || second === undefined) return null;
+      return createCollinearConstraint(
+        createSketchConstraintId(mint("skcon", tool)),
+        first.entityId,
+        second.entityId,
+      );
+    }
+    case "horizontalPair":
+    case "verticalPair": {
+      if (first === undefined || second === undefined) return null;
+      const id = createSketchConstraintId(mint("skcon", tool));
+      return tool === "horizontalPair"
+        ? createHorizontalPairConstraint(
+            id,
+            pointTarget(first.entityId, first.point ?? "center"),
+            pointTarget(second.entityId, second.point ?? "center"),
+          )
+        : createVerticalPairConstraint(
+            id,
+            pointTarget(first.entityId, first.point ?? "center"),
+            pointTarget(second.entityId, second.point ?? "center"),
+          );
+    }
+    case "distanceX":
+    case "distanceY": {
+      if (first === undefined || second === undefined) return null;
+      const value = measuredDimensionValue(tool, sketch, picks);
+      if (value === null || !Number.isFinite(value)) return null;
+      const id = createSketchConstraintId(mint("skcon", tool));
+      return tool === "distanceX"
+        ? createDistanceXConstraint(
+            id,
+            pointTarget(first.entityId, first.point ?? "center"),
+            pointTarget(second.entityId, second.point ?? "center"),
+            length(value),
+          )
+        : createDistanceYConstraint(
+            id,
+            pointTarget(first.entityId, first.point ?? "center"),
+            pointTarget(second.entityId, second.point ?? "center"),
+            length(value),
+          );
+    }
     default:
       return null;
   }
@@ -1005,6 +1321,10 @@ function readyStatusFor(tool: SketchToolId): SketchEditorStatus {
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyCircle);
     case "rectangle":
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyRectangle);
+    case "ellipse":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyEllipse);
+    case "slot":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readySlot);
     case "trim":
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyTrim);
     case "construction":
@@ -1225,6 +1545,162 @@ function canvasPick(
         transaction: null,
       };
     }
+    case "ellipse": {
+      // Pick 1: center. Pick 2: the axis end (radiusX + rotation from the
+      // center→pick direction). Pick 3: the other extent (radiusY from the
+      // perpendicular distance to the axis line).
+      if (state.gesture.kind === "ellipse") {
+        const { center, axis } = state.gesture;
+        const radiusX = Math.hypot(axis.x - center.x, axis.y - center.y);
+        const rotation = Math.atan2(axis.y - center.y, axis.x - center.x);
+        const cosR = Math.cos(rotation);
+        const sinR = Math.sin(rotation);
+        const wx = event.point.x - center.x;
+        const wy = event.point.y - center.y;
+        const radiusY = Math.abs(-sinR * wx + cosR * wy);
+        if (!(radiusX > 0) || !(radiusY > 0)) {
+          return {
+            state: {
+              ...state,
+              status: statusOf(
+                "error",
+                SKETCH_EDITOR_STATUS_TEXT.degenerate,
+                "sketch/degenerate",
+              ),
+            },
+            transaction: null,
+          };
+        }
+        const ellipse = createSketchEntityId(mint("skent", "ellipse"));
+        return {
+          state: {
+            ...state,
+            gesture: { kind: "none" },
+            selectedEntityIds: [ellipse],
+            status: statusOf("hint", `Created ellipse ${ellipse}.`),
+          },
+          transaction: {
+            commands: [
+              {
+                entity: createEllipseEntity(
+                  ellipse,
+                  center,
+                  radiusX,
+                  radiusY,
+                  rotation,
+                ),
+                type: "sketch.entity.create",
+              },
+            ],
+          },
+        };
+      }
+      if (state.gesture.kind === "pick" && state.gesture.tool === "ellipse") {
+        const radiusX = Math.hypot(
+          event.point.x - state.gesture.point.x,
+          event.point.y - state.gesture.point.y,
+        );
+        if (!(radiusX > 0)) {
+          return {
+            state: {
+              ...state,
+              status: statusOf(
+                "error",
+                SKETCH_EDITOR_STATUS_TEXT.degenerate,
+                "sketch/degenerate",
+              ),
+            },
+            transaction: null,
+          };
+        }
+        return {
+          state: {
+            ...state,
+            gesture: {
+              kind: "ellipse",
+              center: state.gesture.point,
+              axis: event.point,
+            },
+            status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.ellipseMinor),
+          },
+          transaction: null,
+        };
+      }
+      return {
+        state: {
+          ...state,
+          gesture: { kind: "pick", point: event.point, tool: "ellipse" },
+          status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.ellipseAxis),
+        },
+        transaction: null,
+      };
+    }
+    case "slot": {
+      // Pick 1: start cap center. Pick 2: end cap center. Pick 3: a point
+      // whose perpendicular distance to the centerline is the cap radius.
+      if (state.gesture.kind === "slot") {
+        const { start, end } = state.gesture;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const lengthSquared = dx * dx + dy * dy;
+        const radius =
+          Math.abs(
+            (event.point.x - start.x) * dy - (event.point.y - start.y) * dx,
+          ) / Math.sqrt(lengthSquared);
+        if (!(radius > 0)) {
+          return {
+            state: {
+              ...state,
+              status: statusOf(
+                "error",
+                SKETCH_EDITOR_STATUS_TEXT.degenerate,
+                "sketch/degenerate",
+              ),
+            },
+            transaction: null,
+          };
+        }
+        const slot = createSketchEntityId(mint("skent", "slot"));
+        return {
+          state: {
+            ...state,
+            gesture: { kind: "none" },
+            selectedEntityIds: [slot],
+            status: statusOf("hint", `Created slot ${slot}.`),
+          },
+          transaction: {
+            commands: [
+              {
+                entity: createStraightSlotEntity(slot, start, end, radius),
+                type: "sketch.entity.create",
+              },
+            ],
+          },
+        };
+      }
+      if (state.gesture.kind === "pick" && state.gesture.tool === "slot") {
+        return {
+          state: {
+            ...state,
+            gesture: {
+              kind: "slot",
+              start: state.gesture.point,
+              end: event.point,
+            },
+            status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.slotRadius),
+          },
+          transaction: null,
+        };
+      }
+      return {
+        state: {
+          ...state,
+          gesture: { kind: "pick", point: event.point, tool: "slot" },
+          status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.slotEnd),
+        },
+        transaction: null,
+      };
+    }
     case "trim": {
       const entity = entityById(event.entityId);
       if (entity === undefined || entity.kind !== "line") {
@@ -1285,7 +1761,7 @@ function canvasPick(
       const tool: SketchConstraintTool = state.tool;
       const entity = entityById(event.entityId);
       if (entity === undefined) return { state, transaction: null };
-      const kindProblem = pickKindProblem(tool, entity);
+      const kindProblem = pickKindProblem(tool, entity, state.picks.length);
       if (kindProblem !== null) {
         return {
           state: {
@@ -1309,7 +1785,9 @@ function canvasPick(
           tool === "parallel" ||
           tool === "perpendicular" ||
           tool === "angle" ||
-          tool === "tangent";
+          tool === "tangent" ||
+          tool === "collinear" ||
+          tool === "pointOnEntity";
         if (twoEntityTool && firstPick.entityId === entity.id) {
           return {
             state: {
@@ -1340,7 +1818,7 @@ function canvasPick(
       }
       const pick: SketchEditorPick = {
         entityId: entity.id,
-        point: usesPointTargets(tool)
+        point: pickUsesPointTarget(tool, state.picks.length)
           ? nearestPointTarget(entity, event.point)
           : null,
       };
@@ -1457,14 +1935,56 @@ type EntityGeometry = SketchEntity | SolvedEntityParameters;
 
 function canvasEntity(
   geometry: EntityGeometry,
-  construction: boolean,
+  authored: SketchEntity,
   selected: boolean,
   diagnostic: CadSketchDiagnosticLevel,
 ): CadSketchCanvasEntity | null {
-  const common = { construction, diagnostic, id: geometry.id, selected };
+  const common = {
+    construction: authored.construction,
+    diagnostic,
+    id: geometry.id,
+    selected,
+  };
   switch (geometry.kind) {
     case "point":
       return { ...common, kind: "point", x: geometry.x, y: geometry.y };
+    case "ellipse":
+      return {
+        ...common,
+        kind: "ellipse",
+        cx: geometry.cx,
+        cy: geometry.cy,
+        radiusX: geometry.radiusX,
+        radiusY: geometry.radiusY,
+        rotation: geometry.rotation,
+      };
+    case "ellipticalArc":
+      return {
+        ...common,
+        kind: "ellipticalArc",
+        cx: geometry.cx,
+        cy: geometry.cy,
+        radiusX: geometry.radiusX,
+        radiusY: geometry.radiusY,
+        rotation: geometry.rotation,
+        startAngle: geometry.startAngle,
+        endAngle: geometry.endAngle,
+      };
+    case "spline":
+    case "polygon":
+    case "slot": {
+      // The polyline kinds tessellate at the domain's fixed deflection; the
+      // discrete parameters (flavor, sides, fit, variant) come from the
+      // AUTHORED entity, which the solved records deliberately omit.
+      void geometry;
+      const points = entityPolyline(authored);
+      if (points === null || points.length < 2) return null;
+      return {
+        ...common,
+        kind: "polyline",
+        points: points.map((point) => ({ x: point.x, y: point.y })),
+      };
+    }
     case "line":
       return {
         ...common,
@@ -1501,6 +2021,10 @@ function dimensionText(constraint: SketchConstraint): string | null {
   switch (constraint.kind) {
     case "distance":
       return `${String(valueIn(constraint.value, "mm"))} mm`;
+    case "distanceX":
+      return `Δx ${String(valueIn(constraint.value, "mm"))} mm`;
+    case "distanceY":
+      return `Δy ${String(valueIn(constraint.value, "mm"))} mm`;
     case "radius":
       return `R ${String(valueIn(constraint.value, "mm"))}`;
     case "diameter":
@@ -1518,7 +2042,9 @@ function dimensionAnchor(
   constraint: SketchConstraint,
 ): EditorPoint | null {
   switch (constraint.kind) {
-    case "distance": {
+    case "distance":
+    case "distanceX":
+    case "distanceY": {
       const a = pointTargetPosition(sketch.entities, constraint.first);
       const b = pointTargetPosition(sketch.entities, constraint.second);
       if (a === null || b === null) return null;
@@ -1616,7 +2142,7 @@ export function sketchViewModel(
     }
     const node = canvasEntity(
       geometry,
-      authored.construction,
+      authored,
       selectedIds.has(authored.id),
       diagnosticLevelFor(authored.id, diagnostics),
     );

@@ -641,10 +641,10 @@ export function CadModelTree({
         aria-level={row.depth + 1}
         aria-selected={selected}
         className={cn(
-          "outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
-          "cursor-default rounded-none",
+          "outline-none focus-visible:ring-1 focus-visible:ring-ring/80",
+          "cursor-default rounded-[3px]",
           selected
-            ? "bg-accent text-accent-foreground"
+            ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
             : pick === undefined
               ? "opacity-80"
               : "hover:bg-muted",
@@ -691,17 +691,31 @@ export function CadModelTree({
             >
               <ChevronIcon expanded={expanded} />
             </span>
-          ) : null}
-          <span className="min-w-0 flex-1 truncate">{row.label}</span>
+          ) : (
+            <span
+              aria-hidden="true"
+              className="text-muted-foreground/40 inline-flex size-4 shrink-0 items-center justify-center font-mono text-[10px]"
+            >
+              {row.depth > 0 ? "·" : ""}
+            </span>
+          )}
+          {/* Hierarchy typography: feature rows carry the weight (the
+              document's structure); the bodies they produce read lighter
+              and indented under the depth guide. */}
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              row.depth === 0 ? "font-medium" : "text-muted-foreground",
+            )}
+          >
+            {row.label}
+          </span>
           {row.status !== undefined ? (
             <StatusChip labels={labels} status={row.status} />
           ) : null}
         </div>
         {collapsible && expanded ? (
-          <div
-            className="border-border/60 ml-[11px] border-l pl-1"
-            role="group"
-          >
+          <div className="border-border ml-[11px] border-l pl-1" role="group">
             {row.children.map((child) => renderRow(child))}
           </div>
         ) : null}
@@ -720,16 +734,16 @@ export function CadModelTree({
   return (
     <div
       className={cn(
-        "border-border bg-background w-56 border text-sm",
+        "border-border bg-card/60 w-56 overflow-hidden rounded-md border text-sm",
         className,
       )}
       data-slot="cad-model-tree"
     >
-      <div className="text-muted-foreground border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         {labels.treeLabel}
       </div>
       {rows.length === 0 ? (
-        <div className="text-muted-foreground px-2 py-2">
+        <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {labels.emptyDocument}
         </div>
       ) : (

@@ -20,9 +20,31 @@
 export { CAD_DOCUMENT_FORMAT_VERSION } from "@slopcad/cad-react";
 export {
   CAD_SCENE_BACKGROUND,
+  CAD_SCENE_DEFAULT_PALETTE,
+  type CadScenePalette,
   CadScene,
   type CadSceneProps,
 } from "./cad-scene";
+export type { SceneCameraStateSnapshot } from "./scene-camera-controls";
+export {
+  CAD_ORBIT_DRAG_THRESHOLD_PX,
+  CAD_ORBIT_DISTANCE_MAX_MM,
+  CAD_ORBIT_DISTANCE_MIN_MM,
+  CAD_ORBIT_KEY_STEP_DEG,
+  CAD_ORBIT_MAX_ELEVATION_DEG,
+  CAD_ORBIT_MIN_ELEVATION_DEG,
+  CAD_ORBIT_WHEEL_FACTOR,
+  createOrbitState,
+  orbitByKeys,
+  orbitByPixels,
+  orbitPosition,
+  orbitSnapshot,
+  panByPixels,
+  sceneCameraStateFromSpec,
+  zoomByWheel,
+  type OrbitSeed,
+  type OrbitState,
+} from "./orbit-controls";
 export {
   CadModel,
   type CadModelMaterialProps,
@@ -88,6 +110,8 @@ export {
   CAD_SCENE_GRID_SIZE_MM,
   CAD_SCENE_ORIGIN_MARKER_COLOR,
   CAD_SCENE_ORIGIN_MARKER_RADIUS_MM,
+  CAD_SCENE_GROUND_DEFAULT_COLORS,
+  type CadSceneGroundColors,
   CadSceneGround,
   createAxesGeometry,
 } from "./scene-ground";

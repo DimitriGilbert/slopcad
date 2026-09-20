@@ -19,11 +19,23 @@ import {
 } from "./index";
 import {
   SKETCH_DIAGNOSTIC_CODES,
+  SPLINE_TESSELLATION_DEFLECTION_MM,
+  projectOntoSpline,
   applySolvedParameters,
   createAngleConstraint,
   createArcEntity,
   createCircleEntity,
   createCoincidentConstraint,
+  createCollinearConstraint,
+  createDistanceXConstraint,
+  createDistanceYConstraint,
+  createEllipseEntity,
+  createEllipticalArcEntity,
+  createHorizontalPairConstraint,
+  createPointOnEntityConstraint,
+  createPolygonEntity,
+  createSplineEntity,
+  createStraightSlotEntity,
   createDiameterConstraint,
   createDistanceConstraint,
   createEqualConstraint,
@@ -926,7 +938,7 @@ describe("reference solver — integration with the sketch aggregate", () => {
     if (result.status === "failed") return;
     const applied = applySolvedParameters(sketch, result.parameters);
     const serialized = serializeSketch(applied);
-    expect(serialized.formatVersion).toBe(1);
+    expect(serialized.formatVersion).toBe(2);
     const revived: unknown = JSON.parse(JSON.stringify(serialized));
     expect(revived).toEqual(serialized);
   });
@@ -935,3 +947,494 @@ describe("reference solver — integration with the sketch aggregate", () => {
     expect(solver.id).toBe("reference-gauss-newton");
   });
 });
+
+describe("reference solver — phase 36 entity and constraint battery", () => {
+  it("accounts the new entities' degrees of freedom bare", () => {
+    const solverCases: readonly {
+      readonly name: string;
+      readonly entity: SketchEntity;
+      readonly dof: number;
+    }[] = [
+      {
+        name: "ellipse",
+        dof: 5,
+        entity: createEllipseEntityFromIndex(),
+      },
+      {
+        name: "ellipticalArc",
+        dof: 7,
+        entity: createEllipticalArcEntityFromIndex(),
+      },
+      {
+        name: "spline-control",
+        dof: 8,
+        entity: createSplineEntityFromIndex(),
+      },
+      {
+        name: "polygon",
+        dof: 4,
+        entity: createPolygonEntityFromIndex(),
+      },
+      {
+        name: "slot-straight",
+        dof: 5,
+        entity: createStraightSlotEntityFromIndex(),
+      },
+    ];
+    for (const { name, entity, dof } of solverCases) {
+      const result = solver.solve([entity], []);
+      expect(result.status, name).toBe("under-constrained");
+      if (result.status === "failed") continue;
+      expect(result.dof, name).toBe(dof);
+    }
+  });
+
+  it("fully constrains an ellipse through center pin, axis distances, and pair alignment", () => {
+    const anchor = createPointEntity(
+      eid("skent_anchor"),
+      { x: 0, y: 0 },
+      {
+        construction: true,
+        fixed: true,
+      },
+    );
+    const ellipse = createEllipseEntityFromIndex();
+    const result = solver.solve(
+      [anchor, ellipse],
+      [
+        createCoincidentConstraint(
+          cid("ellipse-center"),
+          pointTarget(eid("skent_ellipse"), "center"),
+          pointTarget(eid("skent_anchor"), "center"),
+        ),
+        createDistanceConstraint(
+          cid("ellipse-major"),
+          pointTarget(eid("skent_ellipse"), "center"),
+          pointTarget(eid("skent_ellipse"), "start"),
+          length(8),
+        ),
+        createDistanceConstraint(
+          cid("ellipse-minor"),
+          pointTarget(eid("skent_ellipse"), "center"),
+          pointTarget(eid("skent_ellipse"), "end"),
+          length(5),
+        ),
+        createHorizontalPairConstraint(
+          cid("ellipse-align"),
+          pointTarget(eid("skent_ellipse"), "center"),
+          pointTarget(eid("skent_ellipse"), "start"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("solved");
+    if (result.status === "failed") return;
+    const solved = solvedOf(result);
+    const ellipseSolved = solved.get("skent_ellipse");
+    expect(ellipseSolved?.kind).toBe("ellipse");
+    if (ellipseSolved?.kind !== "ellipse") return;
+    expect(ellipseSolved.cx).toBeCloseTo(0, 9);
+    expect(ellipseSolved.cy).toBeCloseTo(0, 9);
+    expect(ellipseSolved.radiusX).toBeCloseTo(8, 9);
+    expect(ellipseSolved.radiusY).toBeCloseTo(5, 9);
+    // The major-axis end sits on +x: horizontalPair pinned the alignment
+    // (the equivalent 2π branch canonicalizes to the same geometry).
+    expect(
+      Math.min(ellipseSolved.rotation, 2 * Math.PI - ellipseSolved.rotation),
+    ).toBeCloseTo(0, 9);
+  });
+
+  it("fully constrains a polygon through center pin, radius, and vertex alignment", () => {
+    const anchor = createPointEntity(
+      eid("skent_anchor"),
+      { x: 1, y: 2 },
+      {
+        construction: true,
+        fixed: true,
+      },
+    );
+    const polygon = createPolygonEntityFromIndex();
+    const result = solver.solve(
+      [anchor, polygon],
+      [
+        createCoincidentConstraint(
+          cid("hex-center"),
+          pointTarget(eid("skent_polygon"), "center"),
+          pointTarget(eid("skent_anchor"), "center"),
+        ),
+        createRadiusConstraint(
+          cid("hex-radius"),
+          eid("skent_polygon"),
+          length(6),
+        ),
+        createHorizontalPairConstraint(
+          cid("hex-align"),
+          pointTarget(eid("skent_polygon"), "center"),
+          pointTarget(eid("skent_polygon"), "start"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("solved");
+    if (result.status === "failed") return;
+    const solved = solvedOf(result);
+    const hex = solved.get("skent_polygon");
+    expect(hex?.kind).toBe("polygon");
+    if (hex?.kind !== "polygon") return;
+    expect(hex.cx).toBeCloseTo(1, 9);
+    expect(hex.cy).toBeCloseTo(2, 9);
+    expect(hex.radius).toBeCloseTo(6, 9);
+    expect(Math.min(hex.rotation, 2 * Math.PI - hex.rotation)).toBeCloseTo(
+      0,
+      9,
+    );
+  });
+
+  it("fully constrains a straight slot through cap pins and its radius", () => {
+    const a = createPointEntity(
+      eid("skent_a"),
+      { x: -6, y: 0 },
+      {
+        construction: true,
+        fixed: true,
+      },
+    );
+    const b = createPointEntity(
+      eid("skent_b"),
+      { x: 6, y: 0 },
+      {
+        construction: true,
+        fixed: true,
+      },
+    );
+    const slot = createStraightSlotEntityFromIndex();
+    const result = solver.solve(
+      [a, b, slot],
+      [
+        createCoincidentConstraint(
+          cid("slot-start"),
+          pointTarget(eid("skent_slot"), "start"),
+          pointTarget(eid("skent_a"), "center"),
+        ),
+        createCoincidentConstraint(
+          cid("slot-end"),
+          pointTarget(eid("skent_slot"), "end"),
+          pointTarget(eid("skent_b"), "center"),
+        ),
+        createRadiusConstraint(
+          cid("slot-radius"),
+          eid("skent_slot"),
+          length(2.5),
+        ),
+      ],
+    );
+    expect(result.status).toBe("solved");
+    if (result.status === "failed") return;
+    const solved = solvedOf(result);
+    const slotSolved = solved.get("skent_slot");
+    if (slotSolved?.kind !== "slot") {
+      throw new Error("solved slot record is missing");
+    }
+    expect(slotSolved.radius).toBeCloseTo(2.5, 9);
+    expect(slotSolved.x1).toBeCloseTo(-6, 9);
+    expect(slotSolved.y1).toBeCloseTo(0, 9);
+    expect(slotSolved.x2).toBeCloseTo(6, 9);
+  });
+
+  it("pins spline endpoints and leaves the interior freedoms", () => {
+    const a = createPointEntity(
+      eid("skent_a"),
+      { x: 0, y: 0 },
+      {
+        construction: true,
+        fixed: true,
+      },
+    );
+    const b = createPointEntity(
+      eid("skent_b"),
+      { x: 10, y: 0 },
+      {
+        construction: true,
+        fixed: true,
+      },
+    );
+    const spline = createSplineEntityFromIndex();
+    const result = solver.solve(
+      [a, b, spline],
+      [
+        createCoincidentConstraint(
+          cid("spline-start"),
+          pointTarget(eid("skent_spline"), "start"),
+          pointTarget(eid("skent_a"), "center"),
+        ),
+        createCoincidentConstraint(
+          cid("spline-end"),
+          pointTarget(eid("skent_spline"), "end"),
+          pointTarget(eid("skent_b"), "center"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("under-constrained");
+    if (result.status === "failed") return;
+    // 8 unknowns − 4 endpoint rows = 4 interior freedoms.
+    expect(result.dof).toBe(4);
+    const solved = solvedOf(result);
+    const solvedSpline = solved.get("skent_spline");
+    if (solvedSpline?.kind !== "spline") {
+      throw new Error("solved spline record is missing");
+    }
+    expect(solvedSpline.points[0]).toEqual({ x: 0, y: 0 });
+    expect(solvedSpline.points[3]).toEqual({ x: 10, y: 0 });
+  });
+
+  it("pulls a point onto a fixed circle, ellipse, and spline exactly", () => {
+    // The curves are pinned (the CAD fix convention): |P − C| = r has a
+    // one-parameter family otherwise, and the least-squares step would
+    // legitimately split the correction between the point and the curve.
+    const circle = createCircleEntity(eid("skent_circle"), { x: 0, y: 0 }, 5, {
+      fixed: true,
+    });
+    const ellipse = createEllipseEntityFromIndex({ fixed: true });
+    const spline = createSplineEntityFromIndex({ fixed: true });
+    const onCircle = createPointEntity(eid("skent_p1"), { x: 3, y: 3.5 });
+    const onEllipse = createPointEntity(eid("skent_p2"), { x: 7.7, y: 1.2 });
+    const onSpline = createPointEntity(eid("skent_p3"), { x: 5.1, y: 0.6 });
+    const circleResult = solver.solve(
+      [circle, onCircle],
+      [
+        createPointOnEntityConstraint(
+          cid("poe-circle"),
+          pointTarget(eid("skent_p1"), "center"),
+          eid("skent_circle"),
+        ),
+      ],
+    );
+    expect(circleResult.status).toBe("under-constrained");
+    if (circleResult.status !== "failed") {
+      const point = solvedOf(circleResult).get("skent_p1");
+      if (point?.kind === "point") {
+        expect(Math.hypot(point.x, point.y)).toBeCloseTo(5, 9);
+      }
+    }
+    const ellipseResult = solver.solve(
+      [ellipse, onEllipse],
+      [
+        createPointOnEntityConstraint(
+          cid("poe-ellipse"),
+          pointTarget(eid("skent_p2"), "center"),
+          eid("skent_ellipse"),
+        ),
+      ],
+    );
+    expect(ellipseResult.status).toBe("under-constrained");
+    if (ellipseResult.status !== "failed") {
+      const point = solvedOf(ellipseResult).get("skent_p2");
+      const ell = solvedOf(ellipseResult).get("skent_ellipse");
+      if (point?.kind === "point" && ell?.kind === "ellipse") {
+        // The implicit form in the ellipse's own (rotated) frame.
+        const wx = point.x - ell.cx;
+        const wy = point.y - ell.cy;
+        const c = Math.cos(ell.rotation);
+        const sn = Math.sin(ell.rotation);
+        const ex = c * wx + sn * wy;
+        const ey = -sn * wx + c * wy;
+        expect(
+          (ex * ex) / (ell.radiusX * ell.radiusX) +
+            (ey * ey) / (ell.radiusY * ell.radiusY),
+        ).toBeCloseTo(1, 7);
+      }
+    }
+    const splineResult = solver.solve(
+      [spline, onSpline],
+      [
+        createPointOnEntityConstraint(
+          cid("poe-spline"),
+          pointTarget(eid("skent_p3"), "center"),
+          eid("skent_spline"),
+        ),
+      ],
+    );
+    expect(splineResult.status).toBe("under-constrained");
+    if (splineResult.status !== "failed") {
+      const point = solvedOf(splineResult).get("skent_p3");
+      const solvedSpline = solvedOf(splineResult).get("skent_spline");
+      if (point?.kind === "point" && solvedSpline?.kind === "spline") {
+        // The solved record carries the spline's points; the flavor lives
+        // on the authored entity (the same pairing applySolvedParameters
+        // performs).
+        const projection = projectOntoSpline(
+          { flavor: "control", points: solvedSpline.points },
+          { x: point.x, y: point.y },
+        );
+        expect(projection?.distance).toBeLessThanOrEqual(
+          SPLINE_TESSELLATION_DEFLECTION_MM,
+        );
+      }
+    }
+  });
+
+  it("collinear puts one line onto another's infinite line", () => {
+    const first = createLineEntity(
+      eid("skent_first"),
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    );
+    const second = createLineEntity(
+      eid("skent_second"),
+      { x: 1, y: 2.5 },
+      { x: 9, y: 1.5 },
+    );
+    const result = solver.solve(
+      [first, second],
+      [
+        createCollinearConstraint(
+          cid("col"),
+          eid("skent_first"),
+          eid("skent_second"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("under-constrained");
+    if (result.status === "failed") return;
+    // Two lines (8 unknowns) − collinear's 2 rows − the lines' own shape
+    // freedoms: rank gain is exactly 2 → 6 DoF remain.
+    expect(result.dof).toBe(6);
+    const solved = solvedOf(result);
+    const secondSolved = solved.get("skent_second");
+    if (secondSolved?.kind !== "line") {
+      throw new Error("solved line record is missing");
+    }
+    expect(secondSolved.y1).toBeCloseTo(0, 9);
+    expect(secondSolved.y2).toBeCloseTo(0, 9);
+  });
+
+  it("distanceX and distanceY carry signed separations", () => {
+    const first = createLineEntity(
+      eid("skent_first"),
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    );
+    const second = createLineEntity(
+      eid("skent_second"),
+      { x: 1, y: 6 },
+      { x: 5, y: 7 },
+    );
+    const result = solver.solve(
+      [first, second],
+      [
+        createDistanceXConstraint(
+          cid("dx"),
+          pointTarget(eid("skent_first"), "start"),
+          pointTarget(eid("skent_second"), "start"),
+          length(-12),
+        ),
+        createDistanceYConstraint(
+          cid("dy"),
+          pointTarget(eid("skent_first"), "start"),
+          pointTarget(eid("skent_second"), "start"),
+          length(8),
+        ),
+      ],
+    );
+    expect(result.status).toBe("under-constrained");
+    if (result.status === "failed") return;
+    const solved = solvedOf(result);
+    const secondSolved = solved.get("skent_second");
+    if (secondSolved?.kind !== "line") {
+      throw new Error("solved line record is missing");
+    }
+    // The signed separations hold exactly; the least-squares step splits
+    // each correction across both free endpoints (both are unconstrained),
+    // so the assertion is on the separations, not absolute positions.
+    const firstSolved = solvedOf(result).get("skent_first");
+    if (firstSolved?.kind !== "line") {
+      throw new Error("solved first line record is missing");
+    }
+    expect(secondSolved.x1 - firstSolved.x1).toBeCloseTo(-12, 9);
+    expect(secondSolved.y1 - firstSolved.y1).toBeCloseTo(8, 9);
+  });
+
+  it("declines out-of-scope spline constraint systems structurally", () => {
+    const spline = createSplineEntityFromIndex();
+    const line = createLineEntity(
+      eid("skent_line"),
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+    );
+    const result = solver.solve(
+      [spline, line],
+      [
+        createParallelConstraint(
+          cid("par"),
+          eid("skent_line"),
+          eid("skent_spline"),
+        ),
+      ],
+    );
+    expect(result.status).toBe("failed");
+    if (result.status !== "failed") return;
+    expect(result.diagnostics[0]?.code).toBe(
+      SKETCH_DIAGNOSTIC_CODES.constraintUnsupported,
+    );
+  });
+});
+
+// Local entity factories (stable ids for the assertions above).
+function createEllipseEntityFromIndex(
+  options: { fixed?: boolean } = {},
+): SketchEntity {
+  return createEllipseEntity(
+    eid("skent_ellipse"),
+    { x: 2, y: 1 },
+    7.5,
+    4.5,
+    0.35,
+    options,
+  );
+}
+
+function createEllipticalArcEntityFromIndex(): SketchEntity {
+  return createEllipticalArcEntity(
+    eid("skent_earc"),
+    { x: 0, y: 0 },
+    6,
+    3,
+    0.2,
+    0.3,
+    2.2,
+  );
+}
+
+function createSplineEntityFromIndex(
+  options: { fixed?: boolean } = {},
+): SketchEntity {
+  return createSplineEntity(
+    eid("skent_spline"),
+    "control",
+    [
+      { x: 0, y: 0 },
+      { x: 2, y: 6 },
+      { x: 6, y: -6 },
+      { x: 10, y: 0 },
+    ],
+    options,
+  );
+}
+
+function createPolygonEntityFromIndex(): SketchEntity {
+  return createPolygonEntity(
+    eid("skent_polygon"),
+    { x: 0, y: 0 },
+    5,
+    6,
+    0.4,
+    "inscribed",
+  );
+}
+
+function createStraightSlotEntityFromIndex(): SketchEntity {
+  return createStraightSlotEntity(
+    eid("skent_slot"),
+    { x: -5, y: 0 },
+    { x: 5, y: 0 },
+    2,
+  );
+}

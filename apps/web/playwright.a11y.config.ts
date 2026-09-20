@@ -13,7 +13,7 @@ import { defineConfig } from "@playwright/test";
  * Kept OUT of `pnpm verify` — run via `pnpm test:a11y`.
  */
 
-const PORT = 3007;
+const PORT = 3207;
 const baseURL = process.env.A11Y_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({

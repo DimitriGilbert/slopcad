@@ -60,6 +60,9 @@ export interface CadExportFormatOption {
   readonly label: string;
   /** What the export produces, for this host and this format. */
   readonly description: string;
+  /** The exchange taxonomy chip ("mesh / binary"): what kind of artifact
+   * this format carries, rendered as a mono tag on the row. */
+  readonly meta?: string;
   /** Disabled formats render but cannot start. */
   readonly disabled?: boolean;
 }
@@ -176,8 +179,18 @@ export function CadExportDialog({
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-foreground text-xs font-medium">
-                        {format.label}
+                      <div className="flex items-center gap-2">
+                        <span className="text-foreground text-xs font-medium">
+                          {format.label}
+                        </span>
+                        {format.meta !== undefined ? (
+                          <span
+                            aria-hidden="true"
+                            className="border-border text-muted-foreground shrink-0 border px-1 font-mono text-[10px] leading-4"
+                          >
+                            {format.meta}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="text-muted-foreground text-xs leading-4">
                         {format.description}
@@ -242,6 +255,9 @@ export interface CadImportFormatOption {
   readonly label: string;
   /** What an import of this format produces, for this host. */
   readonly description: string;
+  /** The exchange taxonomy chip ("brep / worker"): the artifact kind and
+   * the channel it arrives through, rendered as a mono tag on the row. */
+  readonly meta?: string;
   /** The file-extension accept token (", "-joined extensions). */
   readonly extensions: readonly string[];
 }
@@ -373,8 +389,18 @@ export function CadImportDialog({
                   key={format.id}
                 >
                   <div className="min-w-0">
-                    <div className="text-foreground text-xs font-medium">
-                      {format.label}
+                    <div className="flex items-center gap-2">
+                      <span className="text-foreground text-xs font-medium">
+                        {format.label}
+                      </span>
+                      {format.meta !== undefined ? (
+                        <span
+                          aria-hidden="true"
+                          className="border-border text-muted-foreground shrink-0 border px-1 font-mono text-[10px] leading-4"
+                        >
+                          {format.meta}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="text-muted-foreground text-xs leading-4">
                       {format.description}

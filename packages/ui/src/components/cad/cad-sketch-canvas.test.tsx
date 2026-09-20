@@ -6,7 +6,7 @@
  * machine attributes per entity.
  */
 
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -250,5 +250,118 @@ describe("CadSketchCanvas", () => {
     ).not.toBeNull();
     expect(view.container.textContent).toContain("60 mm");
     expect(view.container.textContent).toContain("XY");
+  });
+});
+
+describe("CadSketchCanvas phase 36 kinds", () => {
+  const renderCurved = () => {
+    const onPick = vi.fn();
+    const utils = render(
+      <CadSketchCanvas
+        entities={[
+          {
+            id: "skent_ellipse",
+            kind: "ellipse",
+            cx: 0,
+            cy: 0,
+            radiusX: 40,
+            radiusY: 20,
+            rotation: 0,
+            construction: false,
+            selected: false,
+            diagnostic: "none",
+          },
+          {
+            id: "skent_earc",
+            kind: "ellipticalArc",
+            cx: 0,
+            cy: 0,
+            radiusX: 30,
+            radiusY: 15,
+            rotation: 0,
+            startAngle: 0,
+            endAngle: Math.PI,
+            construction: false,
+            selected: false,
+            diagnostic: "none",
+          },
+          {
+            id: "skent_spline",
+            kind: "polyline",
+            points: [
+              { x: -40, y: -30 },
+              { x: -20, y: 30 },
+              { x: 20, y: 30 },
+              { x: 40, y: -30 },
+            ],
+            construction: false,
+            selected: false,
+            diagnostic: "none",
+          },
+        ]}
+        height={400}
+        onPick={onPick}
+        origin={{ x: 200, y: 200 }}
+        scale={2}
+        gridStep={10}
+        width={600}
+      />,
+    );
+    const svg = utils.container.querySelector(
+      "svg",
+    ) as unknown as SVGSVGElement;
+    return { ...utils, onPick, svg };
+  };
+
+  it("renders ellipse, elliptical arc, and polyline nodes with machine ids", () => {
+    const view = renderCurved();
+    const ellipse = view.container.querySelector(
+      '[data-sketch-entity-id="skent_ellipse"]',
+    );
+    expect(ellipse?.tagName.toLowerCase()).toBe("ellipse");
+    expect(ellipse?.getAttribute("rx")).toBe("80");
+    expect(ellipse?.getAttribute("ry")).toBe("40");
+    const arc = view.container.querySelector(
+      '[data-sketch-entity-id="skent_earc"]',
+    );
+    expect(arc?.tagName.toLowerCase()).toBe("path");
+    expect(arc?.getAttribute("d")).toContain("A 60 30");
+    const polyline = view.container.querySelector(
+      '[data-sketch-entity-id="skent_spline"]',
+    );
+    expect(polyline?.tagName.toLowerCase()).toBe("polyline");
+    expect(polyline?.getAttribute("points")).toBe(
+      "120,260 160,140 240,140 280,260",
+    );
+  });
+
+  it("hit-tests the ellipse rim, the arc sweep, and the polyline", () => {
+    const { onPick, svg } = renderCurved();
+    // Ellipse rim at (40, 0) workplane → screen (280, 200).
+    act(() => {
+      fireEvent.pointerDown(svg, {
+        clientX: 280,
+        clientY: 200,
+      });
+    });
+    expect(onPick).toHaveBeenLastCalledWith({
+      entityId: "skent_ellipse",
+      point: { x: 40, y: 0 },
+    });
+    // Inside the arc's ellipse but outside its upper sweep: the arc is at
+    // (30, 0) rim; the polyline sits at y=−30 only near |x|≤40 — a miss
+    // against all three at (0, 8)? The arc rim misses (8 ≪ radius) and the
+    // ellipse rim (30 off) — pick at the polyline's mid-span (0, 30) →
+    // screen (200, 140) hits skent_spline.
+    act(() => {
+      fireEvent.pointerDown(svg, {
+        clientX: 200,
+        clientY: 140,
+      });
+    });
+    expect(onPick).toHaveBeenLastCalledWith({
+      entityId: "skent_spline",
+      point: { x: 0, y: 30 },
+    });
   });
 });

@@ -41,8 +41,16 @@ import {
 /**
  * Version of the sketch serialization format implemented by this package.
  * It must remain a positive integer and only ever move forward.
+ *
+ * v2 (Phase 36) added the entity kinds `ellipse`, `ellipticalArc`, `spline`,
+ * `polygon`, and `slot`, and the constraint kinds `pointOnEntity`,
+ * `collinear`, `horizontalPair`, `verticalPair`, `distanceX`, and
+ * `distanceY`. The growth is strictly additive — every v1 payload is a
+ * valid v2 payload byte-for-byte except the stamp — so the native-format
+ * v1→v2 migration carries old embedded sketches forward by bumping their
+ * stamp alone.
  */
-export const SKETCH_FORMAT_VERSION = 1;
+export const SKETCH_FORMAT_VERSION = 2;
 
 /** A complete sketch: where it lives and what is in it. */
 export interface Sketch {
@@ -293,6 +301,58 @@ export function applySolvedParameters(
             : mismatch(entity.id, entity.kind, solved.kind);
         case "rectangle":
           return mismatch(entity.id, entity.kind, solved.kind);
+        case "ellipse":
+          return entity.kind === "ellipse"
+            ? {
+                ...entity,
+                cx: solved.cx,
+                cy: solved.cy,
+                radiusX: solved.radiusX,
+                radiusY: solved.radiusY,
+                rotation: solved.rotation,
+              }
+            : mismatch(entity.id, entity.kind, solved.kind);
+        case "ellipticalArc":
+          return entity.kind === "ellipticalArc"
+            ? {
+                ...entity,
+                cx: solved.cx,
+                cy: solved.cy,
+                radiusX: solved.radiusX,
+                radiusY: solved.radiusY,
+                rotation: solved.rotation,
+                startAngle: solved.startAngle,
+                endAngle: solved.endAngle,
+              }
+            : mismatch(entity.id, entity.kind, solved.kind);
+        case "spline":
+          return entity.kind === "spline"
+            ? { ...entity, points: solved.points }
+            : mismatch(entity.id, entity.kind, solved.kind);
+        case "polygon":
+          return entity.kind === "polygon"
+            ? {
+                ...entity,
+                cx: solved.cx,
+                cy: solved.cy,
+                radius: solved.radius,
+                rotation: solved.rotation,
+              }
+            : mismatch(entity.id, entity.kind, solved.kind);
+        case "slot":
+          return entity.kind === "slot"
+            ? {
+                ...entity,
+                x1: solved.x1,
+                y1: solved.y1,
+                x2: solved.x2,
+                y2: solved.y2,
+                ...(solved.x3 === undefined || solved.y3 === undefined
+                  ? {}
+                  : { x3: solved.x3, y3: solved.y3 }),
+                radius: solved.radius,
+              }
+            : mismatch(entity.id, entity.kind, solved.kind);
       }
     }),
   };
