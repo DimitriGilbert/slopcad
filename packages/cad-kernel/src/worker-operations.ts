@@ -48,6 +48,21 @@
  * contract: a payload without it parses as translation-only, so every
  * message formed before the extension keeps its meaning unchanged.
  *
+ * ## The sweep/loft extension (Phase 38) — the sketch-driven feature ops
+ *
+ * `solid.sweep` and `solid.loft` translate the contract's `ProfileSweepInput`
+ * and `ProfileLoftInput` across the wire: the profile loop segments exactly
+ * as `solid.extrude` carries them, the sweep's path chain in the local XZ
+ * plane (lines and signed-sweep arcs — the contract's directed-path
+ * convention, NOT the profile machinery's mod-2π loop convention), and the
+ * loft's ordered section list with per-section station lengths. The codecs
+ * validate structure only: a path segment kind must be line or arc, a
+ * section must carry a loop and a length — every semantic rule (origin
+ * attachment, G1 continuity, self-intersection, station ordering,
+ * vertex-count compatibility) stays in the kernel contract, and a kernel
+ * that declares neither capability (Manifold) answers the structured
+ * `kernel/unsupported-operation` through the ordinary failure path.
+ *
  * ## The STEP import extension (Phase 21.3) — a disclosed vocabulary group
  *
  * `step.import` is the first operation in the vocabulary that is NOT a
@@ -157,6 +172,8 @@ export const WORKER_OPERATION_IDS = [
   "solid.createCone",
   "solid.extrude",
   "solid.revolve",
+  "solid.sweep",
+  "solid.loft",
   "solid.union",
   "solid.subtract",
   "solid.intersect",
@@ -248,6 +265,67 @@ export interface WorkerRevolveInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly axis: WorkerRevolveAxisInput;
   readonly angle: AngleValue;
+  readonly placement: ProfilePlacementInput;
+}
+
+/**
+ * One segment of a `solid.sweep` path (the Phase 38 wire twin of the
+ * contract's `SweepPathSegmentInput`): an open chain in the LOCAL XZ plane
+ * as 2D `(x, z)` millimetre pairs — lines from start to end, arcs with a
+ * SIGNED sweep (`endAngle − startAngle`, magnitude in `(0, 2π]`). Whether
+ * the chain starts at the local origin, keeps G1 continuity, and stays
+ * self-intersection-free is the kernel contract's semantic call
+ * (`kernel/invalid-path`, `kernel/path-self-intersecting`); the codec
+ * checks structure only.
+ */
+export type WorkerSweepPathSegmentInput =
+  | {
+      readonly kind: "line";
+      readonly start: readonly [number, number];
+      readonly end: readonly [number, number];
+    }
+  | {
+      readonly kind: "arc";
+      readonly center: readonly [number, number];
+      readonly radius: number;
+      readonly startAngle: AngleValue;
+      readonly endAngle: AngleValue;
+    };
+
+/**
+ * Input of `solid.sweep` (Phase 38): the closed profile loop, the open path
+ * chain in the local XZ plane, and the placement rotation+translation — the
+ * contract's `ProfileSweepInput` carried across the wire. Whether the
+ * profile pinches through a bend is the kernel contract's semantic call
+ * (`kernel/sweep-self-intersecting`); the codec checks structure only.
+ */
+export interface WorkerSweepInput {
+  readonly loop: readonly ProfileSegmentInput[];
+  readonly path: readonly WorkerSweepPathSegmentInput[];
+  readonly placement: ProfilePlacementInput;
+}
+
+/**
+ * One section of a `solid.loft` (Phase 38): the closed profile loop at its
+ * station — the contract's `ProfileLoftSectionInput` carried across the
+ * wire, the station z as a length in any unit (canonicalized to mm).
+ */
+export interface WorkerLoftSectionInput {
+  readonly loop: readonly ProfileSegmentInput[];
+  readonly z: LengthValue;
+}
+
+/**
+ * Input of `solid.loft` (Phase 38): the ORDERED section list (at least two;
+ * the order IS the loft direction) and the placement rotation+translation —
+ * the contract's `ProfileLoftInput` carried across the wire. Whether the
+ * sections carry equal chord-polygon vertex counts and strictly increasing
+ * stations is the kernel contract's semantic call
+ * (`kernel/loft-incompatible-profiles`, `kernel/loft-unordered-stations`);
+ * the codec checks structure only.
+ */
+export interface WorkerLoftInput {
+  readonly sections: readonly WorkerLoftSectionInput[];
   readonly placement: ProfilePlacementInput;
 }
 
@@ -655,6 +733,8 @@ export interface WorkerOperationInputs {
   readonly "solid.createCone": WorkerConeInput;
   readonly "solid.extrude": WorkerExtrudeInput;
   readonly "solid.revolve": WorkerRevolveInput;
+  readonly "solid.sweep": WorkerSweepInput;
+  readonly "solid.loft": WorkerLoftInput;
   readonly "solid.union": WorkerUnionInput;
   readonly "solid.subtract": WorkerSubtractInput;
   readonly "solid.intersect": WorkerIntersectInput;
@@ -688,6 +768,8 @@ export interface WorkerOperationResults {
   readonly "solid.createCone": WorkerSolidResult;
   readonly "solid.extrude": WorkerSolidResult;
   readonly "solid.revolve": WorkerSolidResult;
+  readonly "solid.sweep": WorkerSolidResult;
+  readonly "solid.loft": WorkerSolidResult;
   readonly "solid.union": WorkerSolidResult;
   readonly "solid.subtract": WorkerSolidResult;
   readonly "solid.intersect": WorkerSolidResult;
@@ -718,6 +800,34 @@ export type SerializedWorkerLength = SerializedDimensionalValue;
 
 /** Serialized angles are cad-core dimensional values in canonical radians. */
 export type SerializedWorkerAngle = SerializedDimensionalValue;
+
+/** The canonical wire form of a profile placement (rotation, then translation). */
+export interface SerializedProfilePlacement {
+  readonly rotation: {
+    readonly axis: readonly [number, number, number];
+    readonly angle: SerializedWorkerAngle;
+  };
+  readonly translation: {
+    readonly x: SerializedWorkerLength;
+    readonly y: SerializedWorkerLength;
+    readonly z: SerializedWorkerLength;
+  };
+}
+
+/** The canonical wire form of one `solid.sweep` path segment. */
+export type SerializedWorkerSweepPathSegment =
+  | {
+      readonly kind: "line";
+      readonly start: readonly [number, number];
+      readonly end: readonly [number, number];
+    }
+  | {
+      readonly kind: "arc";
+      readonly center: readonly [number, number];
+      readonly radius: number;
+      readonly startAngle: SerializedWorkerAngle;
+      readonly endAngle: SerializedWorkerAngle;
+    };
 
 /**
  * The canonical JSON input form of each operation, in a fixed key order.
@@ -764,17 +874,19 @@ export interface SerializedWorkerOperationInputs {
       readonly direction: readonly [number, number];
     };
     readonly angle: SerializedWorkerAngle;
-    readonly placement: {
-      readonly rotation: {
-        readonly axis: readonly [number, number, number];
-        readonly angle: SerializedWorkerAngle;
-      };
-      readonly translation: {
-        readonly x: SerializedWorkerLength;
-        readonly y: SerializedWorkerLength;
-        readonly z: SerializedWorkerLength;
-      };
-    };
+    readonly placement: SerializedProfilePlacement;
+  };
+  readonly "solid.sweep": {
+    readonly loop: readonly SerializedProfileSegment[];
+    readonly path: readonly SerializedWorkerSweepPathSegment[];
+    readonly placement: SerializedProfilePlacement;
+  };
+  readonly "solid.loft": {
+    readonly sections: readonly {
+      readonly loop: readonly SerializedProfileSegment[];
+      readonly z: SerializedWorkerLength;
+    }[];
+    readonly placement: SerializedProfilePlacement;
   };
   readonly "solid.union": {
     readonly operands: readonly string[];
@@ -882,6 +994,12 @@ export interface SerializedWorkerOperationResults {
     readonly solid: string;
   };
   readonly "solid.revolve": {
+    readonly solid: string;
+  };
+  readonly "solid.sweep": {
+    readonly solid: string;
+  };
+  readonly "solid.loft": {
     readonly solid: string;
   };
   readonly "solid.union": {
@@ -1739,6 +1857,234 @@ function parseRevolveInput(
       translation: { x: x.value, y: y.value, z: z.value },
     },
   });
+}
+
+/** Serializes a profile placement to its canonical wire form. */
+function serializeProfilePlacement(
+  placement: ProfilePlacementInput,
+): SerializedProfilePlacement {
+  return {
+    rotation: {
+      axis: [...placement.rotation.axis],
+      angle: serializeDimensionalValue(placement.rotation.angle),
+    },
+    translation: {
+      x: serializeDimensionalValue(placement.translation.x),
+      y: serializeDimensionalValue(placement.translation.y),
+      z: serializeDimensionalValue(placement.translation.z),
+    },
+  };
+}
+
+/** Parses a profile placement from untrusted wire input. */
+function parseProfilePlacement(
+  operation: WorkerOperationId,
+  placement: unknown,
+): ParseResult<ProfilePlacementInput, WorkerParseError> {
+  if (!isPlainRecord(placement)) {
+    return payloadError(
+      `The "${operation}" field "placement" must be a plain object with rotation and translation.`,
+      placement,
+    );
+  }
+  const rotation = placement.rotation;
+  if (!isPlainRecord(rotation)) {
+    return payloadError(
+      `The "${operation}" placement "rotation" must be a plain object with axis and angle.`,
+      rotation,
+    );
+  }
+  const axis = requireAxisField(
+    operation,
+    "placement.rotation.axis",
+    rotation.axis,
+  );
+  if (!axis.ok) return axis;
+  const angle = requireAngleField(
+    operation,
+    "placement.rotation.angle",
+    rotation.angle,
+  );
+  if (!angle.ok) return angle;
+  const translation = placement.translation;
+  if (!isPlainRecord(translation)) {
+    return payloadError(
+      `The "${operation}" placement "translation" must be a plain object with x, y, z length fields.`,
+      translation,
+    );
+  }
+  const x = requireLengthField(
+    operation,
+    "placement.translation.x",
+    translation.x,
+  );
+  if (!x.ok) return x;
+  const y = requireLengthField(
+    operation,
+    "placement.translation.y",
+    translation.y,
+  );
+  if (!y.ok) return y;
+  const z = requireLengthField(
+    operation,
+    "placement.translation.z",
+    translation.z,
+  );
+  if (!z.ok) return z;
+  return ok({
+    rotation: { axis: axis.value, angle: angle.value },
+    translation: { x: x.value, y: y.value, z: z.value },
+  });
+}
+
+function serializeSweepInput(
+  input: WorkerSweepInput,
+): SerializedWorkerOperationInput<"solid.sweep"> {
+  return {
+    loop: input.loop.map(serializeProfileSegment),
+    path: input.path.map((segment) =>
+      segment.kind === "line"
+        ? { kind: "line", start: [...segment.start], end: [...segment.end] }
+        : {
+            kind: "arc",
+            center: [...segment.center],
+            radius: segment.radius,
+            startAngle: serializeDimensionalValue(segment.startAngle),
+            endAngle: serializeDimensionalValue(segment.endAngle),
+          },
+    ),
+    placement: serializeProfilePlacement(input.placement),
+  };
+}
+
+function parseSweepInput(
+  payload: unknown,
+): ParseResult<WorkerSweepInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.sweep", payload);
+  if (!record.ok) return record;
+  const loop = parseProfileLoop("solid.sweep", record.value.loop);
+  if (!loop.ok) return loop;
+  if (!Array.isArray(record.value.path) || record.value.path.length === 0) {
+    return payloadError(
+      'The "solid.sweep" field "path" must be a non-empty array of path segments.',
+      record.value.path,
+    );
+  }
+  const path: WorkerSweepPathSegmentInput[] = [];
+  for (const entry of record.value.path) {
+    if (!isPlainRecord(entry)) {
+      return payloadError(
+        'The "solid.sweep" path segment must be a plain object.',
+        entry,
+      );
+    }
+    if (entry.kind === "line") {
+      const start = parseProfilePoint2(
+        "solid.sweep",
+        "path.line.start",
+        entry.start,
+      );
+      if (!start.ok) return start;
+      const end = parseProfilePoint2("solid.sweep", "path.line.end", entry.end);
+      if (!end.ok) return end;
+      path.push({ kind: "line", start: start.value, end: end.value });
+      continue;
+    }
+    if (entry.kind === "arc") {
+      const center = parseProfilePoint2(
+        "solid.sweep",
+        "path.arc.center",
+        entry.center,
+      );
+      if (!center.ok) return center;
+      const radius = entry.radius;
+      if (!isFiniteNumber(radius) || radius <= 0) {
+        return payloadError(
+          'The "solid.sweep" path arc radius must be a positive finite number.',
+          radius,
+        );
+      }
+      const startAngle = requireAngleField(
+        "solid.sweep",
+        "path.arc.startAngle",
+        entry.startAngle,
+      );
+      if (!startAngle.ok) return startAngle;
+      const endAngle = requireAngleField(
+        "solid.sweep",
+        "path.arc.endAngle",
+        entry.endAngle,
+      );
+      if (!endAngle.ok) return endAngle;
+      path.push({
+        kind: "arc",
+        center: center.value,
+        radius,
+        startAngle: startAngle.value,
+        endAngle: endAngle.value,
+      });
+      continue;
+    }
+    return payloadError(
+      'The "solid.sweep" path segment kind must be "line" or "arc".',
+      entry.kind,
+    );
+  }
+  const placement = parseProfilePlacement(
+    "solid.sweep",
+    record.value.placement,
+  );
+  if (!placement.ok) return placement;
+  return ok({
+    loop: loop.value,
+    path,
+    placement: placement.value,
+  });
+}
+
+function serializeLoftInput(
+  input: WorkerLoftInput,
+): SerializedWorkerOperationInput<"solid.loft"> {
+  return {
+    sections: input.sections.map((section) => ({
+      loop: section.loop.map(serializeProfileSegment),
+      z: serializeDimensionalValue(section.z),
+    })),
+    placement: serializeProfilePlacement(input.placement),
+  };
+}
+
+function parseLoftInput(
+  payload: unknown,
+): ParseResult<WorkerLoftInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.loft", payload);
+  if (!record.ok) return record;
+  if (
+    !Array.isArray(record.value.sections) ||
+    record.value.sections.length === 0
+  ) {
+    return payloadError(
+      'The "solid.loft" field "sections" must be a non-empty array of section objects.',
+      record.value.sections,
+    );
+  }
+  const sections: WorkerLoftSectionInput[] = [];
+  for (const entry of record.value.sections) {
+    if (!isPlainRecord(entry)) {
+      return payloadError(
+        'The "solid.loft" section must be a plain object with loop and z.',
+        entry,
+      );
+    }
+    const loop = parseProfileLoop("solid.loft", entry.loop);
+    if (!loop.ok) return loop;
+    const z = requireLengthField("solid.loft", "section.z", entry.z);
+    if (!z.ok) return z;
+    sections.push({ loop: loop.value, z: z.value });
+  }
+  const placement = parseProfilePlacement("solid.loft", record.value.placement);
+  if (!placement.ok) return placement;
+  return ok({ sections, placement: placement.value });
 }
 
 function serializeOperandsInput(input: {
@@ -2676,6 +3022,8 @@ const INPUT_SERIALIZERS: {
   "solid.createCone": serializeConeInput,
   "solid.extrude": serializeExtrudeInput,
   "solid.revolve": serializeRevolveInput,
+  "solid.sweep": serializeSweepInput,
+  "solid.loft": serializeLoftInput,
   "solid.union": serializeOperandsInput,
   "solid.subtract": serializeSubtractInput,
   "solid.intersect": serializeOperandsInput,
@@ -2707,6 +3055,8 @@ const INPUT_PARSERS: {
   "solid.createCone": parseConeInput,
   "solid.extrude": parseExtrudeInput,
   "solid.revolve": parseRevolveInput,
+  "solid.sweep": parseSweepInput,
+  "solid.loft": parseLoftInput,
   "solid.union": (payload) => parseOperandsInput("solid.union", payload),
   "solid.subtract": parseSubtractInput,
   "solid.intersect": (payload) =>
@@ -3034,6 +3384,8 @@ const RESULT_SERIALIZERS: {
   "solid.createCone": serializeSolidResult,
   "solid.extrude": serializeSolidResult,
   "solid.revolve": serializeSolidResult,
+  "solid.sweep": serializeSolidResult,
+  "solid.loft": serializeSolidResult,
   "solid.union": serializeSolidResult,
   "solid.subtract": serializeSolidResult,
   "solid.intersect": serializeSolidResult,
@@ -3068,6 +3420,8 @@ const RESULT_PARSERS: {
     parseSolidResult("solid.createCone", payload),
   "solid.extrude": (payload) => parseSolidResult("solid.extrude", payload),
   "solid.revolve": (payload) => parseSolidResult("solid.revolve", payload),
+  "solid.sweep": (payload) => parseSolidResult("solid.sweep", payload),
+  "solid.loft": (payload) => parseSolidResult("solid.loft", payload),
   "solid.union": (payload) => parseSolidResult("solid.union", payload),
   "solid.subtract": (payload) => parseSolidResult("solid.subtract", payload),
   "solid.intersect": (payload) => parseSolidResult("solid.intersect", payload),
@@ -3132,6 +3486,8 @@ const RESULT_MINTS: {
   "solid.createCone": (result) => [result.solid],
   "solid.extrude": (result) => [result.solid],
   "solid.revolve": (result) => [result.solid],
+  "solid.sweep": (result) => [result.solid],
+  "solid.loft": (result) => [result.solid],
   "solid.union": (result) => [result.solid],
   "solid.subtract": (result) => [result.solid],
   "solid.intersect": (result) => [result.solid],

@@ -35,11 +35,12 @@
  * mirrored state.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import {
   CadProvider,
   createCadStore,
+  DIAGNOSTIC_CODES,
   documentChangeInvalidations,
   type CadDocument,
   type FeatureId,
@@ -72,17 +73,23 @@ import {
   dimensionless,
   length,
 } from "@slopcad/cad-core";
+import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
 import {
   bootRenderFixtureSession,
   faceAnchorSurface,
   type RenderFixtureSession,
+  type SceneDispatchOutcome,
 } from "../render-fixture/fixture-session";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { createCadWorkbenchSession } from "./session";
-import { documentExtrudeRequest, type ExtrudeSceneRequest } from "./extrude";
+import {
+  documentExtrudeRequest,
+  sketchProfileResolverOf,
+  type ExtrudeSceneRequest,
+} from "./extrude";
 import {
   defaultHolePosition,
   documentHoleSceneRequest,
@@ -97,6 +104,18 @@ import {
   type SketchRevolveSubmission,
 } from "./revolve";
 import {
+  documentSweepRequest,
+  sketchPathResolverOf,
+  validateSweepSubmission,
+  type SweepSceneRequest,
+} from "./sweep";
+import {
+  documentLoftRequest,
+  validateLoftSubmission,
+  type LoftSceneRequest,
+  type LoftSectionChoice,
+} from "./loft";
+import {
   EXTRUDE_DEFAULT_DEPTH_MM,
   type SketchExtrudeSubmission,
 } from "./SketchMode";
@@ -105,7 +124,10 @@ import { distanceReadout } from "./distance-inspection";
 import { massPropertiesReadout } from "./mass-properties-inspection";
 import { radiusReadout } from "./radius-inspection";
 import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
-import { WORKBENCH_SESSION_BACKEND } from "../render-fixture/session-backend";
+import {
+  sessionBackendOf,
+  type FixtureSessionBackendId,
+} from "../render-fixture/session-backend";
 
 /** The workbench's top-level modes: the 3D model workspace or the sketch. */
 export type WorkbenchMode = "model" | "sketch";
@@ -132,7 +154,12 @@ interface DerivationPrevious {
   readonly results: RegenerationResultMap;
 }
 
-/** The session settle-surface ids the booted fixture session writes into. */
+/**
+ * The session settle-surface ids the booted fixture session writes into,
+ * plus the worker backend the session boots (default `"manifold"` — the
+ * boot state every established baseline pins; the sweep-capable
+ * composition boots `"occt"`, Phase 38).
+ */
 export interface WorkbenchEngineSurface {
   /** The element receiving the settle `data-*` attributes. */
   readonly rootId: string;
@@ -142,6 +169,8 @@ export interface WorkbenchEngineSurface {
   readonly volumeId: string;
   /** The error span the session writer updates. */
   readonly errorId: string;
+  /** The worker backend the session boots. */
+  readonly backend?: FixtureSessionBackendId;
 }
 
 /**
@@ -162,6 +191,69 @@ export function useWorkbenchStore() {
     }),
   );
   return store;
+}
+
+/**
+ * The scene kinds the dispatch effect follows — the plate computation until
+ * the first solid action commits, then the worker-executed composition the
+ * document names (Phase 38 adds the sweep and loft scenes).
+ */
+export type WorkbenchSceneKind =
+  "plate" | "extrude" | "revolve" | "sweep" | "loft" | "hole";
+
+/**
+ * The structured outcome of a feature-form submission: the domain's refusal
+ * verbatim, or success (the transaction committed and the scene switched).
+ */
+export type FeatureFormOutcome =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/** The active scene feature's worker refusal — the timeline's verdict seam:
+ *  the document-data executor judges document inputs alone and cannot know
+ *  a kernel declined an operation, so the session's structured refusal
+ *  (Phase 38: Manifold's `kernel/unsupported-operation` for sweep/loft)
+ *  rides here and the timeline joins it into the feature's status. */
+export interface SceneFeatureFailure {
+  /** The refused dispatch's output body id (resolved at join time). */
+  readonly bodyId: string;
+  /** The verbatim error-surface text (the chip title can't contradict it). */
+  readonly text: string;
+}
+
+/**
+ * Joins the worker's build verdict into the regeneration states the
+ * timeline reads: the feature that owns the refused dispatch's output body
+ * is marked `failed` with the registered kernel-operation-failed code and
+ * the error surface's exact text as its diagnostic message — the same
+ * presentation a refused executor pass gets, so the chip follows the
+ * existing failure conventions. The pass's own states are untouched
+ * (suppression and rollback still win in the joined view), and a body the
+ * document no longer declares — an undo removed the feature — resolves to
+ * no override at all.
+ */
+export function sceneVerdictAdjustedStates(
+  states: RegenerationStateMap,
+  document: CadDocument,
+  failure: SceneFeatureFailure,
+): RegenerationStateMap {
+  const feature = document.features.find((entry) =>
+    entry.outputs.some((output) => output === failure.bodyId),
+  );
+  if (feature === undefined) return states;
+  const adjusted = new Map(states);
+  adjusted.set(feature.id, {
+    state: "failed",
+    diagnostics: [
+      {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelOperationFailed,
+        message: failure.text,
+        location: { primary: feature.id },
+      },
+    ],
+  });
+  return adjusted;
 }
 
 /** Everything the composed workbench pages render from. */
@@ -205,16 +297,14 @@ export interface WorkbenchEngine {
   /** The document's stored hole diameter, or `null`. */
   readonly storedHole: number | null;
   /** The active scene kind the dispatch effect follows. */
-  readonly activeScene: "plate" | "extrude" | "revolve" | "hole";
+  readonly activeScene: WorkbenchSceneKind;
   /**
    * Switches the active scene kind. A host whose authoring actions can
    * INVALIDATE the active scene (e.g. a feature removal that leaves the
    * scene request unresolved) falls back honestly: point the dispatch at
    * the plate scene rather than leave stale pixels up.
    */
-  readonly setActiveScene: (
-    scene: "plate" | "extrude" | "revolve" | "hole",
-  ) => void;
+  readonly setActiveScene: (scene: WorkbenchSceneKind) => void;
   /** The face-anchor surface JSON of the applied projection. */
   readonly faceAnchors: string;
   /** The measure tool's point-pair completion text, or `null`. */
@@ -232,6 +322,31 @@ export interface WorkbenchEngine {
   readonly handleRevolve: (submission: SketchRevolveSubmission) => void;
   /** The hole create action (parameter-panel-driven defaults). */
   readonly handleHole: () => void;
+  /**
+   * The Phase 38 save-sketch action: commits the CURRENT sketch as a
+   * STANDALONE document sketch record (no feature) — the sketch pool the
+   * sweep and loft forms pick from. Exits to the model workspace.
+   */
+  readonly handleSaveSketch: (submission: { readonly sketch: unknown }) => void;
+  /**
+   * The Phase 38 sweep create action: validates the picked profile + path
+   * sketches through the action-time battery, then commits the sweep
+   * feature in one atomic transaction and switches the scene. A refusal
+   * commits nothing and returns the structured outcome for the form.
+   */
+  readonly handleSweep: (
+    profileSketchId: string,
+    pathSketchId: string,
+  ) => FeatureFormOutcome;
+  /**
+   * The Phase 38 loft create action: validates the picked ordered sections
+   * (shared frame, strictly increasing stations), then commits the station
+   * parameters and the loft feature in one atomic transaction. A refusal
+   * commits nothing and returns the structured outcome for the form.
+   */
+  readonly handleLoft: (
+    sections: readonly LoftSectionChoice[],
+  ) => FeatureFormOutcome;
 }
 
 /**
@@ -243,7 +358,7 @@ export interface WorkbenchEngine {
 export function useWorkbenchEngine(
   surface: WorkbenchEngineSurface,
 ): WorkbenchEngine {
-  const { rootId, statusId, volumeId, errorId } = surface;
+  const { rootId, statusId, volumeId, errorId, backend } = surface;
   // The workbench mode is page-level authoring state: the model workspace
   // keeps its worker session alive across switches (hidden, not unmounted).
   const [mode, setMode] = useState<WorkbenchMode>("model");
@@ -300,12 +415,32 @@ export function useWorkbenchEngine(
   // first solid action commits a feature; afterwards the worker executes
   // the document's extrude, revolve, or hole composition (parameter edits
   // re-dispatch).
-  const [activeScene, setActiveScene] = useState<
-    "plate" | "extrude" | "revolve" | "hole"
-  >("plate");
+  const [activeScene, setActiveScene] = useState<WorkbenchSceneKind>("plate");
   const [extrudeCount, setExtrudeCount] = useState(0);
   const [revolveCount, setRevolveCount] = useState(0);
   const [holeCount, setHoleCount] = useState(0);
+  const [sketchCount, setSketchCount] = useState(0);
+  const [sweepCount, setSweepCount] = useState(0);
+  const [loftCount, setLoftCount] = useState(0);
+
+  // The active scene feature's worker refusal (Phase 38 capability
+  // honesty): the session reports every feature-backed dispatch's verdict,
+  // and a refusal maps onto the owning feature's timeline status — the
+  // chip reads Failed beside the error surface that carries the refusal,
+  // never Valid. A successful dispatch clears it, so a re-drive that
+  // builds recovers the chip.
+  const [sceneFeatureFailure, setSceneFeatureFailure] =
+    useState<SceneFeatureFailure | null>(null);
+  const onSceneOutcome = useCallback((outcome: SceneDispatchOutcome): void => {
+    if (outcome.ok) {
+      setSceneFeatureFailure(null);
+      return;
+    }
+    setSceneFeatureFailure({
+      bodyId: outcome.bodyId,
+      text: outcome.text,
+    });
+  }, []);
 
   const workbenchDocument = documentApi.document;
   const suppressedKey = useMemo(
@@ -560,16 +695,195 @@ export function useWorkbenchEngine(
     setActiveScene("hole");
   };
 
+  // The Phase 38 save-sketch action: commit the CURRENT sketch as a
+  // STANDALONE document sketch record (no feature — the sketch pool the
+  // sweep and loft forms pick from) and exit to the model workspace, where
+  // the feature forms live. A refused transaction keeps everything
+  // unchanged.
+  const handleSaveSketch = (submission: { readonly sketch: unknown }): void => {
+    const n = sketchCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const applied = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "sketch.create",
+          id: createSketchDocumentId(`skd_sketch${suffix}`),
+          name: `sketch ${String(n)}`,
+          sketch: submission.sketch as Record<string, unknown>,
+        },
+      ],
+    });
+    if (!applied.ok) return;
+    setSketchCount(n);
+    setMode("model");
+  };
+
+  // The Phase 38 sweep action: resolve the picked profile and path sketches
+  // through the same resolver seams the executor bridge uses, run the
+  // kernel's sweep battery BEFORE anything commits (the revolve action's
+  // validation-seam precedent), then commit the feature in ONE atomic
+  // transaction and switch the scene. A refusal commits nothing and hands
+  // the structured outcome back to the form.
+  const handleSweep = (
+    profileSketchId: string,
+    pathSketchId: string,
+  ): FeatureFormOutcome => {
+    if (profileSketchId === pathSketchId) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "The sweep profile and the sweep path must be different sketches; one sketch cannot be both the loop and its spine.",
+      };
+    }
+    const profile = sketchProfileResolverOf(workbenchDocument)(
+      createSketchDocumentId(profileSketchId),
+    );
+    if (!profile.ok) {
+      return {
+        ok: false,
+        code: profile.error.code,
+        message: profile.error.message,
+      };
+    }
+    const path = sketchPathResolverOf(workbenchDocument)(
+      createSketchDocumentId(pathSketchId),
+    );
+    if (!path.ok) {
+      return {
+        ok: false,
+        code: path.error.code,
+        message: path.error.message,
+      };
+    }
+    const validation = validateSweepSubmission({
+      loop: profile.value.loop,
+      path: path.value.path,
+    });
+    if (!validation.ok) return validation;
+    const n = sweepCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_sweep${suffix}`);
+    const featureId = createFeatureId(`feat_sweep${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        { type: "body.create", id: bodyId, name: `swept ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "sweep",
+          inputs: [
+            { kind: "sketch", id: createSketchDocumentId(profileSketchId) },
+            { kind: "sketch", id: createSketchDocumentId(pathSketchId) },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setSweepCount(n);
+    setActiveScene("sweep");
+    return { ok: true };
+  };
+
+  // The Phase 38 loft action: resolve the picked ordered sections (shared
+  // frame, strictly increasing stations — the action-time twin of the
+  // bridge's rules), then commit the station parameters and the loft
+  // feature in ONE atomic transaction. A refusal commits nothing.
+  const handleLoft = (
+    sections: readonly LoftSectionChoice[],
+  ): FeatureFormOutcome => {
+    const resolveProfile = sketchProfileResolverOf(workbenchDocument);
+    const resolvedSections: {
+      readonly choice: LoftSectionChoice;
+      readonly placement: KernelResolvedProfile["placement"];
+    }[] = [];
+    for (const choice of sections) {
+      const resolution = resolveProfile(
+        createSketchDocumentId(choice.sketchId),
+      );
+      if (!resolution.ok) {
+        return {
+          ok: false,
+          code: resolution.error.code,
+          message: resolution.error.message,
+        };
+      }
+      resolvedSections.push({ choice, placement: resolution.value.placement });
+    }
+    const validation = validateLoftSubmission({ sections: resolvedSections });
+    if (!validation.ok) return validation;
+    const n = loftCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_loft${suffix}`);
+    const featureId = createFeatureId(`feat_loft${suffix}`);
+    const stationCommands = sections.map((choice, index) => ({
+      type: "parameter.create" as const,
+      id: createParameterId(`param_loft_z${suffix}_${String(index)}`),
+      name: `loftZ${suffix}_${String(index)}`,
+      value: length(choice.stationMm),
+    }));
+    const committed = documentApi.applyTransaction({
+      commands: [
+        ...stationCommands,
+        { type: "body.create", id: bodyId, name: `lofted ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "loft",
+          inputs: sections.flatMap((choice, index) => [
+            {
+              kind: "sketch" as const,
+              id: createSketchDocumentId(choice.sketchId),
+            },
+            {
+              kind: "parameter" as const,
+              id: createParameterId(`param_loft_z${suffix}_${String(index)}`),
+            },
+          ]),
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setLoftCount(n);
+    setActiveScene("loft");
+    return { ok: true };
+  };
+
   const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {
     if (runState === null) return null;
+    // The worker's verdict outranks the document-data executor's "valid"
+    // for the ONE feature whose build the kernel refused — a refusal the
+    // error surface carries must not read "valid" on the chip.
+    const states =
+      sceneFeatureFailure === null
+        ? runState.states
+        : sceneVerdictAdjustedStates(
+            runState.states,
+            workbenchDocument,
+            sceneFeatureFailure,
+          );
     const joined = featureTimeline({
       features: workbenchDocument.features,
-      states: runState.states,
+      states,
       rollback,
       suppressed: [...suppressed],
     });
     return joined.ok ? joined.value : null;
-  }, [workbenchDocument, runState, rollback, suppressed]);
+  }, [workbenchDocument, runState, rollback, suppressed, sceneFeatureFailure]);
 
   const toggleSuppressed = (id: FeatureId): void => {
     setSuppressed((current) => {
@@ -602,15 +916,27 @@ export function useWorkbenchEngine(
         // stable references persist.
         beginRegeneration(revision);
       },
+      { backend, onSceneOutcome },
     );
     sessionRef.current = session;
     return () => {
       sessionRef.current = null;
       session.dispose();
     };
-    // arm and beginRegeneration are stable store operation identities: the
-    // session boots exactly once.
-  }, [arm, beginRegeneration, rootId, statusId, volumeId, errorId]);
+    // arm and beginRegeneration are stable store operation identities and
+    // onSceneOutcome is a stable callback: the session boots exactly once
+    // (the backend id is boot-time configuration, not a live switch —
+    // remount the host to change it).
+  }, [
+    arm,
+    beginRegeneration,
+    rootId,
+    statusId,
+    volumeId,
+    errorId,
+    backend,
+    onSceneOutcome,
+  ]);
 
   // The scene dispatch: whichever computation the active scene names follows
   // the DOCUMENT (the parameter edit → regenerate criterion) — the plate
@@ -638,6 +964,22 @@ export function useWorkbenchEngine(
       }
       return;
     }
+    if (activeScene === "sweep") {
+      const request: SweepSceneRequest | null =
+        documentSweepRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchSweep(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "loft") {
+      const request: LoftSceneRequest | null =
+        documentLoftRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchLoft(request, request.bodyId);
+      }
+      return;
+    }
     if (activeScene === "hole") {
       const derived = documentHoleSceneRequest(workbenchDocument);
       if (derived !== null) {
@@ -654,6 +996,8 @@ export function useWorkbenchEngine(
     storedHole,
     extrudeCount,
     revolveCount,
+    sweepCount,
+    loftCount,
     holeCount,
   ]);
 
@@ -689,7 +1033,7 @@ export function useWorkbenchEngine(
             (object) => object.bodyId !== undefined,
           )?.bodyId,
     bounds: applied === null ? undefined : applied.state.measurement.bounds,
-    tightBooleanBounds: WORKBENCH_SESSION_BACKEND.tightBooleanBounds,
+    tightBooleanBounds: sessionBackendOf(backend).tightBooleanBounds,
   });
 
   // The distance inspection (Phase 27.2): the selection's reference pair —
@@ -771,6 +1115,9 @@ export function useWorkbenchEngine(
     handleExtrude,
     handleRevolve,
     handleHole,
+    handleSaveSketch,
+    handleSweep,
+    handleLoft,
   };
 }
 

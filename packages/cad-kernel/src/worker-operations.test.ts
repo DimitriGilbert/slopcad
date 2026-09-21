@@ -58,6 +58,8 @@ describe("operation vocabulary", () => {
       "solid.createCone",
       "solid.extrude",
       "solid.revolve",
+      "solid.sweep",
+      "solid.loft",
       "solid.union",
       "solid.subtract",
       "solid.intersect",
@@ -267,6 +269,95 @@ describe("operation input round-trips", () => {
         translation: { x: mm(1), y: mm(2), z: mm(3) },
       },
     });
+  });
+
+  it("round-trips the sweep input with its XZ path chain and signed-sweep arcs", () => {
+    expectInputRoundTrip("solid.sweep", {
+      loop: [
+        { kind: "line", start: [-5, -5], end: [5, -5] },
+        { kind: "line", start: [5, -5], end: [5, 5] },
+        { kind: "line", start: [5, 5], end: [-5, 5] },
+        { kind: "line", start: [-5, 5], end: [-5, -5] },
+      ],
+      path: [
+        { kind: "line", start: [0, 0], end: [0, 10] },
+        {
+          kind: "arc",
+          center: [-10, 10],
+          radius: 10,
+          startAngle: angle(0),
+          endAngle: angle(Math.PI / 2),
+        },
+      ],
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: mm(0), y: mm(0), z: mm(0) },
+      },
+    });
+  });
+
+  it("round-trips the loft input with its ordered sections and stations", () => {
+    expectInputRoundTrip("solid.loft", {
+      sections: [
+        {
+          loop: [{ kind: "circle", center: [0, 0], radius: 10 }],
+          z: mm(0),
+        },
+        {
+          loop: [{ kind: "circle", center: [0, 0], radius: 4 }],
+          z: mm(20),
+        },
+      ],
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: mm(0), y: mm(0), z: mm(0) },
+      },
+    });
+  });
+
+  it("normalizes loft stations to canonical millimetres across units", () => {
+    const wire = serializeWorkerOperationInput("solid.loft", {
+      sections: [
+        { loop: [{ kind: "circle", center: [0, 0], radius: 10 }], z: mm(0) },
+        {
+          loop: [{ kind: "circle", center: [0, 0], radius: 4 }],
+          z: length(2, "cm"),
+        },
+      ],
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: mm(0), y: mm(0), z: mm(0) },
+      },
+    });
+    const sections = wire.sections;
+    expect(sections).toHaveLength(2);
+    expect(sections[1]?.z).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 20,
+    });
+  });
+
+  it("rejects a sweep path segment that is not line or arc", () => {
+    const failure = failureOf(
+      parseWorkerOperationInput("solid.sweep", {
+        loop: [{ kind: "circle", center: [0, 0], radius: 5 }],
+        path: [
+          {
+            kind: "spline",
+            points: [
+              [0, 0],
+              [1, 1],
+            ],
+          },
+        ],
+        placement: {
+          rotation: { axis: [0, 0, 1], angle: angle(0) },
+          translation: { x: mm(0), y: mm(0), z: mm(0) },
+        },
+      }),
+    );
+    expect(failure.code).toBe(WORKER_PROTOCOL_ERROR_CODES.malformedPayload);
   });
 
   it("serializes lengths in the canonical key order and unit", () => {
@@ -554,6 +645,12 @@ describe("operation input validation", () => {
       },
       "solid.extrude": { loop: "not-a-loop", height: 2, direction: 1 },
       "solid.revolve": { loop: [], axis: { point: [0, 0] }, angle: 2 },
+      "solid.sweep": {
+        loop: [],
+        path: [{ kind: "circle", center: [0, 0], radius: 2 }],
+        placement: {},
+      },
+      "solid.loft": { sections: [{ loop: [], z: "elevated" }], placement: {} },
       "solid.union": { operands: [solidA, 5] },
       "solid.subtract": { target: "not-an-id", tools: [] },
       "solid.intersect": { operands: {} },

@@ -156,8 +156,11 @@ export type {
   HoleCutPlan,
   KernelExecutionBridge,
   KernelExecutorContext,
+  KernelPathResolution,
+  KernelPathResolver,
   KernelProfileResolution,
   KernelProfileResolver,
+  KernelResolvedPath,
   KernelResolvedProfile,
 } from "./core-bridge";
 

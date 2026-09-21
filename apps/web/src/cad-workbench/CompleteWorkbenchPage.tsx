@@ -56,6 +56,7 @@ import type {
 } from "@slopcad/ui/components/cad/cad-io-dialog";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 import type { ThreeMfImportResponse } from "../io-fixture/io-protocol";
+import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CadImportPreview, CadWorkbenchIo } from "./complete-workbench";
 import type { WorkbenchEngine } from "./workbench-engine";
 
@@ -158,15 +159,34 @@ interface OcctWorkerSession {
   readonly client: WorkerClient;
 }
 
-export function CompleteWorkbenchPage(): ReactElement {
+export function CompleteWorkbenchPage({
+  backend,
+  rootId = "workbench-complete-root",
+}: {
+  /**
+   * The worker backend the workbench boots (see
+   * {@link CompleteCadWorkbenchProps.backend}); the default `"manifold"` is
+   * the boot state the established baselines pin, and `"occt"` serves the
+   * sweep-capable route (Phase 38).
+   */
+  readonly backend?: FixtureSessionBackendId;
+  /** The root element id (the machine surface's anchor; per route). */
+  readonly rootId?: string;
+}): ReactElement {
   return (
     <WorkbenchStoreProvider>
-      <CompleteWorkbenchBody />
+      <CompleteWorkbenchBody backend={backend} rootId={rootId} />
     </WorkbenchStoreProvider>
   );
 }
 
-function CompleteWorkbenchBody(): ReactElement {
+function CompleteWorkbenchBody({
+  backend,
+  rootId,
+}: {
+  readonly backend?: FixtureSessionBackendId;
+  readonly rootId?: string;
+}): ReactElement {
   // Held exports (one slot per exportable format), the import side's
   // outcome/preview state, and the shared error surface. The workbench's
   // export formats (STL/3MF/GLB) all produce their bytes synchronously, so
@@ -538,5 +558,7 @@ function CompleteWorkbenchBody(): ReactElement {
   // the workbench's import preview covers the imported-geometry story, and
   // the /io fixture remains the GLTFLoader reference surface.
 
-  return <CompleteCadWorkbench io={buildIo} rootId="workbench-complete-root" />;
+  return (
+    <CompleteCadWorkbench backend={backend} io={buildIo} rootId={rootId} />
+  );
 }

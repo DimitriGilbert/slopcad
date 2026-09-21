@@ -21,6 +21,7 @@ import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
 import { Route as WorkbenchCompleteRouteImport } from './routes/workbench-complete'
+import { Route as WorkbenchCompleteOcctRouteImport } from './routes/workbench-complete-occt'
 import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
@@ -92,6 +93,11 @@ const WorkbenchCompleteRoute = WorkbenchCompleteRouteImport.update({
   path: '/workbench-complete',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkbenchCompleteOcctRoute = WorkbenchCompleteOcctRouteImport.update({
+  id: '/workbench-complete-occt',
+  path: '/workbench-complete-occt',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkerRoute = WorkerRouteImport.update({
   id: '/worker',
   path: '/worker',
@@ -160,6 +166,7 @@ export interface FileRoutesByFullPath {
   '/workbench': typeof WorkbenchRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
+  '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -184,6 +191,7 @@ export interface FileRoutesByTo {
   '/workbench': typeof WorkbenchRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
+  '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -210,6 +218,7 @@ export interface FileRoutesById {
   '/workbench': typeof WorkbenchRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
+  '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
     | '/workbench'
     | '/workbench-chain'
     | '/workbench-complete'
+    | '/workbench-complete-occt'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -260,6 +270,7 @@ export interface FileRouteTypes {
     | '/workbench'
     | '/workbench-chain'
     | '/workbench-complete'
+    | '/workbench-complete-occt'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -285,6 +296,7 @@ export interface FileRouteTypes {
     | '/workbench'
     | '/workbench-chain'
     | '/workbench-complete'
+    | '/workbench-complete-occt'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -311,6 +323,7 @@ export interface RootRouteChildren {
   WorkbenchRoute: typeof WorkbenchRoute
   WorkbenchChainRoute: typeof WorkbenchChainRoute
   WorkbenchCompleteRoute: typeof WorkbenchCompleteRoute
+  WorkbenchCompleteOcctRoute: typeof WorkbenchCompleteOcctRoute
   WorkerRoute: typeof WorkerRoute
   WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
@@ -404,6 +417,13 @@ declare module '@tanstack/react-router' {
       path: '/workbench-complete'
       fullPath: '/workbench-complete'
       preLoaderRoute: typeof WorkbenchCompleteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workbench-complete-occt': {
+      id: '/workbench-complete-occt'
+      path: '/workbench-complete-occt'
+      fullPath: '/workbench-complete-occt'
+      preLoaderRoute: typeof WorkbenchCompleteOcctRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/worker': {
@@ -517,6 +537,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkbenchRoute: WorkbenchRoute,
   WorkbenchChainRoute: WorkbenchChainRoute,
   WorkbenchCompleteRoute: WorkbenchCompleteRoute,
+  WorkbenchCompleteOcctRoute: WorkbenchCompleteOcctRoute,
   WorkerRoute: WorkerRoute,
   WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,

@@ -26,10 +26,41 @@ doc = addFeature(doc, {
 
 The bridge vocabulary is `BRIDGE_FEATURE_KINDS` (`@slopcad/cad-kernel`'s
 `core-bridge`): `box`, `sphere`, `cylinder`, `cone`, `union`,
-`subtract`, `intersect`, `translate`, `extrude`, `revolve`, `fillet`,
-`chamfer`, `shell`, `patternLinear`, `patternCircular`, `mirror`, `hole`
-— each kind documents its input contract in the `core-bridge.ts`
-header.
+`subtract`, `intersect`, `translate`, `extrude`, `revolve`, `sweep`,
+`loft`, `fillet`, `chamfer`, `shell`, `patternLinear`,
+`patternCircular`, `mirror`, `hole` — each kind documents its input
+contract in the `core-bridge.ts` header.
+
+## Sweep and loft (Phase 38)
+
+`sweep` carries two sketch inputs — the profile first, the path second —
+and no dimension parameters (the path determines the extent). The profile
+resolves like an extrude's; the path resolves through the executor
+context's optional `paths` resolver, mapping the sketch's chain onto the
+kernel contract's local XZ plane by coordinate identity (sketch
+`(x, y)` → path `(x, z)`): the path must START at the sketch origin and
+rise along +y (the profile plane's normal). A kernel that does not
+declare the `sweep` capability (Manifold) refuses at the bridge gate
+before any resolution.
+
+```ts
+const bridge = createKernelFeatureExecutor(kernel, {
+  document,
+  bodies: new Map(),
+  profiles, // (sketchId) => { loop, placement }
+  paths, // (sketchId) => { path } — cad-sketch's resolveSweepPath behind it
+});
+// feature: { kind: "sweep", inputs: [sketch profile, sketch path], outputs: [body] }
+```
+
+`loft` carries N section sketch inputs plus N length parameters (each
+section's station z, matched by declared position; the order IS the loft
+direction). All sections must resolve on the FIRST section's workplane
+frame; the kernel's own battery judges member validity, vertex-count
+compatibility, and strictly increasing stations. Kernels without the
+`loft` capability decline at the gate the same way; the workbench
+surfaces both declines as the structured
+`kernel/unsupported-operation` on its error surface.
 
 ## Transactions, undo, redo
 
