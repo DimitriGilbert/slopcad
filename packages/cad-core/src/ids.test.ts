@@ -13,6 +13,7 @@ import {
   ID_GENERATOR_ERROR_CODES,
   parseAnyCadId,
   parseBodyId,
+  parseDatumId,
   parseDocumentId,
   parseFeatureId,
   parseParameterId,
@@ -63,7 +64,9 @@ describe("id wire format parsing", () => {
       body: "body",
       reference: "ref",
       sketch: "skd",
+      datum: "dtm",
     });
+    expect(parseDatumId("dtm_a").ok).toBe(true);
     expect(parseDocumentId("doc_a").ok).toBe(true);
     expect(parseParameterId("param_a").ok).toBe(true);
     expect(parseFeatureId("feat_a").ok).toBe(true);
@@ -223,6 +226,7 @@ describe("createIdGenerator", () => {
       body: 1,
       reference: 0,
       sketch: 0,
+      datum: 0,
     });
   });
 
@@ -235,6 +239,7 @@ describe("createIdGenerator", () => {
         body: 0,
         reference: 0,
         sketch: 0,
+        datum: 0,
       }),
     ).toThrow(RangeError);
     expect(() =>
@@ -245,6 +250,7 @@ describe("createIdGenerator", () => {
         body: 0,
         reference: 0,
         sketch: 0,
+        datum: 0,
       }),
     ).toThrow(RangeError);
   });
@@ -257,6 +263,7 @@ describe("createIdGenerator", () => {
       body: Number.MAX_SAFE_INTEGER,
       reference: 0,
       sketch: 0,
+      datum: 0,
     });
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);
     try {
@@ -282,6 +289,7 @@ describe("createIdGenerator", () => {
       body: Number.MAX_SAFE_INTEGER - 1,
       reference: 0,
       sketch: 0,
+      datum: 0,
     });
     expect(generator.nextBodyId()).toBe("body_9007199254740991");
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);

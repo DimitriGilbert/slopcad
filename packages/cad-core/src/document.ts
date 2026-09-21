@@ -56,11 +56,13 @@ import {
   CadIdGeneratorExhaustedError,
   type CadIdKind,
   createIdGenerator,
+  type DatumId,
   type DocumentId,
   type FeatureId,
   type IdGenerator,
   type IdGeneratorState,
   parseBodyId,
+  parseDatumId,
   parseDocumentId,
   parseFeatureId,
   parseParameterId,
@@ -147,6 +149,31 @@ export interface DocumentReferenceInput {
 }
 
 /**
+ * A named datum entity (Phase 39): the document-resident record of datum
+ * reference geometry — a plane, an axis, a point, or a coordinate system —
+ * carrying its canonical serialized payload verbatim (the datum module owns
+ * the payload's schema and its parse/resolve; the document guarantees only
+ * identity, a name, and JSON-safe fixed storage — the sketch and
+ * persistent-reference discipline). Features address a datum through a
+ * `{ kind: "datum" }` input; the EXECUTOR resolves the payload against the
+ * datum's definition, with reference-dependent definitions re-resolving
+ * through the caller-supplied topology seam every regeneration.
+ */
+export interface DocumentDatum {
+  readonly id: DatumId;
+  readonly name: string;
+  /** The datum module's canonical serialized payload, stored verbatim. */
+  readonly datum: Readonly<Record<string, unknown>>;
+}
+
+/** Input accepted by {@link addDocumentDatum}. */
+export interface DocumentDatumInput {
+  readonly id?: DatumId;
+  readonly name: string;
+  readonly datum: Readonly<Record<string, unknown>>;
+}
+
+/**
  * A typed reference to an entity a feature consumes. The `kind`/`id` pair is
  * validated for consistency (the id must carry the wire prefix of its
  * declared kind).
@@ -156,7 +183,8 @@ export type FeatureInputRef =
   | { readonly kind: "feature"; readonly id: FeatureId }
   | { readonly kind: "body"; readonly id: BodyId }
   | { readonly kind: "sketch"; readonly id: SketchDocumentId }
-  | { readonly kind: "reference"; readonly id: ReferenceId };
+  | { readonly kind: "reference"; readonly id: ReferenceId }
+  | { readonly kind: "datum"; readonly id: DatumId };
 
 /** The entity kinds a feature input may reference. */
 export const FEATURE_INPUT_KINDS = [
@@ -165,6 +193,7 @@ export const FEATURE_INPUT_KINDS = [
   "body",
   "sketch",
   "reference",
+  "datum",
 ] as const;
 
 export type FeatureInputKind = (typeof FEATURE_INPUT_KINDS)[number];
@@ -214,6 +243,11 @@ export interface CadDocument {
    */
   readonly references: readonly DocumentReference[];
   /**
+   * The document's named datum records, in add order (empty in older
+   * files; Phase 39-additive).
+   */
+  readonly datums: readonly DocumentDatum[];
+  /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
    * generated ids unique across save/load.
@@ -226,7 +260,8 @@ export type DocumentEntity =
   | { readonly kind: "parameter"; readonly parameter: Parameter }
   | { readonly kind: "body"; readonly body: Body }
   | { readonly kind: "feature"; readonly feature: FeatureRecord }
-  | { readonly kind: "sketch"; readonly sketch: DocumentSketch };
+  | { readonly kind: "sketch"; readonly sketch: DocumentSketch }
+  | { readonly kind: "datum"; readonly datum: DocumentDatum };
 
 /** Result of {@link addBody}: the next document plus the added body. */
 export interface BodyAddResult {
@@ -258,6 +293,12 @@ export interface DocumentReferenceAddResult {
   readonly reference: DocumentReference;
 }
 
+/** Result of {@link addDocumentDatum}: next document plus the record. */
+export interface DocumentDatumAddResult {
+  readonly document: CadDocument;
+  readonly datum: DocumentDatum;
+}
+
 /** Stable failure codes produced when document input is rejected. */
 export const DOCUMENT_ERROR_CODES = {
   malformed: "document/malformed",
@@ -271,6 +312,8 @@ export const DOCUMENT_ERROR_CODES = {
   sketchPayloadInvalid: "document/sketch-payload-invalid",
   referenceNameInvalid: "document/reference-name-invalid",
   referencePayloadInvalid: "document/reference-payload-invalid",
+  datumNameInvalid: "document/datum-name-invalid",
+  datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
   inputUnknown: "document/input-unknown",
@@ -428,6 +471,19 @@ export function parseFeatureInputRef(
     }
     return ok(Object.freeze({ kind, id: parsed.value }));
   }
+  if (kind === "datum") {
+    const parsed = parseDatumId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A datum input reference must carry a valid datum id: ${parsed.error.message}`,
+          input,
+        ),
+      );
+    }
+    return ok(Object.freeze({ kind, id: parsed.value }));
+  }
   return fail(
     docError(
       DOCUMENT_ERROR_CODES.inputKindInvalid,
@@ -549,6 +605,7 @@ function raiseGeneratorState(
     body: Math.max(base.body, floor.body),
     reference: Math.max(base.reference, floor.reference),
     sketch: Math.max(base.sketch, floor.sketch),
+    datum: Math.max(base.datum, floor.datum),
   };
   return Object.freeze(raised);
 }
@@ -594,7 +651,8 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
     document.bodies.some((body) => body.id === id) ||
     document.features.some((feature) => feature.id === id) ||
     document.sketches.some((sketch) => sketch.id === id) ||
-    document.references.some((reference) => reference.id === id)
+    document.references.some((reference) => reference.id === id) ||
+    document.datums.some((datum) => datum.id === id)
   );
 }
 
@@ -616,6 +674,9 @@ function featureInputResolves(
   if (ref.kind === "reference") {
     return document.references.some((reference) => reference.id === ref.id);
   }
+  if (ref.kind === "datum") {
+    return document.datums.some((datum) => datum.id === ref.id);
+  }
   return document.bodies.some((body) => body.id === ref.id);
 }
 
@@ -632,6 +693,7 @@ export function createDocument(id: DocumentId): CadDocument {
     features: Object.freeze([]),
     sketches: Object.freeze([]),
     references: Object.freeze([]),
+    datums: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -684,6 +746,8 @@ export function getDocumentEntity(
   if (feature !== undefined) return { kind: "feature", feature };
   const sketch = document.sketches.find((candidate) => candidate.id === id);
   if (sketch !== undefined) return { kind: "sketch", sketch };
+  const datum = document.datums.find((candidate) => candidate.id === id);
+  if (datum !== undefined) return { kind: "datum", datum };
   return undefined;
 }
 
@@ -1474,6 +1538,159 @@ export function getDocumentReference(
   return document.references.find((reference) => reference.id === id);
 }
 
+/** A datum name shares the body name rules (1-64 characters). */
+function validateDatumName(name: unknown): ParseResult<string, DocumentError> {
+  if (
+    typeof name !== "string" ||
+    name.length === 0 ||
+    name.length > BODY_NAME_MAX_LENGTH
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.datumNameInvalid,
+        `A datum name must be a string of 1-${BODY_NAME_MAX_LENGTH} characters.`,
+        name,
+      ),
+    );
+  }
+  return ok(name);
+}
+
+/**
+ * A datum payload must be a plain object (its schema is the datum module's,
+ * validated there on use through `parseDatumPayload`).
+ */
+function validateDatumPayload(
+  datum: unknown,
+): ParseResult<Readonly<Record<string, unknown>>, DocumentError> {
+  if (!isPlainRecord(datum)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.datumPayloadInvalid,
+        "A datum record's payload must be a plain object (the datum module's canonical serialized form).",
+        datum,
+      ),
+    );
+  }
+  return ok(datum);
+}
+
+function frozenDatumPayload(
+  payload: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  // The recursion preserves the payload's shape (record in, record out).
+  return deepFreezePlainData(payload) as Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Adds a named datum document entity. The payload is stored verbatim
+ * (deeply frozen, the sketch discipline); its schema is the datum module's,
+ * validated there on use (`parseDatumPayload`).
+ */
+export function addDocumentDatum(
+  document: CadDocument,
+  input: DocumentDatumInput,
+): ParseResult<DocumentDatumAddResult, DocumentError> {
+  const name = validateDatumName(input.name);
+  if (!name.ok) return name;
+  const payload = validateDatumPayload(input.datum);
+  if (!payload.ok) return payload;
+  let id: DatumId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextDatumId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseDatumId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A datum id must be a valid datum id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("datum", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${parsed.value}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    id = parsed.value;
+    idGeneratorState = claimExplicitId(idGeneratorState, "datum", parsed.value);
+  }
+  const datum = Object.freeze({
+    id,
+    name: name.value,
+    datum: frozenDatumPayload(payload.value),
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      datums: Object.freeze([...document.datums, datum]),
+      idGeneratorState,
+    }),
+    datum,
+  });
+}
+
+/**
+ * Removes the datum record with the given id. Refused with `in-use` while
+ * any feature declares it as an input; removal never cascades.
+ */
+export function removeDocumentDatum(
+  document: CadDocument,
+  id: DatumId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getDocumentDatum(document, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No datum with id "${id}" exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const blocking = document.features.find((feature) =>
+    feature.inputs.some((ref) => ref.kind === "datum" && ref.id === id),
+  );
+  if (blocking !== undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.inUse,
+        `Datum "${id}" is referenced by feature "${blocking.id}".`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      datums: Object.freeze(document.datums.filter((datum) => datum.id !== id)),
+    }),
+  );
+}
+
+/**
+ * Returns the datum record with the given id, or undefined.
+ */
+export function getDocumentDatum(
+  document: CadDocument,
+  id: DatumId,
+): DocumentDatum | undefined {
+  return document.datums.find((datum) => datum.id === id);
+}
+
 /** Canonical JSON form of a body. */
 export interface SerializedBody {
   readonly id: string;
@@ -1496,12 +1713,17 @@ export interface SerializedFeatureRecord {
 
 /**
  * Canonical JSON form of the id generator state. The `sketch` counter is
- * Phase 26.1-additive: it is emitted exactly when nonzero, so documents
- * that never carried sketch ids serialize byte-identically to their
- * pre-sketch form; parsing defaults an absent counter to zero.
+ * Phase 26.1-additive and the `datum` counter Phase 39-additive: each is
+ * emitted exactly when nonzero, so documents that never carried ids of
+ * that kind serialize byte-identically to their earlier form; parsing
+ * defaults an absent counter to zero.
  */
-export type SerializedIdGeneratorState = Omit<IdGeneratorState, "sketch"> & {
+export type SerializedIdGeneratorState = Omit<
+  IdGeneratorState,
+  "sketch" | "datum"
+> & {
   readonly sketch?: number;
+  readonly datum?: number;
 };
 
 function serializeIdGeneratorState(
@@ -1514,6 +1736,7 @@ function serializeIdGeneratorState(
     body: state.body,
     reference: state.reference,
     ...(state.sketch === 0 ? {} : { sketch: state.sketch }),
+    ...(state.datum === 0 ? {} : { datum: state.datum }),
   };
 }
 
@@ -1536,6 +1759,12 @@ export interface SerializedCadDocument {
     readonly id: string;
     readonly name: string;
     readonly reference: Readonly<Record<string, unknown>>;
+  }[];
+  /** Present exactly when the document carries datum records (additive). */
+  readonly datums?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly datum: Readonly<Record<string, unknown>>;
   }[];
 }
 
@@ -1576,6 +1805,18 @@ export function serializeCadDocument(
             id: reference.id,
             name: reference.name,
             reference: reference.reference,
+          })),
+        }),
+    // Additive (Phase 39): emitted only when datum records exist, so
+    // documents from before datums serialize byte-identically to their
+    // old form.
+    ...(document.datums.length === 0
+      ? {}
+      : {
+          datums: document.datums.map((datum) => ({
+            id: datum.id,
+            name: datum.name,
+            datum: datum.datum,
           })),
         }),
   };
@@ -1718,6 +1959,44 @@ function parseSerializedReference(input: unknown): ParseResult<
   });
 }
 
+function parseSerializedDatum(input: unknown): ParseResult<
+  {
+    id: DatumId;
+    name: string;
+    datum: Readonly<Record<string, unknown>>;
+  },
+  DocumentError
+> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized datum record must be a plain object with id, name, and datum fields.",
+        input,
+      ),
+    );
+  }
+  const parsedId = parseDatumId(input.id);
+  if (!parsedId.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.idInvalid,
+        `A datum id must be a valid datum id: ${parsedId.error.message}`,
+        input.id,
+      ),
+    );
+  }
+  const name = validateDatumName(input.name);
+  if (!name.ok) return name;
+  const payload = validateDatumPayload(input.datum);
+  if (!payload.ok) return payload;
+  return ok({
+    id: parsedId.value,
+    name: name.value,
+    datum: payload.value,
+  });
+}
+
 function parseSerializedFeature(
   input: unknown,
 ): ParseResult<FeatureRecord, DocumentError> {
@@ -1845,6 +2124,12 @@ export function parseCadDocument(
     parseSerializedReference,
   );
   if (!parsedReferences.ok) return parsedReferences;
+  const parsedDatums = parseSerializedList(
+    input.datums ?? [],
+    "datums",
+    parseSerializedDatum,
+  );
+  if (!parsedDatums.ok) return parsedDatums;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -1865,6 +2150,11 @@ export function parseCadDocument(
   }
   for (const reference of parsedReferences.value) {
     const added = addDocumentReference(document, reference);
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  for (const datum of parsedDatums.value) {
+    const added = addDocumentDatum(document, datum);
     if (!added.ok) return added;
     document = added.value.document;
   }

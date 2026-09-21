@@ -99,6 +99,7 @@ import {
   type SketchTransaction,
   type SolvedEntityParameters,
   type SplineEndSelection,
+  type Workplane,
 } from "@slopcad/cad-sketch";
 import type {
   CadSketchCanvasAnnotation,
@@ -2865,9 +2866,13 @@ export function sketchSurface(sketch: Sketch): {
   };
 }
 
-/** Creates the workbench's boot sketch: an empty XY-workplane sketch. */
-export function createWorkbenchSketch(): Sketch {
-  const created = createSketch(xyWorkplane(), [], []);
+/**
+ * Creates the workbench's boot sketch: an empty sketch on the given
+ * workplane (the XY plane when none is given — the Phase 39 sketch-on-face
+ * flow boots sessions on a face-derived datum plane instead).
+ */
+export function createWorkbenchSketch(workplane?: Workplane): Sketch {
+  const created = createSketch(workplane ?? xyWorkplane(), [], []);
   if (!created.ok) {
     throw new Error(`Workbench sketch rejected: ${created.error.message}`);
   }

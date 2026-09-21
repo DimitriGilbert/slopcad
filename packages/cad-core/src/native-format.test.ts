@@ -527,14 +527,14 @@ describe("sweep and loft features persist natively", () => {
 describe("native document parsing is version-gated", () => {
   it("rejects a future version predictably", () => {
     const input = revived();
-    input.formatVersion = 3;
+    input.formatVersion = 4;
     const result = parseNativeCadDocument(input);
     expect(result).toMatchObject({
       ok: false,
       error: { code: "native-migration/version-unsupported" },
     });
     if (!result.ok) {
-      expect(result.error.message).toContain("3");
+      expect(result.error.message).toContain("4");
     }
   });
 
@@ -804,7 +804,7 @@ describe("validateNativeCadDocument checks structure without replay", () => {
     const validation = validateNativeCadDocument(revived());
     expect(validation.valid).toBe(true);
     expect(validation.issues).toEqual([]);
-    expect(validation.formatVersion).toBe(2);
+    expect(validation.formatVersion).toBe(3);
   });
 
   it("accepts every create command the transaction log can carry", () => {
@@ -901,10 +901,10 @@ describe("validateNativeCadDocument checks structure without replay", () => {
 
   it("stops at a non-current version with the version-unsupported class", () => {
     const input = revived();
-    input.formatVersion = 3;
+    input.formatVersion = 4;
     const validation = validateNativeCadDocument(input);
     expect(validation.valid).toBe(false);
-    expect(validation.formatVersion).toBe(3);
+    expect(validation.formatVersion).toBe(4);
     expect(validation.issues).toHaveLength(1);
     expect(validation.issues[0]).toMatchObject({
       code: NATIVE_FORMAT_ISSUE_CODES.versionUnsupported,

@@ -185,19 +185,26 @@ import {
   DIAGNOSTIC_CODES,
   type Diagnostic,
   type DiagnosticCode,
+  type DatumTopologyResolver,
+  type DatumVec3,
   type FeatureExecutionOutcome,
   type FeatureExecutor,
   type FeatureId,
   type FeatureInputRef,
   type FeatureRecord,
+  type ResolvedDatumAxis,
+  type ResolvedDatumPlane,
   type TopologyView,
   angle as angleValue,
   length as lengthValue,
   type ParseFailure,
   type ParseResult,
   type SketchDocumentId,
+  getDocumentDatum,
   getDocumentReference,
+  parseDatumPayload,
   parseTopologyReference,
+  resolveDatumPayload,
   resolveDocumentReference,
   transientSelectionOf,
   valueIn,
@@ -320,13 +327,22 @@ export interface KernelExecutorContext {
    * features' (`fillet`, `chamfer`, `shell`) references resolve against
    * (the Phase 22
    * protocol's kernel-side gate — the persistent-topology kernel's
-   * `TopologyView`). A context without one cannot resolve edge references:
+   * {@link TopologyView}). A context without one cannot resolve edge references:
    * every such feature carrying reference inputs fails with a structured
    * diagnostic instead of guessing. The view must stand at the CURRENT
    * regeneration — the snapshot ordinals the resolution produces are the
    * addresses the kernel's edge-cutting operations consume for this run.
    */
   readonly topology?: TopologyView;
+  /**
+   * The optional topology-geometry seam that reference-dependent DATUM
+   * definitions (`faceOffset` planes, `edge` axes, `faceCylinder` axes)
+   * resolve through (Phase 39). Explicit-geometry datums resolve from the
+   * document record alone and need no seam; a datum whose definition needs
+   * face/edge geometry fails with a structured diagnostic when the context
+   * carries none — never a guessed frame.
+   */
+  readonly datumTopology?: DatumTopologyResolver;
 }
 
 /** A bridge created for one regeneration run. */
@@ -489,8 +505,491 @@ export function planHoleCut(input: {
   };
 }
 
+/**
+ * The planned tool cut of one hole whose axis rides a DATUM AXIS (Phase 39):
+ * the generalized twin of {@link planHoleCut}. The hole runs PARALLEL to the
+ * resolved datum direction and enters through the target's + face ALONG it —
+ * the bounds are projected onto the axis to find the entry and floor planes,
+ * and the through/blind semantic is the same one-distance rule
+ * (`depth ≥ extent` is through). The tool is the same one-segment extruded
+ * circle; its placement rotation points local +z along the datum direction
+ * (deterministically: the rotation carrying +z onto it, half turn about +x
+ * for the exact −z case), and the in-plane position rides the ROTATED
+ * tool frame's local x/y axes — the datum form's own documented convention
+ * (the world-selector form's position convention is unchanged; the two
+ * forms are distinct input layouts and never reinterpreted between them).
+ */
+export interface HoleAxisCutPlan {
+  /** The tool circle's radius (diameter/2), in millimetres. */
+  readonly toolRadiusMm: number;
+  /** The tool's extrusion height, in millimetres. */
+  readonly toolHeightMm: number;
+  /** The placement rotation pointing local +z along the datum direction. */
+  readonly toolRotationAxis: readonly [number, number, number];
+  readonly toolRotationAngleRad: number;
+  /** The placement translation: the tool's axis base in world coordinates. */
+  readonly toolTranslationMm: readonly [number, number, number];
+  /** Whether the plan drills through (`depth ≥ extent` along the axis). */
+  readonly through: boolean;
+}
+
+/**
+ * Plans the datum-axis hole's tool cut against the target's measured bounds
+ * (see {@link HoleAxisCutPlan} for the semantics). Pure and
+ * kernel-independent; `axisDirection` must be a unit vector (the resolved
+ * datum axis guarantees it).
+ */
+export function planHoleCutWithAxis(input: {
+  readonly diameterMm: number;
+  readonly depthMm: number;
+  readonly positionXMm: number;
+  readonly positionYMm: number;
+  readonly axisDirection: readonly [number, number, number];
+  readonly bounds: KernelBounds;
+}): HoleAxisCutPlan {
+  const d = input.axisDirection;
+  const entry = extremeBoundsProjection(input.bounds, d, true);
+  const floor = extremeBoundsProjection(input.bounds, d, false);
+  const extent = entry - floor;
+  const through = input.depthMm >= extent;
+  const toolHeightMm = through
+    ? extent + 2 * HOLE_TOOL_OVERSHOOT_MM
+    : input.depthMm + HOLE_TOOL_OVERSHOOT_MM;
+  const axisBaseMm = through
+    ? floor - HOLE_TOOL_OVERSHOOT_MM
+    : entry - input.depthMm;
+  // The rotation carrying local +z onto the datum direction: axis = z × d,
+  // angle = atan2(|z × d|, z·d); identity for +d = +z, half turn about +x
+  // for the exact −z case.
+  const cross = vecCross([0, 0, 1], d);
+  const sin = Math.sqrt(vecDot(cross, cross));
+  const cos = d[2];
+  let rotationAxis: readonly [number, number, number];
+  let angle: number;
+  if (sin < 1e-12) {
+    if (cos > 0) {
+      rotationAxis = [1, 0, 0];
+      angle = 0;
+    } else {
+      rotationAxis = [1, 0, 0];
+      angle = Math.PI;
+    }
+  } else {
+    rotationAxis = [cross[0] / sin, cross[1] / sin, cross[2] / sin];
+    angle = Math.atan2(sin, cos);
+  }
+  // The rotated local x/y axes carry the in-plane position into the world.
+  const matrix = rotationMatrix(rotationAxis, angle);
+  const localX = matrixColumn(matrix, 0);
+  const localY = matrixColumn(matrix, 1);
+  const base = vecCombine(
+    vecCombine(
+      [axisBaseMm * d[0], axisBaseMm * d[1], axisBaseMm * d[2]],
+      input.positionXMm,
+      localX,
+    ),
+    input.positionYMm,
+    localY,
+  );
+  return {
+    toolRadiusMm: input.diameterMm / 2,
+    toolHeightMm,
+    toolRotationAxis: rotationAxis,
+    toolRotationAngleRad: angle,
+    toolTranslationMm: [base[0], base[1], base[2]],
+    through,
+  };
+}
+
+/** Column `index` of a rotation matrix, as a vector (the rotated basis axis). */
+function matrixColumn(
+  matrix: readonly [DatumVec3, DatumVec3, DatumVec3],
+  index: 0 | 1 | 2,
+): DatumVec3 {
+  return [matrix[0][index], matrix[1][index], matrix[2][index]];
+}
+
 function isBridgeFeatureKind(kind: string): kind is BridgeFeatureKind {
   return BRIDGE_KIND_SET.has(kind);
+}
+
+// ---------------------------------------------------------------------------
+// Datum resolution (Phase 39): the bridge-side half of the datum seam
+// ---------------------------------------------------------------------------
+
+/**
+ * The tolerance a resolved datum plane's normal may deviate from an exact
+ * world axis and still ride the DIRECT kernel.mirror call (a resolved frame
+ * is unit-length by construction; the tolerance absorbs the float noise of
+ * resolution). Beyond it the oblique composition path runs.
+ */
+const DATUM_AXIS_ALIGNMENT_TOLERANCE = 1e-9;
+
+/** How far a revolve datum axis may lean out of the sketch plane. */
+const DATUM_COPLANARITY_TOLERANCE = 1e-9;
+
+/** Component-wise dot of two world vectors. */
+function vecDot(a: DatumVec3, b: DatumVec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/** Component-wise cross of two world vectors. */
+function vecCross(a: DatumVec3, b: DatumVec3): DatumVec3 {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ];
+}
+
+/** `a + s·b` in world coordinates. */
+function vecCombine(a: DatumVec3, s: number, b: DatumVec3): DatumVec3 {
+  return [a[0] + s * b[0], a[1] + s * b[1], a[2] + s * b[2]];
+}
+
+/** Normalizes a world direction; null when degenerate. */
+function vecUnit(a: DatumVec3): DatumVec3 | null {
+  const length = Math.sqrt(vecDot(a, a));
+  if (length < 1e-12) return null;
+  return [a[0] / length, a[1] / length, a[2] / length];
+}
+
+/**
+ * The world-frame bounds corner used for axis projections: among the eight
+ * corners, the one whose position along `direction` is extreme. `max`
+ * picks the entry face, `!max` the floor. Deterministic tie behavior is
+ * irrelevant — tied corners share the same projection.
+ */
+function extremeBoundsProjection(
+  bounds: KernelBounds,
+  direction: DatumVec3,
+  max: boolean,
+): number {
+  let best = max ? -Infinity : Infinity;
+  for (const x of [bounds.min[0], bounds.max[0]]) {
+    for (const y of [bounds.min[1], bounds.max[1]]) {
+      for (const z of [bounds.min[2], bounds.max[2]]) {
+        const projection =
+          x * direction[0] + y * direction[1] + z * direction[2];
+        best = max ? Math.max(best, projection) : Math.min(best, projection);
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The rotation matrix of a right-hand rotation about `axis` (unit) by
+ `angle` radians (Rodrigues). Pure float math — the same convention the
+ contract's `RotationInput` documents.
+ */
+function rotationMatrix(
+  axis: DatumVec3,
+  angle: number,
+): readonly [DatumVec3, DatumVec3, DatumVec3] {
+  const [x, y, z] = axis;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const t = 1 - c;
+  return [
+    [t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+    [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+    [t * x * z - s * y, t * y * z + s * x, t * z * z + c],
+  ];
+}
+
+/** The transpose (inverse of a rotation) applied to a vector. */
+function applyMatrixTranspose(
+  matrix: readonly [DatumVec3, DatumVec3, DatumVec3],
+  v: DatumVec3,
+): DatumVec3 {
+  return [
+    matrix[0][0] * v[0] + matrix[1][0] * v[1] + matrix[2][0] * v[2],
+    matrix[0][1] * v[0] + matrix[1][1] * v[1] + matrix[2][1] * v[2],
+    matrix[0][2] * v[0] + matrix[1][2] * v[1] + matrix[2][2] * v[2],
+  ];
+}
+
+/**
+ * The rotation carrying `from` onto `to` (both unit): axis = from × to,
+ * angle = atan2(|axis|, from·to). Parallel vectors map to the identity
+ * (angle 0); antiparallel to a half turn about `fallback` — deterministic
+ * picks, never arbitrary.
+ */
+function rotationFromTo(
+  from: DatumVec3,
+  to: DatumVec3,
+  fallback: DatumVec3,
+): { readonly axis: DatumVec3; readonly angle: number } {
+  const cross = vecCross(from, to);
+  const sin = Math.sqrt(vecDot(cross, cross));
+  const cos = vecDot(from, to);
+  if (sin < 1e-12) {
+    if (cos > 0) return { axis: fallback, angle: 0 };
+    return { axis: fallback, angle: Math.PI };
+  }
+  return {
+    axis: [cross[0] / sin, cross[1] / sin, cross[2] / sin],
+    angle: Math.atan2(sin, cos),
+  };
+}
+
+/** A structured datum-input diagnostic carrying the failure's own code. */
+function datumInputFailure(
+  feature: FeatureRecord,
+  ref: FeatureInputRef,
+  message: string,
+  code: string,
+): { readonly ok: false; readonly diagnostic: Diagnostic } {
+  return {
+    ok: false,
+    diagnostic: {
+      severity: "error",
+      code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+      message,
+      location: { primary: feature.id, related: [ref.id] },
+      data: { datumCode: code },
+    },
+  };
+}
+
+/**
+ * A datum kind-mismatch diagnostic: the datum resolved but its kind is not
+ * the one the feature role needs (`data.datumCode` names the failure class,
+ * the datum resolution seam's convention).
+ */
+function datumKindMismatch(
+  feature: FeatureRecord,
+  ref: FeatureInputRef,
+  message: string,
+): { readonly ok: false; readonly diagnostic: Diagnostic } {
+  return {
+    ok: false,
+    diagnostic: {
+      severity: "error",
+      code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+      message,
+      location: { primary: feature.id, related: [ref.id] },
+      data: { datumCode: "datum/kind-invalid" },
+    },
+  };
+}
+
+/**
+ * Resolves one `datum` input of the feature to its geometry, through the
+ * document record and the caller-supplied topology seam for
+ * reference-dependent definitions. Every failure is structured and carries
+ * the datum layer's own code in `data.datumCode`.
+ */
+function resolveDatumInput(
+  feature: FeatureRecord,
+  ref: FeatureInputRef,
+  document: CadDocument,
+  seam: DatumTopologyResolver | undefined,
+  what: string,
+):
+  | {
+      readonly ok: true;
+      readonly datumType: "plane" | "axis" | "point" | "cSys";
+      readonly plane?: ResolvedDatumPlane;
+      readonly axis?: ResolvedDatumAxis;
+    }
+  | {
+      readonly ok: false;
+      readonly diagnostic: Diagnostic;
+    } {
+  if (ref.kind !== "datum") {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${feature.kind}" needs a datum input where a ${ref.kind} input was declared.`,
+        [ref],
+      ),
+    };
+  }
+  const record = getDocumentDatum(document, ref.id);
+  if (record === undefined) {
+    return datumInputFailure(
+      feature,
+      ref,
+      `Feature "${feature.id}" references datum "${ref.id}", which the document does not define.`,
+      "document/not-found",
+    );
+  }
+  const payload = parseDatumPayload(record.datum);
+  if (!payload.ok) {
+    return datumInputFailure(
+      feature,
+      ref,
+      `Feature "${feature.id}" references datum "${ref.id}" whose payload does not parse: ${payload.error.message}`,
+      payload.error.code,
+    );
+  }
+  const topologySeam: DatumTopologyResolver = seam ?? {
+    facePlane: () => ({
+      ok: false,
+      error: {
+        code: "datum/reference-unresolved",
+        message:
+          "The executor context provides no datum topology resolver; face-referencing datum definitions cannot resolve.",
+        input: null,
+      },
+    }),
+    faceCylinderAxis: () => ({
+      ok: false,
+      error: {
+        code: "datum/reference-unresolved",
+        message:
+          "The executor context provides no datum topology resolver; face-referencing datum definitions cannot resolve.",
+        input: null,
+      },
+    }),
+    edgeLine: () => ({
+      ok: false,
+      error: {
+        code: "datum/reference-unresolved",
+        message:
+          "The executor context provides no datum topology resolver; edge-referencing datum definitions cannot resolve.",
+        input: null,
+      },
+    }),
+  };
+  const resolved = resolveDatumPayload(payload.value, topologySeam);
+  if (!resolved.ok) {
+    return datumInputFailure(
+      feature,
+      ref,
+      `Feature "${feature.id}" could not resolve datum "${ref.id}" (${what}): ${resolved.error.message}`,
+      resolved.error.code,
+    );
+  }
+  if (resolved.value.datumType === "plane") {
+    return { ok: true, datumType: "plane", plane: resolved.value.plane };
+  }
+  if (resolved.value.datumType === "axis") {
+    return { ok: true, datumType: "axis", axis: resolved.value.axis };
+  }
+  return datumInputFailure(
+    feature,
+    ref,
+    `Feature "${feature.id}" needs datum "${ref.id}" to define ${what}; it defines a ${resolved.value.datumType === "point" ? "datum point" : "coordinate system"}.`,
+    "datum/kind-invalid",
+  );
+}
+
+/**
+ * Plans one mirrored copy of `solid` about the arbitrary plane
+ * {@link ResolvedDatumPlane} (Phase 39): an AXIS-ALIGNED plane (normal ± a
+ * world axis, the datum's resolved frame being exact) rides the DIRECT
+ * `kernel.mirror` call at the plane's offset; an OBLIQUE plane composes the
+ * reflection from existing contract ops — translate the plane origin to
+ * the world origin, rotate the plane normal onto +x, world-plane mirror,
+ * rotate back, translate back — the composition the mirror op's own
+ * documentation names as the pre-datum route, now driven BY the datum.
+ *
+ * The composition needs `transformRotation` in addition to `mirror`; a
+ * kernel without either refuses structurally (the capability-gate
+ * precedent) — the contract allows a rotation-less kernel to IGNORE a
+ * rotation, which would silently misplace the reflection.
+ */
+function runDatumPlaneMirror(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  solid: KernelSolid,
+  plane: ResolvedDatumPlane,
+): OperationOutcome {
+  const normal = plane.normal;
+  const axes: readonly {
+    readonly axis: MirrorPlaneAxis;
+    readonly unit: DatumVec3;
+  }[] = [
+    { axis: "x", unit: [1, 0, 0] },
+    { axis: "y", unit: [0, 1, 0] },
+    { axis: "z", unit: [0, 0, 1] },
+  ];
+  const aligned = axes.find(
+    (entry) =>
+      Math.abs(Math.abs(vecDot(normal, entry.unit)) - 1) <=
+      DATUM_AXIS_ALIGNMENT_TOLERANCE,
+  );
+  if (aligned !== undefined) {
+    // Direct call: the plane {p : p·unit = p·origin} is the world-axis
+    // plane at offset p·unit — identical for either normal orientation.
+    const offset = vecDot(plane.origin, aligned.unit);
+    const mirrored = kernel.mirror(solid, {
+      axis: aligned.axis,
+      offset: lengthValue(offset),
+    });
+    return mirrored.ok
+      ? { ok: true, solid: mirrored.value }
+      : operationFailure(feature, mirrored.error.code, mirrored.error.message);
+  }
+  if (!kernel.capabilities.mirror || !kernel.capabilities.transformRotation) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${feature.kind}" mirrors about an oblique datum plane, which composes rotations with a world-plane reflection, but this kernel ("${kernel.id}") does not declare the ${!kernel.capabilities.mirror ? "mirror" : "transformRotation"} capability — the gate refuses before the kernel can ignore a rotation and build a misplaced reflection.`,
+      ),
+    };
+  }
+  const turn = rotationFromTo(normal, [1, 0, 0], [0, 1, 0]);
+  const toOrigin = kernel.transform(solid, {
+    x: lengthValue(-plane.origin[0]),
+    y: lengthValue(-plane.origin[1]),
+    z: lengthValue(-plane.origin[2]),
+  });
+  if (!toOrigin.ok) {
+    return operationFailure(
+      feature,
+      toOrigin.error.code,
+      toOrigin.error.message,
+    );
+  }
+  const rotated = kernel.transform(toOrigin.value, {
+    x: lengthValue(0),
+    y: lengthValue(0),
+    z: lengthValue(0),
+    rotation: { axis: turn.axis, angle: angleValue(turn.angle, "rad") },
+  });
+  if (!rotated.ok) {
+    return operationFailure(feature, rotated.error.code, rotated.error.message);
+  }
+  const reflected = kernel.mirror(rotated.value, {
+    axis: "x",
+    offset: lengthValue(0),
+  });
+  if (!reflected.ok) {
+    return operationFailure(
+      feature,
+      reflected.error.code,
+      reflected.error.message,
+    );
+  }
+  const backTurn = kernel.transform(reflected.value, {
+    x: lengthValue(0),
+    y: lengthValue(0),
+    z: lengthValue(0),
+    rotation: { axis: turn.axis, angle: angleValue(-turn.angle, "rad") },
+  });
+  if (!backTurn.ok) {
+    return operationFailure(
+      feature,
+      backTurn.error.code,
+      backTurn.error.message,
+    );
+  }
+  const final = kernel.transform(backTurn.value, {
+    x: lengthValue(plane.origin[0]),
+    y: lengthValue(plane.origin[1]),
+    z: lengthValue(plane.origin[2]),
+  });
+  return final.ok
+    ? { ok: true, solid: final.value }
+    : operationFailure(feature, final.error.code, final.error.message);
 }
 
 type BridgeDiagnosticCode = Extract<
@@ -779,6 +1278,7 @@ export function createKernelFeatureExecutor(
       },
       document: context.document,
       topology: context.topology,
+      datumTopology: context.datumTopology,
     });
     if (!result.ok) return { ok: false, diagnostics: [result.diagnostic] };
     solids.set(output, result.solid);
@@ -821,6 +1321,11 @@ interface InputReaders {
   readonly document: CadDocument;
   /** The reference-resolution view (see KernelExecutorContext.topology). */
   readonly topology: TopologyView | undefined;
+  /**
+   * The datum topology-geometry seam (see KernelExecutorContext.datumTopology):
+   * reference-dependent datum definitions resolve through it.
+   */
+  readonly datumTopology: DatumTopologyResolver | undefined;
 }
 
 /** Reads exactly `count` length parameters named by `names`. */
@@ -1283,21 +1788,50 @@ function runPatternOperation(
     (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
       ref.kind === "parameter",
   );
+  const datumRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
+      ref.kind === "datum",
+  );
   const otherRefs = inputs.filter(
     (ref) =>
       ref.kind !== "feature" && ref.kind !== "body" && ref.kind !== "parameter",
   );
-  if (targetRefs.length !== 1 || parameterRefs.length !== 3) {
+  // Phase 39: patternCircular's axis may ride a DATUM AXIS instead of the
+  // dimensionless world-axis selector — one target, count + total angle
+  // parameters, and one datum input. Linearity keeps the three-parameter
+  // form only.
+  const datumAxisForm =
+    kind === "patternCircular" &&
+    datumRefs.length === 1 &&
+    parameterRefs.length === 2;
+  const expectedParameters = datumAxisForm ? 2 : 3;
+  if (targetRefs.length !== 1 || parameterRefs.length !== expectedParameters) {
     return {
       ok: false,
       diagnostic: diagnostic(
         feature,
         DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        `Feature "${feature.id}" of kind "${kind}" needs exactly one feature/body input (the solid to repeat) and exactly three parameter inputs (${parameterNames.join(", ")}); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
+        datumAxisForm
+          ? `Feature "${feature.id}" of kind "${kind}" in datum-axis form needs exactly one feature/body input (the solid to repeat), two parameter inputs (count, totalAngle), and exactly one datum input (the axis); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`
+          : `Feature "${feature.id}" of kind "${kind}" needs exactly one feature/body input (the solid to repeat) and exactly three parameter inputs (${parameterNames.join(", ")}); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
       ),
     };
   }
-  if (otherRefs.length > 0) {
+  // In the compat form every non-target, non-parameter input (a datum among
+  // them) is a misdeclaration; in the datum-axis form the input list must
+  // be exactly target + two parameters + one datum.
+  if (datumAxisForm) {
+    if (inputs.length !== 4 || otherRefs.length !== datumRefs.length) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "${kind}" in datum-axis form must carry exactly one target input, two parameter inputs (count, totalAngle), and one datum input (the axis); it declares ${inputs.length} input(s).`,
+        ),
+      };
+    }
+  } else if (otherRefs.length > 0) {
     const offender = otherRefs[0];
     return {
       ok: false,
@@ -1317,7 +1851,7 @@ function runPatternOperation(
     targetRef === undefined ||
     countRef === undefined ||
     secondRef === undefined ||
-    thirdRef === undefined
+    (thirdRef === undefined && !datumAxisForm)
   ) {
     return {
       ok: false,
@@ -1372,6 +1906,16 @@ function runPatternOperation(
   // The copies: copy 0 is the target itself; the bridge composes the rest.
   const copies: KernelSolid[] = [target.solid];
   if (kind === "patternLinear") {
+    if (thirdRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "${kind}" needs a direction parameter input.`,
+        ),
+      };
+    }
     const spacing = readers.lengthParameter(secondRef, "spacing");
     if (!spacing.ok) return { ok: false, diagnostic: spacing.diagnostic };
     if (!(spacing.mm > 0)) {
@@ -1444,45 +1988,120 @@ function runPatternOperation(
         ),
       };
     }
-    const axisValue = readers.dimensionlessParameter(thirdRef, "axis");
-    if (!axisValue.ok) return { ok: false, diagnostic: axisValue.diagnostic };
-    if (
-      !Number.isInteger(axisValue.value) ||
-      axisValue.value < 1 ||
-      axisValue.value > 3
-    ) {
-      return {
-        ok: false,
-        diagnostic: diagnostic(
-          feature,
-          DIAGNOSTIC_CODES.kernelParameterInvalid,
-          `Feature "${feature.id}" of kind "${kind}" needs parameter "${thirdRef.id}" (axis) to select a world axis: 1 = X, 2 = Y, 3 = Z (${axisValue.value} given).`,
-          [thirdRef],
-        ),
-      };
-    }
-    const axis: readonly [number, number, number] =
-      axisValue.value === 1
-        ? [1, 0, 0]
-        : axisValue.value === 2
-          ? [0, 1, 0]
-          : [0, 0, 1];
     const step = totalAngle.rad / count;
-    for (let i = 1; i < count; i += 1) {
-      const placed = kernel.transform(target.solid, {
-        x: lengthValue(0),
-        y: lengthValue(0),
-        z: lengthValue(0),
-        rotation: { axis, angle: angleValue(i * step, "rad") },
-      });
-      if (!placed.ok) {
-        return operationFailure(
+
+    // The datum-axis form (Phase 39): the copies rotate about the RESOLVED
+    // datum axis line. The contract rotates about the world origin only, so
+    // each copy composes as translate(axis origin → 0), rotate, translate
+    // back — and one `transform` call carries the last two (the contract's
+    // fixed order: rotation, then translation).
+    if (datumAxisForm) {
+      const datumRef = datumRefs[0];
+      if (datumRef === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${kind}" has a malformed input list.`,
+          ),
+        };
+      }
+      const resolved = resolveDatumInput(
+        feature,
+        datumRef,
+        readers.document,
+        readers.datumTopology,
+        "the pattern axis",
+      );
+      if (!resolved.ok) return { ok: false, diagnostic: resolved.diagnostic };
+      if (resolved.datumType !== "axis" || resolved.axis === undefined) {
+        return datumKindMismatch(
           feature,
-          placed.error.code,
-          placed.error.message,
+          datumRef,
+          `Feature "${feature.id}" of kind "${kind}" needs a datum AXIS as its pattern axis; the referenced datum defines ${resolved.datumType === "plane" ? "a plane" : resolved.datumType === "point" ? "a point" : "a coordinate system"}.`,
         );
       }
-      copies.push(placed.value);
+      const axisOrigin = resolved.axis.origin;
+      const axisDirection = resolved.axis.direction;
+      for (let i = 1; i < count; i += 1) {
+        const centered = kernel.transform(target.solid, {
+          x: lengthValue(-axisOrigin[0]),
+          y: lengthValue(-axisOrigin[1]),
+          z: lengthValue(-axisOrigin[2]),
+        });
+        if (!centered.ok) {
+          return operationFailure(
+            feature,
+            centered.error.code,
+            centered.error.message,
+          );
+        }
+        const placed = kernel.transform(centered.value, {
+          x: lengthValue(axisOrigin[0]),
+          y: lengthValue(axisOrigin[1]),
+          z: lengthValue(axisOrigin[2]),
+          rotation: { axis: axisDirection, angle: angleValue(i * step, "rad") },
+        });
+        if (!placed.ok) {
+          return operationFailure(
+            feature,
+            placed.error.code,
+            placed.error.message,
+          );
+        }
+        copies.push(placed.value);
+      }
+    } else {
+      if (thirdRef === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${kind}" needs an axis parameter input.`,
+          ),
+        };
+      }
+      const axisValue = readers.dimensionlessParameter(thirdRef, "axis");
+      if (!axisValue.ok) return { ok: false, diagnostic: axisValue.diagnostic };
+      if (
+        !Number.isInteger(axisValue.value) ||
+        axisValue.value < 1 ||
+        axisValue.value > 3
+      ) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "${kind}" needs parameter "${thirdRef.id}" (axis) to select a world axis: 1 = X, 2 = Y, 3 = Z (${axisValue.value} given).`,
+            [thirdRef],
+          ),
+        };
+      }
+      const axis: readonly [number, number, number] =
+        axisValue.value === 1
+          ? [1, 0, 0]
+          : axisValue.value === 2
+            ? [0, 1, 0]
+            : [0, 0, 1];
+      for (let i = 1; i < count; i += 1) {
+        const placed = kernel.transform(target.solid, {
+          x: lengthValue(0),
+          y: lengthValue(0),
+          z: lengthValue(0),
+          rotation: { axis, angle: angleValue(i * step, "rad") },
+        });
+        if (!placed.ok) {
+          return operationFailure(
+            feature,
+            placed.error.code,
+            placed.error.message,
+          );
+        }
+        copies.push(placed.value);
+      }
     }
   }
   const merged = kernel.union(copies);
@@ -1492,13 +2111,12 @@ function runPatternOperation(
 }
 
 /**
- * The mirror feature kind's executor path (Phase 26.9) — the DIRECT KERNEL
- * CALL the negative determinant forces (see the module doc's mirror design
- * decision): one target solid, one world axis plane, one call to the
- * contract's dedicated `mirror` operation.
+ * The mirror feature kind's executor path (Phase 26.9; datum-plane
+ * generalization Phase 39) — the DIRECT KERNEL CALL the negative
+ * determinant forces, plus the datum composition for arbitrary planes.
+ * THE COMPAT SHIM: the bridge validates EITHER input form.
  *
- * ## Input layout (roles off the refs' kinds; parameter roles in declared
- * order)
+ * ## Input layout — the world-axis selector form (compat)
  *
  * ONE feature/body input (the solid to reflect), then exactly TWO
  * parameter inputs:
@@ -1506,36 +2124,39 @@ function runPatternOperation(
  * - plane (DIMENSIONLESS integer `1` = YZ plane, normal +x — reflects the
  *   x coordinate; `2` = XZ, normal +y; `3` = XY, normal +z — the
  *   patternCircular axis precedent, dimensionless 1/2/3, carried to plane
- *   selection). Arbitrary planes are OUT OF SCOPE here by the revolve
- *   precedent: they need the datum concept (named reference geometry), the
- *   same generalization the revolve axis defers; an oblique mirror
- *   composes today from a `transform` rotation ahead of the feature.
+ *   selection).
  * - offset (LENGTH, any finite value — the plane's signed position along
  *   its normal; the reflection maps that coordinate `c → 2·offset − c`).
- *   Unlike size-like lengths, EVERY finite offset is a legal plane
- *   position: zero (the world plane itself) and negative offsets are good
- *   mirrors, so no sign rule exists.
  *
  * `parameter.set` on either parameter re-drives the reflection through
  * regeneration — the bridge re-reads the plane and offset each run.
  *
+ * ## Input layout — the datum-plane form (Phase 39)
+ *
+ * ONE feature/body input (the solid to reflect), then exactly ONE `datum`
+ * input naming a datum-plane record. The datum's RESOLVED plane defines
+ * the mirror: an axis-aligned plane rides the direct `kernel.mirror` call
+ * at its offset; an oblique plane composes the reflection through
+ * rotations (see {@link runDatumPlaneMirror}). Editing the datum record
+ * re-drives the feature — the datum is the parameter plane.
+ *
  * ## Failure taxonomy (all structured, before any kernel call)
  *
- * - Layout: not exactly one feature/body target or exactly two parameter
- *   inputs, or a sketch input in the target's place →
- *   `kernel/feature-input-invalid`.
- * - Plane: wrong dimension, non-integer, or outside `1..3` →
- *   `kernel/parameter-invalid`.
- * - Offset: wrong dimension → `kernel/parameter-invalid` (any finite
- *   magnitude is legal; a non-finite one cannot ride the typed parameter
- *   model, and the kernel's own no-throw boundary owns it anyway).
- * - Capability: a kernel that has not declared `mirror` →
+ * - Layout: neither exactly one target + two parameters (compat) nor
+ *   exactly one target + one datum (datum form), or a sketch input in the
+ *   target's place → `kernel/feature-input-invalid`.
+ * - Plane selector (compat): wrong dimension, non-integer, or outside
+ *   `1..3` → `kernel/parameter-invalid`.
+ * - Offset (compat): wrong dimension → `kernel/parameter-invalid`.
+ * - Datum resolution (datum form): the structured failures of
+ *   {@link resolveDatumInput}, `data.datumCode` carrying the datum layer's
+ *   own code.
+ * - Capability: a kernel that has not declared `mirror` (and, for the
+ *   oblique composition, `transformRotation`) →
  *   `kernel/feature-input-invalid` (the circular pattern's rotation-gate
- *   precedent: refuse structurally before the kernel can answer, so the
- *   unsupported verdict is a feature diagnostic, never a half-built
- *   arrangement).
- * - Kernel failures (the mirror call rejecting) ride through as
- *   `kernel/operation-failed` with the kernel code in `data`.
+ *   precedent).
+ * - Kernel failures ride through as `kernel/operation-failed` with the
+ *   kernel code in `data`.
  */
 function runMirrorOperation(
   kernel: GeometryKernel,
@@ -1551,6 +2172,60 @@ function runMirrorOperation(
     (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
       ref.kind === "parameter",
   );
+  const datumRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
+      ref.kind === "datum",
+  );
+
+  // The datum-plane form: one target + one datum input, no parameters.
+  if (datumRefs.length > 0) {
+    if (
+      targetRefs.length !== 1 ||
+      parameterRefs.length !== 0 ||
+      datumRefs.length !== 1
+    ) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "mirror" in datum-plane form needs exactly one feature/body input (the solid to reflect) and exactly one datum input (the mirror plane); it declares ${targetRefs.length} target(s), ${parameterRefs.length} parameter(s), and ${datumRefs.length} datum input(s).`,
+        ),
+      };
+    }
+    const targetRef = targetRefs[0];
+    const datumRef = datumRefs[0];
+    if (targetRef === undefined || datumRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "mirror" has a malformed input list.`,
+        ),
+      };
+    }
+    const target = readers.solidInput(targetRef);
+    if (!target.ok) return target;
+    const resolved = resolveDatumInput(
+      feature,
+      datumRef,
+      readers.document,
+      readers.datumTopology,
+      "the mirror plane",
+    );
+    if (!resolved.ok) return { ok: false, diagnostic: resolved.diagnostic };
+    if (resolved.datumType !== "plane" || resolved.plane === undefined) {
+      return datumKindMismatch(
+        feature,
+        datumRef,
+        `Feature "${feature.id}" of kind "mirror" needs a datum PLANE as its mirror; the referenced datum defines ${resolved.datumType === "axis" ? "an axis" : resolved.datumType === "point" ? "a point" : "a coordinate system"}.`,
+      );
+    }
+    return runDatumPlaneMirror(kernel, feature, target.solid, resolved.plane);
+  }
+
+  // The world-axis selector form (compat).
   const otherRefs = inputs.filter(
     (ref) =>
       ref.kind !== "feature" && ref.kind !== "body" && ref.kind !== "parameter",
@@ -1710,21 +2385,45 @@ function runHoleOperation(
     (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
       ref.kind === "parameter",
   );
+  const datumRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
+      ref.kind === "datum",
+  );
   const otherRefs = inputs.filter(
     (ref) =>
       ref.kind !== "feature" && ref.kind !== "body" && ref.kind !== "parameter",
   );
-  if (targetRefs.length !== 1 || parameterRefs.length !== 5) {
+  // Phase 39: the axis may ride a DATUM AXIS instead of the dimensionless
+  // world-axis selector — one target, the four dimension parameters, and
+  // one datum input.
+  const datumAxisForm = datumRefs.length === 1 && parameterRefs.length === 4;
+  if (
+    targetRefs.length !== 1 ||
+    parameterRefs.length !== (datumAxisForm ? 4 : 5)
+  ) {
     return {
       ok: false,
       diagnostic: diagnostic(
         feature,
         DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        `Feature "${feature.id}" of kind "hole" needs exactly one feature/body input (the target solid) and exactly five parameter inputs (diameter, depth, positionX, positionY, axis); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
+        datumAxisForm
+          ? `Feature "${feature.id}" of kind "hole" in datum-axis form needs exactly one feature/body input (the target solid), four parameter inputs (diameter, depth, positionX, positionY), and one datum input (the axis); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`
+          : `Feature "${feature.id}" of kind "hole" needs exactly one feature/body input (the target solid) and exactly five parameter inputs (diameter, depth, positionX, positionY, axis); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
       ),
     };
   }
-  if (otherRefs.length > 0) {
+  if (datumAxisForm) {
+    if (inputs.length !== 6 || otherRefs.length !== datumRefs.length) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "hole" in datum-axis form must carry exactly one target input, four parameter inputs (diameter, depth, positionX, positionY), and one datum input (the axis); it declares ${inputs.length} input(s).`,
+        ),
+      };
+    }
+  } else if (otherRefs.length > 0) {
     const offender = otherRefs[0];
     return {
       ok: false,
@@ -1741,7 +2440,7 @@ function runHoleOperation(
   const depthRef = parameterRefs[1];
   const xRef = parameterRefs[2];
   const yRef = parameterRefs[3];
-  const axisRef = parameterRefs[4];
+  const axisRef = datumAxisForm ? datumRefs[0] : parameterRefs[4];
   if (
     targetRef === undefined ||
     diameterRef === undefined ||
@@ -1796,7 +2495,61 @@ function runHoleOperation(
   if (!positionX.ok) return { ok: false, diagnostic: positionX.diagnostic };
   const positionY = readers.lengthParameter(yRef, "positionY");
   if (!positionY.ok) return { ok: false, diagnostic: positionY.diagnostic };
-  // The axis selector: the mirror plane's dimensionless discipline.
+
+  // The target's bounds drive the through/blind decision and the tool
+  // placement (planHoleCut / planHoleCutWithAxis: the one tool-geometry
+  // source of truth per form).
+  const measured = kernel.bounds(target.solid);
+  if (!measured.ok) {
+    return operationFailure(
+      feature,
+      measured.error.code,
+      measured.error.message,
+    );
+  }
+
+  // The datum-axis form (Phase 39): the hole runs parallel to the resolved
+  // datum direction, entering through the + face along it.
+  if (datumAxisForm) {
+    const resolvedDatum = resolveDatumInput(
+      feature,
+      axisRef,
+      readers.document,
+      readers.datumTopology,
+      "the hole axis",
+    );
+    if (!resolvedDatum.ok) {
+      return { ok: false, diagnostic: resolvedDatum.diagnostic };
+    }
+    if (
+      resolvedDatum.datumType !== "axis" ||
+      resolvedDatum.axis === undefined
+    ) {
+      return datumKindMismatch(
+        feature,
+        axisRef,
+        `Feature "${feature.id}" of kind "hole" needs a datum AXIS as its axis; the referenced datum defines ${resolvedDatum.datumType === "plane" ? "a plane" : resolvedDatum.datumType === "point" ? "a point" : "a coordinate system"}.`,
+      );
+    }
+    const plan = planHoleCutWithAxis({
+      diameterMm: diameter.mm,
+      depthMm: depth.mm,
+      positionXMm: positionX.mm,
+      positionYMm: positionY.mm,
+      axisDirection: resolvedDatum.axis.direction,
+      bounds: measured.value,
+    });
+    return executeHoleCut(kernel, feature, plan, {
+      measured: measured.value,
+      target: target.solid,
+      targetRef,
+      positionRefs: [xRef, yRef],
+      diameterMm: diameter.mm,
+      depthMm: depth.mm,
+    });
+  }
+
+  // The world-axis selector form (compat).
   const axisValue = readers.dimensionlessParameter(axisRef, "axis");
   if (!axisValue.ok) return { ok: false, diagnostic: axisValue.diagnostic };
   if (
@@ -1814,17 +2567,6 @@ function runHoleOperation(
       ),
     };
   }
-
-  // The target's bounds drive the through/blind decision and the tool
-  // placement (planHoleCut: the one tool-geometry source of truth).
-  const measured = kernel.bounds(target.solid);
-  if (!measured.ok) {
-    return operationFailure(
-      feature,
-      measured.error.code,
-      measured.error.message,
-    );
-  }
   const plan = planHoleCut({
     diameterMm: diameter.mm,
     depthMm: depth.mm,
@@ -1833,6 +2575,35 @@ function runHoleOperation(
     axis: axisValue.value as HoleAxisSelector,
     bounds: measured.value,
   });
+  return executeHoleCut(kernel, feature, plan, {
+    measured: measured.value,
+    target: target.solid,
+    targetRef,
+    positionRefs: [xRef, yRef],
+    diameterMm: diameter.mm,
+    depthMm: depth.mm,
+  });
+}
+
+/**
+ * The hole composition's shared tail (both forms): the planned extruded
+ * circle is subtracted from the target and the no-op post-condition guards
+ * the silent-miss trap — a cut that removed no material is a structured
+ * `kernel/operation-failed` carrying the measured volumes in `data`.
+ */
+function executeHoleCut(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  plan: HoleCutPlan | HoleAxisCutPlan,
+  context: {
+    readonly measured: KernelBounds;
+    readonly target: KernelSolid;
+    readonly targetRef: FeatureInputRef;
+    readonly positionRefs: readonly FeatureInputRef[];
+    readonly diameterMm: number;
+    readonly depthMm: number;
+  },
+): OperationOutcome {
   // The tool: a one-segment extruded circle (see HoleCutPlan — the extrude
   // op's own placement carries the axis orientation every kernel
   // implements, so no rotation-gated transform is involved).
@@ -1858,7 +2629,7 @@ function runHoleOperation(
 
   // The no-op guard's before-side: the target's volume, measured through
   // the same kernel the cut runs on.
-  const targetVolume = kernel.volume(target.solid);
+  const targetVolume = kernel.volume(context.target);
   if (!targetVolume.ok) {
     return operationFailure(
       feature,
@@ -1866,7 +2637,7 @@ function runHoleOperation(
       targetVolume.error.message,
     );
   }
-  const cut = kernel.subtract(target.solid, [tool.value]);
+  const cut = kernel.subtract(context.target, [tool.value]);
   if (!cut.ok) {
     return operationFailure(feature, cut.error.code, cut.error.message);
   }
@@ -1885,10 +2656,13 @@ function runHoleOperation(
       diagnostic: {
         severity: "error",
         code: DIAGNOSTIC_CODES.kernelOperationFailed,
-        message: `Feature "${feature.id}" of kind "hole" removed no material: the ${plan.through ? "through" : "blind"} hole (Ø${diameter.mm} × ${depth.mm} mm at in-plane (${positionX.mm}, ${positionY.mm})) misses its target (bounds [${measured.value.min.join(", ")}] → [${measured.value.max.join(", ")}]). Move holeX/holeY onto the target or grow the diameter — the subtract would otherwise silently return the target unchanged.`,
+        message: `Feature "${feature.id}" of kind "hole" removed no material: the ${plan.through ? "through" : "blind"} hole (Ø${context.diameterMm} × ${context.depthMm} mm) misses its target (bounds [${context.measured.min.join(", ")}] → [${context.measured.max.join(", ")}]). Move holeX/holeY onto the target or grow the diameter — the subtract would otherwise silently return the target unchanged.`,
         location: {
           primary: feature.id,
-          related: [targetRef.id, xRef.id, yRef.id],
+          related: [
+            context.targetRef.id,
+            ...context.positionRefs.map((ref) => ref.id),
+          ],
         },
         data: {
           reason: "hole/no-op",
@@ -2473,17 +3247,26 @@ function runKernelOperation(
         : operationFailure(feature, result.error.code, result.error.message);
     }
     case "revolve": {
-      // Input layout: one sketch input (the profile source), one angle
-      // parameter (the sweep), one angle parameter (the axis direction in
-      // the sketch plane, CCW from the workplane x axis — the axis line
-      // runs through the workplane origin along it).
+      // Input layout — COMPAT form: one sketch input (the profile source),
+      // one angle parameter (the sweep), one angle parameter (the axis
+      // direction in the sketch plane, CCW from the workplane x axis — the
+      // axis line runs through the workplane origin along it).
+      // DATUM form (Phase 39): the third input is a DATUM AXIS; the axis
+      // line is the datum's resolved line, which must lie IN the sketch
+      // plane (its out-of-plane lean above the coplanarity tolerance is a
+      // structured refusal — the contract's axis is in-plane).
+      const datumAxisRefs = inputs.filter(
+        (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
+          ref.kind === "datum",
+      );
+      const datumAxisForm = datumAxisRefs.length === 1;
       if (inputs.length !== 3) {
         return {
           ok: false,
           diagnostic: diagnostic(
             feature,
             DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-            `Feature "${feature.id}" of kind "revolve" needs exactly three inputs: a sketch input (the profile source), a sweep angle parameter, and an axis direction parameter.`,
+            `Feature "${feature.id}" of kind "revolve" needs exactly three inputs: a sketch input (the profile source), a sweep angle parameter, and ${datumAxisForm ? "a datum axis input" : "an axis direction parameter"}.`,
           ),
         };
       }
@@ -2526,13 +3309,17 @@ function runKernelOperation(
           ),
         };
       }
-      if (axisRef.kind !== "parameter") {
+      if (
+        datumAxisForm ? axisRef.kind !== "datum" : axisRef.kind !== "parameter"
+      ) {
         return {
           ok: false,
           diagnostic: diagnostic(
             feature,
             DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-            `Feature "${feature.id}" of kind "revolve" needs a parameter input as its axis direction; a ${axisRef.kind} input was declared.`,
+            datumAxisForm
+              ? `Feature "${feature.id}" of kind "revolve" needs a datum input as its axis; a ${axisRef.kind} input was declared.`
+              : `Feature "${feature.id}" of kind "revolve" needs a parameter input as its axis direction; a ${axisRef.kind} input was declared.`,
             [axisRef],
           ),
         };
@@ -2552,15 +3339,109 @@ function runKernelOperation(
       }
       const sweep = readers.angleParameter(sweepRef, "sweep");
       if (!sweep.ok) return { ok: false, diagnostic: sweep.diagnostic };
-      const axisDirection = readers.angleParameter(axisRef, "axisDirection");
-      if (!axisDirection.ok) {
-        return { ok: false, diagnostic: axisDirection.diagnostic };
+
+      let axisPoint: readonly [number, number];
+      let axisDirection: readonly [number, number];
+      if (datumAxisForm) {
+        const resolvedDatum = resolveDatumInput(
+          feature,
+          axisRef,
+          readers.document,
+          readers.datumTopology,
+          "the revolve axis",
+        );
+        if (!resolvedDatum.ok) {
+          return { ok: false, diagnostic: resolvedDatum.diagnostic };
+        }
+        if (
+          resolvedDatum.datumType !== "axis" ||
+          resolvedDatum.axis === undefined
+        ) {
+          return datumKindMismatch(
+            feature,
+            axisRef,
+            `Feature "${feature.id}" of kind "revolve" needs a datum AXIS as its revolve axis; the referenced datum defines ${resolvedDatum.datumType === "plane" ? "a plane" : resolvedDatum.datumType === "point" ? "a point" : "a coordinate system"}.`,
+          );
+        }
+        // Map the world axis into the sketch frame: the placement is a
+        // rotation about the world origin then a translation, so the local
+        // form of a world point p is R⁻¹·(p − t).
+        const placement = resolvedProfile.value.placement;
+        const rotationAngle = valueIn(placement.rotation.angle, "rad");
+        const matrix = rotationMatrix(
+          [
+            placement.rotation.axis[0],
+            placement.rotation.axis[1],
+            placement.rotation.axis[2],
+          ],
+          rotationAngle,
+        );
+        const translation: DatumVec3 = [
+          valueIn(placement.translation.x, "mm"),
+          valueIn(placement.translation.y, "mm"),
+          valueIn(placement.translation.z, "mm"),
+        ];
+        const worldOrigin = resolvedDatum.axis.origin;
+        const localOrigin = applyMatrixTranspose(matrix, [
+          worldOrigin[0] - translation[0],
+          worldOrigin[1] - translation[1],
+          worldOrigin[2] - translation[2],
+        ]);
+        const localDirection = applyMatrixTranspose(
+          matrix,
+          resolvedDatum.axis.direction,
+        );
+        if (Math.abs(localDirection[2]) > DATUM_COPLANARITY_TOLERANCE) {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "revolve" needs its datum axis to lie IN the sketch plane; the resolved axis leans ${String(Math.abs(localDirection[2]))} out of plane along the sketch normal. Revolving about an out-of-plane line is not a sketch-plane operation — re-define the datum axis in the sketch's plane.`,
+              [axisRef],
+            ),
+          };
+        }
+        // A direction IN the plane is not enough: the axis ORIGIN must also
+        // sit in the plane. An axis parallel to the plane but offset along
+        // its normal is a legal datum yet revolving about its projected
+        // in-plane shadow would silently displace the solid — the exact
+        // silent-misgeometry class this bridge refuses elsewhere.
+        if (Math.abs(localOrigin[2]) > DATUM_COPLANARITY_TOLERANCE) {
+          return datumInputFailure(
+            feature,
+            axisRef,
+            `Feature "${feature.id}" of kind "revolve" needs its datum axis to lie IN the sketch plane; the resolved axis is parallel to the plane but its origin is offset ${String(Math.abs(localOrigin[2]))} along the sketch normal. Revolving about the projected in-plane line would silently displace the solid — re-define the datum axis in the sketch's plane.`,
+            "datum/definition-invalid",
+          );
+        }
+        const inPlane = vecUnit([localDirection[0], localDirection[1], 0]);
+        if (inPlane === null) {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "revolve" resolved a datum axis whose in-plane direction is degenerate.`,
+              [axisRef],
+            ),
+          };
+        }
+        axisPoint = [localOrigin[0], localOrigin[1]];
+        axisDirection = [inPlane[0], inPlane[1]];
+      } else {
+        const axisAngle = readers.angleParameter(axisRef, "axisDirection");
+        if (!axisAngle.ok) {
+          return { ok: false, diagnostic: axisAngle.diagnostic };
+        }
+        axisPoint = [0, 0];
+        axisDirection = [Math.cos(axisAngle.rad), Math.sin(axisAngle.rad)];
       }
       const revolveInput: ProfileRevolveInput = {
         loop: resolvedProfile.value.loop,
         axis: {
-          point: [0, 0],
-          direction: [Math.cos(axisDirection.rad), Math.sin(axisDirection.rad)],
+          point: [...axisPoint],
+          direction: [...axisDirection],
         },
         angle: angleValue(sweep.rad, "rad"),
         placement: resolvedProfile.value.placement,

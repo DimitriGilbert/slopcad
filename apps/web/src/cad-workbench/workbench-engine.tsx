@@ -67,13 +67,17 @@ import {
 import {
   angle,
   createBodyId,
+  createDatumId,
   createFeatureId,
   createParameterId,
   createSketchDocumentId,
   dimensionless,
   length,
+  parseDatumPayload,
+  type DatumId,
 } from "@slopcad/cad-core";
 import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
+import type { Workplane } from "@slopcad/cad-sketch";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
 import {
@@ -87,6 +91,7 @@ import { workbenchExecutor } from "../workbench-fixture/workbench-extended-docum
 import { createCadWorkbenchSession } from "./session";
 import {
   documentExtrudeRequest,
+  documentPadSceneRequest,
   sketchProfileResolverOf,
   type ExtrudeSceneRequest,
 } from "./extrude";
@@ -119,6 +124,12 @@ import {
   EXTRUDE_DEFAULT_DEPTH_MM,
   type SketchExtrudeSubmission,
 } from "./SketchMode";
+import {
+  resolveSessionDatumPlane,
+  sceneFacePickOfSelection,
+  sessionFaceReferenceOf,
+  type SceneFacePick,
+} from "./datum";
 import { boundsReadout } from "./bounds-inspection";
 import { distanceReadout } from "./distance-inspection";
 import { massPropertiesReadout } from "./mass-properties-inspection";
@@ -171,6 +182,15 @@ export interface WorkbenchEngineSurface {
   readonly errorId: string;
   /** The worker backend the session boots. */
   readonly backend?: FixtureSessionBackendId;
+  /**
+   * The viewport element whose CANVAS the face anchors project into. A
+   * fluid-viewport host passes its id so the anchor projection reads the
+   * LIVE canvas size (the scene camera consumes the live aspect — a fixed
+   * 800×520 projection drifts off the geometry at any other size). A host
+   * whose viewport IS the fixture's fixed 800×520 box omits it and keeps
+   * the authored frame (byte-identical anchors).
+   */
+  readonly viewportId?: string;
 }
 
 /**
@@ -347,6 +367,38 @@ export interface WorkbenchEngine {
   readonly handleLoft: (
     sections: readonly LoftSectionChoice[],
   ) => FeatureFormOutcome;
+  /**
+   * The Phase 39 sketch-on-face action: resolves the picked scene face into
+   * a datum plane record (the persistent anchor) plus the face workplane,
+   * commits the datum in one atomic transaction, and enters the sketch mode
+   * booted on that workplane. A structured refusal (curved face, unsettled
+   * scene, refused transaction) changes nothing and carries the message for
+   * the caller's status surface.
+   */
+  readonly handleSketchOnFace: (reference: {
+    readonly kind: "face";
+    readonly bodyId: string;
+    readonly faceIndex: number;
+  }) =>
+    { readonly ok: true } | { readonly ok: false; readonly message: string };
+  /**
+   * The Phase 39 datum creation action (the Formedible form's submission
+   * seam): validates the payload through the datum module's parser, then
+   * commits the datum.create command. A refusal commits nothing.
+   */
+  readonly handleCreateDatum: (
+    payload: Record<string, unknown>,
+  ) => FeatureFormOutcome;
+  /**
+   * The workplane the CURRENT sketch session boots on — the datum plane's
+   * frame in sketch-on-face mode, `null` in the ordinary (XY) flow.
+   */
+  readonly sketchBootWorkplane: Workplane | null;
+  /**
+   * The document's datum records with their session-resolved planes, as
+   * canonical JSON for the machine surface (empty array when none).
+   */
+  readonly datumsJson: string;
 }
 
 /**
@@ -358,7 +410,7 @@ export interface WorkbenchEngine {
 export function useWorkbenchEngine(
   surface: WorkbenchEngineSurface,
 ): WorkbenchEngine {
-  const { rootId, statusId, volumeId, errorId, backend } = surface;
+  const { rootId, statusId, volumeId, errorId, backend, viewportId } = surface;
   // The workbench mode is page-level authoring state: the model workspace
   // keeps its worker session alive across switches (hidden, not unmounted).
   const [mode, setMode] = useState<WorkbenchMode>("model");
@@ -422,6 +474,14 @@ export function useWorkbenchEngine(
   const [sketchCount, setSketchCount] = useState(0);
   const [sweepCount, setSweepCount] = useState(0);
   const [loftCount, setLoftCount] = useState(0);
+  // The Phase 39 sketch-on-face anchor: the datum record the CURRENT sketch
+  // session boots on (its id commits with the extrude feature; its plane
+  // booted the sketch editor). `null` in the ordinary sketch flow.
+  const [sketchAnchor, setSketchAnchor] = useState<{
+    readonly datumId: DatumId;
+    readonly workplane: Workplane;
+  } | null>(null);
+  const [datumCount, setDatumCount] = useState(0);
 
   // The active scene feature's worker refusal (Phase 38 capability
   // honesty): the session reports every feature-backed dispatch's verdict,
@@ -516,7 +576,10 @@ export function useWorkbenchEngine(
   // the sketch record, the distance parameter, the output body, and the
   // extrude feature in ONE atomic transaction, then switch the scene to the
   // worker-executed extrusion and return to the model workspace. A refused
-  // transaction keeps everything unchanged.
+  // transaction keeps everything unchanged. When the sketch session was
+  // anchored on a datum (sketch-on-face, Phase 39), the feature ALSO
+  // declares the datum as an input — the live anchor the scene re-resolves
+  // on every dispatch (edit driving face — geometry follows).
   const handleExtrude = (submission: SketchExtrudeSubmission): void => {
     const n = extrudeCount + 1;
     const suffix = n === 1 ? "" : String(n);
@@ -524,6 +587,10 @@ export function useWorkbenchEngine(
     const parameterId = createParameterId(`param_extrude_depth${suffix}`);
     const bodyId = createBodyId(`body_extrude${suffix}`);
     const featureId = createFeatureId(`feat_extrude${suffix}`);
+    const datumInput =
+      sketchAnchor === null
+        ? []
+        : [{ kind: "datum" as const, id: sketchAnchor.datumId }];
     const applied = documentApi.applyTransaction({
       commands: [
         {
@@ -546,6 +613,7 @@ export function useWorkbenchEngine(
           inputs: [
             { kind: "sketch", id: sketchId },
             { kind: "parameter", id: parameterId },
+            ...datumInput,
           ],
           outputs: [bodyId],
         },
@@ -554,7 +622,92 @@ export function useWorkbenchEngine(
     if (!applied.ok) return;
     setExtrudeCount(n);
     setActiveScene("extrude");
-    setMode("model");
+    // Through the wrapped setter: the extrude consumed the sketch anchor, and
+    // a raw setMode would leave it alive to re-attach the NEXT sketch.
+    wrappedSetMode("model");
+  };
+
+  // The Phase 39 sketch-on-face action: resolve the picked scene face into
+  // a datum plane record (the persistent anchor), commit it, then boot the
+  // sketch editor on the datum's RESOLVED frame — the same frame every
+  // re-derivation computes, so what the author draws is what re-drives
+  // when the face moves (no anchor-vs-resolution coordinate jump). A
+  // curved face (no single normal) is refused structurally — no guessed
+  // plane.
+  const handleSketchOnFace = (reference: {
+    readonly kind: "face";
+    readonly bodyId: string;
+    readonly faceIndex: number;
+  }):
+    | { readonly ok: true }
+    | { readonly ok: false; readonly message: string } => {
+    if (applied === null) {
+      return {
+        ok: false,
+        message: "The scene has not settled; nothing to sketch on yet.",
+      };
+    }
+    const pick: SceneFacePick | null = sceneFacePickOfSelection(
+      applied.state.projection,
+      reference,
+    );
+    if (pick === null || pick.normal === null) {
+      return {
+        ok: false,
+        message:
+          "The picked face has no single normal (a curved or vanished face); sketch-on-face needs a planar face.",
+      };
+    }
+    const referencePayload = sessionFaceReferenceOf(pick);
+    if (referencePayload === null) {
+      return {
+        ok: false,
+        message: "The picked face cannot anchor a datum plane.",
+      };
+    }
+    const n = datumCount + 1;
+    const datumId = createDatumId(`dtm_face_plane${n === 1 ? "" : String(n)}`);
+    const commit = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "datum.create",
+          id: datumId,
+          name: `face plane ${String(n)}`,
+          datum: {
+            formatVersion: 1,
+            datumType: "plane",
+            definition: "faceOffset",
+            reference: referencePayload,
+            normalAtDefinition: [
+              pick.normal[0],
+              pick.normal[1],
+              pick.normal[2],
+            ],
+            offsetMm: 0,
+          },
+        },
+      ],
+    });
+    if (!commit.ok) {
+      return { ok: false, message: commit.error.message };
+    }
+    // Boot the sketch on the datum's RESOLVED plane — the resolution the
+    // scene request re-derives on every dispatch.
+    const plane = resolveSessionDatumPlane(commit.value.document, datumId);
+    if (!plane.ok) {
+      return { ok: false, message: plane.error.message };
+    }
+    setDatumCount(n);
+    setSketchAnchor({
+      datumId,
+      workplane: {
+        origin: { x: plane.origin[0], y: plane.origin[1], z: plane.origin[2] },
+        normal: { x: plane.normal[0], y: plane.normal[1], z: plane.normal[2] },
+        xAxis: { x: plane.xAxis[0], y: plane.xAxis[1], z: plane.xAxis[2] },
+      },
+    });
+    setMode("sketch");
+    return { ok: true };
   };
 
   // The Phase 26.2 revolve action (the sketch → solid UX bridge): commit
@@ -609,7 +762,7 @@ export function useWorkbenchEngine(
     if (!applied.ok) return;
     setRevolveCount(n);
     setActiveScene("revolve");
-    setMode("model");
+    wrappedSetMode("model");
   };
 
   // The Phase 26.10 hole action (the solid → hole UX bridge): commit the
@@ -715,7 +868,7 @@ export function useWorkbenchEngine(
     });
     if (!applied.ok) return;
     setSketchCount(n);
-    setMode("model");
+    wrappedSetMode("model");
   };
 
   // The Phase 38 sweep action: resolve the picked profile and path sketches
@@ -941,7 +1094,9 @@ export function useWorkbenchEngine(
   // The scene dispatch: whichever computation the active scene names follows
   // the DOCUMENT (the parameter edit → regenerate criterion) — the plate
   // scene follows the hole diameter, the extrude scene re-reads the
-  // document's extrude feature through the profile resolver, the hole scene
+  // document's extrude feature through the profile resolver (a datum-
+  // anchored pad dispatches the COMPOSED pad scene: base + pad union, so a
+  // driving-face edit is measurable in the settle volume), the hole scene
   // re-reads the hole composition (base extrusion + every hole's five
   // parameters). Declared AFTER the boot effect above so the mount pass
   // runs with the session already in sessionRef — the initial plate
@@ -949,6 +1104,11 @@ export function useWorkbenchEngine(
   // holeCount) re-dispatch the current scene.
   useEffect(() => {
     if (activeScene === "extrude") {
+      const padRequest = documentPadSceneRequest(workbenchDocument);
+      if (padRequest !== null) {
+        sessionRef.current?.dispatchPad(padRequest, padRequest.bodyId);
+        return;
+      }
       const request: ExtrudeSceneRequest | null =
         documentExtrudeRequest(workbenchDocument);
       if (request !== null) {
@@ -1007,9 +1167,46 @@ export function useWorkbenchEngine(
     store.setProjection(applied === null ? null : applied.state.projection);
   }, [applied, store]);
 
+  // The live anchor-projection frame: the viewport canvas's CSS size, read
+  // at projection time through a ResizeObserver so the face anchors track
+  // the SAME frame the scene camera renders into (R3F consumes the live
+  // canvas aspect; projecting into the fixed 800×520 spec frame would
+  // mis-place every anchor at any other window size). Kept `null` until a
+  // real (non-collapsed) size is observed — a hidden workspace renders the
+  // canvas at 0×0, and the last real size must survive that. Hosts without
+  // a `viewportId` (the fixed 800×520 workbenches) never measure: the
+  // authored frame IS their canvas size.
+  const [anchorViewport, setAnchorViewport] = useState<{
+    readonly width: number;
+    readonly height: number;
+  } | null>(null);
+  const projectionLive = applied !== null;
+  useEffect(() => {
+    if (viewportId === undefined || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    // The canvas mounts with the first applied projection (the viewport
+    // renders its scene only then), so the lookup re-runs when that lands.
+    const canvas = document.querySelector(`#${viewportId} canvas`);
+    if (!(canvas instanceof HTMLElement)) return;
+    const observer = new ResizeObserver(() => {
+      const { clientWidth, clientHeight } = canvas;
+      if (clientWidth > 0 && clientHeight > 0) {
+        setAnchorViewport({ width: clientWidth, height: clientHeight });
+      }
+    });
+    observer.observe(canvas);
+    return () => {
+      observer.disconnect();
+    };
+  }, [viewportId, projectionLive]);
+
   const faceAnchors = useMemo(
-    () => (applied === null ? "" : faceAnchorSurface(applied.state)),
-    [applied],
+    () =>
+      applied === null
+        ? ""
+        : faceAnchorSurface(applied.state, anchorViewport ?? undefined),
+    [applied, anchorViewport],
   );
 
   // The measure tool's completion: the readout the Measurement block shows.
@@ -1082,9 +1279,95 @@ export function useWorkbenchEngine(
     [rollback, timeline, runState],
   );
 
+  // The Phase 39 datum creation action (the Formedible form's submission
+  // seam): validates the payload through the datum module's parser, then
+  // commits the datum.create command in one atomic transaction. A refusal
+  // commits nothing and hands the structured outcome back to the form.
+  const handleCreateDatum = (
+    payload: Record<string, unknown>,
+  ): FeatureFormOutcome => {
+    const parsed = parseDatumPayload(payload);
+    if (!parsed.ok) {
+      return {
+        ok: false,
+        code: parsed.error.code,
+        message: parsed.error.message,
+      };
+    }
+    const n = datumCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const commit = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "datum.create",
+          id: createDatumId(`dtm_datum${suffix}`),
+          name: `datum ${String(n)}`,
+          datum: payload,
+        },
+      ],
+    });
+    if (!commit.ok) {
+      return {
+        ok: false,
+        code: commit.error.code,
+        message: commit.error.message,
+      };
+    }
+    setDatumCount(n);
+    return { ok: true };
+  };
+
+  // The datums machine surface: every datum record with its kind and, for
+  // PLANE datums, the session-resolved plane (or the structured failure),
+  // canonical JSON. A plane datum whose resolution fails surfaces its
+  // failure code — the surface tells the truth about unanchored datums
+  // instead of hiding them. A NON-plane datum (axis, point, cSys) reports
+  // `resolved: null` with its kind: this surface resolves PLANES, and a
+  // healthy axis datum is not a failed plane resolution.
+  const datumsJson = useMemo(() => {
+    const resolved = workbenchDocument.datums.map((datum) => {
+      const payload = parseDatumPayload(datum.datum);
+      const kind = payload.ok ? payload.value.datumType : null;
+      if (kind !== null && kind !== "plane") {
+        return {
+          id: datum.id,
+          kind,
+          name: datum.name,
+          resolved: null,
+        };
+      }
+      const plane = resolveSessionDatumPlane(workbenchDocument, datum.id);
+      return plane.ok
+        ? {
+            id: datum.id,
+            kind: "plane" as const,
+            name: datum.name,
+            resolved: true,
+            origin: plane.origin,
+            normal: plane.normal,
+          }
+        : {
+            id: datum.id,
+            kind: "plane" as const,
+            name: datum.name,
+            resolved: false,
+            code: plane.error.code,
+          };
+    });
+    return JSON.stringify(resolved);
+  }, [workbenchDocument]);
+
+  // Exiting to the model workspace drops the sketch anchor: an anchor
+  // without a sketch session behind it would silently attach the NEXT
+  // sketch's extrude to a face the user picked minutes ago.
+  const wrappedSetMode = (next: WorkbenchMode): void => {
+    if (next === "model") setSketchAnchor(null);
+    setMode(next);
+  };
+
   return {
     mode,
-    setMode,
+    setMode: wrappedSetMode,
     store,
     documentApi,
     selectionApi,
@@ -1118,6 +1401,10 @@ export function useWorkbenchEngine(
     handleSaveSketch,
     handleSweep,
     handleLoft,
+    handleSketchOnFace,
+    sketchBootWorkplane: sketchAnchor === null ? null : sketchAnchor.workplane,
+    datumsJson,
+    handleCreateDatum,
   };
 }
 

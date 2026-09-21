@@ -28,6 +28,7 @@ import type {
   LoftSceneRequest,
   RevolveSceneRequest,
   SweepSceneRequest,
+  PadSceneRequest,
 } from "../worker-fixture/plate-scene-extra";
 
 import {
@@ -40,6 +41,7 @@ import { computeRevolveScene } from "../worker-fixture/revolve-scene";
 import { computeSweepScene } from "../worker-fixture/sweep-scene";
 import { computeLoftScene } from "../worker-fixture/loft-scene";
 import { computeHoleScene } from "../worker-fixture/hole-scene";
+import { computePadScene } from "../worker-fixture/pad-scene";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
  * authored for exactly this size (and the scene runs at dpr 1), which is
@@ -88,6 +90,15 @@ export interface RenderFixtureSession {
    * visible scene (the same bounds-derived camera the extrude scene uses).
    */
   dispatchHole(request: HoleSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 39 pad computation: the REAL kernel composes the
+   * base extrusion, the datum-anchored pad extrusion, and their union in
+   * the worker, and the settled solid's measurement + projection become
+   * the visible scene (the same bounds-derived camera the extrude scene
+   * uses). This is the scene that makes "edit driving face — geometry
+   * follows" measurable in the settle volume.
+   */
+  dispatchPad(request: PadSceneRequest, bodyId: string): void;
   /** Settles the channel and terminates the worker. */
   dispose(): void;
 }
@@ -150,8 +161,21 @@ export function completionJson(completion: ToolCompletion): string {
  * synthetic face, the CSS-pixel anchor point and the face's mean normal.
  * Pure function of the render state — deterministic, so tests can rely on
  * identical anchors across runs of the same parameters.
+ *
+ * `viewport` is the CSS-pixel size the anchors project into — the size of
+ * the canvas the clicks land on. The scene camera consumes the LIVE canvas
+ * aspect (R3F's `size`), so a caller whose canvas size differs from the
+ * fixture's fixed 800×520 frame MUST pass the live size or every anchor
+ * mis-projects by the aspect difference. Fixed-viewport fixtures omit it
+ * and keep the authored frame (their canvas IS that size — byte-stable).
  */
-export function faceAnchorSurface(renderState: PlateRenderState): string {
+export function faceAnchorSurface(
+  renderState: PlateRenderState,
+  viewport: { readonly width: number; readonly height: number } = {
+    width: VIEWPORT_CSS_WIDTH,
+    height: VIEWPORT_CSS_HEIGHT,
+  },
+): string {
   const anchors: Record<
     string,
     {
@@ -170,8 +194,8 @@ export function faceAnchorSurface(renderState: PlateRenderState): string {
       const screen = renderCameraScreenPoint(
         renderState.projection.camera,
         world,
-        VIEWPORT_CSS_WIDTH,
-        VIEWPORT_CSS_HEIGHT,
+        viewport.width,
+        viewport.height,
       );
       anchors[`${object.bodyId ?? object.id}/${String(face.index)}`] = {
         point: [round1(screen[0]), round1(screen[1])],
@@ -200,7 +224,7 @@ export type FixtureSessionBackend = "manifold" | "occt";
 
 /** The feature-backed scene kinds a dispatch can carry a verdict for. */
 export type FeatureSceneKind =
-  "extrude" | "revolve" | "sweep" | "loft" | "hole";
+  "extrude" | "revolve" | "sweep" | "loft" | "hole" | "pad";
 
 /**
  * One feature-backed scene dispatch's worker verdict — the seam a host uses
@@ -472,6 +496,16 @@ export function bootRenderFixtureSession(
           settleWithVerdict("hole", bodyId),
           failWithVerdict("hole", bodyId),
         );
+    },
+    dispatchPad(request: PadSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computePadScene(context, request), bodyId),
+        )
+        .then(settleWithVerdict("pad", bodyId), failWithVerdict("pad", bodyId));
     },
     dispatchSweep(request: SweepSceneRequest, bodyId: string): void {
       counters.dispatched += 1;

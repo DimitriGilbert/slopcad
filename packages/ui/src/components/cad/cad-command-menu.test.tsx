@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CAD_COMMAND_MENU_LABELS,
   CadCommandMenu,
+  commandRank,
   type CadCommandDescriptor,
 } from "./cad-command-menu";
 
@@ -183,5 +184,132 @@ describe("CadCommandMenu", () => {
   it("renders label overrides and the empty state", () => {
     renderMenu({ open: true, commands: [] });
     expect(screen.getByText(CAD_COMMAND_MENU_LABELS.empty)).not.toBeNull();
+  });
+
+  it("orders searched groups by best surviving score — the import-vs-Loft regression", () => {
+    // The bug this ranking replaced: with grouped commands, cmdk's
+    // post-filter reordering highlighted the first surviving item of the
+    // FIRST group, so a Workspace keyword graze beat the perfect File
+    // label match. The menu ranks itself now: typing "import" grazes
+    // Loft's keywords (m-p in "morph", o in "solid", r-t in "create") but
+    // the perfect label match must own the TOP of the list — File renders
+    // first despite being last in the array, and Measure (no match) drops.
+    const list: CadCommandDescriptor[] = [
+      {
+        id: "measure",
+        label: "Measure",
+        group: "Tools",
+        run: vi.fn(),
+      },
+      {
+        id: "loft",
+        label: "Loft ordered sections",
+        group: "Workspace",
+        keywords: "loft sections morph solid create",
+        run: vi.fn(),
+      },
+      {
+        id: "import",
+        label: "Import model",
+        group: "File",
+        keywords: "stl 3mf step brep iges open upload",
+        run: vi.fn(),
+      },
+    ];
+    render(
+      <CadCommandMenu commands={list} onOpenChange={() => {}} open={true} />,
+    );
+    const input = document.querySelector('[data-slot="command-input"]');
+    expect(input).not.toBeNull();
+    fireEvent.change(input as HTMLElement, {
+      target: { value: "import" },
+    });
+    const groups = document.querySelectorAll("[data-cad-command-group]");
+    expect(
+      [...groups].map((group) => group.getAttribute("data-cad-command-group")),
+    ).toEqual(["File", "Workspace"]);
+    expect(
+      document.querySelector('[data-cad-command-id="import"]'),
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-cad-command-id="loft"]'),
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-cad-command-id="measure"]'),
+    ).toBeNull();
+  });
+
+  it("reorders groups by their best surviving score, not first-seen order", () => {
+    // A keyword graze in the first-seen group (History) must NOT outrank a
+    // stronger match in a later group (File): "mpo" grazes History's
+    // keywords and matches File's label consecutively, so File renders
+    // first despite being second in the array.
+    const list: CadCommandDescriptor[] = [
+      {
+        id: "remove-rollback",
+        label: "Remove rollback point",
+        group: "History",
+        keywords: "timeline marker",
+        run: vi.fn(),
+      },
+      {
+        id: "import",
+        label: "Import model",
+        group: "File",
+        keywords: "stl 3mf step brep iges open upload",
+        run: vi.fn(),
+      },
+    ];
+    render(
+      <CadCommandMenu commands={list} onOpenChange={() => {}} open={true} />,
+    );
+    const input = document.querySelector('[data-slot="command-input"]');
+    expect(input).not.toBeNull();
+    fireEvent.change(input as HTMLElement, {
+      target: { value: "mpo" },
+    });
+    expect(
+      commandRank("Import model stl 3mf step brep iges open upload", "mpo"),
+    ).toBeGreaterThan(
+      commandRank("Remove rollback point timeline marker", "mpo"),
+    );
+    const groups = document.querySelectorAll("[data-cad-command-group]");
+    expect(
+      [...groups].map((group) => group.getAttribute("data-cad-command-group")),
+    ).toEqual(["File", "History"]);
+  });
+});
+
+describe("commandRank", () => {
+  it("scores an empty query as a uniform match and a miss as zero", () => {
+    expect(commandRank("Loft ordered sections", "")).toBe(1);
+    expect(commandRank("Loft ordered sections", "   ")).toBe(1);
+    // No in-order subsequence: "Measure" carries no "i" at all, so the
+    // query "import" can never match it (the component test's drop).
+    expect(commandRank("Measure", "import")).toBe(0);
+  });
+
+  it("ranks a perfect label match above a scattered keyword graze", () => {
+    const perfect = commandRank(
+      "Import model stl 3mf step brep iges open upload",
+      "import",
+    );
+    // The keyword graze: the same query's letters land scattered through
+    // Loft's search text — m-p in "morph", o in "solid", r-t in "create".
+    const graze = commandRank(
+      "Loft ordered sections morph solid create",
+      "import",
+    );
+    expect(graze).toBeGreaterThan(0);
+    expect(perfect).toBeGreaterThan(graze);
+  });
+
+  it("matches case-insensitively and ignores surrounding whitespace", () => {
+    expect(commandRank("Import Model", "IMPORT")).toBe(
+      commandRank("import model", "import"),
+    );
+    expect(commandRank("Import model", "  import  ")).toBe(
+      commandRank("Import model", "import"),
+    );
   });
 });

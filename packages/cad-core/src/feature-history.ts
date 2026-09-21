@@ -412,14 +412,15 @@ export function featureTimeline(
 // ---------------------------------------------------------------------------
 
 /**
- * The changed graph nodes between two documents: every parameter, body, and
- * feature whose record identity differs (added, removed, or replaced —
- * records and parameters are immutable, so identity IS content), in
- * deterministic order (the next document's parameter order, then its body
- * order, then its feature order, then ids that only the previous document
- * had). An empty result means nothing a regeneration depends on moved.
- * The result feeds `markStale` directly; a REORDER produces no nodes, so a
- * host that diffs documents never invalidates across a reorder.
+ * The changed graph nodes between two documents: every parameter, body,
+ * datum, and feature whose record identity differs (added, removed, or
+ * replaced — records and parameters are immutable, so identity IS content),
+ * in deterministic order (the next document's parameter order, then its
+ * body order, then its feature order, then ids that only the previous
+ * document had). An empty result means nothing a regeneration depends on
+ * moved. The result feeds `markStale` directly; a REORDER produces no
+ * nodes, so a host that diffs documents never invalidates across a
+ * reorder.
  */
 export function documentChangeInvalidations(
   previous: CadDocument,
@@ -476,6 +477,22 @@ export function documentChangeInvalidations(
       !next.references.some((reference) => reference.id === id) &&
       !nodes.includes(id)
     ) {
+      nodes.push(id);
+    }
+  }
+  // Datum records are graph sources too (Phase 39): a replaced datum (a
+  // re-defined plane, a moved offset) invalidates every feature that
+  // addresses it.
+  const previousDatums = new Map(
+    previous.datums.map((datum) => [datum.id, datum]),
+  );
+  for (const datum of next.datums) {
+    if (previousDatums.get(datum.id) !== datum) {
+      nodes.push(datum.id);
+    }
+  }
+  for (const id of previousDatums.keys()) {
+    if (!next.datums.some((datum) => datum.id === id) && !nodes.includes(id)) {
       nodes.push(id);
     }
   }

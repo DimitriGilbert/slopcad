@@ -27,7 +27,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { createBodyId, createFeatureId } from "@slopcad/cad-core";
+import {
+  createBodyId,
+  createDatumId,
+  createFeatureId,
+} from "@slopcad/cad-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SceneDispatchOutcome } from "../render-fixture/fixture-session";
 
@@ -72,6 +76,8 @@ afterEach(cleanup);
 
 const PROBE_FEATURE = createFeatureId("feat_probe");
 const PROBE_BODY = createBodyId("body_probe");
+const AXIS_DATUM = createDatumId("dtm_engine_axis");
+const PLANE_DATUM = createDatumId("dtm_engine_plane");
 
 function EngineHarness(): ReactElement {
   const engine = useWorkbenchEngine({
@@ -84,6 +90,7 @@ function EngineHarness(): ReactElement {
     <div>
       <div
         data-testid="engine-surface"
+        data-datums={engine.datumsJson}
         data-rollback={
           engine.rollback === null
             ? "none"
@@ -146,6 +153,46 @@ function EngineHarness(): ReactElement {
         }}
       >
         undo
+      </button>
+      <button
+        type="button"
+        data-testid="add-datums"
+        onClick={() => {
+          const applied = engine.documentApi.applyTransaction({
+            commands: [
+              {
+                type: "datum.create",
+                id: AXIS_DATUM,
+                name: "bore axis",
+                datum: {
+                  formatVersion: 1,
+                  datumType: "axis",
+                  definition: "twoPoints",
+                  first: [0, 0, 0],
+                  second: [0, 0, 10],
+                },
+              },
+              {
+                type: "datum.create",
+                id: PLANE_DATUM,
+                name: "ground plane",
+                datum: {
+                  formatVersion: 1,
+                  datumType: "plane",
+                  definition: "originFrame",
+                  origin: [0, 0, 0],
+                  normal: [0, 0, 1],
+                  xAxis: [1, 0, 0],
+                },
+              },
+            ],
+          });
+          if (!applied.ok) {
+            throw new Error("the datum commits were refused");
+          }
+        }}
+      >
+        add datums
       </button>
     </div>
   );
@@ -259,5 +306,44 @@ describe("the workbench engine's stale rollback-marker clamp", () => {
     expect(surface().getAttribute("data-timeline")).not.toContain("feat_probe");
     expect(statuses()).toContain("feat_translate_plate=valid");
     expect(statuses()).toContain("feat_rotate_plate=valid");
+  });
+});
+
+describe("the datums machine surface's per-kind semantics", () => {
+  it("reports a healthy axis datum as kind-marked non-applicable, not a failed plane", async () => {
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    const surface = (): HTMLElement => screen.getByTestId("engine-surface");
+    expect(surface().getAttribute("data-datums")).toBe("[]");
+
+    fireEvent.click(screen.getByTestId("add-datums"));
+    type DatumEntry = {
+      readonly kind?: string;
+      readonly resolved?: boolean | null;
+      readonly code?: string;
+    };
+    const entries = await waitFor(() => {
+      const parsed = JSON.parse(
+        surface().getAttribute("data-datums") ?? "[]",
+      ) as DatumEntry[];
+      expect(parsed).toHaveLength(2);
+      return parsed;
+    });
+
+    // The plane resolves: boolean `resolved` with geometry, as before.
+    const plane = entries.find((entry) => entry.kind === "plane");
+    expect(plane?.resolved).toBe(true);
+    expect(plane?.code).toBeUndefined();
+
+    // The axis is NOT a failed plane resolution: the surface is plane-only,
+    // so a healthy axis datum reports its kind and a null applicability —
+    // no `session/datum-not-a-plane` failure for geometry that is fine.
+    const axis = entries.find((entry) => entry.kind === "axis");
+    expect(axis).toBeDefined();
+    expect(axis?.resolved).toBeNull();
+    expect(axis?.code).toBeUndefined();
   });
 });

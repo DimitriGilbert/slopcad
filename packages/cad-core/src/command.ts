@@ -60,6 +60,7 @@ import {
   addBody,
   addDocumentReference,
   addDocumentSketch,
+  addDocumentDatum,
   addDocumentParameter,
   addFeature,
   type CadDocument,
@@ -74,10 +75,12 @@ import {
 } from "./document";
 import {
   type BodyId,
+  type DatumId,
   type FeatureId,
   type ParameterId,
   type SketchDocumentId,
   parseBodyId,
+  parseDatumId,
   parseFeatureId,
   parseParameterId,
   parseSketchDocumentId,
@@ -88,7 +91,7 @@ import { type ParameterError, updateParameterValue } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
-/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder). */
+/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder + Phase 39 datums). */
 export const CAD_COMMAND_TYPES = [
   "parameter.set",
   "parameter.create",
@@ -99,6 +102,7 @@ export const CAD_COMMAND_TYPES = [
   "body.create",
   "sketch.create",
   "reference.create",
+  "datum.create",
 ] as const;
 
 export type CadCommandType = (typeof CAD_COMMAND_TYPES)[number];
@@ -151,6 +155,12 @@ export type CadCommand =
       readonly id?: ReferenceId;
       readonly name: string;
       readonly reference: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly type: "datum.create";
+      readonly id?: DatumId;
+      readonly name: string;
+      readonly datum: Readonly<Record<string, unknown>>;
     }
   | {
       readonly type: "feature.create";
@@ -265,6 +275,15 @@ export function applyCommand(
       if (!added.ok) return added;
       return ok(added.value.document);
     }
+    case "datum.create": {
+      const added = addDocumentDatum(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+        datum: command.datum,
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
     case "feature.create": {
       const added = addFeature(document, command);
       if (!added.ok) return added;
@@ -328,6 +347,13 @@ export type SerializedCadCommand =
       readonly id?: string;
       readonly name: string;
       readonly reference: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "datum.create";
+      readonly id?: string;
+      readonly name: string;
+      readonly datum: Readonly<Record<string, unknown>>;
     }
   | {
       readonly formatVersion: number;
@@ -445,6 +471,21 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
             id: command.id,
             name: command.name,
             reference: command.reference,
+          };
+    case "datum.create":
+      return command.id === undefined
+        ? {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            name: command.name,
+            datum: command.datum,
+          }
+        : {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            id: command.id,
+            name: command.name,
+            datum: command.datum,
           };
     case "feature.update":
       return {
@@ -788,6 +829,47 @@ export function parseCommand(
           id === undefined
             ? { type, name: input.name, reference: input.reference }
             : { type, id, name: input.name, reference: input.reference },
+        ),
+      );
+    }
+    case "datum.create": {
+      let id: DatumId | undefined;
+      if (input.id !== undefined) {
+        const parsedId = parseDatumId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A datum.create command needs a valid datum id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A datum.create command needs a non-empty name string.",
+            input.name,
+          ),
+        );
+      }
+      if (!isPlainRecord(input.datum)) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A datum.create command needs a plain-object datum payload (the datum module's canonical serialized form).",
+            input.datum,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze(
+          id === undefined
+            ? { type, name: input.name, datum: input.datum }
+            : { type, id, name: input.name, datum: input.datum },
         ),
       );
     }

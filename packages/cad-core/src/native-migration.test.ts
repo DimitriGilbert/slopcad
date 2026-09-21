@@ -107,8 +107,9 @@ const SYNTHETIC_V1_TO_V2: NativeFormatMigration = {
  * embedded sketch payloads' additive vocabulary growth).
  */
 describe("the production migration registry", () => {
-  it("carries exactly the v1→v2 step with a pure deterministic transform", () => {
-    expect(NATIVE_FORMAT_MIGRATIONS).toHaveLength(1);
+  it("carries the v1→v2→v3 steps with pure deterministic transforms", () => {
+    expect(NATIVE_FORMAT_MIGRATIONS).toHaveLength(2);
+    expect(NATIVE_FORMAT_MIGRATIONS[1]).toMatchObject({ from: 2, to: 3 });
     const step = NATIVE_FORMAT_MIGRATIONS[0];
     expect(step).toMatchObject({ from: 1, to: 2 });
     if (step === undefined) return;
@@ -377,15 +378,15 @@ describe("migrateNativeCadDocument (the production front door)", () => {
   });
 
   it("rejects a future version predictably", () => {
-    const document = { ...currentDocument(), formatVersion: 3 };
+    const document = { ...currentDocument(), formatVersion: 4 };
     const result = migrateNativeCadDocument(document);
     expect(result).toMatchObject({
       ok: false,
       error: { code: "native-migration/version-unsupported" },
     });
     if (!result.ok) {
+      expect(result.error.message).toContain("4");
       expect(result.error.message).toContain("3");
-      expect(result.error.message).toContain("2");
     }
   });
 
