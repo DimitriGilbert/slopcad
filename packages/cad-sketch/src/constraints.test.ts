@@ -19,6 +19,7 @@ import {
   createParallelConstraint,
   createPerpendicularConstraint,
   createPointOnEntityConstraint,
+  createPointOnTangentConstraint,
   createHorizontalPairConstraint,
   createVerticalPairConstraint,
   createRadiusConstraint,
@@ -33,6 +34,7 @@ import {
   validateConstraintReferences,
 } from "./constraints";
 import {
+  createArc3SlotEntity,
   createArcEntity,
   createCircleEntity,
   createEllipseEntity,
@@ -54,6 +56,7 @@ const pointA = eid("skent_point-a");
 const circleA = eid("skent_circle-a");
 const arcA = eid("skent_arc-a");
 const circleB = eid("skent_circle-b");
+const splineA = eid("skent_spline-a");
 
 function allConstraintSamples(): SketchConstraint[] {
   return [
@@ -95,6 +98,23 @@ function allConstraintSamples(): SketchConstraint[] {
       pointTarget(lineB, "start"),
       lineA,
     ),
+    createParallelConstraint(cid("skcon_c15"), lineA, splineA, "start"),
+    createPerpendicularConstraint(cid("skcon_c16"), splineA, lineA, "end"),
+    createAngleConstraint(
+      cid("skcon_c17"),
+      lineA,
+      splineA,
+      angle(Math.PI / 4),
+      "end",
+    ),
+    createPointOnTangentConstraint(
+      cid("skcon_c18"),
+      pointTarget(pointA, "center"),
+      splineA,
+      "start",
+    ),
+    createTangentConstraint(cid("skcon_c19"), splineA, lineA),
+    createEqualConstraint(cid("skcon_c20"), splineA, splineA),
   ];
 }
 
@@ -139,7 +159,7 @@ describe("constraint builders", () => {
   });
 
   it("exposes the constraint kind list and type guard", () => {
-    expect(SKETCH_CONSTRAINT_KINDS).toHaveLength(19);
+    expect(SKETCH_CONSTRAINT_KINDS).toHaveLength(20);
     expect(SKETCH_CONSTRAINT_KINDS).toContain("coincident");
     expect(SKETCH_CONSTRAINT_KINDS).toContain("symmetry");
     expect(isSketchConstraintKind("tangent")).toBe(true);
@@ -303,6 +323,12 @@ describe("constraint reference validation", () => {
     createCircleEntity(circleA, { x: 20, y: 0 }, 4),
     createCircleEntity(circleB, { x: 30, y: 0 }, 6),
     createArcEntity(arcA, { x: 0, y: 20 }, 8, 0.2, 2.9),
+    createSplineEntity(splineA, "control", [
+      { x: 0, y: 0 },
+      { x: 2, y: 6 },
+      { x: 6, y: -6 },
+      { x: 10, y: 0 },
+    ]),
   ];
 
   it("accepts well-formed references for every kind", () => {
@@ -423,7 +449,6 @@ describe("constraint reference validation", () => {
 
 describe("phase 36 constraints", () => {
   const ellipseA = eid("skent_ellipse-a");
-  const splineA = eid("skent_spline-a");
   const polygonA = eid("skent_polygon-a");
   const slotA = eid("skent_slot-a");
   const newEntities = [
@@ -526,6 +551,8 @@ describe("phase 36 constraints", () => {
         newEntities,
       ),
     ).toBeNull();
+    // Polygons and straight slots are boundary operands (Phase 37); the
+    // arc3 slot variant stays outside the subset.
     expect(
       validateConstraintReferences(
         createPointOnEntityConstraint(
@@ -535,12 +562,137 @@ describe("phase 36 constraints", () => {
         ),
         newEntities,
       ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createPointOnEntityConstraint(
+          cid("skcon_poe"),
+          pointTarget(pointA, "center"),
+          slotA,
+        ),
+        newEntities,
+      ),
+    ).toBeNull();
+    const arc3 = createArc3SlotEntity(
+      slotA,
+      { x: 0, y: 0 },
+      { x: 6, y: 4 },
+      { x: 12, y: 0 },
+      2,
+    );
+    expect(
+      validateConstraintReferences(
+        createPointOnEntityConstraint(
+          cid("skcon_poe"),
+          pointTarget(pointA, "center"),
+          arc3.id,
+        ),
+        [...newEntities.filter((entity) => entity.id !== slotA), arc3],
+      ),
     ).not.toBeNull();
   });
 
+  it("accepts the Phase 37 spline pairs and declines the kinds with no spline meaning", () => {
+    // Direction pairs: two lines, or a line and a spline — never two
+    // splines (a spline's tangent sweeps all directions; vacuous).
+    expect(
+      validateConstraintReferences(
+        createParallelConstraint(cid("skcon_par"), lineA, splineA, "start"),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createPerpendicularConstraint(cid("skcon_perp"), splineA, lineA),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createAngleConstraint(
+          cid("skcon_ang"),
+          lineA,
+          splineA,
+          angle(30, "deg"),
+          "end",
+        ),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createParallelConstraint(cid("skcon_par"), splineA, splineA),
+        newEntities,
+      )?.code,
+    ).toBe(SKETCH_DIAGNOSTIC_CODES.constraintReferenceMalformed);
+    // Tangency: line↔spline anywhere, spline↔spline G1; a spline paired
+    // with a circle/arc is a malformed pair (well-formed, but no such row).
+    expect(
+      validateConstraintReferences(
+        createTangentConstraint(cid("skcon_tan"), splineA, lineA),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createTangentConstraint(cid("skcon_tan"), splineA, splineA),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createTangentConstraint(cid("skcon_tan"), splineA, circleA),
+        newEntities,
+      )?.code,
+    ).toBe(SKETCH_DIAGNOSTIC_CODES.constraintReferenceMalformed);
+    // Equal endpoint chords: line/spline pairs.
+    expect(
+      validateConstraintReferences(
+        createEqualConstraint(cid("skcon_eq"), splineA, splineA),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createEqualConstraint(cid("skcon_eq"), lineA, splineA),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createEqualConstraint(cid("skcon_eq"), splineA, circleA),
+        newEntities,
+      )?.code,
+    ).toBe(SKETCH_DIAGNOSTIC_CODES.constraintReferenceMalformed);
+    // Point-on-end-tangent: any point target + a spline.
+    expect(
+      validateConstraintReferences(
+        createPointOnTangentConstraint(
+          cid("skcon_pot"),
+          pointTarget(pointA, "center"),
+          splineA,
+        ),
+        newEntities,
+      ),
+    ).toBeNull();
+    expect(
+      validateConstraintReferences(
+        createPointOnTangentConstraint(
+          cid("skcon_pot"),
+          pointTarget(pointA, "center"),
+          lineA,
+        ),
+        newEntities,
+      )?.code,
+    ).toBe(SKETCH_DIAGNOSTIC_CODES.constraintReferenceMalformed);
+  });
+
   it("declines out-of-scope spline operands with constraint-unsupported", () => {
+    // The kinds with NO spline meaning at all still decline: radius and
+    // diameter (a spline has no radius parameter), collinear (its
+    // meaningful spline reading is pointOnTangent), horizontal/vertical.
     const diagnostic = validateConstraintReferences(
-      createParallelConstraint(cid("skcon_par"), lineA, splineA),
+      createCollinearConstraint(cid("skcon_col"), lineA, splineA),
       newEntities,
     );
     expect(diagnostic).not.toBeNull();
@@ -549,7 +701,7 @@ describe("phase 36 constraints", () => {
     );
     expect(
       validateConstraintReferences(
-        createTangentConstraint(cid("skcon_tan"), splineA, circleA),
+        createRadiusConstraint(cid("skcon_r"), splineA, length(4)),
         newEntities,
       )?.code,
     ).toBe(SKETCH_DIAGNOSTIC_CODES.constraintUnsupported);

@@ -20,6 +20,7 @@ import {
   revolveSignedExtremes,
   type RevolveAxisFrame,
 } from "./profile-geometry";
+import { certifiedCubicExtremes } from "./profile-splines";
 
 /** Normalizes an axis or fails the test (degenerate axes are adapter-rejected). */
 function frameOf(axis: ProfileRevolveAxisInput): RevolveAxisFrame {
@@ -432,5 +433,133 @@ describe("revolvePappusVolume", () => {
     );
     const volume = revolvePappusVolume(polygon, Math.PI * 2);
     expect(volume).toBeCloseTo(Math.PI * 25 ** 2 * 30, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 37: certified spline×axis crossing (§8 of
+// docs/design/spline-constraint-math.md) — the scalar-cubic extremes replace
+// tessellation sampling, closing the constructible false-negative gap.
+// ---------------------------------------------------------------------------
+
+describe("certifiedCubicExtremes (§8.3)", () => {
+  it("certifies the arch's one-sided hull non-crossing at depth 0 (§8.6 #1)", () => {
+    // y-controls (0, 2, 2, 0): hull [0, 2] one-sided, the monotone test
+    // fires on the descending halves — exact, zero subdivisions.
+    const { lo, hi, depth } = certifiedCubicExtremes(0, 2, 2, 0);
+    expect(lo).toBeCloseTo(0, 12);
+    // y(t) = 6ut peaks at 3/2 on t = 1/2 (the apex — exact via the
+    // derivative's linear root, A = 0).
+    expect(hi).toBeCloseTo(1.5, 12);
+    expect(depth).toBe(0);
+  });
+
+  it("certifies the crossing wiggle with the exact ±√3/2 extremes (§8.6 #2)", () => {
+    const { lo, hi, depth } = certifiedCubicExtremes(0, 3, -3, 0);
+    expect(lo).toBeCloseTo(-Math.sqrt(3) / 2, 12);
+    expect(hi).toBeCloseTo(Math.sqrt(3) / 2, 12);
+    expect(depth).toBe(0);
+  });
+
+  it("brackets every case: [lo, hi] ⊇ [trueMin, trueMax] on a sweep", () => {
+    // A deterministic sweep of control quartets, each verified against a
+    // dense on-curve sampling: lo ≤ sampled min, hi ≥ sampled max.
+    let cases = 0;
+    for (const g0 of [-2, 0, 0.5]) {
+      for (const g1 of [-3, 0.001, 2]) {
+        for (const g2 of [-3, -0.001, 2]) {
+          for (const g3 of [-2, 0, 0.5]) {
+            const { lo, hi } = certifiedCubicExtremes(g0, g1, g2, g3);
+            let sampledLo = Number.POSITIVE_INFINITY;
+            let sampledHi = Number.NEGATIVE_INFINITY;
+            for (let i = 0; i <= 2000; i += 1) {
+              const t = i / 2000;
+              const u = 1 - t;
+              const value =
+                u * u * u * g0 +
+                3 * u * u * t * g1 +
+                3 * u * t * t * g2 +
+                t * t * t * g3;
+              sampledLo = Math.min(sampledLo, value);
+              sampledHi = Math.max(sampledHi, value);
+            }
+            expect(lo).toBeLessThanOrEqual(sampledLo + 1e-12);
+            expect(hi).toBeGreaterThanOrEqual(sampledHi - 1e-12);
+            cases += 1;
+          }
+        }
+      }
+    }
+    expect(cases).toBe(81);
+  });
+
+  it("is deterministic: identical controls, identical result", () => {
+    expect(certifiedCubicExtremes(0.3, -1.2, 2.4, 0.9)).toEqual(
+      certifiedCubicExtremes(0.3, -1.2, 2.4, 0.9),
+    );
+  });
+});
+
+/** A closed-ish spline loop segment for the crossing-rule probes. */
+function splineSegmentOf(
+  points: readonly (readonly [number, number])[],
+): Parameters<typeof revolveSignedExtremes>[0][number] {
+  return { kind: "spline", flavor: "control", points };
+}
+
+describe("revolveCrossesAxis — the certified spline branch (§8.1/§8.6 #3)", () => {
+  it("accepts the arch touching the x axis from above (non-crossing certified)", () => {
+    // y-controls (0, 2, 2, 0): min 0 ≥ −τ — legal touching.
+    const loop = [
+      splineSegmentOf([
+        [0, 0],
+        [1, 2],
+        [3, 2],
+        [4, 0],
+      ]),
+    ];
+    expect(revolveCrossesAxis(loop, X_FRAME)).toBe(false);
+  });
+
+  it("rejects the transversal wiggle (0, 3, −3, 0) with exact ±√3/2 extremes", () => {
+    const loop = [
+      splineSegmentOf([
+        [0, 0],
+        [1, 3],
+        [3, -3],
+        [4, 0],
+      ]),
+    ];
+    expect(revolveCrossesAxis(loop, X_FRAME)).toBe(true);
+    const extremes = revolveSignedExtremes(loop, X_FRAME);
+    expect(extremes.min).toBeCloseTo(-Math.sqrt(3) / 2, 12);
+    expect(extremes.max).toBeCloseTo(Math.sqrt(3) / 2, 12);
+  });
+
+  it("catches the δ = 0.001 sub-deflection crossing the tessellated check missed (§8.6 #3)", () => {
+    // x-controls (0, 1, 3, 4), y-controls (0, δ, −δ, 0) with δ = 0.001 <
+    // PROFILE_SPLINE_DEFLECTION_MM = 0.01: the flatness criterion passes at
+    // depth 0, the tessellation emits only the endpoints, and the SAMPLED
+    // extremes are (0, 0) — no crossing. The curve crosses the x axis
+    // transversally at t = 1/2 (y(½) = 0) with extremes ±δ√3/6 ≈ 0.000289
+    // at t = (3 ± √3)/6 — below the 0.01 deflection, invisible to sampled
+    // extremes. The certified clipping must report crossing.
+    const delta = 0.001;
+    const loop = [
+      splineSegmentOf([
+        [0, 0],
+        [1, delta],
+        [3, -delta],
+        [4, 0],
+      ]),
+    ];
+    expect(revolveCrossesAxis(loop, X_FRAME)).toBe(true);
+    const extremes = revolveSignedExtremes(loop, X_FRAME);
+    // On-curve contact values: y(¼) = +0.00028125·… — the certified
+    // The exact critical values: controls (0, δ, −δ, 0) = (δ/3)·(0, 3,
+    // −3, 0), so the extremes are ±(δ/3)(√3/2) = ±δ√3/6 at t = (3±√3)/6.
+    const exact = (delta * Math.sqrt(3)) / 6;
+    expect(extremes.min).toBeCloseTo(-exact, 12);
+    expect(extremes.max).toBeCloseTo(exact, 12);
   });
 });

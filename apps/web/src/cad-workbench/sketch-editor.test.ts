@@ -16,10 +16,12 @@ import {
   createParallelConstraint,
   createPointEntity,
   createRectangleEntity,
+  createPolygonEntity,
   createSketch,
   createSketchConstraintId,
   createSketchEntityId,
   createSplineEntity,
+  createStraightSlotEntity,
   xyWorkplane,
   type Sketch,
 } from "@slopcad/cad-sketch";
@@ -805,5 +807,330 @@ describe("sketch editor phase 36 gestures and constraints", () => {
     expect(points.length).toBeGreaterThan(5);
     expect(points[0]).toEqual({ x: 0, y: 0 });
     expect(points[points.length - 1]).toEqual({ x: 10, y: 0 });
+  });
+});
+
+describe("sketch editor phase 37 gestures and constraints", () => {
+  /** A sketch with a control spline, a line, a polygon, and a straight slot. */
+  function sketchWithPhase37Entities(): Sketch {
+    const spline = createSketchEntityId("skent_spline");
+    const line = createSketchEntityId("skent_line");
+    const polygon = createSketchEntityId("skent_polygon");
+    const slot = createSketchEntityId("skent_slot");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createSplineEntity(spline, "control", [
+          { x: 0, y: 0 },
+          { x: 1, y: 2 },
+          { x: 3, y: 2 },
+          { x: 4, y: 0 },
+        ]),
+        createLineEntity(line, { x: 8, y: 0 }, { x: 8, y: 6 }),
+        createPolygonEntity(polygon, { x: 20, y: 0 }, 6, 5, 0, "inscribed"),
+        createStraightSlotEntity(
+          slot,
+          { x: -20, y: -10 },
+          { x: -10, y: -10 },
+          2,
+        ),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    return created.value;
+  }
+
+  /** Activates `tool`, replays `picks`, returns the final transition. */
+  function commitPicks(
+    sketch: Sketch,
+    tool: string,
+    picks: readonly { x: number; y: number; entityId: string }[],
+  ): ReturnType<typeof sketchEditorReducer> {
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: tool as never, type: "activate-tool" },
+      sketch,
+    ).state;
+    let last = { transaction: null } as ReturnType<typeof sketchEditorReducer>;
+    for (const pick of picks) {
+      last = sketchEditorReducer(
+        state,
+        {
+          point: { x: pick.x, y: pick.y },
+          entityId: pick.entityId,
+          type: "canvas-pick",
+        },
+        sketch,
+      );
+      state = last.state;
+    }
+    return last;
+  }
+
+  it("draws a control spline in four picks as one entity.create", () => {
+    const sketch = createWorkbenchSketch();
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "spline", type: "activate-tool" },
+      sketch,
+    ).state;
+    const points = [
+      { x: -10, y: -5 },
+      { x: -7, y: 3 },
+      { x: -1, y: 3 },
+      { x: 2, y: -5 },
+    ];
+    let last = { transaction: null } as ReturnType<typeof sketchEditorReducer>;
+    for (const point of points) {
+      last = sketchEditorReducer(
+        state,
+        { point, entityId: null, type: "canvas-pick" },
+        sketch,
+      );
+      state = last.state;
+    }
+    expect(last.transaction).toMatchObject({
+      commands: [
+        {
+          type: "sketch.entity.create",
+          entity: {
+            kind: "spline",
+            flavor: "control",
+            points: points.map((point) => ({ x: point.x, y: point.y })),
+          },
+        },
+      ],
+    });
+  });
+
+  it("refuses a spline whose first and last control points coincide", () => {
+    const sketch = createWorkbenchSketch();
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "spline", type: "activate-tool" },
+      sketch,
+    ).state;
+    const points = [
+      { x: 0, y: 0 },
+      { x: 1, y: 2 },
+      { x: 3, y: 2 },
+      { x: 0, y: 0 },
+    ];
+    for (const point of points.slice(0, 3)) {
+      state = sketchEditorReducer(
+        state,
+        { point, entityId: null, type: "canvas-pick" },
+        sketch,
+      ).state;
+    }
+    const degenerate = sketchEditorReducer(
+      state,
+      {
+        point: points[3] as { x: number; y: number },
+        entityId: null,
+        type: "canvas-pick",
+      },
+      sketch,
+    );
+    expect(degenerate.transaction).toBeNull();
+    expect(degenerate.state.status.severity).toBe("error");
+  });
+
+  it("draws a polygon in two picks (center then vertex)", () => {
+    const sketch = createWorkbenchSketch();
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "polygon", type: "activate-tool" },
+      sketch,
+    ).state;
+    state = sketchEditorReducer(
+      state,
+      { point: { x: 10, y: 5 }, entityId: null, type: "canvas-pick" },
+      sketch,
+    ).state;
+    const commit = sketchEditorReducer(
+      state,
+      { point: { x: 16, y: 5 }, entityId: null, type: "canvas-pick" },
+      sketch,
+    );
+    expect(commit.transaction).toMatchObject({
+      commands: [
+        {
+          type: "sketch.entity.create",
+          entity: {
+            kind: "polygon",
+            sides: 6,
+            fit: "inscribed",
+            cx: 10,
+            cy: 5,
+            radius: 6,
+            rotation: 0,
+          },
+        },
+      ],
+    });
+  });
+
+  it("commits tangent between a line and a spline (anywhere tangency)", () => {
+    const commit = commitPicks(sketchWithPhase37Entities(), "tangent", [
+      { x: 8, y: 3, entityId: "skent_line" },
+      { x: 2, y: 1.5, entityId: "skent_spline" },
+    ]);
+    expect(commit.transaction).toMatchObject({
+      commands: [
+        {
+          type: "sketch.constraint.create",
+          constraint: {
+            kind: "tangent",
+            first: "skent_line",
+            second: "skent_spline",
+          },
+        },
+      ],
+    });
+  });
+
+  it("commits tangent between two splines (a G1 joint)", () => {
+    const a = createSketchEntityId("skent_a");
+    const b = createSketchEntityId("skent_b");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createSplineEntity(a, "control", [
+          { x: 0, y: 0 },
+          { x: 1, y: 2 },
+          { x: 3, y: 2 },
+          { x: 4, y: 0 },
+        ]),
+        createSplineEntity(b, "control", [
+          { x: 4, y: 0 },
+          { x: 5, y: -2 },
+          { x: 7, y: -2 },
+          { x: 8, y: 0 },
+        ]),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const commit = commitPicks(created.value, "tangent", [
+      { x: 2, y: 1, entityId: "skent_a" },
+      { x: 6, y: -1, entityId: "skent_b" },
+    ]);
+    expect(commit.transaction).toMatchObject({
+      commands: [
+        {
+          constraint: { kind: "tangent", first: "skent_a", second: "skent_b" },
+        },
+      ],
+    });
+  });
+
+  it("addresses the spline end the direction tools pick (at = start near P0)", () => {
+    const commit = commitPicks(sketchWithPhase37Entities(), "parallel", [
+      { x: 8, y: 3, entityId: "skent_line" },
+      { x: 0.2, y: 0.1, entityId: "skent_spline" },
+    ]);
+    expect(commit.transaction).toMatchObject({
+      commands: [
+        {
+          constraint: {
+            kind: "parallel",
+            first: "skent_line",
+            second: "skent_spline",
+            at: "start",
+          },
+        },
+      ],
+    });
+  });
+
+  it("measures the angle between a line and a spline's start tangent", () => {
+    const commit = commitPicks(sketchWithPhase37Entities(), "angle", [
+      { x: 8, y: 3, entityId: "skent_line" },
+      { x: 0.2, y: 0.1, entityId: "skent_spline" },
+    ]);
+    // Line direction (0,6) (90°); start tangent (1,2)·3 (63.4349°) —
+    // measured angle 26.5651°.
+    const command = (
+      commit.transaction as unknown as {
+        commands: { constraint: { value: { value: number } } }[];
+      }
+    ).commands[0];
+    expect(command?.constraint.value.value).toBeCloseTo(26.56505117707799, 9);
+  });
+
+  it("pins a point onto a polygon and a straight slot through pointOnEntity", () => {
+    const sketch = sketchWithPhase37Entities();
+    const polygonCommit = commitPicks(sketch, "pointOnEntity", [
+      { x: 8, y: 3, entityId: "skent_line" },
+      { x: 20, y: 4, entityId: "skent_polygon" },
+    ]);
+    expect(polygonCommit.transaction).toMatchObject({
+      commands: [
+        { constraint: { kind: "pointOnEntity", entity: "skent_polygon" } },
+      ],
+    });
+    const slotCommit = commitPicks(sketch, "pointOnEntity", [
+      { x: 8, y: 3, entityId: "skent_line" },
+      { x: -15, y: -8, entityId: "skent_slot" },
+    ]);
+    expect(slotCommit.transaction).toMatchObject({
+      commands: [
+        { constraint: { kind: "pointOnEntity", entity: "skent_slot" } },
+      ],
+    });
+  });
+
+  it("commits pointOnTangent with the picked spline end", () => {
+    const commit = commitPicks(sketchWithPhase37Entities(), "pointOnTangent", [
+      { x: 8, y: 3, entityId: "skent_line" },
+      { x: 0.2, y: 0.1, entityId: "skent_spline" },
+    ]);
+    expect(commit.transaction).toMatchObject({
+      commands: [
+        {
+          constraint: {
+            kind: "pointOnTangent",
+            spline: "skent_spline",
+            at: "start",
+          },
+        },
+      ],
+    });
+  });
+
+  it("refuses two splines for parallel (no direction pair)", () => {
+    const a = createSketchEntityId("skent_a");
+    const b = createSketchEntityId("skent_b");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createSplineEntity(a, "control", [
+          { x: 0, y: 0 },
+          { x: 1, y: 2 },
+          { x: 3, y: 2 },
+          { x: 4, y: 0 },
+        ]),
+        createSplineEntity(b, "control", [
+          { x: 8, y: 0 },
+          { x: 9, y: 2 },
+          { x: 11, y: 2 },
+          { x: 12, y: 0 },
+        ]),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const commit = commitPicks(created.value, "parallel", [
+      { x: 2, y: 1, entityId: "skent_a" },
+      { x: 10, y: 1, entityId: "skent_b" },
+    ]);
+    expect(commit.transaction).toBeNull();
+    expect(commit.state.status.severity).toBe("error");
   });
 });

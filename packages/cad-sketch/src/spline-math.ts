@@ -61,7 +61,15 @@ function splineDeriv(
   index: number,
 ) => readonly { readonly point: number; readonly weight: number }[] {
   if (chain.flavor === "control") {
-    return (index) => [{ point: index, weight: 1 }];
+    // The caller addresses a control by its CHAIN index (4·segment + which,
+    // mirroring the interpolated flavor's span addressing), but the control
+    // flavor packs one segment per three new points: segment k's controls
+    // are stored points 3k..3k+3. The identity map was only correct for
+    // segment 0 — every later segment landed its gradient on the wrong
+    // stored point (or past the end of the point list).
+    return (index) => [
+      { point: 3 * Math.floor(index / 4) + (index % 4), weight: 1 },
+    ];
   }
   return (index) => splineFitDeriv(chain, index);
 }
@@ -216,6 +224,133 @@ export function splinePointGradient(
     }
   }
   return grad;
+}
+
+/**
+ * The derivative Bernstein weights of one cubic segment at `t`:
+ * `B'(t) = (−3u², 3(u²−2ut), 3(2ut−t²), 3t²)` with `u = 1 − t` — the four
+ * weights sum to exactly 0 (the basis partitions unity), and the first
+ * control's weight is always ≤ 0.
+ */
+function bernsteinDerivative(
+  t: number,
+): readonly [number, number, number, number] {
+  const u = 1 - t;
+  return [
+    -3 * u * u,
+    3 * (u * u - 2 * u * t),
+    3 * (2 * u * t - t * t),
+    3 * t * t,
+  ];
+}
+
+/**
+ * The chain's tangent (dC/dt) at (segment, t) — the exact derivative, the
+ * same evaluation the point gradient chains through. End tangents have the
+ * closed forms `C'(0) = 3(b1 − b0)` and `C'(1) = 3(b3 − b2)`, so a control
+ * flavor's end tangent is `3(P_1 − P_0)` / `3(P_{N−1} − P_{N−2})` and the
+ * interpolated flavor's is the same direction at 1/6 the magnitude.
+ */
+export function splineTangent(
+  chain: SplineChain,
+  segment: number,
+  t: number,
+): { readonly vx: number; readonly vy: number } {
+  const seg = chain.segments[segment];
+  if (seg === undefined) {
+    throw new RangeError(`Spline chain has no segment ${String(segment)}.`);
+  }
+  const [w0, w1, w2, w3] = bernsteinDerivative(t);
+  return {
+    vx: w0 * seg.b0.x + w1 * seg.b1.x + w2 * seg.b2.x + w3 * seg.b3.x,
+    vy: w0 * seg.b0.y + w1 * seg.b1.y + w2 * seg.b2.y + w3 * seg.b3.y,
+  };
+}
+
+/**
+ * The exact gradient of the tangent at (segment, t) w.r.t. the spline's
+ * stored points — the mirror of {@link splinePointGradient} for the
+ * derivative weights: `H_i(t) = Σ_j B'_j(t)·M[j][i]`, the same scalar on
+ * the point's x and y slots. Sparsity: a control-flavor end tangent touches
+ * exactly its two end points with weights (+3, −3); the interpolated flavor
+ * touches the same two with (+1/2, −1/2); an interior anchor of an
+ * interpolated span touches the 4 neighboring fit points.
+ */
+export function splineTangentGradient(
+  chain: SplineChain,
+  segment: number,
+  t: number,
+): ReadonlyMap<number, number> {
+  const seg = chain.segments[segment];
+  if (seg === undefined) {
+    throw new RangeError(`Spline chain has no segment ${String(segment)}.`);
+  }
+  const weights = bernsteinDerivative(t);
+  const grad = new Map<number, number>();
+  const derivative = splineDeriv(chain);
+  for (let which = 0; which < 4; which += 1) {
+    const w = weights[which];
+    if (w === undefined || w === 0) continue;
+    for (const term of derivative(4 * segment + which)) {
+      grad.set(term.point, (grad.get(term.point) ?? 0) + w * term.weight);
+    }
+  }
+  return grad;
+}
+
+/**
+ * The strictly interior stationary parameters of a scalar cubic in Bézier
+ * form (controls `g0..g3`): the roots in `(0, 1)` of the derivative
+ * quadratic, whose Bernstein controls are `3(g_{j+1} − g_j)`, power form
+ * `A·t² + B·t + C` with `A = q0 − 2q1 + q2`, `B = 2(q1 − q0)`, `C = q0`.
+ * At most two parameters, ascending.
+ *
+ * Rooting is the Kahan-stable quadratic — with `Q = −(B + sign(B)·√D)/2`
+ * the two roots are `Q/A` and `C/Q`, products that never subtract
+ * nearly-equal magnitudes — plus a tolerance-based near-linear fallback
+ * (`|A| ≤ 1e-12·scale` treats the quadratic term as fp noise and returns
+ * the well-conditioned linear root `−C/B`). The naive `(-B ± √D)/2A` form
+ * loses the root entirely when `A` is analytically zero but computed as
+ * ~1e-14 (catastrophic cancellation sends both roots out of `(0, 1)`),
+ * which made the anywhere-tangency anchor jump discontinuously under
+ * 1e-6 parameter perturbations. This is the same scalar-cubic machinery
+ * the kernel's `certifiedCubicExtremes` leaf carries (the deliberate
+ * `spline-math.ts` ↔ `profile-splines.ts` mirror — §8.5).
+ */
+export function cubicStationaryParameters(
+  g0: number,
+  g1: number,
+  g2: number,
+  g3: number,
+): readonly number[] {
+  const q0 = 3 * (g1 - g0);
+  const q1 = 3 * (g2 - g1);
+  const q2 = 3 * (g3 - g2);
+  const a = q0 - 2 * q1 + q2;
+  const b = 2 * (q1 - q0);
+  const c = q0;
+  const roots: number[] = [];
+  const keep = (t: number): void => {
+    if (t > 0 && t < 1) roots.push(t);
+  };
+  const scale = Math.max(Math.abs(a), Math.abs(b), Math.abs(c));
+  if (scale === 0) return roots;
+  if (Math.abs(a) <= 1e-12 * scale) {
+    // (Near-)linear derivative: the t² coefficient is floating-point noise
+    // (analytically zero — a true quadratic g). −C/B is the stable limit.
+    if (Math.abs(b) > 1e-12 * scale) keep(-c / b);
+    return roots.sort((x, y) => x - y);
+  }
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant <= 0) return roots;
+  const root = Math.sqrt(discriminant);
+  const q = -(b + (b >= 0 ? root : -root)) / 2;
+  // Q = 0 would force B = 0 and C = 0, leaving A·t² = 0 — no interior root.
+  if (q !== 0) {
+    keep(c / q);
+    keep(q / a);
+  }
+  return roots.sort((x, y) => x - y);
 }
 
 /** Maximum chord deviation of a tessellated spline (mm). */

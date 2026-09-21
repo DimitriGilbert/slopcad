@@ -12,11 +12,14 @@ vocabulary lives in `@slopcad/cad-sketch`'s `constraints.ts`.
   perpendicular, tangent (`TANGENT_VARIANTS`: external | internal),
   midpoint, equal, symmetry — one kind whose two builders mirror about a
   point target (`createSymmetryAboutPointConstraint`) or about a line
-  (`createSymmetryAboutLineConstraint`). Phase 36 adds pointOnEntity (a
+  (`createSymmetryAboutLineConstraint`). Phase 36 added pointOnEntity (a
   point on a line/circle/arc/ellipse/spline curve — arcs participate as
   their full circles, the tangency convention), collinear (two lines on
   one infinite line, 2 equations), and the point-pair alignments
-  horizontalPair / verticalPair (two point targets share y / x).
+  horizontalPair / verticalPair (two point targets share y / x). Phase 37
+  added pointOnTangent (a point on the line through a spline's end along
+  that end's tangent — "collinear with the end tangent") and widened the
+  operand kinds below.
 - **Dimensional** (`DIMENSIONAL_CONSTRAINT_KINDS`): distance, radius,
   diameter, angle — each carrying a dimensional value — plus the Phase 36
   signed axis dimensions distanceX / distanceY
@@ -25,15 +28,44 @@ vocabulary lives in `@slopcad/cad-sketch`'s `constraints.ts`.
   radius — circumradius or inradius per the fit) and slots (the cap
   radius).
 
-### The spline scope (Phase 36's pinned honesty)
+### Spline operands (Phase 36 pinned the subset; Phase 37 closed it)
 
 Spline entities accept point-target constraints on their `start`/`end`
 (the curve passes through both), `pointOnEntity` onto them (a
 frozen-parameter projection onto the tessellated chord form — see
-`spline-math.ts`), and the `fixed` pin. Every other constraint kind
-with a spline operand — tangency, equality, parallelism,
-perpendicularity, angle, radius/diameter — declines at validation with
-`sketch/constraint-unsupported`, never a silent mis-solve.
+`spline-math.ts`), the `fixed` pin, and the Phase 37 additions:
+
+- **tangent(line, spline)** — ANYWHERE tangency: one equation, the
+  contact eliminated at a per-evaluation stationary anchor (codimension
+  1, exactly like line↔circle). **tangent(spline, spline)** — a G1
+  joint: `first.end` coincides with `second.start` AND the end/start
+  tangents share direction (3 equations). Anywhere spline↔spline
+  tangency needs constraint-owned auxiliary solver unknowns and stays a
+  staged design (see `docs/design/spline-constraint-math.md` §1.6).
+- **parallel / perpendicular / angle** with a line↔spline pair — the row
+  addresses the spline's END tangent (the `at` operand on the
+  constraint, `"start" | "end"`, default `"end"`); direction-only, the
+  line↔line convention. Full "meets" semantics composes these with a
+  contact row, the layering the line↔line kinds already imply.
+- **equal(line | spline, line | spline)** — equal endpoint chords: a
+  spline counts the distance between its first and last stored points
+  (the same notion `equal` uses for line lengths).
+- **pointOnTangent(point, spline, at?)** — the point lies on the line
+  through the spline's end along that end's tangent (1 equation, mm).
+
+Still declined at validation with `sketch/constraint-unsupported`, never
+a silent mis-solve: radius/diameter (a spline has no radius parameter),
+collinear (its meaningful spline reading is `pointOnTangent`), and
+horizontal/vertical (single-line kinds).
+
+### Composite operands (Phase 37)
+
+`pointOnEntity` also accepts **polygons** (the boundary perimeter — a
+stateless per-evaluation min over the edges; the argmin constituent's
+gradient is the row's, Danskin-style) and **straight slots** (the
+stadium boundary — two edge segments plus two gated semicircular caps).
+The arc3 slot variant stays outside the subset until the straight-slot
+row has fixture coverage.
 
 Points are addressed by `pointTarget(entityId, "start" | "end" |
 "center")` — constraints bind to an entity's endpoint or a point's

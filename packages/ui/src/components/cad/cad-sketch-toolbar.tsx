@@ -107,13 +107,28 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "Construction",
       tooltip: "Toggle construction geometry on the selected entities",
     },
+    spline: {
+      label: "Spline",
+      tooltip:
+        "Draw a spline: click four control points (one cubic Bézier segment)",
+    },
+    polygon: {
+      label: "Polygon",
+      tooltip:
+        "Draw a hexagon: click the center, then the first vertex (sets size and rotation)",
+    },
     coincident: { label: "Coincident", tooltip: "Make two points coincide" },
     horizontal: { label: "Horizontal", tooltip: "Make a line horizontal" },
     vertical: { label: "Vertical", tooltip: "Make a line vertical" },
     pointOnEntity: {
       label: "Point On",
       tooltip:
-        "Pin a point onto a curve: click the point entity, then the curve (line, circle/arc, ellipse, spline)",
+        "Pin a point onto a curve: click the point entity, then the curve (line, circle/arc, ellipse, spline, polygon, slot)",
+    },
+    pointOnTangent: {
+      label: "On Tangent",
+      tooltip:
+        "Pin a point onto a spline's end-tangent line: click the point, then the spline end",
     },
     collinear: {
       label: "Collinear",
@@ -127,19 +142,28 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "V Align",
       tooltip: "Make two points share their x",
     },
-    parallel: { label: "Parallel", tooltip: "Make two lines parallel" },
+    parallel: {
+      label: "Parallel",
+      tooltip:
+        "Make two lines parallel, or a line parallel to a spline's end tangent",
+    },
     perpendicular: {
       label: "Perpendicular",
-      tooltip: "Make two lines perpendicular",
+      tooltip:
+        "Make two lines perpendicular, or a line perpendicular to a spline's end tangent",
     },
-    equal: { label: "Equal", tooltip: "Equal lengths or equal radii" },
+    equal: {
+      label: "Equal",
+      tooltip: "Equal lengths, radii, or spline endpoint chords",
+    },
     midpoint: {
       label: "Midpoint",
       tooltip: "Pin a point to a line's midpoint",
     },
     tangent: {
       label: "Tangent",
-      tooltip: "Tangency between lines and circles/arcs",
+      tooltip:
+        "Tangency between lines and circles/arcs, a line and a spline, or a G1 joint between two splines",
     },
     distance: {
       label: "Distance",
@@ -158,7 +182,11 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "Diameter",
       tooltip: "Dimension a circle or arc diameter",
     },
-    angle: { label: "Angle", tooltip: "Dimension the angle between two lines" },
+    angle: {
+      label: "Angle",
+      tooltip:
+        "Dimension the angle between two lines, or a line and a spline's end tangent",
+    },
   },
 };
 

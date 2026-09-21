@@ -52,6 +52,7 @@ import {
   applySketchSessionTransaction,
   canRedoSketch,
   canUndoSketch,
+  createPolygonEntity,
   createReferenceSketchSolver,
   createSketchSession,
   createStraightSlotEntity,
@@ -91,6 +92,7 @@ import {
   createWorkbenchSketch,
   isSketchToolId,
   pointTargetPosition,
+  POLYGON_TOOL_SIDES,
   SKETCH_CANVAS,
   SKETCH_CONSTRAINT_TOOLS,
   SKETCH_DRAWING_TOOLS,
@@ -553,8 +555,41 @@ export function SketchMode({
               kind: "line",
               to: pointer,
             };
+      case "spline": {
+        // The picked controls so far, threaded through the pointer — the
+        // same polyline the committed control spline will render as once a
+        // fourth control lands.
+        const points = [...editor.gesture.points, pointer].map((point) => ({
+          x: point.x,
+          y: point.y,
+        }));
+        return points.length < 2
+          ? { kind: "none" }
+          : { kind: "polyline", points };
+      }
+      case "polygon": {
+        // The provisional hexagon (the tool's fixed discrete parameters)
+        // through the domain's own boundary derivation.
+        const { center } = editor.gesture;
+        const radius = Math.hypot(pointer.x - center.x, pointer.y - center.y);
+        if (!(radius > 0)) return { kind: "none" };
+        const provisional = createPolygonEntity(
+          createSketchEntityId("skent_preview"),
+          center,
+          radius,
+          POLYGON_TOOL_SIDES,
+          Math.atan2(pointer.y - center.y, pointer.x - center.x),
+          "inscribed",
+        );
+        const points = entityPolyline(provisional);
+        if (points === null || points.length < 2) return { kind: "none" };
+        return {
+          kind: "polyline",
+          points: points.map((point) => ({ x: point.x, y: point.y })),
+        };
+      }
       default:
-        return { kind: "none" } as const;
+        return { kind: "none" };
     }
   })();
 
