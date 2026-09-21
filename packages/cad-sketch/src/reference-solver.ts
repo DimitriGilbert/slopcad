@@ -97,7 +97,11 @@ interface Evaluation {
   readonly rms: number;
 }
 
-function evaluateRows(
+/**
+ * Evaluates every residual row at `parameters` (package-internal: shared
+ * with `constrainedness.ts`, never exported through the package index).
+ */
+export function evaluateRows(
   rows: readonly ResidualRow[],
   parameters: readonly number[],
 ): Evaluation {
@@ -120,7 +124,7 @@ function stepNorm(step: readonly number[]): number {
 }
 
 /** Strips the columns of pinned entities from a sparse gradient. */
-function stripFixed(
+export function stripFixed(
   grad: ReadonlyMap<number, number>,
   fixedSlots: ReadonlySet<number>,
 ): Map<number, number> {
@@ -132,7 +136,8 @@ function stripFixed(
   return stripped;
 }
 
-function denseJacobian(
+/** Densifies sparse gradient rows into a matrix (package-internal). */
+export function denseJacobian(
   gradients: readonly ReadonlyMap<number, number>[],
   parameterCount: number,
 ): number[][] {

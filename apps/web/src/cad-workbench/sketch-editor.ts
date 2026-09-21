@@ -40,7 +40,7 @@
  * ids, the status line shows text.
  */
 
-import { angle, length, valueIn, type LengthValue } from "@slopcad/cad-core";
+import { angle, length, type LengthValue } from "@slopcad/cad-core";
 import {
   createAngleConstraint,
   createCircleEntity,
@@ -71,13 +71,22 @@ import {
   createTangentConstraint,
   createVerticalConstraint,
   createVerticalPairConstraint,
+  dimensionText,
   entityPolyline,
+  extendLineCommand,
   isSketchConstraintKind,
+  mirrorEntitiesCommands,
+  offsetEntitiesCommands,
   pointTarget,
+  pointTargetPosition,
   serializeSketchConstraint,
   serializeSketchEntity,
+  translateSketchEntity,
+  sketchDimensionPresentations,
   validateConstraintReferences,
   xyWorkplane,
+  SKETCH_ENTITY_OP_ERROR_CODES,
+  type DimensionPresentation,
   type PointTarget,
   type Sketch,
   type SketchCommand,
@@ -86,12 +95,14 @@ import {
   type SketchDiagnostic,
   type SketchEntity,
   type SketchEntityId,
+  type SketchConstrainedness,
   type SketchTransaction,
   type SolvedEntityParameters,
   type SplineEndSelection,
 } from "@slopcad/cad-sketch";
 import type {
   CadSketchCanvasAnnotation,
+  CadSketchCanvasDimension,
   CadSketchCanvasEntity,
   CadSketchCanvasRegion,
   CadSketchDiagnosticLevel,
@@ -115,7 +126,21 @@ export const SKETCH_DRAWING_TOOLS = [
   "polygon",
 ] as const;
 
-/** The constraint tools of the second cluster (the domain's kind names). */
+/**
+ * The entity-operation tools of the second cluster (Phase 37): offset,
+ * mirror, the arrays, extend, and convert — the multi-entity grammar the
+ * domain's `entity-ops`/`convert` modules back.
+ */
+export const SKETCH_EDIT_TOOLS = [
+  "offset",
+  "mirror",
+  "extend",
+  "rectArray",
+  "circArray",
+  "convert",
+] as const;
+
+/** The constraint tools of the third cluster (the domain's kind names). */
 export const SKETCH_CONSTRAINT_TOOLS = [
   "coincident",
   "horizontal",
@@ -139,11 +164,14 @@ export const SKETCH_CONSTRAINT_TOOLS = [
 ] as const;
 
 export type SketchDrawingTool = (typeof SKETCH_DRAWING_TOOLS)[number];
+export type SketchEditTool = (typeof SKETCH_EDIT_TOOLS)[number];
 export type SketchConstraintTool = (typeof SKETCH_CONSTRAINT_TOOLS)[number];
-export type SketchToolId = SketchDrawingTool | SketchConstraintTool;
+export type SketchToolId =
+  SketchDrawingTool | SketchEditTool | SketchConstraintTool;
 
 const SKETCH_TOOL_ID_SET: ReadonlySet<string> = new Set<string>([
   ...SKETCH_DRAWING_TOOLS,
+  ...SKETCH_EDIT_TOOLS,
   ...SKETCH_CONSTRAINT_TOOLS,
 ]);
 
@@ -194,10 +222,33 @@ export type SketchGesture =
       readonly center: EditorPoint;
     }
   | {
-      /** The first pick of either multi-pick curve gesture. */
+      /**
+       * The first pick of a multi-pick gesture: ellipse/slot centerline
+       * picks, the offset's source entity (entityId), or the offset's
+       * second (point) pick via the offset gesture below.
+       */
       readonly kind: "pick";
-      readonly tool: "ellipse" | "slot";
+      readonly tool: "ellipse" | "slot" | "offset";
       readonly point: EditorPoint;
+      /** The picked entity, when the gesture addresses one (offset). */
+      readonly entityId?: SketchEntityId;
+    }
+  | {
+      /**
+       * Offset's second pick pending: the source entity is fixed; the next
+       * click's distance and side from it set the offset.
+       */
+      readonly kind: "offset";
+      readonly entityId: SketchEntityId;
+      readonly point: EditorPoint;
+    }
+  | {
+      /**
+       * Mirror after the axis pick: each further click mirrors that entity
+       * about the axis and the tool stays armed for more.
+       */
+      readonly kind: "mirror";
+      readonly axisId: SketchEntityId;
     };
 
 /** One accumulated constraint pick: the entity plus its point target, if any. */
@@ -216,10 +267,32 @@ export interface SketchEditorStatus {
   readonly code: string | null;
 }
 
+/**
+ * The active pointer drag (Phase 37): which entity is being dragged, how
+ * the grab maps to geometry (an endpoint, a spline control, or a rigid
+ * translate), the grab's start point, and the entity's pre-drag values.
+ */
+export interface SketchEditorDrag {
+  readonly entityId: SketchEntityId;
+  readonly mode:
+    | { readonly kind: "endpoint"; readonly which: "start" | "end" }
+    | { readonly kind: "spline-point"; readonly index: number }
+    | { readonly kind: "translate" };
+  readonly start: EditorPoint;
+  readonly original: SketchEntity;
+}
+
 /** The pure editor state the sketch UI renders from. */
 export interface SketchEditorState {
   readonly tool: SketchToolId;
   readonly gesture: SketchGesture;
+  /** The live pointer drag, when one is in progress. */
+  readonly drag: SketchEditorDrag | null;
+  /**
+   * The drag's provisional geometry (not yet committed): the host overlays
+   * it on the sketch and re-solves per move.
+   */
+  readonly provisional: SketchEntity | null;
   readonly picks: readonly SketchEditorPick[];
   readonly hoveredEntityId: string | null;
   readonly selectedEntityIds: readonly SketchEntityId[];
@@ -264,14 +337,41 @@ export const SKETCH_EDITOR_STATUS_TEXT = {
   rectangleEdge: "Referenced by a rectangle: delete the rectangle first.",
   incompatiblePick: "Incompatible pick for this constraint kind.",
   distinctPick: "Incompatible pick: pick two distinct entities.",
+  readyOffset:
+    "Offset: click an entity (a chain of selected lines offsets together).",
+  offsetSecond:
+    "Offset: click a point — its distance and side from the pick set the offset.",
+  readyMirror: "Mirror: click a line to serve as the mirror axis.",
+  mirrorPick:
+    "Mirror: click entities to mirror about the axis (each click commits).",
+  readyExtend:
+    "Extend: click a line near the end to grow it to the nearest boundary.",
+  readyRectArray:
+    "Rectangular array: select entities, set counts and spacings in the inspector, apply.",
+  readyCircArray:
+    "Circular array: select entities, set count, step, and center in the inspector, apply.",
+  readyConvert:
+    "Convert: pick model vertices from the topology list in the inspector.",
+  convertNoTopology:
+    "Convert: no topology view is available in this host — model geometry cannot be converted here.",
+  converted: (count: number): string =>
+    `Converted ${String(count)} model ${count === 1 ? "vertex" : "vertices"} to construction points.`,
+  convertDeclined: (count: number): string =>
+    `${String(count)} reference${count === 1 ? "" : "s"} declined (see the inspector).`,
+  arrayApplied: (count: number): string =>
+    `Array applied: ${String(count)} ${count === 1 ? "copy" : "copies"} created.`,
+  dragged: "Drag committed: the constraints re-solved to hold.",
+  dragRefused: "Drag refused: the constraints reject the moved geometry.",
 } as const;
 
 /** The editor's boot state: the select tool, empty everything. */
 export function createSketchEditorState(): SketchEditorState {
   return {
+    drag: null,
     gesture: { kind: "none" },
     hoveredEntityId: null,
     picks: [],
+    provisional: null,
     selectedConstraintId: null,
     selectedEntityIds: [],
     status: {
@@ -301,12 +401,35 @@ export type SketchEditorEvent =
       readonly type: "select-constraint";
       readonly constraintId: SketchConstraintId | null;
     }
-  | { readonly type: "clear-selection" };
+  | { readonly type: "clear-selection" }
+  | {
+      /** A pointer drag begins on an entity (Phase 37's drag interaction). */
+      readonly type: "drag-start";
+      readonly entityId: string;
+      readonly point: EditorPoint;
+    }
+  | {
+      /** The drag moves: re-derive the provisional geometry. */
+      readonly type: "drag-move";
+      readonly point: EditorPoint;
+    }
+  | { readonly type: "drag-end"; readonly point: EditorPoint }
+  | {
+      /** The host surfaces a status (op outcomes outside the canvas flow). */
+      readonly type: "note-status";
+      readonly status: SketchEditorStatus;
+    };
 
 /** The reducer's outcome: the next state plus the transaction to commit. */
 export interface SketchEditorTransition {
   readonly state: SketchEditorState;
   readonly transaction: SketchTransaction | null;
+  /**
+   * The drag's provisional entity (Phase 37): display-only geometry the
+   * host overlays and re-solves per move; never a transaction. `null`
+   * whenever no live drag produced new geometry.
+   */
+  readonly provisional: SketchEntity | null;
 }
 
 function statusOf(
@@ -400,6 +523,14 @@ function isSpline(entity: SketchEntity): boolean {
 
 /** The polygon drawing tool's fixed side count (a discrete parameter). */
 export const POLYGON_TOOL_SIDES = 6;
+
+/**
+ * The drag grab radius (workplane mm) within which a press near a line
+ * endpoint drags THAT endpoint instead of translating the entity — the
+ * canvas's 8 px hit tolerance mapped through the workbench's 6 px/mm scale
+ * ({@link SKETCH_CANVAS.scale}).
+ */
+export const ENDPOINT_GRAB_MM = 8 / 6;
 
 /** The entity kinds a constraint tool accepts, per pick slot. */
 function pickKindProblem(
@@ -659,98 +790,6 @@ function nearestPointTarget(
     null,
   );
   return nearest === null ? null : nearest.point;
-}
-
-/** The workplane position of a point target (for measuring and annotations). */
-export function pointTargetPosition(
-  entities: readonly SketchEntity[],
-  target: PointTarget,
-): EditorPoint | null {
-  const entity = entities.find((candidate) => candidate.id === target.entity);
-  if (entity === undefined) return null;
-  switch (entity.kind) {
-    case "point":
-      return { x: entity.x, y: entity.y };
-    case "circle":
-      return { x: entity.cx, y: entity.cy };
-    case "line": {
-      if (target.point === "start") return { x: entity.x1, y: entity.y1 };
-      if (target.point === "end") return { x: entity.x2, y: entity.y2 };
-      return {
-        x: (entity.x1 + entity.x2) / 2,
-        y: (entity.y1 + entity.y2) / 2,
-      };
-    }
-    case "arc": {
-      if (target.point === "start") {
-        return {
-          x: entity.cx + entity.radius * Math.cos(entity.startAngle),
-          y: entity.cy + entity.radius * Math.sin(entity.startAngle),
-        };
-      }
-      if (target.point === "end") {
-        return {
-          x: entity.cx + entity.radius * Math.cos(entity.endAngle),
-          y: entity.cy + entity.radius * Math.sin(entity.endAngle),
-        };
-      }
-      return { x: entity.cx, y: entity.cy };
-    }
-    case "ellipse":
-    case "ellipticalArc": {
-      const parametric = (t: number): EditorPoint => {
-        const u = entity.radiusX * Math.cos(t);
-        const v = entity.radiusY * Math.sin(t);
-        const c = Math.cos(entity.rotation);
-        const s = Math.sin(entity.rotation);
-        return {
-          x: entity.cx + c * u - s * v,
-          y: entity.cy + s * u + c * v,
-        };
-      };
-      if (entity.kind === "ellipse") {
-        if (target.point === "start") return parametric(0);
-        if (target.point === "end") return parametric(Math.PI / 2);
-        return { x: entity.cx, y: entity.cy };
-      }
-      if (target.point === "start") return parametric(entity.startAngle);
-      if (target.point === "end") return parametric(entity.endAngle);
-      return { x: entity.cx, y: entity.cy };
-    }
-    case "spline": {
-      const first = entity.points[0];
-      const last = entity.points[entity.points.length - 1];
-      if (target.point === "start" && first !== undefined) return first;
-      if (target.point === "end" && last !== undefined) return last;
-      return null;
-    }
-    case "polygon": {
-      if (target.point === "center") return { x: entity.cx, y: entity.cy };
-      const effective =
-        entity.fit === "inscribed"
-          ? entity.radius
-          : entity.radius / Math.cos(Math.PI / entity.sides);
-      const k = target.point === "start" ? 0 : 1;
-      const angle = entity.rotation + (Math.PI * 2 * k) / entity.sides;
-      return {
-        x: entity.cx + effective * Math.cos(angle),
-        y: entity.cy + effective * Math.sin(angle),
-      };
-    }
-    case "slot": {
-      if (target.point === "start") return { x: entity.x1, y: entity.y1 };
-      if (target.point === "end") {
-        return entity.variant === "straight"
-          ? { x: entity.x2, y: entity.y2 }
-          : { x: entity.x3 ?? entity.x2, y: entity.y3 ?? entity.y2 };
-      }
-      return entity.variant === "straight"
-        ? { x: (entity.x1 + entity.x2) / 2, y: (entity.y1 + entity.y2) / 2 }
-        : { x: entity.x2, y: entity.y2 };
-    }
-    case "rectangle":
-      return null;
-  }
 }
 
 /**
@@ -1330,20 +1369,29 @@ function constraintCommand(
 /**
  * The editor reducer: pure over (state, event, sketch). At decision points
  * it returns the transaction to commit; the host applies it and reports a
- * refusal by overriding the status.
+ * refusal by overriding the status. Drag events (Phase 37) derive the
+ * provisional drag geometry instead of transactions — the host re-solves
+ * per move and commits once at drag end.
  */
-export function sketchEditorReducer(
+interface SketchEditorCoreTransition {
+  readonly state: SketchEditorState;
+  readonly transaction: SketchTransaction | null;
+}
+
+function sketchEditorCore(
   state: SketchEditorState,
   event: SketchEditorEvent,
   sketch: Sketch,
-): SketchEditorTransition {
+): SketchEditorCoreTransition {
   switch (event.type) {
     case "activate-tool":
       return {
         state: {
           ...state,
+          drag: null,
           gesture: { kind: "none" },
           picks: [],
+          provisional: null,
           status: readyStatusFor(event.tool),
           tool: event.tool,
         },
@@ -1369,6 +1417,13 @@ export function sketchEditorReducer(
         transaction: null,
       };
     case "escape": {
+      if (state.drag !== null || state.provisional !== null) {
+        // An escape during a drag discards the provisional geometry.
+        return {
+          state: { ...state, drag: null, provisional: null },
+          transaction: null,
+        };
+      }
       if (state.gesture.kind === "none" && state.picks.length === 0) {
         return {
           state: {
@@ -1455,6 +1510,167 @@ export function sketchEditorReducer(
     }
     case "canvas-pick":
       return canvasPick(state, event, sketch);
+    case "drag-start": {
+      // Dragging is the select tool's gesture: other tools ignore it.
+      if (state.tool !== "select") return { state, transaction: null };
+      const entity = sketch.entities.find(
+        (candidate) => candidate.id === event.entityId,
+      );
+      if (entity === undefined || entity.kind === "rectangle") {
+        return { state, transaction: null };
+      }
+      const mode = dragModeFor(entity, event.point);
+      if (mode === null) return { state, transaction: null };
+      return {
+        state: {
+          ...state,
+          drag: {
+            entityId: entity.id,
+            mode,
+            original: entity,
+            start: event.point,
+          },
+        },
+        transaction: null,
+      };
+    }
+    case "drag-move": {
+      if (state.drag === null) return { state, transaction: null };
+      return {
+        state: {
+          ...state,
+          provisional: draggedEntity(state.drag, event.point),
+        },
+        transaction: null,
+      };
+    }
+    case "drag-end": {
+      const drag = state.drag;
+      if (drag === null) return { state, transaction: null };
+      const dragged = draggedEntity(drag, event.point);
+      if (dragged === null) {
+        return { state: { ...state, drag: null }, transaction: null };
+      }
+      return {
+        state: {
+          ...state,
+          drag: null,
+          provisional: null,
+          status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.dragged),
+        },
+        transaction: {
+          commands: [{ entity: dragged, type: "sketch.entity.update" }],
+        },
+      };
+    }
+    case "note-status":
+      return { state: { ...state, status: event.status }, transaction: null };
+  }
+}
+
+/**
+ * The public reducer: the core transition plus the provisional drag
+ * geometry, surfaced at the top level for the host's per-move re-solve.
+ */
+export function sketchEditorReducer(
+  state: SketchEditorState,
+  event: SketchEditorEvent,
+  sketch: Sketch,
+): SketchEditorTransition {
+  const core = sketchEditorCore(state, event, sketch);
+  return { ...core, provisional: core.state.provisional };
+}
+
+/**
+ * How a grab at `at` maps to geometry changes on `entity` (the documented
+ * drag grammar): near a line's endpoint the endpoint moves; near a spline's
+ * control/fit point that point moves; anything else drags rigidly.
+ */
+function dragModeFor(
+  entity: SketchEntity,
+  at: EditorPoint,
+): SketchEditorDrag["mode"] | null {
+  switch (entity.kind) {
+    case "line": {
+      const toStart = Math.hypot(entity.x1 - at.x, entity.y1 - at.y);
+      const toEnd = Math.hypot(entity.x2 - at.x, entity.y2 - at.y);
+      if (toStart <= ENDPOINT_GRAB_MM || toEnd <= ENDPOINT_GRAB_MM) {
+        return toStart <= toEnd
+          ? { kind: "endpoint", which: "start" }
+          : { kind: "endpoint", which: "end" };
+      }
+      return { kind: "translate" };
+    }
+    case "spline": {
+      let nearest = -1;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (let index = 0; index < entity.points.length; index += 1) {
+        const point = entity.points[index];
+        if (point === undefined) continue;
+        const distance = Math.hypot(point.x - at.x, point.y - at.y);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearest = index;
+        }
+      }
+      return nearest >= 0
+        ? { kind: "spline-point", index: nearest }
+        : { kind: "translate" };
+    }
+    case "rectangle":
+      return null;
+    default:
+      return { kind: "translate" };
+  }
+}
+
+/** The drag's provisional entity at `point`, or `null` when undraggable. */
+function draggedEntity(
+  drag: SketchEditorDrag,
+  point: EditorPoint,
+): SketchEntity | null {
+  const { mode, original } = drag;
+  switch (mode.kind) {
+    case "endpoint": {
+      if (original.kind !== "line") return null;
+      return mode.which === "start"
+        ? createLineEntity(
+            original.id,
+            point,
+            { x: original.x2, y: original.y2 },
+            {
+              construction: original.construction,
+              fixed: original.fixed,
+            },
+          )
+        : createLineEntity(
+            original.id,
+            { x: original.x1, y: original.y1 },
+            point,
+            {
+              construction: original.construction,
+              fixed: original.fixed,
+            },
+          );
+    }
+    case "spline-point": {
+      if (original.kind !== "spline") return null;
+      return createSplineEntity(
+        original.id,
+        original.flavor,
+        original.points.map((candidate, index) =>
+          index === mode.index ? { x: point.x, y: point.y } : candidate,
+        ),
+        { construction: original.construction, fixed: original.fixed },
+      );
+    }
+    case "translate":
+      return translateSketchEntity(
+        original,
+        original.id,
+        point.x - drag.start.x,
+        point.y - drag.start.y,
+      );
   }
 }
 
@@ -1480,6 +1696,18 @@ function readyStatusFor(tool: SketchToolId): SketchEditorStatus {
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readySpline);
     case "polygon":
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyPolygon);
+    case "offset":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyOffset);
+    case "mirror":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyMirror);
+    case "extend":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyExtend);
+    case "rectArray":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyRectArray);
+    case "circArray":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyCircArray);
+    case "convert":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyConvert);
     default:
       return statusOf(
         "hint",
@@ -1498,7 +1726,7 @@ function canvasPick(
   state: SketchEditorState,
   event: { readonly point: EditorPoint; readonly entityId: string | null },
   sketch: Sketch,
-): SketchEditorTransition {
+): SketchEditorCoreTransition {
   const mint = createIdMinter(sketch);
   const entityById = (id: string | null): SketchEntity | undefined =>
     sketch.entities.find((entity) => entity.id === id);
@@ -2026,6 +2254,151 @@ function canvasPick(
         },
       };
     }
+    case "offset": {
+      // Pick 1: the source entity (kept in the gesture). Pick 2: the offset
+      // target point — its measured distance and side from the source set
+      // the offset. The domain op handles chains (connected targeted lines).
+      if (
+        state.gesture.kind === "offset" &&
+        state.gesture.entityId !== undefined
+      ) {
+        const result = offsetEntitiesCommands(sketch, {
+          entityIds: [state.gesture.entityId],
+          towards: event.point,
+        });
+        if (!result.ok) {
+          return {
+            state: {
+              ...state,
+              gesture: { kind: "none" },
+              status: statusOf(
+                "error",
+                result.error.message,
+                result.error.code,
+              ),
+            },
+            transaction: null,
+          };
+        }
+        return {
+          state: {
+            ...state,
+            gesture: { kind: "none" },
+            selectedEntityIds: result.value
+              .map((command) =>
+                command.type === "sketch.entity.create"
+                  ? command.entity.id
+                  : null,
+              )
+              .filter((id): id is SketchEntityId => id !== null),
+            status: statusOf(
+              "hint",
+              `Offset created ${String(result.value.length)} ${result.value.length === 1 ? "entity" : "entities"}.`,
+            ),
+          },
+          transaction: { commands: result.value },
+        };
+      }
+      const entity = entityById(event.entityId);
+      if (entity === undefined) {
+        return { state, transaction: null };
+      }
+      return {
+        state: {
+          ...state,
+          gesture: {
+            entityId: entity.id,
+            kind: "offset",
+            point: event.point,
+          },
+          selectedEntityIds: [entity.id],
+          status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.offsetSecond),
+        },
+        transaction: null,
+      };
+    }
+    case "mirror": {
+      // Pick 1: the axis (a line, kept in the gesture). Picks 2+: each
+      // entity mirrors immediately; the tool stays armed for more.
+      if (state.gesture.kind === "mirror") {
+        const entity = entityById(event.entityId);
+        if (entity === undefined || entity.id === state.gesture.axisId) {
+          return { state, transaction: null };
+        }
+        const result = mirrorEntitiesCommands(sketch, {
+          entityIds: [entity.id],
+          mirrorLineId: state.gesture.axisId,
+        });
+        if (!result.ok) {
+          return {
+            state: {
+              ...state,
+              status: statusOf(
+                "error",
+                result.error.message,
+                result.error.code,
+              ),
+            },
+            transaction: null,
+          };
+        }
+        return {
+          state: {
+            ...state,
+            selectedEntityIds: result.value
+              .map((command) =>
+                command.type === "sketch.entity.create"
+                  ? command.entity.id
+                  : null,
+              )
+              .filter((id): id is SketchEntityId => id !== null),
+            status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.mirrorPick),
+          },
+          transaction: { commands: result.value },
+        };
+      }
+      const entity = entityById(event.entityId);
+      if (entity === undefined) return { state, transaction: null };
+      if (entity.kind !== "line") {
+        return {
+          state: {
+            ...state,
+            status: statusOf(
+              "error",
+              "Mirror needs a line as its axis: that entity cannot be an axis.",
+              SKETCH_ENTITY_OP_ERROR_CODES.mirrorLineNeeded,
+            ),
+          },
+          transaction: null,
+        };
+      }
+      return {
+        state: {
+          ...state,
+          gesture: { axisId: entity.id, kind: "mirror" },
+          status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.mirrorPick),
+        },
+        transaction: null,
+      };
+    }
+    case "extend": {
+      const entity = entityById(event.entityId);
+      if (entity === undefined) return { state, transaction: null };
+      const result = extendLineCommand(sketch, entity.id, event.point);
+      if (!result.ok) {
+        return {
+          state: {
+            ...state,
+            status: statusOf("error", result.error.message, result.error.code),
+          },
+          transaction: null,
+        };
+      }
+      return {
+        state,
+        transaction: { commands: result.value },
+      };
+    }
     default: {
       // The constraint tools.
       if (!isSketchConstraintKind(state.tool))
@@ -2165,11 +2538,18 @@ function canvasPick(
 // View model
 // ---------------------------------------------------------------------------
 
-/** The canvas view model: entities, regions, annotations. */
+/** The canvas view model: entities, regions, dimensions, annotations. */
 export interface SketchViewModel {
   readonly entities: readonly CadSketchCanvasEntity[];
   readonly regions: readonly CadSketchCanvasRegion[];
   readonly annotations: readonly CadSketchCanvasAnnotation[];
+  /** The drawn-dimension overlay geometry (Phase 37), constraint order. */
+  readonly dimensions: readonly CadSketchCanvasDimension[];
+  /**
+   * Per-entity degrees of freedom (Phase 37's ink convention), empty when
+   * no constrainedness analysis is available.
+   */
+  readonly entityDof: ReadonlyMap<string, number>;
 }
 
 /**
@@ -2290,67 +2670,6 @@ function canvasEntity(
   }
 }
 
-function dimensionText(constraint: SketchConstraint): string | null {
-  switch (constraint.kind) {
-    case "distance":
-      return `${String(valueIn(constraint.value, "mm"))} mm`;
-    case "distanceX":
-      return `Δx ${String(valueIn(constraint.value, "mm"))} mm`;
-    case "distanceY":
-      return `Δy ${String(valueIn(constraint.value, "mm"))} mm`;
-    case "radius":
-      return `R ${String(valueIn(constraint.value, "mm"))}`;
-    case "diameter":
-      return `⌀ ${String(valueIn(constraint.value, "mm"))}`;
-    case "angle":
-      return `${String(valueIn(constraint.value, "deg"))}°`;
-    default:
-      return null;
-  }
-}
-
-/** Annotation anchor for a dimensional constraint, workplane mm. */
-function dimensionAnchor(
-  sketch: Sketch,
-  constraint: SketchConstraint,
-): EditorPoint | null {
-  switch (constraint.kind) {
-    case "distance":
-    case "distanceX":
-    case "distanceY": {
-      const a = pointTargetPosition(sketch.entities, constraint.first);
-      const b = pointTargetPosition(sketch.entities, constraint.second);
-      if (a === null || b === null) return null;
-      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    }
-    case "radius":
-    case "diameter": {
-      const entity = sketch.entities.find(
-        (candidate) => candidate.id === constraint.entity,
-      );
-      if (
-        entity !== undefined &&
-        (entity.kind === "circle" || entity.kind === "arc")
-      ) {
-        return { x: entity.cx, y: entity.cy };
-      }
-      return null;
-    }
-    case "angle": {
-      const entity = sketch.entities.find(
-        (candidate) => candidate.id === constraint.first,
-      );
-      if (entity === undefined || entity.kind !== "line") return null;
-      return {
-        x: (entity.x1 + entity.x2) / 2,
-        y: (entity.y1 + entity.y2) / 2 + 6,
-      };
-    }
-    default:
-      return null;
-  }
-}
-
 /** Constraint label for the inspector list (host data, verbatim). */
 export function constraintLabel(constraint: SketchConstraint): string {
   const text = dimensionText(constraint);
@@ -2368,8 +2687,17 @@ export function sketchViewModel(
   solved: Sketch | null,
   selection: { readonly entityIds: readonly string[] },
   diagnostics: readonly SketchDiagnostic[],
+  /**
+   * The per-entity constrainedness readout (Phase 37), computed by the host
+   * from the same solved state it displays; `null` keeps the legacy styling.
+   */
+  constrainedness: SketchConstrainedness | null = null,
 ): SketchViewModel {
   const selectedIds = new Set(selection.entityIds);
+  // The sketch the dimensions present: the SOLVED geometry when available
+  // (dimensions follow the solver, exactly like the entities do), the
+  // authored sketch otherwise.
+  const displayed = solved ?? sketch;
   const geometryById = new Map<string, EntityGeometry>();
   for (const entity of sketch.entities) {
     geometryById.set(entity.id, entity);
@@ -2422,27 +2750,28 @@ export function sketchViewModel(
     if (node !== null) entities.push(node);
   }
   const annotations: CadSketchCanvasAnnotation[] = [];
-  // Dimension labels stack when they share an anchor (two dimensions on the
-  // same targets): each duplicate shifts 2 mm up per prior occupant, so
-  // every label stays readable.
+  // Phase 37: the drawn dimensions come from the domain's presentation
+  // geometry; their TEXT anchors ride each presentation's textAnchor, so
+  // the label sits where the dimension's own layout put it. Duplicate
+  // anchors (two dimensions resolving to one anchor) stack 2 mm per prior
+  // occupant so every label stays readable.
   const anchorOccupancy = new Map<string, number>();
+  const presentations = sketchDimensionPresentations(displayed);
+  for (const presentation of presentations) {
+    const level = diagnosticLevelFor(presentation.id, diagnostics);
+    const anchorKey = `${presentation.textAnchor.x}:${presentation.textAnchor.y}`;
+    const occupants = anchorOccupancy.get(anchorKey) ?? 0;
+    anchorOccupancy.set(anchorKey, occupants + 1);
+    annotations.push({
+      id: presentation.id,
+      kind: "dimension",
+      level: level === "none" ? "info" : level,
+      text: presentation.text,
+      x: presentation.textAnchor.x,
+      y: presentation.textAnchor.y + occupants * 2,
+    });
+  }
   for (const constraint of sketch.constraints) {
-    const text = dimensionText(constraint);
-    const anchor = text === null ? null : dimensionAnchor(sketch, constraint);
-    if (text !== null && anchor !== null) {
-      const anchorKey = `${anchor.x}:${anchor.y}`;
-      const occupants = anchorOccupancy.get(anchorKey) ?? 0;
-      anchorOccupancy.set(anchorKey, occupants + 1);
-      const level = diagnosticLevelFor(constraint.id, diagnostics);
-      annotations.push({
-        id: constraint.id,
-        kind: "dimension",
-        level: level === "none" ? "info" : level,
-        text,
-        x: anchor.x,
-        y: anchor.y + occupants * 2,
-      });
-    }
     for (const diagnostic of diagnostics) {
       if (
         diagnostic.location?.primary === constraint.id &&
@@ -2459,11 +2788,71 @@ export function sketchViewModel(
       }
     }
   }
-  return { annotations, entities, regions };
+  return {
+    annotations,
+    dimensions: presentations.map(toCanvasDimension),
+    entities,
+    entityDof: constrainedness?.entityDof ?? new Map<string, number>(),
+    regions,
+  };
+}
+
+/** Maps a domain presentation onto the canvas's dimension view model. */
+function toCanvasDimension(
+  presentation: DimensionPresentation,
+): CadSketchCanvasDimension {
+  switch (presentation.kind) {
+    case "linear":
+      return {
+        dimensionLine: presentation.dimensionLine,
+        extensionLines: presentation.extensionLines.filter(
+          (line): line is { from: EditorPoint; to: EditorPoint } =>
+            line !== undefined,
+        ),
+        id: presentation.id,
+        kind: "linear",
+        text: presentation.text,
+        textAnchor: presentation.textAnchor,
+      };
+    case "radial":
+      return {
+        id: presentation.id,
+        kind: "radial",
+        leader: presentation.leader,
+        text: presentation.text,
+        textAnchor: presentation.textAnchor,
+      };
+    case "diametral":
+      return {
+        id: presentation.id,
+        kind: "diametral",
+        line: presentation.line,
+        text: presentation.text,
+        textAnchor: presentation.textAnchor,
+      };
+    case "angular":
+      return {
+        arc: presentation.arc,
+        id: presentation.id,
+        kind: "angular",
+        text: presentation.text,
+        textAnchor: presentation.textAnchor,
+      };
+    case "label":
+      return {
+        id: presentation.id,
+        kind: "label",
+        text: presentation.text,
+        textAnchor: presentation.textAnchor,
+      };
+  }
 }
 
 /** Badge anchor for problem diagnostics without a geometry anchor. */
 const SKETCH_CANVAS_BADGE_XY: EditorPoint = { x: 6, y: 60 };
+
+/** The workplane position of a point target — the domain's shared readout. */
+export { pointTargetPosition } from "@slopcad/cad-sketch";
 
 /** The serialized machine surface of the sketch (entities + constraints). */
 export function sketchSurface(sketch: Sketch): {

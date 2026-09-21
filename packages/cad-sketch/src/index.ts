@@ -250,6 +250,64 @@ export type {
 export { solvedEntityParametersById } from "./solver";
 
 export {
+  CHAIN_CONTACT_EPSILON_MM,
+  OFFSET_COLLAPSE_EPSILON_MM,
+  SKETCH_ENTITY_OP_ERROR_CODES,
+  circularArrayCommands,
+  createSketchOpIdAllocator,
+  extendLineCommand,
+  mirrorEntitiesCommands,
+  offsetEntitiesCommands,
+  rectangularArrayCommands,
+  translateSketchEntity,
+} from "./entity-ops";
+export type {
+  CircularArrayRequest,
+  EntityOpPoint,
+  MirrorEntitiesRequest,
+  OffsetEntitiesRequest,
+  RectangularArrayRequest,
+  SketchEntityOpError,
+  SketchEntityOpErrorCode,
+} from "./entity-ops";
+
+export {
+  SKETCH_CONVERT_DECLINE_CODES,
+  SKETCH_CONVERT_ERROR_CODES,
+  convertTopologyEntities,
+} from "./convert";
+export type {
+  ConvertedTopologyEntity,
+  ConvertTopologyEntitiesRequest,
+  SketchConvertDeclineCode,
+  SketchConvertError,
+  SketchConvertErrorCode,
+} from "./convert";
+
+export { analyzeConstrainedness } from "./constrainedness";
+export type { SketchConstrainedness } from "./constrainedness";
+
+export {
+  DIAMETRAL_TEXT_STANDOFF_MM,
+  DIMENSION_ANGULAR_ARC_RADIUS_MM,
+  DIMENSION_ANGULAR_TEXT_STANDOFF_MM,
+  DIMENSION_CIRCLE_ANCHOR_ANGLE_RAD,
+  DIMENSION_EXTENSION_OVERSHOOT_MM,
+  DIMENSION_LINE_OFFSET_MM,
+  DIMENSION_TEXT_FRACTION,
+  dimensionPresentation,
+  dimensionText,
+  pointTargetPosition,
+  serializeDimensionPresentation,
+  sketchDimensionPresentations,
+} from "./dimensions";
+export type {
+  DimensionPoint,
+  DimensionPresentation,
+  SerializedDimensionPresentation,
+} from "./dimensions";
+
+export {
   arcChainSketch,
   conflictingDimensionsSketch,
   dimensionedRectangleSketch,

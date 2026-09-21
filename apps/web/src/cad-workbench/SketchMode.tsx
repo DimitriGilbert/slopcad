@@ -42,12 +42,19 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactElement } from "react";
 import {
   angle,
   angle as angleValue,
+  createReferenceId,
   length,
   length as lengthValue,
+  mintTopologyReference,
   valueIn,
+  type BodyId,
+  type TopologyView,
 } from "@slopcad/cad-core";
 import {
+  analyzeConstrainedness,
   applySolvedParameters,
+  circularArrayCommands,
+  convertTopologyEntities,
   createSketchEntityId,
   applySketchSessionTransaction,
   canRedoSketch,
@@ -58,13 +65,16 @@ import {
   createStraightSlotEntity,
   entityPolyline,
   isDimensionalConstraint,
+  rectangularArrayCommands,
   redoSketchSession,
   resolveExtrudeProfile,
+  serializeDimensionPresentation,
   serializeSketch,
   serializeSketchCommand,
   undoSketchSession,
   workplaneToPlacement,
   type SketchCommand,
+  type SketchConstrainedness,
   type SketchDiagnostic,
   type SerializedSketch,
   type SerializedSketchCommand,
@@ -96,9 +106,11 @@ import {
   SKETCH_CANVAS,
   SKETCH_CONSTRAINT_TOOLS,
   SKETCH_DRAWING_TOOLS,
+  SKETCH_EDIT_TOOLS,
   sketchEditorReducer,
   sketchSurface,
   sketchViewModel,
+  SKETCH_EDITOR_STATUS_TEXT,
   type SketchEditorEvent,
   type SketchEditorState,
 } from "./sketch-editor";
@@ -117,14 +129,27 @@ interface SketchSolveState {
   /** The last successfully solved sketch (`null` before the first solve). */
   readonly solved: ReturnType<typeof applySolvedParameters> | null;
   readonly diagnostics: readonly SketchDiagnostic[];
+  /** Per-entity constrainedness (Phase 37's ink convention). */
+  readonly constrainedness: SketchConstrainedness | null;
 }
 
 const SOLVER = createReferenceSketchSolver();
 
 const TOOLBAR_GROUPS = [
   { id: "tools", label: "Tools", toolIds: SKETCH_DRAWING_TOOLS },
+  { id: "edit", label: "Edit", toolIds: SKETCH_EDIT_TOOLS },
   { id: "constraints", label: "Constraints", toolIds: SKETCH_CONSTRAINT_TOOLS },
 ];
+
+/**
+ * The topology surface the convert tool consumes (Phase 37): the resolving
+ * kernel's view plus the bodies the host owns — the snapshots SketchMode
+ * lists in the inspector's convert section.
+ */
+export interface SketchModeTopology {
+  readonly view: TopologyView;
+  readonly bodies: readonly BodyId[];
+}
 
 /** The resolved extrusion the action hands to the host. */
 export interface SketchExtrudeSubmission {
@@ -169,6 +194,13 @@ export interface SketchModeProps {
    * of dead.
    */
   readonly onRevolve?: (submission: SketchRevolveSubmission) => void;
+  /**
+   * The Phase 37 convert source: the persistent-topology view of the
+   * host's bodies, when the host has one. Without it the convert tool
+   * surfaces its honest decline (`sketch-convert/view-missing`) — a host
+   * whose kernel carries no persistent topology never pretends to convert.
+   */
+  readonly topology?: SketchModeTopology;
 }
 
 /** The default extrusion depth the action creates the parameter with (mm). */
@@ -198,6 +230,7 @@ export function SketchMode({
   onRevolve,
   extrudeDisabled = false,
   extrudeDisabledTitle,
+  topology,
 }: SketchModeProps): ReactElement {
   const [session, setSession] = useState(() =>
     createSketchSession(createWorkbenchSketch()),
@@ -210,6 +243,7 @@ export function SketchMode({
     dof: 0,
     solved: null,
     diagnostics: [],
+    constrainedness: null,
   });
   const [commandLog, setCommandLog] = useState<
     readonly SerializedSketchCommand[]
@@ -223,30 +257,52 @@ export function SketchMode({
   const [revolveAxis, setRevolveAxis] = useState<RevolveAxisId>("x");
   const [revolveOutcome, setRevolveOutcome] =
     useState<SketchRevolveOutcome | null>(null);
+  // The Phase 37 convert attempt's machine surface (the last outcome set).
+  const [convertOutcome, setConvertOutcome] = useState<string | null>(null);
 
-  // The solve loop: every authored change re-derives; a failure keeps the
-  // last-known-good geometry and surfaces the structured diagnostics.
+  // The displayed sketch: the authored sketch with the drag's provisional
+  // geometry overlaid — the value the solve loop re-solves per move.
+  const displaySketch = useMemo(() => {
+    const provisional = editor.provisional;
+    if (provisional === null) return session.sketch;
+    return {
+      ...session.sketch,
+      entities: session.sketch.entities.map((entity) =>
+        entity.id === provisional.id ? provisional : entity,
+      ),
+    };
+  }, [editor.provisional, session.sketch]);
+
+  // The solve loop: every displayed change re-derives (including each drag
+  // move — the drag re-solves through the solver per move); a failure keeps
+  // the last-known-good geometry and surfaces the structured diagnostics.
   useEffect(() => {
     const result = SOLVER.solve(
-      session.sketch.entities,
-      session.sketch.constraints,
+      displaySketch.entities,
+      displaySketch.constraints,
     );
     if (result.status === "failed") {
       setSolveState((previous) => ({
         status: "failed",
+        constrainedness: null,
         dof: null,
         solved: previous.solved,
         diagnostics: result.diagnostics,
       }));
       return;
     }
+    const solved = applySolvedParameters(displaySketch, result.parameters);
     setSolveState({
-      status: result.status,
-      dof: result.dof,
-      solved: applySolvedParameters(session.sketch, result.parameters),
+      constrainedness: analyzeConstrainedness(
+        solved.entities,
+        displaySketch.constraints,
+      ),
       diagnostics: result.diagnostics,
+      dof: result.dof,
+      solved,
+      status: result.status,
     });
-  }, [session.sketch]);
+  }, [displaySketch]);
 
   const dispatch = useCallback(
     (event: SketchEditorEvent): void => {
@@ -407,6 +463,270 @@ export function SketchMode({
     [session],
   );
 
+  // The convert list (Phase 37): one persistent reference per topology
+  // entity of the host's bodies, minted deterministically; vertices are
+  // convertible, edges/faces carry the domain's honest decline up front.
+  const convertList = useMemo(() => {
+    if (topology === undefined) return null;
+    const entries = [];
+    for (const bodyId of topology.bodies) {
+      const snapshot = topology.view.snapshotOf(bodyId);
+      if (snapshot === null || !snapshot.persistentTopology) continue;
+      for (const entity of snapshot.entities) {
+        const referenceId = createReferenceId(
+          `ref_${bodyId}_${entity.kind}_${String(entity.ordinal)}`,
+        );
+        const minted = mintTopologyReference(
+          snapshot,
+          entity.ordinal,
+          {
+            bodyId,
+            featurePath: [],
+          },
+          {
+            id: referenceId,
+            kind: entity.kind,
+          },
+        );
+        entries.push({
+          convertible: entity.kind === "vertex" && minted.ok,
+          declineMessage:
+            entity.kind === "vertex"
+              ? undefined
+              : `A model ${entity.kind} carries only summary measures — not the curve projection needs.`,
+          kind: entity.kind,
+          label: `${entity.kind} ${String(entity.ordinal)} of ${bodyId}`,
+          minted: minted.ok ? minted.value : null,
+          referenceId,
+        });
+      }
+    }
+    return entries;
+  }, [topology]);
+
+  // ----- Phase 37 op surfaces -------------------------------------------------
+
+  // The array apply surface: the inspector's Formedible form lands here;
+  // the domain op builds the copies for the LIVE selection and the commit
+  // rides the session (one atomic, undoable transaction).
+  const applyArray = useCallback(
+    (
+      tool: "rectArray" | "circArray",
+      values:
+        | {
+            readonly countX: number;
+            readonly countY: number;
+            readonly spacingX: number;
+            readonly spacingY: number;
+          }
+        | {
+            readonly count: number;
+            readonly angleStepDeg: number;
+            readonly centerX: number;
+            readonly centerY: number;
+          },
+    ) => {
+      if (editor.selectedEntityIds.length === 0) {
+        return {
+          error: {
+            code: "sketch/no-selection",
+            message:
+              "The array applies to the selected entities; none are selected.",
+          },
+          ok: false,
+        } as const;
+      }
+      // One commit path: the op's commands land atomically through the
+      // session and the command log records their serializations.
+      const commitCommands = (
+        commands: readonly SketchCommand[],
+      ):
+        | { readonly ok: true }
+        | {
+            readonly ok: false;
+            readonly error: { readonly code: string; readonly message: string };
+          } => {
+        const applied = applySketchSessionTransaction(session, { commands });
+        if (!applied.ok) {
+          return { error: applied.error, ok: false };
+        }
+        setSession(applied.value);
+        setCommandLog((log) => [
+          ...log,
+          ...commands.map(serializeSketchCommand),
+        ]);
+        return { ok: true };
+      };
+      if (
+        tool === "rectArray" &&
+        "countX" in values &&
+        "countY" in values &&
+        "spacingX" in values &&
+        "spacingY" in values
+      ) {
+        const result = rectangularArrayCommands(session.sketch, {
+          countX: values.countX,
+          countY: values.countY,
+          entityIds: editor.selectedEntityIds,
+          spacingX: values.spacingX,
+          spacingY: values.spacingY,
+        });
+        if (!result.ok) {
+          return { error: result.error, ok: false } as const;
+        }
+        const committed = commitCommands(result.value);
+        if (!committed.ok) return committed;
+        dispatch({
+          status: {
+            code: null,
+            message: SKETCH_EDITOR_STATUS_TEXT.arrayApplied(
+              result.value.length,
+            ),
+            severity: "hint",
+          },
+          type: "note-status",
+        });
+        return { ok: true } as const;
+      }
+      if (
+        tool === "circArray" &&
+        "count" in values &&
+        "angleStepDeg" in values &&
+        "centerX" in values &&
+        "centerY" in values
+      ) {
+        const result = circularArrayCommands(session.sketch, {
+          angleStepRad: (values.angleStepDeg * Math.PI) / 180,
+          center: { x: values.centerX, y: values.centerY },
+          count: values.count,
+          entityIds: editor.selectedEntityIds,
+        });
+        if (!result.ok) {
+          return { error: result.error, ok: false } as const;
+        }
+        const committed = commitCommands(result.value);
+        if (!committed.ok) return committed;
+        dispatch({
+          status: {
+            code: null,
+            message: SKETCH_EDITOR_STATUS_TEXT.arrayApplied(
+              result.value.length,
+            ),
+            severity: "hint",
+          },
+          type: "note-status",
+        });
+        return { ok: true } as const;
+      }
+      return {
+        error: {
+          code: "sketch-op/array-counts-invalid",
+          message: "The array form submitted incomplete values.",
+        },
+        ok: false,
+      } as const;
+    },
+    [dispatch, editor.selectedEntityIds, session],
+  );
+
+  // The convert apply surface: resolves the entry's persistent reference
+  // against the view and commits the projected construction point.
+  const applyConvert = useCallback(
+    (referenceId: string) => {
+      if (topology === undefined) {
+        return {
+          error: {
+            code: "sketch-convert/view-missing",
+            message:
+              "No topology view is available: model geometry cannot be converted here.",
+          },
+          ok: false,
+        } as const;
+      }
+      const entry = convertList?.find(
+        (candidate) => candidate.referenceId === referenceId,
+      );
+      if (entry === undefined || entry.minted === null) {
+        return {
+          error: {
+            code: "sketch-convert/reference-invalid",
+            message: `The convert entry ${referenceId} carries no resolvable reference.`,
+          },
+          ok: false,
+        } as const;
+      }
+      const result = convertTopologyEntities(session.sketch, {
+        references: [entry.minted],
+        view: topology.view,
+      });
+      if (!result.ok) {
+        return { error: result.error, ok: false } as const;
+      }
+      const outcome = result.value[0];
+      if (outcome === undefined) {
+        return {
+          error: {
+            code: "sketch-convert/reference-invalid",
+            message: "The convert produced no outcome.",
+          },
+          ok: false,
+        } as const;
+      }
+      if (outcome.status === "declined") {
+        setConvertOutcome(
+          JSON.stringify({
+            code: outcome.code,
+            reference: referenceId,
+            status: "declined",
+          }),
+        );
+        return {
+          error: { code: outcome.code, message: outcome.message },
+          ok: false,
+        } as const;
+      }
+      const applied = applySketchSessionTransaction(session, {
+        commands: [outcome.command],
+      });
+      if (!applied.ok) {
+        return { error: applied.error, ok: false } as const;
+      }
+      setSession(applied.value);
+      setCommandLog((log) => [...log, serializeSketchCommand(outcome.command)]);
+      setConvertOutcome(
+        JSON.stringify({
+          offsetMm: outcome.offsetMm,
+          reference: referenceId,
+          status: "converted",
+        }),
+      );
+      dispatch({
+        status: {
+          code: null,
+          message:
+            outcome.offsetMm === 0
+              ? SKETCH_EDITOR_STATUS_TEXT.converted(1)
+              : `${SKETCH_EDITOR_STATUS_TEXT.converted(1)} (projected ${String(outcome.offsetMm)} mm off-plane)`,
+          severity: "hint",
+        },
+        type: "note-status",
+      });
+      return { ok: true } as const;
+    },
+    [convertList, dispatch, session, topology],
+  );
+
+  // The effective status: the convert tool without a topology view states
+  // its honest decline instead of pointing at an inspector list that has
+  // nothing to list.
+  const effectiveStatus =
+    editor.tool === "convert" && topology === undefined
+      ? {
+          ...editor.status,
+          message: SKETCH_EDITOR_STATUS_TEXT.convertNoTopology,
+        }
+      : editor.status;
+
   // ----- Derived view models -------------------------------------------------
   const authoredSurface = sketchSurface(session.sketch);
   const diagnostics = solveState.diagnostics;
@@ -461,10 +781,11 @@ export function SketchMode({
   }, [editor.selectedConstraintId, session.sketch.constraints]);
 
   const view = sketchViewModel(
-    session.sketch,
+    displaySketch,
     solveState.solved,
     { entityIds: editor.selectedEntityIds },
     diagnostics,
+    solveState.constrainedness,
   );
 
   const pickMarkers: readonly CadSketchPoint[] = editor.picks.map((pick) => {
@@ -609,6 +930,13 @@ export function SketchMode({
       aria-label="Sketch workspace"
       className="flex min-h-0 flex-1 flex-col"
       data-sketch-commands={JSON.stringify(commandLog)}
+      data-sketch-convert={convertOutcome ?? ""}
+      data-sketch-dimensions={JSON.stringify(
+        view.dimensions.map(serializeDimensionPresentation),
+      )}
+      data-sketch-entity-dof={JSON.stringify(
+        Object.fromEntries(view.entityDof),
+      )}
       data-sketch-extrude={
         extrudeOutcome === null ? "" : JSON.stringify(extrudeOutcome)
       }
@@ -647,7 +975,7 @@ export function SketchMode({
           : sketchSurface(solveState.solved).entities,
       )}
       data-sketch-tool={editor.tool}
-      data-sketch-tool-status={JSON.stringify(editor.status)}
+      data-sketch-tool-status={JSON.stringify(effectiveStatus)}
       id="sketch-root"
       onKeyDown={handleKeyDown}
       tabIndex={-1}
@@ -768,10 +1096,26 @@ export function SketchMode({
       <div className="flex min-h-0 flex-1 flex-wrap items-start justify-center gap-3 overflow-y-auto p-3">
         <CadSketchCanvas
           annotations={view.annotations}
+          dimensions={view.dimensions}
+          draggingEntityId={editor.drag?.entityId ?? null}
           entities={view.entities}
+          entityDof={view.entityDof}
           gridStep={SKETCH_CANVAS.gridStep}
           height={SKETCH_CANVAS.height}
           hoveredEntityId={editor.hoveredEntityId}
+          onDragEnd={(point) => {
+            dispatch({ point, type: "drag-end" });
+          }}
+          onDragMove={(point) => {
+            dispatch({ point, type: "drag-move" });
+          }}
+          onDragStart={(drag) => {
+            dispatch({
+              entityId: drag.entityId,
+              point: drag.point,
+              type: "drag-start",
+            });
+          }}
           onHover={(entityId) => {
             dispatch({ entityId, type: "hover" });
           }}
@@ -787,8 +1131,30 @@ export function SketchMode({
           width={SKETCH_CANVAS.width}
         />
         <CadSketchInspector
+          array={
+            editor.tool === "rectArray" || editor.tool === "circArray"
+              ? {
+                  selectionCount: editor.selectedEntityIds.length,
+                  tool: editor.tool,
+                }
+              : null
+          }
           className="shrink-0"
           constraints={inspectorConstraints}
+          convert={
+            convertList === null
+              ? null
+              : {
+                  entries: convertList.map((entry) => ({
+                    convertible: entry.convertible,
+                    declineMessage: entry.declineMessage,
+                    kind: entry.kind,
+                    label: entry.label,
+                    referenceId: entry.referenceId,
+                  })),
+                  hint: "Vertices project to construction points on the sketch plane.",
+                }
+          }
           diagnostics={diagnostics.map((diagnostic) => ({
             code: diagnostic.code,
             message: diagnostic.message,
@@ -796,6 +1162,8 @@ export function SketchMode({
           }))}
           dimension={selectedDimension}
           dof={solveState.dof ?? 0}
+          onApplyArray={applyArray}
+          onConvert={applyConvert}
           onEditDimension={editDimension}
           onSelectConstraint={(constraintId) => {
             const found =
@@ -821,12 +1189,14 @@ export function SketchMode({
         <span
           aria-live="polite"
           className={
-            editor.status.severity === "error" ? "text-destructive" : undefined
+            effectiveStatus.severity === "error"
+              ? "text-destructive"
+              : undefined
           }
           data-sketch-status-severity={editor.status.severity}
           data-testid="sketch-status-message"
         >
-          {editor.status.message}
+          {effectiveStatus.message}
         </span>
         <span className="ml-auto">
           entities = {String(authoredSurface.entities.length)}

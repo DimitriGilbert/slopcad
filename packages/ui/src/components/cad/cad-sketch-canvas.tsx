@@ -32,12 +32,38 @@
  * resolves to the topmost hit in view-model order (later entities win, the
  * draw order). Empty canvas picks carry `entityId: null`.
  *
+ * ## Drag (Phase 37)
+ *
+ * Pointer press-move-release on an entity surfaces as a semantic drag:
+ * `onDragStart` (the hit entity + workplane point), `onDragMove` per move
+ * (pointer capture keeps the stream alive outside the surface), `onDragEnd`
+ * on release. The component owns only the gesture plumbing; what a drag
+ * means (which point moves, re-solving) is the host's. A press without
+ * movement still produces the pick semantics — `onPick` fires on
+ * pointer-down as before, and a drag start fires only alongside it.
+ *
+ * ## The ink convention (Phase 37)
+ *
+ * Entities carry an optional per-entity degrees-of-freedom readout
+ * (`dof`): the CAD blue/black ink convention — `dof > 0` renders BLUE
+ * (under-constrained geometry), `dof === 0` renders the normal black ink;
+ * `undefined` keeps the legacy styling (hosts that do not run the analysis).
+ * Diagnostics (error red, warning amber) and selection still win over the
+ * ink — a problem is a problem even when constrained.
+ *
+ * ## Dimensions (Phase 37)
+ *
+ * The `dimensions` prop receives host-computed presentation geometry
+ * (extension lines, dimension lines, leaders, the angular arc) in workplane
+ * millimetres and renders it as the deterministic SVG overlay under the
+ * annotation labels, each shape carrying `data-sketch-dimension-id`.
+ *
  * All user-facing strings live in {@link CAD_SKETCH_CANVAS_LABELS}
  * (overridable via the `labels` prop); annotation text is host data rendered
  * verbatim.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { cn } from "cn";
 
@@ -160,6 +186,59 @@ export interface CadSketchCanvasAnnotation {
   readonly kind: "dimension" | "constraint";
 }
 
+/** A workplane-space line segment of a dimension presentation. */
+export interface CadSketchCanvasDimensionSegment {
+  readonly from: CadSketchPoint;
+  readonly to: CadSketchPoint;
+}
+
+/**
+ * View model of one drawn dimension (workplane mm) — the canvas-local
+ * mirror of the domain's presentation geometry; the host maps its own
+ * presentation records onto these.
+ */
+export type CadSketchCanvasDimension =
+  | {
+      readonly kind: "linear";
+      readonly id: string;
+      readonly text: string;
+      readonly dimensionLine: CadSketchCanvasDimensionSegment;
+      readonly extensionLines: readonly CadSketchCanvasDimensionSegment[];
+      readonly textAnchor: CadSketchPoint;
+    }
+  | {
+      readonly kind: "radial";
+      readonly id: string;
+      readonly text: string;
+      readonly leader: CadSketchCanvasDimensionSegment;
+      readonly textAnchor: CadSketchPoint;
+    }
+  | {
+      readonly kind: "diametral";
+      readonly id: string;
+      readonly text: string;
+      readonly line: CadSketchCanvasDimensionSegment;
+      readonly textAnchor: CadSketchPoint;
+    }
+  | {
+      readonly kind: "angular";
+      readonly id: string;
+      readonly text: string;
+      readonly arc: {
+        readonly center: CadSketchPoint;
+        readonly radius: number;
+        readonly startAngle: number;
+        readonly endAngle: number;
+      };
+      readonly textAnchor: CadSketchPoint;
+    }
+  | {
+      readonly kind: "label";
+      readonly id: string;
+      readonly text: string;
+      readonly textAnchor: CadSketchPoint;
+    };
+
 /** The in-progress gesture preview, workplane mm. */
 export type CadSketchCanvasPreview =
   | {
@@ -221,6 +300,17 @@ export interface CadSketchCanvasProps {
   readonly regions?: readonly CadSketchCanvasRegion[];
   /** Dimension labels and constraint badges. */
   readonly annotations?: readonly CadSketchCanvasAnnotation[];
+  /**
+   * The drawn-dimension overlay (Phase 37): host-computed presentation
+   * geometry rendered beneath the annotation labels.
+   */
+  readonly dimensions?: readonly CadSketchCanvasDimension[];
+  /**
+   * Per-entity degrees of freedom (Phase 37's ink convention): entities
+   * whose dof is positive render blue (under-constrained), zero renders the
+   * normal black; entities absent from the map keep the legacy styling.
+   */
+  readonly entityDof?: ReadonlyMap<string, number>;
   /** Pending constraint picks, rendered as numbered markers. */
   readonly picks?: readonly CadSketchPoint[];
   /** The in-progress gesture preview, or `{ kind: "none" }`. */
@@ -236,6 +326,20 @@ export interface CadSketchCanvasProps {
   readonly onHover?: (entityId: string | null) => void;
   /** Pointer tracking: the workplane mm point under the pointer. */
   readonly onMove?: (point: CadSketchPoint) => void;
+  /**
+   * A drag begins: the entity under the press plus the press point.
+   * Without this callback pointer drags stay plain picks/hovers.
+   */
+  readonly onDragStart?: (drag: {
+    readonly entityId: string;
+    readonly point: CadSketchPoint;
+  }) => void;
+  /** The drag moves: the current workplane point (capture-robust). */
+  readonly onDragMove?: (point: CadSketchPoint) => void;
+  /** The drag ends: the release point (the entity id rode the start). */
+  readonly onDragEnd?: (point: CadSketchPoint) => void;
+  /** The entity id of an in-progress drag (renders with the drag ink). */
+  readonly draggingEntityId?: string | null;
   /** Label token overrides, merged over {@link CAD_SKETCH_CANVAS_LABELS}. */
   readonly labels?: Partial<CadSketchCanvasLabels>;
   /** Extends the container classes. */
@@ -337,11 +441,17 @@ function distanceToPolyline(
 export function CadSketchCanvas({
   annotations = [],
   className,
+  dimensions = [],
+  draggingEntityId = null,
   entities,
+  entityDof,
   gridStep,
   height,
   hoveredEntityId = null,
   labels: labelOverrides,
+  onDragEnd,
+  onDragMove,
+  onDragStart,
   onHover,
   onMove,
   onPick,
@@ -357,6 +467,15 @@ export function CadSketchCanvas({
     ...labelOverrides,
   };
   const svgRef = useRef<SVGSVGElement | null>(null);
+  // The in-progress drag: armed at press (the press point rides along so
+  // the drag starts exactly where the grab happened), STARTED on the first
+  // move — a press without movement stays a pure pick, never a drag.
+  const dragRef = useRef<{
+    entityId: string;
+    point: CadSketchPoint;
+    started: boolean;
+  } | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   // Workplane mm → screen px (y flipped), and back for pointer events.
   const toScreen = useCallback(
@@ -436,32 +555,89 @@ export function CadSketchCanvas({
       const point = eventToWorkplane(event);
       if (point === null) return;
       onMove?.(point);
+      // The armed drag STARTS on the first move — carrying the PRESS point,
+      // so the host's grab decision reads the grab site — and streams moves
+      // under capture, even outside the surface.
+      const drag = dragRef.current;
+      if (drag !== null) {
+        if (!drag.started) {
+          drag.started = true;
+          onDragStart?.({ entityId: drag.entityId, point: drag.point });
+        }
+        onDragMove?.(point);
+        return;
+      }
       if (onHover !== undefined) {
         onHover(hitEntity(point));
       }
     },
-    [eventToWorkplane, hitEntity, onHover, onMove],
+    [eventToWorkplane, hitEntity, onDragMove, onDragStart, onHover, onMove],
   );
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<SVGSVGElement>): void => {
-      if (onPick === undefined) return;
       const point = eventToWorkplane(event);
       if (point === null) return;
-      onPick({ entityId: hitEntity(point), point });
+      const entityId = hitEntity(point);
+      if (onPick !== undefined) {
+        onPick({ entityId, point });
+      }
+      // Arm the drag on an entity press when the host listens for one;
+      // pointer capture keeps the move stream alive outside the surface.
+      // The drag STARTS on the first move, not here — the pick semantics of
+      // a plain click stay undisturbed.
+      if (onDragStart !== undefined && entityId !== null) {
+        dragRef.current = { entityId, point, started: false };
+        setDragging(true);
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // Capture is robustness, not semantics: environments without
+          // pointer capture (or with an inactive pointer id) still drag.
+        }
+      }
     },
-    [eventToWorkplane, hitEntity, onPick],
+    [eventToWorkplane, hitEntity, onDragStart, onPick],
+  );
+
+  const handlePointerUp = useCallback(
+    (event: ReactPointerEvent<SVGSVGElement>): void => {
+      const drag = dragRef.current;
+      dragRef.current = null;
+      setDragging(false);
+      if (drag === null || !drag.started) return;
+      try {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // See handlePointerDown: capture is best-effort.
+      }
+      const point = eventToWorkplane(event);
+      if (point === null) return;
+      onDragEnd?.(point);
+    },
+    [eventToWorkplane, onDragEnd],
   );
 
   // Colors: severity-driven, driven through fixed class tokens so the
-  // surface stays on the design system (no raw hexes).
+  // surface stays on the design system (no raw hexes). The Phase 37 ink
+  // convention rides the same gate: under-constrained geometry (dof > 0)
+  // renders blue; diagnostics and selection still win — a problem is a
+  // problem even when constrained.
+  const UNDER_CONSTRAINED_INK = "var(--color-sky-600, #0284c7)";
+  const DRAG_INK = "var(--color-violet-500, #8b5cf6)";
   const strokeFor = (entity: CadSketchCanvasEntity): string => {
     if (entity.diagnostic === "error")
       return "var(--color-destructive, #dc2626)";
     if (entity.diagnostic === "warning")
       return "var(--color-amber-500, #f59e0b)";
+    if (dragging && entity.id === draggingEntityId) return DRAG_INK;
     if (entity.selected) return "var(--color-sky-400, #38bdf8)";
     if (entity.construction) return "var(--color-muted-foreground, #71717a)";
+    if (entityDof !== undefined && (entityDof.get(entity.id) ?? 0) > 0) {
+      return UNDER_CONSTRAINED_INK;
+    }
     return "var(--color-foreground, #0a0a0a)";
   };
 
@@ -710,6 +886,174 @@ export function CadSketchCanvas({
     );
   });
 
+  const dimensionNodes = dimensions.map((dimension) => {
+    const toScreenPair = (
+      segment: CadSketchCanvasDimensionSegment,
+    ): { readonly from: CadSketchPoint; readonly to: CadSketchPoint } => ({
+      from: toScreen(segment.from),
+      to: toScreen(segment.to),
+    });
+    // The presentation geometry is authoritative; the canvas only maps
+    // workplane mm to screen px. Arrowheads are small filled triangles at
+    // segment ends, oriented along the segment (or arc tangent).
+    const arrow = (at: CadSketchPoint, angle: number): ReactNode => {
+      const length = 7;
+      const width = 3;
+      const back = {
+        x: at.x - length * Math.cos(angle),
+        y: at.y - length * Math.sin(angle),
+      };
+      const perp = { x: -Math.sin(angle), y: Math.cos(angle) };
+      const p1 = {
+        x: back.x + (perp.x * width) / 2,
+        y: back.y + (perp.y * width) / 2,
+      };
+      const p2 = {
+        x: back.x - (perp.x * width) / 2,
+        y: back.y - (perp.y * width) / 2,
+      };
+      return (
+        <polygon
+          fill="var(--color-sky-600, #0284c7)"
+          points={`${at.x},${at.y} ${p1.x},${p1.y} ${p2.x},${p2.y}`}
+        />
+      );
+    };
+    const stroke = "var(--color-sky-600, #0284c7)";
+    const shape = (() => {
+      switch (dimension.kind) {
+        case "linear": {
+          const line = toScreenPair(dimension.dimensionLine);
+          const angle = Math.atan2(
+            line.to.y - line.from.y,
+            line.to.x - line.from.x,
+          );
+          return (
+            <g>
+              <line
+                stroke={stroke}
+                strokeWidth={1}
+                x1={line.from.x}
+                x2={line.to.x}
+                y1={line.from.y}
+                y2={line.to.y}
+              />
+              {arrow(line.from, angle + Math.PI)}
+              {arrow(line.to, angle)}
+              {dimension.extensionLines.map((extension, index) => {
+                const screen = toScreenPair(extension);
+                return (
+                  <line
+                    key={`ext-${String(index)}`}
+                    stroke={stroke}
+                    strokeOpacity={0.6}
+                    strokeWidth={0.75}
+                    x1={screen.from.x}
+                    x2={screen.to.x}
+                    y1={screen.from.y}
+                    y2={screen.to.y}
+                  />
+                );
+              })}
+            </g>
+          );
+        }
+        case "radial": {
+          const leader = toScreenPair(dimension.leader);
+          const angle = Math.atan2(
+            leader.to.y - leader.from.y,
+            leader.to.x - leader.from.x,
+          );
+          return (
+            <g>
+              <line
+                stroke={stroke}
+                strokeWidth={1}
+                x1={leader.from.x}
+                x2={leader.to.x}
+                y1={leader.from.y}
+                y2={leader.to.y}
+              />
+              {arrow(leader.to, angle)}
+            </g>
+          );
+        }
+        case "diametral": {
+          const line = toScreenPair(dimension.line);
+          const angle = Math.atan2(
+            line.to.y - line.from.y,
+            line.to.x - line.from.x,
+          );
+          return (
+            <g>
+              <line
+                stroke={stroke}
+                strokeWidth={1}
+                x1={line.from.x}
+                x2={line.to.x}
+                y1={line.from.y}
+                y2={line.to.y}
+              />
+              {arrow(line.from, angle + Math.PI)}
+              {arrow(line.to, angle)}
+            </g>
+          );
+        }
+        case "angular": {
+          const center = toScreen(dimension.arc.center);
+          const radius = dimension.arc.radius * scale;
+          // Screen y flips: the workplane's CCW sweep becomes SVG's CW.
+          const startScreen = {
+            x: center.x + radius * Math.cos(dimension.arc.startAngle),
+            y: center.y - radius * Math.sin(dimension.arc.startAngle),
+          };
+          const endScreen = {
+            x: center.x + radius * Math.cos(dimension.arc.endAngle),
+            y: center.y - radius * Math.sin(dimension.arc.endAngle),
+          };
+          const sweepDegrees =
+            (((dimension.arc.endAngle - dimension.arc.startAngle) %
+              (Math.PI * 2)) +
+              Math.PI * 2) %
+            (Math.PI * 2);
+          return (
+            <g>
+              <path
+                d={`M ${startScreen.x} ${startScreen.y} A ${radius} ${radius} 0 ${sweepDegrees > Math.PI ? 1 : 0} 0 ${endScreen.x} ${endScreen.y}`}
+                fill="none"
+                stroke={stroke}
+                strokeWidth={1}
+              />
+              {/* Arrowheads ride the arc tangents: the screen parametrization
+                  is (cos θ, −sin θ), so the tangents are its ±derivative. */}
+              {arrow(
+                startScreen,
+                Math.atan2(
+                  Math.cos(dimension.arc.startAngle),
+                  Math.sin(dimension.arc.startAngle),
+                ),
+              )}
+              {arrow(
+                endScreen,
+                Math.atan2(
+                  -Math.cos(dimension.arc.endAngle),
+                  -Math.sin(dimension.arc.endAngle),
+                ),
+              )}
+            </g>
+          );
+        }
+        case "label":
+          return null;
+      }
+    })();
+    return (
+      <g key={dimension.id} data-sketch-dimension-id={dimension.id}>
+        {shape}
+      </g>
+    );
+  });
+
   const annotationNodes = annotations.map((annotation) => {
     const screen = toScreen({ x: annotation.x, y: annotation.y });
     const color =
@@ -870,14 +1214,17 @@ export function CadSketchCanvas({
       </span>
       <svg
         aria-label={labels.canvasLabel}
+        data-sketch-dragging={dragging || undefined}
         data-sketch-surface=""
         height={height}
+        onPointerCancel={handlePointerUp}
         onPointerDown={handlePointerDown}
         onPointerLeave={() => {
           // Leaving the surface is the deterministic end of hover feedback.
           onHover?.(null);
         }}
         onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
         ref={svgRef}
         role="img"
         width={width}
@@ -885,6 +1232,7 @@ export function CadSketchCanvas({
         {gridLines}
         {axes}
         {regionNodes}
+        {dimensionNodes}
         {entityNodes}
         {previewNode}
         {annotationNodes}
