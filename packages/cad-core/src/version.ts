@@ -33,8 +33,19 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * v1→v2 migration carries old documents forward by bumping every embedded
  * sketch payload's stamp (the growth is additive — v1 payload content is
  * valid v2 content).
+ *
+ * v3 (Phase 39): the document substrate grew named datum records — the
+ * additive `datums` section, the `datum` id-generator counter, and the
+ * `datum` feature-input kind that addresses datums. The growth is
+ * content-additive (v2 content is valid v3 content and the v2→v3
+ * migration is content-preserving), but the version moves because an old
+ * reader can no longer load every v3 document faithfully: a feature input
+ * of kind `datum` fails an old reader's input-kind validation outright,
+ * and a standalone `datums` section is silently dropped by the old
+ * reader's unknown-field tolerance — both are data the old reader cannot
+ * carry, so the envelope stamp is the gate.
  */
-export const CAD_NATIVE_FORMAT_VERSION = 2;
+export const CAD_NATIVE_FORMAT_VERSION = 3;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

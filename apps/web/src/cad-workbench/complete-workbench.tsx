@@ -105,10 +105,13 @@ import type { LoftSectionChoice } from "./loft";
 import { completionJson } from "../render-fixture/fixture-session";
 import {
   CAD_FEATURE_FORM_LABELS,
+  DATUM_FORM_LABELS,
+  DatumFeatureForm,
   LoftFeatureForm,
   SweepFeatureForm,
   type CadFeatureSketchOption,
 } from "./feature-forms";
+import { CadDatumOverlay } from "./datum-overlay";
 import {
   FeatureTimelineChips,
   FeatureTimelineSummary,
@@ -271,6 +274,9 @@ export function CompleteCadWorkbench({
     statusId: "workbench-complete-status",
     volumeId: "workbench-complete-volume",
     errorId: "workbench-complete-error",
+    // The fluid viewport: its canvas size follows the window, so the anchor
+    // projection must read the LIVE frame (see the engine's viewportId).
+    viewportId: "workbench-complete-viewport",
   });
   const {
     applied,
@@ -295,6 +301,10 @@ export function CompleteCadWorkbench({
     handleSaveSketch,
     handleSweep,
     handleLoft,
+    handleSketchOnFace,
+    sketchBootWorkplane,
+    datumsJson,
+    handleCreateDatum,
   } = engine;
 
   // Dialog + palette state: composition-owned UI state (replaced entirely
@@ -305,9 +315,9 @@ export function CompleteCadWorkbench({
   // The Phase 38 feature dialog: the sweep/loft create forms. One dialog,
   // kind-switched; the last submission's structured refusal rides here (the
   // parameter panel's apply-failure precedent) and clears on the next open.
-  const [featureDialog, setFeatureDialog] = useState<"sweep" | "loft" | null>(
-    null,
-  );
+  const [featureDialog, setFeatureDialog] = useState<
+    "sweep" | "loft" | "datum" | null
+  >(null);
   const [featureOutcome, setFeatureOutcome] = useState<
     | { readonly ok: true }
     | { readonly ok: false; readonly code: string; readonly message: string }
@@ -482,10 +492,32 @@ export function CompleteCadWorkbench({
   };
 
   /** Opens one feature dialog with its outcome region reset. */
-  const openFeatureDialog = useCallback((kind: "sweep" | "loft"): void => {
-    setFeatureOutcome(null);
-    setFeatureDialog(kind);
-  }, []);
+  const openFeatureDialog = useCallback(
+    (kind: "sweep" | "loft" | "datum"): void => {
+      setFeatureOutcome(null);
+      setFeatureDialog(kind);
+    },
+    [],
+  );
+  // The sketch-on-face refusal (a curved face, an unsettled scene): the
+  // last attempt's message, surfaced as the viewport's honest status chip.
+  const [sketchOnFaceNote, setSketchOnFaceNote] = useState<string | null>(null);
+
+  /** Runs the sketch-on-face pick for the currently selected face. */
+  const sketchOnSelectedFace = useCallback(() => {
+    const faceRef = selectionApi.selected.find(
+      (reference) => reference.kind === "face",
+    );
+    if (faceRef === undefined || faceRef.kind !== "face") return;
+    const outcome = handleSketchOnFace(faceRef);
+    setSketchOnFaceNote(outcome.ok ? null : outcome.message);
+  }, [handleSketchOnFace, selectionApi.selected]);
+
+  // The selection holds exactly one synthetic face reference when a face
+  // pick is live — the sketch-on-face verb's enablement.
+  const hasFaceSelection =
+    selectionApi.selected.length === 1 &&
+    selectionApi.selected[0]?.kind === "face";
 
   useEffect(() => {
     // The shared, sweep/loft-aware fallback decision (./scene-fallback):
@@ -594,6 +626,23 @@ export function CompleteCadWorkbench({
           openFeatureDialog("loft");
         },
       },
+      {
+        disabled: !hasFaceSelection,
+        group: "Workspace",
+        id: "sketch-on-face",
+        keywords: "sketch on face datum plane anchor pad create",
+        label: "Sketch on the selected face",
+        run: sketchOnSelectedFace,
+      },
+      {
+        group: "Workspace",
+        id: "create-datum",
+        keywords: "datum plane axis point coordinate system reference create",
+        label: "Create datum geometry",
+        run: () => {
+          openFeatureDialog("datum");
+        },
+      },
     );
     if (io !== undefined) {
       list.push(
@@ -624,6 +673,7 @@ export function CompleteCadWorkbench({
     canAuthorSketchFeatures,
     clearSelection,
     handleHole,
+    hasFaceSelection,
     historyApi,
     holeBase,
     io,
@@ -632,6 +682,7 @@ export function CompleteCadWorkbench({
     selectionApi.selected.length,
     setMode,
     setRollback,
+    sketchOnSelectedFace,
     toolsApi,
   ]);
 
@@ -796,6 +847,23 @@ export function CompleteCadWorkbench({
                   >
                     Back to model
                   </Button>
+                </div>
+              ) : null}
+              {!showingPreview &&
+              applied !== null &&
+              workbenchDocument.datums.length > 0 ? (
+                <CadDatumOverlay
+                  document={workbenchDocument}
+                  projection={applied.state.projection}
+                />
+              ) : null}
+              {sketchOnFaceNote !== null ? (
+                <div
+                  className="border-destructive/40 bg-background/95 text-destructive absolute top-2 right-2 max-w-sm rounded-sm border px-2 py-1 text-xs leading-4"
+                  data-testid="sketch-on-face-note"
+                  role="alert"
+                >
+                  {sketchOnFaceNote}
                 </div>
               ) : null}
               {!showingPreview && !sketchHintDismissed ? (
@@ -1054,6 +1122,12 @@ export function CompleteCadWorkbench({
       data-export-dialog-open={String(exportDialogOpen)}
       data-export-error={ioSurface.exportError}
       data-export-held={heldExportsJson}
+      data-datum-count={String(
+        (datumsJson === "[]" ? [] : (JSON.parse(datumsJson) as unknown[]))
+          .length,
+      )}
+      data-datums={datumsJson}
+      data-face-anchors={engine.faceAnchors}
       data-feature-dialog-kind={featureDialog ?? ""}
       data-feature-dialog-open={String(featureDialog !== null)}
       data-feature-timeline={timelineJson}
@@ -1296,6 +1370,38 @@ export function CompleteCadWorkbench({
         >
           Loft
         </Button>
+        {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
+            the datum form needs nothing. Both stay in the command menu on
+            narrow rows. */}
+        <Button
+          className="max-xl:hidden"
+          data-testid="complete-sketch-on-face"
+          disabled={!hasFaceSelection}
+          onClick={sketchOnSelectedFace}
+          size="xs"
+          title={
+            hasFaceSelection
+              ? "Sketch on the selected face: anchors a datum plane to it and boots the sketch editor there."
+              : "Select a face in the viewport first; sketch-on-face anchors to it."
+          }
+          type="button"
+          variant="outline"
+        >
+          Sketch on face
+        </Button>
+        <Button
+          className="max-xl:hidden"
+          data-testid="complete-datum"
+          onClick={() => {
+            openFeatureDialog("datum");
+          }}
+          size="xs"
+          title="Create datum geometry: a plane, an axis, a point, or a coordinate system."
+          type="button"
+          variant="outline"
+        >
+          Datum
+        </Button>
         {/* THE creation affordance: the one verb that adds geometry. The
             signal-amber border and mark make it the only tinted control in
             the row — the eye lands here first (the label stays foreground
@@ -1334,6 +1440,10 @@ export function CompleteCadWorkbench({
       </div>
       {mode === "sketch" ? (
         <SketchMode
+          bootWorkplane={sketchBootWorkplane ?? undefined}
+          key={
+            sketchBootWorkplane === null ? "xy" : sketchBootWorkplane.origin.x
+          }
           onExit={() => {
             setMode("model");
           }}
@@ -1476,18 +1586,30 @@ export function CompleteCadWorkbench({
               <DialogTitle>
                 {featureDialog === "sweep"
                   ? CAD_FEATURE_FORM_LABELS.sweepTitle
-                  : CAD_FEATURE_FORM_LABELS.loftTitle}
+                  : featureDialog === "datum"
+                    ? DATUM_FORM_LABELS.title
+                    : CAD_FEATURE_FORM_LABELS.loftTitle}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
               {featureDialog === "sweep"
                 ? CAD_FEATURE_FORM_LABELS.sweepHint
-                : CAD_FEATURE_FORM_LABELS.loftHint}
+                : featureDialog === "datum"
+                  ? DATUM_FORM_LABELS.hint
+                  : CAD_FEATURE_FORM_LABELS.loftHint}
             </p>
             {featureDialog === "sweep" ? (
               <SweepFeatureForm
                 onSweep={submitSweep}
                 sketches={sketchOptions}
+              />
+            ) : featureDialog === "datum" ? (
+              <DatumFeatureForm
+                onCreateDatum={(payload) => {
+                  const outcome = handleCreateDatum(payload);
+                  setFeatureOutcome(outcome);
+                  if (outcome.ok) setFeatureDialog(null);
+                }}
               />
             ) : (
               <LoftFeatureForm onLoft={submitLoft} sketches={sketchOptions} />

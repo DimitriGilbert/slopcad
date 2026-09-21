@@ -21,8 +21,9 @@
  *   naming both versions), and an older version must reach the current one
  *   through the registered chain.
  *
- * The registry's first real step is v1→v2 (Phase 36): the embedded sketch
- * payloads' additive vocabulary growth (see `version.ts`). The synthetic
+ * The registry's real steps are v1→v2 (Phase 36: the embedded sketch
+ * payloads' additive vocabulary growth) and v2→v3 (Phase 39: the document
+ * substrate's named datum records — see `version.ts`). The synthetic
  * migrations the mechanism tests inject (a v0→v1 test shape and a v1→v2
  * continuation) exist in tests ONLY and are never registered in production
  * code alongside the real steps.
@@ -79,14 +80,21 @@ export interface NativeFormatMigration {
 
 /**
  * The production migration registry, ordered or not — planning walks it by
- * version, not position. The v1→v2 step (Phase 36) carries the first real
- * schema growth: the embedded sketch payloads' vocabulary grew additive
- * (new entity and constraint kinds), so the step bumps every embedded
- * sketch payload's `formatVersion` from 1 to 2 — in the head document's
- * sketch records, the history base's sketch records, and every
- * `sketch.create` command payload in the transaction log — leaving all
- * other content byte-identical. A payload already stamped 2 (impossible in
- * the wild, tolerated in hand-made files) passes through unchanged.
+ * version, not position. The v1→v2 step (Phase 36) carries the embedded
+ * sketch payloads' vocabulary growth: the step bumps every embedded sketch
+ * payload's `formatVersion` from 1 to 2 — in the head document's sketch
+ * records, the history base's sketch records, and every `sketch.create`
+ * command payload in the transaction log — leaving all other content
+ * byte-identical. A payload already stamped 2 (impossible in the wild,
+ * tolerated in hand-made files) passes through unchanged.
+ *
+ * The v2→v3 step (Phase 39) carries the datum records' additive growth.
+ * The growth is CONTENT-PRESERVING — v2 content is valid v3 content — so
+ * the step is the identity transform: it exists so the version walk has a
+ * registered path (the framework stamps the envelope after it), and its
+ * documentation is the proof that nothing inside the document needed
+ * rewriting (datum payloads carry their own stamp, added with the
+ * vocabulary itself; v2 documents never contain one).
  */
 export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
   Object.freeze([
@@ -95,7 +103,32 @@ export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
       to: 2,
       migrate: migrateV1ToV2,
     },
+    {
+      from: 2,
+      to: 3,
+      migrate: migrateV2ToV3,
+    },
   ]);
+
+/**
+ * The v2→v3 content transform (the framework stamps `formatVersion`):
+ * the identity — the datum growth is additive, so v2 content is already
+ * valid v3 content and nothing inside the document is rewritten.
+ */
+function migrateV2ToV3(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v2→v3 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
 
 /** Bumps one embedded sketch payload's stamp from 1 to 2 (v1→v2 step). */
 function migrateSketchPayload(payload: unknown): unknown {

@@ -107,6 +107,7 @@ describe("the native document compatibility suite", () => {
       "failed-feature.native.json",
       "plate-with-hole.native.json",
       "rolled-back.native.json",
+      "sketch-on-face.native.json",
       "workbench-extrude.native.json",
     ]);
   });

@@ -24,7 +24,7 @@ type BrandedId<K extends CadIdKind> = string & {
   readonly [cadIdBrand]: K;
 };
 
-/** The six domain object kinds that carry branded ids. */
+/** The seven domain object kinds that carry branded ids. */
 export const CAD_ID_KINDS = [
   "document",
   "parameter",
@@ -32,6 +32,7 @@ export const CAD_ID_KINDS = [
   "body",
   "reference",
   "sketch",
+  "datum",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -55,6 +56,13 @@ export type ReferenceId = BrandedId<"reference">;
  * consumes a sketch's profile (Phase 26.1's extrude).
  */
 export type SketchDocumentId = BrandedId<"sketch">;
+/**
+ * Identifier of a named datum entity (e.g. `dtm_plane-top`): the
+ * document-resident record of datum reference geometry — a plane, an axis,
+ * a point, or a coordinate system (Phase 39) — that features and sketches
+ * address through the `datum` input kind.
+ */
+export type DatumId = BrandedId<"datum">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -63,6 +71,7 @@ type CadIdTable = {
   body: BodyId;
   reference: ReferenceId;
   sketch: SketchDocumentId;
+  datum: DatumId;
 };
 
 /** The branded id type of a given id kind. */
@@ -82,6 +91,7 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   body: "body",
   reference: "ref",
   sketch: "skd",
+  datum: "dtm",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -211,6 +221,13 @@ export function parseSketchDocumentId(
   return parseIdOfKind("sketch", input);
 }
 
+/** Parses untrusted input as a {@link DatumId}. */
+export function parseDatumId(
+  input: unknown,
+): ParseResult<DatumId, IdParseError> {
+  return parseIdOfKind("datum", input);
+}
+
 /** An id of any kind together with the kind it was recognized as. */
 export interface ParsedCadId<K extends CadIdKind = CadIdKind> {
   readonly kind: K;
@@ -338,6 +355,14 @@ export function createSketchDocumentId(raw: string): SketchDocumentId {
 }
 
 /**
+ * Adopts an explicit user-provided datum id exactly as given (`dtm_…` wire
+ * format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createDatumId(raw: string): DatumId {
+  return requireId("datum", raw);
+}
+
+/**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
  */
@@ -390,6 +415,7 @@ export interface IdGenerator {
   nextBodyId(): BodyId;
   nextReferenceId(): ReferenceId;
   nextSketchDocumentId(): SketchDocumentId;
+  nextDatumId(): DatumId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -401,6 +427,7 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   body: 0,
   reference: 0,
   sketch: 0,
+  datum: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -455,6 +482,7 @@ export function createIdGenerator(
     nextBodyId: () => requireId("body", nextRawId("body")),
     nextReferenceId: () => requireId("reference", nextRawId("reference")),
     nextSketchDocumentId: () => requireId("sketch", nextRawId("sketch")),
+    nextDatumId: () => requireId("datum", nextRawId("datum")),
     state: () => Object.freeze({ ...counters }),
   };
 }

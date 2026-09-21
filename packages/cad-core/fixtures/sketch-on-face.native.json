@@ -1,0 +1,556 @@
+{
+  "formatVersion": 3,
+  "metadata": {
+    "name": "sketch-on-face",
+    "unitSystem": "metric"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_sketch_on_face",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_base_depth",
+          "name": "baseDepth",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 10
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_pad_depth",
+          "name": "padDepth",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 6
+          },
+          "expression": null,
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_base",
+        "name": "base"
+      },
+      {
+        "id": "body_pad",
+        "name": "pad"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_base_extrude",
+        "kind": "extrude",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_base"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_base_depth"
+          }
+        ],
+        "outputs": [
+          "body_base"
+        ]
+      },
+      {
+        "id": "feat_pad_extrude",
+        "kind": "extrude",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_pad"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_pad_depth"
+          },
+          {
+            "kind": "datum",
+            "id": "dtm_face_plane"
+          }
+        ],
+        "outputs": [
+          "body_pad"
+        ]
+      }
+    ],
+    "sketches": [
+      {
+        "id": "skd_base",
+        "name": "base sketch",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "normal": {
+              "x": 0,
+              "y": 0,
+              "z": 1
+            },
+            "xAxis": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_rect_a",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 0,
+              "x2": 24,
+              "y2": 0
+            },
+            {
+              "id": "skent_rect_b",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 24,
+              "y1": 0,
+              "x2": 24,
+              "y2": 16
+            },
+            {
+              "id": "skent_rect_c",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 24,
+              "y1": 16,
+              "x2": 0,
+              "y2": 16
+            },
+            {
+              "id": "skent_rect_d",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 16,
+              "x2": 0,
+              "y2": 0
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_pad",
+        "name": "pad sketch",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "normal": {
+              "x": 0,
+              "y": 0,
+              "z": 1
+            },
+            "xAxis": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_rect_a",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 0,
+              "x2": 24,
+              "y2": 0
+            },
+            {
+              "id": "skent_rect_b",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 24,
+              "y1": 0,
+              "x2": 24,
+              "y2": 16
+            },
+            {
+              "id": "skent_rect_c",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 24,
+              "y1": 16,
+              "x2": 0,
+              "y2": 16
+            },
+            {
+              "id": "skent_rect_d",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 16,
+              "x2": 0,
+              "y2": 0
+            }
+          ],
+          "constraints": []
+        }
+      }
+    ],
+    "datums": [
+      {
+        "id": "dtm_face_plane",
+        "name": "face plane 1",
+        "datum": {
+          "formatVersion": 1,
+          "datumType": "plane",
+          "definition": "faceOffset",
+          "reference": {
+            "kind": "sessionFace",
+            "bodyId": "body_base",
+            "faceNormal": [
+              0,
+              0,
+              1
+            ]
+          },
+          "normalAtDefinition": [
+            0,
+            0,
+            1
+          ],
+          "offsetMm": 0
+        }
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_sketch_on_face",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": [
+          {
+            "id": "param_base_depth",
+            "name": "baseDepth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 10
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_pad_depth",
+            "name": "padDepth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 6
+            },
+            "expression": null,
+            "metadata": {}
+          }
+        ]
+      },
+      "bodies": [],
+      "features": [],
+      "sketches": [
+        {
+          "id": "skd_base",
+          "name": "base sketch",
+          "sketch": {
+            "formatVersion": 2,
+            "workplane": {
+              "origin": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "normal": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+              },
+              "xAxis": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "entities": [
+              {
+                "id": "skent_rect_a",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": 0,
+                "x2": 24,
+                "y2": 0
+              },
+              {
+                "id": "skent_rect_b",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 24,
+                "y1": 0,
+                "x2": 24,
+                "y2": 16
+              },
+              {
+                "id": "skent_rect_c",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 24,
+                "y1": 16,
+                "x2": 0,
+                "y2": 16
+              },
+              {
+                "id": "skent_rect_d",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": 16,
+                "x2": 0,
+                "y2": 0
+              }
+            ],
+            "constraints": []
+          }
+        },
+        {
+          "id": "skd_pad",
+          "name": "pad sketch",
+          "sketch": {
+            "formatVersion": 2,
+            "workplane": {
+              "origin": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "normal": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+              },
+              "xAxis": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "entities": [
+              {
+                "id": "skent_rect_a",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": 0,
+                "x2": 24,
+                "y2": 0
+              },
+              {
+                "id": "skent_rect_b",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 24,
+                "y1": 0,
+                "x2": 24,
+                "y2": 16
+              },
+              {
+                "id": "skent_rect_c",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 24,
+                "y1": 16,
+                "x2": 0,
+                "y2": 16
+              },
+              {
+                "id": "skent_rect_d",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": 16,
+                "x2": 0,
+                "y2": 0
+              }
+            ],
+            "constraints": []
+          }
+        }
+      ]
+    },
+    "transactions": [
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_base",
+            "name": "base"
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_base_extrude",
+            "kind": "extrude",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_base"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_base_depth"
+              }
+            ],
+            "outputs": [
+              "body_base"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "datum.create",
+            "id": "dtm_face_plane",
+            "name": "face plane 1",
+            "datum": {
+              "formatVersion": 1,
+              "datumType": "plane",
+              "definition": "faceOffset",
+              "reference": {
+                "kind": "sessionFace",
+                "bodyId": "body_base",
+                "faceNormal": [
+                  0,
+                  0,
+                  1
+                ]
+              },
+              "normalAtDefinition": [
+                0,
+                0,
+                1
+              ],
+              "offsetMm": 0
+            }
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_pad",
+            "name": "pad"
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_pad_extrude",
+            "kind": "extrude",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_pad"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_pad_depth"
+              },
+              {
+                "kind": "datum",
+                "id": "dtm_face_plane"
+              }
+            ],
+            "outputs": [
+              "body_pad"
+            ]
+          }
+        ]
+      }
+    ],
+    "cursor": 5
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": [
+      {
+        "id": "feat_base_extrude",
+        "state": "valid",
+        "diagnostics": []
+      },
+      {
+        "id": "feat_pad_extrude",
+        "state": "valid",
+        "diagnostics": []
+      }
+    ]
+  }
+}

@@ -135,6 +135,7 @@ import {
 import {
   CAD_ID_KINDS,
   parseBodyId,
+  parseDatumId,
   parseDocumentId,
   parseFeatureId,
   parseParameterId,
@@ -1082,6 +1083,71 @@ function validateSerializedReferenceListShape(
   });
 }
 
+/**
+ * Validates the additive datums section's shape (the substrate parser's
+ * `parseSerializedDatum` requirements): an array of plain records, each
+ * with a valid datum id, a 1-64 character name, and a plain-object payload
+ * (the datum module's own schema validates on use). Absent or null parses
+ * as the empty list, so absent validates clean — the validator and the
+ * parser must agree on what is well-formed.
+ */
+function validateSerializedDatumListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized datums must be an array of datum records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const entryPath = `${path}[${String(index)}]`;
+    if (!isPlainRecord(entry)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        entryPath,
+        "A serialized datum record must be a plain object with id, name, and datum fields.",
+      );
+      return;
+    }
+    if (!parseDatumId(entry.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.id`,
+        "A datum id must carry the datum id prefix and payload rules.",
+      );
+    }
+    if (
+      typeof entry.name !== "string" ||
+      entry.name.length < 1 ||
+      entry.name.length > BODY_NAME_MAX_LENGTH
+    ) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.name`,
+        "A datum name must be a string of 1-64 characters.",
+      );
+    }
+    if (!isPlainRecord(entry.datum)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.datum`,
+        "A datum record's payload must be a plain object (the datum module's canonical serialized form).",
+      );
+    }
+  });
+}
+
 function validateSerializedCadDocumentShape(
   input: unknown,
   path: string,
@@ -1248,17 +1314,19 @@ function validateSerializedCadDocumentShape(
       }
     });
   }
-  // The additive sections (sketches, references): absent means empty (the
-  // substrate parser defaults it), but a PRESENT list is inspected with the
-  // parser's own per-record requirements, so a malformed list no longer
-  // validates clean only to fail the parse. Runs for every document section
-  // the validator walks — the top-level document and history.base alike.
+  // The additive sections (sketches, references, datums): absent means
+  // empty (the substrate parser defaults it), but a PRESENT list is
+  // inspected with the parser's own per-record requirements, so a malformed
+  // list no longer validates clean only to fail the parse. Runs for every
+  // document section the validator walks — the top-level document and
+  // history.base alike.
   validateSerializedSketchListShape(input.sketches, `${path}.sketches`, issues);
   validateSerializedReferenceListShape(
     input.references,
     `${path}.references`,
     issues,
   );
+  validateSerializedDatumListShape(input.datums, `${path}.datums`, issues);
 }
 
 /** Validates a create-command's display name (a non-empty string). */
@@ -1384,6 +1452,24 @@ function validateCommandShape(
       input.reference,
       `${path}.reference`,
       "A reference.create command's reference payload must be a plain object.",
+      issues,
+    );
+    return;
+  }
+  if (type === "datum.create") {
+    if (input.id !== undefined && !parseDatumId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A datum.create command's optional id must be a valid datum id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "datum.create", issues);
+    validateRecordShape(
+      input.datum,
+      `${path}.datum`,
+      "A datum.create command's datum payload must be a plain object.",
       issues,
     );
     return;

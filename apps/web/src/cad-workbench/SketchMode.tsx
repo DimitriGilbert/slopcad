@@ -33,8 +33,9 @@
  * `data-sketch-tool`, `data-sketch-tool-status`, `data-sketch-selection`,
  * `data-sketch-entities`, `data-sketch-constraints`, `data-sketch-solved`,
  * `data-sketch-solve`, `data-sketch-diagnostics`, `data-sketch-commands`
- * (the serialized command log), `data-sketch-history`, and
- * `data-sketch-gesture` — everything the Playwright battery asserts.
+ * (the serialized command log), `data-sketch-history`, `data-sketch-gesture`,
+ * and `data-sketch-workplane` (the session's boot workplane — the
+ * sketch-on-face regression pin) — everything the Playwright battery asserts.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -78,6 +79,7 @@ import {
   type SketchDiagnostic,
   type SerializedSketch,
   type SerializedSketchCommand,
+  type Workplane,
 } from "@slopcad/cad-sketch";
 import type { ProfileExtrudeInput } from "@slopcad/cad-kernel";
 import { Redo2, Undo2 } from "lucide-react";
@@ -211,6 +213,13 @@ export interface SketchModeProps {
   readonly onSaveSketch?: (submission: {
     readonly sketch: SerializedSketch;
   }) => void;
+  /**
+   * The Phase 39 boot workplane: a face-derived datum plane the session
+   * starts on (sketch-on-face). `undefined` boots the ordinary XY workplane.
+   * Boot-time configuration — a remount starts a new session, so the host
+   * re-mounts SketchMode when the anchor changes.
+   */
+  readonly bootWorkplane?: Workplane;
 }
 
 /** The default extrusion depth the action creates the parameter with (mm). */
@@ -242,9 +251,10 @@ export function SketchMode({
   extrudeDisabledTitle,
   topology,
   onSaveSketch,
+  bootWorkplane,
 }: SketchModeProps): ReactElement {
   const [session, setSession] = useState(() =>
-    createSketchSession(createWorkbenchSketch()),
+    createSketchSession(createWorkbenchSketch(bootWorkplane)),
   );
   const [editor, setEditor] = useState<SketchEditorState>(
     createSketchEditorState,
@@ -997,6 +1007,7 @@ export function SketchMode({
       )}
       data-sketch-tool={editor.tool}
       data-sketch-tool-status={JSON.stringify(effectiveStatus)}
+      data-sketch-workplane={JSON.stringify(session.sketch.workplane)}
       id="sketch-root"
       onKeyDown={handleKeyDown}
       tabIndex={-1}
