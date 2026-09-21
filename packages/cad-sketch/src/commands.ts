@@ -276,6 +276,10 @@ function constraintReferencesEntity(
       return (
         constraint.point.entity === entityId || constraint.entity === entityId
       );
+    case "pointOnTangent":
+      return (
+        constraint.point.entity === entityId || constraint.spline === entityId
+      );
     case "horizontalPair":
     case "verticalPair":
     case "distanceX":

@@ -59,11 +59,14 @@ import {
   createParallelConstraint,
   createPerpendicularConstraint,
   createPointOnEntityConstraint,
+  createPointOnTangentConstraint,
+  createPolygonEntity,
   createRadiusConstraint,
   createRectangleEntity,
   createSketch,
   createSketchConstraintId,
   createSketchEntityId,
+  createSplineEntity,
   createStraightSlotEntity,
   createTangentConstraint,
   createVerticalConstraint,
@@ -85,6 +88,7 @@ import {
   type SketchEntityId,
   type SketchTransaction,
   type SolvedEntityParameters,
+  type SplineEndSelection,
 } from "@slopcad/cad-sketch";
 import type {
   CadSketchCanvasAnnotation,
@@ -107,6 +111,8 @@ export const SKETCH_DRAWING_TOOLS = [
   "slot",
   "trim",
   "construction",
+  "spline",
+  "polygon",
 ] as const;
 
 /** The constraint tools of the second cluster (the domain's kind names). */
@@ -115,6 +121,7 @@ export const SKETCH_CONSTRAINT_TOOLS = [
   "horizontal",
   "vertical",
   "pointOnEntity",
+  "pointOnTangent",
   "collinear",
   "horizontalPair",
   "verticalPair",
@@ -174,6 +181,19 @@ export type SketchGesture =
       readonly end: EditorPoint;
     }
   | {
+      /**
+       * Control spline: four picks commit one cubic Bézier (the control
+       * flavor's minimal count). The picks accumulate as the controls.
+       */
+      readonly kind: "spline";
+      readonly points: readonly EditorPoint[];
+    }
+  | {
+      /** Polygon after the center pick: the vertex pick sets radius + rotation. */
+      readonly kind: "polygon";
+      readonly center: EditorPoint;
+    }
+  | {
       /** The first pick of either multi-pick curve gesture. */
       readonly kind: "pick";
       readonly tool: "ellipse" | "slot";
@@ -227,6 +247,12 @@ export const SKETCH_EDITOR_STATUS_TEXT = {
     "Trim: click a line near the end to trim to the nearest intersection.",
   readyConstruction:
     "Construction: click entities to toggle construction geometry.",
+  readySpline: "Spline: click four control points (one cubic Bézier segment).",
+  splineNext: (remaining: number): string =>
+    `Spline: click ${String(remaining)} more control point${remaining === 1 ? "" : "s"}.`,
+  readyPolygon:
+    "Polygon: click the center, then the first vertex (6 sides, inscribed).",
+  polygonVertex: "Polygon: click the first vertex (sets size and rotation).",
   pickNeeded: (tool: string, remaining: number): string =>
     `${tool}: pick ${String(remaining)} more ${remaining === 1 ? "entity" : "entities"}.`,
   constraintApplied: "Constraint applied.",
@@ -308,6 +334,7 @@ function pickArity(tool: SketchToolId): number {
     case "distance":
     case "angle":
     case "pointOnEntity":
+    case "pointOnTangent":
     case "collinear":
     case "horizontalPair":
     case "verticalPair":
@@ -335,6 +362,13 @@ function pickUsesPointTarget(tool: SketchToolId, pickIndex: number): boolean {
       return true;
     case "pointOnEntity":
       return pickIndex === 0;
+    case "parallel":
+    case "perpendicular":
+    case "angle":
+    case "pointOnTangent":
+      // The direction constraints record the spline pick's nearest end to
+      // address `at`; pointOnTangent addresses a point and a spline end.
+      return true;
     default:
       return false;
   }
@@ -353,9 +387,19 @@ function isPointOnEntityCurve(entity: SketchEntity): boolean {
     entity.kind === "arc" ||
     entity.kind === "ellipse" ||
     entity.kind === "ellipticalArc" ||
-    entity.kind === "spline"
+    entity.kind === "spline" ||
+    entity.kind === "polygon" ||
+    (entity.kind === "slot" && entity.variant === "straight")
   );
 }
+
+/** Whether `entity` is a spline operand a direction/tangent tool accepts. */
+function isSpline(entity: SketchEntity): boolean {
+  return entity.kind === "spline";
+}
+
+/** The polygon drawing tool's fixed side count (a discrete parameter). */
+export const POLYGON_TOOL_SIDES = 6;
 
 /** The entity kinds a constraint tool accepts, per pick slot. */
 function pickKindProblem(
@@ -369,14 +413,19 @@ function pickKindProblem(
   switch (tool) {
     case "horizontal":
     case "vertical":
+      return isLine ? null : "needs a line";
     case "parallel":
     case "perpendicular":
     case "angle":
-      return isLine ? null : "needs a line";
+      return isLine || isSpline(entity)
+        ? null
+        : "needs a line or a spline's end tangent";
     case "collinear":
       return isLine ? null : "needs a line";
     case "equal":
-      return isLine || isCircular ? null : "needs a line or circle/arc";
+      return isLine || isCircular || isSpline(entity)
+        ? null
+        : "needs a line, circle/arc, or spline";
     case "coincident":
     case "distance":
     case "midpoint":
@@ -392,9 +441,19 @@ function pickKindProblem(
           : "needs a point-capable entity"
         : isPointOnEntityCurve(entity)
           ? null
-          : "needs a curve (line, circle/arc, ellipse, or spline)";
+          : "needs a curve (line, circle/arc, ellipse, spline, polygon, or slot)";
+    case "pointOnTangent":
+      return pickIndex === 0
+        ? isPointCapable
+          ? null
+          : "needs a point-capable entity"
+        : isSpline(entity)
+          ? null
+          : "needs a spline";
     case "tangent":
-      return isLine || isCircular ? null : "needs a line or circle/arc";
+      return isLine || isCircular || isSpline(entity)
+        ? null
+        : "needs a line, circle/arc, or spline";
     case "radius":
     case "diameter":
       return isCircular || entity.kind === "polygon" || entity.kind === "slot"
@@ -415,31 +474,52 @@ function pairProblem(
   const secondLine = second.kind === "line";
   const firstCircular = first.kind === "circle" || first.kind === "arc";
   const secondCircular = second.kind === "circle" || second.kind === "arc";
+  const firstSpline = first.kind === "spline";
+  const secondSpline = second.kind === "spline";
   switch (tool) {
     case "equal":
       if (firstLine && secondLine) return null;
       if (firstCircular && secondCircular) return null;
-      return "equal needs two lines or two circles/arcs";
+      if ((firstLine || firstSpline) && (secondLine || secondSpline)) {
+        return null;
+      }
+      return "equal needs two lines, two circles/arcs, or lines and splines (endpoint chords)";
+    case "parallel":
+    case "perpendicular":
+    case "angle":
+      if (firstLine && secondLine) return null;
+      if (firstLine && secondSpline) return null;
+      if (firstSpline && secondLine) return null;
+      return `${tool} needs two lines, or a line and a spline (two splines have no direction pair)`;
     case "tangent":
       if (firstLine && secondCircular) return null;
       if (firstCircular && secondLine) return null;
       if (firstCircular && secondCircular) return null;
-      return "tangent needs a line and a circle/arc, or two circles/arcs";
+      if (firstLine && secondSpline) return null;
+      if (firstSpline && secondLine) return null;
+      if (firstSpline && secondSpline) return null;
+      return "tangent needs a line and a circle/arc or spline, two circles/arcs, or two splines";
     case "pointOnEntity": {
-      const curveKinds = new Set([
-        "line",
-        "circle",
-        "arc",
-        "ellipse",
-        "ellipticalArc",
-        "spline",
-      ]);
+      const isCurve = (entity: SketchEntity): boolean =>
+        entity.kind === "line" ||
+        entity.kind === "circle" ||
+        entity.kind === "arc" ||
+        entity.kind === "ellipse" ||
+        entity.kind === "ellipticalArc" ||
+        entity.kind === "spline" ||
+        entity.kind === "polygon" ||
+        (entity.kind === "slot" && entity.variant === "straight");
       // Either orientation composes: the curve pick pins the other's point.
-      if (curveKinds.has(second.kind) && first.kind !== "rectangle")
-        return null;
-      if (curveKinds.has(first.kind) && second.kind !== "rectangle")
-        return null;
-      return "pointOnEntity needs a point-capable pick and a curve pick (line, circle/arc, ellipse, or spline)";
+      if (isCurve(second) && first.kind !== "rectangle") return null;
+      if (isCurve(first) && second.kind !== "rectangle") return null;
+      return "pointOnEntity needs a point-capable pick and a curve pick (line, circle/arc, ellipse, spline, polygon, or slot)";
+    }
+    case "pointOnTangent": {
+      if (firstSpline && secondSpline) {
+        return "pointOnTangent needs a point pick and a spline pick";
+      }
+      if (firstSpline || secondSpline) return null;
+      return "pointOnTangent needs a point pick and a spline pick";
     }
     default:
       return null;
@@ -774,12 +854,34 @@ function measuredDimensionValue(
     return b.y - a.y;
   }
   if (tool === "angle") {
-    if (firstEntity.kind !== "line") return null;
     const secondEntity = sketch.entities.find(
       (entity) => entity.id === second.entityId,
     );
-    if (secondEntity === undefined || secondEntity.kind !== "line") return null;
-    return angleBetweenDegrees(firstEntity, secondEntity);
+    if (secondEntity === undefined) return null;
+    // A spline operand contributes its END tangent direction (the same
+    // direction the constraint's row addresses; parallel to P1 − P0 /
+    // P_{N−1} − P_{N−2} on both flavors).
+    const directionOf = (
+      entity: SketchEntity,
+      pick: SketchEditorPick,
+    ): { readonly x: number; readonly y: number } | null => {
+      if (entity.kind === "line") {
+        return { x: entity.x2 - entity.x1, y: entity.y2 - entity.y1 };
+      }
+      if (entity.kind !== "spline" || entity.points.length < 2) return null;
+      const end = pick.point === "start" ? 0 : entity.points.length - 2;
+      const a = entity.points[end];
+      const b = entity.points[end + 1];
+      if (a === undefined || b === undefined) return null;
+      return { x: b.x - a.x, y: b.y - a.y };
+    };
+    const a = directionOf(firstEntity, first);
+    const b = directionOf(secondEntity, second);
+    if (a === null || b === null) return null;
+    return angleBetweenDegrees(
+      { x1: 0, y1: 0, x2: a.x, y2: a.y },
+      { x1: 0, y1: 0, x2: b.x, y2: b.y },
+    );
   }
   return null;
 }
@@ -956,6 +1058,8 @@ export function constraintOperandIds(
       return [constraint.first, constraint.second];
     case "pointOnEntity":
       return [constraint.point.entity, constraint.entity];
+    case "pointOnTangent":
+      return [constraint.point.entity, constraint.spline];
     case "midpoint":
       return [constraint.point.entity, constraint.line];
     case "symmetry":
@@ -1042,14 +1146,32 @@ function constraintCommand(
     case "tangent": {
       if (first === undefined || second === undefined) return null;
       const id = createSketchConstraintId(mint("skcon", tool));
+      // A spline pick addresses its nearest end (`at`) for the direction
+      // rows; the point target was recorded by pickUsesPointTarget.
+      const atOf = (pick: SketchEditorPick): SplineEndSelection | undefined => {
+        const entity = entityOf(pick);
+        // A spline's nearest point target is always start/end; any other
+        // recorded target defaults to the doc's "end".
+        return entity !== undefined && entity.kind === "spline"
+          ? pick.point === "start"
+            ? "start"
+            : "end"
+          : undefined;
+      };
       if (tool === "parallel") {
-        return createParallelConstraint(id, first.entityId, second.entityId);
+        return createParallelConstraint(
+          id,
+          first.entityId,
+          second.entityId,
+          atOf(first) ?? atOf(second),
+        );
       }
       if (tool === "perpendicular") {
         return createPerpendicularConstraint(
           id,
           first.entityId,
           second.entityId,
+          atOf(first) ?? atOf(second),
         );
       }
       if (tool === "equal") {
@@ -1061,11 +1183,22 @@ function constraintCommand(
       if (first === undefined || second === undefined) return null;
       const value = measuredDimensionValue("angle", sketch, picks);
       if (value === null || !(value > 0 && value < 180)) return null;
+      const atOf = (pick: SketchEditorPick): SplineEndSelection | undefined => {
+        const entity = entityOf(pick);
+        // A spline's nearest point target is always start/end; any other
+        // recorded target defaults to the doc's "end".
+        return entity !== undefined && entity.kind === "spline"
+          ? pick.point === "start"
+            ? "start"
+            : "end"
+          : undefined;
+      };
       return createAngleConstraint(
         createSketchConstraintId(mint("skcon", tool)),
         first.entityId,
         second.entityId,
         angle(value, "deg"),
+        atOf(first) ?? atOf(second),
       );
     }
     case "coincident":
@@ -1129,6 +1262,20 @@ function constraintCommand(
         createSketchConstraintId(mint("skcon", tool)),
         pointTarget(pointPick.entityId, pointPick.point ?? "center"),
         curvePick.entityId,
+      );
+    }
+    case "pointOnTangent": {
+      if (first === undefined || second === undefined) return null;
+      // Either orientation composes: the pick on the SPLINE is the curve
+      // side; the other (which carries a point target) is the point.
+      const splinePick = entityOf(first)?.kind === "spline" ? first : second;
+      const pointPick = splinePick === first ? second : first;
+      if (entityOf(splinePick)?.kind !== "spline") return null;
+      return createPointOnTangentConstraint(
+        createSketchConstraintId(mint("skcon", tool)),
+        pointTarget(pointPick.entityId, pointPick.point ?? "center"),
+        splinePick.entityId,
+        splinePick.point === "start" ? "start" : "end",
       );
     }
     case "collinear": {
@@ -1329,6 +1476,10 @@ function readyStatusFor(tool: SketchToolId): SketchEditorStatus {
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyTrim);
     case "construction":
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyConstruction);
+    case "spline":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readySpline);
+    case "polygon":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyPolygon);
     default:
       return statusOf(
         "hint",
@@ -1701,6 +1852,127 @@ function canvasPick(
         transaction: null,
       };
     }
+    case "spline": {
+      // Four picks commit one cubic Bézier (the control flavor's minimal
+      // count): the picks are the controls b0..b3. The entity layer's own
+      // validation (coincident segment endpoints) refuses degenerates
+      // through the transaction's structured error.
+      const points =
+        state.gesture.kind === "spline" ? state.gesture.points : [];
+      const picked = [...points, event.point];
+      if (picked.length < 4) {
+        return {
+          state: {
+            ...state,
+            gesture: { kind: "spline", points: picked },
+            status: statusOf(
+              "hint",
+              SKETCH_EDITOR_STATUS_TEXT.splineNext(4 - picked.length),
+            ),
+          },
+          transaction: null,
+        };
+      }
+      const [b0, b3] = [picked[0], picked[3]];
+      if (
+        b0 === undefined ||
+        b3 === undefined ||
+        (b0.x === b3.x && b0.y === b3.y)
+      ) {
+        return {
+          state: {
+            ...state,
+            status: statusOf(
+              "error",
+              SKETCH_EDITOR_STATUS_TEXT.degenerate,
+              "sketch/degenerate",
+            ),
+          },
+          transaction: null,
+        };
+      }
+      const spline = createSketchEntityId(mint("skent", "spline"));
+      return {
+        state: {
+          ...state,
+          gesture: { kind: "none" },
+          selectedEntityIds: [spline],
+          status: statusOf("hint", `Created spline ${spline}.`),
+        },
+        transaction: {
+          commands: [
+            {
+              entity: createSplineEntity(
+                spline,
+                "control",
+                picked.map((point) => ({ x: point.x, y: point.y })),
+              ),
+              type: "sketch.entity.create",
+            },
+          ],
+        },
+      };
+    }
+    case "polygon": {
+      // Pick 1: center. Pick 2: the first vertex — radius from the
+      // distance, rotation from the direction. Fixed discrete parameters
+      // (6 sides, inscribed) keep the gesture deterministic.
+      if (state.gesture.kind === "polygon") {
+        const radius = Math.hypot(
+          event.point.x - state.gesture.center.x,
+          event.point.y - state.gesture.center.y,
+        );
+        if (!(radius > 0)) {
+          return {
+            state: {
+              ...state,
+              status: statusOf(
+                "error",
+                SKETCH_EDITOR_STATUS_TEXT.degenerate,
+                "sketch/degenerate",
+              ),
+            },
+            transaction: null,
+          };
+        }
+        const rotation = Math.atan2(
+          event.point.y - state.gesture.center.y,
+          event.point.x - state.gesture.center.x,
+        );
+        const polygon = createSketchEntityId(mint("skent", "polygon"));
+        return {
+          state: {
+            ...state,
+            gesture: { kind: "none" },
+            selectedEntityIds: [polygon],
+            status: statusOf("hint", `Created polygon ${polygon}.`),
+          },
+          transaction: {
+            commands: [
+              {
+                entity: createPolygonEntity(
+                  polygon,
+                  state.gesture.center,
+                  radius,
+                  POLYGON_TOOL_SIDES,
+                  rotation,
+                  "inscribed",
+                ),
+                type: "sketch.entity.create",
+              },
+            ],
+          },
+        };
+      }
+      return {
+        state: {
+          ...state,
+          gesture: { kind: "polygon", center: event.point },
+          status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.polygonVertex),
+        },
+        transaction: null,
+      };
+    }
     case "trim": {
       const entity = entityById(event.entityId);
       if (entity === undefined || entity.kind !== "line") {
@@ -1787,7 +2059,8 @@ function canvasPick(
           tool === "angle" ||
           tool === "tangent" ||
           tool === "collinear" ||
-          tool === "pointOnEntity";
+          tool === "pointOnEntity" ||
+          tool === "pointOnTangent";
         if (twoEntityTool && firstPick.entityId === entity.id) {
           return {
             state: {

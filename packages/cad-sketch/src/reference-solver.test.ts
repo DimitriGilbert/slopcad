@@ -20,6 +20,7 @@ import {
 import {
   SKETCH_DIAGNOSTIC_CODES,
   SPLINE_TESSELLATION_DEFLECTION_MM,
+  cubicStationaryParameters,
   projectOntoSpline,
   applySolvedParameters,
   createAngleConstraint,
@@ -33,6 +34,7 @@ import {
   createEllipticalArcEntity,
   createHorizontalPairConstraint,
   createPointOnEntityConstraint,
+  createPointOnTangentConstraint,
   createPolygonEntity,
   createSplineEntity,
   createStraightSlotEntity,
@@ -1359,11 +1361,14 @@ describe("reference solver — phase 36 entity and constraint battery", () => {
       { x: 0, y: 0 },
       { x: 10, y: 0 },
     );
+    // collinear on a spline operand stays outside the solving subset (its
+    // meaningful spline reading is the pointOnTangent kind); the
+    // direction pairs parallel/perpendicular/angle now solve.
     const result = solver.solve(
       [spline, line],
       [
-        createParallelConstraint(
-          cid("par"),
+        createCollinearConstraint(
+          cid("col"),
           eid("skent_line"),
           eid("skent_spline"),
         ),
@@ -1374,6 +1379,390 @@ describe("reference solver — phase 36 entity and constraint battery", () => {
     expect(result.diagnostics[0]?.code).toBe(
       SKETCH_DIAGNOSTIC_CODES.constraintUnsupported,
     );
+  });
+});
+
+describe("reference solver — phase 37 spline constraint closure", () => {
+  /** Narrows a solve to its under-constrained shape (DoF assertions). */
+  const underConstrainedOf = (
+    result: SketchSolveResult,
+  ): Extract<SketchSolveResult, { status: "under-constrained" }> => {
+    if (result.status !== "under-constrained") {
+      throw new Error(
+        `expected under-constrained, got ${result.status}: ${JSON.stringify(result.diagnostics.map((d) => d.message))}`,
+      );
+    }
+    return result;
+  };
+
+  /** The spec's arch: control spline (0,0) (1,2) (3,2) (4,0). */
+  const archEntity = (id = "skent_spline") =>
+    createSplineEntity(eid(id), "control", [
+      { x: 0, y: 0 },
+      { x: 1, y: 2 },
+      { x: 3, y: 2 },
+      { x: 4, y: 0 },
+    ]);
+
+  it("anywhere tangent(line, spline) removes exactly one DoF and restores tangency", () => {
+    const spline = archEntity();
+    // §1.8's fixture pins the line (raised to y = 2) so the whole
+    // correction lands on the spline's controls.
+    const line = createLineEntity(
+      eid("skent_line"),
+      { x: 0, y: 2 },
+      { x: 4, y: 2 },
+      { fixed: true },
+    );
+    const result = solver.solve(
+      [spline, line],
+      [
+        createTangentConstraint(
+          cid("tan"),
+          eid("skent_line"),
+          eid("skent_spline"),
+        ),
+      ],
+    );
+    const solvedResult = underConstrainedOf(result);
+    // 8 free spline parameters − 1 row: codimension 1, the line↔circle
+    // precedent of §0.5 (the sliding contact is eliminated, not added).
+    expect(solvedResult.dof).toBe(7);
+    expect(solvedResult.diagnostics).toHaveLength(1);
+    // §1.8: the line at y = 2 leaves r = −0.5; Gauss–Newton restores
+    // tangency — the solved curve TOUCHES y = 2 at a stationary point of
+    // the signed distance (s = 0 with s' = 0: a double root, not a
+    // crossing; the contact parameter is wherever the Seidel iteration
+    // settles, so the assertion finds it via the derivative roots).
+    const solved = solvedOf(solvedResult);
+    const splineSolved = solved.get("skent_spline");
+    if (splineSolved === undefined || splineSolved.kind !== "spline") {
+      throw new Error("missing solved spline");
+    }
+    const [p0, p1, p2, p3] = splineSolved.points;
+    if (
+      p0 === undefined ||
+      p1 === undefined ||
+      p2 === undefined ||
+      p3 === undefined
+    ) {
+      throw new Error("missing solved points");
+    }
+    const candidates = [
+      0,
+      1,
+      ...cubicStationaryParameters(p0.y - 2, p1.y - 2, p2.y - 2, p3.y - 2),
+    ];
+    const touches = candidates.some((t) => {
+      const u = 1 - t;
+      const y =
+        u * u * u * p0.y +
+        3 * u * u * t * p1.y +
+        3 * u * t * t * p2.y +
+        t * t * t * p3.y;
+      return Math.abs(y - 2) <= 1e-7;
+    });
+    expect(
+      touches,
+      `solved controls ${JSON.stringify(splineSolved.points)}`,
+    ).toBe(true);
+  });
+
+  it("composes endpoint tangency as pointOnEntity + parallel at the end (codimension 2)", () => {
+    const spline = archEntity();
+    const line = createLineEntity(
+      eid("skent_line"),
+      { x: 4, y: 0 },
+      { x: 8, y: 0 },
+    );
+    const result = solver.solve(
+      [spline, line],
+      [
+        createPointOnEntityConstraint(
+          cid("poe"),
+          pointTarget(eid("skent_spline"), "end"),
+          eid("skent_line"),
+        ),
+        createParallelConstraint(
+          cid("par"),
+          eid("skent_line"),
+          eid("skent_spline"),
+          "end",
+        ),
+      ],
+    );
+    const solvedResult = underConstrainedOf(result);
+    // 12 parameters − 2 rows: the pinned form is strictly stronger than
+    // the anywhere form's 1 (§0.5's table).
+    expect(solvedResult.dof).toBe(10);
+  });
+
+  it("joins a kinked continuation to the arch at G1", () => {
+    const a = archEntity("skent_a");
+    const b = createSplineEntity(eid("skent_b"), "control", [
+      { x: 4, y: 0 },
+      { x: 5, y: -1 },
+      { x: 7, y: -1 },
+      { x: 8, y: 0 },
+    ]);
+    const result = solver.solve(
+      [a, b],
+      [createTangentConstraint(cid("g1"), eid("skent_a"), eid("skent_b"))],
+    );
+    const solvedResult = underConstrainedOf(result);
+    // 16 parameters − 3 rows (coincidence ×2 + tangent direction).
+    expect(solvedResult.dof).toBe(13);
+    const solved = solvedOf(solvedResult);
+    const aSolved = solved.get("skent_a");
+    const bSolved = solved.get("skent_b");
+    if (aSolved === undefined || aSolved.kind !== "spline") {
+      throw new Error("missing solved A");
+    }
+    if (bSolved === undefined || bSolved.kind !== "spline") {
+      throw new Error("missing solved B");
+    }
+    const aEnd = aSolved.points[aSolved.points.length - 1];
+    const bStart = bSolved.points[0];
+    const aP2 = aSolved.points[aSolved.points.length - 2];
+    const bP1 = bSolved.points[1];
+    if (
+      aEnd === undefined ||
+      bStart === undefined ||
+      aP2 === undefined ||
+      bP1 === undefined
+    ) {
+      throw new Error("missing solved end points");
+    }
+    // Coincident ends and matching tangent directions (T ∝ P_k − P_{k−1}
+    // on the control flavor — parallelism is the check).
+    expect(aEnd.x).toBeCloseTo(bStart.x, 6);
+    expect(aEnd.y).toBeCloseTo(bStart.y, 6);
+    const tax = aEnd.x - aP2.x;
+    const tay = aEnd.y - aP2.y;
+    const tbx = bP1.x - bStart.x;
+    const tby = bP1.y - bStart.y;
+    expect(tax * tby - tay * tbx).toBeCloseTo(0, 6);
+  });
+
+  it("solves an angle between a line and a spline's start tangent", () => {
+    const spline = createSplineEntity(eid("skent_spline"), "control", [
+      { x: 0, y: 0 },
+      { x: 0, y: 3 },
+      { x: 3, y: 3 },
+      { x: 6, y: 0 },
+    ]);
+    const line = createLineEntity(
+      eid("skent_line"),
+      { x: 0, y: 0 },
+      { x: 4, y: 0 },
+    );
+    // T_start = (0,9) (vertical), line horizontal: φ = 90°; demand 60°.
+    const result = solver.solve(
+      [spline, line],
+      [
+        createAngleConstraint(
+          cid("ang"),
+          eid("skent_line"),
+          eid("skent_spline"),
+          angle(60, "deg"),
+          "start",
+        ),
+      ],
+    );
+    const solvedResult = underConstrainedOf(result);
+    expect(solvedResult.dof).toBe(11);
+    const solved = solvedOf(solvedResult);
+    const splineSolved = solved.get("skent_spline");
+    const lineSolved = solved.get("skent_line");
+    if (splineSolved === undefined || splineSolved.kind !== "spline") {
+      throw new Error("missing solved spline");
+    }
+    if (lineSolved === undefined || lineSolved.kind !== "line") {
+      throw new Error("missing solved line");
+    }
+    const p0 = splineSolved.points[0];
+    const p1 = splineSolved.points[1];
+    if (p0 === undefined || p1 === undefined) {
+      throw new Error("missing solved start points");
+    }
+    const tx = p1.x - p0.x;
+    const ty = p1.y - p0.y;
+    const dot =
+      (lineSolved.x2 - lineSolved.x1) * tx +
+      (lineSolved.y2 - lineSolved.y1) * ty;
+    const cosPhi =
+      dot /
+      (Math.hypot(
+        lineSolved.x2 - lineSolved.x1,
+        lineSolved.y2 - lineSolved.y1,
+      ) *
+        Math.hypot(tx, ty));
+    expect(cosPhi).toBeCloseTo(Math.cos(Math.PI / 3), 6);
+  });
+
+  it("equal endpoint chords converge and pin equality, not a value", () => {
+    const a = archEntity("skent_a");
+    const b = createSplineEntity(eid("skent_b"), "control", [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      { x: 2, y: 1 },
+      { x: 3, y: 0 },
+    ]);
+    const result = solver.solve(
+      [a, b],
+      [createEqualConstraint(cid("eq"), eid("skent_a"), eid("skent_b"))],
+    );
+    const solvedResult = underConstrainedOf(result);
+    expect(solvedResult.dof).toBe(15);
+    const solved = solvedOf(solvedResult);
+    const aSolved = solved.get("skent_a");
+    const bSolved = solved.get("skent_b");
+    if (aSolved === undefined || aSolved.kind !== "spline") {
+      throw new Error("missing solved A");
+    }
+    if (bSolved === undefined || bSolved.kind !== "spline") {
+      throw new Error("missing solved B");
+    }
+    const chord = (points: readonly { x: number; y: number }[]): number => {
+      const first = points[0];
+      const last = points[points.length - 1];
+      if (first === undefined || last === undefined) {
+        throw new Error("empty spline");
+      }
+      return Math.hypot(last.x - first.x, last.y - first.y);
+    };
+    expect(chord(aSolved.points)).toBeCloseTo(chord(bSolved.points), 6);
+  });
+
+  it("pointOnTangent pulls a point onto the end-tangent line", () => {
+    const spline = archEntity();
+    const point = createPointEntity(eid("skent_point"), { x: 1, y: 3 });
+    const result = solver.solve(
+      [point, spline],
+      [
+        createPointOnTangentConstraint(
+          cid("pot"),
+          pointTarget(eid("skent_point"), "center"),
+          eid("skent_spline"),
+          "start",
+        ),
+      ],
+    );
+    const solvedResult = underConstrainedOf(result);
+    expect(solvedResult.dof).toBe(9);
+    const pointSolved = solvedPoint(solvedResult, "skent_point");
+    const splineSolved = solvedOf(solvedResult).get("skent_spline");
+    if (splineSolved === undefined || splineSolved.kind !== "spline") {
+      throw new Error("missing solved spline");
+    }
+    const p0 = splineSolved.points[0];
+    const p1 = splineSolved.points[1];
+    if (p0 === undefined || p1 === undefined) {
+      throw new Error("missing solved start points");
+    }
+    // On the SOLVED start-tangent line (the solver may bend the spline or
+    // move the point — both keep the point on the line through P0 along
+    // P1 − P0).
+    const wx = pointSolved.x - p0.x;
+    const wy = pointSolved.y - p0.y;
+    const tx = p1.x - p0.x;
+    const ty = p1.y - p0.y;
+    expect(wx * ty - wy * tx).toBeCloseTo(0, 6);
+  });
+
+  it("pointOnEntity pulls a point onto a polygon's boundary", () => {
+    const polygon = createPolygonEntity(
+      eid("skent_polygon"),
+      { x: 0, y: 0 },
+      5,
+      4,
+      0,
+      "inscribed",
+    );
+    const point = createPointEntity(eid("skent_point"), { x: 2.5, y: 3 });
+    const result = solver.solve(
+      [point, polygon],
+      [
+        createPointOnEntityConstraint(
+          cid("poe"),
+          pointTarget(eid("skent_point"), "center"),
+          eid("skent_polygon"),
+        ),
+      ],
+    );
+    const solvedResult = underConstrainedOf(result);
+    expect(solvedResult.dof).toBe(5);
+    const pointSolved = solvedPoint(solvedResult, "skent_point");
+    const polygonSolved = solvedOf(solvedResult).get("skent_polygon");
+    if (polygonSolved === undefined || polygonSolved.kind !== "polygon") {
+      throw new Error("missing solved polygon");
+    }
+    // The point lands on the SOLVED boundary: min distance over the four
+    // perimeter segments is zero. (sides/fit are discrete parameters the
+    // solved record omits — read them from the authored entity.)
+    const scale =
+      polygon.fit === "inscribed" ? 1 : 1 / Math.cos(Math.PI / polygon.sides);
+    const effective = scale * polygonSolved.radius;
+    const vertex = (k: number): { x: number; y: number } => {
+      const theta = polygonSolved.rotation + (Math.PI * 2 * k) / polygon.sides;
+      return {
+        x: polygonSolved.cx + effective * Math.cos(theta),
+        y: polygonSolved.cy + effective * Math.sin(theta),
+      };
+    };
+    let minDistance = Number.POSITIVE_INFINITY;
+    for (let k = 0; k < polygon.sides; k += 1) {
+      const a = vertex(k);
+      const b = vertex(k + 1);
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const u = Math.max(
+        0,
+        Math.min(
+          1,
+          ((pointSolved.x - a.x) * dx + (pointSolved.y - a.y) * dy) /
+            (dx * dx + dy * dy),
+        ),
+      );
+      minDistance = Math.min(
+        minDistance,
+        Math.hypot(a.x + u * dx - pointSolved.x, a.y + u * dy - pointSolved.y),
+      );
+    }
+    expect(minDistance).toBeCloseTo(0, 6);
+  });
+
+  it("pointOnEntity pulls a point onto a straight slot's cap", () => {
+    const slot = createStraightSlotEntity(
+      eid("skent_slot"),
+      { x: 0, y: 0 },
+      { x: 6, y: 0 },
+      2,
+    );
+    const point = createPointEntity(eid("skent_point"), { x: 7, y: 0 });
+    const result = solver.solve(
+      [point, slot],
+      [
+        createPointOnEntityConstraint(
+          cid("poe"),
+          pointTarget(eid("skent_point"), "center"),
+          eid("skent_slot"),
+        ),
+      ],
+    );
+    const solvedResult = underConstrainedOf(result);
+    expect(solvedResult.dof).toBe(6);
+    const solved = solvedPoint(solvedResult, "skent_point");
+    const slotSolved = solvedOf(solvedResult).get("skent_slot");
+    if (slotSolved === undefined || slotSolved.kind !== "slot") {
+      throw new Error("missing solved slot");
+    }
+    // The right cap: |‖P − c_2‖ − r| = 0.
+    const distance = Math.hypot(
+      solved.x - slotSolved.x2,
+      solved.y - slotSolved.y2,
+    );
+    expect(Math.abs(distance - slotSolved.radius)).toBeCloseTo(0, 6);
   });
 });
 

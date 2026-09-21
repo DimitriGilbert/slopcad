@@ -27,13 +27,19 @@ import type { SketchConstraintId, SketchEntityId } from "./sketch-ids";
 import type { SolvedEntityParameters, SolvedSketchParameters } from "./solver";
 
 import {
+  type SplineChain,
   bezierChainOfSpline,
+  cubicStationaryParameters,
+  evaluateSplinePoint,
   projectOntoSpline,
   splinePointGradient,
+  splineTangent,
+  splineTangentGradient,
 } from "./spline-math";
 import {
   type PointTarget,
   type SketchConstraint,
+  type SplineEndSelection,
   validateConstraintReferences,
 } from "./constraints";
 
@@ -856,6 +862,14 @@ function pointOnLineRow(
       addInto(dCross, line.ddy, -wx);
       addInto(dCross, px.grad, -line.dy);
       addInto(dCross, py.grad, line.dx);
+      // w = P − p1: the line's own start slots flow through w as well —
+      // ∂wx/∂x1 = −1 and ∂wy/∂y1 = −1 through cross (the §1.3 convention
+      // note: these two columns were missing from the original construction,
+      // a latent gradient gap verified against finite differences; the row
+      // converged anyway whenever a correct column elsewhere spanned the
+      // step, which is why it went unnoticed).
+      dCross.set(x1Slot, (dCross.get(x1Slot) ?? 0) + line.dy);
+      dCross.set(y1Slot, (dCross.get(y1Slot) ?? 0) - line.dx);
       const grad = chain(
         1 / line.length,
         dCross,
@@ -1069,11 +1083,960 @@ function pointOnSplineRow(
       for (const [pointIndex, weight] of pointGrad) {
         const xSlot = slots.offsets[2 * pointIndex];
         const ySlot = slots.offsets[2 * pointIndex + 1];
-        if (xSlot === undefined || ySlot === undefined) continue;
+        if (xSlot === undefined || ySlot === undefined) {
+          // In-range by construction (the gradient's point indices are the
+          // chain's stored points); out-of-range is a gradient-mapping bug.
+          throw new RangeError(
+            `Point-on-spline gradient touches point ${String(pointIndex)}, which has no parameter slots.`,
+          );
+        }
         grad.set(xSlot, (grad.get(xSlot) ?? 0) + ux * weight);
         grad.set(ySlot, (grad.get(ySlot) ?? 0) + uy * weight);
       }
       return { value: projection.distance, grad };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Spline residual machinery (the Phase 37 constraint-math closure): curve
+// point/tangent expressions, the anywhere line↔spline tangency anchor, the
+// end-tangent direction rows, the G1 joint, endpoint chords, and the
+// end-tangent-line row. Derivations: docs/design/spline-constraint-math.md.
+// ---------------------------------------------------------------------------
+
+/** The spline entity and slots of a spline operand (fails loudly if absent). */
+function splineOperandOf(
+  splineId: SketchEntityId,
+  context: CompiledContext,
+): {
+  readonly entity: Extract<SketchEntity, { kind: "spline" }>;
+  readonly slots: EntitySlots;
+} {
+  const entity = context.entitiesById.get(splineId);
+  const slots = context.layout.slotsOf(splineId);
+  if (entity === undefined || entity.kind !== "spline" || slots === undefined) {
+    throw new RangeError(`Constraint references unknown spline ${splineId}.`);
+  }
+  return { entity, slots };
+}
+
+/** Reads a spline's stored points out of the parameter vector. */
+function splinePointsFrom(
+  parameters: readonly number[],
+  slots: EntitySlots,
+): { x: number; y: number }[] {
+  return slots.offsets
+    .filter((_, index) => index % 2 === 0)
+    .map((xSlot) => {
+      const x = parameters[xSlot];
+      const y = parameters[xSlot + 1];
+      if (x === undefined || y === undefined) {
+        throw new RangeError("Spline operand is missing parameter values.");
+      }
+      return { x, y };
+    });
+}
+
+/** The spline's Bézier chain as a pure function of the current parameters. */
+function splineChainFrom(
+  parameters: readonly number[],
+  splineId: SketchEntityId,
+  context: CompiledContext,
+): SplineChain {
+  const { entity, slots } = splineOperandOf(splineId, context);
+  return bezierChainOfSpline({
+    flavor: entity.flavor,
+    points: splinePointsFrom(parameters, slots),
+  });
+}
+
+/**
+ * The curve point at (segment, t) as a first-order expression over the
+ * spline's slots — the value evaluated on the TRUE curve, the gradient the
+ * exact `splinePointGradient` weights distributed onto each point's x/y
+ * slots (stage 2 of the design doc; the same scalar weight applies to both
+ * axes because the flavor conversion maps x and y identically).
+ */
+function curvePointExpr(
+  chain: SplineChain,
+  slots: EntitySlots,
+  segment: number,
+  t: number,
+  axis: "x" | "y",
+): LinExpr {
+  const point = evaluateSplinePoint(chain, segment, t);
+  const weights = splinePointGradient(chain, segment, t);
+  const grad = new Map<number, number>();
+  for (const [pointIndex, weight] of weights) {
+    const slot = slots.offsets[2 * pointIndex + (axis === "x" ? 0 : 1)];
+    // Every gradient point index is a stored point of the chain by
+    // construction; an out-of-range index is a gradient-mapping bug (the
+    // §37 control-flavor mis-indexing hid here silently) — fail loudly.
+    if (slot === undefined) {
+      throw new RangeError(
+        `Spline gradient touches point ${String(pointIndex)}, which has no parameter slot.`,
+      );
+    }
+    grad.set(slot, weight);
+  }
+  return {
+    value: axis === "x" ? point.x : point.y,
+    grad,
+  };
+}
+
+/**
+ * The curve tangent component at (segment, t) as a first-order expression —
+ * the mirror of {@link curvePointExpr} over `splineTangentGradient`.
+ */
+function curveTangentExpr(
+  chain: SplineChain,
+  slots: EntitySlots,
+  segment: number,
+  t: number,
+  axis: "x" | "y",
+): LinExpr {
+  const tangent = splineTangent(chain, segment, t);
+  const weights = splineTangentGradient(chain, segment, t);
+  const grad = new Map<number, number>();
+  for (const [pointIndex, weight] of weights) {
+    const slot = slots.offsets[2 * pointIndex + (axis === "x" ? 0 : 1)];
+    if (slot === undefined) {
+      throw new RangeError(
+        `Spline tangent gradient touches point ${String(pointIndex)}, which has no parameter slot.`,
+      );
+    }
+    grad.set(slot, weight);
+  }
+  return {
+    value: axis === "x" ? tangent.vx : tangent.vy,
+    grad,
+  };
+}
+
+/** The (segment, t) anchor of a spline end. */
+function splineEndAnchor(
+  chain: SplineChain,
+  at: SplineEndSelection,
+): { readonly segment: number; readonly t: number } {
+  if (chain.segments.length === 0) {
+    throw new RangeError("Spline operand has no Bézier segments.");
+  }
+  return at === "start"
+    ? { segment: 0, t: 0 }
+    : { segment: chain.segments.length - 1, t: 1 };
+}
+
+/** Below this tangent magnitude a curve point has no defined tangency. */
+const SPLINE_CUSP_TANGENT_EPSILON = 1e-9;
+
+/** One candidate tangency contact: a curve anchor. */
+interface TangencyCandidate {
+  readonly segment: number;
+  readonly t: number;
+}
+
+/**
+ * The per-segment stationary candidates of the signed line distance —
+ * `s` restricted to one Bézier segment is a scalar cubic with control
+ * values `g_j = s(b_j)` (affine composition preserves Bézier form exactly),
+ * so its stationary parameters are the derivative-quadratic roots.
+ */
+function stationaryCandidates(
+  chain: SplineChain,
+  signedDistanceOfControl: (index: number) => number,
+): TangencyCandidate[] {
+  const candidates: TangencyCandidate[] = [];
+  for (let segment = 0; segment < chain.segments.length; segment += 1) {
+    const base = 4 * segment;
+    const roots = cubicStationaryParameters(
+      signedDistanceOfControl(base),
+      signedDistanceOfControl(base + 1),
+      signedDistanceOfControl(base + 2),
+      signedDistanceOfControl(base + 3),
+    );
+    for (const t of roots) candidates.push({ segment, t });
+  }
+  return candidates;
+}
+
+/**
+ * The anywhere-tangency anchor (§1.3 Option C): candidates are the
+ * per-segment stationary parameters of the signed distance plus the two
+ * chain ends; the anchor is the |s|-minimizer, evaluated EXACTLY on the true
+ * curve, ties to the earlier candidate (the `projectOntoSpline` strict-`<`
+ * convention). Stationary candidates at a cusp (`‖C'‖ < ε`) are skipped —
+ * the tangent is undefined there, so they are not tangency contacts.
+ */
+function tangencyAnchor(
+  chain: SplineChain,
+  line: LineGeom,
+  x1: number,
+  y1: number,
+): TangencyCandidate {
+  const signedDistanceAt = (point: { x: number; y: number }): number =>
+    (line.dx * (point.y - y1) - line.dy * (point.x - x1)) / line.length;
+  const signedDistanceOfControl = (index: number): number => {
+    const segment = Math.floor(index / 4);
+    const which = index % 4;
+    const seg = chain.segments[segment];
+    if (seg === undefined) return 0;
+    const control = [seg.b0, seg.b1, seg.b2, seg.b3][which];
+    return control === undefined
+      ? 0
+      : line.dx * (control.y - y1) - line.dy * (control.x - x1);
+  };
+  const candidates: TangencyCandidate[] = stationaryCandidates(
+    chain,
+    signedDistanceOfControl,
+  );
+  candidates.push({ segment: 0, t: 0 });
+  candidates.push({ segment: chain.segments.length - 1, t: 1 });
+  let best: TangencyCandidate | null = null;
+  let bestValue = Number.POSITIVE_INFINITY;
+  for (const candidate of candidates) {
+    const tangent = splineTangent(chain, candidate.segment, candidate.t);
+    const magnitude = Math.hypot(tangent.vx, tangent.vy);
+    if (magnitude < SPLINE_CUSP_TANGENT_EPSILON) continue;
+    const value = Math.abs(
+      signedDistanceAt(
+        evaluateSplinePoint(chain, candidate.segment, candidate.t),
+      ),
+    );
+    if (value < bestValue) {
+      best = candidate;
+      bestValue = value;
+    }
+  }
+  // The candidate set always contains the two chain ends, and the cusp guard
+  // can only exclude interior stationary points — an anchor exists whenever
+  // the chain does.
+  if (best === null) {
+    throw new RangeError("Tangency anchor search found no candidates.");
+  }
+  return best;
+}
+
+/**
+ * Tangency(line, spline), ANYWHERE on the curve: the eliminated
+ * stationary-anchor row (§1.3) — one row, codimension 1, matching the
+ * line↔circle precedent. The zero set is exactly tangency: an interior
+ * stationary anchor carries `s' = 0` built in, the chain ends are the
+ * legitimate endpoint contacts, and the frozen gradient is Danskin-exact in
+ * both anchor classes (§0.4). Scale: mm, `pointOnLineRow`'s convention.
+ */
+function tangentLineSplineRow(
+  label: string,
+  origin: ResidualOrigin,
+  lineId: SketchEntityId,
+  splineId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const lineSlots = lineSlotsOf(lineId, context);
+      const line = lineGeom(parameters, lineSlots);
+      const [x1Slot, y1Slot] = lineSlots.offsets;
+      if (x1Slot === undefined || y1Slot === undefined) {
+        throw new RangeError("Tangent line operand is missing slots.");
+      }
+      const x1 = parameters[x1Slot];
+      const y1 = parameters[y1Slot];
+      if (x1 === undefined || y1 === undefined) {
+        throw new RangeError("Tangent line operand is missing values.");
+      }
+      const { slots: splineSlots } = splineOperandOf(splineId, context);
+      const curve = splineChainFrom(parameters, splineId, context);
+      const anchor = tangencyAnchor(curve, line, x1, y1);
+      const px = curvePointExpr(
+        curve,
+        splineSlots,
+        anchor.segment,
+        anchor.t,
+        "x",
+      );
+      const py = curvePointExpr(
+        curve,
+        splineSlots,
+        anchor.segment,
+        anchor.t,
+        "y",
+      );
+      const wx = px.value - x1;
+      const wy = py.value - y1;
+      const cross = line.dx * wy - line.dy * wx;
+      const distance = cross / line.length;
+      const dCross = new Map<number, number>();
+      addInto(dCross, line.ddx, wy);
+      addInto(dCross, line.ddy, -wx);
+      addInto(dCross, px.grad, -line.dy);
+      addInto(dCross, py.grad, line.dx);
+      // w = C(t) − p1: the line's own start slots flow through w as well
+      // (the §1.3 convention-note columns — REQUIRED for a correct
+      // gradient, and the same fix pointOnLineRow now carries).
+      dCross.set(x1Slot, (dCross.get(x1Slot) ?? 0) + line.dy);
+      dCross.set(y1Slot, (dCross.get(y1Slot) ?? 0) - line.dx);
+      const grad = chain(
+        1 / line.length,
+        dCross,
+        -cross / (line.length * line.length),
+        line.dLength,
+      );
+      return { value: distance, grad };
+    },
+  };
+}
+
+/** Parallel(line, spline end tangent): `cross(d, T) = 0` (mm², §3). */
+function parallelLineSplineRow(
+  label: string,
+  origin: ResidualOrigin,
+  lineId: SketchEntityId,
+  splineId: SketchEntityId,
+  at: SplineEndSelection,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const line = lineGeom(parameters, lineSlotsOf(lineId, context));
+      const { slots } = splineOperandOf(splineId, context);
+      const spline = splineChainFrom(parameters, splineId, context);
+      const anchor = splineEndAnchor(spline, at);
+      const tx = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "x");
+      const ty = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "y");
+      const cross = line.dx * ty.value - line.dy * tx.value;
+      const grad = new Map<number, number>();
+      addInto(grad, line.ddx, ty.value);
+      addInto(grad, line.ddy, -tx.value);
+      addInto(grad, tx.grad, -line.dy);
+      addInto(grad, ty.grad, line.dx);
+      return { value: cross, grad };
+    },
+  };
+}
+
+/** Perpendicular(line, spline end tangent): `dot(d, T) = 0` (mm², §2). */
+function perpendicularLineSplineRow(
+  label: string,
+  origin: ResidualOrigin,
+  lineId: SketchEntityId,
+  splineId: SketchEntityId,
+  at: SplineEndSelection,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const line = lineGeom(parameters, lineSlotsOf(lineId, context));
+      const { slots } = splineOperandOf(splineId, context);
+      const spline = splineChainFrom(parameters, splineId, context);
+      const anchor = splineEndAnchor(spline, at);
+      const tx = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "x");
+      const ty = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "y");
+      const dot = line.dx * tx.value + line.dy * ty.value;
+      const grad = new Map<number, number>();
+      addInto(grad, line.ddx, tx.value);
+      addInto(grad, line.ddy, ty.value);
+      addInto(grad, tx.grad, line.dx);
+      addInto(grad, ty.grad, line.dy);
+      return { value: dot, grad };
+    },
+  };
+}
+
+/**
+ * Angle(line, spline end tangent): `dot(d,T)/(L·‖T‖) − cosθ` — dimensionless,
+ * the unsigned `[0, π]` convention `angleRow` pins (the supplementary angle
+ * is never a false zero). Guard `‖T‖ = 0` delegates with a zero subgradient.
+ */
+function angleLineSplineRow(
+  label: string,
+  origin: ResidualOrigin,
+  lineId: SketchEntityId,
+  splineId: SketchEntityId,
+  at: SplineEndSelection,
+  context: CompiledContext,
+  target: number,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const line = lineGeom(parameters, lineSlotsOf(lineId, context));
+      const { slots } = splineOperandOf(splineId, context);
+      const spline = splineChainFrom(parameters, splineId, context);
+      const anchor = splineEndAnchor(spline, at);
+      const tx = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "x");
+      const ty = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "y");
+      const tangentNorm = Math.hypot(tx.value, ty.value);
+      const cos = Math.cos(target);
+      if (tangentNorm === 0) {
+        return { value: -cos, grad: new Map() };
+      }
+      const dot = line.dx * tx.value + line.dy * ty.value;
+      const denom = line.length * tangentNorm;
+      const value = dot / denom - cos;
+      const dDot = new Map<number, number>();
+      addInto(dDot, line.ddx, tx.value);
+      addInto(dDot, line.ddy, ty.value);
+      addInto(dDot, tx.grad, line.dx);
+      addInto(dDot, ty.grad, line.dy);
+      const dDenom = new Map<number, number>();
+      addInto(dDenom, line.dLength, tangentNorm);
+      addInto(dDenom, tx.grad, (line.length * tx.value) / tangentNorm);
+      addInto(dDenom, ty.grad, (line.length * ty.value) / tangentNorm);
+      const grad = new Map<number, number>();
+      for (const slot of new Set([...dDot.keys(), ...dDenom.keys()])) {
+        const dd = dDot.get(slot) ?? 0;
+        const dn = dDenom.get(slot) ?? 0;
+        grad.set(slot, (dd * denom - dot * dn) / (denom * denom));
+      }
+      return { value, grad };
+    },
+  };
+}
+
+/**
+ * The G1 tangent-direction row of a spline↔spline joint (§1.5):
+ * `cross(T_A_end, T_B_start) = 0` (mm²). Named ends — no anchors, exact
+ * gradients. Pairs with the two coincident rows on the same ends.
+ */
+function splineJointTangentRow(
+  label: string,
+  origin: ResidualOrigin,
+  first: SketchEntityId,
+  second: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const a = splineOperandOf(first, context);
+      const b = splineOperandOf(second, context);
+      const chainA = splineChainFrom(parameters, first, context);
+      const chainB = splineChainFrom(parameters, second, context);
+      const endA = splineEndAnchor(chainA, "end");
+      const startB = splineEndAnchor(chainB, "start");
+      const tax = curveTangentExpr(chainA, a.slots, endA.segment, endA.t, "x");
+      const tay = curveTangentExpr(chainA, a.slots, endA.segment, endA.t, "y");
+      const tbx = curveTangentExpr(
+        chainB,
+        b.slots,
+        startB.segment,
+        startB.t,
+        "x",
+      );
+      const tby = curveTangentExpr(
+        chainB,
+        b.slots,
+        startB.segment,
+        startB.t,
+        "y",
+      );
+      const cross = tax.value * tby.value - tay.value * tbx.value;
+      const grad = new Map<number, number>();
+      addInto(grad, tax.grad, tby.value);
+      addInto(grad, tay.grad, -tbx.value);
+      addInto(grad, tbx.grad, -tay.value);
+      addInto(grad, tby.grad, tax.value);
+      return { value: cross, grad };
+    },
+  };
+}
+
+/**
+ * The endpoint-chord expression of a spline: `‖P_end − P_start‖` with the
+ * `distanceRow` gradient chain over the four end slots. Zero chord (P_0 =
+ * P_{N−1}) is constructible on control splines; the caller delegates.
+ */
+function splineChordExpr(
+  parameters: readonly number[],
+  slots: EntitySlots,
+): LinExpr {
+  const firstX = slots.offsets[0];
+  const firstY = slots.offsets[1];
+  const lastX = slots.offsets[slots.offsets.length - 2];
+  const lastY = slots.offsets[slots.offsets.length - 1];
+  if (
+    firstX === undefined ||
+    firstY === undefined ||
+    lastX === undefined ||
+    lastY === undefined
+  ) {
+    throw new RangeError("Equal spline operand is missing end slots.");
+  }
+  const dxExpr = subtractExpr(
+    { value: parameters[lastX] ?? 0, grad: new Map([[lastX, 1]]) },
+    { value: parameters[firstX] ?? 0, grad: new Map([[firstX, 1]]) },
+  );
+  const dyExpr = subtractExpr(
+    { value: parameters[lastY] ?? 0, grad: new Map([[lastY, 1]]) },
+    { value: parameters[firstY] ?? 0, grad: new Map([[firstY, 1]]) },
+  );
+  const distance = Math.hypot(dxExpr.value, dyExpr.value);
+  const grad =
+    distance === 0
+      ? new Map<number, number>()
+      : chain(
+          dxExpr.value / distance,
+          dxExpr.grad,
+          dyExpr.value / distance,
+          dyExpr.grad,
+        );
+  return { value: distance, grad };
+}
+
+/**
+ * Point-on-end-tangent-line (§6(b)): the signed distance from the point
+ * target to the line through the spline's end along its end tangent — mm,
+ * the `pointOnLineRow` scale, with every channel explicit (the end point's
+ * two slots and the tangent's stored-point weights), so the §1.3 omission
+ * class cannot recur. Guard `‖T‖ = 0`: the "line" degenerates to its end
+ * point; return the distance to it with a zero subgradient (delegation).
+ */
+function pointOnTangentRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  splineId: SketchEntityId,
+  at: SplineEndSelection,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const { slots } = splineOperandOf(splineId, context);
+      const spline = splineChainFrom(parameters, splineId, context);
+      const anchor = splineEndAnchor(spline, at);
+      const ex = curvePointExpr(spline, slots, anchor.segment, anchor.t, "x");
+      const ey = curvePointExpr(spline, slots, anchor.segment, anchor.t, "y");
+      const tx = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "x");
+      const ty = curveTangentExpr(spline, slots, anchor.segment, anchor.t, "y");
+      const px = pointExpr(target, context, parameters, "x");
+      const py = pointExpr(target, context, parameters, "y");
+      const wx = px.value - ex.value;
+      const wy = py.value - ey.value;
+      const tangentNorm = Math.hypot(tx.value, ty.value);
+      if (tangentNorm === 0) {
+        return {
+          value: Math.hypot(wx, wy),
+          grad: new Map(),
+        };
+      }
+      const cross = tx.value * wy - ty.value * wx;
+      const dCross = new Map<number, number>();
+      addInto(dCross, px.grad, -ty.value);
+      addInto(dCross, py.grad, tx.value);
+      addInto(dCross, ex.grad, ty.value);
+      addInto(dCross, ey.grad, -tx.value);
+      addInto(dCross, tx.grad, wy);
+      addInto(dCross, ty.grad, -wx);
+      const dNorm = new Map<number, number>();
+      addInto(dNorm, tx.grad, tx.value / tangentNorm);
+      addInto(dNorm, ty.grad, ty.value / tangentNorm);
+      // Quotient rule (the pointOnLineRow shape): ∂(cross/n) =
+      // ∂cross/n − cross·∂n/n², with ∂n = (T_x·∂T_x + T_y·∂T_y)/n.
+      const grad = chain(
+        1 / tangentNorm,
+        dCross,
+        -cross / (tangentNorm * tangentNorm),
+        dNorm,
+      );
+      return { value: cross / tangentNorm, grad };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Composite-entity pointOnEntity (§7): the stateless per-evaluation Danskin
+// argmin — r(x) = min over constituents of the exact constituent distance,
+// gradient = the active constituent's. NOT N simultaneous rows (that
+// intersects the constituents) and NOT stateful hysteresis (rows must stay
+// pure functions of the parameters; the backtracking line search is the
+// switch-hysteresis this architecture can honestly offer). Tie-break:
+// strict `<`, lowest constituent index wins (the `projectOntoSpline`
+// convention). One row of rank 1 — 1 degree of freedom removed, matching
+// pointOnEntity on every other kind.
+// ---------------------------------------------------------------------------
+
+/** A 2D first-order expression (the point/tangent rows' shared pair). */
+interface PointExpr2 {
+  readonly x: LinExpr;
+  readonly y: LinExpr;
+}
+
+/**
+ * The distance from point `p` to the SEGMENT a→b with the projection foot
+ * FROZEN at its current parameter: envelope-exact for interior feet
+ * (`∂/∂u = 0` at the projection), a valid subgradient at clamped feet
+ * (endpoint contact). `d = 0` delegates to the containing segment's
+ * infinite-line distance gradient (the `pointOnLineRow` construction over
+ * the same expressions).
+ */
+function segmentDistanceWithFrozenFoot(
+  p: PointExpr2,
+  a: PointExpr2,
+  b: PointExpr2,
+): ResidualEvaluation {
+  const dxExpr = subtractExpr(b.x, a.x);
+  const dyExpr = subtractExpr(b.y, a.y);
+  const wxExpr = subtractExpr(p.x, a.x);
+  const wyExpr = subtractExpr(p.y, a.y);
+  const lengthSquared =
+    dxExpr.value * dxExpr.value + dyExpr.value * dyExpr.value;
+  const u =
+    lengthSquared === 0
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            1,
+            (wxExpr.value * dxExpr.value + wyExpr.value * dyExpr.value) /
+              lengthSquared,
+          ),
+        );
+  const qxExpr = combineExpr(wxExpr, dxExpr, 1, -u);
+  const qyExpr = combineExpr(wyExpr, dyExpr, 1, -u);
+  const distance = Math.hypot(qxExpr.value, qyExpr.value);
+  if (distance === 0) {
+    // The point sits ON the segment: zero residual with the containing
+    // segment's infinite-line gradient (signed distance cross/L and its
+    // exact chain — the same channels pointOnLineRow accumulates).
+    const cross = dxExpr.value * wyExpr.value - dyExpr.value * wxExpr.value;
+    const length = Math.sqrt(lengthSquared);
+    if (length === 0) return { value: 0, grad: new Map() };
+    const dCross = new Map<number, number>();
+    addInto(dCross, dxExpr.grad, wyExpr.value);
+    addInto(dCross, dyExpr.grad, -wxExpr.value);
+    addInto(dCross, wxExpr.grad, -dyExpr.value);
+    addInto(dCross, wyExpr.grad, dxExpr.value);
+    const dLength = new Map<number, number>();
+    addInto(dLength, dxExpr.grad, dxExpr.value / length);
+    addInto(dLength, dyExpr.grad, dyExpr.value / length);
+    return {
+      value: 0,
+      grad: chain(1 / length, dCross, -cross / (length * length), dLength),
+    };
+  }
+  const ux = qxExpr.value / distance;
+  const uy = qyExpr.value / distance;
+  // d = ‖q‖ with q = P − foot: ∂d = ûᵀ·∂q (û from foot to P — moving P
+  // outward along û increases the distance; moving the segment's points
+  // with the foot decreases it).
+  const grad = new Map<number, number>();
+  addInto(grad, qxExpr.grad, ux);
+  addInto(grad, qyExpr.grad, uy);
+  return { value: distance, grad };
+}
+
+/** The polygon entity and slots of a polygon operand. */
+function polygonOperandOf(
+  polygonId: SketchEntityId,
+  context: CompiledContext,
+): {
+  readonly entity: Extract<SketchEntity, { kind: "polygon" }>;
+  readonly slots: EntitySlots;
+} {
+  const entity = context.entitiesById.get(polygonId);
+  const slots = context.layout.slotsOf(polygonId);
+  if (
+    entity === undefined ||
+    entity.kind !== "polygon" ||
+    slots === undefined
+  ) {
+    throw new RangeError(
+      `pointOnEntity references unknown polygon ${polygonId}.`,
+    );
+  }
+  return { entity, slots };
+}
+
+/**
+ * The polygon's vertex expressions (§7.2): `θ_k = ρ + 2πk/n`,
+ * `R_eff = r·σ` (σ = 1 inscribed, 1/cos(π/n) circumscribed), with the exact
+ * per-slot gradients. `sides` and `fit` are discrete parameters, not
+ * unknowns — the layout rule.
+ */
+function polygonVertexExprs(
+  entity: Extract<SketchEntity, { kind: "polygon" }>,
+  slots: EntitySlots,
+  parameters: readonly number[],
+): readonly PointExpr2[] {
+  const [cxSlot, cySlot, rSlot, rhoSlot] = slots.offsets;
+  if (
+    cxSlot === undefined ||
+    cySlot === undefined ||
+    rSlot === undefined ||
+    rhoSlot === undefined
+  ) {
+    throw new RangeError("Polygon operand is missing slots.");
+  }
+  const cx = parameters[cxSlot];
+  const cy = parameters[cySlot];
+  const radius = parameters[rSlot];
+  const rho = parameters[rhoSlot];
+  if (
+    cx === undefined ||
+    cy === undefined ||
+    radius === undefined ||
+    rho === undefined
+  ) {
+    throw new RangeError("Polygon operand is missing values.");
+  }
+  const sigma =
+    entity.fit === "inscribed" ? 1 : 1 / Math.cos(Math.PI / entity.sides);
+  const effective = sigma * radius;
+  return Array.from({ length: entity.sides }, (_, k) => {
+    const theta = rho + (Math.PI * 2 * k) / entity.sides;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    return {
+      x: {
+        value: cx + effective * cosT,
+        grad: new Map<number, number>([
+          [cxSlot, 1],
+          [rSlot, sigma * cosT],
+          [rhoSlot, -effective * sinT],
+        ]),
+      },
+      y: {
+        value: cy + effective * sinT,
+        grad: new Map<number, number>([
+          [cySlot, 1],
+          [rSlot, sigma * sinT],
+          [rhoSlot, effective * cosT],
+        ]),
+      },
+    };
+  });
+}
+
+/**
+ * pointOnEntity on a polygon (§7.2): the min over the n BOUNDARY segments
+ * `V_k → V_{k+1 mod n}` (the perimeter, not the infinite lines — a closed
+ * boundary's "on the entity" means on the perimeter). A regular polygon's
+ * edges have equal positive length (the entity invariants), so the segment
+ * distance never divides by zero.
+ */
+function pointOnPolygonRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  polygonId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const { entity, slots } = polygonOperandOf(polygonId, context);
+      const p = {
+        x: pointExpr(target, context, parameters, "x"),
+        y: pointExpr(target, context, parameters, "y"),
+      };
+      const vertices = polygonVertexExprs(entity, slots, parameters);
+      let best: ResidualEvaluation | null = null;
+      for (let k = 0; k < vertices.length; k += 1) {
+        const a = vertices[k];
+        const b = vertices[(k + 1) % vertices.length];
+        if (a === undefined || b === undefined) continue;
+        const evaluation = segmentDistanceWithFrozenFoot(p, a, b);
+        if (best === null || evaluation.value < best.value) best = evaluation;
+      }
+      if (best === null) {
+        throw new RangeError("Polygon operand has no boundary constituents.");
+      }
+      return best;
+    },
+  };
+}
+
+/**
+ * pointOnEntity on a STRAIGHT slot (§7.3): the min over the four gated
+ * boundary constituents — two edge segments (offset endpoints with the
+ * exact `∂n̂/∂` chain) and two semicircular caps (the `pointOnCircularRow`
+ * body gated by the half-plane the cap's nearest circle point needs). The
+ * min over the gated constituents is the true distance to the slot boundary
+ * (each constituent exact on its active domain). The arc3 variant stays
+ * declined at validation — its boundary arcs are offsets of the centerline
+ * circumcircle and ship after the straight-slot row has fixture coverage.
+ */
+function pointOnStraightSlotRow(
+  label: string,
+  origin: ResidualOrigin,
+  target: PointTarget,
+  slotId: SketchEntityId,
+  context: CompiledContext,
+): ResidualRow {
+  return {
+    label,
+    origin,
+    evaluate: (parameters) => {
+      const slots = context.layout.slotsOf(slotId);
+      if (slots === undefined || slots.offsets.length !== 5) {
+        throw new RangeError(
+          `pointOnEntity references unknown straight slot ${slotId}.`,
+        );
+      }
+      const [x1Slot, y1Slot, x2Slot, y2Slot, rSlot] = slots.offsets;
+      if (
+        x1Slot === undefined ||
+        y1Slot === undefined ||
+        x2Slot === undefined ||
+        y2Slot === undefined ||
+        rSlot === undefined
+      ) {
+        throw new RangeError("Slot operand is missing slots.");
+      }
+      const x1 = parameters[x1Slot];
+      const y1 = parameters[y1Slot];
+      const x2 = parameters[x2Slot];
+      const y2 = parameters[y2Slot];
+      const radius = parameters[rSlot];
+      if (
+        x1 === undefined ||
+        y1 === undefined ||
+        x2 === undefined ||
+        y2 === undefined ||
+        radius === undefined
+      ) {
+        throw new RangeError("Slot operand is missing values.");
+      }
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const length = Math.hypot(dx, dy);
+      if (length === 0) {
+        throw new RangeError("Slot operand has a degenerate centerline.");
+      }
+      const ax = dx / length;
+      const ay = dy / length;
+      const nx = -dy / length;
+      const ny = dx / length;
+      // ∂n̂/∂ over the four centerline slots (n̂ = (−dy, dx)/L).
+      const dnxDx1 = (-dx * dy) / (length * length * length);
+      const dnxDx2 = (dx * dy) / (length * length * length);
+      const dnxDy1 = (dx * dx) / (length * length * length);
+      const dnxDy2 = -(dx * dx) / (length * length * length);
+      const dnyDx1 = (-dy * dy) / (length * length * length);
+      const dnyDx2 = (dy * dy) / (length * length * length);
+      const dnyDy1 = (dx * dy) / (length * length * length);
+      const dnyDy2 = (-dx * dy) / (length * length * length);
+      // Edge endpoint expressions E = c_i ± r·n̂ over the slot's slots.
+      const edgeEndpoint = (
+        which: 1 | 2,
+        sign: number,
+        axis: "x" | "y",
+      ): LinExpr => {
+        const centerSlot =
+          which === 1
+            ? axis === "x"
+              ? x1Slot
+              : y1Slot
+            : axis === "x"
+              ? x2Slot
+              : y2Slot;
+        const centerValue =
+          which === 1 ? (axis === "x" ? x1 : y1) : axis === "x" ? x2 : y2;
+        const normalComponent = axis === "x" ? nx : ny;
+        const grad = new Map<number, number>();
+        grad.set(centerSlot, 1);
+        const scale = sign * radius;
+        if (axis === "x") {
+          grad.set(x1Slot, (grad.get(x1Slot) ?? 0) + scale * dnxDx1);
+          grad.set(y1Slot, (grad.get(y1Slot) ?? 0) + scale * dnxDy1);
+          grad.set(x2Slot, (grad.get(x2Slot) ?? 0) + scale * dnxDx2);
+          grad.set(y2Slot, (grad.get(y2Slot) ?? 0) + scale * dnxDy2);
+        } else {
+          grad.set(x1Slot, (grad.get(x1Slot) ?? 0) + scale * dnyDx1);
+          grad.set(y1Slot, (grad.get(y1Slot) ?? 0) + scale * dnyDy1);
+          grad.set(x2Slot, (grad.get(x2Slot) ?? 0) + scale * dnyDx2);
+          grad.set(y2Slot, (grad.get(y2Slot) ?? 0) + scale * dnyDy2);
+        }
+        grad.set(rSlot, sign * normalComponent);
+        return {
+          value: centerValue + sign * radius * normalComponent,
+          grad,
+        };
+      };
+      const edge = (sign: number): { a: PointExpr2; b: PointExpr2 } => ({
+        a: {
+          x: edgeEndpoint(1, sign, "x"),
+          y: edgeEndpoint(1, sign, "y"),
+        },
+        b: {
+          x: edgeEndpoint(2, sign, "x"),
+          y: edgeEndpoint(2, sign, "y"),
+        },
+      });
+      const p = {
+        x: pointExpr(target, context, parameters, "x"),
+        y: pointExpr(target, context, parameters, "y"),
+      };
+      // Cap: the pointOnCircularRow body at a cap center (|‖P − c‖ − r|,
+      // unsigned so the min is the true distance to the boundary set),
+      // gated by the half-plane condition that the full circle's nearest
+      // point lies on the semicircle (right cap: dot(P − c_2, â) ≥ 0; left:
+      // ≤ 0 at c_1). Outside the gate the cap is not a candidate (its
+      // nearest points belong to the edges, which are in the min).
+      const cap = (
+        which: 1 | 2,
+        cx: number,
+        cy: number,
+      ): ResidualEvaluation | null => {
+        const cxSlot = which === 1 ? x1Slot : x2Slot;
+        const cySlot = which === 1 ? y1Slot : y2Slot;
+        const gate = (p.x.value - cx) * ax + (p.y.value - cy) * ay;
+        const insideGate = which === 1 ? gate <= 0 : gate >= 0;
+        if (!insideGate) return null;
+        const wx = p.x.value - cx;
+        const wy = p.y.value - cy;
+        const distance = Math.hypot(wx, wy);
+        if (distance === 0) {
+          // At the cap center the direction is undefined; the unsigned
+          // residual is the radius itself, gradient delegating.
+          return { value: radius, grad: new Map() };
+        }
+        const ux = wx / distance;
+        const uy = wy / distance;
+        const grad = new Map<number, number>();
+        // Inside the circle the unsigned value |d − r| = r − d negates the
+        // signed row's gradient; exactly on it either sign is a valid
+        // subgradient (the + side's is used).
+        const sign = distance - radius >= 0 ? 1 : -1;
+        addInto(grad, p.x.grad, sign * ux);
+        addInto(grad, p.y.grad, sign * uy);
+        grad.set(cxSlot, (grad.get(cxSlot) ?? 0) - sign * ux);
+        grad.set(cySlot, (grad.get(cySlot) ?? 0) - sign * uy);
+        grad.set(rSlot, -sign);
+        return { value: Math.abs(distance - radius), grad };
+      };
+      const constituents: ResidualEvaluation[] = [];
+      const top = edge(1);
+      constituents.push(segmentDistanceWithFrozenFoot(p, top.a, top.b));
+      const bottom = edge(-1);
+      constituents.push(segmentDistanceWithFrozenFoot(p, bottom.a, bottom.b));
+      const rightCap = cap(2, x2, y2);
+      if (rightCap !== null) constituents.push(rightCap);
+      const leftCap = cap(1, x1, y1);
+      if (leftCap !== null) constituents.push(leftCap);
+      let best: ResidualEvaluation | null = null;
+      for (const constituent of constituents) {
+        if (best === null || constituent.value < best.value) {
+          best = constituent;
+        }
+      }
+      if (best === null) {
+        throw new RangeError("Slot operand has no boundary constituents.");
+      }
+      return best;
     },
   };
 }
@@ -1098,6 +2061,10 @@ function pointOnEntityRow(
       return pointOnEllipseRow(label, origin, target, entityId, context);
     case "spline":
       return pointOnSplineRow(label, origin, target, entityId, context);
+    case "polygon":
+      return pointOnPolygonRow(label, origin, target, entityId, context);
+    case "slot":
+      return pointOnStraightSlotRow(label, origin, target, entityId, context);
     default:
       throw new RangeError(
         `pointOnEntity references entity ${entityId} of unsupported kind.`,
@@ -1342,6 +2309,98 @@ function angleRow(
   };
 }
 
+/**
+ * Resolves a (line, spline) pair from a direction constraint's operands,
+ * either order; `null` when neither operand is a spline (the line↔line
+ * rows apply). A spline paired with anything but a line is blocked at
+ * validation.
+ */
+function lineSplinePairOf(
+  first: SketchEntityId,
+  second: SketchEntityId,
+  context: CompiledContext,
+): { readonly line: SketchEntityId; readonly spline: SketchEntityId } | null {
+  const firstKind = context.entitiesById.get(first)?.kind;
+  const secondKind = context.entitiesById.get(second)?.kind;
+  if (firstKind === "spline" && secondKind === "line") {
+    return { line: second, spline: first };
+  }
+  if (secondKind === "spline" && firstKind === "line") {
+    return { line: first, spline: second };
+  }
+  return null;
+}
+
+/** Parallel dispatch: line↔spline end-tangent row or the line↔line row. */
+function parallelRows(
+  label: string,
+  origin: ResidualOrigin,
+  first: SketchEntityId,
+  second: SketchEntityId,
+  at: SplineEndSelection,
+  context: CompiledContext,
+): ResidualRow[] {
+  const pair = lineSplinePairOf(first, second, context);
+  if (pair !== null) {
+    return [
+      parallelLineSplineRow(label, origin, pair.line, pair.spline, at, context),
+    ];
+  }
+  return [parallelRow(label, origin, first, second, context)];
+}
+
+/** Perpendicular dispatch: line↔spline end-tangent row or the line↔line row. */
+function perpendicularRows(
+  label: string,
+  origin: ResidualOrigin,
+  first: SketchEntityId,
+  second: SketchEntityId,
+  at: SplineEndSelection,
+  context: CompiledContext,
+): ResidualRow[] {
+  const pair = lineSplinePairOf(first, second, context);
+  if (pair !== null) {
+    return [
+      perpendicularLineSplineRow(
+        label,
+        origin,
+        pair.line,
+        pair.spline,
+        at,
+        context,
+      ),
+    ];
+  }
+  return [perpendicularRow(label, origin, first, second, context)];
+}
+
+/** Angle dispatch: line↔spline end-tangent row or the line↔line row. */
+function angleRows(
+  label: string,
+  origin: ResidualOrigin,
+  first: SketchEntityId,
+  second: SketchEntityId,
+  at: SplineEndSelection,
+  context: CompiledContext,
+  target: number,
+): ResidualRow[] {
+  const pair = lineSplinePairOf(first, second, context);
+  if (pair !== null) {
+    return [
+      angleLineSplineRow(
+        label,
+        origin,
+        pair.line,
+        pair.spline,
+        at,
+        context,
+        target,
+      ),
+    ];
+  }
+  return [angleRow(label, origin, first, second, context, target)];
+}
+
 /** The parameter slot of an entity's radial dimension, by kind. */
 function radialRadiusSlotOf(
   id: SketchEntityId,
@@ -1414,6 +2473,34 @@ function equalRow(
         addInto(grad, g2.dLength, -1);
         return { value: g1.length - g2.length, grad };
       }
+      if (firstKind === "spline" || secondKind === "spline") {
+        // Equal endpoint chord (§5(a)): the distance between the spline's
+        // first and last stored points — the same notion `equal` uses for
+        // lines — with mixed line↔spline pairs comparing a line's length to
+        // a spline's chord. A zero chord (or zero-length line) delegates
+        // with an empty subgradient on that side (the distanceRow pattern).
+        const lengthOf = (
+          id: SketchEntityId,
+          kind: string | undefined,
+        ): LinExpr => {
+          if (kind === "line") {
+            const g = lineGeom(parameters, lineSlotsOf(id, context));
+            return { value: g.length, grad: g.dLength };
+          }
+          const slots = context.layout.slotsOf(id);
+          if (slots === undefined) {
+            throw new RangeError(
+              `Equal operand ${id} is missing parameter slots.`,
+            );
+          }
+          return splineChordExpr(parameters, slots);
+        };
+        const a = lengthOf(first, firstKind);
+        const b = lengthOf(second, secondKind);
+        const grad = new Map<number, number>(a.grad);
+        addInto(grad, b.grad, -1);
+        return { value: a.value - b.value, grad };
+      }
       const a = circularSlotsOf(first, context);
       const b = circularSlotsOf(second, context);
       const raSlot = a.offsets[2];
@@ -1447,6 +2534,34 @@ function tangentRows(
 ): ResidualRow[] {
   const firstKind = context.entitiesById.get(first)?.kind;
   const secondKind = context.entitiesById.get(second)?.kind;
+  // Spline operands: line↔spline is the anywhere row (§1.3); spline↔spline
+  // is the G1 joint at the named ends first.end ↔ second.start (§1.5) —
+  // two coincident rows plus the tangent-direction cross row, codimension 3.
+  // The anywhere spline↔spline form needs auxiliary solver unknowns and is
+  // deliberately staged (§1.6).
+  if (firstKind === "spline" || secondKind === "spline") {
+    if (firstKind === "spline" && secondKind === "spline") {
+      return [
+        ...coincidentRows(
+          `${label}/joint`,
+          origin,
+          { entity: first, point: "end" },
+          { entity: second, point: "start" },
+          context,
+        ),
+        splineJointTangentRow(
+          `${label}/tangent`,
+          origin,
+          first,
+          second,
+          context,
+        ),
+      ];
+    }
+    const splineId = firstKind === "spline" ? first : second;
+    const lineId = firstKind === "line" ? first : second;
+    return [tangentLineSplineRow(label, origin, lineId, splineId, context)];
+  }
   if (firstKind === "line" || secondKind === "line") {
     const lineId = firstKind === "line" ? first : second;
     const circularId = firstKind === "line" ? second : first;
@@ -1494,6 +2609,11 @@ function tangentRows(
         addInto(dCross, line.ddy, -wx);
         dCross.set(cXSlot, (dCross.get(cXSlot) ?? 0) - line.dy);
         dCross.set(cYSlot, (dCross.get(cYSlot) ?? 0) + line.dx);
+        // The line's own start slots flow through w = c − p1 exactly as in
+        // pointOnLineRow (the §1.3 convention-note fix — the analogous
+        // ±(dx, dy) columns the circle center already carried).
+        dCross.set(x1Slot, (dCross.get(x1Slot) ?? 0) + line.dy);
+        dCross.set(y1Slot, (dCross.get(y1Slot) ?? 0) - line.dx);
         const dDistance = chain(
           1 / line.length,
           dCross,
@@ -1737,22 +2857,24 @@ export function compileConstraintSystem(
         break;
       case "parallel":
         rows.push(
-          parallelRow(
+          ...parallelRows(
             "parallel",
             origin,
             constraint.first,
             constraint.second,
+            constraint.at ?? "end",
             context,
           ),
         );
         break;
       case "perpendicular":
         rows.push(
-          perpendicularRow(
+          ...perpendicularRows(
             "perpendicular",
             origin,
             constraint.first,
             constraint.second,
+            constraint.at ?? "end",
             context,
           ),
         );
@@ -1771,11 +2893,12 @@ export function compileConstraintSystem(
         break;
       case "angle":
         rows.push(
-          angleRow(
+          ...angleRows(
             "angle",
             origin,
             constraint.first,
             constraint.second,
+            constraint.at ?? "end",
             context,
             valueIn(constraint.value, "rad"),
           ),
@@ -1858,6 +2981,18 @@ export function compileConstraintSystem(
             origin,
             constraint.point,
             constraint.entity,
+            context,
+          ),
+        );
+        break;
+      case "pointOnTangent":
+        rows.push(
+          pointOnTangentRow(
+            "pointOnTangent",
+            origin,
+            constraint.point,
+            constraint.spline,
+            constraint.at,
             context,
           ),
         );

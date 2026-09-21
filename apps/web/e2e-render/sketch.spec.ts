@@ -849,3 +849,253 @@ test("phase 36: pointOnEntity pulls a line endpoint onto a circle", async ({
     })
     .toBeCloseTo(6, 6);
 });
+
+/** Phase 37 e2e: the spline constraint closure — anywhere line↔spline
+ *  tangency, the angle against a spline's end tangent, and pointOnEntity on
+ *  the composite boundary entities (polygon, straight slot). The same
+ *  machine surfaces the battery above pins: solver DoF, the solved geometry,
+ *  and the inspector's dimension editor. */
+
+/** The spline points of a solved spline entity, as workplane mm pairs. */
+async function solvedSplinePoints(
+  page: Page,
+  entityId: string,
+): Promise<{ x: number; y: number }[]> {
+  const entity = await solvedEntity(page, entityId);
+  const points = entity.points as { x: number; y: number }[] | undefined;
+  expect(points, `solved spline ${entityId} points`).toBeDefined();
+  return points ?? [];
+}
+
+test("phase 37: tangent line↔spline solves with one degree of freedom removed", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  // The arch: control picks (−12,−10) (−9,−2) (−3,−2) (0,−10) — apex
+  // C(1/2) = (−6,−4).
+  await activateTool(page, "spline");
+  await clickCanvas(page, -12, -10);
+  await clickCanvas(page, -9, -2);
+  await clickCanvas(page, -3, -2);
+  await clickCanvas(page, 0, -10);
+  // A horizontal line ABOVE the apex (2 mm away — not tangent yet).
+  await activateTool(page, "line");
+  await clickCanvas(page, -12, -2);
+  await clickCanvas(page, 0, -2);
+
+  // Both entities bare: 8 + 4 = 12 dof.
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 12, status: "under-constrained" }),
+  );
+
+  // Tangency anywhere on the curve: pick the line, then the curve at its
+  // apex. ONE row — the sliding contact is eliminated, not added.
+  await activateTool(page, "tangent");
+  await clickCanvas(page, -6, -2);
+  await clickCanvas(page, -6, -4);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 11, status: "under-constrained" }),
+  );
+
+  // The solved system is tangent: some stationary contact (or a chain end)
+  // sits ON the solved line with zero residual — the same stationary-root
+  // check the unit suite pins, computed from the solved machine surface.
+  await expect
+    .poll(async () => {
+      const [points, line] = await Promise.all([
+        solvedSplinePoints(page, "skent_spline-1"),
+        solvedEntity(page, "skent_line-1"),
+      ]);
+      const [p0, p1, p2, p3] = points;
+      if (!p0 || !p1 || !p2 || !p3) return Number.NaN;
+      const y1 = Number(line.y1);
+      const y2 = Number(line.y2);
+      // Signed distance controls against the (possibly tilted) line.
+      const dx = Number(line.x2) - Number(line.x1);
+      const dy = y2 - y1;
+      const length = Math.hypot(dx, dy);
+      const s = (p: { x: number; y: number }): number =>
+        (dx * (p.y - y1) - dy * (p.x - Number(line.x1))) / length;
+      const controls = [p0, p1, p2, p3].map(s);
+      const q = [0, 1, 2].map(
+        (j) => 3 * ((controls[j + 1] ?? 0) - (controls[j] ?? 0)),
+      );
+      const a = (q[0] ?? 0) - 2 * (q[1] ?? 0) + (q[2] ?? 0);
+      const b = 2 * ((q[1] ?? 0) - (q[0] ?? 0));
+      const c = q[0] ?? 0;
+      const candidates = [controls[0] ?? 0, controls[3] ?? 0];
+      const discriminant = b * b - 4 * a * c;
+      if (discriminant > 0) {
+        const root = Math.sqrt(discriminant);
+        for (const t of [(-b - root) / (2 * a), (-b + root) / (2 * a)]) {
+          if (t > 0 && t < 1) {
+            const u = 1 - t;
+            candidates.push(
+              u * u * u * (controls[0] ?? 0) +
+                3 * u * u * t * (controls[1] ?? 0) +
+                3 * u * t * t * (controls[2] ?? 0) +
+                t * t * t * (controls[3] ?? 0),
+            );
+          }
+        }
+      }
+      return Math.min(...candidates.map((value) => Math.abs(value)));
+    })
+    .toBeLessThan(1e-6);
+});
+
+test("phase 37: an angle between a line and a spline's end tangent is measured and edited", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  // Start tangent P1 − P0 = (3, 6) (63.4349° above x); a horizontal line.
+  await activateTool(page, "spline");
+  await clickCanvas(page, 2, -10);
+  await clickCanvas(page, 5, -4);
+  await clickCanvas(page, 11, -4);
+  await clickCanvas(page, 14, -10);
+  await activateTool(page, "line");
+  await clickCanvas(page, 24, -10);
+  await clickCanvas(page, 34, -10);
+
+  // The angle tool measures line × start tangent: 63.435°, committing at
+  // arity (the pick near the spline's start addresses at = "start").
+  await activateTool(page, "angle");
+  await clickCanvas(page, 29, -10);
+  await clickCanvas(page, 2.4, -9.2);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 11, status: "under-constrained" }),
+  );
+  const input = page.getByRole("spinbutton");
+  await expect(input).toHaveValue("63.435");
+
+  // Edit to 90°: the solved line direction and the solved start tangent
+  // become perpendicular.
+  await input.fill("90");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect
+    .poll(async () => {
+      const [points, line] = await Promise.all([
+        solvedSplinePoints(page, "skent_spline-1"),
+        solvedEntity(page, "skent_line-1"),
+      ]);
+      const p0 = points[0];
+      const p1 = points[1];
+      if (!p0 || !p1) return Number.NaN;
+      const tx = p1.x - p0.x;
+      const ty = p1.y - p0.y;
+      const dx = Number(line.x2) - Number(line.x1);
+      const dy = Number(line.y2) - Number(line.y1);
+      const dot = dx * tx + dy * ty;
+      return dot / (Math.hypot(dx, dy) * Math.hypot(tx, ty));
+    })
+    .toBeCloseTo(0, 6);
+});
+
+test("phase 37: pointOnEntity pulls a line endpoint onto a polygon and a slot boundary", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  // A hexagon (center (8,8), vertex (14,8) → radius 6) and a line whose
+  // start sits outside it.
+  await activateTool(page, "polygon");
+  await clickCanvas(page, 8, 8);
+  await clickCanvas(page, 14, 8);
+  await activateTool(page, "line");
+  await clickCanvas(page, 24, 12);
+  await clickCanvas(page, 34, 12);
+
+  // Pin the line's START (the nearest point target at the click) onto the
+  // polygon's boundary (the pick lands on vertex 0 of the hexagon).
+  await activateTool(page, "pointOnEntity");
+  await clickCanvas(page, 24, 12);
+  await clickCanvas(page, 14, 8);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 7, status: "under-constrained" }),
+  );
+
+  // The solved start sits ON the solved hexagon's perimeter: the min
+  // distance over the six edges is zero.
+  await expect
+    .poll(async () => {
+      const [polygon, line] = await Promise.all([
+        solvedEntity(page, "skent_polygon-1"),
+        solvedEntity(page, "skent_line-1"),
+      ]);
+      const px = Number(line.x1);
+      const py = Number(line.y1);
+      const effective =
+        polygon.fit === "inscribed"
+          ? Number(polygon.radius)
+          : Number(polygon.radius) / Math.cos(Math.PI / Number(polygon.sides));
+      let min = Number.POSITIVE_INFINITY;
+      const sides = Number(polygon.sides);
+      for (let k = 0; k < sides; k += 1) {
+        const thetaOf = (index: number): [number, number] => [
+          Number(polygon.cx) +
+            effective *
+              Math.cos(
+                Number(polygon.rotation) + (Math.PI * 2 * index) / sides,
+              ),
+          Number(polygon.cy) +
+            effective *
+              Math.sin(
+                Number(polygon.rotation) + (Math.PI * 2 * index) / sides,
+              ),
+        ];
+        const [ax, ay] = thetaOf(k);
+        const [bx, by] = thetaOf(k + 1);
+        const dx = bx - ax;
+        const dy = by - ay;
+        const u = Math.max(
+          0,
+          Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)),
+        );
+        min = Math.min(min, Math.hypot(ax + u * dx - px, ay + u * dy - py));
+      }
+      return min;
+    })
+    .toBeLessThan(1e-6);
+
+  // A straight slot (cap centers (−14,6) → (−4,6), radius 4) and a line
+  // whose start sits beyond the slot's left cap. The sketch now carries
+  // polygon + line + slot + line = 17 free parameters, 2 constraints.
+  await activateTool(page, "slot");
+  await clickCanvas(page, -14, 6);
+  await clickCanvas(page, -4, 6);
+  await clickCanvas(page, -9, 10);
+  await activateTool(page, "line");
+  await clickCanvas(page, -18, 14);
+  await clickCanvas(page, -10, 14);
+
+  // Pin the second line's start onto the slot boundary (the pick lands on
+  // the top edge, away from the line).
+  await activateTool(page, "pointOnEntity");
+  await clickCanvas(page, -18, 14);
+  await clickCanvas(page, -9, 10);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-solve",
+    JSON.stringify({ diagnostics: 1, dof: 15, status: "under-constrained" }),
+  );
+
+  // The solved start sits on the slot's left cap: |‖P − c1‖ − r| = 0.
+  await expect
+    .poll(async () => {
+      const [slot, line] = await Promise.all([
+        solvedEntity(page, "skent_slot-1"),
+        solvedEntity(page, "skent_line-2"),
+      ]);
+      const px = Number(line.x1);
+      const py = Number(line.y1);
+      const distance = Math.hypot(px - Number(slot.x1), py - Number(slot.y1));
+      return Math.abs(distance - Number(slot.radius));
+    })
+    .toBeLessThan(1e-6);
+});

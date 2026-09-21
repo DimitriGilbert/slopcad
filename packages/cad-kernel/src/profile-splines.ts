@@ -180,6 +180,198 @@ export function splineEndPoint(
   return at(points, points.length - 1);
 }
 
+// ---------------------------------------------------------------------------
+// Certified scalar-cubic extremes (Phase 37): convex-hull subdivision with
+// exact leaves, the shared primitive behind the revolve axis-crossing rule's
+// spline branch. Mirrors `cubicStationaryParameters` on the sketch side
+// (`@slopcad/cad-sketch`'s spline-math.ts) — the same scalar-cubic
+// machinery, carried per package by the deliberate mirror.
+// ---------------------------------------------------------------------------
+
+/**
+ * Width at or below which a leaf's control hull certifies its extremes to
+ * the axis-crossing tolerance: the hull contains the true extremes (the
+ * Bernstein basis is nonnegative and sums to 1), so a hull this narrow
+ * decides the crossing rule exactly at the
+ * `REVOLVE_AXIS_TOUCH_TOLERANCE_MM` scale it is judged at.
+ */
+export const PROFILE_SPLINE_EXTREMES_EPSILON = 1e-9;
+
+/** Maximum certified-extremes subdivision depth (§8.4: D = 24). */
+export const PROFILE_SPLINE_EXTREMES_MAX_DEPTH = 24;
+
+/** The certified extremes of a scalar cubic in Bézier form on [0, 1]. */
+export interface CertifiedCubicExtremes {
+  /** A lower bound on the true minimum (`lo ≤ trueMin`). */
+  readonly lo: number;
+  /** An upper bound on the true maximum (`trueMax ≤ hi`). */
+  readonly hi: number;
+  /** How many de Casteljau subdivisions were needed (0 = certified at depth 0). */
+  readonly depth: number;
+}
+
+/** Evaluates the scalar cubic with controls `g` at `t` (Bernstein form). */
+function cubicAt(
+  g: readonly [number, number, number, number],
+  t: number,
+): number {
+  const u = 1 - t;
+  return (
+    u * u * u * g[0] +
+    3 * u * u * t * g[1] +
+    3 * u * t * t * g[2] +
+    t * t * t * g[3]
+  );
+}
+
+/** Splits one scalar cubic at its midpoint (the 1-D de Casteljau split). */
+function splitCubic(
+  g: readonly [number, number, number, number],
+): [
+  readonly [number, number, number, number],
+  readonly [number, number, number, number],
+] {
+  const ab = (g[0] + g[1]) / 2;
+  const bc = (g[1] + g[2]) / 2;
+  const cd = (g[2] + g[3]) / 2;
+  const abc = (ab + bc) / 2;
+  const bcd = (bc + cd) / 2;
+  const abcd = (abc + bcd) / 2;
+  return [
+    [g[0], ab, abc, abcd],
+    [abcd, bcd, cd, g[3]],
+  ];
+}
+
+/**
+ * The CERTIFIED extremes of a scalar cubic in Bézier form on [0, 1]
+ * (§8.3): `[lo, hi]` always contains the true `[min, max]`, every visited
+ * interval endpoint is an on-curve value, and the generic case resolves
+ * EXACTLY at depth 0 —
+ *
+ * 1. MONOTONE TEST (exact): the derivative's Bernstein controls
+ *    `q = 3(g_{j+1} − g_j)` one-signed ⇒ g is monotone ⇒ extremes at the
+ *    endpoints.
+ * 1b. QUADRATIC FORMULA (exact, the degenerate-critical-point resolver of
+ *    §8.4): the derivative quadratic's roots in (0, 1) evaluated on-curve.
+ *    A double root (inflection-seat) leaves g monotone — endpoints again.
+ * 2. ε-HULL: a leaf whose control hull width is within
+ *    {@link PROFILE_SPLINE_EXTREMES_EPSILON} certifies by its hull.
+ * 4. DEPTH CAP: a leaf at the cap certifies by its hull — conservative in
+ *    the safe direction (a crossing decision made on an over-approximated
+ *    spread errs toward rejection).
+ * 3. SUBDIVIDE: de Casteljau midpoint split (the split point g(1/2) is an
+ *    exact on-curve value); recursion with depth + 1.
+ *
+ * Deterministic: a pure function of the four controls.
+ */
+export function certifiedCubicExtremes(
+  g0: number,
+  g1: number,
+  g2: number,
+  g3: number,
+): CertifiedCubicExtremes {
+  const initial = [g0, g1, g2, g3] as [number, number, number, number];
+  let lo = Number.POSITIVE_INFINITY;
+  let hi = Number.NEGATIVE_INFINITY;
+  let depth = 0;
+  const visit = (
+    g: readonly [number, number, number, number],
+    level: number,
+  ): void => {
+    if (level > depth) depth = level;
+    const hullLo = Math.min(g[0], g[1], g[2], g[3]);
+    const hullHi = Math.max(g[0], g[1], g[2], g[3]);
+    const q0 = 3 * (g[1] - g[0]);
+    const q1 = 3 * (g[2] - g[1]);
+    const q2 = 3 * (g[3] - g[2]);
+    const qMin = Math.min(q0, q1, q2);
+    const qMax = Math.max(q0, q1, q2);
+    // Leaf 1: the derivative hull is one-signed — monotone, exact.
+    if (qMin > 0 || qMax < 0) {
+      lo = Math.min(lo, g[0], g[3]);
+      hi = Math.max(hi, g[0], g[3]);
+      return;
+    }
+    // Leaf 1b: the derivative quadratic, by formula. D ≤ 0 ⇒ no sign
+    // change ⇒ (weakly) monotone ⇒ endpoints — exact even at a double
+    // root (an inflection-seat critical point).
+    const a = q0 - 2 * q1 + q2;
+    const b = 2 * (q1 - q0);
+    const c = q0;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant <= 0) {
+      // Mathematically monotone. Near a degenerate discriminant the
+      // formula's reliability degrades; when the hull is not already
+      // decisively narrow, fall through to the ε-hull / subdivision path
+      // so the certificate never narrows below the truth.
+      if (
+        hullHi - hullLo > PROFILE_SPLINE_EXTREMES_EPSILON &&
+        level < PROFILE_SPLINE_EXTREMES_MAX_DEPTH
+      ) {
+        const [left, right] = splitCubic(g);
+        visit(left, level + 1);
+        visit(right, level + 1);
+        return;
+      }
+      lo = Math.min(lo, g[0], g[3]);
+      hi = Math.max(hi, g[0], g[3]);
+      return;
+    }
+    // Two distinct critical parameters; the stable quadratic form
+    // (Kahan): with q = (−b − sign(b)·√D)/2 the roots are q/a and c/q.
+    // A = 0 degenerates the quadratic to the linear root −C/B (B ≠ 0
+    // whenever D > 0 there).
+    const root = Math.sqrt(discriminant);
+    const denominator = -b - Math.sign(b) * root;
+    const roots =
+      a === 0
+        ? [-c / b]
+        : denominator === 0
+          ? []
+          : [denominator / (2 * a), (2 * c) / denominator];
+    let resolved = true;
+    const values: number[] = [g[0], g[3]];
+    const slack = 1e-9 * (1 + Math.abs(hullLo) + Math.abs(hullHi));
+    for (const t of roots) {
+      if (!(t > 0 && t < 1)) continue;
+      const value = cubicAt(g, t);
+      // The convex-hull property must hold for an on-curve value; a
+      // violation means the formula failed numerically at this leaf.
+      if (value < hullLo - slack || value > hullHi + slack) {
+        resolved = false;
+        break;
+      }
+      values.push(value);
+    }
+    if (resolved) {
+      for (const value of values) {
+        lo = Math.min(lo, value);
+        hi = Math.max(hi, value);
+      }
+      return;
+    }
+    // Leaf 2: ε-narrow hull.
+    if (hullHi - hullLo <= PROFILE_SPLINE_EXTREMES_EPSILON) {
+      lo = Math.min(lo, hullLo);
+      hi = Math.max(hi, hullHi);
+      return;
+    }
+    // Leaf 4: the depth cap — conservative hull.
+    if (level >= PROFILE_SPLINE_EXTREMES_MAX_DEPTH) {
+      lo = Math.min(lo, hullLo);
+      hi = Math.max(hi, hullHi);
+      return;
+    }
+    // Subdivide.
+    const [left, right] = splitCubic(g);
+    visit(left, level + 1);
+    visit(right, level + 1);
+  };
+  visit(initial, 0);
+  return { lo, hi, depth };
+}
+
 /**
  * The structural problems of a spline segment's point list, or `null`:
  * non-finite coordinates, a control flavor whose count is not 4, 7, 10, …,

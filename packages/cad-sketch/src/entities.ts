@@ -46,9 +46,12 @@
  *     evaluated exactly through its per-span cubic Bézier equivalent
  *     (`b1 = Pᵢ + (Pᵢ₊₁ − Pᵢ₋₁)/6`, `b2 = Pᵢ₊₁ − (Pᵢ₊₂ − Pᵢ)/6`).
  *   Point targets: `start` (points[0]) and `end` (points[N−1]) only — no
- *   `center`. See the solver docs in `residuals.ts` for the pinned solving
- *   subset (endpoint point-target rows and point-on-spline projection;
- *   other constraint kinds on spline operands decline with
+ *   `center`. See the solver docs in `residuals.ts` and the constraint
+ *   vocabulary docs in `constraints.ts` for the solving subset (endpoint
+ *   point-target rows, point-on-spline projection, line tangency, the
+ *   end-tangent direction constraints, endpoint-chord equality, and the
+ *   end-tangent-line row; radius/diameter, collinear, and horizontal/
+ *   vertical on spline operands decline with
  *   `sketch/constraint-unsupported`).
  * - `polygon` — a regular n-gon `(cx, cy, radius, sides, rotation, fit)`:
  *   center, radius (mm, > 0), side count (integer, ≥ 3 — a discrete

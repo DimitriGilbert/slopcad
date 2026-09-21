@@ -23,11 +23,17 @@
  *   strictly between 0° and 180° (use parallel/perpendicular at the limits).
  * - `radius(entity, value)` — circle/arc radius, positive.
  * - `diameter(entity, value)` — circle/arc diameter, positive.
- * - `equal(first, second)` — equal lengths (two lines) or equal radii (two
- *   circles/arcs); mixed pairs are rejected as malformed.
+ * - `equal(first, second)` — equal lengths (two lines), equal radii (two
+ *   circles/arcs), or equal endpoint chords (lines and splines: a spline
+ *   counts the distance between its first and last stored point); other
+ *   pairs are rejected as malformed.
  * - `tangent(first, second, variant?)` — a line tangent to a circle/arc
- *   (infinite line, not segment), or two circles/arcs tangent `external`
- *   (default: centers r1+r2 apart) or `internal` (|r1−r2| apart).
+ *   (infinite line, not segment), two circles/arcs tangent `external`
+ *   (default: centers r1+r2 apart) or `internal` (|r1−r2| apart), a line
+ *   tangent to a spline ANYWHERE on the curve (1 equation, the contact
+ *   eliminated at a stationary anchor), or two splines joined G1 at
+ *   first.end ↔ second.start (3 equations: coincidence plus matching
+ *   tangent directions).
  * - `midpoint(point, line)` — the point target sits at the line's midpoint
  *   (2 equations).
  * - `symmetry(first, second, about)` — two point targets symmetric about a
@@ -37,8 +43,18 @@
  *   curve (1 equation). Operand kinds: line (the infinite line, like
  *   tangency), circle, arc (as its full circle — the tangency convention),
  *   ellipse/ellipticalArc (the exact implicit ellipse — arcs participate as
- *   their full ellipse), and spline (the frozen-parameter projection onto
- *   the tessellated chord form; see `residuals.ts` for the pinned honesty).
+ *   their full ellipse), spline (the frozen-parameter projection onto
+ *   the tessellated chord form; see `residuals.ts` for the pinned honesty),
+ *   polygon (the boundary perimeter — a stateless per-evaluation min over
+ *   the edges), and a straight slot (the stadium boundary — edges plus
+ *   gated caps; the arc3 variant stays outside the subset).
+ * - `pointOnTangent(point, spline, at?)` — the point target lies on the
+ *   line through the spline's `at` end (default `"end"`) along that end's
+ *   tangent (1 equation, mm).
+ * - `parallel` / `perpendicular` / `angle` accept a spline in place of one
+ *   line: the row addresses the spline's END tangent (the `at` operand,
+ *   default `"end"`) — direction-only, the line↔line convention; full
+ *   contact composes with a point-on/tangency row.
  * - `collinear(first, second)` — two lines lie on one infinite line (2
  *   equations: both endpoints of `second` sit on `first`'s line).
  * - `horizontalPair(first, second)` — two point targets share y (1
@@ -49,15 +65,21 @@
  *   value — negative and zero included, unlike `distance`).
  * - `distanceY(first, second, value)` — the same along workplane y.
  *
- * ## The spline operand subset (Phase 36's pinned scope)
+ * ## The spline operand subset (Phase 36 pinned it; Phase 37 closed it)
  *
  * Spline entities accept point-target constraints on their `start`/`end`
  * (coincident, distance, distanceX/Y, horizontalPair/verticalPair,
- * midpoint, symmetry), `pointOnEntity` onto them, and the `fixed` pin.
- * Every other constraint kind with a spline operand — tangency, equality,
- * parallelism, perpendicularity, angle, radius/diameter — is OUTSIDE the
- * pinned solving scope and declines at validation with
- * `sketch/constraint-unsupported`, never a silent mis-solve.
+ * midpoint, symmetry), `pointOnEntity` onto them, the `fixed` pin, and —
+ * since Phase 37 — `tangent` (a line anywhere on the curve, or a G1 joint
+ * between two splines), `parallel`/`perpendicular`/`angle` against a spline
+ * END tangent (the `at` operand), `equal` endpoint chords, and
+ * `pointOnTangent`. Still OUTSIDE the scope and declined at validation with
+ * `sketch/constraint-unsupported`, never a silent mis-solve: radius and
+ * diameter (a spline has no radius parameter), collinear (its meaningful
+ * spline reading is `pointOnTangent`), and horizontal/vertical (single-line
+ * kinds). Anywhere spline↔spline tangency needs constraint-owned auxiliary
+ * solver unknowns and stays a staged design (see
+ * `docs/design/spline-constraint-math.md` §1.6).
  */
 
 import {
@@ -105,6 +127,7 @@ export const SKETCH_CONSTRAINT_KINDS = [
   "midpoint",
   "symmetry",
   "pointOnEntity",
+  "pointOnTangent",
   "collinear",
   "horizontalPair",
   "verticalPair",
@@ -165,6 +188,26 @@ export function isTangentVariant(input: unknown): input is TangentVariant {
   );
 }
 
+/**
+ * Which end of a spline a constraint attaches to. End tangents are the
+ * meaningful anchor for direction constraints on splines: a spline's
+ * tangent sweeps all directions along the curve, so an "anywhere"
+ * direction-only constraint would be vacuous.
+ */
+export const SPLINE_END_SELECTIONS = ["start", "end"] as const;
+
+export type SplineEndSelection = (typeof SPLINE_END_SELECTIONS)[number];
+
+/** Type guard for untrusted spline end selections. */
+export function isSplineEndSelection(
+  input: unknown,
+): input is SplineEndSelection {
+  return (
+    typeof input === "string" &&
+    (SPLINE_END_SELECTIONS as readonly string[]).includes(input)
+  );
+}
+
 /** What a symmetry constraint mirrors its operands about. */
 export type SymmetryAbout =
   | { readonly type: "point"; readonly point: PointTarget }
@@ -193,18 +236,32 @@ export interface VerticalConstraint extends ConstraintBase {
   readonly entity: SketchEntityId;
 }
 
-/** Two lines must be parallel (either sense). */
+/**
+ * Two lines must be parallel (either sense), or a line's direction must be
+ * parallel to a spline's END tangent (the cross product, sign-blind).
+ */
 export interface ParallelConstraint extends ConstraintBase {
   readonly kind: "parallel";
   readonly first: SketchEntityId;
   readonly second: SketchEntityId;
+  /**
+   * The spline operand's end whose tangent the row addresses (present only
+   * when an operand is a spline; `"end"` when absent).
+   */
+  readonly at?: SplineEndSelection;
 }
 
-/** Two lines must meet at 90°. */
+/**
+ * Two lines must meet at 90°, or a line's direction must be perpendicular
+ * to a spline's END tangent (direction-only — full contact composes this
+ * with a contact row, the same layering the line↔line kind implies).
+ */
 export interface PerpendicularConstraint extends ConstraintBase {
   readonly kind: "perpendicular";
   readonly first: SketchEntityId;
   readonly second: SketchEntityId;
+  /** The spline operand's end whose tangent the row addresses; `"end"`. */
+  readonly at?: SplineEndSelection;
 }
 
 /** Two point targets must lie `value` mm apart. */
@@ -215,12 +272,18 @@ export interface DistanceConstraint extends ConstraintBase {
   readonly value: LengthValue;
 }
 
-/** The angle between two lines' directions must equal `value` (0° < θ < 180°). */
+/**
+ * The angle between two lines' directions must equal `value` (0° < θ <
+ * 180°) — or, with a spline operand, the angle between the line's direction
+ * and the spline's END tangent (the same unsigned [0°, 180°] convention).
+ */
 export interface AngleConstraint extends ConstraintBase {
   readonly kind: "angle";
   readonly first: SketchEntityId;
   readonly second: SketchEntityId;
   readonly value: AngleValue;
+  /** The spline operand's end whose tangent the row addresses; `"end"`. */
+  readonly at?: SplineEndSelection;
 }
 
 /**
@@ -252,6 +315,11 @@ export interface EqualConstraint extends ConstraintBase {
  * A line must be tangent to a circle/arc, or two circles/arcs must be tangent
  * to each other. Arcs participate as their full circles; endpoint tangency is
  * modeled as tangency plus a coincident constraint on the arc endpoint.
+ *
+ * Spline operands (Phase 37): `tangent(line, spline)` is ANYWHERE tangency —
+ * the contact slides along the curve, codimension 1 like line↔circle. Two
+ * splines form a G1 JOINT: the first operand's end coincides with the
+ * second's start and the end/start tangents share direction (codimension 3).
  */
 export interface TangentConstraint extends ConstraintBase {
   readonly kind: "tangent";
@@ -279,13 +347,30 @@ export interface SymmetryConstraint extends ConstraintBase {
 /**
  * A point target must lie on an entity's curve: line (infinite line),
  * circle, arc (as its full circle), ellipse/ellipticalArc (the exact
- * implicit ellipse), or spline (frozen-parameter projection — see the
- * module's spline scope note).
+ * implicit ellipse), spline (frozen-parameter projection — see the
+ * module's spline scope note), polygon (the boundary — a stateless
+ * per-evaluation min over the perimeter segments), or a STRAIGHT slot (the
+ * stadium boundary — edges plus gated semicircular caps). The arc3 slot
+ * variant stays outside the solving subset.
  */
 export interface PointOnEntityConstraint extends ConstraintBase {
   readonly kind: "pointOnEntity";
   readonly point: PointTarget;
   readonly entity: SketchEntityId;
+}
+
+/**
+ * A point target must lie on the line through a spline's end along that
+ * end's tangent — "collinear with the spline's end tangent" (mm, the
+ * point-on-line scale). For the control flavor this is literally
+ * collinearity with the first/last tangent-handle pair.
+ */
+export interface PointOnTangentConstraint extends ConstraintBase {
+  readonly kind: "pointOnTangent";
+  readonly point: PointTarget;
+  readonly spline: SketchEntityId;
+  /** Which end's tangent line; defaults to `"end"`. */
+  readonly at: SplineEndSelection;
 }
 
 /** Two lines must lie on one infinite line. */
@@ -346,6 +431,7 @@ export type SketchConstraint =
   | MidpointConstraint
   | SymmetryConstraint
   | PointOnEntityConstraint
+  | PointOnTangentConstraint
   | CollinearConstraint
   | HorizontalPairConstraint
   | VerticalPairConstraint
@@ -453,22 +539,34 @@ export function createVerticalConstraint(
   return { id, kind: "vertical", entity };
 }
 
-/** Builds a parallel constraint between two lines. */
+/**
+ * Builds a parallel constraint between two lines, or between a line and a
+ * spline's end tangent (`at`, default `"end"`).
+ */
 export function createParallelConstraint(
   id: SketchConstraintId,
   first: SketchEntityId,
   second: SketchEntityId,
+  at?: SplineEndSelection,
 ): ParallelConstraint {
-  return { id, kind: "parallel", first, second };
+  return at === undefined
+    ? { id, kind: "parallel", first, second }
+    : { id, kind: "parallel", first, second, at };
 }
 
-/** Builds a perpendicular constraint between two lines. */
+/**
+ * Builds a perpendicular constraint between two lines, or between a line
+ * and a spline's end tangent (`at`, default `"end"`).
+ */
 export function createPerpendicularConstraint(
   id: SketchConstraintId,
   first: SketchEntityId,
   second: SketchEntityId,
+  at?: SplineEndSelection,
 ): PerpendicularConstraint {
-  return { id, kind: "perpendicular", first, second };
+  return at === undefined
+    ? { id, kind: "perpendicular", first, second }
+    : { id, kind: "perpendicular", first, second, at };
 }
 
 /**
@@ -485,15 +583,21 @@ export function createDistanceConstraint(
   return { id, kind: "distance", first, second, value };
 }
 
-/** Builds an angle constraint between two lines (0° < θ < 180°). */
+/**
+ * Builds an angle constraint between two lines, or between a line and a
+ * spline's end tangent (`at`, default `"end"`); 0° < θ < 180°.
+ */
 export function createAngleConstraint(
   id: SketchConstraintId,
   first: SketchEntityId,
   second: SketchEntityId,
   value: AngleValue,
+  at?: SplineEndSelection,
 ): AngleConstraint {
   requireOpenAngle("angle", value);
-  return { id, kind: "angle", first, second, value };
+  return at === undefined
+    ? { id, kind: "angle", first, second, value }
+    : { id, kind: "angle", first, second, value, at };
 }
 
 /** Builds a radius constraint on a circle or arc. */
@@ -586,6 +690,19 @@ export function createPointOnEntityConstraint(
   entity: SketchEntityId,
 ): PointOnEntityConstraint {
   return { id, kind: "pointOnEntity", point, entity };
+}
+
+/**
+ * Builds a point-on-end-tangent constraint: the point target lies on the
+ * line through the spline's `at` end along that end's tangent.
+ */
+export function createPointOnTangentConstraint(
+  id: SketchConstraintId,
+  point: PointTarget,
+  spline: SketchEntityId,
+  at: SplineEndSelection = "end",
+): PointOnTangentConstraint {
+  return { id, kind: "pointOnTangent", point, spline, at };
 }
 
 /** Builds a collinear constraint between two lines. */
@@ -692,6 +809,27 @@ function parseEntityField(
     );
   }
   return parsed;
+}
+
+/**
+ * Parses a direction constraint's optional spline-end operand: absent means
+ * `"end"`; a present value must name an end.
+ */
+function parseOptionalSplineEnd(
+  input: unknown,
+  whole: unknown,
+): ParseResult<SplineEndSelection | undefined, SketchConstraintError> {
+  if (input === undefined) return ok(undefined);
+  if (!isSplineEndSelection(input)) {
+    return fail(
+      constraintError(
+        SKETCH_DIAGNOSTIC_CODES.constraintMalformed,
+        'A constraint\'s spline end operand must be "start" or "end".',
+        whole,
+      ),
+    );
+  }
+  return ok(input);
 }
 
 function parsePositiveLengthValue(
@@ -895,12 +1033,22 @@ export function parseSketchConstraint(
       if (!first.ok) return first;
       const second = parseEntityField("second", input.second, input);
       if (!second.ok) return second;
-      return ok({
-        id: id.value,
-        kind: input.kind,
-        first: first.value,
-        second: second.value,
-      });
+      const at = parseOptionalSplineEnd(input.at, input);
+      if (!at.ok) return at;
+      return at.value === undefined
+        ? ok({
+            id: id.value,
+            kind: input.kind,
+            first: first.value,
+            second: second.value,
+          })
+        : ok({
+            id: id.value,
+            kind: input.kind,
+            first: first.value,
+            second: second.value,
+            at: at.value,
+          });
     }
     case "distance": {
       const first = parsePointTarget(input.first);
@@ -924,13 +1072,24 @@ export function parseSketchConstraint(
       if (!second.ok) return second;
       const value = parseOpenAngleValue(input.value);
       if (!value.ok) return value;
-      return ok({
-        id: id.value,
-        kind: "angle",
-        first: first.value,
-        second: second.value,
-        value: value.value,
-      });
+      const at = parseOptionalSplineEnd(input.at, input);
+      if (!at.ok) return at;
+      return at.value === undefined
+        ? ok({
+            id: id.value,
+            kind: "angle",
+            first: first.value,
+            second: second.value,
+            value: value.value,
+          })
+        : ok({
+            id: id.value,
+            kind: "angle",
+            first: first.value,
+            second: second.value,
+            value: value.value,
+            at: at.value,
+          });
     }
     case "radius":
     case "diameter": {
@@ -1019,6 +1178,25 @@ export function parseSketchConstraint(
         entity: entity.value,
       });
     }
+    case "pointOnTangent": {
+      const point = parsePointTarget(input.point);
+      if (!point.ok) return point;
+      const spline = parseEntityField("spline", input.spline, input);
+      if (!spline.ok) return spline;
+      const at = parseOptionalSplineEnd(
+        input.at === undefined ? "end" : input.at,
+        input,
+      );
+      if (!at.ok) return at;
+      const end = at.value ?? "end";
+      return ok({
+        id: id.value,
+        kind: "pointOnTangent",
+        point: point.value,
+        spline: spline.value,
+        at: end,
+      });
+    }
     case "collinear": {
       const first = parseEntityField("first", input.first, input);
       if (!first.ok) return first;
@@ -1093,6 +1271,20 @@ export function serializeSketchConstraint(
       };
     case "parallel":
     case "perpendicular":
+      return constraint.at === undefined
+        ? {
+            id: constraint.id,
+            kind: constraint.kind,
+            first: constraint.first,
+            second: constraint.second,
+          }
+        : {
+            id: constraint.id,
+            kind: constraint.kind,
+            first: constraint.first,
+            second: constraint.second,
+            at: constraint.at,
+          };
     case "equal":
       return {
         id: constraint.id,
@@ -1109,13 +1301,22 @@ export function serializeSketchConstraint(
         value: serializeDimensionalValue(constraint.value),
       };
     case "angle":
-      return {
-        id: constraint.id,
-        kind: constraint.kind,
-        first: constraint.first,
-        second: constraint.second,
-        value: serializeDimensionalValue(constraint.value),
-      };
+      return constraint.at === undefined
+        ? {
+            id: constraint.id,
+            kind: constraint.kind,
+            first: constraint.first,
+            second: constraint.second,
+            value: serializeDimensionalValue(constraint.value),
+          }
+        : {
+            id: constraint.id,
+            kind: constraint.kind,
+            first: constraint.first,
+            second: constraint.second,
+            value: serializeDimensionalValue(constraint.value),
+            at: constraint.at,
+          };
     case "radius":
     case "diameter":
       return {
@@ -1161,6 +1362,14 @@ export function serializeSketchConstraint(
         kind: constraint.kind,
         point: serializePointTarget(constraint.point),
         entity: constraint.entity,
+      };
+    case "pointOnTangent":
+      return {
+        id: constraint.id,
+        kind: constraint.kind,
+        point: serializePointTarget(constraint.point),
+        spline: constraint.spline,
+        at: constraint.at,
       };
     case "collinear":
       return {
@@ -1220,8 +1429,10 @@ function isSpline(entity: SketchEntity): entity is SplineEntity {
 
 /**
  * Entity kinds `pointOnEntity` accepts: line (infinite line), circle, arc
- * (as its full circle), ellipse/ellipticalArc (the implicit ellipse), and
- * spline (frozen-parameter projection).
+ * (as their full circle), ellipse/ellipticalArc (the implicit ellipse),
+ * spline (frozen-parameter projection), polygon (the boundary perimeter),
+ * and a STRAIGHT slot (the stadium boundary). The arc3 slot variant stays
+ * outside the subset until the straight-slot row has fixture coverage.
  */
 function pointOnEntityKindProblem(entity: SketchEntity): string | null {
   switch (entity.kind) {
@@ -1231,14 +1442,16 @@ function pointOnEntityKindProblem(entity: SketchEntity): string | null {
     case "ellipse":
     case "ellipticalArc":
     case "spline":
+    case "polygon":
       return null;
+    case "slot":
+      return entity.variant === "straight"
+        ? null
+        : "an arc3 slot's boundary arcs are not yet a pointOnEntity operand; constrain the straight variant";
     case "point":
       return "a point has no curve to lie on (use coincident)";
     case "rectangle":
       return "a rectangle has no curve of its own; constrain its edge lines";
-    case "polygon":
-    case "slot":
-      return `a ${entity.kind} has no single curve operand yet; constrain its resolved boundary via the profile domain`;
   }
 }
 
@@ -1277,20 +1490,20 @@ function targetKindProblem(
  * structured diagnostics instead of throwing.
  */
 /**
- * Constraint kinds outside the pinned spline scope (module docs): a spline
- * operand on one of these declines with `sketch/constraint-unsupported`
- * instead of the malformed-reference failure — the constraint is
- * well-formed; the solver surface does not reach splines for it.
+ * Constraint kinds still outside the spline solving scope (module docs): a
+ * spline operand on one of these declines with
+ * `sketch/constraint-unsupported` instead of the malformed-reference
+ * failure — the constraint is well-formed; the solver surface does not
+ * reach splines for it. (Phase 37 moved tangent, equal, parallel,
+ * perpendicular, and angle into the supported pairs; these kinds have no
+ * spline meaning at all — a spline has no radius parameter, `collinear`
+ * reduces to the end-tangent row `pointOnTangent` carries, and
+ * horizontal/vertical address single lines.)
  */
 const SPLINE_SCOPE_UNSUPPORTED: ReadonlySet<SketchConstraintKind> =
   new Set<SketchConstraintKind>([
-    "parallel",
-    "perpendicular",
-    "angle",
     "radius",
     "diameter",
-    "equal",
-    "tangent",
     "collinear",
     "horizontal",
     "vertical",
@@ -1336,6 +1549,8 @@ function constraintEntityOperands(
       return [constraint.first, constraint.second];
     case "pointOnEntity":
       return [constraint.point.entity, constraint.entity];
+    case "pointOnTangent":
+      return [constraint.point.entity, constraint.spline];
   }
 }
 
@@ -1357,7 +1572,7 @@ export function validateConstraintReferences(
       return {
         severity: "error",
         code: SKETCH_DIAGNOSTIC_CODES.constraintUnsupported,
-        message: `Constraint ${constraint.id} (${constraint.kind}) references spline ${splineOperand}; spline solving is pinned to endpoint point-targets and point-on-spline, and ${constraint.kind} on a spline operand is outside that subset.`,
+        message: `Constraint ${constraint.id} (${constraint.kind}) references spline ${splineOperand}; spline solving covers endpoint point-targets, point-on-spline, line tangency, end-tangent direction constraints, and endpoint-chord equality, and ${constraint.kind} on a spline operand is outside that subset.`,
         location: { primary: constraint.id, related: [splineOperand] },
       };
     }
@@ -1387,6 +1602,30 @@ export function validateConstraintReferences(
       ? null
       : `${name} must reference a circle, arc, polygon, or slot, found ${entity.kind}`;
   };
+  /**
+   * The direction constraints' pair rule: two lines, or a line and a
+   * spline's end tangent. Two splines have no direction pair — a spline's
+   * tangent sweeps all directions along the curve, so an anywhere
+   * direction-only constraint on two splines is vacuous.
+   */
+  const directionPairProblem = (
+    first: SketchEntityId,
+    second: SketchEntityId,
+  ): string | null => {
+    const a = find(first);
+    const b = find(second);
+    if (a === undefined) return `first references missing entity ${first}`;
+    if (b === undefined) return `second references missing entity ${second}`;
+    const pairOk =
+      (a.kind === "line" && b.kind === "line") ||
+      (a.kind === "line" && b.kind === "spline") ||
+      (a.kind === "spline" && b.kind === "line");
+    if (pairOk) return null;
+    if (a.kind === "spline" && b.kind === "spline") {
+      return `operands must be two lines, or a line and a spline's end tangent; two splines have no direction pair (a spline's tangent sweeps all directions along the curve, so an anywhere direction-only constraint on two splines is vacuous), found ${a.kind} and ${b.kind}`;
+    }
+    return `operands must be two lines, or a line and a spline's end tangent, found ${a.kind} and ${b.kind}`;
+  };
   let problem: string | null = null;
   switch (constraint.kind) {
     case "coincident":
@@ -1398,17 +1637,13 @@ export function validateConstraintReferences(
       break;
     case "parallel":
     case "perpendicular":
-      problem =
-        requireLine("first", constraint.first) ??
-        requireLine("second", constraint.second);
+      problem = directionPairProblem(constraint.first, constraint.second);
       break;
     case "distance":
       problem = checkTarget(constraint.first) ?? checkTarget(constraint.second);
       break;
     case "angle":
-      problem =
-        requireLine("first", constraint.first) ??
-        requireLine("second", constraint.second);
+      problem = directionPairProblem(constraint.first, constraint.second);
       break;
     case "radius":
     case "diameter":
@@ -1425,7 +1660,10 @@ export function validateConstraintReferences(
       }
       if (isLine(first) && isLine(second)) break;
       if (isCircular(first) && isCircular(second)) break;
-      problem = `equal must reference two lines (equal lengths) or two circles/arcs (equal radii), found ${first.kind} and ${second.kind}`;
+      const lengthOperand = (entity: SketchEntity): boolean =>
+        entity.kind === "line" || entity.kind === "spline";
+      if (lengthOperand(first) && lengthOperand(second)) break;
+      problem = `equal must reference two lines (equal lengths), two circles/arcs (equal radii), or lines and splines (a spline counts its endpoint chord), found ${first.kind} and ${second.kind}`;
       break;
     }
     case "tangent": {
@@ -1440,10 +1678,13 @@ export function validateConstraintReferences(
       const pairsOk =
         (isLine(first) && isCircular(second)) ||
         (isCircular(first) && isLine(second)) ||
-        (isCircular(first) && isCircular(second));
+        (isCircular(first) && isCircular(second)) ||
+        (isLine(first) && isSpline(second)) ||
+        (isSpline(first) && isLine(second)) ||
+        (isSpline(first) && isSpline(second));
       problem = pairsOk
         ? null
-        : `tangent must reference a line and a circle/arc, or two circles/arcs, found ${first.kind} and ${second.kind}`;
+        : `tangent must reference a line and a circle/arc, two circles/arcs, a line and a spline (anywhere tangency), or two splines (a G1 joint), found ${first.kind} and ${second.kind}`;
       break;
     }
     case "midpoint":
@@ -1467,6 +1708,18 @@ export function validateConstraintReferences(
           problem = `entity references missing entity ${constraint.entity}`;
         } else {
           problem = pointOnEntityKindProblem(entity);
+        }
+      }
+      break;
+    }
+    case "pointOnTangent": {
+      problem = checkTarget(constraint.point);
+      if (problem === null) {
+        const spline = find(constraint.spline);
+        if (spline === undefined) {
+          problem = `spline references missing entity ${constraint.spline}`;
+        } else if (!isSpline(spline)) {
+          problem = `spline must reference a spline, found ${spline.kind}`;
         }
       }
       break;

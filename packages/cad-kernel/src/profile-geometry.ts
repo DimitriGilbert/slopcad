@@ -30,6 +30,8 @@ import {
   type SweepPathSegmentInput,
 } from "./contract";
 import {
+  certifiedCubicExtremes,
+  splineBezierChain,
   splineEndPoint,
   splinePointsProblem,
   splineStartPoint,
@@ -532,19 +534,28 @@ function segmentSignedExtremes(
     return { min, max };
   }
   if (segment.kind === "spline") {
-    // Deflection-banded: vertices sit ON the true curve, so the sampled
-    // extremes never exceed the true ones and can miss only a crossing
-    // confined strictly between adjacent stations within the deflection —
-    // the same honesty the tessellated mesh kernels carry.
+    // CERTIFIED (Phase 37): the signed distance is affine in the point, so
+    // its restriction to one Bézier segment is a scalar cubic with EXACT
+    // control values g_j = s(b_j) — no approximation. The extremes come
+    // from certified cubic clipping (`certifiedCubicExtremes`): [min, max]
+    // always contains the true extremes, the generic case resolves exactly
+    // (monotone hull or derivative-quadratic roots), and the conservative
+    // leaves err toward reporting a crossing — never a silent far-side
+    // clip. This replaces the tessellation sampling, which could miss a
+    // crossing confined strictly between adjacent stations within the
+    // deflection (§8.1's constructible false negative).
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
-    for (const point of tessellateSplineSegment(
-      segment.flavor,
-      segment.points,
-    )) {
-      const value = axisSignedDistance(frame, point.x, point.y);
-      min = Math.min(min, value);
-      max = Math.max(max, value);
+    for (const bezier of splineBezierChain(segment.flavor, segment.points)) {
+      const g = [
+        axisSignedDistance(frame, bezier.b0.x, bezier.b0.y),
+        axisSignedDistance(frame, bezier.b1.x, bezier.b1.y),
+        axisSignedDistance(frame, bezier.b2.x, bezier.b2.y),
+        axisSignedDistance(frame, bezier.b3.x, bezier.b3.y),
+      ] as const;
+      const certified = certifiedCubicExtremes(g[0], g[1], g[2], g[3]);
+      min = Math.min(min, certified.lo);
+      max = Math.max(max, certified.hi);
     }
     return { min, max };
   }
