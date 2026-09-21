@@ -1,0 +1,877 @@
+{
+  "formatVersion": 3,
+  "metadata": {
+    "name": "helix-thread",
+    "unitSystem": "metric"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_workbench_helix_thread",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_rod_depth",
+          "name": "rodDepth",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 6
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_helix_radius",
+          "name": "helixRadius",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 10
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_helix_pitch",
+          "name": "helixPitch",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 4
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_helix_turns",
+          "name": "helixTurns",
+          "value": {
+            "dimension": "dimensionless",
+            "unit": "1",
+            "value": 3
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_helix_handedness",
+          "name": "helixHandedness",
+          "value": {
+            "dimension": "dimensionless",
+            "unit": "1",
+            "value": 1
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_helix_start",
+          "name": "helixStartAngle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_helix_taper",
+          "name": "helixTaper",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_thread_major",
+          "name": "threadMajor",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 6
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_thread_pitch",
+          "name": "threadPitch",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 1
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_thread_length",
+          "name": "threadLength",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 8
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_thread_mode",
+          "name": "threadMode",
+          "value": {
+            "dimension": "dimensionless",
+            "unit": "1",
+            "value": 1
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_thread_handedness",
+          "name": "threadHandedness",
+          "value": {
+            "dimension": "dimensionless",
+            "unit": "1",
+            "value": 1
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_thread_axis",
+          "name": "threadAxis",
+          "value": {
+            "dimension": "dimensionless",
+            "unit": "1",
+            "value": 3
+          },
+          "expression": null,
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_rod",
+        "name": "rod"
+      },
+      {
+        "id": "body_spring",
+        "name": "spring"
+      },
+      {
+        "id": "body_threaded",
+        "name": "threaded"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_rod",
+        "kind": "extrude",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_rod_circle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_rod_depth"
+          }
+        ],
+        "outputs": [
+          "body_rod"
+        ]
+      },
+      {
+        "id": "feat_helix",
+        "kind": "helix",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_meridian"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_helix_radius"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_helix_pitch"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_helix_turns"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_helix_handedness"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_helix_start"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_helix_taper"
+          },
+          {
+            "kind": "datum",
+            "id": "dtm_helix_axis"
+          }
+        ],
+        "outputs": [
+          "body_spring"
+        ]
+      },
+      {
+        "id": "feat_thread",
+        "kind": "thread",
+        "inputs": [
+          {
+            "kind": "feature",
+            "id": "feat_rod"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_thread_major"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_thread_pitch"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_thread_length"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_thread_mode"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_thread_handedness"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_thread_axis"
+          }
+        ],
+        "outputs": [
+          "body_threaded"
+        ]
+      }
+    ],
+    "sketches": [
+      {
+        "id": "skd_meridian",
+        "name": "meridian profile",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "normal": {
+              "x": 0,
+              "y": 0,
+              "z": 1
+            },
+            "xAxis": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_mer_a",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": -0.75,
+              "x2": 2,
+              "y2": -0.75
+            },
+            {
+              "id": "skent_mer_b",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 2,
+              "y1": -0.75,
+              "x2": 2,
+              "y2": 0.75
+            },
+            {
+              "id": "skent_mer_c",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 2,
+              "y1": 0.75,
+              "x2": 0,
+              "y2": 0.75
+            },
+            {
+              "id": "skent_mer_d",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 0.75,
+              "x2": 0,
+              "y2": -0.75
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_rod_circle",
+        "name": "rod circle",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "normal": {
+              "x": 0,
+              "y": 0,
+              "z": 1
+            },
+            "xAxis": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_rod",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": 0,
+              "radius": 3
+            }
+          ],
+          "constraints": []
+        }
+      }
+    ],
+    "datums": [
+      {
+        "id": "dtm_helix_axis",
+        "name": "helix axis",
+        "datum": {
+          "formatVersion": 1,
+          "datumType": "axis",
+          "definition": "twoPoints",
+          "first": [
+            0,
+            0,
+            0
+          ],
+          "second": [
+            0,
+            0,
+            1
+          ]
+        }
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_workbench_helix_thread",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": [
+          {
+            "id": "param_rod_depth",
+            "name": "rodDepth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 6
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_helix_radius",
+            "name": "helixRadius",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 10
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_helix_pitch",
+            "name": "helixPitch",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 4
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_helix_turns",
+            "name": "helixTurns",
+            "value": {
+              "dimension": "dimensionless",
+              "unit": "1",
+              "value": 3
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_helix_handedness",
+            "name": "helixHandedness",
+            "value": {
+              "dimension": "dimensionless",
+              "unit": "1",
+              "value": 1
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_helix_start",
+            "name": "helixStartAngle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_helix_taper",
+            "name": "helixTaper",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 0
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_thread_major",
+            "name": "threadMajor",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 6
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_thread_pitch",
+            "name": "threadPitch",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 1
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_thread_length",
+            "name": "threadLength",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 6
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_thread_mode",
+            "name": "threadMode",
+            "value": {
+              "dimension": "dimensionless",
+              "unit": "1",
+              "value": 1
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_thread_handedness",
+            "name": "threadHandedness",
+            "value": {
+              "dimension": "dimensionless",
+              "unit": "1",
+              "value": 1
+            },
+            "expression": null,
+            "metadata": {}
+          },
+          {
+            "id": "param_thread_axis",
+            "name": "threadAxis",
+            "value": {
+              "dimension": "dimensionless",
+              "unit": "1",
+              "value": 3
+            },
+            "expression": null,
+            "metadata": {}
+          }
+        ]
+      },
+      "bodies": [],
+      "features": [],
+      "sketches": [
+        {
+          "id": "skd_meridian",
+          "name": "meridian profile",
+          "sketch": {
+            "formatVersion": 2,
+            "workplane": {
+              "origin": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "normal": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+              },
+              "xAxis": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "entities": [
+              {
+                "id": "skent_mer_a",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": -0.75,
+                "x2": 2,
+                "y2": -0.75
+              },
+              {
+                "id": "skent_mer_b",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 2,
+                "y1": -0.75,
+                "x2": 2,
+                "y2": 0.75
+              },
+              {
+                "id": "skent_mer_c",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 2,
+                "y1": 0.75,
+                "x2": 0,
+                "y2": 0.75
+              },
+              {
+                "id": "skent_mer_d",
+                "kind": "line",
+                "construction": false,
+                "fixed": false,
+                "x1": 0,
+                "y1": 0.75,
+                "x2": 0,
+                "y2": -0.75
+              }
+            ],
+            "constraints": []
+          }
+        },
+        {
+          "id": "skd_rod_circle",
+          "name": "rod circle",
+          "sketch": {
+            "formatVersion": 2,
+            "workplane": {
+              "origin": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+              },
+              "normal": {
+                "x": 0,
+                "y": 0,
+                "z": 1
+              },
+              "xAxis": {
+                "x": 1,
+                "y": 0,
+                "z": 0
+              }
+            },
+            "entities": [
+              {
+                "id": "skent_rod",
+                "kind": "circle",
+                "construction": false,
+                "fixed": false,
+                "cx": 0,
+                "cy": 0,
+                "radius": 3
+              }
+            ],
+            "constraints": []
+          }
+        }
+      ],
+      "datums": [
+        {
+          "id": "dtm_helix_axis",
+          "name": "helix axis",
+          "datum": {
+            "formatVersion": 1,
+            "datumType": "axis",
+            "definition": "twoPoints",
+            "first": [
+              0,
+              0,
+              0
+            ],
+            "second": [
+              0,
+              0,
+              1
+            ]
+          }
+        }
+      ]
+    },
+    "transactions": [
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_rod",
+            "name": "rod"
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_rod",
+            "kind": "extrude",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_rod_circle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_rod_depth"
+              }
+            ],
+            "outputs": [
+              "body_rod"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_spring",
+            "name": "spring"
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_helix",
+            "kind": "helix",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_meridian"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_helix_radius"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_helix_pitch"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_helix_turns"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_helix_handedness"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_helix_start"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_helix_taper"
+              },
+              {
+                "kind": "datum",
+                "id": "dtm_helix_axis"
+              }
+            ],
+            "outputs": [
+              "body_spring"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_threaded",
+            "name": "threaded"
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_thread",
+            "kind": "thread",
+            "inputs": [
+              {
+                "kind": "feature",
+                "id": "feat_rod"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_thread_major"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_thread_pitch"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_thread_length"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_thread_mode"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_thread_handedness"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_thread_axis"
+              }
+            ],
+            "outputs": [
+              "body_threaded"
+            ]
+          }
+        ]
+      },
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "parameter.set",
+            "id": "param_thread_length",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 8
+            }
+          }
+        ]
+      }
+    ],
+    "cursor": 7
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": [
+      {
+        "id": "feat_rod",
+        "state": "stale",
+        "diagnostics": []
+      },
+      {
+        "id": "feat_helix",
+        "state": "stale",
+        "diagnostics": []
+      },
+      {
+        "id": "feat_thread",
+        "state": "stale",
+        "diagnostics": []
+      }
+    ]
+  }
+}

@@ -30,6 +30,8 @@ import type {
   SweepSceneRequest,
   PadSceneRequest,
 } from "../worker-fixture/plate-scene-extra";
+import type { HelixSceneRequest } from "../worker-fixture/helix-scene";
+import type { ThreadSceneRequest } from "../worker-fixture/thread-scene";
 
 import {
   computePlateRenderState,
@@ -42,6 +44,8 @@ import { computeSweepScene } from "../worker-fixture/sweep-scene";
 import { computeLoftScene } from "../worker-fixture/loft-scene";
 import { computeHoleScene } from "../worker-fixture/hole-scene";
 import { computePadScene } from "../worker-fixture/pad-scene";
+import { computeHelixScene } from "../worker-fixture/helix-scene";
+import { computeThreadScene } from "../worker-fixture/thread-scene";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
  * authored for exactly this size (and the scene runs at dpr 1), which is
@@ -83,6 +87,23 @@ export interface RenderFixtureSession {
    * structured `kernel/unsupported-operation` lands on the error surface.
    */
   dispatchLoft(request: LoftSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 40 helix computation: the REAL kernel executes
+   * `solid.helixSweep` on the sketch-resolved meridian loop along the
+   * analytic spine in the worker, and the settled solid's measurement +
+   * projection become the visible scene. On a kernel without the helix
+   * capability the structured `kernel/unsupported-operation` lands on the
+   * error surface.
+   */
+  dispatchHelix(request: HelixSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 40 thread computation: the REAL kernel composes
+   * the base extrusion, the planned ISO tool's `solid.helixSweep`, and
+   * the subtract in the worker, and the settled solid's measurement +
+   * projection become the visible scene. The cosmetic mode resolves to
+   * the base alone.
+   */
+  dispatchThread(request: ThreadSceneRequest, bodyId: string): void;
   /**
    * Dispatches the Phase 26.10 hole computation: the REAL kernel composes
    * the base extrusion, one planned tool per hole, and the subtract in the
@@ -224,7 +245,14 @@ export type FixtureSessionBackend = "manifold" | "occt";
 
 /** The feature-backed scene kinds a dispatch can carry a verdict for. */
 export type FeatureSceneKind =
-  "extrude" | "revolve" | "sweep" | "loft" | "hole" | "pad";
+  | "extrude"
+  | "revolve"
+  | "sweep"
+  | "loft"
+  | "helix"
+  | "thread"
+  | "hole"
+  | "pad";
 
 /**
  * One feature-backed scene dispatch's worker verdict — the seam a host uses
@@ -531,6 +559,35 @@ export function bootRenderFixtureSession(
         .then(
           settleWithVerdict("loft", bodyId),
           failWithVerdict("loft", bodyId),
+        );
+    },
+    dispatchHelix(request: HelixSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computeHelixScene(context, request), bodyId),
+        )
+        .then(
+          settleWithVerdict("helix", bodyId),
+          failWithVerdict("helix", bodyId),
+        );
+    },
+    dispatchThread(request: ThreadSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computeThreadScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(
+          settleWithVerdict("thread", bodyId),
+          failWithVerdict("thread", bodyId),
         );
     },
     dispose(): void {

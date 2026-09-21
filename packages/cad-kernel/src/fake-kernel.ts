@@ -76,6 +76,7 @@ import {
   type CylinderInput,
   type FilletInput,
   type GeometryKernel,
+  type HelixSweepInput,
   type KernelBounds,
   type KernelError,
   type KernelErrorCode,
@@ -93,6 +94,17 @@ import {
   type TransformInput,
 } from "./contract";
 import { createSolidTag } from "./opaque";
+import {
+  type CanonicalHelixSpine,
+  helixProfilePolygon,
+  helixScrewContains,
+  helixScrewVolume,
+  helixStations,
+  helixSweepProblem,
+  helixTransportPoint,
+  helixTurnsOverlap,
+  helixUntaperedLocalBounds,
+} from "./helix-geometry";
 import {
   applyMatrix3,
   axisAngleMatrix,
@@ -160,7 +172,13 @@ export const FAKE_KERNEL_TESSELLATION_RINGS = 8;
  * 26.9 mirror — the pointwise reflection model (classify at the
  * reflected query, reflect the interval bounds, delegate the volume,
  * reflect the triangles and swap each winding), exact over EVERY shape
- * the tree can hold, no subset needed.
+ * the tree can hold, no subset needed; and the Phase 40 helix — the
+ * analytic SCREW-SOLID model (exact closed-form volume, exact
+ * inverse-screw membership, exact untapered bounds, a deterministic
+ * station soup at the shared deflection), declining only OVERLAPPING
+ * turns with the structured `kernel/helix-turn-overlap` because the
+ * multiplicity integral would overcount there — the thread tool's
+ * profile-height < pitch keeps every real ISO thread inside the subset.
  */
 export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -173,6 +191,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   persistentTopology: false,
   sweep: true,
   loft: true,
+  helix: true,
   fillet: true,
   chamfer: true,
   shell: true,
@@ -323,6 +342,22 @@ type FakeShape =
       readonly polygons: readonly (readonly ProfilePoint2[])[];
       /** The strictly increasing station z values (mm), in list order. */
       readonly stations: readonly number[];
+      /** World placement: rotation (row-major) applied first, then translation. */
+      readonly rotation: readonly (readonly [number, number, number])[];
+      readonly translation: Vec3;
+    }
+  | {
+      readonly kind: "helix";
+      /**
+       * The profile's CCW chord polygon in MERIDIAN coordinates —
+       * `(x, y) = (radial offset, axial offset)` from the spine's start
+       * point (mm). The screw-solid model addresses the profile through
+       * this one polygon everywhere: volume, membership, bounds, and the
+       * station soup.
+       */
+      readonly polygon: readonly ProfilePoint2[];
+      /** The canonical analytic spine (see ./helix-geometry). */
+      readonly spine: CanonicalHelixSpine;
       /** World placement: rotation (row-major) applied first, then translation. */
       readonly rotation: readonly (readonly [number, number, number])[];
       readonly translation: Vec3;
@@ -590,6 +625,8 @@ function shapeBounds(shape: FakeShape): KernelBounds {
       return sweepBounds(shape);
     case "loft":
       return loftBounds(shape);
+    case "helix":
+      return helixBounds(shape);
   }
 }
 
@@ -703,6 +740,9 @@ type SweepNode = Extract<FakeShape, { kind: "sweep" }>;
 
 /** The loft leaf node type. */
 type LoftNode = Extract<FakeShape, { kind: "loft" }>;
+
+/** The helix leaf node type (Phase 40's screw solid). */
+type HelixNode = Extract<FakeShape, { kind: "helix" }>;
 
 /** The local-frame position of a profile vertex (u, v) at a station. */
 function sweepStationVertex(station: SweepStation, u: number, v: number): Vec3 {
@@ -952,6 +992,8 @@ function contains(shape: FakeShape, x: number, y: number, z: number): boolean {
       return sweepContains(shape, x, y, z);
     case "loft":
       return loftContains(shape, x, y, z);
+    case "helix":
+      return helixContains(shape, x, y, z);
   }
 }
 
@@ -2025,6 +2067,12 @@ function analyticVolume(shape: FakeShape): number | undefined {
       // morph's cross-section area is quadratic in the span parameter, so
       // each span integrates exactly — no quadrature anywhere.
       return loftAnalyticVolume(shape.polygons, shape.stations);
+    case "helix":
+      // The screw-solid closed form the contract documents: the transport's
+      // Jacobian is (R(t)+u)·|θ'|, so V = τ·A·(R̄ + ū) — exact over the
+      // chord polygon, no quadrature anywhere (the node's construction
+      // declined overlapping turns, where the form would overcount).
+      return helixScrewVolume(shape.polygon, shape.spine);
     case "fillet":
       // The analytic corner-fillet decomposition the contract documents:
       // the box minus each edge's validated-disjoint prism quadrant — no
@@ -2232,6 +2280,7 @@ function primitiveTriangles(
     | RevolutionNode
     | SweepNode
     | LoftNode
+    | HelixNode
     | FilletNode
     | ChamferNode
     | ShellNode,
@@ -2257,6 +2306,8 @@ function primitiveTriangles(
       return sweepTriangles(shape);
     case "loft":
       return loftTriangles(shape);
+    case "helix":
+      return helixTriangles(shape);
     case "fillet":
       return filletTriangles(shape);
     case "chamfer":
@@ -2690,6 +2741,176 @@ function loftTriangles(shape: LoftNode): readonly Triangle[] {
 }
 
 /**
+ * The placed helix's bounds: the LOCAL screw-solid box (untapered: the
+ * exact angular-support extremes of the radius band — see
+ * `helixUntaperedLocalBounds`; tapered: the hull of the station
+ * polygons' vertices at the shared station resolution, the soup's own
+ * deflection) hulled through the placement's eight box corners — tight
+ * whenever the placement is axis-aligned (the thread features' world-axis
+ * and datum-axis placements), a conservative container for oblique ones,
+ * the revolution-bounds discipline.
+ */
+function helixBounds(shape: HelixNode): KernelBounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  const hullLocal = (local: readonly [number, number, number]): void => {
+    const world = applyMatrix3(shape.rotation, local);
+    const x = world[0] + at(shape.translation, 0);
+    const y = world[1] + at(shape.translation, 1);
+    const z = world[2] + at(shape.translation, 2);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    minZ = Math.min(minZ, z);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+    maxZ = Math.max(maxZ, z);
+  };
+  if (shape.spine.taperMm === 0) {
+    const box = helixUntaperedLocalBounds(shape.polygon, shape.spine);
+    for (const x of [box.min[0], box.max[0]]) {
+      for (const y of [box.min[1], box.max[1]]) {
+        for (const z of [box.min[2], box.max[2]]) {
+          hullLocal([x, y, z]);
+        }
+      }
+    }
+    return boundsOf([minX, minY, minZ], [maxX, maxY, maxZ]);
+  }
+  for (const t of helixStations(shape.spine)) {
+    for (const vertex of shape.polygon) {
+      hullLocal(helixTransportPoint(shape.spine, vertex.x, vertex.y, t));
+    }
+  }
+  return boundsOf([minX, minY, minZ], [maxX, maxY, maxZ]);
+}
+
+/**
+ * Exact point-in-helix classification: the query is un-placed into the
+ * local frame, read in cylindrical coordinates, and the screw-solid
+ * branch test checks every 2π branch the swept angle range covers (see
+ * `helixScrewContains`). The linear slack mirrors the sweep classification.
+ */
+function helixContains(
+  shape: HelixNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const local = applyMatrix3(transpose3(shape.rotation), [
+    x - at(shape.translation, 0),
+    y - at(shape.translation, 1),
+    z - at(shape.translation, 2),
+  ]);
+  const lx = local[0] ?? 0;
+  const ly = local[1] ?? 0;
+  const lz = local[2] ?? 0;
+  const radius = Math.hypot(lx, ly);
+  const angle = Math.atan2(ly, lx);
+  return helixScrewContains(
+    shape.polygon,
+    shape.spine,
+    radius,
+    angle,
+    lz,
+    SWEEP_LINEAR_EPSILON_MM,
+  );
+}
+
+/**
+ * The placed helix's canonical mesh: the exact transported profile polygon
+ * at every station of the shared station rule (one per
+ * `PROFILE_STATION_ANGLE_RAD` of swept angle), one wall quad per
+ * consecutive-station edge pair (the polygon is CCW and the transport is a
+ * rigid motion per station, so the direct prism winding is outward),
+ * fanned caps on the FIRST and LAST stations, degenerate triangles
+ * skipped. Honesty: the walls are the RULED approximation of the screw
+ * motion between stations — the same class of chord band every curved
+ * segment carries — while `volume`/`bounds`/`contains` measure the exact
+ * screw solid; deterministic by the fixed station rule, which is what the
+ * byte-determinism pins ride on.
+ */
+function helixTriangles(shape: HelixNode): readonly Triangle[] {
+  const triangles: Triangle[] = [];
+  const stations = helixStations(shape.spine);
+  const world = (vertex: ProfilePoint2, t: number): Vec3 => {
+    const local = helixTransportPoint(shape.spine, vertex.x, vertex.y, t);
+    const rotated = applyMatrix3(shape.rotation, [
+      local[0],
+      local[1],
+      local[2],
+    ]);
+    return [
+      rotated[0] + at(shape.translation, 0),
+      rotated[1] + at(shape.translation, 1),
+      rotated[2] + at(shape.translation, 2),
+    ];
+  };
+  const distinct = (triangle: Triangle): boolean => {
+    for (let i = 0; i < 3; i += 1) {
+      const p = triangle[i];
+      const q = triangle[(i + 1) % 3];
+      if (
+        p === undefined ||
+        q === undefined ||
+        (at(p, 0) === at(q, 0) &&
+          at(p, 1) === at(q, 1) &&
+          at(p, 2) === at(q, 2))
+      ) {
+        return false;
+      }
+    }
+    return true;
+  };
+  for (let s = 0; s + 1 < stations.length; s += 1) {
+    const here = stations[s];
+    const next = stations[s + 1];
+    if (here === undefined || next === undefined) continue;
+    const count = shape.polygon.length;
+    for (let i = 0; i < count; i += 1) {
+      const a = shape.polygon[i];
+      const b = shape.polygon[(i + 1) % count];
+      if (a === undefined || b === undefined) continue;
+      const aHere = world(a, here);
+      const bHere = world(b, here);
+      const bTop = world(b, next);
+      const aTop = world(a, next);
+      const quad: readonly Triangle[] = [
+        [aHere, bHere, bTop],
+        [aHere, bTop, aTop],
+      ];
+      for (const triangle of quad) {
+        if (distinct(triangle)) triangles.push(triangle);
+      }
+    }
+  }
+  const first = stations[0];
+  const last = stations[stations.length - 1];
+  if (first !== undefined && last !== undefined) {
+    for (const [t, flip] of [
+      [first, true],
+      [last, false],
+    ] as const) {
+      const count = shape.polygon.length;
+      for (let i = 1; i < count - 1; i += 1) {
+        const a = shape.polygon[i];
+        const b = shape.polygon[i + 1];
+        if (a === undefined || b === undefined) continue;
+        const apex = world(shape.polygon[0] ?? a, t);
+        const fan: Triangle = flip
+          ? [apex, world(b, t), world(a, t)]
+          : [apex, world(a, t), world(b, t)];
+        if (distinct(fan)) triangles.push(fan);
+      }
+    }
+  }
+  return triangles;
+}
+
+/**
  * One affine step on a leaf's path from its primitive mesh to world space:
  * a translation (the `translate` node's) or a reflection (the Phase 26.9
  * `mirror` node's). Translations alone commute, so they once folded into a
@@ -2714,6 +2935,7 @@ interface Leaf {
     | RevolutionNode
     | SweepNode
     | LoftNode
+    | HelixNode
     | FilletNode
     | ChamferNode
     | ShellNode;
@@ -2737,6 +2959,7 @@ function collectLeaves(
     case "revolution":
     case "sweep":
     case "loft":
+    case "helix":
     case "fillet":
     case "chamfer":
     case "shell":
@@ -3928,6 +4151,114 @@ export function createFakeKernel(): GeometryKernel {
           kernelError(
             KERNEL_ERROR_CODES.invalidProfile,
             `sweep rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    helixSweep(input: HelixSweepInput): KernelResult<KernelSolid> {
+      // The same no-throw discipline: placement validation, the shared
+      // Phase 40 battery (spine degeneracy, profile validity, axis
+      // crossing), then the model's documented overlap subset — before the
+      // exact screw-solid node is built.
+      try {
+        const angle = valueIn(input.placement.rotation.angle, "rad");
+        if (!Number.isFinite(angle)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "helixSweep rejected the placement rotation: its angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const rotationAxis = input.placement.rotation.axis;
+        const axisSquared =
+          rotationAxis[0] * rotationAxis[0] +
+          rotationAxis[1] * rotationAxis[1] +
+          rotationAxis[2] * rotationAxis[2];
+        if (
+          !Number.isFinite(axisSquared) ||
+          axisSquared === 0 ||
+          !Number.isFinite(rotationAxis[0]) ||
+          !Number.isFinite(rotationAxis[1]) ||
+          !Number.isFinite(rotationAxis[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `helixSweep rejected a rotation about [${String(rotationAxis[0])}, ${String(rotationAxis[1])}, ${String(rotationAxis[2])}]: the axis must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const translation: Vec3 = [
+          valueIn(input.placement.translation.x, "mm"),
+          valueIn(input.placement.translation.y, "mm"),
+          valueIn(input.placement.translation.z, "mm"),
+        ];
+        if (!translation.every((component) => Number.isFinite(component))) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "helixSweep rejected the placement translation: components must be finite lengths.",
+            ),
+          );
+        }
+        const spine: CanonicalHelixSpine = {
+          radiusMm: valueIn(input.spine.radius, "mm"),
+          pitchMm: valueIn(input.spine.pitch, "mm"),
+          turns: input.spine.turns,
+          handedness: input.spine.handedness,
+          startAngleRad: valueIn(input.spine.startAngle, "rad"),
+          taperMm:
+            input.spine.taper === undefined
+              ? 0
+              : valueIn(input.spine.taper, "mm"),
+        };
+        const problem = helixSweepProblem(input.loop, spine);
+        if (problem !== null) {
+          return fail(
+            kernelError(problem.code, `helixSweep ${problem.message}.`),
+          );
+        }
+        const polygon = helixProfilePolygon(input.loop);
+        const area = polygonSignedArea(polygon);
+        if (polygon.length < 3 || !(Math.abs(area) > 1e-9)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "helixSweep rejected the profile loop: it is degenerate (fewer than three distinct boundary vertices or no enclosed area).",
+            ),
+          );
+        }
+        // The model's documented subset: overlapping turns would make the
+        // multiplicity integral overcount the set volume, so the analytic
+        // reference declines them structurally (the fillet/chamfer subset
+        // discipline) — the general helix kernel is the OpenCascade
+        // backend.
+        if (helixTurnsOverlap(input.loop, spine)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.helixTurnOverlap,
+              `helixSweep rejected the input: the profile's axial extent exceeds one pitch over ${String(spine.turns)} turns, so consecutive turns' material overlaps — the analytic screw-solid model would overcount the union. Reduce the profile height or the turn count.`,
+            ),
+          );
+        }
+        const ccw = area > 0 ? polygon : [...polygon].reverse();
+        return ok(
+          tag.wrap({
+            kind: "helix",
+            polygon: ccw,
+            spine,
+            rotation: axisAngleMatrix(rotationAxis, angle),
+            translation,
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidHelix,
+            `helixSweep rejected its input: ${detail}`,
           ),
         );
       }

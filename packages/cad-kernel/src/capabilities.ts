@@ -83,6 +83,17 @@
  *   `transform`, JSCAD's `mat4.isMirroring` vertex reversal, and the fake
  *   kernel's pointwise model), so all four adapters declare `true` and the
  *   flag gates the suite's mirror fixtures uniformly anyway.
+ * - `helix`: the contract's analytic-spine helical sweep (Phase 40) is
+ *   implemented honestly. The pin's discipline again, with a per-kernel
+ *   subset twist: OCCT rules the exact meridian stations and lofts between
+ *   them (the documented ruled band — its pipe builder carries
+ *   section-perpendicular profiles, provably not the meridian solid), the
+ *   fake kernel models the screw solid exactly (closed-form volume,
+ *   inverse-screw membership) and declines OVERLAPPING turns with the
+ *   structured `kernel/helix-turn-overlap` rather than overcounting, and
+ *   Manifold/JSCAD have no helical primitive at all (the plan's ruling) —
+ *   both answer every `helixSweep` call with `kernel/unsupported-operation`.
+ *   The flag gates the contract suite's helix fixtures like its siblings.
  * - `surfaceArea`: the contract's whole-solid surface-area measurement
  *   (Phase 27.4) is implemented honestly — the first MEASUREMENT flag (its
  *   siblings gate producers; `area` measures). Every engine provides its
@@ -110,6 +121,7 @@ export interface KernelCapabilities {
   readonly persistentTopology: boolean;
   readonly sweep: boolean;
   readonly loft: boolean;
+  readonly helix: boolean;
   readonly fillet: boolean;
   readonly chamfer: boolean;
   readonly shell: boolean;

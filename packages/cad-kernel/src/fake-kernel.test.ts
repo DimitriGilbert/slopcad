@@ -61,6 +61,7 @@ describe("fake kernel identity and capabilities", () => {
       tightBooleanBounds: false,
       persistentTopology: false,
       sweep: true,
+      helix: true,
       fillet: true,
       loft: true,
       chamfer: true,

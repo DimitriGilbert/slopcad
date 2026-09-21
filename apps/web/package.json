@@ -22,7 +22,8 @@
     "test:components": "playwright test -c playwright.components.config.ts",
     "test:docs": "playwright test -c playwright.docs.config.ts",
     "test:matrix": "playwright test -c playwright.matrix.config.ts",
-    "write-native-compatibility-fixture": "tsx scripts/write-native-compatibility-fixture.ts"
+    "write-native-compatibility-fixture": "tsx scripts/write-native-compatibility-fixture.ts",
+    "write-native-helix-thread-fixture": "tsx scripts/write-native-helix-thread-fixture.ts"
   },
   "dependencies": {
     "@libsql/client": "catalog:",

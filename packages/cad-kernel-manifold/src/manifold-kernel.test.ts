@@ -103,6 +103,7 @@ describe("manifold kernel identity and capabilities", () => {
       tightBooleanBounds: true,
       persistentTopology: false,
       sweep: false,
+      helix: false,
       loft: false,
       fillet: false,
       chamfer: false,

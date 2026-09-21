@@ -193,3 +193,39 @@ Facts behind the decision [probed, unless cited]:
 - The honest scope boundary: the engine yields MESHES, never OCCT shapes — its wasm does not expose the shape layer. The adapter's payload therefore mirrors cad-io's mesh-import provenance (`origin: "imported-iges"`, a soup with a name), NOT the OCCT-solids discipline of STEP/BREP import; nothing behind it mints a kernel solid or answers a `GeometryKernel` operation, and the /io wiring runs it on the MAIN THREAD like the STL importer rather than through the worker protocol (whose import operations exist to mint session solids).
 - Fixture: the committed `fixtures/cube-10mm.igs` is adopted verbatim from the package's own LGPL-2.1 test suite (`test/testfiles/cube-10x10mm/Cube 10x10.igs`, header self-describes Autodesk Inventor 2019 and `2HMM` units) — no IGES writer exists in either binding, so a real third-party file is the honest fixture; its extents read back exactly 10 mm in the library's default (and this repo's canonical) millimetre unit.
 - New dependency disclosure: `occt-import-js@0.0.23` added to `packages/cad-kernel-occt` only, knip-disclosed in `knip.json`'s `ignoreDependencies` beside `replicad-opencascadejs`.
+
+---
+
+# Addendum — Phase 40 helix probes (the exact spine, the pipe's impossibility, and the ruled-station route)
+
+_Executed 2026-09-19 during Phase 40's implementation (the helical sweep): same discipline as above — the hands-on results ran against the repo's pinned `replicad-opencascadejs@1.1.0`; findings marked **[probed]** were run, **[cited]** are read off the shipped `dist/replicad_multi.d.ts`. The adapter code carrying these decisions is `packages/cad-kernel-occt/src/occt-kernel.ts` (`newHelixSweep`) and the kernel-neutral derivations live in `packages/cad-kernel/src/helix-geometry.ts`._
+
+## 1. The exact analytic spine IS buildable — parametric-space pcurves
+
+A helix is a straight line in the RIGHT parameter space, so the binding's pcurve edge overload builds the exact spine as BREP, no approximation [probed]:
+
+- `Geom_CylindricalSurface` (typings `:21320`) parametrizes its surface by `(u, v) = (angle, height)`. A helix of radius `R`, pitch `P` is exactly `v = (P/2π)·u` — a `Geom2d_Line` (typings `:18573`) in that space.
+- A tapered helix (radius linear in the turn angle) is likewise a `Geom2d_Line` in `Geom_ConicalSurface` (typings `:20930`) space, where the surface parameter along the slant from the apex is linear in the radius, hence linear in the angle.
+- `BRepBuilderAPI_MakeEdge` (typings `:14505`) carries the pcurve overloads `MakeEdge(Geom2d_Curve, Geom_Surface, p1, p2)` — the 2D line restricted to a parameter interval on the 3D surface, kept on the edge as its pcurve [cited: the overload list] — so the spine edge is exact analytic geometry from the first constructor call.
+
+## 2. `MakePipeShell` cannot produce the meridian solid — the trihedron analysis
+
+`BRepOffsetAPI_MakePipeShell` (typings `:12802`) sweeps a section along a spine under a transport TRIHEDRON. The `SetMode` overloads [cited: the class body at `:12802`+] are: Frenet/corrected-Frenet (`SetMode(IsFrenet)`), a fixed frame (`SetMode(gp_Ax2)`), a fixed binormal (`SetMode(gp_Dir)`), a surface-supported normal, and an auxiliary spine. Every one of them carries the section in the plane PERPENDICULAR to the spine tangent — that is what a pipe is.
+
+The thread tooth needs a different transport. The contract's meridian motion is
+
+```
+M_t(p(0) + u·r̂(θ₀) + v·ẑ) = p(t) + u·r̂(θ(t)) + v·ẑ
+```
+
+— the profile rides in the meridian plane `span(r̂, ẑ)`, whose plane normal is `θ̂`. The Frenet section plane's normal is the tangent `t̂ = cos λ·θ̂ + sin λ·ẑ`, with `λ = atan(P/(2πR))` the lead angle. The relation between the two frames is exact and constant: rotating about the shared radial axis `r̂` by `λ` carries `θ̂` onto `t̂`, i.e. carries the meridian plane onto the Frenet section plane. So the Frenet trihedron of an untapered helix IS the meridian frame rotated by the CONSTANT lead angle about `r̂` — equally torsion-free, but coincident only at `λ = 0`, i.e. zero pitch, i.e. not a helix. The pipe over the exact spine is therefore a provably DIFFERENT solid (every section tilted by `λ`), not an approximation of the wanted one — the deficit is geometric, not numerical, and no trihedron mode closes it (a fixed `gp_Ax2`/`gp_Dir` mode can hold the section rigid, but then it is not transported by the screw motion either — the meridian transport is not among the offered modes).
+
+## 3. The honest exactness: ruled meridian stations, `ThruSections`
+
+The route that keeps every station exact and localizes the approximation to the spans BETWEEN stations [probed]:
+
+- Transport the profile exactly to one station per `PROFILE_STATION_ANGLE_RAD` of swept angle (the shared deflection discipline; `helixStations` in `helix-geometry.ts`): each station wire is the meridian polygon carried by `M_t` — exact analytic points, straight edges in the station's meridian plane.
+- `BRepOffsetAPI_ThruSections` (typings `:12989`) in SOLID, RULED mode lofts straight-ruled surfaces between consecutive station wires; `CheckCompatibility(false)` because every station carries the identical edge structure by construction (the engine's own re-origining compatibility pass is exactly what must not run — the loft path's probe).
+- Ruled-span consequence: each span approximates the screw motion by straight chords. The span's swept Jacobian is `(R+u)·sin Δθ` against the true screw's `(R+u)·Δθ` (Δθ the station step), so the whole solid's volume lands at `sin(Δθ)/Δθ` of the exact screw value `V = 2π·turns·A·d̄` — a deficit `1 − sinΔθ/Δθ = Δθ²/6 + O(Δθ⁴)`, the same 63-chord class the mesh kernels' revolves document. The fixtures pin this band (the OCCT unit suite measures it at 1e-4; the convergence — the deficit quarters when the station rule halves — is pinned in the shared geometry suite), so doubling the station density converges quadratically toward the exact screw volume.
+
+The volume band, its convergence check, and the per-kernel coverage matrix (who builds overlapping turns, who declines them) are pinned in `packages/cad-kernel/src/contract.ts` (`HelixSweepInput`'s coverage notes) and measured in `packages/cad-kernel-occt/src/occt-helix.test.ts`.

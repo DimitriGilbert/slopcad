@@ -227,6 +227,7 @@ import type {
 import { fail, ok, valueIn } from "@slopcad/cad-core";
 import type {
   BRepBuilderAPI_MakeEdge,
+  gp_Pnt,
   TopoDS_Edge,
   TopoDS_Shape,
   TopoDS_Wire,
@@ -238,6 +239,7 @@ import {
   type CylinderInput,
   type FilletInput,
   type GeometryKernel,
+  type HelixSweepInput,
   type KernelBounds,
   type KernelCapabilities,
   type KernelError,
@@ -259,6 +261,11 @@ import {
 } from "@slopcad/cad-kernel";
 import {
   axisAngleMatrix,
+  helixProfilePolygon,
+  helixStations,
+  helixSweepProblem,
+  helixTransportPoint,
+  type CanonicalHelixSpine,
   loftSectionsProblem,
   loftStations,
   normalizeRevolveAxis,
@@ -333,6 +340,21 @@ import {
  *   (`BRepOffsetAPI_MakePipeShell`, probed: straight spines prism exactly,
  *   arc spines hit the Pappus values at 0 relative error, closed circular
  *   spines build exact tori) (`sweep`).
+ * - The Phase 40 helical sweep rules the EXACT meridian stations and
+ *   lofts between them (`BRepOffsetAPI_ThruSections` in ruled mode): every
+ *   station wire is the profile transported by the contract's meridian
+ *   motion, exact analytic geometry, and the ruled spans approximate the
+ *   screw motion between stations — the volume sits at the derived chord
+ *   band `sin(Δθ)/Δθ` of the exact screw value (the ruled span's Jacobian
+ *   is `(R+u)·sinΔθ` against the true `(R+u)·Δθ` — the same 63-chord
+ *   class the mesh kernels' revolves document), pinned in the fixtures.
+ *   The exact analytic SPINE is buildable on this binding (a
+ *   `Geom2d_Line` in `Geom_CylindricalSurface`/`Geom_ConicalSurface`
+ *   parametric space through the pcurve `MakeEdge` overload — probed), but
+ *   `MakePipeShell` carries section-perpendicular profiles, and the
+ *   meridian profile is never perpendicular to the tangent, so the pipe
+ *   over the exact spine is a provably different solid — the ruled-station
+ *   route is the honest exactness the contract pins (`helix`).
  * - The Phase 26.4 loft is the exact ruled loft
  *   (`BRepOffsetAPI_ThruSections`, probed: a prism loft equals the prism,
  *   concentric circles give the exact frustum, the twisted square the
@@ -384,6 +406,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   persistentTopology: true,
   sweep: true,
   loft: true,
+  helix: true,
   fillet: true,
   chamfer: true,
   shell: true,
@@ -1245,6 +1268,93 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * The ruled meridian-station helix sweep (Phase 40): the profile's CCW
+   * chord polygon is transported to every station of the shared station
+   * rule (one per `PROFILE_STATION_ANGLE_RAD` of swept angle — the same
+   * deflection discipline every curved segment chords at) by the
+   * contract's meridian motion, each station becomes an exact straight-
+   * edged wire in its meridian plane, and `BRepOffsetAPI_ThruSections` in
+   * ruled mode (the compatibility pass OFF — every station carries the
+   * identical edge structure) lofts between them, `MakeSolid` closing the
+   * shell. The ruled spans approximate the screw motion between stations
+   * — the derived volume band is `sin(Δθ)/Δθ` of the exact screw value
+   * (the span Jacobian is `(R+u)·sinΔθ` against the true `(R+u)·Δθ`), the
+   * 63-chord class the mesh kernels' revolves already document; the
+   * fixtures pin the band. Every intermediate is deleted exactly once on
+   * the success path; failures throw inside the caller's no-throw
+   * boundary.
+   */
+  const newHelixSweep = (
+    polygon: readonly {
+      readonly x: number;
+      readonly y: number;
+    }[],
+    spine: CanonicalHelixSpine,
+  ): TopoDS_Shape => {
+    const mkLoft = new oc.BRepOffsetAPI_ThruSections(true, true, 1e-6);
+    // Identical edge structure at every station: the engine's own
+    // compatibility pass is exactly what must NOT run (it re-origins
+    // wires — the loft path's probe).
+    mkLoft.CheckCompatibility(false);
+    const wires: TopoDS_Wire[] = [];
+    try {
+      for (const t of helixStations(spine)) {
+        const mkWire = new oc.BRepBuilderAPI_MakeWire();
+        const edges: TopoDS_Edge[] = [];
+        const stationPoint = (vertex: {
+          readonly x: number;
+          readonly y: number;
+        }): gp_Pnt => {
+          const local = helixTransportPoint(spine, vertex.x, vertex.y, t);
+          return new oc.gp_Pnt(local[0], local[1], local[2]);
+        };
+        for (let i = 0; i < polygon.length; i += 1) {
+          const from = polygon[i];
+          const to = polygon[(i + 1) % polygon.length];
+          if (from === undefined || to === undefined) {
+            mkWire.delete();
+            for (const edge of edges) edge.delete();
+            throw new Error(
+              "Invariant violation: the transported polygon is dense.",
+            );
+          }
+          const p1 = stationPoint(from);
+          const p2 = stationPoint(to);
+          const mkEdge = new oc.BRepBuilderAPI_MakeEdge(p1, p2);
+          p1.delete();
+          p2.delete();
+          const edge = mkEdge.Edge();
+          mkEdge.delete();
+          mkWire.Add(edge);
+          edges.push(edge);
+        }
+        if (!mkWire.IsDone()) {
+          mkWire.delete();
+          for (const edge of edges) edge.delete();
+          throw new Error("a helix station wire did not close.");
+        }
+        const wire = mkWire.Wire();
+        mkWire.delete();
+        for (const edge of edges) edge.delete();
+        mkLoft.AddWire(wire);
+        wires.push(wire);
+      }
+      mkLoft.Build();
+      for (const wire of wires) wire.delete();
+      wires.length = 0;
+      if (!mkLoft.IsDone()) {
+        mkLoft.delete();
+        throw new Error("the helical ruled loft did not build into a solid.");
+      }
+      return buildShape(mkLoft);
+    } catch (error) {
+      for (const wire of wires) wire.delete();
+      mkLoft.delete();
+      throw error;
+    }
+  };
+
+  /**
    * Folds a pairwise boolean constructor over the operands (the binding has
    * no n-ary builder): `b(b(b(a₀, a₁), a₂), …)`. Operand payloads are never
    * deleted here — only fold intermediates, each as soon as the next step
@@ -1660,6 +1770,106 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         );
         trsf.delete();
         piped.delete();
+        return ok(wrapSolid(placed));
+      });
+    },
+
+    helixSweep(input: HelixSweepInput): KernelResult<KernelSolid> {
+      return run("helixSweep", KERNEL_ERROR_CODES.invalidHelix, () => {
+        // Validation BEFORE any OCCT call (the silent-mirror rule): the
+        // placement, then the shared Phase 40 battery — spine degeneracy,
+        // profile validity in meridian coordinates, axis crossing — so a
+        // degenerate spine never reaches the builders.
+        const angle = angleIn(input.placement.rotation.angle, "helixSweep");
+        if (!angle.ok) return fail(angle.error);
+        const axis = axisIn(input.placement.rotation.axis, "helixSweep");
+        if (!axis.ok) return fail(axis.error);
+        const tx = lengthIn(
+          input.placement.translation.x,
+          "translation.x",
+          "helixSweep",
+        );
+        if (!tx.ok) return fail(tx.error);
+        const ty = lengthIn(
+          input.placement.translation.y,
+          "translation.y",
+          "helixSweep",
+        );
+        if (!ty.ok) return fail(ty.error);
+        const tz = lengthIn(
+          input.placement.translation.z,
+          "translation.z",
+          "helixSweep",
+        );
+        if (!tz.ok) return fail(tz.error);
+        const radius = lengthIn(
+          input.spine.radius,
+          "spine.radius",
+          "helixSweep",
+        );
+        if (!radius.ok) return fail(radius.error);
+        const pitch = lengthIn(input.spine.pitch, "spine.pitch", "helixSweep");
+        if (!pitch.ok) return fail(pitch.error);
+        const startAngle = angleIn(input.spine.startAngle, "spine.startAngle");
+        if (!startAngle.ok) return fail(startAngle.error);
+        const taper =
+          input.spine.taper === undefined
+            ? { ok: true as const, value: 0 }
+            : lengthIn(input.spine.taper, "spine.taper", "helixSweep");
+        if (!taper.ok) return fail(taper.error);
+        const spine: CanonicalHelixSpine = {
+          radiusMm: radius.value,
+          pitchMm: pitch.value,
+          turns: input.spine.turns,
+          handedness: input.spine.handedness,
+          startAngleRad: startAngle.value,
+          taperMm: taper.value,
+        };
+        const problem = helixSweepProblem(input.loop, spine);
+        if (problem !== null) {
+          return fail(
+            kernelError(problem.code, `helixSweep ${problem.message}.`),
+          );
+        }
+        const polygon = helixProfilePolygon(input.loop);
+        if (
+          polygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(polygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "helixSweep rejected the profile loop: it is degenerate (fewer than three distinct vertices or zero enclosed area).",
+            ),
+          );
+        }
+        // CCW-normalize the meridian polygon before transporting: the
+        // compatibility pass is off, so the winding rule is the adapter's
+        // to enforce (the loft path's discipline).
+        const area = polygonSignedArea(polygon);
+        const ccw = area > 0 ? polygon : [...polygon].reverse();
+        const swept = newHelixSweep(ccw, spine);
+        const rot = axisAngleMatrix(axis.value, angle.value);
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          tx.value,
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          ty.value,
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          tz.value,
+        );
+        const placed = buildShape(
+          new oc.BRepBuilderAPI_Transform(swept, trsf, false, true),
+        );
+        trsf.delete();
+        swept.delete();
         return ok(wrapSolid(placed));
       });
     },

@@ -27,9 +27,9 @@ doc = addFeature(doc, {
 The bridge vocabulary is `BRIDGE_FEATURE_KINDS` (`@slopcad/cad-kernel`'s
 `core-bridge`): `box`, `sphere`, `cylinder`, `cone`, `union`,
 `subtract`, `intersect`, `translate`, `extrude`, `revolve`, `sweep`,
-`loft`, `fillet`, `chamfer`, `shell`, `patternLinear`,
-`patternCircular`, `mirror`, `hole` — each kind documents its input
-contract in the `core-bridge.ts` header.
+`loft`, `helix`, `thread`, `fillet`, `chamfer`, `shell`,
+`patternLinear`, `patternCircular`, `mirror`, `hole` — each kind
+documents its input contract in the `core-bridge.ts` header.
 
 ## Sweep and loft (Phase 38)
 
@@ -61,6 +61,62 @@ compatibility, and strictly increasing stations. Kernels without the
 `loft` capability decline at the gate the same way; the workbench
 surfaces both declines as the structured
 `kernel/unsupported-operation` on its error surface.
+
+## Helix and thread (Phase 40)
+
+`helix` carries one sketch input (the MERIDIAN profile — sketch
+`(x, y)` become the helix's `(radial, axial)` offsets from the spine's
+start point, the sweep path-mapping precedent; the sketch's workplane
+does not carry), six parameter inputs in declared order (radius LENGTH,
+pitch LENGTH, turns DIMENSIONLESS, handedness DIMENSIONLESS ±1, start
+angle ANGLE, taper LENGTH — the taper is the total signed radius change),
+and an optional datum axis input (Phase 39 reuse: the spine runs on the
+datum's resolved line; without one, the world +z axis through the
+origin). The kernel contract's `helixSweep` builds the screw solid —
+the meridian transport (rotation about the spine axis by the swept
+angle, plus the start-point translation) is drift-free by construction,
+and the exact volume is `2π·turns·A·d̄` with `A` the profile area and
+`d̄` its centroid radius (plus `taper/2` on tapered spines). Kernels
+without the `helix` capability (Manifold, JSCAD) refuse at the bridge
+gate; the fake kernel's analytic model declines OVERLAPPING turns (a
+profile axial extent beyond one pitch over multiple turns) with the
+structured `kernel/helix-turn-overlap` rather than overcounting.
+
+```ts
+// feature: {
+//   kind: "helix",
+//   inputs: [sketch profile, p radius, p pitch, p turns, p handedness,
+//            p startAngle, p taper, datum axis?],
+//   outputs: [body],
+// }
+```
+
+`thread` carries one feature/body input (the target), five parameter
+inputs in declared order (major diameter LENGTH, pitch LENGTH, thread
+length LENGTH, mode DIMENSIONLESS 1 external / 2 internal / 3 cosmetic,
+handedness DIMENSIONLESS ±1), and the axis — a datum axis input or a
+DIMENSIONLESS world-axis selector (1 = X, 2 = Y, 3 = Z, the hole
+precedent). The real modes compose `planThreadCut`'s shared ISO tool
+(the ISO 68-1 basic profile derived from the pitch: depth `5H/8`,
+widths `7P/8`/`P/4` external and `3P/4`/`P/8` internal, flanks at
+30°) through `helixSweep` + subtract, entering through the target's +
+face along the axis — model the NOMINAL major diameter and thread it,
+the shop convention. The ISO metric table
+(`ISO_METRIC_THREAD_TABLE`: designation, major diameter, pitch, tap
+drill `d − P`) feeds the workbench form's picker; the specification
+persists as plain parameters, so `parameter.set` re-drives the thread.
+A cut that removes nothing refuses (the hole's no-op guard), and the
+COSMETIC mode passes the target through unchanged — annotation data,
+no geometry, every kernel.
+
+```ts
+// feature: {
+//   kind: "thread",
+//   inputs: [feature target, p major, p pitch, p length, p mode,
+//            p handedness, p axis | datum axis],
+//   outputs: [body],
+// }
+```
 
 ## Transactions, undo, redo
 

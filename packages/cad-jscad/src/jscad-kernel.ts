@@ -170,6 +170,7 @@ import {
   type ProfileExtrudeInput,
   type ProfileLoftInput,
   type ProfileRevolveInput,
+  type HelixSweepInput,
   type ProfileSweepInput,
   type ShellInput,
   type SphereInput,
@@ -338,6 +339,7 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   tightBooleanBounds: true,
   persistentTopology: false,
   sweep: true,
+  helix: false,
   loft: true,
   fillet: false,
   chamfer: false,
@@ -1043,6 +1045,21 @@ export function createJscadKernel(): GeometryKernel {
         );
         return ok(wrapSolid(swept));
       });
+    },
+
+    helixSweep(input: HelixSweepInput): KernelResult<KernelSolid> {
+      // The structured decline (Phase 40): the JSCAD engine's operation
+      // set carries no helical sweep primitive, and the plan's ruling is
+      // that helical sweeps are OCCT territory — a station-loft rolled in
+      // the adapter would be adapter-side meshing wearing a kernel name.
+      // Never a silent approximation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "helixSweep is unsupported by the JSCAD kernel: the engine has no helical sweep primitive, and helical sweeps are the BREP kernel's territory (the capability plan's ruling).",
+        ),
+      );
     },
 
     loft(input: ProfileLoftInput): KernelResult<KernelSolid> {

@@ -54,6 +54,7 @@ describe("createJscadKernel", () => {
       persistentTopology: false,
       sweep: true,
       loft: true,
+      helix: false,
       fillet: false,
       chamfer: false,
       shell: false,

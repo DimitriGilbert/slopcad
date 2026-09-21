@@ -31,6 +31,7 @@ Read the flags from the kernels' own constants
 | persistentTopology    | —        | ✓           | —     | —    |
 | sweep                 | —        | ✓           | ✓     | ✓    |
 | loft                  | —        | ✓           | ✓     | ✓    |
+| helix                 | —        | ✓           | —     | ✓    |
 | fillet                | —        | ✓           | —     | ✓    |
 | chamfer               | —        | ✓           | —     | ✓    |
 | shell                 | —        | ✓           | —     | ✓    |
@@ -43,7 +44,13 @@ it.)
 
 Every capability-gated decline answers the structured
 `kernel/unsupported-operation` — Manifold's `sweep`, its `fillet`,
-JSCAD's `shell`, all of them — never a silently wrong approximation.
+JSCAD's `shell`, Manifold's and JSCAD's `helix`, all of them — never a
+silently wrong approximation. The `helix` flag carries one per-kernel
+subset twist: the fake kernel's analytic screw-solid model declines
+OVERLAPPING turns (`kernel/helix-turn-overlap`) rather than
+overcounting, while OCCT builds them — the general helical sweep is
+OCCT territory (its ruled meridian stations sit at the derived
+`sin(Δθ)/Δθ` chord band of the exact screw volume).
 That discipline is the point of the flags: callers and suites branch on
 the declaration upfront instead of discovering limits through failures.
 

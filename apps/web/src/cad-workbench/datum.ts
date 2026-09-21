@@ -74,6 +74,8 @@ export const SESSION_DATUM_ERROR_CODES = {
   datumInvalid: "session/datum-invalid",
   /** The datum is not a plane. */
   datumNotAPlane: "session/datum-not-a-plane",
+  /** The datum is not an axis. */
+  datumNotAnAxis: "session/datum-not-an-axis",
   /** The reference is not a session face reference. */
   referenceInvalid: "session/reference-invalid",
   /** The referenced body has no resolvable extrude feature. */
@@ -378,6 +380,78 @@ export function resolveSessionDatumPlane(
   }
   const plane = resolved.value.plane;
   return { ok: true, ...plane };
+}
+
+/**
+ * Resolves a datum axis record into the session's axis geometry (origin,
+ * unit direction) — the axis sibling of {@link resolveSessionDatumPlane},
+ * the helix and thread scene frames' source. Explicit-geometry axes
+ * (`twoPoints`) resolve in-session; reference-dependent definitions
+ * (`edge`, `faceCylinder`) answer the session resolver's structured
+ * "kernel side" refusal — the scene never guesses a frame.
+ */
+export function resolveSessionDatumAxis(
+  document: CadDocument,
+  datumId: string,
+):
+  | {
+      readonly ok: true;
+      readonly origin: DatumVec3;
+      readonly direction: DatumVec3;
+    }
+  | {
+      readonly ok: false;
+      readonly error: ParseFailure;
+    } {
+  const parsedId = parseDatumId(datumId);
+  if (!parsedId.ok) {
+    return sessionFailure(
+      SESSION_DATUM_ERROR_CODES.datumInvalid,
+      `No datum record "${datumId}" exists in the document.`,
+      datumId,
+    );
+  }
+  const record = getDocumentDatum(document, parsedId.value);
+  if (record === undefined) {
+    return sessionFailure(
+      SESSION_DATUM_ERROR_CODES.datumInvalid,
+      `No datum record "${datumId}" exists in the document.`,
+      datumId,
+    );
+  }
+  const payload = parseDatumPayload(record.datum);
+  if (!payload.ok) {
+    return sessionFailure(
+      SESSION_DATUM_ERROR_CODES.datumInvalid,
+      `Datum "${datumId}" has an invalid payload: ${payload.error.message}`,
+      record.datum,
+    );
+  }
+  if (payload.value.datumType !== "axis") {
+    return sessionFailure(
+      SESSION_DATUM_ERROR_CODES.datumNotAnAxis,
+      `Datum "${datumId}" is not a datum axis.`,
+      record.datum,
+    );
+  }
+  const resolved = resolveDatumPayload(
+    payload.value,
+    sessionDatumResolverOf(document),
+  );
+  if (!resolved.ok) {
+    return { ok: false, error: resolved.error };
+  }
+  if (
+    resolved.value.datumType !== "axis" ||
+    resolved.value.axis === undefined
+  ) {
+    return sessionFailure(
+      SESSION_DATUM_ERROR_CODES.datumNotAnAxis,
+      `Datum "${datumId}" resolved to a ${resolved.value.datumType}.`,
+      resolved.value,
+    );
+  }
+  return { ok: true, ...resolved.value.axis };
 }
 
 /** The identity of one selectable scene face: body, point, and mean normal. */
