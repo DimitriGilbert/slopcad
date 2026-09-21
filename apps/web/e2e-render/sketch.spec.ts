@@ -1099,3 +1099,333 @@ test("phase 37: pointOnEntity pulls a line endpoint onto a polygon and a slot bo
     })
     .toBeLessThan(1e-6);
 });
+
+/** The absolute page point for a workplane mm coordinate. */
+async function canvasAbsolutePoint(
+  page: Page,
+  x: number,
+  y: number,
+): Promise<{ readonly x: number; readonly y: number }> {
+  const box = await page.locator(CANVAS).boundingBox();
+  if (box === null) throw new Error("the canvas must have a bounding box");
+  return {
+    x: box.x + canvasPoint(x, y).x,
+    y: box.y + canvasPoint(x, y).y,
+  };
+}
+
+/** Pointer drag across the canvas: press, two moves, release. */
+async function dragOnCanvas(
+  page: Page,
+  from: { readonly x: number; readonly y: number },
+  to: { readonly x: number; readonly y: number },
+): Promise<void> {
+  const a = await canvasAbsolutePoint(page, from.x, from.y);
+  const b = await canvasAbsolutePoint(page, to.x, to.y);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2);
+  await page.mouse.move(b.x, b.y);
+  await page.mouse.up();
+}
+
+/** The parsed per-entity dof machine surface. */
+async function readEntityDof(page: Page): Promise<Record<string, number>> {
+  return JSON.parse(
+    (await page.locator(SKETCH).getAttribute("data-sketch-entity-dof")) ?? "{}",
+  ) as Record<string, number>;
+}
+
+test("phase 37 ops: a drag keeps a held dimension and the solver settles", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+
+  // A 40 mm horizontal line, then a distance dimension between its ends.
+  await activateTool(page, "line");
+  await clickCanvas(page, -18, -10);
+  await clickCanvas(page, 22, -10);
+  await activateTool(page, "distance");
+  await clickCanvas(page, -18, -10);
+  await clickCanvas(page, 22, -10);
+  const dimensioned = await readSketchSurface(page);
+  expect(dimensioned.constraints).toHaveLength(1);
+  expect(dimensioned.constraints[0]?.kind).toBe("distance");
+
+  // The dimension's drawn presentation rides the machine surface and the
+  // canvas overlay carries its node.
+  const dimensions = JSON.parse(
+    (await page.locator(SKETCH).getAttribute("data-sketch-dimensions")) ?? "[]",
+  ) as { readonly id: string; readonly kind: string; readonly text: string }[];
+  expect(dimensions).toHaveLength(1);
+  expect(dimensions[0]?.kind).toBe("linear");
+  expect(dimensions[0]?.text).toBe("40 mm");
+  await expect(
+    page.locator(`[data-sketch-dimension-id="${String(dimensions[0]?.id)}"]`),
+  ).toHaveCount(1);
+
+  // Drag the line's END beyond its old position. The dimension must HOLD:
+  // the settled solve satisfies the 40 mm again, with the leftover freedom
+  // surfaced as under-constrained (3 dof), never failed.
+  await activateTool(page, "select");
+  await dragOnCanvas(page, { x: 22, y: -10 }, { x: 22, y: 14 });
+  await expect
+    .poll(async () => {
+      const surface = await readSketchSurface(page);
+      return surface.solve.status;
+    })
+    .toBe("under-constrained");
+  await expect
+    .poll(async () => {
+      const end = await solvedEntity(page, "skent_line-1");
+      return Math.hypot(
+        Number(end.x2) - Number(end.x1),
+        Number(end.y2) - Number(end.y1),
+      );
+    })
+    .toBeCloseTo(40, 6);
+  const settled = await readSketchSurface(page);
+  expect(settled.solve.dof).toBe(3);
+});
+
+test("phase 37 ops: under-constrained geometry renders blue ink", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  await activateTool(page, "line");
+  await clickCanvas(page, -18, -10);
+  await clickCanvas(page, 22, -10);
+  // Free line: four directions, all blue by the ink convention.
+  const dof = await readEntityDof(page);
+  expect(dof["skent_line-1"]).toBe(4);
+  await expect(
+    page.locator('[data-sketch-entity-id="skent_line-1"]'),
+  ).toHaveAttribute("stroke", expect.stringMatching(/sky-600/));
+  // The drag ink exists for machines even when idle (absent when idle).
+  await expect(page.locator(CANVAS)).not.toHaveAttribute(
+    "data-sketch-dragging",
+  );
+});
+
+test("phase 37 ops: offset via the keyboard path, then undo", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  await activateTool(page, "line");
+  await clickCanvas(page, -10, 0);
+  await clickCanvas(page, 20, 0);
+
+  // Keyboard path for a Phase 37 tool: "q" sits at index 10 (first Edit
+  // cluster tool = offset).
+  await page.locator('[data-sketch-tool-id="line"]').focus();
+  await page.keyboard.press("q");
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-tool",
+    "offset",
+  );
+  await clickCanvas(page, 5, 0);
+  await clickCanvas(page, 5, 8);
+  const surface = await readSketchSurface(page);
+  expect(surface.entities).toHaveLength(2);
+  await expect
+    .poll(async () => {
+      const solved = JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
+      ) as { id: string; kind: string; y1?: number }[];
+      const copy = solved.find(
+        (entity) => entity.id !== "skent_line-1" && entity.kind === "line",
+      );
+      return copy?.y1;
+    })
+    .toBeCloseTo(8, 6);
+
+  // Undo removes the offset copy as one history step.
+  await page.locator('[data-testid="sketch-undo"]').click();
+  const undone = await readSketchSurface(page);
+  expect(undone.entities).toHaveLength(1);
+});
+
+test("phase 37 ops: offset to the NEGATIVE side puts the copy on the clicked side", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  await activateTool(page, "line");
+  await clickCanvas(page, -10, 0);
+  await clickCanvas(page, 20, 0);
+
+  // Same keyboard path as the positive-side offset, but the target click
+  // sits 8 mm BELOW the line: the copy must land at y = −8, on the clicked
+  // side — never mirrored to the line's left (positive) normal.
+  await page.locator('[data-sketch-tool-id="line"]').focus();
+  await page.keyboard.press("q");
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-tool",
+    "offset",
+  );
+  await clickCanvas(page, 5, 0);
+  await clickCanvas(page, 5, -8);
+  const surface = await readSketchSurface(page);
+  expect(surface.entities).toHaveLength(2);
+  await expect
+    .poll(async () => {
+      const solved = JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
+      ) as { id: string; kind: string; y1?: number }[];
+      const copy = solved.find(
+        (entity) => entity.id !== "skent_line-1" && entity.kind === "line",
+      );
+      return copy?.y1;
+    })
+    .toBeCloseTo(-8, 6);
+});
+
+test("phase 37 ops: offset past collapse refuses and commits nothing", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  // A r = 6 circle at (20, 20); offsetting inward PAST the center would
+  // collapse the rim, so the op must decline and leave the sketch alone.
+  await activateTool(page, "circle");
+  await clickCanvas(page, 20, 20);
+  await clickCanvas(page, 26, 20);
+  const before = await readSketchSurface(page);
+  expect(before.entities).toHaveLength(1);
+
+  await activateTool(page, "offset");
+  await clickCanvas(page, 26, 20); // pick the rim
+  await clickCanvas(page, 20, 20); // target the center: collapse
+  const after = await readSketchSurface(page);
+  expect(after.entities).toHaveLength(1);
+  expect(after.history.depth).toBe(before.history.depth);
+  await expect(page.getByTestId("sketch-status-message")).toHaveAttribute(
+    "data-sketch-status-severity",
+    "error",
+  );
+});
+
+test("phase 37 dimensions: distanceX draws its line along the measured x separation", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  // A slanted line: Δx between its ends is 30, Δy is 12.
+  await activateTool(page, "line");
+  await clickCanvas(page, 0, 0);
+  await clickCanvas(page, 30, 12);
+  await activateTool(page, "distanceX");
+  await clickCanvas(page, 0, 0);
+  await clickCanvas(page, 30, 12);
+  const dimensions = JSON.parse(
+    (await page.locator(SKETCH).getAttribute("data-sketch-dimensions")) ?? "[]",
+  ) as {
+    readonly kind: string;
+    readonly text: string;
+    readonly dimensionLine: {
+      readonly from: readonly [number, number];
+      readonly to: readonly [number, number];
+    };
+  }[];
+  expect(dimensions).toHaveLength(1);
+  const dimension = dimensions[0];
+  expect(dimension?.kind).toBe("linear");
+  expect(dimension?.text).toBe("Δx 30 mm");
+  // The drawn dimension line spans the x separation HORIZONTALLY (Δy of
+  // the line itself is 12, so a vertical line here would be the old swap).
+  const line = dimension?.dimensionLine;
+  expect(line?.from[1]).toBeCloseTo(line?.to[1] ?? Number.NaN, 6);
+  expect((line?.to[0] ?? 0) - (line?.from[0] ?? 0)).toBeCloseTo(30, 6);
+});
+
+test("phase 37 ops: mirror about a line, and extend to a boundary", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  // Target line (0,0)→(20,0); axis line x=30.
+  await activateTool(page, "line");
+  await clickCanvas(page, 0, 0);
+  await clickCanvas(page, 20, 0);
+  await activateTool(page, "line");
+  await clickCanvas(page, 30, -15);
+  await clickCanvas(page, 30, 15);
+
+  await activateTool(page, "mirror");
+  await clickCanvas(page, 30, 0);
+  await expect(page.locator(SKETCH)).toHaveAttribute(
+    "data-sketch-gesture",
+    "mirror",
+  );
+  await clickCanvas(page, 10, 0);
+  await expect
+    .poll(async () => {
+      const solved = JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
+      ) as { id: string; kind: string; x1?: number; x2?: number }[];
+      const copy = solved.find((entity) => entity.id === "skent_mirror-1");
+      return copy === undefined ? null : (copy.x1 ?? null);
+    })
+    .toBeCloseTo(60, 6);
+  const mirrored = JSON.parse(
+    (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
+  ) as { id: string; x1?: number; x2?: number }[];
+  const copy = mirrored.find((entity) => entity.id === "skent_mirror-1");
+  expect(copy?.x2).toBeCloseTo(40, 6);
+
+  // Extend: a short line short of a wall grows to it.
+  await activateTool(page, "line");
+  await clickCanvas(page, 0, 40);
+  await clickCanvas(page, 20, 40);
+  await activateTool(page, "line");
+  await clickCanvas(page, -15, 30);
+  await clickCanvas(page, -15, 50);
+  await activateTool(page, "extend");
+  await clickCanvas(page, 0.5, 40);
+  await expect
+    .poll(async () => {
+      const solved = JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
+      ) as { id: string; x1?: number }[];
+      return solved.find((entity) => entity.id === "skent_line-3")?.x1;
+    })
+    .toBeCloseTo(-15, 6);
+});
+
+test("phase 37 ops: the rectangular array applies from the inspector form", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  // A hexagon commits selected: two picks.
+  await activateTool(page, "polygon");
+  await clickCanvas(page, 0, 0);
+  await clickCanvas(page, 15, 0);
+  await activateTool(page, "rectArray");
+  const apply = page.getByRole("button", { name: "Apply" });
+  await expect(apply).toBeVisible();
+  await apply.click();
+  await expect
+    .poll(async () => {
+      const surface = await readSketchSurface(page);
+      return surface.entities.filter((entity) => entity.kind === "polygon")
+        .length;
+    })
+    .toBe(6);
+  const surface = await readSketchSurface(page);
+  // The 3×2 defaults: five grid copies, one transaction, all undoable.
+  expect(surface.history.depth).toBe(2);
+  expect(surface.commands).toBe(6);
+});
+
+test("phase 37 ops: convert declines honestly without a topology view", async ({
+  page,
+}) => {
+  await enterSketchMode(page);
+  const section = page.locator("[data-sketch-convert-section]");
+  await expect(section).toContainText("No topology view");
+  await activateTool(page, "convert");
+  const status = JSON.parse(
+    (await page.locator(SKETCH).getAttribute("data-sketch-tool-status")) ??
+      "{}",
+  ) as { readonly message: string };
+  expect(status.message).toContain("no topology view");
+  expect(
+    (await page.locator(SKETCH).getAttribute("data-sketch-convert")) ?? "",
+  ).toBe("");
+});

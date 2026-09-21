@@ -18,14 +18,16 @@
  *
  * ## Keyboard
  *
- * The digit keys `1`–`9` activate tools in group order (the first nine tool
- * ids across all groups; tools beyond the ninth get no shortcut), handled on
- * the strip container so they work from any focus inside it — the same
- * single `activate` path a click takes; keyboard activation is never a
- * parallel mechanism. Modified digit presses (ctrl/meta/alt) are ignored,
- * and Enter/Space activate the focused button natively. Each button shows
- * its digit as a small key cap (aria-hidden — the accessible name is the
- * tool label).
+ * The shortcut row is positional and documented: the first ten tools across
+ * all groups sit on the digit keys `1`–`9` and `0`, and the next ten on the
+ * letters `q w e r t y u i o p` (Phase 37's added entity-op tools included).
+ * Tools beyond the twentieth get no shortcut — the buttons themselves remain
+ * tab-reachable. All shortcuts are handled on the strip container so they
+ * work from any focus inside it — the same single `activate` path a click
+ * takes; keyboard activation is never a parallel mechanism. Modified digit
+ * or letter presses (ctrl/meta/alt) are ignored, and Enter/Space activate
+ * the focused button natively. Each button shows its key as a small key cap
+ * (aria-hidden — the accessible name is the tool label).
  *
  * ## Disabled discipline
  *
@@ -116,6 +118,36 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "Polygon",
       tooltip:
         "Draw a hexagon: click the center, then the first vertex (sets size and rotation)",
+    },
+    offset: {
+      label: "Offset",
+      tooltip:
+        "Offset an entity or chain: click the source, then a point on the offset side",
+    },
+    mirror: {
+      label: "Mirror",
+      tooltip:
+        "Mirror about a line: click the axis line, then entities to mirror",
+    },
+    extend: {
+      label: "Extend",
+      tooltip:
+        "Extend a line: click near the end to grow it to the nearest boundary",
+    },
+    rectArray: {
+      label: "Rect Array",
+      tooltip:
+        "Rectangular array: select entities, set counts and spacings in the inspector, apply",
+    },
+    circArray: {
+      label: "Circ Array",
+      tooltip:
+        "Circular array: select entities, set count, step, and center in the inspector, apply",
+    },
+    convert: {
+      label: "Convert",
+      tooltip:
+        "Convert model geometry: pick vertices from the topology list in the inspector",
     },
     coincident: { label: "Coincident", tooltip: "Make two points coincide" },
     horizontal: { label: "Horizontal", tooltip: "Make a line horizontal" },
@@ -209,21 +241,42 @@ export interface CadSketchToolbarProps {
   readonly className?: string;
 }
 
-/** Digit shortcuts cover the first nine tools across all groups; beyond, none. */
-const SHORTCUT_DIGIT_COUNT = 9;
+/** Digit shortcuts cover the first ten tools; letters cover the next ten. */
+const SHORTCUT_KEYS = [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "0",
+  "q",
+  "w",
+  "e",
+  "r",
+  "t",
+  "y",
+  "u",
+  "i",
+  "o",
+  "p",
+] as const;
 
-/** The digit shortcut of the tool at `index`, or `null` beyond the ninth. */
+/** The key shortcut of the tool at `index`, or `null` beyond the table. */
 function shortcutForIndex(index: number): string | null {
-  return index < SHORTCUT_DIGIT_COUNT ? String(index + 1) : null;
+  return SHORTCUT_KEYS[index] ?? null;
 }
 
-/** The tool id a digit key activates, or `null` when the key maps to none. */
+/** The tool id a key activates, or `null` when the key maps to none. */
 function shortcutToolId(
   key: string,
   toolIds: readonly string[],
 ): string | null {
-  if (!/^[1-9]$/.test(key)) return null;
-  const index = Number(key) - 1;
+  const index = SHORTCUT_KEYS.indexOf(key as (typeof SHORTCUT_KEYS)[number]);
+  if (index < 0) return null;
   return toolIds[index] ?? null;
 }
 

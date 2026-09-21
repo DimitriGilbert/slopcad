@@ -77,7 +77,7 @@ function renderCanvas(props = {}) {
 /** Fires a pointer event at given CLIENT coordinates (jsdom, no layout). */
 function firePointer(
   svg: Element,
-  type: "pointerdown" | "pointermove",
+  type: "pointerdown" | "pointermove" | "pointerup",
   clientX: number,
   clientY: number,
 ): void {
@@ -363,5 +363,108 @@ describe("CadSketchCanvas phase 36 kinds", () => {
       entityId: "skent_spline",
       point: { x: 0, y: 30 },
     });
+  });
+});
+
+describe("CadSketchCanvas Phase 37 — drag, ink, dimensions", () => {
+  it("surfaces press-move-release as drag start/move/end with the drag ink", () => {
+    const onDragStart = vi.fn();
+    const onDragMove = vi.fn();
+    const onDragEnd = vi.fn();
+    const { svg, view } = renderCanvas({
+      draggingEntityId: "skent_a",
+      onDragEnd,
+      onDragMove,
+      onDragStart,
+    });
+    // Press on the line (workplane (25,0) → screen (200,200)): the drag
+    // ARMS but does not start — a press without movement stays a pick.
+    firePointer(svg, "pointerdown", 200, 200);
+    expect(onDragStart).not.toHaveBeenCalled();
+    expect(
+      view.container.querySelector('[data-sketch-dragging="true"]'),
+    ).not.toBeNull();
+    // The first move STARTS the drag with the press point (the grab site
+    // the host's grab decision reads), then streams moves.
+    firePointer(svg, "pointermove", 200, 100);
+    expect(onDragStart).toHaveBeenCalledWith({
+      entityId: "skent_a",
+      point: { x: 25, y: 0 },
+    });
+    expect(onDragMove).toHaveBeenCalledWith({ x: 25, y: 25 });
+    // The dragged entity renders with the violet drag ink mid-drag.
+    const dragged = view.container.querySelector(
+      '[data-sketch-entity-id="skent_a"]',
+    );
+    expect(dragged?.getAttribute("stroke")).toMatch(/violet|#8b5cf6/);
+    // Release ends the drag with the release point.
+    firePointer(svg, "pointerup", 200, 100);
+    expect(onDragEnd).toHaveBeenCalledWith({ x: 25, y: 25 });
+    expect(
+      view.container.querySelector('[data-sketch-dragging="true"]'),
+    ).toBeNull();
+  });
+
+  it("a press on empty space picks without starting a drag", () => {
+    const onDragStart = vi.fn();
+    const { onPick, svg } = renderCanvas({ onDragStart });
+    firePointer(svg, "pointerdown", 500, 50);
+    expect(onPick).toHaveBeenCalledWith({
+      entityId: null,
+      point: { x: 100, y: 37.5 },
+    });
+    expect(onDragStart).not.toHaveBeenCalled();
+  });
+
+  it("renders under-constrained entities blue and constrained ones black", () => {
+    const { view } = renderCanvas({
+      entityDof: new Map([
+        ["skent_a", 2],
+        ["skent_c", 0],
+      ]),
+    });
+    const line = view.container.querySelector(
+      '[data-sketch-entity-id="skent_a"]',
+    );
+    // dof > 0 → the blue ink of the under-constrained convention.
+    expect(line?.getAttribute("stroke")).toMatch(/sky-600|#0284c7/);
+    const point = view.container.querySelector(
+      '[data-sketch-entity-id="skent_c"]',
+    );
+    // dof === 0 → black — even though the entity ALSO reports an error
+    // diagnostic; the diagnostic still wins (red), so assert it here.
+    expect(point?.getAttribute("stroke")).toMatch(/destructive|#dc2626/);
+    const circle = view.container.querySelector(
+      '[data-sketch-entity-id="skent_b"]',
+    );
+    // Absent from the map → legacy styling (warning amber wins here).
+    expect(circle?.getAttribute("stroke")).toMatch(/amber|#f59e0b/);
+  });
+
+  it("renders the dimension overlay with per-dimension machine ids", () => {
+    const { view } = renderCanvas({
+      dimensions: [
+        {
+          dimensionLine: {
+            from: { x: 0, y: 8 },
+            to: { x: 50, y: 8 },
+          },
+          extensionLines: [{ from: { x: 0, y: 0 }, to: { x: 0, y: 10 } }],
+          id: "skcon_d",
+          kind: "linear",
+          text: "50 mm",
+          textAnchor: { x: 25, y: 8 },
+        },
+      ],
+    });
+    const node = view.container.querySelector(
+      '[data-sketch-dimension-id="skcon_d"]',
+    );
+    expect(node).not.toBeNull();
+    // The dimension line plus one extension line.
+    expect(node?.querySelectorAll("line")).toHaveLength(2);
+    // Arrowheads ride the dimension line ends.
+    expect(node?.querySelectorAll("polygon")).toHaveLength(2);
+    expect(node?.getAttribute("data-sketch-dimension-id")).toBe("skcon_d");
   });
 });

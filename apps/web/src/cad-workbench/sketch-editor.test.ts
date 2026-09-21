@@ -537,11 +537,14 @@ describe("sketch view model", () => {
       [],
     );
     expect(view.annotations).toHaveLength(1);
+    // The label rides the dimension PRESENTATION's text anchor (Phase 37):
+    // the aligned dimension line offsets 8 mm along the left normal (+y of
+    // the 0→60 x-run), so the text sits at its midpoint — (30, 8).
     expect(view.annotations[0]).toMatchObject({
       kind: "dimension",
       text: "60 mm",
       x: 30,
-      y: 0,
+      y: 8,
     });
   });
 });
@@ -1132,5 +1135,187 @@ describe("sketch editor phase 37 gestures and constraints", () => {
     ]);
     expect(commit.transaction).toBeNull();
     expect(commit.state.status.severity).toBe("error");
+  });
+});
+
+describe("sketch editor Phase 37 entity ops and drag", () => {
+  it("offsets a picked line toward the second pick as one create transaction", () => {
+    const sketch = sketchWithLines();
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "offset", type: "activate-tool" },
+      sketch,
+    ).state;
+    const first = sketchEditorReducer(
+      state,
+      {
+        entityId: "skent_a",
+        point: { x: 20, y: 0 },
+        type: "canvas-pick",
+      },
+      sketch,
+    );
+    expect(first.transaction).toBeNull();
+    expect(first.state.gesture.kind).toBe("offset");
+    const second = sketchEditorReducer(
+      first.state,
+      { entityId: null, point: { x: 20, y: 10 }, type: "canvas-pick" },
+      sketch,
+    );
+    expect(second.transaction).not.toBeNull();
+    expect(second.transaction?.commands).toHaveLength(1);
+    const command = second.transaction?.commands[0];
+    expect(command?.type).toBe("sketch.entity.create");
+    if (command !== undefined && command.type === "sketch.entity.create") {
+      expect(command.entity.kind).toBe("line");
+      if (command.entity.kind === "line") {
+        // The click sits 10 mm above the x-run: the copy offsets +y by 10.
+        expect(command.entity.y1).toBeCloseTo(10, 9);
+        expect(command.entity.y2).toBeCloseTo(10, 9);
+      }
+    }
+  });
+
+  it("mirrors about the picked axis line, each pick committing its copy", () => {
+    const sketch = sketchWithLines();
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "mirror", type: "activate-tool" },
+      sketch,
+    ).state;
+    const axis = sketchEditorReducer(
+      state,
+      { entityId: "skent_b", point: { x: 30, y: 0 }, type: "canvas-pick" },
+      sketch,
+    );
+    expect(axis.transaction).toBeNull();
+    expect(axis.state.gesture.kind).toBe("mirror");
+    const mirrored = sketchEditorReducer(
+      axis.state,
+      { entityId: "skent_a", point: { x: 10, y: 0 }, type: "canvas-pick" },
+      sketch,
+    );
+    expect(mirrored.transaction?.commands).toHaveLength(1);
+    const command = mirrored.transaction?.commands[0];
+    if (command !== undefined && command.type === "sketch.entity.create") {
+      expect(command.entity.kind).toBe("line");
+      if (command.entity.kind === "line") {
+        // skent_a runs (0,0)→(60,0); mirrored across skent_b (x = 30):
+        // (60,0)→(0,0).
+        expect(command.entity.x1).toBeCloseTo(60, 9);
+        expect(command.entity.x2).toBeCloseTo(0, 9);
+      }
+    }
+  });
+
+  it("extends the clicked end along its direction to the boundary", () => {
+    const a = createSketchEntityId("skent_a");
+    const wall = createSketchEntityId("skent_wall");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createLineEntity(a, { x: 0, y: 0 }, { x: 20, y: 0 }),
+        createLineEntity(wall, { x: -15, y: -10 }, { x: -15, y: 10 }),
+      ],
+      [],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const sketch = created.value;
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "extend", type: "activate-tool" },
+      sketch,
+    ).state;
+    const commit = sketchEditorReducer(
+      state,
+      { entityId: "skent_a", point: { x: 0.5, y: 0 }, type: "canvas-pick" },
+      sketch,
+    );
+    expect(commit.transaction?.commands).toHaveLength(1);
+    const command = commit.transaction?.commands[0];
+    expect(command?.type).toBe("sketch.entity.update");
+    if (command !== undefined && command.type === "sketch.entity.update") {
+      expect(command.entity.kind).toBe("line");
+      if (command.entity.kind === "line") {
+        expect(command.entity.x1).toBeCloseTo(-15, 9);
+      }
+    }
+  });
+
+  it("drag re-derives provisional geometry per move and commits once at end", () => {
+    const sketch = sketchWithLines();
+    let state = createSketchEditorState();
+    // The drag grammar is the select tool's.
+    state = sketchEditorReducer(
+      state,
+      { entityId: "skent_a", point: { x: 20, y: 0 }, type: "drag-start" },
+      sketch,
+    ).state;
+    expect(state.drag?.entityId).toBe("skent_a");
+    // A grab mid-line translates; a grab near an end moves that end. Here:
+    // mid-line.
+    const move = sketchEditorReducer(
+      state,
+      { point: { x: 25, y: 10 }, type: "drag-move" },
+      sketch,
+    );
+    expect(move.transaction).toBeNull();
+    expect(move.provisional).not.toBeNull();
+    expect(move.provisional?.kind).toBe("line");
+    if (move.provisional !== null && move.provisional.kind === "line") {
+      // (0,0)→(60,0) translated by the move delta (+5, +10).
+      expect(move.provisional.x1).toBeCloseTo(5, 9);
+      expect(move.provisional.y1).toBeCloseTo(10, 9);
+      expect(move.provisional.x2).toBeCloseTo(65, 9);
+    }
+    const end = sketchEditorReducer(
+      move.state,
+      { point: { x: 25, y: 10 }, type: "drag-end" },
+      sketch,
+    );
+    expect(end.transaction?.commands).toHaveLength(1);
+    expect(end.transaction?.commands[0]?.type).toBe("sketch.entity.update");
+    expect(end.state.drag).toBeNull();
+    expect(end.state.provisional).toBeNull();
+  });
+
+  it("a line-end drag moves only that endpoint", () => {
+    const sketch = sketchWithLines();
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { entityId: "skent_a", point: { x: 0.5, y: 0 }, type: "drag-start" },
+      sketch,
+    ).state;
+    expect(state.drag?.mode.kind).toBe("endpoint");
+    const move = sketchEditorReducer(
+      state,
+      { point: { x: -5, y: 4 }, type: "drag-move" },
+      sketch,
+    );
+    if (move.provisional !== null && move.provisional.kind === "line") {
+      expect(move.provisional.x1).toBeCloseTo(-5, 9);
+      expect(move.provisional.y1).toBeCloseTo(4, 9);
+      expect(move.provisional.x2).toBeCloseTo(60, 9);
+      expect(move.provisional.y2).toBeCloseTo(0, 9);
+    }
+  });
+
+  it("ignores drags while a drawing tool is active", () => {
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "circle", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
+    const ignored = sketchEditorReducer(
+      state,
+      { entityId: "skent_a", point: { x: 20, y: 0 }, type: "drag-start" },
+      sketchWithLines(),
+    );
+    expect(ignored.state.drag).toBeNull();
   });
 });
