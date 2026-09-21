@@ -39,6 +39,7 @@ import type { KernelCapabilities } from "./capabilities";
 
 import {
   type GeometryKernel,
+  type HelixSweepInput,
   type KernelBounds,
   KERNEL_ERROR_CODES,
   type ProfileExtrudeInput,
@@ -1884,6 +1885,208 @@ export function defineKernelContractSuite(
         }),
         KERNEL_ERROR_CODES.invalidRotation,
         "zero-axis placement rotation",
+      );
+    });
+
+    // -----------------------------------------------------------------
+    // Helix sweep (Phase 40). Semantic judgement is gated on the `helix`
+    // capability; a kernel that has not declared it owes exactly one
+    // thing — the structured `kernel/unsupported-operation` answer, never
+    // a silent approximation. The analytic anchor is the screw solid's
+    // exact volume V = 2π·turns·A·d̄ (the transport's Jacobian
+    // (R+u)·|θ′| integrates to the profile's first radial moment times
+    // the total swept angle); OCCT's ruled meridian stations sit at the
+    // derived sin(Δθ)/Δθ chord band of it, the same 63-chord class the
+    // mesh kernels' revolves document, so the shared curved band judges
+    // every declaring kernel against the exact value.
+    // -----------------------------------------------------------------
+
+    /**
+     * The helix fixture's meridian rectangle: radial extent [0, 2]
+     * (u ∈ [0, 2] from the spine's start point), axial height 1.5.
+     */
+    function helixMeridianLoop(): ProfileExtrudeInput["loop"] {
+      return rectangleLoop(0, -0.75, 2, 1.5);
+    }
+
+    it("helix-sweeps a meridian profile into the exact screw volume, or answers unsupported honestly", () => {
+      const kernel = createKernel();
+      const input: HelixSweepInput = {
+        loop: helixMeridianLoop(),
+        spine: {
+          radius: length(10),
+          pitch: length(4),
+          turns: 3,
+          handedness: 1,
+          startAngle: angle(0),
+        },
+        placement: identityPlacement(),
+      };
+      if (!kernel.capabilities.helix) {
+        // The honesty contract for engines without a helical primitive:
+        // the structured unsupported answer, even for perfectly valid
+        // input.
+        expectKernelFailure(
+          kernel.helixSweep(input),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "helixSweep on a kernel without the helix capability",
+        );
+        return;
+      }
+      const solid = unwrapKernelResult(kernel.helixSweep(input), "helix sweep");
+      // Exact screw volume: A = 3 mm², centroid radius d̄ = 11,
+      // V = 2π·3·3·11 = 198π. The fake kernel reaches it exactly (the
+      // closed-form model); OCCT's ruled stations sit inside the shared
+      // curved band (the derived sin(Δθ)/Δθ ≈ 0.998334 deficit).
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "helix sweep volume"),
+        2 * Math.PI * 3 * 3 * 11,
+        CURVED_VOLUME_TOLERANCE,
+      );
+      // Bounds: the full-turn angular coverage puts x, y ∈ [−12, 12]
+      // (the radius band [10, 12]) and z ∈ [−0.75, 12.75] (the profile's
+      // axial extent carried through pitch·turns = 12).
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(solid), "helix sweep bounds"),
+        { min: [-12, -12, -0.75], max: [12, 12, 12.75] },
+        0.05,
+      );
+      // Determinism: the same input's soup is identical on re-tessellation.
+      const first = unwrapKernelResult(kernel.tessellate(solid), "helix soup");
+      assertTessellationValid(first, {
+        bounds: { min: [-12, -12, -0.75], max: [12, 12, 12.75] },
+      });
+      const second = unwrapKernelResult(kernel.tessellate(solid), "again");
+      expect(second).toEqual(first);
+    });
+
+    it("helix-sweeps handedness and taper within their derived semantics", () => {
+      const kernel = createKernel();
+      if (!kernel.capabilities.helix) return;
+      const base: HelixSweepInput = {
+        loop: helixMeridianLoop(),
+        spine: {
+          radius: length(10),
+          pitch: length(4),
+          turns: 3,
+          handedness: 1,
+          startAngle: angle(0),
+        },
+        placement: identityPlacement(),
+      };
+      const right = unwrapKernelResult(
+        kernel.helixSweep(base),
+        "right-handed helix",
+      );
+      const left = unwrapKernelResult(
+        kernel.helixSweep({
+          ...base,
+          spine: { ...base.spine, handedness: -1 },
+        }),
+        "left-handed helix",
+      );
+      // Handedness flips the winding direction, never the volume.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(left), "left-handed volume"),
+        unwrapKernelResult(kernel.volume(right), "right-handed volume"),
+        EXACT_VOLUME_TOLERANCE,
+      );
+      // Taper: the exact volume adds the taper/2 mean-radius shift (the
+      // Jacobian's linear R(t) integrates to the mean) —
+      // V = 2π·3·3·(11 + 1).
+      const tapered = unwrapKernelResult(
+        kernel.helixSweep({
+          ...base,
+          spine: { ...base.spine, taper: length(2) },
+        }),
+        "tapered helix",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(tapered), "tapered volume"),
+        2 * Math.PI * 3 * 3 * 12,
+        CURVED_VOLUME_TOLERANCE,
+      );
+    });
+
+    it("rejects the degenerate helix battery with the shared codes, or answers unsupported honestly", () => {
+      const kernel = createKernel();
+      const input: HelixSweepInput = {
+        loop: helixMeridianLoop(),
+        spine: {
+          radius: length(10),
+          pitch: length(4),
+          turns: 3,
+          handedness: 1,
+          startAngle: angle(0),
+        },
+        placement: identityPlacement(),
+      };
+      if (!kernel.capabilities.helix) {
+        expectKernelFailure(
+          kernel.helixSweep(input),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "helixSweep on a kernel without the helix capability",
+        );
+        return;
+      }
+      // The flat circle: zero pitch AND zero taper is not a helix.
+      expectKernelFailure(
+        kernel.helixSweep({
+          ...input,
+          spine: { ...input.spine, pitch: length(0) },
+        }),
+        KERNEL_ERROR_CODES.invalidHelix,
+        "flat circle",
+      );
+      // Negative pitch: handedness carries direction.
+      expectKernelFailure(
+        kernel.helixSweep({
+          ...input,
+          spine: { ...input.spine, pitch: length(-1) },
+        }),
+        KERNEL_ERROR_CODES.invalidHelix,
+        "negative pitch",
+      );
+      // Zero turns sweep nothing.
+      expectKernelFailure(
+        kernel.helixSweep({
+          ...input,
+          spine: { ...input.spine, turns: 0 },
+        }),
+        KERNEL_ERROR_CODES.invalidHelix,
+        "zero turns",
+      );
+      // A non-positive radius never builds.
+      expectKernelFailure(
+        kernel.helixSweep({
+          ...input,
+          spine: { ...input.spine, radius: length(0) },
+        }),
+        KERNEL_ERROR_CODES.invalidLength,
+        "zero radius",
+      );
+      // A profile crossing the axis wraps through it — the revolve rule,
+      // carried to the meridian transport.
+      expectKernelFailure(
+        kernel.helixSweep({
+          ...input,
+          loop: rectangleLoop(-12, 1.5, 2, 1.5),
+        }),
+        KERNEL_ERROR_CODES.profileAxisCrossing,
+        "axis-crossing profile",
+      );
+      // Touching the axis stays legal (the revolve precedent).
+      const touching = unwrapKernelResult(
+        kernel.helixSweep({
+          ...input,
+          loop: rectangleLoop(-10, 1.5, 2, 1.5),
+        }),
+        "axis-touching profile",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(touching), "touching volume"),
+        2 * Math.PI * 3 * 3 * 1,
+        CURVED_VOLUME_TOLERANCE,
       );
     });
 

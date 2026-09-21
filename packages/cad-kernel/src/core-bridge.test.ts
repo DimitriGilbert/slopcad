@@ -541,6 +541,8 @@ describe("bridge feature kinds", () => {
       "revolve",
       "sweep",
       "loft",
+      "helix",
+      "thread",
       "fillet",
       "chamfer",
       "shell",

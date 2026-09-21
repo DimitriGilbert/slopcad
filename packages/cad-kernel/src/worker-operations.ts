@@ -63,6 +63,20 @@
  * that declares neither capability (Manifold) answers the structured
  * `kernel/unsupported-operation` through the ordinary failure path.
  *
+ * ## The helix sweep extension (Phase 40) — the analytic-spine twin
+ *
+ * `solid.helixSweep` translates the contract's `HelixSweepInput` across
+ * the wire: the meridian profile loop (the same segment forms every other
+ * profile op carries), the analytic spine record (radius, non-negative
+ * pitch, turns, handedness sign, start angle, optional total taper — the
+ * taper serialized exactly when present, mirroring the transform's
+ * optional-rotation discipline), and the placement. The codec validates
+ * structure only: spine degeneracy, profile validity, and axis crossing
+ * stay in the kernel contract (`kernel/invalid-helix`,
+ * `kernel/profile-axis-crossing`), and a kernel that declares no helix
+ * capability (Manifold, JSCAD) answers the structured
+ * `kernel/unsupported-operation` through the ordinary failure path.
+ *
  * ## The STEP import extension (Phase 21.3) — a disclosed vocabulary group
  *
  * `step.import` is the first operation in the vocabulary that is NOT a
@@ -173,6 +187,7 @@ export const WORKER_OPERATION_IDS = [
   "solid.extrude",
   "solid.revolve",
   "solid.sweep",
+  "solid.helixSweep",
   "solid.loft",
   "solid.union",
   "solid.subtract",
@@ -302,6 +317,36 @@ export type WorkerSweepPathSegmentInput =
 export interface WorkerSweepInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly path: readonly WorkerSweepPathSegmentInput[];
+  readonly placement: ProfilePlacementInput;
+}
+
+/**
+ * The wire twin of the contract's `HelixSpineInput` (Phase 40): the
+ * analytic helix parameters — radius, pitch (non-negative), turns,
+ * handedness sign, start angle, and the optional total taper. Whether the
+ * spine is degenerate is the kernel contract's semantic call
+ * (`kernel/invalid-helix`); the codec checks structure only.
+ */
+export interface WorkerHelixSpineInput {
+  readonly radius: LengthValue;
+  readonly pitch: LengthValue;
+  readonly turns: number;
+  readonly handedness: 1 | -1;
+  readonly startAngle: AngleValue;
+  readonly taper?: LengthValue;
+}
+
+/**
+ * Input of `solid.helixSweep` (Phase 40): the closed profile loop in the
+ * START MERIDIAN (loop coordinates `(u, v) = (radial, axial)` from the
+ * spine's start point), the analytic spine, and the placement — the
+ * contract's `HelixSweepInput` carried across the wire. Whether the
+ * profile crosses the axis is the kernel contract's semantic call
+ * (`kernel/profile-axis-crossing`); the codec checks structure only.
+ */
+export interface WorkerHelixSweepInput {
+  readonly loop: readonly ProfileSegmentInput[];
+  readonly spine: WorkerHelixSpineInput;
   readonly placement: ProfilePlacementInput;
 }
 
@@ -734,6 +779,7 @@ export interface WorkerOperationInputs {
   readonly "solid.extrude": WorkerExtrudeInput;
   readonly "solid.revolve": WorkerRevolveInput;
   readonly "solid.sweep": WorkerSweepInput;
+  readonly "solid.helixSweep": WorkerHelixSweepInput;
   readonly "solid.loft": WorkerLoftInput;
   readonly "solid.union": WorkerUnionInput;
   readonly "solid.subtract": WorkerSubtractInput;
@@ -769,6 +815,7 @@ export interface WorkerOperationResults {
   readonly "solid.extrude": WorkerSolidResult;
   readonly "solid.revolve": WorkerSolidResult;
   readonly "solid.sweep": WorkerSolidResult;
+  readonly "solid.helixSweep": WorkerSolidResult;
   readonly "solid.loft": WorkerSolidResult;
   readonly "solid.union": WorkerSolidResult;
   readonly "solid.subtract": WorkerSolidResult;
@@ -879,6 +926,18 @@ export interface SerializedWorkerOperationInputs {
   readonly "solid.sweep": {
     readonly loop: readonly SerializedProfileSegment[];
     readonly path: readonly SerializedWorkerSweepPathSegment[];
+    readonly placement: SerializedProfilePlacement;
+  };
+  readonly "solid.helixSweep": {
+    readonly loop: readonly SerializedProfileSegment[];
+    readonly spine: {
+      readonly radius: SerializedWorkerLength;
+      readonly pitch: SerializedWorkerLength;
+      readonly turns: number;
+      readonly handedness: 1 | -1;
+      readonly startAngle: SerializedWorkerAngle;
+      readonly taper?: SerializedWorkerLength;
+    };
     readonly placement: SerializedProfilePlacement;
   };
   readonly "solid.loft": {
@@ -997,6 +1056,9 @@ export interface SerializedWorkerOperationResults {
     readonly solid: string;
   };
   readonly "solid.sweep": {
+    readonly solid: string;
+  };
+  readonly "solid.helixSweep": {
     readonly solid: string;
   };
   readonly "solid.loft": {
@@ -2042,6 +2104,98 @@ function parseSweepInput(
   });
 }
 
+function serializeHelixSweepInput(
+  input: WorkerHelixSweepInput,
+): SerializedWorkerOperationInput<"solid.helixSweep"> {
+  return {
+    loop: input.loop.map(serializeProfileSegment),
+    spine: {
+      radius: serializeDimensionalValue(input.spine.radius),
+      pitch: serializeDimensionalValue(input.spine.pitch),
+      turns: input.spine.turns,
+      handedness: input.spine.handedness,
+      startAngle: serializeDimensionalValue(input.spine.startAngle),
+      ...(input.spine.taper === undefined
+        ? {}
+        : { taper: serializeDimensionalValue(input.spine.taper) }),
+    },
+    placement: serializeProfilePlacement(input.placement),
+  };
+}
+
+function parseHelixSweepInput(
+  payload: unknown,
+): ParseResult<WorkerHelixSweepInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.helixSweep", payload);
+  if (!record.ok) return record;
+  const loop = parseProfileLoop("solid.helixSweep", record.value.loop);
+  if (!loop.ok) return loop;
+  const spineEntry = record.value.spine;
+  if (!isPlainRecord(spineEntry)) {
+    return payloadError(
+      'The "solid.helixSweep" field "spine" must be a plain object with the helix parameters.',
+      spineEntry,
+    );
+  }
+  const radius = requireLengthField(
+    "solid.helixSweep",
+    "spine.radius",
+    spineEntry.radius,
+  );
+  if (!radius.ok) return radius;
+  const pitch = requireLengthField(
+    "solid.helixSweep",
+    "spine.pitch",
+    spineEntry.pitch,
+  );
+  if (!pitch.ok) return pitch;
+  if (!isFiniteNumber(spineEntry.turns)) {
+    return payloadError(
+      'The "solid.helixSweep" field "spine.turns" must be a finite number.',
+      spineEntry.turns,
+    );
+  }
+  if (spineEntry.handedness !== 1 && spineEntry.handedness !== -1) {
+    return payloadError(
+      'The "solid.helixSweep" field "spine.handedness" must be 1 (right) or -1 (left).',
+      spineEntry.handedness,
+    );
+  }
+  const startAngle = requireAngleField(
+    "solid.helixSweep",
+    "spine.startAngle",
+    spineEntry.startAngle,
+  );
+  if (!startAngle.ok) return startAngle;
+  let taper: LengthValue | undefined;
+  if (spineEntry.taper !== undefined) {
+    const parsed = requireLengthField(
+      "solid.helixSweep",
+      "spine.taper",
+      spineEntry.taper,
+    );
+    if (!parsed.ok) return parsed;
+    taper = parsed.value;
+  }
+  const placement = parseProfilePlacement(
+    "solid.helixSweep",
+    record.value.placement,
+  );
+  if (!placement.ok) return placement;
+  return ok({
+    loop: loop.value,
+    spine: {
+      radius: radius.value,
+      pitch: pitch.value,
+      turns: spineEntry.turns,
+      handedness: spineEntry.handedness,
+      startAngle: startAngle.value,
+      ...(taper === undefined ? {} : { taper }),
+    },
+    placement: placement.value,
+  });
+}
+
 function serializeLoftInput(
   input: WorkerLoftInput,
 ): SerializedWorkerOperationInput<"solid.loft"> {
@@ -3023,6 +3177,7 @@ const INPUT_SERIALIZERS: {
   "solid.extrude": serializeExtrudeInput,
   "solid.revolve": serializeRevolveInput,
   "solid.sweep": serializeSweepInput,
+  "solid.helixSweep": serializeHelixSweepInput,
   "solid.loft": serializeLoftInput,
   "solid.union": serializeOperandsInput,
   "solid.subtract": serializeSubtractInput,
@@ -3056,6 +3211,7 @@ const INPUT_PARSERS: {
   "solid.extrude": parseExtrudeInput,
   "solid.revolve": parseRevolveInput,
   "solid.sweep": parseSweepInput,
+  "solid.helixSweep": parseHelixSweepInput,
   "solid.loft": parseLoftInput,
   "solid.union": (payload) => parseOperandsInput("solid.union", payload),
   "solid.subtract": parseSubtractInput,
@@ -3385,6 +3541,7 @@ const RESULT_SERIALIZERS: {
   "solid.extrude": serializeSolidResult,
   "solid.revolve": serializeSolidResult,
   "solid.sweep": serializeSolidResult,
+  "solid.helixSweep": serializeSolidResult,
   "solid.loft": serializeSolidResult,
   "solid.union": serializeSolidResult,
   "solid.subtract": serializeSolidResult,
@@ -3421,6 +3578,8 @@ const RESULT_PARSERS: {
   "solid.extrude": (payload) => parseSolidResult("solid.extrude", payload),
   "solid.revolve": (payload) => parseSolidResult("solid.revolve", payload),
   "solid.sweep": (payload) => parseSolidResult("solid.sweep", payload),
+  "solid.helixSweep": (payload) =>
+    parseSolidResult("solid.helixSweep", payload),
   "solid.loft": (payload) => parseSolidResult("solid.loft", payload),
   "solid.union": (payload) => parseSolidResult("solid.union", payload),
   "solid.subtract": (payload) => parseSolidResult("solid.subtract", payload),
@@ -3487,6 +3646,7 @@ const RESULT_MINTS: {
   "solid.extrude": (result) => [result.solid],
   "solid.revolve": (result) => [result.solid],
   "solid.sweep": (result) => [result.solid],
+  "solid.helixSweep": (result) => [result.solid],
   "solid.loft": (result) => [result.solid],
   "solid.union": (result) => [result.solid],
   "solid.subtract": (result) => [result.solid],

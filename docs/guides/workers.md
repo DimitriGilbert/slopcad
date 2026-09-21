@@ -14,7 +14,7 @@ pair).
 
 `WORKER_OPERATION_IDS` is the wire's whole vocabulary — `solid.createBox`,
 `solid.createSphere`, `solid.createCylinder`, `solid.createCone`,
-`solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`,
+`solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.helixSweep`, `solid.loft`,
 `solid.union`, `solid.subtract`,
 `solid.intersect`, `solid.transform`, `solid.bounds`, `solid.volume`,
 `solid.area`, `solid.tessellate`, `solid.dispose`, `solid.fillet`,

@@ -60,7 +60,7 @@ import {
   ROTATE_TOOL_ID,
   SELECT_TOOL_ID,
 } from "@slopcad/cad-react";
-import { formatBoundsExtents } from "@slopcad/cad-core";
+import { formatBoundsExtents, parseDatumPayload } from "@slopcad/cad-core";
 import {
   Command,
   Download,
@@ -101,12 +101,15 @@ import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 import type { RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { LoftSectionChoice } from "./loft";
+import type { ThreadCutInput } from "./thread";
 
 import { completionJson } from "../render-fixture/fixture-session";
 import {
   CAD_FEATURE_FORM_LABELS,
   DATUM_FORM_LABELS,
   DatumFeatureForm,
+  HelixFeatureForm,
+  ThreadFeatureForm,
   LoftFeatureForm,
   SweepFeatureForm,
   type CadFeatureSketchOption,
@@ -301,6 +304,8 @@ export function CompleteCadWorkbench({
     handleSaveSketch,
     handleSweep,
     handleLoft,
+    handleHelix,
+    handleThread,
     handleSketchOnFace,
     sketchBootWorkplane,
     datumsJson,
@@ -316,7 +321,7 @@ export function CompleteCadWorkbench({
   // kind-switched; the last submission's structured refusal rides here (the
   // parameter panel's apply-failure precedent) and clears on the next open.
   const [featureDialog, setFeatureDialog] = useState<
-    "sweep" | "loft" | "datum" | null
+    "sweep" | "loft" | "helix" | "thread" | "datum" | null
   >(null);
   const [featureOutcome, setFeatureOutcome] = useState<
     | { readonly ok: true }
@@ -476,6 +481,18 @@ export function CompleteCadWorkbench({
       name: sketch.name,
     }));
   const canAuthorSketchFeatures = sketchOptions.length >= 2;
+  // A thread needs a target solid: the document's last extrude (the hole
+  // verb's enablement precedent).
+  const hasExtrudeBase = workbenchDocument.features.some(
+    (entry) => entry.kind === "extrude",
+  );
+  // The datum-axis pool the helix form picks from: axis-kind records only.
+  const datumAxisOptions = workbenchDocument.datums.flatMap((datum) => {
+    const payload = parseDatumPayload(datum.datum);
+    return payload.ok && payload.value.datumType === "axis"
+      ? [{ id: datum.id, name: datum.name }]
+      : [];
+  });
 
   /** Runs the sweep submission, surfacing the refusal and closing on success. */
   const submitSweep = (profileId: string, pathId: string): void => {
@@ -491,9 +508,34 @@ export function CompleteCadWorkbench({
     if (outcome.ok) setFeatureDialog(null);
   };
 
+  /** Runs the helix submission, surfacing the refusal and closing on success. */
+  const submitHelix = (
+    sketchId: string,
+    authoring: {
+      readonly radiusMm: number;
+      readonly pitchMm: number;
+      readonly turns: number;
+      readonly handedness: 1 | -1;
+      readonly startAngleRad: number;
+      readonly taperMm: number;
+    },
+    datumAxisId: string | null,
+  ): void => {
+    const outcome = handleHelix(sketchId, authoring, datumAxisId);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the thread submission, surfacing the refusal and closing on success. */
+  const submitThread = (specification: ThreadCutInput): void => {
+    const outcome = handleThread(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
   /** Opens one feature dialog with its outcome region reset. */
   const openFeatureDialog = useCallback(
-    (kind: "sweep" | "loft" | "datum"): void => {
+    (kind: "sweep" | "loft" | "helix" | "thread" | "datum"): void => {
       setFeatureOutcome(null);
       setFeatureDialog(kind);
     },
@@ -627,6 +669,26 @@ export function CompleteCadWorkbench({
         },
       },
       {
+        disabled: !canAuthorSketchFeatures,
+        group: "Workspace",
+        id: "helix",
+        keywords: "helix coil spring screw spiral curve create",
+        label: "Sweep a profile along a helix",
+        run: () => {
+          openFeatureDialog("helix");
+        },
+      },
+      {
+        disabled: !hasExtrudeBase,
+        group: "Workspace",
+        id: "thread",
+        keywords: "thread iso metric screw bolt tap helical create",
+        label: "Thread the last extrusion",
+        run: () => {
+          openFeatureDialog("thread");
+        },
+      },
+      {
         disabled: !hasFaceSelection,
         group: "Workspace",
         id: "sketch-on-face",
@@ -673,6 +735,7 @@ export function CompleteCadWorkbench({
     canAuthorSketchFeatures,
     clearSelection,
     handleHole,
+    hasExtrudeBase,
     hasFaceSelection,
     historyApi,
     holeBase,
@@ -1369,6 +1432,45 @@ export function CompleteCadWorkbench({
           variant="outline"
         >
           Loft
+        </Button>{" "}
+        {/* The Phase 40 feature verbs: helix authors from ONE saved
+            meridian sketch; thread cuts the last extrusion with a picked
+            ISO specification. */}
+        <Button
+          className="max-xl:hidden"
+          data-testid="complete-helix"
+          disabled={sketchOptions.length < 1}
+          onClick={() => {
+            openFeatureDialog("helix");
+          }}
+          size="xs"
+          title={
+            sketchOptions.length >= 1
+              ? "Sweep a saved profile sketch along an analytic helix: radius, pitch, turns, handedness, taper."
+              : "Save a sketch first (draw one and press Save); the helix picks its meridian profile from the saved pool."
+          }
+          type="button"
+          variant="outline"
+        >
+          Helix
+        </Button>
+        <Button
+          className="max-xl:hidden"
+          data-testid="complete-thread"
+          disabled={!hasExtrudeBase}
+          onClick={() => {
+            openFeatureDialog("thread");
+          }}
+          size="xs"
+          title={
+            hasExtrudeBase
+              ? "Cut an ISO metric thread on the latest extrusion: pick a designation, mode, and length."
+              : "Sketch and extrude a profile first; a thread cuts an existing solid."
+          }
+          type="button"
+          variant="outline"
+        >
+          Thread
         </Button>
         {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
             the datum form needs nothing. Both stay in the command menu on
@@ -1586,24 +1688,42 @@ export function CompleteCadWorkbench({
               <DialogTitle>
                 {featureDialog === "sweep"
                   ? CAD_FEATURE_FORM_LABELS.sweepTitle
-                  : featureDialog === "datum"
-                    ? DATUM_FORM_LABELS.title
-                    : CAD_FEATURE_FORM_LABELS.loftTitle}
+                  : featureDialog === "loft"
+                    ? CAD_FEATURE_FORM_LABELS.loftTitle
+                    : featureDialog === "helix"
+                      ? CAD_FEATURE_FORM_LABELS.helixTitle
+                      : featureDialog === "thread"
+                        ? CAD_FEATURE_FORM_LABELS.threadTitle
+                        : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
               {featureDialog === "sweep"
                 ? CAD_FEATURE_FORM_LABELS.sweepHint
-                : featureDialog === "datum"
-                  ? DATUM_FORM_LABELS.hint
-                  : CAD_FEATURE_FORM_LABELS.loftHint}
+                : featureDialog === "loft"
+                  ? CAD_FEATURE_FORM_LABELS.loftHint
+                  : featureDialog === "helix"
+                    ? CAD_FEATURE_FORM_LABELS.helixHint
+                    : featureDialog === "thread"
+                      ? CAD_FEATURE_FORM_LABELS.threadHint
+                      : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "sweep" ? (
               <SweepFeatureForm
                 onSweep={submitSweep}
                 sketches={sketchOptions}
               />
-            ) : featureDialog === "datum" ? (
+            ) : featureDialog === "loft" ? (
+              <LoftFeatureForm onLoft={submitLoft} sketches={sketchOptions} />
+            ) : featureDialog === "helix" ? (
+              <HelixFeatureForm
+                datumAxes={datumAxisOptions}
+                onHelix={submitHelix}
+                sketches={sketchOptions}
+              />
+            ) : featureDialog === "thread" ? (
+              <ThreadFeatureForm onThread={submitThread} />
+            ) : (
               <DatumFeatureForm
                 onCreateDatum={(payload) => {
                   const outcome = handleCreateDatum(payload);
@@ -1611,8 +1731,6 @@ export function CompleteCadWorkbench({
                   if (outcome.ok) setFeatureDialog(null);
                 }}
               />
-            ) : (
-              <LoftFeatureForm onLoft={submitLoft} sketches={sketchOptions} />
             )}
             {featureOutcome !== null && !featureOutcome.ok ? (
               <div

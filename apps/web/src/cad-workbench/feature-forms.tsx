@@ -20,10 +20,20 @@
 
 import { useFormedible } from "@slopcad/ui/components/formedible/hooks/use-formedible";
 import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/lib/types";
-import type { ReactElement } from "react";
+import { useRef, type ReactElement } from "react";
 import { DATUM_FORMAT_VERSION } from "@slopcad/cad-core";
+import {
+  ISO_METRIC_THREAD_TABLE,
+  isoMetricThreadByDesignation,
+} from "@slopcad/cad-kernel";
 
 import { LOFT_DEFAULT_STATION_STEP_MM, type LoftSectionChoice } from "./loft";
+import { HELIX_DEFAULTS } from "./helix";
+import {
+  THREAD_DEFAULTS,
+  THREAD_MODE_VALUES,
+  type ThreadCutInput,
+} from "./thread";
 
 /** One pickable sketch: the document record's id and its name. */
 export interface CadFeatureSketchOption {
@@ -42,6 +52,26 @@ export interface CadFeatureFormLabels {
   readonly loftSectionSketch: string;
   readonly loftSectionStation: string;
   readonly loftHint: string;
+  readonly helixTitle: string;
+  readonly helixProfile: string;
+  readonly helixRadius: string;
+  readonly helixPitch: string;
+  readonly helixTurns: string;
+  readonly helixHandedness: string;
+  readonly helixStartAngle: string;
+  readonly helixTaper: string;
+  readonly helixDatumAxis: string;
+  readonly helixWorldAxis: string;
+  readonly helixHint: string;
+  readonly threadTitle: string;
+  readonly threadDesignation: string;
+  readonly threadMajor: string;
+  readonly threadPitch: string;
+  readonly threadLength: string;
+  readonly threadMode: string;
+  readonly threadHandedness: string;
+  readonly threadAxis: string;
+  readonly threadHint: string;
   readonly submit: string;
   readonly pickSketch: string;
 }
@@ -59,6 +89,28 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   loftSectionStation: "Station z (mm)",
   loftHint:
     "Sections loft in row order along the workplane normal; stations must strictly increase.",
+  helixTitle: "Sweep a profile along a helix",
+  helixProfile: "Profile sketch (drawn in the meridian)",
+  helixRadius: "Radius (mm)",
+  helixPitch: "Pitch (mm per turn)",
+  helixTurns: "Turns",
+  helixHandedness: "Handedness",
+  helixStartAngle: "Start angle (deg)",
+  helixTaper: "Taper (mm over the spine)",
+  helixDatumAxis: "Axis datum (optional)",
+  helixWorldAxis: "World Z axis",
+  helixHint:
+    "The sketch's (x, y) become the helix's (radial, axial) offsets from the spine's start; the spine runs on the world Z axis or the picked datum axis.",
+  threadTitle: "Thread an ISO metric specification",
+  threadDesignation: "ISO designation",
+  threadMajor: "Major diameter (mm)",
+  threadPitch: "Pitch (mm)",
+  threadLength: "Thread length (mm)",
+  threadMode: "Mode",
+  threadHandedness: "Handedness",
+  threadAxis: "Axis",
+  threadHint:
+    "The thread cuts the last extrusion (model the nominal major diameter, then thread it); cosmetic threads annotate without geometry.",
   submit: "Create",
   pickSketch: "Pick a sketch",
 };
@@ -383,5 +435,315 @@ export function DatumFeatureForm({
   });
   return (
     <form.Form aria-label={labels.title} className="space-y-3" noValidate />
+  );
+}
+
+/** Form values of the helix form. */
+export interface HelixFormValues extends Record<string, unknown> {
+  readonly profileSketchId: string;
+  readonly radiusMm: number;
+  readonly pitchMm: number;
+  readonly turns: number;
+  readonly handedness: string;
+  readonly startAngleDeg: number;
+  readonly taperMm: number;
+  readonly datumAxisId: string;
+}
+
+/** One pickable datum axis: the document record's id and its name. */
+export interface CadFeatureDatumOption {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * The helix form: the meridian profile sketch, the six spine numbers, and
+ * the optional datum axis. Submission routes through the engine's helix
+ * action — the same validation seam every create action rides — and a
+ * structured refusal surfaces verbatim in the dialog's error region.
+ */
+export function HelixFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onHelix,
+  sketches,
+  datumAxes,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onHelix: (
+    sketchId: string,
+    authoring: {
+      readonly radiusMm: number;
+      readonly pitchMm: number;
+      readonly turns: number;
+      readonly handedness: 1 | -1;
+      readonly startAngleRad: number;
+      readonly taperMm: number;
+    },
+    datumAxisId: string | null,
+  ) => void;
+  readonly sketches: readonly CadFeatureSketchOption[];
+  readonly datumAxes: readonly CadFeatureDatumOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const numberField = (
+    name: keyof HelixFormValues & string,
+    label: string,
+  ): FormedibleFieldConfig<HelixFormValues> => ({
+    name,
+    required: true,
+    type: "number",
+    label,
+    inputClassName: "font-mono",
+    validation: (value) =>
+      typeof value === "number" && Number.isFinite(value)
+        ? null
+        : "Enter a finite number.",
+  });
+  const fields: readonly FormedibleFieldConfig<HelixFormValues>[] = [
+    {
+      name: "profileSketchId",
+      options: sketchOptions(sketches),
+      placeholder: labels.pickSketch,
+      required: true,
+      type: "select",
+      label: labels.helixProfile,
+    },
+    numberField("radiusMm", labels.helixRadius),
+    numberField("pitchMm", labels.helixPitch),
+    numberField("turns", labels.helixTurns),
+    {
+      name: "handedness",
+      options: [
+        { value: "right", label: "Right-handed" },
+        { value: "left", label: "Left-handed" },
+      ],
+      required: true,
+      type: "select",
+      label: labels.helixHandedness,
+    },
+    numberField("startAngleDeg", labels.helixStartAngle),
+    numberField("taperMm", labels.helixTaper),
+    {
+      name: "datumAxisId",
+      options: [
+        { value: "", label: labels.helixWorldAxis },
+        ...datumAxes.map((datum) => ({
+          value: datum.id,
+          label: datum.name,
+        })),
+      ],
+      // Not required: the empty value IS a choice (the world Z axis) —
+      // a `required` flag would refuse the default and block submission.
+      type: "select",
+      label: labels.helixDatumAxis,
+    },
+  ];
+  const form = useFormedible<HelixFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        profileSketchId: sketches[0]?.id ?? "",
+        radiusMm: HELIX_DEFAULTS.radiusMm,
+        pitchMm: HELIX_DEFAULTS.pitchMm,
+        turns: HELIX_DEFAULTS.turns,
+        handedness: "right",
+        startAngleDeg: (HELIX_DEFAULTS.startAngleRad * 180) / Math.PI,
+        taperMm: HELIX_DEFAULTS.taperMm,
+        datumAxisId: "",
+      },
+      onSubmit: ({ value }) => {
+        onHelix(
+          value.profileSketchId,
+          {
+            radiusMm: value.radiusMm,
+            pitchMm: value.pitchMm,
+            turns: value.turns,
+            handedness: value.handedness === "left" ? -1 : 1,
+            startAngleRad: (value.startAngleDeg * Math.PI) / 180,
+            taperMm: value.taperMm,
+          },
+          value.datumAxisId === "" ? null : value.datumAxisId,
+        );
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.helixTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the thread form. */
+export interface ThreadFormValues extends Record<string, unknown> {
+  readonly designation: string;
+  readonly majorDiameterMm: number;
+  readonly pitchMm: number;
+  readonly lengthMm: number;
+  readonly mode: string;
+  readonly handedness: string;
+  readonly axis: string;
+}
+
+/**
+ * The thread form: the ISO designation picker (the table fills the major
+ * diameter and pitch; the numbers stay editable — the designation is a
+ * picker, never persisted state), the thread length, mode, handedness,
+ * and the world axis. The picker's fill rides the form's own change hook:
+ * a designation CHANGE copies the table row's two numbers into the
+ * fields through the form API (`form.setFieldValue`), and nothing else —
+ * a hand edit after a pick is just another field change the hook
+ * ignores, so it persists until the next pick. Submission routes
+ * through the engine's thread action; a structured refusal surfaces
+ * verbatim in the dialog's error region.
+ */
+export function ThreadFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onThread,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onThread: (specification: ThreadCutInput) => void;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<ThreadFormValues>[] = [
+    {
+      name: "designation",
+      options: ISO_METRIC_THREAD_TABLE.map((size) => ({
+        value: size.designation,
+        label: `${size.designation} — pitch ${String(size.pitchMm)} mm, tap drill ${String(size.tapDrillMm)} mm`,
+      })),
+      required: true,
+      type: "select",
+      label: labels.threadDesignation,
+    },
+    {
+      name: "majorDiameterMm",
+      required: true,
+      type: "number",
+      label: labels.threadMajor,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value)
+          ? null
+          : "Enter a finite number.",
+    },
+    {
+      name: "pitchMm",
+      required: true,
+      type: "number",
+      label: labels.threadPitch,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value)
+          ? null
+          : "Enter a finite number.",
+    },
+    {
+      name: "lengthMm",
+      required: true,
+      type: "number",
+      label: labels.threadLength,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value)
+          ? null
+          : "Enter a finite number.",
+    },
+    {
+      name: "mode",
+      options: [
+        { value: "external", label: "External (cuts the rod's grooves)" },
+        { value: "internal", label: "Internal (cuts a hole's threads)" },
+        { value: "cosmetic", label: "Cosmetic (annotation, no geometry)" },
+      ],
+      required: true,
+      type: "select",
+      label: labels.threadMode,
+    },
+    {
+      name: "handedness",
+      options: [
+        { value: "right", label: "Right-handed" },
+        { value: "left", label: "Left-handed" },
+      ],
+      required: true,
+      type: "select",
+      label: labels.threadHandedness,
+    },
+    {
+      name: "axis",
+      options: [
+        { value: "x", label: "World X" },
+        { value: "y", label: "World Y" },
+        { value: "z", label: "World Z" },
+      ],
+      required: true,
+      type: "select",
+      label: labels.threadAxis,
+    },
+  ];
+  const modeValue = (mode: string): number =>
+    mode === "internal"
+      ? THREAD_MODE_VALUES.internal
+      : mode === "cosmetic"
+        ? THREAD_MODE_VALUES.cosmetic
+        : THREAD_MODE_VALUES.external;
+  const axisValue = (axis: string): number =>
+    axis === "x" ? 1 : axis === "y" ? 2 : 3;
+  // The last designation the fill hook saw (seeded with the form's own
+  // default): the discriminator that keeps the fill tied to DESIGNATION
+  // changes instead of firing on every number-field keystroke.
+  const designationRef = useRef("M6");
+  const form = useFormedible<ThreadFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        designation: "M6",
+        majorDiameterMm: THREAD_DEFAULTS.majorDiameterMm,
+        pitchMm: THREAD_DEFAULTS.pitchMm,
+        lengthMm: THREAD_DEFAULTS.lengthMm,
+        mode: "external",
+        handedness: "right",
+        axis: "z",
+      },
+      onChange: ({ value }) => {
+        // The designation picker's linked-field fill: only a CHANGE of
+        // the designation itself copies the table row's major diameter
+        // and pitch into the number fields — hand edits to those numbers
+        // leave the designation untouched, so they persist until the
+        // next pick. `form.form` is the hook's own TanStack instance
+        // (stable per mount); the closure reads it after the hook
+        // returned.
+        if (value.designation === designationRef.current) return;
+        designationRef.current = value.designation;
+        const size = isoMetricThreadByDesignation(value.designation);
+        if (size === undefined) return;
+        form.form.setFieldValue("majorDiameterMm", size.majorDiameterMm);
+        form.form.setFieldValue("pitchMm", size.pitchMm);
+      },
+      onSubmit: ({ value }) => {
+        onThread({
+          majorDiameterMm: value.majorDiameterMm,
+          pitchMm: value.pitchMm,
+          lengthMm: value.lengthMm,
+          mode: modeValue(value.mode),
+          handedness: value.handedness === "left" ? -1 : 1,
+          axis: axisValue(value.axis),
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.threadTitle}
+      className="space-y-3"
+      noValidate
+    />
   );
 }

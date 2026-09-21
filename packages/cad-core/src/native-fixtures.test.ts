@@ -104,6 +104,61 @@ for (const name of [
   });
 }
 
+describe("the helix-thread fixture (Phase 40)", () => {
+  it("carries the helix and thread features with their parameter vocabularies", async () => {
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(
+        await readFixture("helix-thread.native.json"),
+      ),
+      "parsing helix-thread.native.json",
+    );
+    const document = parsed.document;
+    const kinds = document.features.map((feature) => feature.kind);
+    expect(kinds).toEqual(["extrude", "helix", "thread"]);
+    // The helix's input layout: one sketch, six parameters, one datum.
+    const helix = document.features[1];
+    if (helix === undefined) throw new Error("the helix feature is absent");
+    expect(helix.inputs.map((input) => input.kind)).toEqual([
+      "sketch",
+      "parameter",
+      "parameter",
+      "parameter",
+      "parameter",
+      "parameter",
+      "parameter",
+      "datum",
+    ]);
+    // The thread's input layout: one feature target plus six parameters
+    // (the five fixed roles and the world-axis selector).
+    const thread = document.features[2];
+    if (thread === undefined) throw new Error("the thread feature is absent");
+    expect(thread.inputs.map((input) => input.kind)).toEqual([
+      "feature",
+      "parameter",
+      "parameter",
+      "parameter",
+      "parameter",
+      "parameter",
+      "parameter",
+    ]);
+    // The replayed edit survived: the thread lengthens to 8 mm (eight
+    // full M6×1 turns), the spine parameters hold their authored values.
+    expect(parameterValue(document, "threadLength")).toBe(8);
+    expect(parameterValue(document, "helixRadius")).toBe(10);
+    expect(parameterValue(document, "helixPitch")).toBe(4);
+    expect(parameterValue(document, "helixTurns")).toBe(3);
+    expect(parameterValue(document, "helixHandedness")).toBe(1);
+    expect(parameterValue(document, "threadMajor")).toBe(6);
+    expect(parameterValue(document, "threadPitch")).toBe(1);
+    expect(parameterValue(document, "threadMode")).toBe(1);
+    expect(parameterValue(document, "threadAxis")).toBe(3);
+    // The datum axis record rides the Phase 39 vocabulary unchanged.
+    expect(document.datums.map((datum) => datum.id)).toContain(
+      "dtm_helix_axis",
+    );
+  });
+});
+
 describe("the plate-with-hole fixture", () => {
   const load = async (): Promise<NativeCadDocument> =>
     requireOk(

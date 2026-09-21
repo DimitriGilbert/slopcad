@@ -101,6 +101,7 @@ type SolidProducingOperation =
   | "solid.extrude"
   | "solid.revolve"
   | "solid.sweep"
+  | "solid.helixSweep"
   | "solid.loft"
   | "solid.union"
   | "solid.subtract"
@@ -365,6 +366,19 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             : {
                 status: "failed",
                 error: kernelFailure("solid.sweep", result.error),
+              };
+        }
+        case "solid.helixSweep": {
+          const result = kernel.helixSweep(request.input);
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.helixSweep",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.helixSweep", result.error),
               };
         }
         case "solid.loft": {

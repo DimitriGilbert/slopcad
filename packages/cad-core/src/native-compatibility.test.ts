@@ -105,6 +105,7 @@ describe("the native document compatibility suite", () => {
     const names = fixtureNames();
     expect(names).toEqual([
       "failed-feature.native.json",
+      "helix-thread.native.json",
       "plate-with-hole.native.json",
       "rolled-back.native.json",
       "sketch-on-face.native.json",

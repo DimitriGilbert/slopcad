@@ -21,6 +21,7 @@ import {
   type KernelResult,
   type MirrorInput,
   type ProfileExtrudeInput,
+  type HelixSweepInput,
   type ProfileLoftInput,
   type ProfileRevolveInput,
   type ProfileSweepInput,
@@ -68,6 +69,8 @@ export function withOperationLog(kernel: GeometryKernel): LoggedKernel {
     sweep: (input: ProfileSweepInput) =>
       log("sweep", () => kernel.sweep(input)),
     loft: (input: ProfileLoftInput) => log("loft", () => kernel.loft(input)),
+    helixSweep: (input: HelixSweepInput) =>
+      log("helixSweep", () => kernel.helixSweep(input)),
     fillet: (input: FilletInput) => log("fillet", () => kernel.fillet(input)),
     chamfer: (input: ChamferInput) =>
       log("chamfer", () => kernel.chamfer(input)),

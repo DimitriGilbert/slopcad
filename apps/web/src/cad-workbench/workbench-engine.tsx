@@ -136,6 +136,16 @@ import { massPropertiesReadout } from "./mass-properties-inspection";
 import { radiusReadout } from "./radius-inspection";
 import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
 import {
+  documentHelixRequest,
+  helixSpineOf,
+  validateHelixSubmission,
+} from "./helix";
+import {
+  documentThreadSceneRequest,
+  threadTargetFeatureOf,
+  validateThreadSubmission,
+} from "./thread";
+import {
   sessionBackendOf,
   type FixtureSessionBackendId,
 } from "../render-fixture/session-backend";
@@ -219,7 +229,14 @@ export function useWorkbenchStore() {
  * document names (Phase 38 adds the sweep and loft scenes).
  */
 export type WorkbenchSceneKind =
-  "plate" | "extrude" | "revolve" | "sweep" | "loft" | "hole";
+  | "plate"
+  | "extrude"
+  | "revolve"
+  | "sweep"
+  | "loft"
+  | "helix"
+  | "thread"
+  | "hole";
 
 /**
  * The structured outcome of a feature-form submission: the domain's refusal
@@ -368,6 +385,39 @@ export interface WorkbenchEngine {
     sections: readonly LoftSectionChoice[],
   ) => FeatureFormOutcome;
   /**
+   * The Phase 40 helix create action: validates the picked meridian sketch
+   * and spine numbers through the action-time battery, then commits the
+   * spine parameters and the helix feature in one atomic transaction and
+   * switches the scene. A refusal commits nothing and returns the
+   * structured outcome for the form.
+   */
+  readonly handleHelix: (
+    sketchId: string,
+    authoring: {
+      readonly radiusMm: number;
+      readonly pitchMm: number;
+      readonly turns: number;
+      readonly handedness: 1 | -1;
+      readonly startAngleRad: number;
+      readonly taperMm: number;
+    },
+    datumAxisId: string | null,
+  ) => FeatureFormOutcome;
+  /**
+   * The Phase 40 thread create action: validates the ISO specification
+   * numbers, then commits the thread parameters and the thread feature
+   * (targeting the document's last extrude) in one atomic transaction.
+   * A refusal commits nothing and returns the structured outcome.
+   */
+  readonly handleThread: (specification: {
+    readonly majorDiameterMm: number;
+    readonly pitchMm: number;
+    readonly lengthMm: number;
+    readonly mode: number;
+    readonly handedness: number;
+    readonly axis: number;
+  }) => FeatureFormOutcome;
+  /**
    * The Phase 39 sketch-on-face action: resolves the picked scene face into
    * a datum plane record (the persistent anchor) plus the face workplane,
    * commits the datum in one atomic transaction, and enters the sketch mode
@@ -474,6 +524,8 @@ export function useWorkbenchEngine(
   const [sketchCount, setSketchCount] = useState(0);
   const [sweepCount, setSweepCount] = useState(0);
   const [loftCount, setLoftCount] = useState(0);
+  const [helixCount, setHelixCount] = useState(0);
+  const [threadCount, setThreadCount] = useState(0);
   // The Phase 39 sketch-on-face anchor: the datum record the CURRENT sketch
   // session boots on (its id commits with the extrude feature; its plane
   // booted the sketch editor). `null` in the ordinary sketch flow.
@@ -1016,6 +1068,227 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The Phase 40 helix action: resolve the picked meridian sketch through
+  // the same profile seam the executor bridge uses, run the kernel's helix
+  // battery BEFORE anything commits (the sweep action's validation-seam
+  // precedent), then commit the six spine parameters and the helix feature
+  // in ONE atomic transaction (with the datum axis input when one was
+  // picked). A refusal commits nothing and hands the structured outcome
+  // back to the form.
+  const handleHelix = (
+    sketchId: string,
+    authoring: {
+      readonly radiusMm: number;
+      readonly pitchMm: number;
+      readonly turns: number;
+      readonly handedness: 1 | -1;
+      readonly startAngleRad: number;
+      readonly taperMm: number;
+    },
+    datumAxisId: string | null,
+  ): FeatureFormOutcome => {
+    const profile = sketchProfileResolverOf(workbenchDocument)(
+      createSketchDocumentId(sketchId),
+    );
+    if (!profile.ok) {
+      return {
+        ok: false,
+        code: profile.error.code,
+        message: profile.error.message,
+      };
+    }
+    const spine = helixSpineOf(authoring);
+    const validation = validateHelixSubmission({
+      loop: profile.value.loop,
+      spine,
+    });
+    if (!validation.ok) return validation;
+    const n = helixCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_helix${suffix}`);
+    const featureId = createFeatureId(`feat_helix${suffix}`);
+    const parameterCommands = [
+      {
+        name: `helixRadius${suffix}`,
+        value: length(authoring.radiusMm),
+        id: createParameterId(`param_helix_radius${suffix}`),
+      },
+      {
+        name: `helixPitch${suffix}`,
+        value: length(authoring.pitchMm),
+        id: createParameterId(`param_helix_pitch${suffix}`),
+      },
+      {
+        name: `helixTurns${suffix}`,
+        value: dimensionless(authoring.turns),
+        id: createParameterId(`param_helix_turns${suffix}`),
+      },
+      {
+        name: `helixHandedness${suffix}`,
+        value: dimensionless(authoring.handedness),
+        id: createParameterId(`param_helix_handedness${suffix}`),
+      },
+      {
+        name: `helixStartAngle${suffix}`,
+        value: angle(authoring.startAngleRad),
+        id: createParameterId(`param_helix_start${suffix}`),
+      },
+      {
+        name: `helixTaper${suffix}`,
+        value: length(authoring.taperMm),
+        id: createParameterId(`param_helix_taper${suffix}`),
+      },
+    ].map((parameter) => ({
+      type: "parameter.create" as const,
+      id: parameter.id,
+      name: parameter.name,
+      value: parameter.value,
+    }));
+    const parameterIds = parameterCommands.map((command) => command.id);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        ...parameterCommands,
+        { type: "body.create", id: bodyId, name: `helix ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "helix",
+          inputs: [
+            { kind: "sketch", id: createSketchDocumentId(sketchId) },
+            ...parameterIds.map((id) => ({ kind: "parameter" as const, id })),
+            ...(datumAxisId === null
+              ? []
+              : [{ kind: "datum" as const, id: createDatumId(datumAxisId) }]),
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setHelixCount(n);
+    setActiveScene("helix");
+    return { ok: true };
+  };
+
+  // The Phase 40 thread action: validate the ISO specification numbers
+  // (the action-time battery), then commit the thread parameters and the
+  // thread feature targeting the document's LAST EXTRUDE (the hole
+  // precedent) in ONE atomic transaction. A refusal commits nothing.
+  const handleThread = (specification: {
+    readonly majorDiameterMm: number;
+    readonly pitchMm: number;
+    readonly lengthMm: number;
+    readonly mode: number;
+    readonly handedness: number;
+    readonly axis: number;
+  }): FeatureFormOutcome => {
+    const target = threadTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A thread needs a target solid: extrude a profile first (the thread cuts the last extrusion, the hole's precedent).",
+      };
+    }
+    const validation = validateThreadSubmission(specification);
+    if (!validation.ok) return validation;
+    const n = threadCount + 1;
+    const suffix = String(n);
+    const bodyId = createBodyId(`body_thread${suffix}`);
+    const featureId = createFeatureId(`feat_thread${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_thread_major${suffix}`),
+          name: `threadMajor${suffix}`,
+          value: length(specification.majorDiameterMm),
+        },
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_thread_pitch${suffix}`),
+          name: `threadPitch${suffix}`,
+          value: length(specification.pitchMm),
+        },
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_thread_length${suffix}`),
+          name: `threadLength${suffix}`,
+          value: length(specification.lengthMm),
+        },
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_thread_mode${suffix}`),
+          name: `threadMode${suffix}`,
+          value: dimensionless(specification.mode),
+        },
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_thread_handedness${suffix}`),
+          name: `threadHandedness${suffix}`,
+          value: dimensionless(specification.handedness),
+        },
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_thread_axis${suffix}`),
+          name: `threadAxis${suffix}`,
+          value: dimensionless(specification.axis),
+        },
+        { type: "body.create", id: bodyId, name: `threaded ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "thread",
+          inputs: [
+            { kind: "feature", id: target.id },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_thread_major${suffix}`),
+            },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_thread_pitch${suffix}`),
+            },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_thread_length${suffix}`),
+            },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_thread_mode${suffix}`),
+            },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_thread_handedness${suffix}`),
+            },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_thread_axis${suffix}`),
+            },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setThreadCount(n);
+    setActiveScene("thread");
+    return { ok: true };
+  };
+
   const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {
     if (runState === null) return null;
     // The worker's verdict outranks the document-data executor's "valid"
@@ -1140,6 +1413,20 @@ export function useWorkbenchEngine(
       }
       return;
     }
+    if (activeScene === "helix") {
+      const request = documentHelixRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchHelix(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "thread") {
+      const request = documentThreadSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchThread(request, request.bodyId);
+      }
+      return;
+    }
     if (activeScene === "hole") {
       const derived = documentHoleSceneRequest(workbenchDocument);
       if (derived !== null) {
@@ -1158,6 +1445,8 @@ export function useWorkbenchEngine(
     revolveCount,
     sweepCount,
     loftCount,
+    helixCount,
+    threadCount,
     holeCount,
   ]);
 
@@ -1401,6 +1690,8 @@ export function useWorkbenchEngine(
     handleSaveSketch,
     handleSweep,
     handleLoft,
+    handleHelix,
+    handleThread,
     handleSketchOnFace,
     sketchBootWorkplane: sketchAnchor === null ? null : sketchAnchor.workplane,
     datumsJson,

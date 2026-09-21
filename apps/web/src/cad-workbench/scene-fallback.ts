@@ -21,6 +21,8 @@ import { documentExtrudeRequest } from "./extrude";
 import { documentHoleSceneRequest } from "./hole";
 import { documentLoftRequest } from "./loft";
 import { documentRevolveRequest } from "./revolve";
+import { documentHelixRequest } from "./helix";
+import { documentThreadSceneRequest } from "./thread";
 import { documentSweepRequest } from "./sweep";
 
 /**
@@ -30,7 +32,14 @@ import { documentSweepRequest } from "./sweep";
  * scenes.
  */
 export type WorkbenchSceneKind =
-  "plate" | "extrude" | "revolve" | "sweep" | "loft" | "hole";
+  | "plate"
+  | "extrude"
+  | "revolve"
+  | "sweep"
+  | "loft"
+  | "helix"
+  | "thread"
+  | "hole";
 
 /**
  * The highest scene the document still resolves, in the create actions'
@@ -42,6 +51,8 @@ export function highestResolvableScene(
   document: CadDocument,
 ): WorkbenchSceneKind {
   if (documentHoleSceneRequest(document) !== null) return "hole";
+  if (documentThreadSceneRequest(document) !== null) return "thread";
+  if (documentHelixRequest(document) !== null) return "helix";
   if (documentLoftRequest(document) !== null) return "loft";
   if (documentSweepRequest(document) !== null) return "sweep";
   if (documentRevolveRequest(document) !== null) return "revolve";
@@ -65,12 +76,16 @@ export function honestSceneFallback(
   const resolved =
     activeScene === "hole"
       ? documentHoleSceneRequest(document) !== null
-      : activeScene === "loft"
-        ? documentLoftRequest(document) !== null
-        : activeScene === "sweep"
-          ? documentSweepRequest(document) !== null
-          : activeScene === "revolve"
-            ? documentRevolveRequest(document) !== null
-            : documentExtrudeRequest(document) !== null;
+      : activeScene === "thread"
+        ? documentThreadSceneRequest(document) !== null
+        : activeScene === "helix"
+          ? documentHelixRequest(document) !== null
+          : activeScene === "loft"
+            ? documentLoftRequest(document) !== null
+            : activeScene === "sweep"
+              ? documentSweepRequest(document) !== null
+              : activeScene === "revolve"
+                ? documentRevolveRequest(document) !== null
+                : documentExtrudeRequest(document) !== null;
   return resolved ? null : highestResolvableScene(document);
 }

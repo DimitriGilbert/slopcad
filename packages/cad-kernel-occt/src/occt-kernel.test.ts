@@ -164,6 +164,7 @@ describe("occt kernel identity and capabilities", () => {
       persistentTopology: true,
       sweep: true,
       loft: true,
+      helix: true,
       fillet: true,
       chamfer: true,
       shell: true,

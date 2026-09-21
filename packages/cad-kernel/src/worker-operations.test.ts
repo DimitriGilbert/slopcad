@@ -59,6 +59,7 @@ describe("operation vocabulary", () => {
       "solid.extrude",
       "solid.revolve",
       "solid.sweep",
+      "solid.helixSweep",
       "solid.loft",
       "solid.union",
       "solid.subtract",
@@ -311,6 +312,55 @@ describe("operation input round-trips", () => {
       placement: {
         rotation: { axis: [0, 0, 1], angle: angle(0) },
         translation: { x: mm(0), y: mm(0), z: mm(0) },
+      },
+    });
+  });
+
+  it("round-trips the helixSweep input with the taper PRESENT on the wire", () => {
+    expectInputRoundTrip("solid.helixSweep", {
+      loop: [
+        { kind: "line", start: [0, -0.75], end: [2, -0.75] },
+        { kind: "line", start: [2, -0.75], end: [2, 0.75] },
+        { kind: "line", start: [2, 0.75], end: [0, 0.75] },
+        { kind: "line", start: [0, 0.75], end: [0, -0.75] },
+      ],
+      spine: {
+        radius: mm(10),
+        pitch: mm(4),
+        turns: 3,
+        handedness: 1,
+        startAngle: angle(0),
+        taper: mm(2),
+      },
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: mm(0), y: mm(0), z: mm(0) },
+      },
+    });
+  });
+
+  it("round-trips the helixSweep input with the taper ABSENT — the byte discipline", () => {
+    // `spine.taper` is optional: a caller that omits it must see it stay
+    // omitted across the wire — the serializer's exactly-when-present
+    // branch (always sending `taper: 0` would silently canonicalize every
+    // untapered sweep onto the tapered code path).
+    expectInputRoundTrip("solid.helixSweep", {
+      loop: [
+        { kind: "line", start: [0, -0.75], end: [2, -0.75] },
+        { kind: "line", start: [2, -0.75], end: [2, 0.75] },
+        { kind: "line", start: [2, 0.75], end: [0, 0.75] },
+        { kind: "line", start: [0, 0.75], end: [0, -0.75] },
+      ],
+      spine: {
+        radius: mm(6),
+        pitch: mm(1),
+        turns: 6,
+        handedness: -1,
+        startAngle: angle(Math.PI / 3),
+      },
+      placement: {
+        rotation: { axis: [0.3, -0.4, Math.sqrt(0.75)], angle: angle(1) },
+        translation: { x: mm(1), y: mm(2), z: mm(3) },
       },
     });
   });
@@ -648,6 +698,11 @@ describe("operation input validation", () => {
       "solid.sweep": {
         loop: [],
         path: [{ kind: "circle", center: [0, 0], radius: 2 }],
+        placement: {},
+      },
+      "solid.helixSweep": {
+        loop: [],
+        spine: { radius: "wide", pitch: 1, turns: 2, handedness: 1 },
         placement: {},
       },
       "solid.loft": { sections: [{ loop: [], z: "elevated" }], placement: {} },

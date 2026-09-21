@@ -64,6 +64,7 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   tightBooleanBounds: false,
   persistentTopology: false,
   sweep: false,
+  helix: false,
   loft: false,
   fillet: true,
   chamfer: true,

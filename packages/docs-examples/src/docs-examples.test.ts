@@ -18,6 +18,7 @@ import { runComponentsExample } from "./components/components";
 import { runCustomAdapterExample } from "./kernel/custom-adapter";
 import { KERNEL_CAPABILITY_ROWS } from "./kernel/capabilities";
 import { runFeaturesExample } from "./kernel/features";
+import { runHelixThreadExample } from "./kernel/helix-thread";
 import { runStepExample } from "./kernel/occt";
 import { runWorkersExample } from "./kernel/workers";
 import { runCustomToolExample } from "./core/custom-tool";
@@ -84,7 +85,7 @@ describe("guide example: history (transactions, undo, redo)", () => {
 describe("guide example: native format", () => {
   it("saves, reopens through the replaying parser, and resaves identically", () => {
     const summary = runNativeFormatExample();
-    expect(summary.formatVersion).toBe(2);
+    expect(summary.formatVersion).toBe(3);
     expect(summary.reopenedHoleMm).toBe(12);
     expect(summary.reopenedTransactionCount).toBe(3);
     expect(summary.validatorIssues).toBe(0);
@@ -316,5 +317,27 @@ describe("guide example: the fake kernel still runs the same tour", () => {
     expect(summary.boxVolumeMm3).toBe(6000);
     expect(summary.boxSurfaceAreaMm2).toBe(2200);
     expect(summary.negativeRadiusCode).toBe("kernel/invalid-length");
+  });
+});
+
+describe("guide example: helix and thread through the bridge (Phase 40)", () => {
+  it("executes the helix at the exact screw volume and the thread inside its band", () => {
+    const kernel = createFakeKernel();
+    const volumeOf = (solid: Parameters<typeof kernel.volume>[0]) =>
+      unwrapKernel(kernel.volume(solid), "volume");
+    const summary = runHelixThreadExample(kernel, volumeOf);
+    // The helix: the fake kernel's analytic screw solid is EXACT —
+    // 2π·turns·A·d̄ = 198π.
+    expect(summary.helixVolumeMm3).toBeCloseTo(summary.helixExactVolumeMm3, 6);
+    // The thread: the cut removes at most the full tool volume and at
+    // least the tool minus the end slivers (the derived containment
+    // band; the fake kernel's voxel boolean widens it a hair further).
+    expect(summary.threadVolumeMm3).toBeLessThan(summary.threadRodVolumeMm3);
+    expect(summary.threadVolumeMm3).toBeGreaterThan(
+      summary.threadRodVolumeMm3 - summary.threadToolVolumeMm3 * 1.2,
+    );
+    expect(summary.threadVolumeMm3).toBeLessThan(
+      summary.threadRodVolumeMm3 - summary.threadToolVolumeMm3 * 0.5,
+    );
   });
 });

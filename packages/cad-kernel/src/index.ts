@@ -43,6 +43,8 @@ export type {
   CylinderInput,
   FilletInput,
   GeometryKernel,
+  HelixSpineInput,
+  HelixSweepInput,
   KernelBounds,
   KernelError,
   KernelErrorCode,
@@ -78,6 +80,43 @@ export {
   FAKE_BOX_EDGE_TABLE,
   FAKE_BOX_FACE_TABLE,
 } from "./fake-kernel";
+
+export {
+  helixAngleAt,
+  helixHeightAt,
+  helixPointAt,
+  helixProfilePolygon,
+  helixRadiusAt,
+  helixScrewContains,
+  helixScrewVolume,
+  helixStations,
+  helixSweptAngle,
+  helixSweepProblem,
+  helixTransportPoint,
+  helixTurnsOverlap,
+  helixUntaperedLocalBounds,
+  PROFILE_STATION_ANGLE_RAD,
+} from "./helix-geometry";
+export type { CanonicalHelixSpine, HelixSweepProblem } from "./helix-geometry";
+
+export {
+  ISO_METRIC_THREAD_TABLE,
+  isoMetricThreadByDesignation,
+  isoThreadDepth,
+  isoThreadMinorDiameter,
+  isoThreadToolLoop,
+  isoThreadTriangleHeight,
+  planThreadCut,
+  REAL_THREAD_MODES,
+  rotationAligningZTo,
+  THREAD_MODES,
+  threadHelixSpine,
+} from "./thread-profile";
+export type {
+  IsoMetricThreadSize,
+  ThreadCutPlan,
+  ThreadMode,
+} from "./thread-profile";
 
 export { createSolidTag } from "./opaque";
 

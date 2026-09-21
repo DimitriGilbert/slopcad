@@ -55,6 +55,24 @@
  *   the FIRST section's workplane frame (the contract's one-placement
  *   rule); capability-gated on `loft` (Manifold declines). See
  *   `runLoftOperation`.
+ * - `helix` (Phase 40) — one SKETCH input (the meridian profile: sketch
+ *   `(x, y)` → helix `(radial, axial)` from the spine's start point, the
+ *   sweep path-mapping precedent — the sketch's workplane does not carry),
+ *   SIX parameter inputs in declared order (radius LENGTH, pitch LENGTH,
+ *   turns DIMENSIONLESS, handedness DIMENSIONLESS ±1, start angle ANGLE,
+ *   taper LENGTH), and an optional DATUM AXIS input (the spine's axis;
+ *   without one the spine runs on the world +z axis). See
+ *   `runHelixOperation`.
+ * - `thread` (Phase 40) — one FEATURE or BODY input (the target), FIVE
+ *   parameter inputs in declared order (major diameter LENGTH, pitch
+ *   LENGTH, thread length LENGTH, mode DIMENSIONLESS 1 external / 2
+ *   internal / 3 cosmetic, handedness DIMENSIONLESS ±1), and the axis — a
+ *   DATUM AXIS input or a DIMENSIONLESS world-axis selector (1 = X,
+ *   2 = Y, 3 = Z). The real modes compose `planThreadCut`'s shared ISO
+ *   tool geometry through `helixSweep` + subtract with the hole's no-op
+ *   post-condition; the cosmetic mode passes the target through
+ *   unchanged (annotation data, no geometry — every kernel runs it). See
+ *   `runThreadOperation`.
  * - `fillet` (Phase 26.5) — one FEATURE or BODY input (the target solid),
  *   one or more REFERENCE inputs (the edge selection: document reference
  *   records whose payloads are the Phase 22 persistent
@@ -212,6 +230,7 @@ import {
 
 import {
   type GeometryKernel,
+  type HelixSweepInput,
   type KernelBounds,
   type MirrorPlaneAxis,
   type ProfileExtrudeInput,
@@ -222,6 +241,7 @@ import {
   type KernelSolid,
   type SweepPathSegmentInput,
 } from "./contract";
+import { planThreadCut } from "./thread-profile";
 
 /** The feature kinds the bridge interprets as kernel operations. */
 export const BRIDGE_FEATURE_KINDS = [
@@ -237,6 +257,8 @@ export const BRIDGE_FEATURE_KINDS = [
   "revolve",
   "sweep",
   "loft",
+  "helix",
+  "thread",
   "fillet",
   "chamfer",
   "shell",
@@ -2977,6 +2999,578 @@ function runLoftOperation(
     : operationFailure(feature, result.error.code, result.error.message);
 }
 
+/**
+ * The helix feature kind's executor path (Phase 40) — the sweep's direct
+ * kernel call on the ANALYTIC spine: one SKETCH input (the meridian
+ * profile), SIX parameter inputs in declared order (radius, pitch, turns,
+ * handedness, start angle, taper), and an optional DATUM AXIS input (the
+ * spine's axis — Phase 39 reuse).
+ *
+ * ## Input layout
+ *
+ * - The sketch resolves through the profile seam for its LOOP only: sketch
+ *   `(x, y)` becomes the meridian `(u, v) = (radial, axial)` offset from
+ *   the spine's start point — coordinate identity, the sweep's path-mapping
+ *   precedent. The sketch's own workplane placement DOES NOT carry (the
+ *   helix frame is the spine's, not the drawing's): without a datum the
+ *   spine axis is the world +z axis through the world origin; with one it
+ *   is the datum's resolved line, the frame built by the deterministic
+ *   rotation carrying local +z onto the datum direction.
+ * - Parameters, by declared order: radius (LENGTH, strictly positive),
+ *   pitch (LENGTH, non-negative — handedness carries direction), turns
+ *   (DIMENSIONLESS, strictly positive; fractional legal), handedness
+ *   (DIMENSIONLESS, +1 right / −1 left), startAngle (ANGLE, any), taper
+ *   (LENGTH, the total signed radius change).
+ *
+ * ## Failure taxonomy
+ *
+ * - Layout / parameter kinds → `kernel/feature-input-invalid`.
+ * - Gate: a kernel without `helix` → `kernel/feature-input-invalid` naming
+ *   the kernel (the sweep gate's twin — never a half-built attempt).
+ * - Handedness outside ±1 → `kernel/feature-input-invalid`.
+ * - Profile resolution: the sketch domain's failure verbatim in
+ *   `data.profileCode`.
+ * - Kernel failures (spine degeneracy `kernel/invalid-helix`, profile
+ *   validity, axis crossing, the fake kernel's overlap subset) ride
+ *   through as `kernel/operation-failed` with the kernel code in `data`.
+ */
+function runHelixOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const sketchRefs: (FeatureInputRef & { readonly kind: "sketch" })[] = [];
+  const datumRefs: (FeatureInputRef & { readonly kind: "datum" })[] = [];
+  const parameterRefs: (FeatureInputRef & { readonly kind: "parameter" })[] =
+    [];
+  for (const ref of inputs) {
+    if (ref.kind === "sketch") sketchRefs.push(ref);
+    else if (ref.kind === "datum") datumRefs.push(ref);
+    else if (ref.kind === "parameter") parameterRefs.push(ref);
+  }
+  if (
+    sketchRefs.length !== 1 ||
+    parameterRefs.length !== 6 ||
+    datumRefs.length > 1 ||
+    sketchRefs.length + parameterRefs.length + datumRefs.length !==
+      inputs.length
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "helix" needs exactly one sketch input (the meridian profile) and six parameter inputs (radius, pitch, turns, handedness, start angle, taper), plus at most one datum axis input; it declares ${String(sketchRefs.length)} sketch(es), ${String(parameterRefs.length)} parameter(s), and ${String(datumRefs.length)} datum input(s).`,
+      ),
+    };
+  }
+  const sketchRef = sketchRefs[0];
+  if (sketchRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "helix" has a malformed input list.`,
+      ),
+    };
+  }
+  if (!kernel.capabilities.helix) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "helix" needs a helical sweep, but this kernel ("${kernel.id}") does not declare the helix capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a silent approximation.`,
+      ),
+    };
+  }
+  const resolvedProfile = readers.resolveProfile(sketchRef);
+  if (!resolvedProfile.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "helix" has an unresolvable meridian profile ("${sketchRef.id}"): ${resolvedProfile.error.message}`,
+        location: { primary: feature.id, related: [sketchRef.id] },
+        data: { profileCode: resolvedProfile.error.code },
+      },
+    };
+  }
+  const [
+    radiusRef,
+    pitchRef,
+    turnsRef,
+    handednessRef,
+    startAngleRef,
+    taperRef,
+  ] = parameterRefs;
+  if (
+    radiusRef === undefined ||
+    pitchRef === undefined ||
+    turnsRef === undefined ||
+    handednessRef === undefined ||
+    startAngleRef === undefined ||
+    taperRef === undefined
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "helix" has a malformed parameter list.`,
+      ),
+    };
+  }
+  const radius = readers.lengthParameter(radiusRef, "radius");
+  if (!radius.ok) return { ok: false, diagnostic: radius.diagnostic };
+  const pitch = readers.lengthParameter(pitchRef, "pitch");
+  if (!pitch.ok) return { ok: false, diagnostic: pitch.diagnostic };
+  const turns = readers.dimensionlessParameter(turnsRef, "turns");
+  if (!turns.ok) return { ok: false, diagnostic: turns.diagnostic };
+  const handedness = readers.dimensionlessParameter(
+    handednessRef,
+    "handedness",
+  );
+  if (!handedness.ok) {
+    return { ok: false, diagnostic: handedness.diagnostic };
+  }
+  const startAngle = readers.angleParameter(startAngleRef, "startAngle");
+  if (!startAngle.ok) {
+    return { ok: false, diagnostic: startAngle.diagnostic };
+  }
+  const taper = readers.lengthParameter(taperRef, "taper");
+  if (!taper.ok) return { ok: false, diagnostic: taper.diagnostic };
+  if (handedness.value !== 1 && handedness.value !== -1) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "helix" needs its handedness parameter to be +1 (right-handed) or -1 (left-handed); it carries ${String(handedness.value)}.`,
+        [handednessRef],
+      ),
+    };
+  }
+  // The helix frame: the datum axis when one is declared, else the world
+  // +z axis through the origin. The datum form reuses the Phase 39 seam
+  // (resolveDatumInput) and the deterministic rotation carrying local +z
+  // onto the resolved direction (the planHoleCutWithAxis construction).
+  let placement: ProfileExtrudeInput["placement"];
+  const datumRef = datumRefs[0];
+  if (datumRef === undefined) {
+    placement = {
+      rotation: { axis: [0, 0, 1], angle: angleValue(0, "rad") },
+      translation: { x: lengthValue(0), y: lengthValue(0), z: lengthValue(0) },
+    };
+  } else {
+    const resolvedDatum = resolveDatumInput(
+      feature,
+      datumRef,
+      readers.document,
+      readers.datumTopology,
+      "the helix axis",
+    );
+    if (!resolvedDatum.ok) {
+      return { ok: false, diagnostic: resolvedDatum.diagnostic };
+    }
+    if (
+      resolvedDatum.datumType !== "axis" ||
+      resolvedDatum.axis === undefined
+    ) {
+      return datumKindMismatch(
+        feature,
+        datumRef,
+        `Feature "${feature.id}" of kind "helix" needs a datum AXIS as its spine axis; the referenced datum defines ${resolvedDatum.datumType === "plane" ? "a plane" : resolvedDatum.datumType === "point" ? "a point" : "a coordinate system"}.`,
+      );
+    }
+    const turn = rotationFromTo(
+      [0, 0, 1],
+      resolvedDatum.axis.direction,
+      [0, 1, 0],
+    );
+    placement = {
+      rotation: {
+        axis: [turn.axis[0], turn.axis[1], turn.axis[2]],
+        angle: angleValue(turn.angle, "rad"),
+      },
+      translation: {
+        x: lengthValue(resolvedDatum.axis.origin[0]),
+        y: lengthValue(resolvedDatum.axis.origin[1]),
+        z: lengthValue(resolvedDatum.axis.origin[2]),
+      },
+    };
+  }
+  const helixInput: HelixSweepInput = {
+    loop: resolvedProfile.value.loop,
+    spine: {
+      radius: lengthValue(radius.mm),
+      pitch: lengthValue(pitch.mm),
+      turns: turns.value,
+      handedness: handedness.value,
+      startAngle: angleValue(startAngle.rad, "rad"),
+      taper: lengthValue(taper.mm),
+    },
+    placement,
+  };
+  const result = kernel.helixSweep(helixInput);
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
+/**
+ * The thread feature kind's executor path (Phase 40) — the hole's composed
+ * discipline on the helical tool: one FEATURE or BODY input (the target)
+ * plus FIVE parameter inputs in declared order (major diameter, pitch,
+ * thread length, mode, handedness) plus the axis — a DATUM AXIS input or a
+ * DIMENSIONLESS world-axis selector parameter (1 = X, 2 = Y, 3 = Z, the
+ * hole/mirror precedent; the revolve form-switch pattern picks the shape).
+ *
+ * ## Modes (the DIMENSIONLESS mode parameter)
+ *
+ * - `1` EXTERNAL — cuts the ISO grooves from a rod at the major diameter
+ *   (the shop convention: model the nominal, then thread it).
+ * - `2` INTERNAL — cuts the ISO ridge-shaped grooves from a hole wall out
+ *   to the major diameter (the tap's complement).
+ * - `3` COSMETIC — the annotation-driven mode: NO geometry (the target
+ *   passes through unchanged; the thread specification rides the feature's
+ *   own parameters), so every kernel runs it — no capability gate.
+ *
+ * ## Semantics
+ *
+ * The thread enters through the target's + face along the axis (the bounds
+ * projection — the hole precedent) and advances exactly `length` (its
+ * axial extent; `turns = length / pitch`, fractional final turns honest).
+ * The tool is `planThreadCut`'s ONE shared geometry (the bridge and the
+ * workbench's worker scene compose the identical cut), swept by the
+ * contract's `helixSweep` and subtracted. The hole's post-condition guard
+ * applies verbatim: a cut that removed nothing (a tool that misses the
+ * target — a major diameter entirely inside a thinner rod) refuses as a
+ * structured feature diagnostic, never a silent no-op.
+ *
+ * ## Failure taxonomy
+ *
+ * - Layout / parameter kinds → `kernel/feature-input-invalid`.
+ * - Dimensions: major diameter, pitch, or length non-positive →
+ *   `kernel/parameter-invalid` (the shared battery) — zero pitch, zero
+ *   radius, and non-positive length are the roadmap's named declines.
+ * - Mode outside 1/2/3 or handedness outside ±1 →
+ *   `kernel/feature-input-invalid`.
+ * - Gate: real modes on a kernel without `helix` →
+ *   `kernel/feature-input-invalid` naming the kernel.
+ * - Datum resolution failures ride the datum seam's own codes in
+ *   `data.datumCode`; a non-axis datum is the kind mismatch.
+ * - The no-op post-condition → `kernel/operation-failed` with the
+ *   kernel code in `data` (the diagnostic message names the trap).
+ */
+function runThreadOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const solidRefs: FeatureInputRef[] = [];
+  const datumRefs: (FeatureInputRef & { readonly kind: "datum" })[] = [];
+  const parameterRefs: (FeatureInputRef & { readonly kind: "parameter" })[] =
+    [];
+  for (const ref of inputs) {
+    if (
+      (ref.kind === "feature" || ref.kind === "body") &&
+      solidRefs.length === 0
+    ) {
+      solidRefs.push(ref);
+    } else if (ref.kind === "datum") {
+      datumRefs.push(ref);
+    } else if (ref.kind === "parameter") {
+      parameterRefs.push(ref);
+    } else {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "thread" needs one feature or body input (the target), five parameter inputs (major diameter, pitch, length, mode, handedness), and at most one datum axis input; a ${ref.kind} input was declared where the roles do not allow one.`,
+          [ref],
+        ),
+      };
+    }
+  }
+  const axisParameterCount = datumRefs.length === 0 ? 1 : 0;
+  if (
+    solidRefs.length !== 1 ||
+    parameterRefs.length !== 5 + axisParameterCount ||
+    datumRefs.length > 1
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thread" needs one target input, five parameter inputs (major diameter, pitch, length, mode, handedness)${datumRefs.length === 0 ? ", and a world-axis selector parameter" : ", and at most one datum axis input"}; it declares ${String(solidRefs.length)} target(s), ${String(parameterRefs.length)} parameter(s), and ${String(datumRefs.length)} datum input(s).`,
+      ),
+    };
+  }
+  const solidRef = solidRefs[0];
+  if (solidRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thread" has a malformed input list.`,
+      ),
+    };
+  }
+  // The five fixed parameters come first in declared order; the axis
+  // selector parameter (when present) is the LAST parameter input.
+  const [
+    diameterRef,
+    pitchRef,
+    lengthRef,
+    modeRef,
+    handednessRef,
+    selectorRef,
+  ] = parameterRefs;
+  if (
+    diameterRef === undefined ||
+    pitchRef === undefined ||
+    lengthRef === undefined ||
+    modeRef === undefined ||
+    handednessRef === undefined ||
+    (axisParameterCount === 1 && selectorRef === undefined)
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thread" has a malformed parameter list.`,
+      ),
+    };
+  }
+  const diameter = readers.lengthParameter(diameterRef, "majorDiameter");
+  if (!diameter.ok) return { ok: false, diagnostic: diameter.diagnostic };
+  const pitch = readers.lengthParameter(pitchRef, "pitch");
+  if (!pitch.ok) return { ok: false, diagnostic: pitch.diagnostic };
+  const threadLength = readers.lengthParameter(lengthRef, "length");
+  if (!threadLength.ok) {
+    return { ok: false, diagnostic: threadLength.diagnostic };
+  }
+  const mode = readers.dimensionlessParameter(modeRef, "mode");
+  if (!mode.ok) return { ok: false, diagnostic: mode.diagnostic };
+  const handedness = readers.dimensionlessParameter(
+    handednessRef,
+    "handedness",
+  );
+  if (!handedness.ok) {
+    return { ok: false, diagnostic: handedness.diagnostic };
+  }
+  if (diameter.mm <= 0) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "thread" needs a strictly positive major diameter (got ${String(diameter.mm)} mm).`,
+        [diameterRef],
+      ),
+    };
+  }
+  if (pitch.mm <= 0) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "thread" needs a strictly positive pitch (got ${String(pitch.mm)} mm) — a zero pitch is not a thread.`,
+        [pitchRef],
+      ),
+    };
+  }
+  if (threadLength.mm <= 0) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "thread" needs a strictly positive thread length (got ${String(threadLength.mm)} mm).`,
+        [lengthRef],
+      ),
+    };
+  }
+  if (mode.value !== 1 && mode.value !== 2 && mode.value !== 3) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thread" needs its mode parameter to be 1 (external), 2 (internal), or 3 (cosmetic); it carries ${String(mode.value)}.`,
+        [modeRef],
+      ),
+    };
+  }
+  if (handedness.value !== 1 && handedness.value !== -1) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thread" needs its handedness parameter to be +1 (right-handed) or -1 (left-handed); it carries ${String(handedness.value)}.`,
+        [handednessRef],
+      ),
+    };
+  }
+  const cosmetic = mode.value === 3;
+  // The cosmetic mode runs on EVERY kernel: it is annotation data riding
+  // the feature's own parameters — the target passes through unchanged.
+  const target = readers.solidInput(solidRef);
+  if (!target.ok) return { ok: false, diagnostic: target.diagnostic };
+  if (cosmetic) {
+    return { ok: true, solid: target.solid };
+  }
+  if (!kernel.capabilities.helix) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thread" needs a real helical thread cut, but this kernel ("${kernel.id}") does not declare the helix capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a silent approximation. The COSMETIC thread mode (3) runs on every kernel.`,
+      ),
+    };
+  }
+  // The axis: the datum's resolved line, or the world-axis selector's
+  // axis through the world origin.
+  let axisDirection: DatumVec3;
+  let axisThrough: DatumVec3;
+  if (datumRefs.length === 1) {
+    const datumRef = datumRefs[0];
+    if (datumRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "thread" has a malformed datum input.`,
+        ),
+      };
+    }
+    const resolvedDatum = resolveDatumInput(
+      feature,
+      datumRef,
+      readers.document,
+      readers.datumTopology,
+      "the thread axis",
+    );
+    if (!resolvedDatum.ok) {
+      return { ok: false, diagnostic: resolvedDatum.diagnostic };
+    }
+    if (
+      resolvedDatum.datumType !== "axis" ||
+      resolvedDatum.axis === undefined
+    ) {
+      return datumKindMismatch(
+        feature,
+        datumRef,
+        `Feature "${feature.id}" of kind "thread" needs a datum AXIS as its thread axis; the referenced datum defines ${resolvedDatum.datumType === "plane" ? "a plane" : resolvedDatum.datumType === "point" ? "a point" : "a coordinate system"}.`,
+      );
+    }
+    axisDirection = resolvedDatum.axis.direction;
+    axisThrough = resolvedDatum.axis.origin;
+  } else {
+    if (selectorRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "thread" has a malformed axis selector parameter.`,
+        ),
+      };
+    }
+    const selector = readers.dimensionlessParameter(selectorRef, "axis");
+    if (!selector.ok) {
+      return { ok: false, diagnostic: selector.diagnostic };
+    }
+    if (selector.value !== 1 && selector.value !== 2 && selector.value !== 3) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "thread" needs its axis selector parameter to be 1 (X), 2 (Y), or 3 (Z); it carries ${String(selector.value)}.`,
+          [selectorRef],
+        ),
+      };
+    }
+    axisDirection =
+      selector.value === 1
+        ? [1, 0, 0]
+        : selector.value === 2
+          ? [0, 1, 0]
+          : [0, 0, 1];
+    axisThrough = [0, 0, 0];
+  }
+  // Entry face: the target's bounds project onto the axis; the thread
+  // enters through the + face and advances IN (the hole precedent).
+  const bounds = kernel.bounds(target.solid);
+  if (!bounds.ok) {
+    return operationFailure(feature, bounds.error.code, bounds.error.message);
+  }
+  const entry = extremeBoundsProjection(bounds.value, axisDirection, true);
+  const advance: DatumVec3 = [
+    -axisDirection[0],
+    -axisDirection[1],
+    -axisDirection[2],
+  ];
+  const axisBase: DatumVec3 = [
+    axisThrough[0] + entry * axisDirection[0],
+    axisThrough[1] + entry * axisDirection[1],
+    axisThrough[2] + entry * axisDirection[2],
+  ];
+  const plan = planThreadCut({
+    majorDiameterMm: diameter.mm,
+    pitchMm: pitch.mm,
+    lengthMm: threadLength.mm,
+    mode: mode.value === 1 ? "external" : "internal",
+    handedness: handedness.value,
+    startAngleRad: 0,
+    advanceDirection: advance,
+    axisBaseMm: axisBase,
+  });
+  const tool = kernel.helixSweep(plan.tool);
+  if (!tool.ok) {
+    return operationFailure(feature, tool.error.code, tool.error.message);
+  }
+  const cut = kernel.subtract(target.solid, [tool.value]);
+  if (!cut.ok) {
+    return operationFailure(feature, cut.error.code, cut.error.message);
+  }
+  // The hole's no-op post-condition: a cut that removed nothing is the
+  // silent-miss trap — measure both sides and refuse.
+  const before = kernel.volume(target.solid);
+  const after = kernel.volume(cut.value);
+  if (!before.ok) {
+    return operationFailure(feature, before.error.code, before.error.message);
+  }
+  if (!after.ok) {
+    return operationFailure(feature, after.error.code, after.error.message);
+  }
+  if (after.value >= before.value) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelOperationFailed,
+        `Feature "${feature.id}" of kind "thread" cut nothing: the thread tool (major diameter ${String(diameter.mm)} mm) misses the target solid — the volume is unchanged. Check the thread's major diameter against the target's size, or its axis against the target's position.`,
+      ),
+    };
+  }
+  return { ok: true, solid: cut.value };
+}
+
 function runKernelOperation(
   kernel: GeometryKernel,
   feature: FeatureRecord,
@@ -3461,6 +4055,16 @@ function runKernelOperation(
       // parameters through ONE frame, capability-gated, one direct kernel
       // loft call (see runLoftOperation).
       return runLoftOperation(kernel, feature, readers);
+    case "helix":
+      // The Phase 40 helix: a meridian profile sketch + six spine
+      // parameters (+ optional datum axis), capability-gated, one direct
+      // helixSweep call (see runHelixOperation).
+      return runHelixOperation(kernel, feature, readers);
+    case "thread":
+      // The Phase 40 thread: the composed ISO-tool cut — planThreadCut's
+      // shared geometry swept by helixSweep and subtracted, with the
+      // no-op post-condition guard (see runThreadOperation).
+      return runThreadOperation(kernel, feature, readers);
     case "fillet":
       // The Phase 26.5 edge-cutting kind: the shared resolution battery
       // plus the fillet kernel call (see runEdgeCutOperation).

@@ -68,6 +68,19 @@ export {
   runFeaturesExample,
   type FeaturesExampleSummary,
 } from "./kernel/features";
+export {
+  HELIX_EXACT_VOLUME_MM3,
+  HELIX_PITCH_MM,
+  HELIX_RADIUS_MM,
+  HELIX_TURNS,
+  runHelixThreadExample,
+  THREAD_LENGTH_MM,
+  THREAD_MAJOR_MM,
+  THREAD_PITCH_MM,
+  THREAD_ROD_VOLUME_MM3,
+  THREAD_TOOL_VOLUME_MM3,
+  type HelixThreadExampleSummary,
+} from "./kernel/helix-thread";
 
 // -- IO -----------------------------------------------------------------------
 

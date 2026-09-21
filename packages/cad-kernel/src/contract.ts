@@ -215,6 +215,26 @@ export const KERNEL_ERROR_CODES = {
    * never silently approximate badly in place of it.
    */
   unsupportedOperation: "kernel/unsupported-operation",
+  /**
+   * A helix sweep's analytic spine was degenerate (Phase 40): a
+   * non-positive radius, a negative pitch (handedness carries direction —
+   * the advance per turn is a magnitude), a non-positive or non-finite
+   * turn count, a taper that drives the radius to zero anywhere along the
+   * spine, or the flat circle (zero pitch AND zero taper — a circle is a
+   * revolve/sweep, not a helix). Distinct from a malformed profile loop,
+   * which stays on the profile machinery's own `kernel/invalid-profile`.
+   */
+  invalidHelix: "kernel/invalid-helix",
+  /**
+   * A helix sweep's consecutive turns carry overlapping material (Phase
+   * 40): the profile's axial extent exceeds one pitch with more than one
+   * turn. The input is LEGAL — engines that build the union answer it with
+   * their own honest solid — but kernels whose analytic volume counts the
+   * swept image with multiplicity (the fake kernel's screw-solid model)
+   * decline with this code rather than silently overcounting: the
+   * documented per-kernel subset discipline.
+   */
+  helixTurnOverlap: "kernel/helix-turn-overlap",
   /** A boolean operand list was malformed (wrong operand count). */
   invalidOperands: "kernel/invalid-operands",
   /** A handle was not minted by this kernel instance (foreign or forged). */
@@ -577,6 +597,127 @@ export type SweepPathSegmentInput =
 export interface ProfileSweepInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly path: readonly SweepPathSegmentInput[];
+  readonly placement: ProfilePlacementInput;
+}
+
+/**
+ * The analytic helix spine of `helixSweep` (Phase 40): radius, pitch,
+ * turns, handedness, start angle, and optional taper, in the operation's
+ * LOCAL frame (axis = local +z, base center at the local origin).
+ *
+ * ## The parametrization (the convention the contract pins)
+ *
+ * `p(t) = R(t)·(cos θ(t)·x̂ + sin θ(t)·ŷ) + h(t)·ẑ` for `t ∈ [0, 1]` with
+ * `θ(t) = θ₀ + H·2π·turns·t`, `h(t) = pitch·turns·t`,
+ * `R(t) = radius + taper·t`: handedness `H` is `+1` for RIGHT-handed
+ * (advancing along +z while winding counter-clockwise about it, the
+ * right-hand rule) and `−1` for LEFT-handed; `pitch` is a magnitude (the
+ * axial advance per full turn, ≥ 0 — direction is handedness's job);
+ * `taper` is the TOTAL signed radius change over the whole spine (a cone
+ * angle in linear form), and `R(t)` must stay strictly positive — a
+ * radius that reaches zero is a cone tip, which a revolve builds, not a
+ * helix. A zero pitch with a non-zero taper is the flat spiral (radius
+ * linear in angle, z constant); zero pitch AND zero taper is a circle and
+ * rejects with `kernel/invalid-helix` — the planar sweep machinery owns
+ * circles.
+ */
+export interface HelixSpineInput {
+  /** The start radius `R₀` (strictly positive). */
+  readonly radius: LengthValue;
+  /** The axial advance per full turn (non-negative; 0 = a flat spiral). */
+  readonly pitch: LengthValue;
+  /** The number of turns (strictly positive; fractional turns are legal). */
+  readonly turns: number;
+  /** `+1` right-handed, `−1` left-handed (the sign on the angular term). */
+  readonly handedness: 1 | -1;
+  /** The start angle `θ₀` in any angle unit (canonicalized internally). */
+  readonly startAngle: AngleValue;
+  /** The TOTAL signed radius change over the spine (R(t) stays positive). */
+  readonly taper?: LengthValue;
+}
+
+/**
+ * Input of `helixSweep` (Phase 40): one closed profile loop drawn in the
+ * START MERIDIAN — the local xz plane through the spine's start point,
+ * loop coordinates `(u, v) = (radial offset, axial offset)` measured FROM
+ * that start point — carried along the analytic helix spine, then placed
+ * like every profile op.
+ *
+ * ## The meridian transport (the frame the contract pins, and why)
+ *
+ * The sweep carries the profile by the rigid motion
+ * `M_t(p(0) + u·r̂(θ₀) + v·ẑ) = p(t) + u·r̂(θ(t)) + v·ẑ` — a rotation
+ * about the spine axis by the swept angle, plus the translation carrying
+ * the start point onto the current spine point. This is THE thread
+ * tooth's frame: the ISO thread profile is specified in an AXIAL plane,
+ * and the meridian is that plane carried along the helix. It is
+ * drift-free BY CONSTRUCTION (one fixed rotation axis; no torsion-induced
+ * twist accumulates — the stability the plan demands, stated: the sweep
+ * uses the meridian frame, and the only rotation is about the spine
+ * axis). For comparison, the Frenet trihedron of an untapered helix
+ * equals this frame rotated by the CONSTANT lead angle about the radial
+ * direction — equally drift-free, but never coincident, because the
+ * Frenet SECTION is perpendicular to the tangent while the meridian
+ * never is: pipe builders (OCCT's `BRepOffsetAPI_MakePipeShell`) carry
+ * section-perpendicular profiles and therefore cannot produce the
+ * meridian solid exactly.
+ *
+ * ## The screw solid and the exact volume
+ *
+ * In cylindrical coordinates the result is the SCREW SOLID
+ * `{(ρ, φ, ζ) : (ρ − R(t), ζ − h(t)) ∈ P, θ(t) ≡ φ (mod 2π)}` — the
+ * material at every angle is the profile, screwed along the axis. The
+ * transport's Jacobian is `|J| = (R(t) + u)·|θ′|` (the taper rate drops
+ * out), so with `A` = profile area, `ū` = its centroid radial offset,
+ * `R̄ = R₀ + taper/2` the mean radius:
+ * `V = 2π·turns·A·(R̄ + ū)` — the multiplicity integral, which is the
+ * SET volume exactly while no two turns overlap (profile axial extent ≤
+ * pitch). Overlapping turns are legal input; the coverage matrix below
+ * says who builds them and who declines.
+ *
+ * ## Validation battery (before any kernel geometry)
+ *
+ * - Spine degeneracy → `kernel/invalid-helix` (see {@link HelixSpineInput}).
+ * - Profile validity → `kernel/invalid-profile` (the shared loop battery,
+ *   over the loop as drawn in the meridian).
+ * - Axis crossing → `kernel/profile-axis-crossing`: the transported
+ *   profile must keep material on ONE side of the axis
+ *   (`min_t (R(t) + u_min) ≥ 0`, touching legal — the revolve precedent);
+ *   wrapping through the axis sweeps an undefined solid.
+ * - Overlap → `kernel/helix-turn-overlap` (see the coverage matrix: a
+ *   PER-KERNEL subset rule, not a contract-wide rejection).
+ *
+ * ## Per-kernel fidelity (the coverage matrix)
+ *
+ * - OCCT: the exact meridian stations ruled and lofted between
+ *   (`BRepOffsetAPI_ThruSections` in ruled mode) — every station is the
+ *   exact transported profile, the ruled spans approximate the screw
+ *   motion between them; the volume sits inside the ruled band, which the
+ *   fixtures derive and pin (convergence-checked by doubling the station
+ *   rule). The exact analytic spine IS buildable on this binding
+ *   (`Geom2d_Line` on `Geom_CylindricalSurface`/`Geom_ConicalSurface`
+ *   parametric space, probed), but the pipe over it carries
+ *   section-perpendicular profiles — a provably different solid (the
+ *   meridian profile is never perpendicular to the tangent) — so the
+ *   ruled-station route is the honest exactness. `helix: true`.
+ * - Fake: the analytic screw solid — EXACT volume (the closed form
+ *   above), EXACT membership (the inverse-screw branch test), exact
+ *   untapered bounds, tapered bounds at the station resolution, and a
+ *   deterministic station soup at the shared deflection. Declines
+ *   OVERLAPPING turns with `kernel/helix-turn-overlap` (the multiplicity
+ *   integral would overcount — the documented subset, the fillet/chamfer
+ *   discipline). `helix: true`.
+ * - Manifold / JSCAD: `helix: false` — no helical sweep primitive
+ *   (probed/surveyed; the plan's ruling) — every call answers the
+ *   structured `kernel/unsupported-operation`, never a hand-rolled
+ *   approximation.
+ */
+export interface HelixSweepInput {
+  /** The closed profile loop, in the start meridian (see the module doc). */
+  readonly loop: readonly ProfileSegmentInput[];
+  /** The analytic spine parameters (see {@link HelixSpineInput}). */
+  readonly spine: HelixSpineInput;
+  /** The placement mapping the local frame into world space. */
   readonly placement: ProfilePlacementInput;
 }
 
@@ -1157,6 +1298,22 @@ export interface GeometryKernel {
    * `kernel/unsupported-operation`, never a silent bad approximation.
    */
   sweep(input: ProfileSweepInput): KernelResult<KernelSolid>;
+
+  /**
+   * Sweeps one closed profile loop along an ANALYTIC helix spine (Phase
+   * 40): the profile lies in the start meridian (the local xz plane
+   * through the spine's start point, `(u, v) = (radial, axial)` from that
+   * point), the meridian transport carries it — rotation about the spine
+   * axis by the swept angle plus the start-point translation, the thread
+   * tooth's frame, drift-free by construction — and the same `placement`
+   * composition maps the screw solid into world space. See
+   * {@link HelixSweepInput} for the parametrization, the validation
+   * battery, the exact screw-volume derivation, and the per-kernel
+   * coverage matrix — a kernel declaring `helix: false` answers every
+   * call with the structured `kernel/unsupported-operation`, never a
+   * silent approximation.
+   */
+  helixSweep(input: HelixSweepInput): KernelResult<KernelSolid>;
 
   /**
    * Lofts an ordered collection of at least two profile loops — each at

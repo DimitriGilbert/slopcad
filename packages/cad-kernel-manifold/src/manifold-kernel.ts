@@ -135,6 +135,7 @@ import {
   type ProfileExtrudeInput,
   type ProfileLoftInput,
   type ProfileRevolveInput,
+  type HelixSweepInput,
   type ProfileSweepInput,
   type ShellInput,
   type SphereInput,
@@ -192,6 +193,10 @@ import {
  *   (extrude's twistDegrees/scaleTop cover only single-polygon
  *   two-station specials), and every `loft` call answers the structured
  *   `kernel/unsupported-operation` — the sweep convention, applied again.
+ * - The Phase 40 helical sweep is NOT implemented (`helix: false`), the
+ *   sweep verdict on the analytic spine: the engine has no helix
+ *   constructor at all, so every `helixSweep` call answers the structured
+ *   `kernel/unsupported-operation`.
  * - The Phase 26.5 fillet is NOT implemented (`fillet: false`): the engine
  *   has no fillet operation (probed — `smoothOut` interpolates shading
  *   tangents across existing triangles, geometry unchanged until refine,
@@ -237,6 +242,7 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   tightBooleanBounds: true,
   persistentTopology: false,
   sweep: false,
+  helix: false,
   loft: false,
   fillet: false,
   chamfer: false,
@@ -850,6 +856,21 @@ export function manifoldKernelFromRuntime(
         kernelError(
           KERNEL_ERROR_CODES.unsupportedOperation,
           "sweep is unsupported by the Manifold kernel: the engine has no sweep or loft primitive (its profile constructors are extrude and revolve only, probed), and the adapter does not hand-roll tube meshes in their place.",
+        ),
+      );
+    },
+
+    helixSweep(input: HelixSweepInput): KernelResult<KernelSolid> {
+      // The sweep convention, applied to the analytic spine (Phase 40):
+      // the Manifold engine has no helical sweep primitive (probed — its
+      // constructors are extrude and revolve only), and hand-rolling a
+      // station mesh would be adapter-side meshing, not a kernel
+      // operation. Never a silent approximation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "helixSweep is unsupported by the Manifold kernel: the engine has no helical sweep primitive, and the adapter does not hand-roll station meshes in its place.",
         ),
       );
     },
