@@ -19,25 +19,31 @@ import type { CadDocument } from "@slopcad/cad-core";
 
 import { documentExtrudeRequest } from "./extrude";
 import { documentHoleSceneRequest } from "./hole";
+import { documentLoftRequest } from "./loft";
 import { documentRevolveRequest } from "./revolve";
+import { documentSweepRequest } from "./sweep";
 
 /**
  * The workbench scene kinds the engine's dispatch can follow (the same
  * vocabulary the engine's `activeScene` state and the native-document
- * bridge's reopen derivation use).
+ * bridge's reopen derivation use). Phase 38 adds the sweep and loft
+ * scenes.
  */
-export type WorkbenchSceneKind = "plate" | "extrude" | "revolve" | "hole";
+export type WorkbenchSceneKind =
+  "plate" | "extrude" | "revolve" | "sweep" | "loft" | "hole";
 
 /**
  * The highest scene the document still resolves, in the create actions'
  * precedence: the hole composition when every hole still cuts its base,
- * else the revolve, else the extrude, else the plate (which follows the
- * stored hole parameter and always resolves).
+ * else the loft, else the sweep, else the revolve, else the extrude, else
+ * the plate (which follows the stored hole parameter and always resolves).
  */
 export function highestResolvableScene(
   document: CadDocument,
 ): WorkbenchSceneKind {
   if (documentHoleSceneRequest(document) !== null) return "hole";
+  if (documentLoftRequest(document) !== null) return "loft";
+  if (documentSweepRequest(document) !== null) return "sweep";
   if (documentRevolveRequest(document) !== null) return "revolve";
   if (documentExtrudeRequest(document) !== null) return "extrude";
   return "plate";
@@ -59,8 +65,12 @@ export function honestSceneFallback(
   const resolved =
     activeScene === "hole"
       ? documentHoleSceneRequest(document) !== null
-      : activeScene === "revolve"
-        ? documentRevolveRequest(document) !== null
-        : documentExtrudeRequest(document) !== null;
+      : activeScene === "loft"
+        ? documentLoftRequest(document) !== null
+        : activeScene === "sweep"
+          ? documentSweepRequest(document) !== null
+          : activeScene === "revolve"
+            ? documentRevolveRequest(document) !== null
+            : documentExtrudeRequest(document) !== null;
   return resolved ? null : highestResolvableScene(document);
 }

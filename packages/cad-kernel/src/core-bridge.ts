@@ -42,6 +42,19 @@
  *   so `parameter.set` on either parameter re-drives the revolution, and
  *   the kernel's own axis validation (crossing rejection, sweep domain,
  *   direction normalizability) judges the resolved geometry.
+ * - `sweep` (Phase 38) — two SKETCH inputs: the PROFILE sketch (resolved
+ *   through the profile seam exactly like `extrude`) and the PATH sketch
+ *   (resolved through the caller-supplied {@link KernelPathResolver}, the
+ *   planar-XZ-contract mapping of the sketch's chain onto the profile
+ *   frame's local XZ plane). No dimension parameters — the path determines
+ *   the extent. Capability-gated on `sweep` (Manifold declines) before any
+ *   resolution. See `runSweepOperation`.
+ * - `loft` (Phase 38) — N SKETCH inputs (the ordered sections; the order IS
+ *   the loft direction) plus N LENGTH parameter inputs (each section's
+ *   station z, matched by declared position). All sections must resolve on
+ *   the FIRST section's workplane frame (the contract's one-placement
+ *   rule); capability-gated on `loft` (Manifold declines). See
+ *   `runLoftOperation`.
  * - `fillet` (Phase 26.5) — one FEATURE or BODY input (the target solid),
  *   one or more REFERENCE inputs (the edge selection: document reference
  *   records whose payloads are the Phase 22 persistent
@@ -195,8 +208,12 @@ import {
   type KernelBounds,
   type MirrorPlaneAxis,
   type ProfileExtrudeInput,
+  type ProfileLoftInput,
+  type ProfileLoftSectionInput,
   type ProfileRevolveInput,
+  type ProfileSweepInput,
   type KernelSolid,
+  type SweepPathSegmentInput,
 } from "./contract";
 
 /** The feature kinds the bridge interprets as kernel operations. */
@@ -211,6 +228,8 @@ export const BRIDGE_FEATURE_KINDS = [
   "translate",
   "extrude",
   "revolve",
+  "sweep",
+  "loft",
   "fillet",
   "chamfer",
   "shell",
@@ -246,6 +265,31 @@ export type KernelProfileResolver = (
   sketchId: SketchDocumentId,
 ) => KernelProfileResolution;
 
+/**
+ * The path a sketch resolves to, in the kernel contract's sweep vocabulary:
+ * the ordered chain of line/arc segments in the LOCAL XZ plane (the caller
+ * maps the sketch's workplane coordinates onto it — the planar-XZ contract's
+ * constraint mapping; the path sketch's own workplane placement does not
+ * carry, because {@link ProfileSweepInput} places the whole operation once,
+ * through the profile's frame). The bridge never imports the sketch domain —
+ * the resolver is caller-supplied, typically backed by cad-sketch's
+ * `resolveSweepPath`.
+ */
+export interface KernelResolvedPath {
+  readonly path: readonly SweepPathSegmentInput[];
+}
+
+/** The path resolver's outcome: a resolved chain or a structured failure. */
+export type KernelPathResolution = ParseResult<
+  KernelResolvedPath,
+  ParseFailure
+>;
+
+/** Resolves a document sketch record into a sweepable path chain. */
+export type KernelPathResolver = (
+  sketchId: SketchDocumentId,
+) => KernelPathResolution;
+
 /** Context the bridge executes against. */
 export interface KernelExecutorContext {
   /** The document whose features and parameters are being regenerated. */
@@ -263,6 +307,14 @@ export interface KernelExecutorContext {
    * feature with the failure's own code carried in `data.profileCode`.
    */
   readonly profiles: KernelProfileResolver;
+  /**
+   * Resolves the sketch records that `sweep` features consume as PATH
+   * chains ({@link KernelResolvedPath}). A context without one cannot run a
+   * sweep: every `sweep` feature fails with a structured diagnostic naming
+   * the missing seam instead of guessing a path. A resolver failure carries
+   * the sketch domain's own code in `data.pathCode`.
+   */
+  readonly paths?: KernelPathResolver;
   /**
    * The optional reference-resolution view that the topology-addressed
    * features' (`fillet`, `chamfer`, `shell`) references resolve against
@@ -708,6 +760,18 @@ export function createKernelFeatureExecutor(
         dimensionlessParameter(feature, ref, name),
       solidInput: (ref) => solidInput(feature, ref),
       resolveProfile: (ref) => context.profiles(ref.id),
+      resolvePath: (ref) =>
+        context.paths === undefined
+          ? ({
+              ok: false,
+              error: {
+                code: "kernel/feature-input-invalid",
+                message:
+                  "The executor context provides no path resolver; sweep features cannot resolve a path sketch.",
+                input: ref.id,
+              },
+            } as const)
+          : context.paths(ref.id),
       bodyIdOf: (ref) => {
         if (ref.kind === "body") return ref.id;
         if (ref.kind === "feature") return featureOutputs.get(ref.id);
@@ -742,6 +806,10 @@ interface InputReaders {
   readonly resolveProfile: (
     ref: FeatureInputRef & { readonly kind: "sketch" },
   ) => KernelProfileResolution;
+  /** Resolves a sketch ref as a sweep path chain (the sweep kinds' seam). */
+  readonly resolvePath: (
+    ref: FeatureInputRef & { readonly kind: "sketch" },
+  ) => KernelPathResolution;
   /**
    * The output body a feature/body ref addresses: a body ref names itself,
    * a feature ref its (single) output body, anything else `undefined`. The
@@ -1834,6 +1902,307 @@ function runHoleOperation(
   return { ok: true, solid: cut.value };
 }
 
+/**
+ * Canonical comparison tolerance for two profile placements standing for
+ * "the same workplane frame" (the loft sections' shared-frame rule): every
+ * placement value rides the dimensional model, so equality is a per-field
+ * comparison in the canonical units at double-precision noise.
+ */
+const PLACEMENT_EQUALITY_TOLERANCE = 1e-9;
+
+function placementMatches(
+  a: ProfileExtrudeInput["placement"],
+  b: ProfileExtrudeInput["placement"],
+): boolean {
+  const axisA = a.rotation.axis;
+  const axisB = b.rotation.axis;
+  const sameAxis =
+    axisA.length === axisB.length &&
+    axisA.every((component, index) => component === (axisB[index] ?? NaN));
+  if (
+    !sameAxis ||
+    Math.abs(
+      valueIn(a.rotation.angle, "rad") - valueIn(b.rotation.angle, "rad"),
+    ) > PLACEMENT_EQUALITY_TOLERANCE
+  ) {
+    return false;
+  }
+  return (
+    Math.abs(valueIn(a.translation.x, "mm") - valueIn(b.translation.x, "mm")) <=
+      PLACEMENT_EQUALITY_TOLERANCE &&
+    Math.abs(valueIn(a.translation.y, "mm") - valueIn(b.translation.y, "mm")) <=
+      PLACEMENT_EQUALITY_TOLERANCE &&
+    Math.abs(valueIn(a.translation.z, "mm") - valueIn(b.translation.z, "mm")) <=
+      PLACEMENT_EQUALITY_TOLERANCE
+  );
+}
+
+/**
+ * The sweep feature kind's executor path (Phase 38) — the DIRECT KERNEL CALL
+ * the geometry forces (a sweep is not expressible as the existing ops'
+ * composition): two SKETCH inputs, the PROFILE first and the PATH second,
+ * one gated call to the contract's `sweep` operation.
+ *
+ * ## Input layout
+ *
+ * Exactly two sketch inputs and nothing else — a sweep carries no dimension
+ * parameters (the path itself determines the extent, unlike the extrude's
+ * distance). The FIRST sketch resolves through the profile seam (loop +
+ * workplane placement); the SECOND resolves through the path seam
+ * ({@link KernelPathResolver}, the caller-supplied mapping of the sketch's
+ * chain onto the local XZ plane — the planar-XZ contract; see the type's
+ * documentation for the constraint mapping). Declared order IS the roles:
+ * the kind's own diagnostic says so when the layout is wrong.
+ *
+ * ## The capability gate (the mirror precedent)
+ *
+ * A kernel that has not declared `sweep` (Manifold: no sweep or loft
+ * primitive, probed) would answer the structured
+ * `kernel/unsupported-operation`; the bridge gates on the capability flag
+ * BEFORE any resolution and refuses as a feature diagnostic, so the
+ * unsupported verdict never pretends to be an input failure.
+ *
+ * ## Failure taxonomy
+ *
+ * - Layout: not exactly two sketch inputs → `kernel/feature-input-invalid`.
+ * - Gate: the kernel does not declare `sweep` →
+ *   `kernel/feature-input-invalid`.
+ * - Profile resolution: the sketch domain's own failure verbatim, carried
+ *   in `data.profileCode` (the extrude precedent).
+ * - Path resolution: the resolver's failure verbatim in `data.pathCode`,
+ *   or the structured missing-seam refusal when the context has no path
+ *   resolver at all.
+ * - Kernel failures (path validation: origin attachment, +z initial
+ *   tangent, G1 continuity, self-intersection, bend pinching) ride through
+ *   as `kernel/operation-failed` with the kernel code in `data`.
+ */
+function runSweepOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  if (inputs.length !== 2) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "sweep" needs exactly two sketch inputs: the profile sketch and the path sketch (a sweep carries no dimension parameters — the path determines the extent).`,
+      ),
+    };
+  }
+  const profileRef = inputs[0];
+  const pathRef = inputs[1];
+  if (profileRef === undefined || pathRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "sweep" has a malformed input list.`,
+      ),
+    };
+  }
+  if (profileRef.kind !== "sketch" || pathRef.kind !== "sketch") {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "sweep" needs two sketch inputs (profile first, path second); a ${profileRef.kind === "sketch" ? "path" : profileRef.kind} input was declared where the ${profileRef.kind === "sketch" ? "path" : "profile"} belongs.`,
+        profileRef.kind === "sketch" ? [pathRef] : [profileRef],
+      ),
+    };
+  }
+  // The capability gate: refuse structurally before any resolution, the
+  // mirror/pattern precedent — an unsupported sweep is a feature diagnostic
+  // naming the kernel, never a half-built attempt.
+  if (!kernel.capabilities.sweep) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "sweep" needs a swept solid, but this kernel ("${kernel.id}") does not declare the sweep capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a silent approximation.`,
+      ),
+    };
+  }
+  const resolvedProfile = readers.resolveProfile(profileRef);
+  if (!resolvedProfile.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "sweep" has an unresolvable sketch profile ("${profileRef.id}"): ${resolvedProfile.error.message}`,
+        location: { primary: feature.id, related: [profileRef.id] },
+        data: { profileCode: resolvedProfile.error.code },
+      },
+    };
+  }
+  const resolvedPath = readers.resolvePath(pathRef);
+  if (!resolvedPath.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "sweep" has an unresolvable sketch path ("${pathRef.id}"): ${resolvedPath.error.message}`,
+        location: { primary: feature.id, related: [pathRef.id] },
+        data: { pathCode: resolvedPath.error.code },
+      },
+    };
+  }
+  const sweepInput: ProfileSweepInput = {
+    loop: resolvedProfile.value.loop,
+    path: resolvedPath.value.path,
+    placement: resolvedProfile.value.placement,
+  };
+  const result = kernel.sweep(sweepInput);
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
+/**
+ * The loft feature kind's executor path (Phase 38) — the sweep's sibling
+ * direct kernel call: N SKETCH inputs (the ordered sections) and N LENGTH
+ * parameter inputs (each section's station z, in the SAME declared order),
+ * one gated call to the contract's `loft` operation.
+ *
+ * ## Input layout (roles off the refs' kinds, per-role declared order)
+ *
+ * Every `sketch` input is a section, in declared order (the order IS the
+ * loft direction — the contract never re-sorts stations); every `parameter`
+ * input is that section's station z (LENGTH, any value — the kernel's
+ * strictly-increasing rule judges the collection), matched by position.
+ * The counts must agree and be at least two.
+ *
+ * ## One frame (the placement rule)
+ *
+ * The contract's `ProfileLoftInput` carries ONE placement; the bridge uses
+ * the FIRST section's resolved workplane placement and requires every other
+ * section to resolve against the SAME frame (per-field canonical equality
+ * at double-precision noise) — a collection of sections on differing
+ * workplanes refuses with `kernel/feature-input-invalid` naming the first
+ * diverging section, instead of silently flattening them into one frame.
+ *
+ * ## Failure taxonomy
+ *
+ * - Layout: fewer than two sections, sketch/parameter count mismatch, or a
+ *   non-sketch/non-parameter ref in the list →
+ *   `kernel/feature-input-invalid`.
+ * - Gate: the kernel does not declare `loft` →
+ *   `kernel/feature-input-invalid` (the sweep gate's twin).
+ * - Section resolution: the sketch domain's failure verbatim in
+   `data.profileCode`, naming the section's 1-based index.
+ * - Station dimension: a non-length station → `kernel/parameter-invalid`
+ *   (the shared parameter battery).
+ * - Frame divergence: a section off the first section's workplane →
+ *   `kernel/feature-input-invalid`.
+ * - Kernel failures (member validity, vertex-count compatibility, station
+ *   ordering) ride through as `kernel/operation-failed` with the kernel
+ *   code in `data`.
+ */
+function runLoftOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const sketchRefs: (FeatureInputRef & { readonly kind: "sketch" })[] = [];
+  const parameterRefs: (FeatureInputRef & { readonly kind: "parameter" })[] =
+    [];
+  for (const ref of inputs) {
+    if (ref.kind === "sketch") sketchRefs.push(ref);
+    else if (ref.kind === "parameter") parameterRefs.push(ref);
+  }
+  if (
+    sketchRefs.length < 2 ||
+    parameterRefs.length !== sketchRefs.length ||
+    sketchRefs.length + parameterRefs.length !== inputs.length
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "loft" needs at least two sketch inputs (the ordered sections) and exactly as many length parameter inputs (each section's station z); it declares ${String(sketchRefs.length)} sketch(es) and ${String(parameterRefs.length)} parameter(s) across ${String(inputs.length)} input(s).`,
+      ),
+    };
+  }
+  if (!kernel.capabilities.loft) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "loft" needs a lofted solid, but this kernel ("${kernel.id}") does not declare the loft capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a silent approximation.`,
+      ),
+    };
+  }
+  const sections: ProfileLoftSectionInput[] = [];
+  let placement: ProfileExtrudeInput["placement"] | null = null;
+  for (let index = 0; index < sketchRefs.length; index += 1) {
+    const sketchRef = sketchRefs[index];
+    const stationRef = parameterRefs[index];
+    if (sketchRef === undefined || stationRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "loft" has a malformed input list at section ${String(index + 1)}.`,
+        ),
+      };
+    }
+    const resolvedProfile = readers.resolveProfile(sketchRef);
+    if (!resolvedProfile.ok) {
+      return {
+        ok: false,
+        diagnostic: {
+          severity: "error",
+          code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          message: `Feature "${feature.id}" of kind "loft" has an unresolvable section sketch ("${sketchRef.id}", section ${String(index + 1)}): ${resolvedProfile.error.message}`,
+          location: { primary: feature.id, related: [sketchRef.id] },
+          data: { profileCode: resolvedProfile.error.code },
+        },
+      };
+    }
+    if (placement === null) {
+      placement = resolvedProfile.value.placement;
+    } else if (!placementMatches(placement, resolvedProfile.value.placement)) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "loft" section ${String(index + 1)} ("${sketchRef.id}") resolves on a different workplane frame than section 1; a loft places ALL sections through ONE frame — re-sketch the sections on a shared workplane.`,
+          [sketchRef],
+        ),
+      };
+    }
+    const station = readers.lengthParameter(stationRef, "stationZ");
+    if (!station.ok) return { ok: false, diagnostic: station.diagnostic };
+    sections.push({
+      loop: resolvedProfile.value.loop,
+      z: lengthValue(station.mm),
+    });
+  }
+  const loftInput: ProfileLoftInput = {
+    sections,
+    placement: placement ?? {
+      rotation: { axis: [0, 0, 1], angle: angleValue(0, "rad") },
+      translation: { x: lengthValue(0), y: lengthValue(0), z: lengthValue(0) },
+    },
+  };
+  const result = kernel.loft(loftInput);
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
 function runKernelOperation(
   kernel: GeometryKernel,
   feature: FeatureRecord,
@@ -2201,6 +2570,16 @@ function runKernelOperation(
         ? { ok: true, solid: result.value }
         : operationFailure(feature, result.error.code, result.error.message);
     }
+    case "sweep":
+      // The Phase 38 sweep: two sketch inputs (profile, path) through the
+      // path seam, capability-gated, one direct kernel sweep call (see
+      // runSweepOperation).
+      return runSweepOperation(kernel, feature, readers);
+    case "loft":
+      // The Phase 38 loft: ordered section sketches + their station-z
+      // parameters through ONE frame, capability-gated, one direct kernel
+      // loft call (see runLoftOperation).
+      return runLoftOperation(kernel, feature, readers);
     case "fillet":
       // The Phase 26.5 edge-cutting kind: the shared resolution battery
       // plus the fillet kernel call (see runEdgeCutOperation).

@@ -328,6 +328,7 @@ export {
   profileSegmentPolyline,
   resolveExtrudeProfile,
   resolveProfileLoops,
+  resolveSweepPath,
 } from "./profile";
 export type {
   ProfileError,
@@ -335,6 +336,8 @@ export type {
   ProfilePoint,
   ProfileSegment,
   ResolvedProfile,
+  ResolvedSweepPath,
+  SweepPathSegment,
 } from "./profile";
 export {
   SPLINE_TESSELLATION_DEFLECTION_MM,

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   addBody,
   addDocumentParameter,
+  addDocumentSketch,
   applySessionTransaction,
   canRedo,
   canUndo,
@@ -385,6 +386,143 @@ describe("native documents round-trip exactly", () => {
 // ---------------------------------------------------------------------------
 // Version gating
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Phase 38: sweep and loft feature inputs persist in the open feature schema
+// ---------------------------------------------------------------------------
+
+describe("sweep and loft features persist natively", () => {
+  /** The sketch payload both fixture records carry (a canonical XY sketch). */
+  const sketchPayload = {
+    formatVersion: 1,
+    workplane: {
+      origin: { x: 0, y: 0, z: 0 },
+      normal: { x: 0, y: 0, z: 1 },
+      xAxis: { x: 1, y: 0, z: 0 },
+    },
+    entities: [],
+    constraints: [],
+  };
+
+  function sweepLoftNative(): NativeCadDocument {
+    let document = createDocument(createDocumentId("doc_native_sweep_loft"));
+    for (const [id, name] of [
+      [createSketchDocumentId("skd_profile"), "profile"],
+      [createSketchDocumentId("skd_path"), "path"],
+      [createSketchDocumentId("skd_s1"), "section 1"],
+      [createSketchDocumentId("skd_s2"), "section 2"],
+    ] as const) {
+      document = requireOk(
+        addDocumentSketch(document, { id, name, sketch: sketchPayload }),
+        `the ${name} sketch`,
+      ).document;
+    }
+    for (const [id, name] of [
+      [createParameterId("param_z0"), "loftZ0"],
+      [createParameterId("param_z1"), "loftZ1"],
+    ] as const) {
+      document = requireOk(
+        addDocumentParameter(document, { id, name, value: length(10) }),
+        `the ${name} parameter`,
+      ).document;
+    }
+    for (const [id, name] of [
+      [createBodyId("body_tube"), "tube"],
+      [createBodyId("body_loft"), "loft"],
+    ] as const) {
+      document = requireOk(
+        addBody(document, { id, name }),
+        `the ${name} body`,
+      ).document;
+    }
+    const session = createSession(document);
+    const committed = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          {
+            type: "feature.create",
+            id: createFeatureId("feat_sweep"),
+            kind: "sweep",
+            inputs: [
+              { kind: "sketch", id: createSketchDocumentId("skd_profile") },
+              { kind: "sketch", id: createSketchDocumentId("skd_path") },
+            ],
+            outputs: [createBodyId("body_tube")],
+          },
+          {
+            type: "feature.create",
+            id: createFeatureId("feat_loft"),
+            kind: "loft",
+            inputs: [
+              { kind: "sketch", id: createSketchDocumentId("skd_s1") },
+              { kind: "parameter", id: createParameterId("param_z0") },
+              { kind: "sketch", id: createSketchDocumentId("skd_s2") },
+              { kind: "parameter", id: createParameterId("param_z1") },
+            ],
+            outputs: [createBodyId("body_loft")],
+          },
+        ],
+      }),
+      "the sweep and loft feature commits",
+    );
+    const run = requireOk(
+      regenerate({
+        features: committed.document.features,
+        states: initialRegenerationStates(committed.document.features),
+        suppressed: [],
+        execute: () => ({ ok: true }),
+      }),
+      "the regeneration run",
+    );
+    return {
+      document: committed.document,
+      history: committed.history,
+      regeneration: run.states,
+      metadata: {},
+      rollback: null,
+    };
+  }
+
+  it("resaves byte-identically (the determinism law rides the open kinds)", () => {
+    const native = sweepLoftNative();
+    const text = stringifyNativeCadDocument(serializeNativeCadDocument(native));
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "the parse",
+    );
+    expect(stringifyNativeCadDocument(serializeNativeCadDocument(parsed))).toBe(
+      text,
+    );
+  });
+
+  it("preserves the feature kinds and their input layouts exactly", () => {
+    const native = sweepLoftNative();
+    const text = stringifyNativeCadDocument(serializeNativeCadDocument(native));
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "the parse",
+    );
+    const sweep = parsed.document.features.find(
+      (feature) => feature.kind === "sweep",
+    );
+    const loft = parsed.document.features.find(
+      (feature) => feature.kind === "loft",
+    );
+    expect(sweep?.inputs).toEqual([
+      { kind: "sketch", id: createSketchDocumentId("skd_profile") },
+      { kind: "sketch", id: createSketchDocumentId("skd_path") },
+    ]);
+    expect(loft?.inputs).toEqual([
+      { kind: "sketch", id: createSketchDocumentId("skd_s1") },
+      { kind: "parameter", id: createParameterId("param_z0") },
+      { kind: "sketch", id: createSketchDocumentId("skd_s2") },
+      { kind: "parameter", id: createParameterId("param_z1") },
+    ]);
+    expect(parsed.regeneration.get(createFeatureId("feat_sweep"))?.state).toBe(
+      "valid",
+    );
+  });
+});
 
 describe("native document parsing is version-gated", () => {
   it("rejects a future version predictably", () => {

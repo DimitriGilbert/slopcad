@@ -201,6 +201,16 @@ export interface SketchModeProps {
    * whose kernel carries no persistent topology never pretends to convert.
    */
   readonly topology?: SketchModeTopology;
+  /**
+   * The Phase 38 save-sketch action: commits the CURRENT sketch as a
+   * STANDALONE document sketch record (no feature) — the sketch pool the
+   * workbench's sweep and loft forms pick from. Optional: a host whose
+   * vocabulary needs no standalone sketches omits it and the control stays
+   * hidden instead of dead.
+   */
+  readonly onSaveSketch?: (submission: {
+    readonly sketch: SerializedSketch;
+  }) => void;
 }
 
 /** The default extrusion depth the action creates the parameter with (mm). */
@@ -231,6 +241,7 @@ export function SketchMode({
   extrudeDisabled = false,
   extrudeDisabledTitle,
   topology,
+  onSaveSketch,
 }: SketchModeProps): ReactElement {
   const [session, setSession] = useState(() =>
     createSketchSession(createWorkbenchSketch()),
@@ -419,6 +430,16 @@ export function SketchMode({
     if (onRevolve === undefined) return;
     onRevolve(resolution.value);
   }, [onRevolve, revolveAxis, session.sketch, solveState.solved]);
+
+  // The Phase 38 save action: serialize the CURRENT sketch (solved
+  // geometry when available, authored otherwise) and hand it to the host as
+  // a standalone document record. The button is hidden without the prop —
+  // a host with no use for standalone sketches shows no dead control.
+  const save = useCallback((): void => {
+    if (onSaveSketch === undefined) return;
+    const sketch = solveState.solved ?? session.sketch;
+    onSaveSketch({ sketch: serializeSketch(sketch) });
+  }, [onSaveSketch, session.sketch, solveState.solved]);
 
   // The dimension apply surface: the one write path for dimension edits.
   const editDimension = useCallback(
@@ -1002,6 +1023,23 @@ export function SketchMode({
         >
           Extrude
         </Button>
+        {/* The Phase 38 save action: commits the sketch as a standalone
+            document record for the sweep/loft forms to pick from. Rendered
+            only when the host carries the action; disabled on an empty
+            canvas — an empty record would resolve nothing. */}
+        {onSaveSketch === undefined ? null : (
+          <Button
+            data-testid="sketch-save"
+            disabled={session.sketch.entities.length === 0}
+            onClick={save}
+            size="xs"
+            title="Save this sketch to the document; sweep and loft pick their sketches from the saved pool."
+            type="button"
+            variant="outline"
+          >
+            Save
+          </Button>
+        )}
         {/* The revolve action: the axis selector (a workplane axis — the
             axis line runs through the workplane origin along it) pinned as
             authoring state, then the action button. The selected axis is

@@ -78,6 +78,12 @@ import {
   type CadCommandDescriptor,
 } from "@slopcad/ui/components/cad/cad-command-menu";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@slopcad/ui/components/dialog";
+import {
   CadExportDialog,
   CadImportDialog,
   type CadExportEntry,
@@ -93,17 +99,23 @@ import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 import type { RenderProjection } from "@slopcad/cad-core";
+import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
+import type { LoftSectionChoice } from "./loft";
 
 import { completionJson } from "../render-fixture/fixture-session";
-import { documentExtrudeRequest } from "./extrude";
-import { documentHoleSceneRequest } from "./hole";
-import { documentRevolveRequest } from "./revolve";
-import { SketchMode } from "./SketchMode";
+import {
+  CAD_FEATURE_FORM_LABELS,
+  LoftFeatureForm,
+  SweepFeatureForm,
+  type CadFeatureSketchOption,
+} from "./feature-forms";
 import {
   FeatureTimelineChips,
   FeatureTimelineSummary,
 } from "./feature-timeline-strip";
 import { WorkbenchMeasurementSection } from "./measurement-section";
+import { honestSceneFallback } from "./scene-fallback";
+import { SketchMode } from "./SketchMode";
 import { useWorkbenchEngine, type WorkbenchEngine } from "./workbench-engine";
 
 /** The viewport fills its workspace region at every width (the camera
@@ -189,6 +201,13 @@ export interface CadWorkbenchSlots {
 
 /** Props of {@link CompleteCadWorkbench}. */
 export interface CompleteCadWorkbenchProps {
+  /**
+   * The worker backend the engine's session boots. The default `"manifold"`
+   * is the boot state every established baseline pins; `"occt"` serves the
+   * sweep-capable composition (Phase 38 — sweep and loft are honest
+   * declines on Manifold). Boot-time configuration: remount to change it.
+   */
+  readonly backend?: FixtureSessionBackendId;
   /** Surface replacements, per named slot (see the composition contract). */
   readonly slots?: CadWorkbenchSlots;
   /**
@@ -241,11 +260,13 @@ const DRO_VALUE =
  * through the public CAD APIs.
  */
 export function CompleteCadWorkbench({
+  backend,
   io,
   rootId = "workbench-complete-root",
   slots = {},
 }: CompleteCadWorkbenchProps): ReactElement {
   const engine = useWorkbenchEngine({
+    backend,
     rootId,
     statusId: "workbench-complete-status",
     volumeId: "workbench-complete-volume",
@@ -271,6 +292,9 @@ export function CompleteCadWorkbench({
     handleExtrude,
     handleHole,
     handleRevolve,
+    handleSaveSketch,
+    handleSweep,
+    handleLoft,
   } = engine;
 
   // Dialog + palette state: composition-owned UI state (replaced entirely
@@ -278,6 +302,17 @@ export function CompleteCadWorkbench({
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  // The Phase 38 feature dialog: the sweep/loft create forms. One dialog,
+  // kind-switched; the last submission's structured refusal rides here (the
+  // parameter panel's apply-failure precedent) and clears on the next open.
+  const [featureDialog, setFeatureDialog] = useState<"sweep" | "loft" | null>(
+    null,
+  );
+  const [featureOutcome, setFeatureOutcome] = useState<
+    | { readonly ok: true }
+    | { readonly ok: false; readonly code: string; readonly message: string }
+    | null
+  >(null);
   const [importedFrames, setImportedFrames] = useState(0);
   // The settle lamp's honest state: the document whose pixels the last
   // settled frame actually rendered. A commit flips the lamp to "waiting"
@@ -414,29 +449,50 @@ export function CompleteCadWorkbench({
   // null, and leaving the old pixels up would be fabrication. When the
   // active scene no longer resolves, the dispatch falls back to the
   // deepest scene the document still resolves (the create actions'
-  // precedence: hole over revolve over extrude, then the plate). The
-  // effect only ever FALLS BACK — a newly created deeper scene wins
-  // through its action's own setActiveScene, never through this effect.
+  // precedence: hole over loft over sweep over revolve over extrude, then
+  // the plate). The effect only ever FALLS BACK — a newly created deeper
+  // scene wins through its action's own setActiveScene, never through
+  // this effect.
   const activeScene = engine.activeScene;
   const workbenchDocument = engine.documentApi.document;
+
+  // The sketch pool the sweep/loft forms pick from: every document sketch
+  // record, name verbatim. The create verbs stay disabled until the pool
+  // holds at least two sketches (sweep needs profile + path; a loft needs
+  // two sections minimum).
+  const sketchOptions: readonly CadFeatureSketchOption[] =
+    workbenchDocument.sketches.map((sketch) => ({
+      id: sketch.id,
+      name: sketch.name,
+    }));
+  const canAuthorSketchFeatures = sketchOptions.length >= 2;
+
+  /** Runs the sweep submission, surfacing the refusal and closing on success. */
+  const submitSweep = (profileId: string, pathId: string): void => {
+    const outcome = handleSweep(profileId, pathId);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the loft submission, surfacing the refusal and closing on success. */
+  const submitLoft = (sections: readonly LoftSectionChoice[]): void => {
+    const outcome = handleLoft(sections);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Opens one feature dialog with its outcome region reset. */
+  const openFeatureDialog = useCallback((kind: "sweep" | "loft"): void => {
+    setFeatureOutcome(null);
+    setFeatureDialog(kind);
+  }, []);
+
   useEffect(() => {
-    if (activeScene === "plate") return;
-    const resolved =
-      activeScene === "hole"
-        ? documentHoleSceneRequest(workbenchDocument) !== null
-        : activeScene === "revolve"
-          ? documentRevolveRequest(workbenchDocument) !== null
-          : documentExtrudeRequest(workbenchDocument) !== null;
-    if (resolved) return;
-    if (documentHoleSceneRequest(workbenchDocument) !== null) {
-      engine.setActiveScene("hole");
-    } else if (documentRevolveRequest(workbenchDocument) !== null) {
-      engine.setActiveScene("revolve");
-    } else if (documentExtrudeRequest(workbenchDocument) !== null) {
-      engine.setActiveScene("extrude");
-    } else {
-      engine.setActiveScene("plate");
-    }
+    // The shared, sweep/loft-aware fallback decision (./scene-fallback):
+    // `null` while the active scene still resolves.
+    const fallback = honestSceneFallback(workbenchDocument, activeScene);
+    if (fallback === null) return;
+    engine.setActiveScene(fallback);
   }, [activeScene, engine, workbenchDocument]);
 
   // The command list is derived once per relevant state identity; every
@@ -518,6 +574,26 @@ export function CompleteCadWorkbench({
         label: "Hole the last extrusion",
         run: handleHole,
       },
+      {
+        disabled: !canAuthorSketchFeatures,
+        group: "Workspace",
+        id: "sweep",
+        keywords: "sweep pipe path spine solid create",
+        label: "Sweep a profile along a path",
+        run: () => {
+          openFeatureDialog("sweep");
+        },
+      },
+      {
+        disabled: !canAuthorSketchFeatures,
+        group: "Workspace",
+        id: "loft",
+        keywords: "loft sections morph solid create",
+        label: "Loft ordered sections",
+        run: () => {
+          openFeatureDialog("loft");
+        },
+      },
     );
     if (io !== undefined) {
       list.push(
@@ -545,11 +621,13 @@ export function CompleteCadWorkbench({
     return list;
   }, [
     applied,
+    canAuthorSketchFeatures,
     clearSelection,
     handleHole,
     historyApi,
     holeBase,
     io,
+    openFeatureDialog,
     rollback,
     selectionApi.selected.length,
     setMode,
@@ -976,6 +1054,8 @@ export function CompleteCadWorkbench({
       data-export-dialog-open={String(exportDialogOpen)}
       data-export-error={ioSurface.exportError}
       data-export-held={heldExportsJson}
+      data-feature-dialog-kind={featureDialog ?? ""}
+      data-feature-dialog-open={String(featureDialog !== null)}
       data-feature-timeline={timelineJson}
       data-history={JSON.stringify({
         canUndo: historyApi.canUndo,
@@ -1177,6 +1257,45 @@ export function CompleteCadWorkbench({
         >
           Hole
         </Button>
+        {/* The Phase 38 feature verbs: sweep and loft author from the
+            document's SAVED sketches (at least two), so the buttons state
+            their enablement condition in the title instead of pretending. */}
+        <Button
+          className="max-xl:hidden"
+          data-testid="complete-sweep"
+          disabled={!canAuthorSketchFeatures}
+          onClick={() => {
+            openFeatureDialog("sweep");
+          }}
+          size="xs"
+          title={
+            canAuthorSketchFeatures
+              ? "Sweep a saved profile sketch along a saved path sketch."
+              : "Save two sketches first (draw one, press Save, repeat); sweep picks its profile and path from the saved pool."
+          }
+          type="button"
+          variant="outline"
+        >
+          Sweep
+        </Button>
+        <Button
+          className="max-xl:hidden"
+          data-testid="complete-loft"
+          disabled={!canAuthorSketchFeatures}
+          onClick={() => {
+            openFeatureDialog("loft");
+          }}
+          size="xs"
+          title={
+            canAuthorSketchFeatures
+              ? "Loft two or more saved section sketches, in order, at their stations."
+              : "Save two sketches first (draw one, press Save, repeat); loft picks its ordered sections from the saved pool."
+          }
+          type="button"
+          variant="outline"
+        >
+          Loft
+        </Button>
         {/* THE creation affordance: the one verb that adds geometry. The
             signal-amber border and mark make it the only tinted control in
             the row — the eye lands here first (the label stays foreground
@@ -1220,6 +1339,7 @@ export function CompleteCadWorkbench({
           }}
           onExtrude={handleExtrude}
           onRevolve={handleRevolve}
+          onSaveSketch={handleSaveSketch}
         />
       ) : null}
       {/* The workspace: an edge-to-edge machine bed. Tree dock flush
@@ -1327,6 +1447,63 @@ export function CompleteCadWorkbench({
         {statusBar}
       </div>
       {ioDialogs}
+      {/* The Phase 38 feature dialog: one kind-switched surface hosting the
+          Formedible sweep/loft forms; a structured refusal surfaces verbatim
+          in the error region and the dialog stays open (the import dialog's
+          failure discipline). The dialog MOUNTS ONLY WHEN OPEN — the io
+          dialogs' `if (!open) return null` discipline (see
+          `cad-io-dialog.tsx`): a closed Base UI dialog renders nothing, so
+          its Root never enters the server-rendered tree. That discipline is
+          load-bearing here: the dialog opens only from a client interaction,
+          and a server-mounted `Dialog.Root` (even closed) breaks the route's
+          SSR — Base UI's store-batching hooks ride the
+          `use-sync-external-store` shim, whose CJS factory re-requires
+          `react` at runtime (a second React instance beside the bundled one
+          the SSR renderer drives) → "Invalid hook call" → the whole route
+          degrades to the client-only shell. */}
+      {featureDialog !== null ? (
+        <Dialog
+          onOpenChange={(open) => {
+            if (!open) setFeatureDialog(null);
+          }}
+          open
+        >
+          <DialogContent
+            className="sm:max-w-md"
+            data-testid="feature-form-dialog"
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {featureDialog === "sweep"
+                  ? CAD_FEATURE_FORM_LABELS.sweepTitle
+                  : CAD_FEATURE_FORM_LABELS.loftTitle}
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-muted-foreground text-xs leading-snug">
+              {featureDialog === "sweep"
+                ? CAD_FEATURE_FORM_LABELS.sweepHint
+                : CAD_FEATURE_FORM_LABELS.loftHint}
+            </p>
+            {featureDialog === "sweep" ? (
+              <SweepFeatureForm
+                onSweep={submitSweep}
+                sketches={sketchOptions}
+              />
+            ) : (
+              <LoftFeatureForm onLoft={submitLoft} sketches={sketchOptions} />
+            )}
+            {featureOutcome !== null && !featureOutcome.ok ? (
+              <div
+                className="text-destructive border-destructive/40 rounded-sm border px-2 py-1.5 text-xs leading-4"
+                data-testid="feature-form-error"
+                role="alert"
+              >
+                {`${featureOutcome.code}: ${featureOutcome.message}`}
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

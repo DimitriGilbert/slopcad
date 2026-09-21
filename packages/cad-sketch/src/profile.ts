@@ -1146,6 +1146,237 @@ export function resolveExtrudeProfile(
 }
 
 /**
+ * One walk-oriented segment of a resolved sweep path (Phase 38): the line
+ * and arc primitives the kernel contract's path vocabulary carries, each
+ * oriented along the resolution walk (an entity drawn against the walk is
+ * reported traversed from its far endpoint back to its near one).
+ */
+export type SweepPathSegment =
+  | {
+      readonly kind: "line";
+      readonly entity: SketchEntityId;
+      readonly start: ProfilePoint;
+      readonly end: ProfilePoint;
+    }
+  | {
+      readonly kind: "arc";
+      readonly entity: SketchEntityId;
+      readonly center: ProfilePoint;
+      readonly radius: number;
+      /**
+       * The walk's start angle (rad): the entity's own CCW start when the
+       * walk runs forward, its CCW end when the walk reverses the arc.
+       */
+      readonly startAngle: number;
+      /**
+       * The walk's end angle (rad): `startAngle + walkSweep`, where
+       * {@link SweepPathSegmentArc.walkSweep} carries the sign.
+       */
+      readonly endAngle: number;
+      /**
+       * The SIGNED walk sweep (rad, magnitude in (0, 2π]): positive when the
+       * walk runs the arc counter-clockwise (the entity's own direction),
+       * negative when the walk reverses it.
+       */
+      readonly walkSweep: number;
+    };
+
+/** The resolved sweep path of a sketch: one ordered open (or closed) chain. */
+export interface ResolvedSweepPath {
+  readonly segments: readonly SweepPathSegment[];
+  /**
+   * Whether the chain closes on itself (the walk's end meets its start) —
+   * the kernel contract's closed ring path, swept capped at nothing.
+   */
+  readonly closed: boolean;
+}
+
+/** The chain-walk of the open (chainable) segments, shared by both resolvers. */
+function buildChains(segments: readonly ProfileSegment[]): readonly Chain[] {
+  const open = segments.filter(
+    (segment) => segment.kind !== "circle" && segment.kind !== "ellipse",
+  );
+  const remaining: ProfileSegment[] = [...open];
+  const chains: Chain[] = [];
+  while (remaining.length > 0) {
+    const seed = remaining.shift();
+    if (seed === undefined) break;
+    let chain: Chain = {
+      entries: [{ segment: seed, reversed: false }],
+      start: segmentStart(seed),
+      end: segmentEnd(seed),
+    };
+    // Extend forward and backward until neither end accepts a new segment
+    // (the chain is done) or the ends meet (the chain closed).
+    let extended = true;
+    while (extended && !samePoint(chain.start, chain.end)) {
+      extended = false;
+      for (let index = 0; index < remaining.length; index += 1) {
+        const candidate = remaining[index];
+        if (candidate === undefined) continue;
+        const next = extendChain(chain, candidate);
+        if (next !== null) {
+          chain = next;
+          remaining.splice(index, 1);
+          extended = true;
+          break;
+        }
+      }
+    }
+    chains.push(chain);
+  }
+  return chains;
+}
+
+/**
+ * The sweep-path form of chain resolution (Phase 38): exactly one connected
+ * chain of LINE and ARC entities — the kernel contract's path vocabulary —
+ * in walk order, open or closed (a closed chain is the contract's ring
+ * path). This is the open-chain sibling of {@link resolveExtrudeProfile}:
+ * where profile resolution REFUSES an open chain (`sketch/profile-open-chain`),
+ * path resolution is its consumer.
+ *
+ * Structured failures (persisted-data stable, `sketch/path-*`):
+ *
+ * - `sketch/path-empty` — no path-capable geometry at all.
+ * - `sketch/path-unsupported-entity` — a boundary entity whose resolved
+ *   segment kind the path vocabulary cannot carry (circle, ellipse family,
+ *   spline — name the entity); polygons and slots participate through their
+ *   exact line/arc constituents, construction geometry is excluded.
+ * - `sketch/path-degenerate` — a zero-length line segment.
+ * - `sketch/path-multiple-chains` — the entities resolve to more than one
+ *   connected chain (a path is one connected spine; the count rides the
+ *   failure data).
+ *
+ * The walk's orientation is the path's direction: consumers map the
+ * returned segments' workplane coordinates onto the kernel contract's local
+ * XZ plane (see the bridge and workbench sweep modules), where the walk
+ * start must sit at the local origin with its first tangent along +z — the
+ * kernel validates those rules itself; this resolver owns only sketch-side
+ * structure.
+ */
+export function resolveSweepPath(
+  entities: readonly SketchEntity[],
+): Result<ResolvedSweepPath> {
+  const allSegments: ProfileSegment[] = [];
+  const unsupported: SketchEntityId[] = [];
+  for (const entity of entities) {
+    const segments = segmentsOf(entity);
+    if (segments.length === 0) continue;
+    allSegments.push(...segments);
+    for (const segment of segments) {
+      if (segment.kind !== "line" && segment.kind !== "arc") {
+        if (!unsupported.includes(segment.entity)) {
+          unsupported.push(segment.entity);
+        }
+      }
+    }
+  }
+  if (allSegments.length === 0) {
+    return profileError(
+      SKETCH_DIAGNOSTIC_CODES.pathEmpty,
+      "The sketch has no path-capable geometry: a sweep path needs a connected chain of lines and arcs (construction geometry is excluded).",
+    );
+  }
+  if (unsupported.length > 0) {
+    return profileError(
+      SKETCH_DIAGNOSTIC_CODES.pathUnsupportedEntity,
+      `Entity "${String(
+        unsupported[0],
+      )}" resolves to a segment kind the sweep-path vocabulary cannot carry (circle, ellipse family, or spline); a path is a chain of lines and arcs.`,
+      unsupported,
+    );
+  }
+  for (const segment of allSegments) {
+    if (
+      segment.kind === "line" &&
+      Math.hypot(
+        segment.end.x - segment.start.x,
+        segment.end.y - segment.start.y,
+      ) <= PROFILE_ENDPOINT_TOLERANCE_MM
+    ) {
+      return profileError(
+        SKETCH_DIAGNOSTIC_CODES.pathDegenerate,
+        `Line entity "${String(segment.entity)}" has zero length; a sweep path cannot pass through it.`,
+        [segment.entity],
+      );
+    }
+  }
+  const chains = buildChains(allSegments);
+  if (chains.length !== 1) {
+    return profileError(
+      SKETCH_DIAGNOSTIC_CODES.pathMultipleChains,
+      `The sketch resolves to ${String(chains.length)} disconnected chains; a sweep path is ONE connected chain.`,
+      [],
+      { chains: chains.length },
+    );
+  }
+  const chain = chains[0];
+  if (chain === undefined) {
+    return profileError(
+      SKETCH_DIAGNOSTIC_CODES.pathEmpty,
+      "The sketch resolved no path chain.",
+    );
+  }
+  const segments: SweepPathSegment[] = chain.entries.map((entry) => {
+    if (entry.segment.kind === "line") {
+      const line = entry.segment;
+      return entry.reversed
+        ? {
+            kind: "line",
+            entity: line.entity,
+            start: line.end,
+            end: line.start,
+          }
+        : {
+            kind: "line",
+            entity: line.entity,
+            start: line.start,
+            end: line.end,
+          };
+    }
+    const candidate = entry.segment;
+    // The unsupported kinds were refused above; this guard narrows the
+    // remaining union to the arc member and answers structurally if a
+    // future segment kind ever reaches the walk.
+    if (candidate.kind !== "arc") {
+      throw new RangeError(
+        `Entity "${String(candidate.entity)}" reached the path walk with an unsupported segment kind "${candidate.kind}".`,
+      );
+    }
+    const arc = candidate;
+    const sweep = arcSegmentSweep(arc);
+    if (!entry.reversed) {
+      return {
+        kind: "arc",
+        entity: arc.entity,
+        center: arc.center,
+        radius: arc.radius,
+        startAngle: arc.startAngle,
+        endAngle: canonicalAngle(arc.startAngle + sweep),
+        walkSweep: sweep,
+      };
+    }
+    // Reversed walk: the arc is traversed from its CCW end back to its CCW
+    // start — the same circle with the negative signed sweep.
+    const startAngle = canonicalAngle(arc.startAngle + sweep);
+    return {
+      kind: "arc",
+      entity: arc.entity,
+      center: arc.center,
+      radius: arc.radius,
+      startAngle,
+      endAngle: canonicalAngle(startAngle - sweep),
+      walkSweep: -sweep,
+    };
+  });
+  return {
+    ok: true,
+    value: { segments, closed: samePoint(chain.start, chain.end) },
+  };
+}
+
+/**
  * The full-circle sweep of a circle entity as a loop segment's angular
  * extent (2π); an arc's sweep is its own. Ellipse-family and spline
  * segments carry no circular sweep (their area path is the closed-form /

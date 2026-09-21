@@ -100,6 +100,8 @@ type SolidProducingOperation =
   | "solid.createCone"
   | "solid.extrude"
   | "solid.revolve"
+  | "solid.sweep"
+  | "solid.loft"
   | "solid.union"
   | "solid.subtract"
   | "solid.intersect"
@@ -350,6 +352,32 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             : {
                 status: "failed",
                 error: kernelFailure("solid.revolve", result.error),
+              };
+        }
+        case "solid.sweep": {
+          const result = kernel.sweep(request.input);
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.sweep",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.sweep", result.error),
+              };
+        }
+        case "solid.loft": {
+          const result = kernel.loft(request.input);
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.loft",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.loft", result.error),
               };
         }
         case "solid.union": {

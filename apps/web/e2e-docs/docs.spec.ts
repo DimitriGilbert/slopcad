@@ -18,10 +18,11 @@ test("every live example reaches ok with the documented values", async ({
   page,
 }) => {
   const statuses = page.getByTestId("docs-example-status");
-  await expect(statuses).toHaveCount(8);
-  // The four async cards boot the real Manifold WASM kernel in-process;
-  // every card — sync and async — must end at "ok".
-  for (let index = 0; index < 8; index += 1) {
+  // Phase 36 added the sketch-vocabulary card: nine live examples today.
+  await expect(statuses).toHaveCount(9);
+  // The async cards boot the real Manifold WASM kernel in-process; every
+  // card — sync and async — must end at "ok".
+  for (let index = 0; index < 9; index += 1) {
     await expect(statuses.nth(index)).toHaveText("ok", { timeout: 30_000 });
   }
 });

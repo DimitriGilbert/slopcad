@@ -62,6 +62,10 @@ export const SKETCH_DIAGNOSTIC_CODES = {
   profileDegenerate: "sketch/profile-degenerate",
   profileSelfIntersecting: "sketch/profile-self-intersecting",
   profileMultipleLoops: "sketch/profile-multiple-loops",
+  pathEmpty: "sketch/path-empty",
+  pathDegenerate: "sketch/path-degenerate",
+  pathUnsupportedEntity: "sketch/path-unsupported-entity",
+  pathMultipleChains: "sketch/path-multiple-chains",
 } as const;
 
 export type SketchDiagnosticCode =

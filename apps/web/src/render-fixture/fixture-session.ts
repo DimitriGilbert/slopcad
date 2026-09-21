@@ -19,12 +19,15 @@ import {
 import {
   createStaleResultCoordinator,
   bootWorkerChannel,
+  WorkerRequestFailure,
 } from "@slopcad/cad-kernel";
 import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
 import type {
   ExtrudeSceneRequest,
   HoleSceneRequest,
+  LoftSceneRequest,
   RevolveSceneRequest,
+  SweepSceneRequest,
 } from "../worker-fixture/plate-scene-extra";
 
 import {
@@ -34,6 +37,8 @@ import {
 } from "./plate-render-scene";
 import { computeExtrudeScene } from "../worker-fixture/extrude-scene";
 import { computeRevolveScene } from "../worker-fixture/revolve-scene";
+import { computeSweepScene } from "../worker-fixture/sweep-scene";
+import { computeLoftScene } from "../worker-fixture/loft-scene";
 import { computeHoleScene } from "../worker-fixture/hole-scene";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
@@ -59,6 +64,23 @@ export interface RenderFixtureSession {
    * visible scene (the same bounds-derived camera the extrude scene uses).
    */
   dispatchRevolve(request: RevolveSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 38 sweep computation: the REAL kernel executes
+   * `solid.sweep` on the sketch-resolved profile along the mapped XZ path
+   * in the worker, and the settled solid's measurement + projection become
+   * the visible scene (the same bounds-derived camera the extrude scene
+   * uses). On a kernel without the sweep capability the structured
+   * `kernel/unsupported-operation` lands on the session's error surface.
+   */
+  dispatchSweep(request: SweepSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 38 loft computation: the REAL kernel executes
+   * `solid.loft` on the ordered sketch-resolved sections at their stations
+   * in the worker, and the settled solid's measurement + projection become
+   * the visible scene. On a kernel without the loft capability the
+   * structured `kernel/unsupported-operation` lands on the error surface.
+   */
+  dispatchLoft(request: LoftSceneRequest, bodyId: string): void;
   /**
    * Dispatches the Phase 26.10 hole computation: the REAL kernel composes
    * the base extrusion, one planned tool per hole, and the subtract in the
@@ -168,6 +190,98 @@ export function faceAnchorSurface(renderState: PlateRenderState): string {
 }
 
 /**
+ * The worker backend a fixture session boots. The default (and the boot
+ * every established fixture and baseline pins) is the Manifold kernel; the
+ * OCCT option exists for compositions whose feature vocabulary needs the
+ * BREP-exact kernels — sweep and loft (Phase 38) are honest declines on
+ * Manifold, so the sweep-capable complete-workbench route boots OCCT.
+ */
+export type FixtureSessionBackend = "manifold" | "occt";
+
+/** The feature-backed scene kinds a dispatch can carry a verdict for. */
+export type FeatureSceneKind =
+  "extrude" | "revolve" | "sweep" | "loft" | "hole";
+
+/**
+ * One feature-backed scene dispatch's worker verdict — the seam a host uses
+ * to map the KERNEL's build verdict into the feature's timeline status (the
+ * document-data executor alone cannot know a kernel declined an operation).
+ */
+export type SceneDispatchOutcome =
+  | {
+      /** The worker built the scene's solid. */
+      readonly ok: true;
+      /** The scene that settled. */
+      readonly scene: FeatureSceneKind;
+      /** The dispatched feature's output body. */
+      readonly bodyId: string;
+    }
+  | {
+      /** The worker refused or failed the build. */
+      readonly ok: false;
+      /** The scene that failed. */
+      readonly scene: FeatureSceneKind;
+      /** The dispatched feature's output body. */
+      readonly bodyId: string;
+      /** The verbatim error-surface text (so a chip can never contradict it). */
+      readonly text: string;
+    };
+
+/**
+ * The failure text the session surfaces: the protocol code, the kernel
+ * code when the failure carries one, then the message — the io page's
+ * `workerErrorText` format, so a structured kernel decline (e.g. the
+ * Manifold sweep's `kernel/unsupported-operation`) is machine-readable on
+ * the error surface.
+ */
+function failureText(failure: unknown): string {
+  if (failure instanceof WorkerRequestFailure) {
+    const kernelCode = failure.error.data?.kernelCode;
+    return kernelCode === undefined
+      ? `${failure.error.code}: ${failure.error.message}`
+      : `${failure.error.code} [${String(kernelCode)}]: ${failure.error.message}`;
+  }
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
+/**
+ * The structured outcome of one failed feature-scene dispatch: the error
+ * surface's exact text (protocol code, bracketed kernel code, message)
+ * riding verbatim — the host's timeline diagnostic repeats it word for
+ * word, so the chip and the error surface can never disagree.
+ */
+function sceneDispatchFailure(
+  scene: FeatureSceneKind,
+  bodyId: string,
+  failure: unknown,
+): SceneDispatchOutcome {
+  return {
+    ok: false,
+    scene,
+    bodyId,
+    text: failureText(failure),
+  };
+}
+
+/** Options of {@link bootRenderFixtureSession}. */
+export interface BootRenderFixtureSessionOptions {
+  /**
+   * The worker backend to boot; the default `"manifold"` is the
+   * boot state every established baseline pins (byte-determinism).
+   */
+  readonly backend?: FixtureSessionBackend;
+  /**
+   * Receives every feature-backed scene dispatch's worker verdict —
+   * success when the scene settles, the structured refusal when the
+   * kernel declines (e.g. Manifold's `kernel/unsupported-operation` for
+   * sweep/loft). The host maps the verdict onto the feature's timeline
+   * status, so a refusal the error surface shows cannot hide behind a
+   * "valid" chip (Phase 38's capability honesty).
+   */
+  readonly onSceneOutcome?: (outcome: SceneDispatchOutcome) => void;
+}
+
+/**
  * Boots a fixture's worker session (client-only, called from an effect).
  * `onApplied` receives every render state that became the visible one —
  * in application order, newest-wins through the stale-result coordinator —
@@ -177,16 +291,29 @@ export function faceAnchorSurface(renderState: PlateRenderState): string {
 export function bootRenderFixtureSession(
   targets: FixtureSurfaceTargets,
   onApplied: (state: PlateRenderState, revision: number) => void,
+  options: BootRenderFixtureSessionOptions = {},
 ): RenderFixtureSession {
   let errorText = "";
   // The crash-settling boot (Phase 35 hardening): a dead thread settles
   // in-flight requests (worker/transport-closed) instead of hanging, and
   // the crash lands on the same error surface as computation failures.
+  // The worker URLs stay INLINE string literals per branch — the bundler
+  // statically rewrites exactly that form into its worker chunks, so a
+  // variable indirection here would silently break the worker emission.
+  const backend = options.backend ?? "manifold";
   const boot = bootWorkerChannel(
-    new Worker(
-      new URL("../worker-fixture/manifold-worker-entry.ts", import.meta.url),
-      { type: "module" },
-    ),
+    backend === "occt"
+      ? new Worker(
+          new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
+          { type: "module" },
+        )
+      : new Worker(
+          new URL(
+            "../worker-fixture/manifold-worker-entry.ts",
+            import.meta.url,
+          ),
+          { type: "module" },
+        ),
     (failure) => {
       errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
       writeSurface();
@@ -261,6 +388,30 @@ export function bootRenderFixtureSession(
     if (visible !== null) onApplied(visible.state, visible.revision);
   }
 
+  /** Reports one feature-backed dispatch's verdict (the timeline seam). */
+  function settleWithVerdict(
+    scene: FeatureSceneKind,
+    bodyId: string,
+  ): () => void {
+    return () => {
+      settle();
+      options.onSceneOutcome?.({ ok: true, scene, bodyId });
+    };
+  }
+
+  /** The failure path of one feature-backed dispatch, verdict included. */
+  function failWithVerdict(
+    scene: FeatureSceneKind,
+    bodyId: string,
+  ): (failure: unknown) => void {
+    return (failure: unknown) => {
+      counters.settled += 1;
+      errorText = failureText(failure);
+      writeSurface();
+      options.onSceneOutcome?.(sceneDispatchFailure(scene, bodyId, failure));
+    };
+  }
+
   return {
     dispatch(holeDiameterMm: number): void {
       counters.dispatched += 1;
@@ -273,8 +424,7 @@ export function bootRenderFixtureSession(
         .update((context) => computePlateRenderState(context, holeDiameterMm))
         .then(settle, (failure: unknown) => {
           counters.settled += 1;
-          errorText =
-            failure instanceof Error ? failure.message : String(failure);
+          errorText = failureText(failure);
           writeSurface();
         });
     },
@@ -289,12 +439,10 @@ export function bootRenderFixtureSession(
             bodyId,
           ),
         )
-        .then(settle, (failure: unknown) => {
-          counters.settled += 1;
-          errorText =
-            failure instanceof Error ? failure.message : String(failure);
-          writeSurface();
-        });
+        .then(
+          settleWithVerdict("extrude", bodyId),
+          failWithVerdict("extrude", bodyId),
+        );
     },
     dispatchRevolve(request: RevolveSceneRequest, bodyId: string): void {
       counters.dispatched += 1;
@@ -307,12 +455,10 @@ export function bootRenderFixtureSession(
             bodyId,
           ),
         )
-        .then(settle, (failure: unknown) => {
-          counters.settled += 1;
-          errorText =
-            failure instanceof Error ? failure.message : String(failure);
-          writeSurface();
-        });
+        .then(
+          settleWithVerdict("revolve", bodyId),
+          failWithVerdict("revolve", bodyId),
+        );
     },
     dispatchHole(request: HoleSceneRequest, bodyId: string): void {
       counters.dispatched += 1;
@@ -322,12 +468,36 @@ export function bootRenderFixtureSession(
         .update(async (context) =>
           extrudeRenderState(await computeHoleScene(context, request), bodyId),
         )
-        .then(settle, (failure: unknown) => {
-          counters.settled += 1;
-          errorText =
-            failure instanceof Error ? failure.message : String(failure);
-          writeSurface();
-        });
+        .then(
+          settleWithVerdict("hole", bodyId),
+          failWithVerdict("hole", bodyId),
+        );
+    },
+    dispatchSweep(request: SweepSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computeSweepScene(context, request), bodyId),
+        )
+        .then(
+          settleWithVerdict("sweep", bodyId),
+          failWithVerdict("sweep", bodyId),
+        );
+    },
+    dispatchLoft(request: LoftSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computeLoftScene(context, request), bodyId),
+        )
+        .then(
+          settleWithVerdict("loft", bodyId),
+          failWithVerdict("loft", bodyId),
+        );
     },
     dispose(): void {
       boot.dispose();

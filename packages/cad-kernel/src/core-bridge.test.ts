@@ -449,18 +449,20 @@ describe("core bridge failure paths", () => {
   }
 
   it("fails an unknown feature kind with kernel/unknown-feature-kind", () => {
-    const loft = createFeatureId("feat_loft");
+    // "draft" arrives with Phase 41's feature-richness batch; today it is
+    // exactly the kind the bridge does not interpret.
+    const draft = createFeatureId("feat_draft");
     const diagnostic = failureOf(
       singleFeatureRun({
-        id: loft,
-        kind: "loft",
+        id: draft,
+        kind: "draft",
         inputs: [],
         outputs: [bResult],
       }),
-      loft,
+      draft,
     );
     expect(diagnostic.code).toBe(DIAGNOSTIC_CODES.kernelUnknownFeatureKind);
-    expect(diagnostic.location.primary).toBe(loft);
+    expect(diagnostic.location.primary).toBe(draft);
   });
 
   it("fails a box whose width parameter is an angle with kernel/parameter-invalid", () => {
@@ -537,6 +539,8 @@ describe("bridge feature kinds", () => {
       "translate",
       "extrude",
       "revolve",
+      "sweep",
+      "loft",
       "fillet",
       "chamfer",
       "shell",
