@@ -157,6 +157,7 @@ describe("SettleProbe content gate", () => {
     const onSettled = vi.fn();
     const view = render(
       <SettleProbe
+        camera={PROJECTION.camera}
         onSettled={onSettled}
         projection={PROJECTION}
         settle={settle}
@@ -189,6 +190,7 @@ describe("SettleProbe content gate", () => {
     const onSettled = vi.fn();
     const view = render(
       <SettleProbe
+        camera={PROJECTION.camera}
         onSettled={onSettled}
         projection={PROJECTION}
         settle={settle}
@@ -207,6 +209,7 @@ describe("SettleProbe content gate", () => {
     const onSettled = vi.fn();
     const view = render(
       <SettleProbe
+        camera={PROJECTION.camera}
         onSettled={onSettled}
         projection={PROJECTION}
         settle={settle}

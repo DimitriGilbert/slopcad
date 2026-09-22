@@ -57,10 +57,21 @@
 
 import { useCallback, useRef } from "react";
 import type {
+  ComponentProps,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from "react";
+/**
+ * The Phase 45 camera/display prop types, derived from `CadScene`'s own
+ * public component surface (the component this viewport composes): the
+ * ui boundary allowlist stops at the renderer package, and the props
+ * pass through untouched — the type follows the component edge, not a
+ * re-export chain around the boundary.
+ */
+type SceneUserCameraProp = ComponentProps<typeof CadScene>["userCamera"];
+type SceneOnUserCameraProp = ComponentProps<typeof CadScene>["onUserCamera"];
+type SceneDisplayModeProp = ComponentProps<typeof CadScene>["displayMode"];
 import {
   CadProviderError,
   useCadSelection,
@@ -144,6 +155,24 @@ export interface CadViewportProps {
    * clicking coexist (the drag threshold separates them).
    */
   readonly cameraOrbitDragEnabled?: boolean;
+  /**
+   * The session-scoped USER camera overlay (Phase 45): when present it
+   * replaces the projection's spec for rendering only (see
+   * `docs/architecture/adr-user-camera-overlay.md`). Default `null` — the
+   * spec camera every pinned fixture renders with.
+   */
+  readonly userCamera?: SceneUserCameraProp;
+  /**
+   * Receives user-camera RECORDS committed by gestures (drag end, wheel
+   * notch, key step) — the host stores them session-scoped and feeds the
+   * value back through {@link userCamera}. Fires only from user input.
+   */
+  readonly onUserCamera?: SceneOnUserCameraProp;
+  /**
+   * The display mode (Phase 45): `shaded` (the default), `shaded-edges`,
+   * `wireframe`, or `hidden-line`.
+   */
+  readonly displayMode?: SceneDisplayModeProp;
   /** Fires once per projection change, on its first settled demand frame. */
   readonly onSettled?: () => void;
   /** Fires when new selection content reached a rendered frame. */
@@ -201,8 +230,10 @@ export function CadViewport({
   cameraControls = false,
   cameraOrbitDragEnabled = true,
   className,
+  displayMode,
   labels: labelOverrides,
   onHover,
+  onUserCamera,
   onPick,
   onPickDown,
   onPickUp,
@@ -213,6 +244,7 @@ export function CadViewport({
   projection,
   regeneration: regenerationProp,
   selection: selectionProp,
+  userCamera = null,
 }: CadViewportProps) {
   const labels: CadViewportLabels = {
     ...CAD_VIEWPORT_LABELS,
@@ -251,6 +283,7 @@ export function CadViewport({
       const container = containerRef.current;
       if (container === null) return;
       container.setAttribute("data-camera-mode", snapshot.mode);
+      container.setAttribute("data-camera-projection", snapshot.projection);
       container.setAttribute(
         "data-camera-azimuth-deg",
         String(snapshot.azimuthDeg),
@@ -415,14 +448,17 @@ export function CadViewport({
         <CadScene
           cameraControls={cameraControls}
           cameraOrbitDragEnabled={cameraOrbitDragEnabled}
+          displayMode={displayMode}
           onCameraState={handleCameraState}
           onSelectionRendered={onSelectionRendered}
           onSettled={onSettled}
+          onUserCamera={onUserCamera}
           palette={studioPalette}
           pickCategory={pickCategory}
           projection={projection}
           regeneration={regeneration}
           selection={selection}
+          userCamera={userCamera}
           {...sceneInteraction}
         />
       )}

@@ -9,17 +9,17 @@ with the shadcn CLI.
 
 ## The CAD components
 
-| Item                                                                | What it is                                                       |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `cad-viewport`                                                      | the deterministic R3F scene + picking + overlay plumbing         |
-| `cad-toolbar`                                                       | the tool palette, mirrored from the store's tool surface         |
-| `cad-model-tree`                                                    | the document's bodies/features timeline                          |
-| `cad-parameter-panel`                                               | Formedible parameter editing (documents AND component contracts) |
-| `cad-command-menu`                                                  | the command palette                                              |
-| `cad-io-dialog`                                                     | import/export affordances (host wires `@slopcad/cad-io`)         |
-| `cad-property-panel`                                                | per-selection properties                                         |
-| `cad-sketch-canvas` / `cad-sketch-inspector` / `cad-sketch-toolbar` | the sketch editing surface                                       |
-| `cad-status-bar`                                                    | regeneration/selection status                                    |
+| Item                                                                | What it is                                                                                                                                                                              |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cad-viewport`                                                      | the deterministic R3F scene + picking + overlay plumbing, with the Phase 45 passthrough props (`userCamera`, `onUserCamera`, `displayMode`) typed off the scene's own component surface |
+| `cad-toolbar`                                                       | the tool palette, mirrored from the store's tool surface                                                                                                                                |
+| `cad-model-tree`                                                    | the document's bodies/features timeline                                                                                                                                                 |
+| `cad-parameter-panel`                                               | Formedible parameter editing (documents AND component contracts)                                                                                                                        |
+| `cad-command-menu`                                                  | the command palette                                                                                                                                                                     |
+| `cad-io-dialog`                                                     | import/export affordances (host wires `@slopcad/cad-io`)                                                                                                                                |
+| `cad-property-panel`                                                | per-selection properties                                                                                                                                                                |
+| `cad-sketch-canvas` / `cad-sketch-inspector` / `cad-sketch-toolbar` | the sketch editing surface                                                                                                                                                              |
+| `cad-status-bar`                                                    | regeneration/selection status                                                                                                                                                           |
 
 All of them are prop-driven over the store's mirrored state — mount
 `CadProvider` (from `@slopcad/cad-react`) and read the hooks

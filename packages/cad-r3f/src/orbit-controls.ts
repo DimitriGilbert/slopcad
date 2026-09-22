@@ -327,8 +327,10 @@ export function panByPixels(
 
 /** The camera state a viewport publishes on its machine surface. */
 export interface SceneCameraStateSnapshot {
-  /** `"spec"` until the first gesture takes over; `"user"` after. */
+  /** The camera SOURCE: `"spec"` (document law) or `"user"` (overlay). */
   readonly mode: "spec" | "user";
+  /** The camera's projection kind (the persp/ortho readout). */
+  readonly projection: "perspective" | "orthographic";
   /** Angle around the pole, degrees (0–360, normalized). */
   readonly azimuthDeg: number;
   /** Angle above the ground plane, degrees. */
@@ -344,6 +346,7 @@ export interface SceneCameraStateSnapshot {
 export function orbitSnapshot(
   state: OrbitState,
   mode: "spec" | "user",
+  projection: "perspective" | "orthographic",
 ): SceneCameraStateSnapshot {
   const azimuthDeg =
     ((Math.atan2(Math.sin(state.azimuthRad), Math.cos(state.azimuthRad)) *
@@ -356,6 +359,7 @@ export function orbitSnapshot(
     distanceMm: Number(state.distanceMm.toFixed(1)),
     elevationDeg: Number(((state.elevationRad * 180) / Math.PI).toFixed(1)),
     mode,
+    projection,
   };
 }
 
@@ -388,5 +392,5 @@ export function sceneCameraStateFromSpec(
     verticalFovRad,
     viewportHeight,
   });
-  return orbitSnapshot(state, "spec");
+  return orbitSnapshot(state, "spec", spec.kind);
 }

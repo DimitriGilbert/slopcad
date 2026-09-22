@@ -87,8 +87,41 @@ export {
   CAD_SCENE_CAMERA_FAR_MM,
   CAD_SCENE_CAMERA_NEAR_MM,
   createSceneCamera,
+  sceneCameraToSpec,
   type SceneCamera,
 } from "./scene-camera";
+export {
+  boundsCenter,
+  boundsRadius,
+  CAD_STANDARD_VIEW_FOV_DEG,
+  CAD_VIEW_FIT_MARGIN,
+  fitCameraToBounds,
+  framingDistance,
+  isoViewCameraOfDirection,
+  retargetCamera,
+  standardViewCamera,
+  standardViewDirection,
+  toggleCameraProjection,
+  type StandardViewId,
+  type ViewAngleConvention,
+  type ViewportRect,
+  zoomWindowCamera,
+} from "./standard-views";
+export {
+  buildFeatureEdgeGeometry,
+  CAD_DISPLAY_MODES,
+  CAD_EDGE_FEATURE_ANGLE_DEG,
+  CAD_MODEL_EDGE_COLOR,
+  displayModePasses,
+  type CadDisplayMode,
+} from "./display-mode";
+export {
+  cornerIsoDirection,
+  projectViewCube,
+  type ViewCubeFace,
+  type ViewCubeFaceId,
+  type ViewCubeProjection,
+} from "./view-cube";
 export {
   CAD_SCENE_AMBIENT_INTENSITY,
   CAD_SCENE_FILL_LIGHT_INTENSITY,

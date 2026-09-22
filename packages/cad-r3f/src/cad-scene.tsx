@@ -68,6 +68,7 @@ import {
   type SelectionReference,
 } from "@slopcad/cad-core";
 import type { CadPick, CadPickCategory } from "./picking";
+import type { CadDisplayMode } from "./display-mode";
 
 import { CadModel } from "./cad-model";
 import {
@@ -230,6 +231,28 @@ export interface CadSceneProps {
    * never re-renders the host.
    */
   readonly onCameraState?: (snapshot: SceneCameraStateSnapshot) => void;
+  /**
+   * The session-scoped USER camera overlay (Phase 45): when present it
+   * replaces the projection's spec for RENDERING ONLY — the rig applies
+   * it through the same spec-is-law mapping, nothing serializes it, and
+   * `null` (the default) is the exact pre-Phase-45 behavior. See
+   * `docs/architecture/adr-user-camera-overlay.md`.
+   */
+  readonly userCamera?: RenderCamera | null;
+  /**
+   * Reports a user-camera RECORD the controls derived from a gesture
+   * (committed at gesture end, each wheel notch, each key step — never
+   * per pointer move, so a drag stays off the React render path). The
+   * host stores it session-scoped and passes it back through
+   * {@link userCamera}; it fires only from user input.
+   */
+  readonly onUserCamera?: (camera: RenderCamera) => void;
+  /**
+   * The display mode (Phase 45): `shaded` (the default — the pinned
+   * bytes), `shaded-edges`, `wireframe`, or `hidden-line` (see
+   * `display-mode.ts` for each mode's honest scope).
+   */
+  readonly displayMode?: CadDisplayMode;
 }
 
 /**
@@ -278,6 +301,7 @@ function SceneCameraRig({
  * highlight or material change reaches the next demand frame.
  */
 function SceneModel({
+  displayMode,
   material,
   onPick,
   onPickDown,
@@ -289,6 +313,7 @@ function SceneModel({
   selection,
   settle,
 }: {
+  displayMode?: CadDisplayMode;
   material?: { readonly color: string };
   onPick?: (pick: CadPick) => void;
   onPickDown?: (pick: CadPick) => void;
@@ -311,9 +336,17 @@ function SceneModel({
   }, [settle, projection]);
   useEffect(() => {
     invalidate();
-  }, [invalidate, material, pickCategory, regeneration, selection]);
+  }, [
+    displayMode,
+    invalidate,
+    material,
+    pickCategory,
+    regeneration,
+    selection,
+  ]);
   return (
     <CadModel
+      displayMode={displayMode}
       material={material}
       onHover={onHover}
       onPick={onPick}
@@ -337,15 +370,18 @@ function SceneModel({
 /**
  * The settle probe: reports the current projection once, on the first frame
  * the demand loop runs after that projection's content is applied — its
- * geometry synced through the model's controller AND its camera applied by
- * the rig (the settle ledger), not merely after the projection prop
- * arrived (module doc).
+ * geometry synced through the model's controller AND the EFFECTIVE camera
+ * applied by the rig (the user overlay's, when present — the settle ledger),
+ * not merely after the projection prop arrived (module doc).
  */
 export function SettleProbe({
+  camera,
   onSettled,
   projection,
   settle,
 }: {
+  /** The effective camera the frame must have applied (overlay ?? spec). */
+  camera: RenderCamera;
   onSettled?: () => void;
   projection: RenderProjection;
   settle: SettleLedger;
@@ -369,10 +405,7 @@ export function SettleProbe({
       return;
     }
     const appliedCamera = settle.appliedCamera;
-    if (
-      appliedCamera === null ||
-      !camerasEqual(appliedCamera, projection.camera)
-    ) {
+    if (appliedCamera === null || !camerasEqual(appliedCamera, camera)) {
       return;
     }
     reportedRef.current = projection;
@@ -418,6 +451,7 @@ function SelectionProbe({
 export function CadScene({
   cameraControls = false,
   cameraOrbitDragEnabled = true,
+  displayMode,
   onCameraState,
   onHover,
   onPick,
@@ -425,13 +459,18 @@ export function CadScene({
   onPickUp,
   onSelectionRendered,
   onSettled,
+  onUserCamera,
   palette = CAD_SCENE_DEFAULT_PALETTE,
   pickCategory,
   projection,
   regeneration,
   selection,
   showGround = true,
+  userCamera = null,
 }: CadSceneProps): ReactElement {
+  // The Phase 45 effective camera: the user overlay when present, the
+  // projection's spec otherwise (spec law, byte-identical, when absent).
+  const effectiveCamera: RenderCamera = userCamera ?? projection.camera;
   // One settle ledger per mounted scene, shared by the appliers (the model's
   // geometry sync, the rig's camera effect) and the probe that gates on them.
   const [settle] = useState<SettleLedger>(() => ({
@@ -478,22 +517,22 @@ export function CadScene({
       gl={{ antialias: false, preserveDrawingBuffer: true }}
     >
       <color attach="background" args={[palette.background]} />
-      <SceneCameraRig settle={settle} spec={projection.camera} />
+      <SceneCameraRig settle={settle} spec={effectiveCamera} />
       {cameraControls ? (
         <SceneCameraControls
+          cameraSource={userCamera === null ? "spec" : "user"}
           onCameraState={handleCameraState}
+          onUserCamera={onUserCamera}
           orbitDragEnabled={cameraOrbitDragEnabled}
-          spec={projection.camera}
+          spec={effectiveCamera}
         />
       ) : null}
       <CadSceneLights />
       {showGround ? (
-        <CadSceneGround
-          colors={groundColors}
-          target={projection.camera.target}
-        />
+        <CadSceneGround colors={groundColors} target={effectiveCamera.target} />
       ) : null}
       <SceneModel
+        displayMode={displayMode}
         material={material}
         onHover={onHover}
         onPick={onPick}
@@ -510,6 +549,7 @@ export function CadScene({
         selection={selection}
       />
       <SettleProbe
+        camera={effectiveCamera}
         onSettled={onSettled}
         projection={projection}
         settle={settle}
