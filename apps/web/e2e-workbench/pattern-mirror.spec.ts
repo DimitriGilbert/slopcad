@@ -132,7 +132,7 @@ test("pattern: the editor arrays the rod with a skip and re-drives around it", a
 
   // SKIP-INSTANCES RE-DRIVE (the roadmap's validation criterion): the
   // count 3 → 5 and the spacing 20 → 30 re-compose the arrangement
-  // around the STANDING skip — four copies at 0/30/60/90, disjoint.
+  // around the STANDING skip — four copies at 0/60/90/120, disjoint.
   const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
   await page.getByLabel("patternCount1", { exact: true }).fill("5");
   await page.getByLabel("patternSpacing1", { exact: true }).fill("30");

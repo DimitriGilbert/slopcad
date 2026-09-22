@@ -15,7 +15,10 @@
  *   the bridge's capability gate is itself under test).
  * - PATTERN ON FACE (`patternFace`): the grid clipped to the referenced
  *   face's tessellated boundary through the fillet battery's reference
- *   records, the fixture TopologyView, and the datum seam's plane.
+ *   records, the fixture TopologyView, and the datum seam's plane — on a
+ *   PRISMATIC box (the whole-solid projection on the face's plane IS the
+ *   face) and on a TAPERED extrusion whose projection strictly contains
+ *   it, so the coplanar cut — not the projection — is what clips.
  * - THE GENERALIZED DIRECTION INPUTS: patternLinear along a DATUM AXIS
  *   and along a SKETCH LINE (the resolved chain's end−start direction).
  * - THE MIRROR MERGE OPTION: the datum-plane mirror's standalone copy
@@ -60,16 +63,18 @@ import {
   type TopologyView,
   valueIn,
 } from "@slopcad/cad-core";
-import type {
-  GeometryKernel,
-  KernelSolid,
-  SweepPathSegmentInput,
-  TransformInput,
-} from "./contract";
 
+import {
+  type GeometryKernel,
+  KERNEL_ERROR_CODES,
+  type KernelSolid,
+  type SweepPathSegmentInput,
+  type TransformInput,
+} from "./contract";
 import {
   createKernelFeatureExecutor,
   type KernelPathResolution,
+  type KernelProfileResolver,
   PATTERN_COUNT_LIMIT,
 } from "./core-bridge";
 import { createFakeKernel } from "./fake-kernel";
@@ -183,22 +188,28 @@ interface RunOptions {
   readonly paths?: (sketchId: string) => KernelPathResolution;
   readonly topology?: TopologyView;
   readonly datumTopology?: DatumTopologyResolver;
+  readonly profiles?: KernelProfileResolver;
 }
 
 /** Regenerates a document against the fake kernel through the bridge. */
-function runBridge(document: CadDocument, options: RunOptions = {}) {
-  const kernel = createFakeKernel();
+function runBridge(
+  document: CadDocument,
+  options: RunOptions = {},
+  kernel: GeometryKernel = createFakeKernel(),
+) {
   const bridge = createKernelFeatureExecutor(kernel, {
     document,
     bodies: new Map(),
-    profiles: () => ({
-      ok: false,
-      error: {
-        code: "document/not-found",
-        message: "the Phase 43 fixtures resolve no profiles",
-        input: null,
-      },
-    }),
+    profiles:
+      options.profiles ??
+      (() => ({
+        ok: false,
+        error: {
+          code: "document/not-found",
+          message: "the Phase 43 fixtures resolve no profiles",
+          input: null,
+        },
+      })),
     ...(options.paths === undefined ? {} : { paths: options.paths }),
     ...(options.topology === undefined ? {} : { topology: options.topology }),
     ...(options.datumTopology === undefined
@@ -239,6 +250,79 @@ function withFeatureInputs(
       feature.id === featureId ? { ...feature, inputs } : feature,
     ),
   };
+}
+
+// ---------------------------------------------------------------------------
+// The zero-ride spy (the M6 pin)
+// ---------------------------------------------------------------------------
+
+/**
+ * A double over the fake kernel whose `transform` records every issued
+ * translation and REJECTS an all-zero one. The pattern kinds ride their
+ * zero-offset instance on the target UNTRANSLATED (`copies.push(
+ * target.solid)`) rather than issuing a zero transform — on the fake
+ * kernel a zero transform is byte-transparent, so the equivalence pins
+ * cannot see which path ran. The double makes the discipline observable
+ * both ways: a regression that starts transforming the zero instance
+ * fails the feature outright here (the rejection rides through as the
+ * feature's own kernel diagnostic), and the recorded list pins exactly
+ * which instances the bridge did transform — the exact instance set.
+ */
+function zeroRideSpy(): {
+  readonly kernel: GeometryKernel;
+  readonly translations: readonly (readonly [number, number, number])[];
+} {
+  const translations: (readonly [number, number, number])[] = [];
+  const base = createFakeKernel();
+  const kernel: GeometryKernel = {
+    ...base,
+    transform: (solid: KernelSolid, input: TransformInput) => {
+      const translation = [
+        valueIn(input.x, "mm"),
+        valueIn(input.y, "mm"),
+        valueIn(input.z, "mm"),
+      ] as const;
+      if (
+        translation[0] === 0 &&
+        translation[1] === 0 &&
+        translation[2] === 0
+      ) {
+        return {
+          ok: false,
+          error: {
+            code: KERNEL_ERROR_CODES.unsupportedOperation,
+            message:
+              "the zero-ride spy rejects an all-zero transform: a pattern's zero-offset instance rides the target untranslated, it is never transformed",
+            input: null,
+          },
+        };
+      }
+      translations.push(translation);
+      return base.transform(solid, { x: input.x, y: input.y, z: input.z });
+    },
+  };
+  return { kernel, translations };
+}
+
+/**
+ * Asserts a recorded instance set against its expected translations: same
+ * length, each world offset equal to 1e-9 — the leg directions' cos/sin
+ * carry unit-rounding (cos(π/2) = 6.1e-17, so a "zero" in-plane
+ * coordinate reads as a few times 1e-16), which an exact `toEqual` would
+ * flag.
+ */
+function expectTranslations(
+  recorded: readonly (readonly [number, number, number])[],
+  expected: readonly (readonly [number, number, number])[],
+): void {
+  expect(recorded).toHaveLength(expected.length);
+  for (const [index, want] of expected.entries()) {
+    const got = recorded[index];
+    if (got === undefined) throw new Error("a recorded translation is absent");
+    expect(got[0]).toBeCloseTo(want[0], 9);
+    expect(got[1]).toBeCloseTo(want[1], 9);
+    expect(got[2]).toBeCloseTo(want[2], 9);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -399,9 +483,7 @@ describe("bridge patternFeature: the asymmetric leg array with skips", () => {
       kind: "translate",
       inputs: [
         { kind: "feature", id: fBox },
-        { kind: "parameter", id: lift.ids[0] as never },
-        { kind: "parameter", id: lift.ids[1] as never },
-        { kind: "parameter", id: lift.ids[2] as never },
+        ...lift.ids.map((id) => ({ kind: "parameter" as const, id })),
       ],
       outputs: [bSecond],
     });
@@ -641,6 +723,34 @@ describe("bridge patternFeature: the asymmetric leg array with skips", () => {
         fArray,
       )?.message,
     ).toContain(`at most ${PATTERN_COUNT_LIMIT}`);
+  });
+
+  it("rides instance 0 on the target untranslated (the zero-ride pin)", () => {
+    // The M6 pin: the fake kernel's zero transform is byte-transparent, so
+    // geometry alone cannot tell a ride from a transform. The spy rejects
+    // any all-zero transform outright — the run only survives because the
+    // bridge never issues one — and records the rest: exactly instances
+    // 1 and 2 of the 3 × 20 array, while instance 0 rides the target into
+    // the union (the volume still measures three boxes).
+    const spy = zeroRideSpy();
+    const { bridge, run } = runBridge(
+      buildArrayDocument({ count: 3, spacingMm: 20, directionRad: 0 }),
+      {},
+      spy.kernel,
+    );
+    expect(run.executed).toEqual([fBox, fArray]);
+    const solid = bridge.solidOf(bResult);
+    expect(solid).toBeDefined();
+    if (solid === undefined) return;
+    expect(spy.translations).toEqual([
+      [20, 0, 0],
+      [40, 0, 0],
+    ]);
+    assertVolumeClose(
+      unwrapKernelResult(spy.kernel.volume(solid), "ridden volume"),
+      3 * BOX.w * BOX.d * BOX.h,
+      0.02,
+    );
   });
 });
 
@@ -1275,6 +1385,196 @@ const faceRunOptions: RunOptions = {
   datumTopology: facePlaneSeam(),
 };
 
+// ---------------------------------------------------------------------------
+// patternFace's NON-PRISMATIC fixture: the tapered extrusion whose
+// whole-solid projection strictly contains the referenced face
+// ---------------------------------------------------------------------------
+
+/** The tapered target's extents (mm): base square, far inset, height. */
+const TAPER = { base: 20, inset: 5, height: 10 } as const;
+
+const bTapered = createBodyId("body_p43_tapered");
+const fTapered = createFeatureId("feat_p43_tapered");
+const rTaperedFace = createReferenceId("ref_p43_taper_top_face");
+
+const TAPERED_KERNEL_ID = "fixture-kernel-p43-tapered";
+const TAPERED_SCHEMA = "fixture-face-v1";
+const TAPERED_FACE_ORDINAL = 2;
+const TAPERED_SKETCH = "skd_p43_taper";
+
+/**
+ * The taper angle whose far-end inset is exactly `TAPER.inset`:
+ * inset = height · tan(angle), so the angle is atan(inset / height) — the
+ * top face is the TAPER.base square inset by 5 on every side.
+ */
+const TAPER_ANGLE_RAD = Math.atan(TAPER.inset / TAPER.height);
+
+/** The profile resolver: the base square on the identity workplane. */
+const taperedProfileResolver: KernelProfileResolver = () => ({
+  ok: true,
+  value: {
+    loop: [
+      { kind: "line", start: [0, 0], end: [TAPER.base, 0] },
+      { kind: "line", start: [TAPER.base, 0], end: [TAPER.base, TAPER.base] },
+      {
+        kind: "line",
+        start: [TAPER.base, TAPER.base],
+        end: [0, TAPER.base],
+      },
+      { kind: "line", start: [0, TAPER.base], end: [0, 0] },
+    ],
+    placement: {
+      rotation: { axis: [0, 0, 1] as const, angle: angleValue(0, "rad") },
+      translation: { x: length(0), y: length(0), z: length(0) },
+    },
+  },
+});
+
+/** The tapered target's hand-built snapshot (one face: the inset top). */
+function taperedFaceSnapshot(
+  bodyId: ReturnType<typeof createBodyId>,
+): TopologySnapshot {
+  const side = TAPER.base - 2 * TAPER.inset;
+  const entity: TopologyEntitySnapshot = {
+    kind: "face",
+    ordinal: TAPERED_FACE_ORDINAL,
+    identity: {
+      kernelId: TAPERED_KERNEL_ID,
+      schema: TAPERED_SCHEMA,
+      data: { hash: 78 },
+    },
+    geometry: {
+      areaMm2: side * side,
+      centroidAbsoluteMm: [TAPER.base / 2, TAPER.base / 2, TAPER.height],
+      centroidRelativeMm: [0, 0, TAPER.height / 2],
+    },
+  };
+  return {
+    kernelId: TAPERED_KERNEL_ID,
+    persistentTopology: true,
+    identitySchemas: [TAPERED_SCHEMA],
+    bodyId,
+    regeneration: 0,
+    entities: [entity],
+  };
+}
+
+/** The tapered fixture's topology view. */
+function taperedFaceView(
+  bodyId: ReturnType<typeof createBodyId>,
+): TopologyView {
+  return {
+    kernelId: TAPERED_KERNEL_ID,
+    persistentTopology: true,
+    identitySchemas: [TAPERED_SCHEMA],
+    snapshotOf: (id) => (id === bodyId ? taperedFaceSnapshot(bodyId) : null),
+  };
+}
+
+/** The tapered fixture's datum seam: the inset top face's plane (z = 10). */
+function taperedPlaneSeam(): NonNullable<RunOptions["datumTopology"]> {
+  return {
+    facePlane: () => ({
+      ok: true,
+      value: {
+        origin: [0, 0, TAPER.height],
+        normal: [0, 0, 1],
+        xAxis: [1, 0, 0],
+      },
+    }),
+    faceCylinderAxis: () => ({
+      ok: false,
+      error: {
+        code: "datum/face-not-planar",
+        message: "the fixture seam resolves planes only",
+        input: null,
+      },
+    }),
+    edgeLine: () => ({
+      ok: false,
+      error: {
+        code: "datum/face-not-planar",
+        message: "the fixture seam resolves planes only",
+        input: null,
+      },
+    }),
+  };
+}
+
+/** The tapered face-pattern document: drafted extrude + reference + grid. */
+function buildTaperedFaceDocument(): CadDocument {
+  let document = withSketchRecord(
+    createDocument(createDocumentId("doc_p43_taper_face")),
+    TAPERED_SKETCH,
+  );
+  const parameters = addParameters(document, "tpr", [
+    { kind: "length", value: TAPER.height },
+    { kind: "angle", value: TAPER_ANGLE_RAD },
+    { kind: "angle", value: 0 },
+    { kind: "dimensionless", value: 3 },
+    { kind: "length", value: 7 },
+    { kind: "angle", value: Math.PI / 2 },
+    { kind: "dimensionless", value: 3 },
+    { kind: "length", value: 7 },
+  ]);
+  document = parameters.document;
+  const [pDistance, pTaper, ...gridIds] = parameters.ids;
+  if (pDistance === undefined || pTaper === undefined) {
+    throw new Error("the tapered fixture mints its extrude parameters");
+  }
+  const taperedBody = addBody(document, { id: bTapered, name: "tapered" });
+  if (!taperedBody.ok) throw new Error(taperedBody.error.message);
+  document = taperedBody.value.document;
+  const resultBody = addBody(document, { id: bResult, name: "result" });
+  if (!resultBody.ok) throw new Error(resultBody.error.message);
+  document = resultBody.value.document;
+  const extrude = addFeature(document, {
+    id: fTapered,
+    kind: "extrude",
+    inputs: [
+      { kind: "sketch", id: createSketchDocumentId(TAPERED_SKETCH) },
+      { kind: "parameter", id: pDistance },
+      { kind: "parameter", id: pTaper },
+    ],
+    outputs: [bTapered],
+  });
+  if (!extrude.ok) throw new Error(extrude.error.message);
+  document = extrude.value.document;
+  const snapshot = taperedFaceSnapshot(bTapered);
+  const minted = mintTopologyReference(
+    snapshot,
+    TAPERED_FACE_ORDINAL,
+    { bodyId: bTapered, featurePath: [fTapered] },
+    { id: rTaperedFace, kind: "face" },
+  );
+  if (!minted.ok) throw new Error(minted.error.message);
+  const referenced = addDocumentReference(document, {
+    id: rTaperedFace,
+    name: "the tapered top face",
+    reference: { ...serializeTopologyReference(minted.value) },
+  });
+  if (!referenced.ok) throw new Error(referenced.error.message);
+  document = referenced.value.document;
+  const added = addFeature(document, {
+    id: fFace,
+    kind: "patternFace",
+    inputs: [
+      { kind: "feature", id: fTapered },
+      { kind: "reference", id: rTaperedFace },
+      ...gridIds.map((id) => ({ kind: "parameter" as const, id })),
+    ],
+    outputs: [bResult],
+  });
+  if (!added.ok) throw new Error(added.error.message);
+  return added.value.document;
+}
+
+const taperedRunOptions: RunOptions = {
+  topology: taperedFaceView(bTapered),
+  datumTopology: taperedPlaneSeam(),
+  profiles: taperedProfileResolver,
+};
+
 describe("bridge patternFace: the grid clipped to the face boundary", () => {
   it("places the full in-face grid: 3 × 2 candidates at 4 mm all inside", () => {
     const { kernel, bridge } = runBridge(
@@ -1386,5 +1686,74 @@ describe("bridge patternFace: the grid clipped to the face boundary", () => {
         failureOf(buildFaceDocument(spec), fFace, faceRunOptions),
       ).toMatchObject({ code: "kernel/parameter-invalid" });
     }
+  });
+
+  it("clips a TAPERED target to the face, not its whole-solid projection", () => {
+    // THE NON-PRISMATIC DISCRIMINATOR: the Phase 41 drafted extrusion's
+    // base (20 × 20 at z = 0) strictly contains its inset top face
+    // (10 × 10 at z = 10), so the boundary the coplanar cut keeps — the
+    // top face alone — is a strict subset of the solid's projection onto
+    // the plane. The grid's nine candidates {0, 7, 14} × {0, 7, 14} split:
+    // exactly (7, 7), (7, 14), (14, 7), (14, 14) fall inside the FACE; the
+    // axes-hugging candidates fall inside only the PROJECTION, so a
+    // boundary test that leaned on it (a loosened coplanar tolerance
+    // admitting the side and base triangles) would place nine instances
+    // where the face places four. The spy records the exact instance set;
+    // the union's bounds carry it geometrically — min (7, 7, 0), never
+    // the projection's (0, 0, 0).
+    const spy = zeroRideSpy();
+    const { bridge } = runBridge(
+      buildTaperedFaceDocument(),
+      taperedRunOptions,
+      spy.kernel,
+    );
+    const solid = bridge.solidOf(bResult);
+    expect(solid).toBeDefined();
+    if (solid === undefined) return;
+    expectTranslations(spy.translations, [
+      [7, 7, 0],
+      [7, 14, 0],
+      [14, 7, 0],
+      [14, 14, 0],
+    ]);
+    assertBoundsEqual(
+      unwrapKernelResult(spy.kernel.bounds(solid), "tapered face bounds"),
+      { min: [7, 7, 0], max: [34, 34, TAPER.height] },
+    );
+  });
+
+  it("rides the grid's zero-offset instance on the target (the zero-ride pin)", () => {
+    // The M6 pin on the face grid: candidate (0, 0) always qualifies, and
+    // it rides the target UNTRANSLATED — never a zero transform (the spy
+    // rejects one outright). Only the five in-face, non-zero candidates
+    // transform, and the union still tiles the full 18 × 14 region.
+    const spy = zeroRideSpy();
+    const { bridge } = runBridge(
+      buildFaceDocument({
+        countOne: 3,
+        spacingOneMm: 4,
+        directionOneRad: 0,
+        countTwo: 2,
+        spacingTwoMm: 4,
+        directionTwoRad: Math.PI / 2,
+      }),
+      faceRunOptions,
+      spy.kernel,
+    );
+    const solid = bridge.solidOf(bResult);
+    expect(solid).toBeDefined();
+    if (solid === undefined) return;
+    expectTranslations(spy.translations, [
+      [0, 4, 0],
+      [4, 0, 0],
+      [4, 4, 0],
+      [8, 0, 0],
+      [8, 4, 0],
+    ]);
+    assertVolumeClose(
+      unwrapKernelResult(spy.kernel.volume(solid), "ridden face volume"),
+      18 * 14 * 10,
+      0.02,
+    );
   });
 });
