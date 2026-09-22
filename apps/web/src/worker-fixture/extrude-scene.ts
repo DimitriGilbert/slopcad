@@ -12,7 +12,7 @@
  * of the operation matrix, exactly like every other scene.
  */
 
-import { length } from "@slopcad/cad-core";
+import { angle, length } from "@slopcad/cad-core";
 import type {
   ComputationContext,
   ProfileExtrudeInput,
@@ -24,6 +24,8 @@ export interface ExtrudeSceneRequest {
   readonly loop: ProfileExtrudeInput["loop"];
   readonly placement: ProfileExtrudeInput["placement"];
   readonly distanceMm: number;
+  /** The optional draft taper (Phase 41), canonical radians. */
+  readonly taperRad?: number;
 }
 
 const mm = (value: number) => length(value, "mm");
@@ -43,6 +45,11 @@ export async function computeExtrudeScene(
     height: mm(Math.abs(request.distanceMm)),
     direction: request.distanceMm > 0 ? 1 : -1,
     placement: request.placement,
+    // The Phase 41 draft taper rides exactly when present — the wire's
+    // optional-field discipline, so untapered scenes keep their bytes.
+    ...(request.taperRad === undefined
+      ? {}
+      : { taper: angle(request.taperRad) }),
   });
   const volume = await context.request("solid.volume", {
     solid: extruded.solid,

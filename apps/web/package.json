@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:fast": "tsx scripts/test-fast.ts",
     "test:render": "playwright test -c playwright.render.config.ts",
     "probe:floor": "tsx scripts/floor-probe.ts",
     "test:spike": "playwright test -c playwright.spike.config.ts",

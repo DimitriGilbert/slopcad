@@ -14,6 +14,7 @@
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
     "test:e2e": "pnpm --filter web test:e2e",
+    "test:fast": "pnpm --filter web test:fast",
     "test:render": "pnpm --filter web test:render",
     "test:render:gate": "node scripts/render-gate.mjs",
     "test:floor-probe": "pnpm --filter web probe:floor",

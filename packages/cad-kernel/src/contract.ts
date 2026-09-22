@@ -226,6 +226,29 @@ export const KERNEL_ERROR_CODES = {
    */
   invalidHelix: "kernel/invalid-helix",
   /**
+   * A tapered extrusion's draft was degenerate (Phase 41): a non-finite
+   * taper angle, a magnitude of at least π/2 (an infinite or backwards
+   * lean — `tan` leaves its domain), or a taper whose far-end inset
+   * degenerates (the loop inset by `height·tan(taper)` collapses an edge,
+   * inverts, or self-intersects before the far cap is reached). The
+   * shared validator `taperedExtrudeProblem` runs this battery on the
+   * chord polygon in every kernel BEFORE any geometry runs, so the
+   * rejection is identical across engines.
+   */
+  invalidTaper: "kernel/invalid-taper",
+  /**
+   * A thicken could not be built (Phase 41): the walls could not hollow at
+   * the requested thickness — canonically TOO THICK, the inward offset
+   * meeting or crossing itself before the far wall is reached (a thickness
+   * at or past half the target's smallest extent collapses the cavity).
+   * The probed OCCT degeneracy taxonomy mirrors `kernel/shell-failed`'s:
+   * the engine does not fail degenerate input itself, so the adapter's
+   * semantic post-condition (a closed hollow keeps strictly positive
+   * volume, strictly below the target's) surfaces every violation
+   * structurally.
+   */
+  thickenFailed: "kernel/thicken-failed",
+  /**
    * A helix sweep's consecutive turns carry overlapping material (Phase
    * 40): the profile's axial extent exceeds one pitch with more than one
    * turn. The input is LEGAL — engines that build the union answer it with
@@ -412,7 +435,7 @@ export interface ProfileRevolveAxisInput {
  * positive height, the extrusion direction along the profile plane's normal
  * (`1`: local +z, so the solid spans local z ∈ [0, height]; `-1`: local −z,
  * spanning [−height, 0]), and the placement mapping the local frame into
- * world space.
+ * world space. Phase 41 adds the optional draft `taper` (see the field).
  *
  * ## Profile requirements and per-kernel fidelity (the honesty contract)
  *
@@ -441,6 +464,63 @@ export interface ProfileExtrudeInput {
   readonly height: LengthValue;
   readonly direction: 1 | -1;
   readonly placement: ProfilePlacementInput;
+  /**
+   * The optional DRAFT TAPER ANGLE (Phase 41), in any angle unit: the
+   * lateral walls lean by this angle away from the extrusion direction,
+   * narrowing (positive) or widening (negative) the cross-sections as
+   * they travel from the profile plane. Absent or zero = the plain prism
+   * (the Phase 26.1 semantics, unchanged).
+   *
+   * ## The model the contract pins (the foundry draft)
+   *
+   * Every horizontal cross-section at parameter t ∈ [0, 1] along the
+   * extrusion is the loop INSET by `t·H` toward the material's interior,
+   * with `H = height·tan(taper)` the far-end inset — "inset" is the
+   * standard planar offset (each boundary segment shifts by the distance
+   * toward the interior side; holes widen). Equivalently the solid is the
+   * two-station ruled morph between the loop and its inset-by-H image —
+   * for straight-segmented loops the vertex blend IS the inset polygon at
+   * every t (the inset corner moves linearly along the base-corner-to-
+   * inset-corner line), so the model is Simpson-EXACT: the cross-section
+   * area is quadratic in t and `V = h/6·(A₀ + 4·A_{1/2} + A₁)` — the
+   * PRISMATOID formula the fixtures pin. Probed against OCCT's
+   * `BRepOffsetAPI_DraftAngle` (the plan's named route): a box prism at
+   * 5° drafts to the prismatoid at 15-digit agreement, a cylinder at 3°
+   * becomes the exact cone frustum, and a CONCAVE L-prism matches the
+   * inset-quadratic `h·(A₀ − P₀H/2 + κH²/3)` (κ = Σ cot(θᵢ/2) over
+   * interior angles) — concave loops included, no convexity subset.
+   *
+   * Validation battery (shared, before any geometry, as
+   * `kernel/invalid-taper` — see `taperedExtrudeProblem`): finite angle,
+   * |taper| < π/2, and the far-end inset over the chord polygon stays a
+   * valid simple loop (positive area, no edge collapse, no
+   * self-intersection).
+   *
+   * ## Per-kernel fidelity (the coverage matrix)
+   *
+   * - OCCT: exact `BRepOffsetAPI_DraftAngle` over every LATERAL face
+   *   (neutral plane at the profile plane, pull along the extrusion
+   *   direction — probed exact on box, cylinder, and concave L fixtures).
+   *   Its face domain is planar/cylindrical/conical, so loops carrying
+   *   `ellipse`/`ellipticalArc`/`spline` segments (whose prisms have
+   *   general extrusion surfaces) decline with the structured
+   *   `kernel/unsupported-operation` naming the subset — the per-shape
+   *   honesty discipline. `extrudeTaper: true`.
+   * - Fake: the two-station loft over the chord polygon and its far inset
+   *   (the existing Simpson-exact loft model) — exact for straight-edge
+   *   loops, the documented chord band for curved ones, every loop kind
+   *   accepted. `extrudeTaper: true`.
+   * - JSCAD: the chord polygon and its far inset through
+   *   `extrudeFromSlices` — the ruled walls are its own representation,
+   *   exact for straight-edge loops (probed class), chord-banded for
+   *   curved ones. `extrudeTaper: true`.
+   * - Manifold: `extrudeTaper: false` — the engine's extrude carries a
+   *   uniform top-scale only (a DIFFERENT solid: one scale factor moves
+   *   every wall by its distance from the origin, not by the wall angle),
+   *   so a tapered extrude answers `kernel/unsupported-operation`, never
+   *   that wrong approximation.
+   */
+  readonly taper?: AngleValue;
 }
 
 /**
@@ -1091,6 +1171,60 @@ export interface ShellInput {
 }
 
 /**
+ * Input of `thicken` (Phase 41): one target solid and one wall thickness —
+ * the CLOSED HOLLOW, the operation the Phase 26.7 shell probe ruled OCCT's
+ * `MakeThickSolidByJoin` cannot build directly (handed an empty closing
+ * list it returns the offset CAVITY REGION, not the hollow — probed at
+ * 2496 mm³ on the 30×20×10 box at t = 2, where the hollow is 3504).
+ *
+ * ## Semantics — the closed hollow
+ *
+ * The result is the target hollowed to uniform `thickness` walls with NO
+ * openings: a solid with a closed interior void, exactly the target minus
+ * its inward offset by `thickness` — `V = V_target − V_inset` (for a box:
+ * `W·D·H − (W−2t)(D−2t)(H−2t)`, the fixture's analytic anchor). The
+ * complement of `shell` (the OPEN hollow), carried as its own operation
+ * because no composition of the existing contract ops builds it: the
+ * cavity needs an inward 3D offset no primitive expresses.
+ *
+ * ## Failure taxonomy (all structured, before or around the offset)
+ *
+ * - Non-finite magnitude → `kernel/invalid-length`; a NON-POSITIVE
+ *   thickness rejects the same way (nothing to thicken with).
+ * - TOO THICK (the inward offset meets or crosses itself — at or past
+ *   half the target's smallest extent on the modelled subsets) →
+ *   `kernel/thicken-failed`, the shell's post-condition discipline: the
+ *   engine does not fail degenerate input itself, the adapter measures
+ *   the result and refuses every violation (zero-or-negative volume,
+ *   unchanged-or-inverted volume).
+ *
+ * ## Per-kernel fidelity (the coverage matrix)
+ *
+ * - OCCT: the probed composition — `MakeThickSolidByJoin(S, [], −t)`
+ *   builds the cavity region EXACTLY (the 26×16×6 inner box measured at
+ *   0 relative error), and one exact `BRepAlgoAPI_Cut` of the cavity from
+ *   the target builds the hollow (probed 3504 mm³ exact on the fixture
+ *   box, exact on the sphere shell fixture) — every intermediate an
+ *   engine operation, no adapter-side geometry. `thicken: true`.
+ * - Fake: the analytic closed-hollow model over its documented
+ *   pristine-leaf subset (box and sphere): exact volume, membership
+ *   (`in target ∧ ¬(strictly inside the inset)`), and bounds (the
+ *   target's own); everything else declines with the structured
+ *   `kernel/unsupported-operation` naming the subset — the shell
+ *   precedent. `thicken: true`.
+ * - Manifold: `thicken: false` — the engine has no 3D offset (probed,
+ *   the shell's verdict verbatim) and the cavity cannot be composed from
+ *   its primitives. Every call answers `kernel/unsupported-operation`.
+ * - JSCAD: `thicken: false` — the same verdict (no offsetting op).
+ */
+export interface ThickenInput {
+  /** The solid to hollow into a closed shell. */
+  readonly target: KernelSolid;
+  /** The uniform wall thickness (strictly positive). */
+  readonly thickness: LengthValue;
+}
+
+/**
  * The full input of `transform`: a translation vector plus an optional
  * rotation. Application order is fixed by the contract: the rotation is
  * applied first, about the world-origin axis, and the translation second,
@@ -1100,9 +1234,39 @@ export interface ShellInput {
  * declared it must never silently mis-apply a rotation — it rejects the
  * input with `kernel/invalid-rotation` or ignores the field outright
  * (the suite judges rotation only where the flag is set).
+ *
+ * Phase 41 adds the optional uniform `scale` (see the field), completing
+ * the transform the `transformScale` capability flag has gated since
+ * Phase 8.
  */
 export interface TransformInput extends TranslationInput {
   readonly rotation?: RotationInput;
+  /**
+   * The optional UNIFORM scale factor (Phase 41): a strictly positive
+   * dimensionless number. The transform maps `p ↦ s·R·p + t` — the scale
+   * applies about the world origin, composed with (commuting past) the
+   * rotation, before the translation — so bounds scale by exactly `s` and
+   * volume by exactly `s³`, hand-derivable from the input's own
+   * measurements (the fixtures' analytic anchors). A scale of exactly 1
+   * (or absent) is the identity scale: the Phase 8 rigid transform,
+   * unchanged.
+   *
+   * Non-uniform (per-axis) scale is deliberately OUT and documented: the
+   * OCCT engine route would be `BRepBuilderAPI_GTransform`, which this
+   * binding does not carry (probed — absent from the typings, the
+   * roadmap's ruling), and a mesh-kernel matrix scale would silently
+   * diverge from any BREP kernel's future non-uniform semantics. A
+   * non-positive or non-finite factor rejects with `kernel/invalid-length`
+   * before any geometry runs.
+   *
+   * Coverage: OCCT (`gp_Trsf.SetScale` + `BRepBuilderAPI_Transform`,
+   * probed ×s³ volume and ×s bounds about the origin), the fake kernel
+   * (the pointwise model), Manifold (the engine's affine transform), and
+   * JSCAD (`geom3.transform` with a scale matrix) all declare
+   * `transformScale: true` — the mirror precedent: the one Phase 41
+   * transform feature every kernel implements honestly.
+   */
+  readonly scale?: number;
 }
 
 /**
@@ -1364,6 +1528,17 @@ export interface GeometryKernel {
    * `kernel/unsupported-operation`, never a silent bad approximation.
    */
   shell(input: ShellInput): KernelResult<KernelSolid>;
+
+  /**
+   * Hollows one solid into a CLOSED shell of uniform wall thickness — a
+   * solid with a closed interior void, exactly the target minus its
+   * inward offset (Phase 41; the complement of `shell`'s open hollow —
+   * see {@link ThickenInput} for the semantics, the probed OCCT cavity
+   * composition, and the per-kernel coverage matrix — a kernel declaring
+   * `thicken: false` answers every call with the structured
+   * `kernel/unsupported-operation`, never a silent approximation).
+   */
+  thicken(input: ThickenInput): KernelResult<KernelSolid>;
 
   /** Unions two or more solids. */
   union(operands: readonly KernelSolid[]): KernelResult<KernelSolid>;

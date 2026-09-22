@@ -47,6 +47,7 @@ import {
   type ProfileLoftSectionInput,
   type ProfilePlacementInput,
   type ProfileRevolveInput,
+  type ProfileSegmentInput,
   type ProfileSweepInput,
   type Tessellation,
   tessellationTriangleCount,
@@ -2715,6 +2716,218 @@ export function defineKernelContractSuite(
         kernel.bounds(mirrored),
         KERNEL_ERROR_CODES.boundsEmpty,
         "bounds of mirrored empty solid",
+      );
+    });
+
+    it("extrudes the draft taper to the exact prismatoid — or answers unsupported honestly (Phase 41)", () => {
+      const kernel = createKernel();
+      const input: ProfileExtrudeInput = {
+        loop: [
+          { kind: "line", start: [-15, -10], end: [15, -10] },
+          { kind: "line", start: [15, -10], end: [15, 10] },
+          { kind: "line", start: [15, 10], end: [-15, 10] },
+          { kind: "line", start: [-15, 10], end: [-15, -10] },
+        ],
+        height: length(10),
+        direction: 1,
+        placement: identityPlacement(),
+        taper: angle(5, "deg"),
+      };
+      if (!kernel.capabilities.extrudeTaper) {
+        expectKernelFailure(
+          kernel.extrude(input),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "tapered extrude on a kernel without the extrudeTaper capability",
+        );
+        return;
+      }
+      const solid = unwrapKernelResult(
+        kernel.extrude(input),
+        "tapered extrude",
+      );
+      // Straight-edge profile: the miter family's area is quadratic, so
+      // the prismatoid value is exact on EVERY taper-capable kernel
+      // (OCCT's DraftAngle and the chord models agree to 15 digits).
+      const inset = 10 * Math.tan((5 * Math.PI) / 180);
+      const expected = 10 * (600 - 100 * (inset / 2) + (4 / 3) * inset * inset);
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "tapered volume"),
+        expected,
+        EXACT_VOLUME_TOLERANCE,
+      );
+      // The untapered footing is unchanged: the same loop without the
+      // field is the plain prism.
+      const plain = unwrapKernelResult(
+        kernel.extrude({ ...input, taper: undefined }),
+        "plain extrude",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(plain), "plain volume"),
+        6000,
+        EXACT_VOLUME_TOLERANCE,
+      );
+    });
+
+    it("drafts the tapered circle within the curved band — or answers unsupported honestly", () => {
+      const kernel = createKernel();
+      const input: ProfileExtrudeInput = {
+        loop: [{ kind: "circle", center: [0, 0], radius: 5 }],
+        height: length(10),
+        direction: 1,
+        placement: identityPlacement(),
+        taper: angle(3, "deg"),
+      };
+      if (!kernel.capabilities.extrudeTaper) {
+        expectKernelFailure(
+          kernel.extrude(input),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "tapered circle on a kernel without the extrudeTaper capability",
+        );
+        return;
+      }
+      const solid = unwrapKernelResult(kernel.extrude(input), "tapered circle");
+      const r2 = 5 - 10 * Math.tan((3 * Math.PI) / 180);
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "frustum volume"),
+        (Math.PI * 10 * (25 + 5 * r2 + r2 * r2)) / 3,
+        CURVED_VOLUME_TOLERANCE,
+      );
+    });
+
+    it("rejects the degenerate taper battery with kernel/invalid-taper (Phase 41)", () => {
+      const kernel = createKernel();
+      const loop: ProfileSegmentInput[] = [
+        { kind: "line", start: [-15, -10], end: [15, -10] },
+        { kind: "line", start: [15, -10], end: [15, 10] },
+        { kind: "line", start: [15, 10], end: [-15, 10] },
+        { kind: "line", start: [-15, 10], end: [-15, -10] },
+      ];
+      // The angle domain and the collapsing inset reject identically on
+      // every kernel — taper-capable or not (the shared battery runs
+      // before the capability can matter on the declining kernels too,
+      // because Manifold answers unsupported for ANY taper; the domain
+      // check is judged on the taper-capable kernels).
+      if (kernel.capabilities.extrudeTaper) {
+        expectKernelFailure(
+          kernel.extrude({
+            loop,
+            height: length(10),
+            direction: 1,
+            placement: identityPlacement(),
+            taper: angle(Math.PI / 2),
+          }),
+          KERNEL_ERROR_CODES.invalidTaper,
+          "taper at the domain bound",
+        );
+        expectKernelFailure(
+          kernel.extrude({
+            loop,
+            height: length(10),
+            direction: 1,
+            placement: identityPlacement(),
+            taper: angle((84.3 * Math.PI) / 180),
+          }),
+          KERNEL_ERROR_CODES.invalidTaper,
+          "collapsing taper",
+        );
+      }
+    });
+
+    it("scales uniformly by factor³ with ×f bounds about the origin (Phase 41)", () => {
+      const kernel = createKernel();
+      if (!kernel.capabilities.transformScale) {
+        expectKernelFailure(
+          kernel.transform(box(kernel, 30, 20, 10), {
+            x: length(0),
+            y: length(0),
+            z: length(0),
+            scale: 2,
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "scale on a kernel without the transformScale capability",
+        );
+        return;
+      }
+      const target = box(kernel, 30, 20, 10);
+      const scaled = unwrapKernelResult(
+        kernel.transform(target, {
+          x: length(0),
+          y: length(0),
+          z: length(0),
+          scale: 2,
+        }),
+        "scale",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(scaled), "scaled volume"),
+        48000,
+        EXACT_VOLUME_TOLERANCE,
+      );
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(scaled), "scaled bounds"),
+        { min: [0, 0, 0], max: [60, 40, 20] },
+        EXACT_VOLUME_TOLERANCE,
+      );
+      // The composed order p ↦ s·R·p + t: bounds shift by the translation
+      // AFTER the scale.
+      const moved = unwrapKernelResult(
+        kernel.transform(target, {
+          x: length(5),
+          y: length(0),
+          z: length(0),
+          scale: 2,
+        }),
+        "scale + translate",
+      );
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(moved), "moved bounds"),
+        { min: [5, 0, 0], max: [65, 40, 20] },
+        EXACT_VOLUME_TOLERANCE,
+      );
+      // Non-positive factors reject before any geometry.
+      expectKernelFailure(
+        kernel.transform(target, {
+          x: length(0),
+          y: length(0),
+          z: length(0),
+          scale: 0,
+        }),
+        KERNEL_ERROR_CODES.invalidLength,
+        "zero scale",
+      );
+    });
+
+    it("thickens into the exact closed hollow — or answers unsupported honestly (Phase 41)", () => {
+      const kernel = createKernel();
+      const target = box(kernel, 30, 20, 10);
+      if (!kernel.capabilities.thicken) {
+        expectKernelFailure(
+          kernel.thicken({ target, thickness: length(2) }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "thicken on a kernel without the thicken capability",
+        );
+        return;
+      }
+      const solid = unwrapKernelResult(
+        kernel.thicken({ target, thickness: length(2) }),
+        "thicken",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "hollow volume"),
+        6000 - 26 * 16 * 6,
+        EXACT_VOLUME_TOLERANCE,
+      );
+      // The hollow keeps the target's outer footprint.
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(solid), "hollow bounds"),
+        { min: [0, 0, 0], max: [30, 20, 10] },
+        EXTRUDE_PLACED_BOUNDS_TOLERANCE,
+      );
+      // The too-thick degeneracy refuses structurally (walls that meet).
+      expectKernelFailure(
+        kernel.thicken({ target, thickness: length(5) }),
+        KERNEL_ERROR_CODES.thickenFailed,
+        "too-thick thicken",
       );
     });
 

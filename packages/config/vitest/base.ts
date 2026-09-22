@@ -19,6 +19,13 @@ export function createTestConfig(options: TestConfigOptions = {}): {
       include: options.include ?? ["src/**/*.test.ts"],
       setupFiles: options.setupFiles ?? [],
       exclude: [...configDefaults.exclude, "**/e2e/**"],
+      // Sized for the turbo-parallel reality: `pnpm test` runs every
+      // package suite at once, and suite boot (transform + import) can
+      // triple a test's wall time on a fully loaded machine — measured
+      // victims ran 6.5-7.4 s against vitest's 5 s default without ever
+      // failing standalone. An infrastructure budget, not an assertion:
+      // passing still requires passing.
+      testTimeout: 20_000,
       coverage: {
         provider: "istanbul",
         reporter: ["text", "json", "html"],

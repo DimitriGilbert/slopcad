@@ -229,3 +229,81 @@ The route that keeps every station exact and localizes the approximation to the 
 - Ruled-span consequence: each span approximates the screw motion by straight chords. The span's swept Jacobian is `(R+u)·sin Δθ` against the true screw's `(R+u)·Δθ` (Δθ the station step), so the whole solid's volume lands at `sin(Δθ)/Δθ` of the exact screw value `V = 2π·turns·A·d̄` — a deficit `1 − sinΔθ/Δθ = Δθ²/6 + O(Δθ⁴)`, the same 63-chord class the mesh kernels' revolves document. The fixtures pin this band (the OCCT unit suite measures it at 1e-4; the convergence — the deficit quarters when the station rule halves — is pinned in the shared geometry suite), so doubling the station density converges quadratically toward the exact screw volume.
 
 The volume band, its convergence check, and the per-kernel coverage matrix (who builds overlapping turns, who declines them) are pinned in `packages/cad-kernel/src/contract.ts` (`HelixSweepInput`'s coverage notes) and measured in `packages/cad-kernel-occt/src/occt-helix.test.ts`.
+
+---
+
+# Addendum — Phase 41 feature-richness probes (draft, scale, thicken, split)
+
+_Executed 2026-09-20 during Phase 41's implementation, same discipline as
+above — the hands-on results ran in a scratch project outside the repo
+(`/tmp/occt-41-probe`, deleted after) against the repo's pinned
+`replicad-opencascadejs@1.1.0`; findings marked **[probed]** were run,
+**[cited]** are read off the shipped `dist/replicad_single.d.ts`. The
+adapter code carrying these decisions is
+`packages/cad-kernel-occt/src/occt-kernel.ts`; the kernel-neutral derivations
+live in `packages/cad-kernel/src/taper-geometry.ts`._
+
+## 1. Draft: `BRepOffsetAPI_DraftAngle` is prismatoid-exact, concavity included
+
+The plan named the route and ordered a probe; the probe confirms it
+whole [probed]:
+
+- A 30×20×10 box prism with all four LATERAL faces drafted (neutral plane
+  `z = 0`, pull `+z`, angle `+5°`, flag `true`) measures the miter
+  quadratic `h·(A₀ − P₀H/2 + κH²/3)` — `5572.762370697783` against the
+  analytic `5572.762370697783`, 15-digit agreement. Convention pinned:
+  **positive angle + pull along the material side narrows the rising
+  cross-sections**; the neutral plane is the profile plane; the CAP faces
+  (planar, normal ∥ the extrusion axis) must be SKIPPED — their `Add`
+  fails (no useful intersection with the neutral plane).
+- A ⌀10 × 10 cylinder's wall drafts into the exact cone frustum
+  (`705.9524231632731` vs `…32`, last-ulp) — cylindrical faces are in the
+  engine's domain and need no special-casing.
+- A CONCAVE L-prism (A₀ = 500, P₀ = 100, one 270° corner) matches the
+  same quadratic with `κ = Σcot(θᵢ/2) = 4` — the MITER offset model (each
+  edge shifted inward, consecutive lines intersecting) is the
+  cross-section family OCCT builds, NOT the half-plane erosion (which
+  differs at concave corners) and NOT a uniform scale (which differs
+  everywhere except the circle). This is the evidence that pins the
+  contract's cross-kernel draft semantics.
+
+The face-domain limit is the engine's own: `Add` documents
+planar/cylindrical/conical faces only. An `ellipse`/`spline` segment's
+prism carries a general extrusion surface, so the OCCT adapter DECLINES
+those loops per shape (`kernel/unsupported-operation` naming the subset)
+— the per-shape honesty discipline; the chord-model kernels (fake, JSCAD)
+taper every loop kind at their documented bands.
+
+## 2. Thicken: the closed hollow IS the cavity-plus-cut composition
+
+The Phase 26.7 probe found `MakeThickSolidByJoin(S, [], −t)` returns the
+offset CAVITY REGION itself; Phase 41 re-probed and BUILT on it [probed]:
+
+- The cavity is exact: 2496 mm³ on the 30×20×10 box at t = 2 — the
+  26×16×6 inner box at 0 relative error.
+- One exact `BRepAlgoAPI_Cut(S, cavity)` builds the closed hollow: 3504
+  mm³ = 6000 − 2496, exact. The adapter composes exactly this — two
+  engine operations, no adapter-side geometry — and pins a post-condition
+  (strictly positive, strictly below the target's volume) because the
+  engine does not fail degenerate input itself: the POSITIVE-offset
+  empty-list answer measured **−11187.49** (a negative volume, silently
+  degenerate), and past the wall collapse the answers stay degenerate
+  rather than failing.
+- `BRepPrimAPI_MakeHalfSpace(face, refPoint)` + `BRepAlgoAPI_Cut` also
+  works exactly (3000 on the half-split box) [probed] — but it stays
+  OCCT-internal knowledge: the shipped `split` feature composes a finite
+  covering box through `extrude` + `subtract` instead, so every kernel
+  splits with zero new contract surface (the probe is the documented
+  "composition or dedicated op per probe" resolution).
+
+## 3. Scale: `gp_Trsf.SetScale` is the mirror's twin
+
+[probed] `SetScale(gp_Pnt(0,0,0), 2)` + `BRepBuilderAPI_Transform` on the
+30×20×10 box: volume 48000 (×s³), bounds `[0,60]×[0,40]×[0,20]` (×s about
+the origin point). A NEGATIVE factor mirrors (|48000| with flipped
+bounds) — so the contract pins strictly-positive factors and the adapter
+validates before any OCCT object exists. `BRepBuilderAPI_GTransform`
+(the non-uniform route) is **absent from the typings** [cited — only a
+doc-comment mention beside `Geom2d_Curve` factories], confirming the
+roadmap's ruling: non-uniform scaling stays documented OUT until the
+binding grows it.

@@ -64,6 +64,7 @@ export type {
   SphereInput,
   SweepPathSegmentInput,
   Tessellation,
+  ThickenInput,
   TransformInput,
   TranslationInput,
 } from "./contract";
@@ -166,6 +167,14 @@ export {
   tessellateSplineSegment,
 } from "./profile-splines";
 export type { SplineBezierSegment, SplinePoint2 } from "./profile-splines";
+export {
+  insetPolygon,
+  polygonSelfIntersects,
+  taperInsetDistanceMm,
+  taperedExtrudeProblem,
+  TAPER_ANGLE_LIMIT_RAD,
+} from "./taper-geometry";
+export type { TaperProblem } from "./taper-geometry";
 export type {
   LoftSectionsProblem,
   ProfilePoint2,
@@ -188,11 +197,14 @@ export {
   HOLE_TOOL_OVERSHOOT_MM,
   PATTERN_COUNT_LIMIT,
   planHoleCut,
+  planSplitCut,
+  SPLIT_TOOL_OVERSHOOT_MM,
 } from "./core-bridge";
 export type {
   BridgeFeatureKind,
   HoleAxisSelector,
   HoleCutPlan,
+  SplitCutPlan,
   KernelExecutionBridge,
   KernelExecutorContext,
   KernelPathResolution,

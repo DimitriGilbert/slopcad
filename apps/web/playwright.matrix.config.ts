@@ -21,7 +21,12 @@ import { defineConfig } from "@playwright/test";
  */
 
 const PORT = 3210;
-const baseURL = process.env.MATRIX_E2E_BASE_URL ?? `http://localhost:${PORT}`;
+// The shared-server fast path (root `pnpm test:fast`): the orchestrator
+// exports SLOPCAD_E2E_SHARED_URL when ONE pre-built server serves every
+// harness — no per-config rebuild, no per-config boot.
+const sharedURL = process.env.SLOPCAD_E2E_SHARED_URL;
+const baseURL =
+  sharedURL ?? process.env.MATRIX_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 // WebKit's remaining host check (gstreamer1.0-libav — media codecs) is not
 // needed for DOM/WebGL automation; the user-space deps script + this skip
@@ -79,10 +84,14 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: `pnpm build && PORT=${PORT} node --env-file-if-exists=.env .output/server/index.mjs`,
-    url: baseURL,
-    timeout: 300_000,
-    reuseExistingServer: false,
-  },
+  ...(sharedURL
+    ? {}
+    : {
+        webServer: {
+          command: `pnpm build && PORT=${PORT} node --env-file-if-exists=.env .output/server/index.mjs`,
+          url: baseURL,
+          timeout: 300_000,
+          reuseExistingServer: false,
+        },
+      }),
 });

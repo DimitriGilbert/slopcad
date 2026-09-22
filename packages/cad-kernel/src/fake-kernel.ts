@@ -91,6 +91,7 @@ import {
   type ShellInput,
   type SphereInput,
   type Tessellation,
+  type ThickenInput,
   type TransformInput,
 } from "./contract";
 import { createSolidTag } from "./opaque";
@@ -136,6 +137,11 @@ import {
   tessellateRevolveProfile,
   transpose3,
 } from "./profile-geometry";
+import {
+  insetPolygon,
+  taperInsetDistanceMm,
+  taperedExtrudeProblem,
+} from "./taper-geometry";
 
 /** Voxel-quadrature resolution (samples per axis) for boolean volumes. */
 export const FAKE_KERNEL_VOLUME_RESOLUTION = 64;
@@ -184,7 +190,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
   transformTranslation: true,
   transformRotation: false,
-  transformScale: false,
+  transformScale: true,
   exactPrimitiveVolumes: true,
   exactBooleanVolumes: false,
   tightBooleanBounds: false,
@@ -195,6 +201,8 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   fillet: true,
   chamfer: true,
   shell: true,
+  thicken: true,
+  extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
 });
@@ -264,6 +272,32 @@ type FakeShape =
       readonly kind: "translate";
       readonly source: FakeShape;
       readonly offset: Vec3;
+    }
+  | {
+      /**
+       * The Phase 41 uniform scale node: `source` scaled by the strictly
+       * positive `factor` about the world origin. A uniform scale is not
+       * an isometry, so like the mirror node it cannot fold into a
+       * rotation+translation pair and stands alone; every consumer
+       * answers pointwise through it (bounds ×f, volume ×f³ via
+       * delegation, membership at the inverse-scaled query, triangles
+       * scaled — orientation preserved by the positive factor).
+       */
+      readonly kind: "scale";
+      readonly source: FakeShape;
+      readonly factor: number;
+    }
+  | {
+      /**
+       * The Phase 41 closed-hollow node: `target` minus its inward offset
+       * by `thickness` — the complement of the shell node's open hollow.
+       * Modelled exactly over the pristine box and sphere leaves (see the
+       * `thicken` operation's subset docs); membership is the pointwise
+       * `in target ∧ ¬(strictly inside the inset)`.
+       */
+      readonly kind: "thickened";
+      readonly target: FakeShape;
+      readonly thickness: number;
     }
   | {
       /**
@@ -598,6 +632,27 @@ function shapeBounds(shape: FakeShape): KernelBounds {
         ],
       );
     }
+    case "scale": {
+      // The strictly positive factor scales both interval endpoints, so
+      // min/max stay min/max — the exact scaled AABB of the source.
+      const source = shapeBounds(shape.source);
+      return boundsOf(
+        [
+          boundsAt(source, "min", 0) * shape.factor,
+          boundsAt(source, "min", 1) * shape.factor,
+          boundsAt(source, "min", 2) * shape.factor,
+        ],
+        [
+          boundsAt(source, "max", 0) * shape.factor,
+          boundsAt(source, "max", 1) * shape.factor,
+          boundsAt(source, "max", 2) * shape.factor,
+        ],
+      );
+    }
+    case "thickened":
+      // The closed hollow keeps the target's full footprint (the walls own
+      // the outer boundary; only interior material became the cavity).
+      return shapeBounds(shape.target);
     case "mirror": {
       // The reflected interval: [min, max] maps to [2o − max, 2o − min] on
       // the plane's axis, the other two components unchanged — the exact
@@ -961,6 +1016,18 @@ function contains(shape: FakeShape, x: number, y: number, z: number): boolean {
         y - at(shape.offset, 1),
         z - at(shape.offset, 2),
       );
+    case "scale":
+      // The scaled solid contains p iff the source contains the
+      // inverse-scaled p — the pointwise model, the mirror node's
+      // discipline carried to the one non-isometry transform.
+      return contains(
+        shape.source,
+        x / shape.factor,
+        y / shape.factor,
+        z / shape.factor,
+      );
+    case "thickened":
+      return thickenedContains(shape, x, y, z);
     case "mirror": {
       // The mirrored solid contains p iff the source contains the
       // reflected p — reflection is its own inverse, so the same flip
@@ -1793,6 +1860,152 @@ function chamferTriangles(shape: ChamferNode): readonly Triangle[] {
 /** The shell leaf node type. */
 type ShellNode = Extract<FakeShape, { kind: "shell" }>;
 
+/** The Phase 41 closed-hollow node type. */
+type ThickenedNode = Extract<FakeShape, { kind: "thickened" }>;
+
+/**
+ * Exact point-in-closed-hollow classification: inside the target leaf AND
+ * not strictly inside the inset cavity (the cavity's own boundary faces
+ * are material, the inclusive boundary rule the shell model uses).
+ */
+function thickenedContains(
+  shape: ThickenedNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  const target = shape.target;
+  if (target.kind === "box") {
+    const size = target.size;
+    const insideOuter =
+      x >= 0 &&
+      x <= at(size, 0) &&
+      y >= 0 &&
+      y <= at(size, 1) &&
+      z >= 0 &&
+      z <= at(size, 2);
+    if (!insideOuter) return false;
+    const t = shape.thickness;
+    return !(
+      x > t &&
+      x < at(size, 0) - t &&
+      y > t &&
+      y < at(size, 1) - t &&
+      z > t &&
+      z < at(size, 2) - t
+    );
+  }
+  if (target.kind === "sphere") {
+    const outer2 = x * x + y * y + z * z;
+    if (outer2 > target.radius ** 2) return false;
+    const inner = target.radius - shape.thickness;
+    return !(outer2 < inner * inner);
+  }
+  throw new Error(
+    "Invariant violation: the thickened node's target is the pristine box or sphere leaf the builder validated.",
+  );
+}
+
+/**
+ * The analytic closed-hollow volume: the pristine leaf minus its inset —
+ * the box's inner box or the sphere's inner sphere — exact by the fit
+ * battery's validated non-degeneracy.
+ */
+function thickenedAnalyticVolume(shape: ThickenedNode): number {
+  const t = shape.thickness;
+  const target = shape.target;
+  if (target.kind === "box") {
+    const size = target.size;
+    return (
+      at(size, 0) * at(size, 1) * at(size, 2) -
+      (at(size, 0) - 2 * t) * (at(size, 1) - 2 * t) * (at(size, 2) - 2 * t)
+    );
+  }
+  if (target.kind === "sphere") {
+    return (4 / 3) * Math.PI * (target.radius ** 3 - (target.radius - t) ** 3);
+  }
+  throw new Error(
+    "Invariant violation: the thickened node's target is the pristine box or sphere leaf the builder validated.",
+  );
+}
+
+/** The closed hollow's boundary area: both surfaces, exact closed forms. */
+function thickenedAnalyticArea(shape: ThickenedNode): number {
+  const t = shape.thickness;
+  const target = shape.target;
+  if (target.kind === "box") {
+    const size = target.size;
+    const outer =
+      2 *
+      (at(size, 0) * at(size, 1) +
+        at(size, 1) * at(size, 2) +
+        at(size, 0) * at(size, 2));
+    const inner =
+      2 *
+      ((at(size, 0) - 2 * t) * (at(size, 1) - 2 * t) +
+        (at(size, 1) - 2 * t) * (at(size, 2) - 2 * t) +
+        (at(size, 0) - 2 * t) * (at(size, 2) - 2 * t));
+    return outer + inner;
+  }
+  if (target.kind === "sphere") {
+    return 4 * Math.PI * (target.radius ** 2 + (target.radius - t) ** 2);
+  }
+  throw new Error(
+    "Invariant violation: the thickened node's target is the pristine box or sphere leaf the builder validated.",
+  );
+}
+
+/**
+ * The closed hollow's canonical mesh: the leaf's own triangles (outward)
+ * plus the inset's triangles REVERSED — the cavity's surface faces into
+ * the void, the two-surface boundary the volume and area models integrate.
+ */
+function thickenedTriangles(shape: ThickenedNode): readonly Triangle[] {
+  const t = shape.thickness;
+  const target = shape.target;
+  if (target.kind === "box") {
+    const outer = boxTriangles(
+      at(target.size, 0),
+      at(target.size, 1),
+      at(target.size, 2),
+    );
+    const inner = boxTriangles(
+      at(target.size, 0) - 2 * t,
+      at(target.size, 1) - 2 * t,
+      at(target.size, 2) - 2 * t,
+    ).map((triangle) => shiftedTriangle(triangle, [t, t, t]));
+    return [
+      ...outer,
+      ...inner.map(
+        (triangle) =>
+          [
+            cornerOf(triangle, 2),
+            cornerOf(triangle, 1),
+            cornerOf(triangle, 0),
+          ] as Triangle,
+      ),
+    ];
+  }
+  if (target.kind === "sphere") {
+    const outer = sphereTriangles(target.radius);
+    const inner = sphereTriangles(target.radius - t);
+    return [
+      ...outer,
+      ...inner.map(
+        (triangle) =>
+          [
+            cornerOf(triangle, 2),
+            cornerOf(triangle, 1),
+            cornerOf(triangle, 0),
+          ] as Triangle,
+      ),
+    ];
+  }
+  throw new Error(
+    "Invariant violation: the thickened node's target is the pristine box or sphere leaf the builder validated.",
+  );
+}
+
 /**
  * Exact point-in-shell classification: the box minus the inset cavity open
  * at the removed face. The cavity runs `[t, size−t]` along both cross axes
@@ -2045,6 +2258,17 @@ function analyticVolume(shape: FakeShape): number | undefined {
       );
     case "translate":
       return analyticVolume(shape.source);
+    case "scale":
+      // A uniform scale multiplies volume by exactly f³ — for the analytic
+      // subset AND for a voxel-quantized boolean (the quantized count
+      // scales with the cell volume), so the delegation never
+      // double-quantizes.
+      return shapeVolume(shape.source) * shape.factor ** 3;
+    case "thickened":
+      // The analytic closed-hollow decomposition the contract documents:
+      // the pristine leaf minus its validated non-degenerate inset — no
+      // quadrature anywhere.
+      return thickenedAnalyticVolume(shape);
     case "mirror":
       // A reflection is an isometry: the mirrored volume IS the source
       // volume, exactly, for every source (the delegation keeps a voxel-
@@ -2165,6 +2389,19 @@ function analyticArea(shape: FakeShape): number | undefined {
       return analyticArea(shape.source);
     case "mirror":
       return analyticArea(shape.source);
+    case "scale": {
+      // A uniform scale multiplies area by exactly f² (the isometry
+      // nodes' delegation discipline, carried to the one non-isometry
+      // transform); the value falls to `undefined` exactly where the
+      // source's does, so the area entry point's per-shape decline
+      // vocabulary is unchanged.
+      const source = analyticArea(shape.source);
+      return source === undefined ? undefined : source * shape.factor ** 2;
+    }
+    case "thickened":
+      // The closed hollow's boundary is BOTH surfaces — the outer and the
+      // cavity's — each an exact closed form over the pristine leaf.
+      return thickenedAnalyticArea(shape);
     default:
       return undefined;
   }
@@ -2283,7 +2520,8 @@ function primitiveTriangles(
     | HelixNode
     | FilletNode
     | ChamferNode
-    | ShellNode,
+    | ShellNode
+    | ThickenedNode,
 ): readonly Triangle[] {
   switch (shape.kind) {
     case "box":
@@ -2314,6 +2552,8 @@ function primitiveTriangles(
       return chamferTriangles(shape);
     case "shell":
       return shellTriangles(shape);
+    case "thickened":
+      return thickenedTriangles(shape);
   }
 }
 
@@ -2925,7 +3165,8 @@ type LeafStep =
       readonly kind: "reflect";
       readonly axis: Axis;
       readonly planeOffset: number;
-    };
+    }
+  | { readonly kind: "scale"; readonly factor: number };
 
 /** A primitive leaf paired with the affine chain accumulated along its path. */
 interface Leaf {
@@ -2938,7 +3179,8 @@ interface Leaf {
     | HelixNode
     | FilletNode
     | ChamferNode
-    | ShellNode;
+    | ShellNode
+    | ThickenedNode;
   readonly steps: readonly LeafStep[];
 }
 
@@ -2963,6 +3205,7 @@ function collectLeaves(
     case "fillet":
     case "chamfer":
     case "shell":
+    case "thickened":
       out.push({ primitive: shape, steps });
       return;
     case "union":
@@ -2979,6 +3222,13 @@ function collectLeaves(
       collectLeaves(
         shape.source,
         [...steps, { kind: "shift", offset: shape.offset }],
+        out,
+      );
+      return;
+    case "scale":
+      collectLeaves(
+        shape.source,
+        [...steps, { kind: "scale", factor: shape.factor }],
         out,
       );
       return;
@@ -3025,7 +3275,28 @@ function shiftedTriangle(triangle: Triangle, offset: Vec3): Triangle {
     shifted(cornerOf(triangle, 0), offset),
     shifted(cornerOf(triangle, 1), offset),
     shifted(cornerOf(triangle, 2), offset),
-  ];
+  ] as Triangle;
+}
+
+/** Scales a triangle's corners by the strictly positive factor (winding kept). */
+function scaledTriangle(triangle: Triangle, factor: number): Triangle {
+  return [
+    [
+      cornerOf(triangle, 0)[0] * factor,
+      cornerOf(triangle, 0)[1] * factor,
+      cornerOf(triangle, 0)[2] * factor,
+    ],
+    [
+      cornerOf(triangle, 1)[0] * factor,
+      cornerOf(triangle, 1)[1] * factor,
+      cornerOf(triangle, 1)[2] * factor,
+    ],
+    [
+      cornerOf(triangle, 2)[0] * factor,
+      cornerOf(triangle, 2)[1] * factor,
+      cornerOf(triangle, 2)[2] * factor,
+    ],
+  ] as Triangle;
 }
 
 /**
@@ -3083,6 +3354,14 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
       return renderTriangles(shape.source).map((triangle) =>
         shiftedTriangle(triangle, shape.offset),
       );
+    case "scale":
+      // The strictly positive factor preserves orientation, so the scaled
+      // triangles keep their winding — outward stays outward.
+      return renderTriangles(shape.source).map((triangle) =>
+        scaledTriangle(triangle, shape.factor),
+      );
+    case "thickened":
+      return thickenedTriangles(shape);
     case "mirror":
       return renderTriangles(shape.source).map((triangle) =>
         reflectedTriangle(triangle, shape.axis, shape.planeOffset),
@@ -3106,7 +3385,9 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
         candidate =
           step.kind === "shift"
             ? shiftedTriangle(candidate, step.offset)
-            : reflectedTriangle(candidate, step.axis, step.planeOffset);
+            : step.kind === "scale"
+              ? scaledTriangle(candidate, step.factor)
+              : reflectedTriangle(candidate, step.axis, step.planeOffset);
       }
       candidates.push(candidate);
     }
@@ -3660,6 +3941,57 @@ export function createFakeKernel(): GeometryKernel {
     );
   };
 
+  /**
+   * The Phase 41 closed hollow over the fake kernel's PRISTINE-LEAF
+   * subset — a box or sphere target (the shell node's domain discipline
+   * verbatim): exact volume (target minus its inset), exact membership
+   * (`in target ∧ ¬(strictly inside the inset)`), bounds equal to the
+   * target's own (the walls own the outer boundary), and a deterministic
+   * two-surface mesh (the target's canonical triangles plus the inset's,
+   * reversed so the cavity faces inward). Anything else declines
+   * structurally with `kernel/unsupported-operation`, and a thickness at
+   * or past half the target's smallest extent — where the cavity meets
+   * itself — refuses with `kernel/thicken-failed` (the shell's
+   * post-condition discipline, feature-level).
+   */
+  const buildThicken = (input: ThickenInput): KernelResult<KernelSolid> => {
+    const target = shapeOf(input.target, "thicken");
+    if (!target.ok) return fail(target.error);
+    if (target.value.kind !== "box" && target.value.kind !== "sphere") {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          `thicken rejected the target: the fake kernel's thicken domain is the pristine box and sphere leaves (the analytic closed-hollow model); this solid is a "${target.value.kind}". The general thicken reference kernel is the OpenCascade backend.`,
+        ),
+      );
+    }
+    const thickness = positiveLength(input.thickness, "thickness", "thicken");
+    if (!thickness.ok) return fail(thickness.error);
+    const t = thickness.value;
+    if (target.value.kind === "box") {
+      const size = target.value.size;
+      const smallest = Math.min(at(size, 0), at(size, 1), at(size, 2));
+      if (2 * t >= smallest) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.thickenFailed,
+            `thicken rejected thickness ${String(t)} mm: the cavity meets or crosses itself (the box's smallest extent is ${String(smallest)} mm; the walls need strictly less than half of it). Reduce the thickness.`,
+          ),
+        );
+      }
+    } else if (2 * t >= 2 * target.value.radius) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.thickenFailed,
+          `thicken rejected thickness ${String(t)} mm: the cavity meets or crosses itself (the sphere's diameter is ${String(2 * target.value.radius)} mm; the walls need strictly less than half of it). Reduce the thickness.`,
+        ),
+      );
+    }
+    return ok(
+      tag.wrap({ kind: "thickened", target: target.value, thickness: t }),
+    );
+  };
+
   const operandsOf = (
     solids: readonly KernelSolid[],
     minimum: number,
@@ -3867,6 +4199,52 @@ export function createFakeKernel(): GeometryKernel {
         }
         const ccw = area > 0 ? polygon : [...polygon].reverse();
         const rotation = axisAngleMatrix(axis, angle);
+        // The Phase 41 draft taper: the solid becomes the two-station loft
+        // between the loop's chord polygon and its far inset — the ruled
+        // morph the contract pins (the inset corner moves linearly, so the
+        // blend IS the inset family at every parameter while the far inset
+        // stays valid; the shared battery above guaranteed it does). The
+        // existing Simpson-exact loft node then answers volume, bounds,
+        // membership, and the canonical mesh with no new model code.
+        if (input.taper !== undefined) {
+          const problem = taperedExtrudeProblem(
+            input.loop,
+            height,
+            input.taper,
+          );
+          if (problem !== null) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidTaper,
+                `extrude rejected the taper: ${problem.message}`,
+              ),
+            );
+          }
+          const inset = taperInsetDistanceMm(height, input.taper) ?? 0;
+          if (inset !== 0) {
+            const far = insetPolygon(ccw, inset);
+            if (far === null) {
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.invalidTaper,
+                  "extrude rejected the taper: the far-end inset degenerates the chord polygon.",
+                ),
+              );
+            }
+            return ok(
+              tag.wrap({
+                kind: "loft",
+                polygons:
+                  input.direction === -1
+                    ? [far, ccw.map((point) => ({ x: point.x, y: point.y }))]
+                    : [ccw.map((point) => ({ x: point.x, y: point.y })), far],
+                stations: input.direction === -1 ? [-height, 0] : [0, height],
+                rotation,
+                translation,
+              }),
+            );
+          }
+        }
         return ok(
           tag.wrap({
             kind: "extrusion",
@@ -4388,6 +4766,23 @@ export function createFakeKernel(): GeometryKernel {
       }
     },
 
+    thicken(input: ThickenInput): KernelResult<KernelSolid> {
+      // The throwing seam is only the thickness's valueIn parse; the
+      // subset and fit rules return structured failures (the shell
+      // discipline verbatim).
+      try {
+        return buildThicken(input);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `thicken rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
     transform(
       solid: KernelSolid,
       input: TransformInput,
@@ -4411,6 +4806,39 @@ export function createFakeKernel(): GeometryKernel {
           valueIn(input.y, "mm"),
           valueIn(input.z, "mm"),
         ];
+        // The Phase 41 uniform scale: strictly positive and finite, folded
+        // through its own node (a scale is not an isometry — the mirror
+        // node's rationale verbatim — so it cannot ride the translate
+        // node). A factor of exactly 1 is the identity: no node at all.
+        // The contract's composition `p ↦ s·R·p + t` still applies the
+        // translation after the scale, so a nonzero offset wraps the
+        // scaled source in the translate node.
+        if (input.scale !== undefined) {
+          if (!(input.scale > 0) || !Number.isFinite(input.scale)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidLength,
+                `transform rejected the scale factor ${String(input.scale)}: it must be a finite, strictly positive number.`,
+              ),
+            );
+          }
+          if (input.scale !== 1) {
+            const scaled: FakeShape = {
+              kind: "scale",
+              source: shape.value,
+              factor: input.scale,
+            };
+            const zeroOffset =
+              offset[0] === 0 && offset[1] === 0 && offset[2] === 0;
+            return ok(
+              tag.wrap(
+                zeroOffset
+                  ? scaled
+                  : { kind: "translate", source: scaled, offset },
+              ),
+            );
+          }
+        }
         return ok(tag.wrap({ kind: "translate", source: shape.value, offset }));
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);

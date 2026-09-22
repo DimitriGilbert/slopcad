@@ -14,7 +14,12 @@ import { defineConfig } from "@playwright/test";
  */
 
 const PORT = 3207;
-const baseURL = process.env.A11Y_E2E_BASE_URL ?? `http://localhost:${PORT}`;
+// The shared-server fast path (root `pnpm test:fast`): the orchestrator
+// exports SLOPCAD_E2E_SHARED_URL when ONE pre-built server serves every
+// harness — no per-config rebuild, no per-config boot.
+const sharedURL = process.env.SLOPCAD_E2E_SHARED_URL;
+const baseURL =
+  sharedURL ?? process.env.A11Y_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "e2e-a11y",
@@ -62,15 +67,19 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: `pnpm build && PORT=${PORT} node --env-file-if-exists=.env .output/server/index.mjs`,
-    url: baseURL,
-    timeout: 300_000,
-    // Reuse a running server like the smoke harness does: the a11y
-    // assertions ride the DOM, not the boot path (the boot-sensitive
-    // suites keep reuseExistingServer: false).
-    reuseExistingServer: true,
-  },
+  ...(sharedURL
+    ? {}
+    : {
+        webServer: {
+          command: `pnpm build && PORT=${PORT} node --env-file-if-exists=.env .output/server/index.mjs`,
+          url: baseURL,
+          timeout: 300_000,
+          // Reuse a running server like the smoke harness does: the a11y
+          // assertions ride the DOM, not the boot path (the boot-sensitive
+          // suites keep reuseExistingServer: false).
+          reuseExistingServer: true,
+        },
+      }),
 });
 
 /*

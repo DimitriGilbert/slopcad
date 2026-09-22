@@ -25,6 +25,7 @@ Read the flags from the kernels' own constants
 | booleans              | ✓        | ✓           | ✓     | ✓    |
 | transformTranslation  | ✓        | ✓           | ✓     | ✓    |
 | transformRotation     | —        | ✓           | ✓     | —    |
+| transformScale        | ✓        | ✓           | ✓     | ✓    |
 | exactPrimitiveVolumes | ✓        | ✓           | ✓     | ✓    |
 | exactBooleanVolumes   | ✓        | ✓           | —     | —    |
 | tightBooleanBounds    | ✓        | ✓           | ✓     | —    |
@@ -35,17 +36,27 @@ Read the flags from the kernels' own constants
 | fillet                | —        | ✓           | —     | ✓    |
 | chamfer               | —        | ✓           | —     | ✓    |
 | shell                 | —        | ✓           | —     | ✓    |
+| thicken               | —        | ✓           | —     | ✓    |
+| extrudeTaper          | —        | ✓           | ✓     | ✓    |
 | mirror                | ✓        | ✓           | ✓     | ✓    |
 | surfaceArea           | ✓        | ✓           | ✓     | ✓    |
-
-(`transformScale` is declared `false` everywhere today — the flag exists
-so a kernel can declare readiness before the input type grows to carry
-it.)
 
 Every capability-gated decline answers the structured
 `kernel/unsupported-operation` — Manifold's `sweep`, its `fillet`,
 JSCAD's `shell`, Manifold's and JSCAD's `helix`, all of them — never a
-silently wrong approximation. The `helix` flag carries one per-kernel
+silently wrong approximation. Phase 41's additions: the uniform
+`transformScale` is the mirror precedent (every kernel implements it —
+OCCT through `gp_Trsf.SetScale`, the mesh kernels through their affine
+matrices); `thicken` (the CLOSED hollow, `MakeThickSolidByJoin`'s cavity
+plus one exact cut on OCCT, the analytic box/sphere subset on the fake
+kernel) declines on Manifold and JSCAD (no 3D offset — the shell
+verdict); `extrudeTaper` (the draft wall-angle on `extrude`) builds on
+OCCT (`BRepOffsetAPI_DraftAngle`, declining ellipse/spline loops per
+shape — its face domain is planar/cylindrical) and the chord-model
+kernels (the fake kernel's two-station inset loft, JSCAD's
+`extrudeFromSlices` pair), while Manifold declines — its extrude's
+uniform top-scale is a provably different solid, never a draft. The
+`helix` flag carries one per-kernel
 subset twist: the fake kernel's analytic screw-solid model declines
 OVERLAPPING turns (`kernel/helix-turn-overlap`) rather than
 overcounting, while OCCT builds them — the general helical sweep is

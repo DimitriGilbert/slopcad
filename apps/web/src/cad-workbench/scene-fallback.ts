@@ -24,6 +24,12 @@ import { documentRevolveRequest } from "./revolve";
 import { documentHelixRequest } from "./helix";
 import { documentThreadSceneRequest } from "./thread";
 import { documentSweepRequest } from "./sweep";
+import { documentRibSceneRequest } from "./rib";
+import {
+  documentScaleSceneRequest,
+  documentThickenSceneRequest,
+} from "./scale-thicken";
+import { documentSplitSceneRequest } from "./split";
 
 /**
  * The workbench scene kinds the engine's dispatch can follow (the same
@@ -39,6 +45,10 @@ export type WorkbenchSceneKind =
   | "loft"
   | "helix"
   | "thread"
+  | "rib"
+  | "scale"
+  | "thicken"
+  | "split"
   | "hole";
 
 /**
@@ -52,6 +62,10 @@ export function highestResolvableScene(
 ): WorkbenchSceneKind {
   if (documentHoleSceneRequest(document) !== null) return "hole";
   if (documentThreadSceneRequest(document) !== null) return "thread";
+  if (documentSplitSceneRequest(document) !== null) return "split";
+  if (documentThickenSceneRequest(document) !== null) return "thicken";
+  if (documentScaleSceneRequest(document) !== null) return "scale";
+  if (documentRibSceneRequest(document) !== null) return "rib";
   if (documentHelixRequest(document) !== null) return "helix";
   if (documentLoftRequest(document) !== null) return "loft";
   if (documentSweepRequest(document) !== null) return "sweep";
@@ -78,14 +92,22 @@ export function honestSceneFallback(
       ? documentHoleSceneRequest(document) !== null
       : activeScene === "thread"
         ? documentThreadSceneRequest(document) !== null
-        : activeScene === "helix"
-          ? documentHelixRequest(document) !== null
-          : activeScene === "loft"
-            ? documentLoftRequest(document) !== null
-            : activeScene === "sweep"
-              ? documentSweepRequest(document) !== null
-              : activeScene === "revolve"
-                ? documentRevolveRequest(document) !== null
-                : documentExtrudeRequest(document) !== null;
+        : activeScene === "split"
+          ? documentSplitSceneRequest(document) !== null
+          : activeScene === "thicken"
+            ? documentThickenSceneRequest(document) !== null
+            : activeScene === "scale"
+              ? documentScaleSceneRequest(document) !== null
+              : activeScene === "rib"
+                ? documentRibSceneRequest(document) !== null
+                : activeScene === "helix"
+                  ? documentHelixRequest(document) !== null
+                  : activeScene === "loft"
+                    ? documentLoftRequest(document) !== null
+                    : activeScene === "sweep"
+                      ? documentSweepRequest(document) !== null
+                      : activeScene === "revolve"
+                        ? documentRevolveRequest(document) !== null
+                        : documentExtrudeRequest(document) !== null;
   return resolved ? null : highestResolvableScene(document);
 }

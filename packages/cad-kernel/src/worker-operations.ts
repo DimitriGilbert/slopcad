@@ -201,6 +201,7 @@ export const WORKER_OPERATION_IDS = [
   "solid.fillet",
   "solid.chamfer",
   "solid.shell",
+  "solid.thicken",
   "solid.mirror",
   "solid.topology",
   "step.import",
@@ -257,6 +258,14 @@ export interface WorkerExtrudeInput {
   readonly height: LengthValue;
   readonly direction: 1 | -1;
   readonly placement: ProfilePlacementInput;
+  /**
+   * The optional draft taper angle (Phase 41), in any angle unit — the
+   * contract's `ProfileExtrudeInput.taper` carried across the wire.
+   * Whether the angle is finite, inside ±π/2, and its far inset
+   * non-degenerate is the kernel contract's semantic call
+   * (`kernel/invalid-taper`); the codec checks structure only.
+   */
+  readonly taper?: AngleValue;
 }
 
 /**
@@ -418,6 +427,14 @@ export interface WorkerTransformInput {
   readonly solid: WorkerSolidId;
   readonly translation: WorkerTranslationVector;
   readonly rotation?: WorkerRotationInput;
+  /**
+   * The optional uniform scale factor (Phase 41): a strictly positive
+   * dimensionless number applied about the world origin before the
+   * translation. Whether the factor is finite and positive is the kernel
+   * contract's semantic call (`kernel/invalid-length`); the codec checks
+   * structure only.
+   */
+  readonly scale?: number;
 }
 
 /**
@@ -488,6 +505,19 @@ export interface WorkerMirrorInput {
   readonly target: WorkerSolidId;
   readonly axis: MirrorPlaneAxis;
   readonly offset: LengthValue;
+}
+
+/**
+ * Input of `solid.thicken` (Phase 41): the target solid and the uniform
+ * wall thickness of the CLOSED hollow — the contract's `ThickenInput`
+ * carried across the wire. Whether the thickness is positive and fits
+ * (the cavity must not meet itself) is the kernel contract's semantic
+ * call (`kernel/invalid-length`, `kernel/thicken-failed`); the codec
+ * checks structure only.
+ */
+export interface WorkerThickenInput {
+  readonly target: WorkerSolidId;
+  readonly thickness: LengthValue;
 }
 
 /**
@@ -793,6 +823,7 @@ export interface WorkerOperationInputs {
   readonly "solid.fillet": WorkerFilletInput;
   readonly "solid.chamfer": WorkerChamferInput;
   readonly "solid.shell": WorkerShellInput;
+  readonly "solid.thicken": WorkerThickenInput;
   readonly "solid.mirror": WorkerMirrorInput;
   readonly "solid.topology": WorkerTopologyInput;
   readonly "step.import": WorkerStepImportInput;
@@ -829,6 +860,7 @@ export interface WorkerOperationResults {
   readonly "solid.fillet": WorkerSolidResult;
   readonly "solid.chamfer": WorkerSolidResult;
   readonly "solid.shell": WorkerSolidResult;
+  readonly "solid.thicken": WorkerSolidResult;
   readonly "solid.mirror": WorkerSolidResult;
   readonly "solid.topology": WorkerTopologyResult;
   readonly "step.import": WorkerStepImportResult;
@@ -913,6 +945,7 @@ export interface SerializedWorkerOperationInputs {
         readonly z: SerializedWorkerLength;
       };
     };
+    readonly taper?: SerializedWorkerAngle;
   };
   readonly "solid.revolve": {
     readonly loop: readonly SerializedProfileSegment[];
@@ -973,6 +1006,8 @@ export interface SerializedWorkerOperationInputs {
       readonly axis: readonly [number, number, number];
       readonly angle: SerializedWorkerAngle;
     };
+    /** The optional uniform scale factor (Phase 41), last in key order. */
+    readonly scale?: number;
   };
   readonly "solid.bounds": {
     readonly solid: string;
@@ -1002,6 +1037,10 @@ export interface SerializedWorkerOperationInputs {
   readonly "solid.shell": {
     readonly target: string;
     readonly faces: readonly number[];
+    readonly thickness: SerializedWorkerLength;
+  };
+  readonly "solid.thicken": {
+    readonly target: string;
     readonly thickness: SerializedWorkerLength;
   };
   readonly "solid.mirror": {
@@ -1103,6 +1142,9 @@ export interface SerializedWorkerOperationResults {
     readonly solid: string;
   };
   readonly "solid.shell": {
+    readonly solid: string;
+  };
+  readonly "solid.thicken": {
     readonly solid: string;
   };
   readonly "solid.mirror": {
@@ -1726,6 +1768,12 @@ function serializeExtrudeInput(
         z: serializeDimensionalValue(input.placement.translation.z),
       },
     },
+    // The taper rides last in the fixed key order, exactly when present —
+    // the helix spine's optional-taper discipline, so an untapered input
+    // serializes to the pre-extension byte shape.
+    ...(input.taper === undefined
+      ? {}
+      : { taper: serializeDimensionalValue(input.taper) }),
   };
 }
 
@@ -1800,6 +1848,21 @@ function parseExtrudeInput(
     translation.z,
   );
   if (!z.ok) return z;
+  // Backward compatibility: a payload without the taper field is the plain
+  // prism, byte-compatible with the pre-extension wire.
+  if (record.value.taper === undefined) {
+    return ok({
+      loop: loop.value,
+      height: height.value,
+      direction,
+      placement: {
+        rotation: { axis: axis.value, angle: angle.value },
+        translation: { x: x.value, y: y.value, z: z.value },
+      },
+    });
+  }
+  const taper = requireAngleField("solid.extrude", "taper", record.value.taper);
+  if (!taper.ok) return taper;
   return ok({
     loop: loop.value,
     height: height.value,
@@ -1808,6 +1871,7 @@ function parseExtrudeInput(
       rotation: { axis: axis.value, angle: angle.value },
       translation: { x: x.value, y: y.value, z: z.value },
     },
+    taper: taper.value,
   });
 }
 
@@ -2301,10 +2365,14 @@ function serializeTransformInput(
     y: serializeDimensionalValue(input.translation.y),
     z: serializeDimensionalValue(input.translation.z),
   };
-  // The rotation rides last in the fixed key order, exactly when present —
-  // a translation-only input serializes to the pre-extension byte shape.
-  if (input.rotation === undefined) {
+  // The rotation rides before the scale, both exactly when present — a
+  // translation-only input serializes to the pre-extension byte shape.
+  if (input.rotation === undefined && input.scale === undefined) {
     return { solid: input.solid, translation };
+  }
+  const withScale = input.scale === undefined ? {} : { scale: input.scale };
+  if (input.rotation === undefined) {
+    return { solid: input.solid, translation, ...withScale };
   }
   return {
     solid: input.solid,
@@ -2313,6 +2381,7 @@ function serializeTransformInput(
       axis: [...input.rotation.axis],
       angle: serializeDimensionalValue(input.rotation.angle),
     },
+    ...withScale,
   };
 }
 
@@ -2352,8 +2421,23 @@ function parseTransformInput(
   );
   if (!z.ok) return z;
   // Backward compatibility: a payload without the rotation field is a
-  // translation-only transform, byte-compatible with the pre-extension wire.
+  // translation-only transform (the optional Phase 41 scale may still
+  // ride alone), byte-compatible with the pre-extension wire.
   if (record.value.rotation === undefined) {
+    const scale = optionalScaleField(record.value.scale);
+    if (scale === null) {
+      return payloadError(
+        'The "solid.transform" field "scale" must be a finite number.',
+        record.value.scale,
+      );
+    }
+    if (scale !== undefined) {
+      return ok({
+        solid: solid.value,
+        translation: { x: x.value, y: y.value, z: z.value },
+        scale,
+      });
+    }
     return ok({
       solid: solid.value,
       translation: { x: x.value, y: y.value, z: z.value },
@@ -2377,6 +2461,21 @@ function parseTransformInput(
     record.value.rotation.angle,
   );
   if (!angle.ok) return angle;
+  const scale = optionalScaleField(record.value.scale);
+  if (scale === null) {
+    return payloadError(
+      'The "solid.transform" field "scale" must be a finite number.',
+      record.value.scale,
+    );
+  }
+  if (scale !== undefined) {
+    return ok({
+      solid: solid.value,
+      translation: { x: x.value, y: y.value, z: z.value },
+      rotation: { axis: axis.value, angle: angle.value },
+      scale,
+    });
+  }
   return ok({
     solid: solid.value,
     translation: { x: x.value, y: y.value, z: z.value },
@@ -2781,6 +2880,46 @@ function parseShellInput(
   );
   if (!thickness.ok) return thickness;
   return ok({ target: target.value, faces, thickness: thickness.value });
+}
+
+function serializeThickenInput(
+  input: WorkerThickenInput,
+): SerializedWorkerOperationInput<"solid.thicken"> {
+  return {
+    target: input.target,
+    thickness: serializeDimensionalValue(input.thickness),
+  };
+}
+
+function parseThickenInput(
+  payload: unknown,
+): ParseResult<WorkerThickenInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.thicken", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.thicken",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const thickness = requireLengthField(
+    "solid.thicken",
+    "thickness",
+    record.value.thickness,
+  );
+  if (!thickness.ok) return thickness;
+  return ok({ target: target.value, thickness: thickness.value });
+}
+
+/**
+ * Reads the optional `solid.transform` scale field: `undefined` when
+ * absent (the pre-extension wire), the finite number when present, and
+ * `null` when malformed (the caller's structured refusal).
+ */
+function optionalScaleField(field: unknown): number | undefined | null {
+  if (field === undefined) return undefined;
+  if (typeof field !== "number" || !Number.isFinite(field)) return null;
+  return field;
 }
 
 function serializeMirrorInput(
@@ -3191,6 +3330,7 @@ const INPUT_SERIALIZERS: {
   "solid.fillet": serializeFilletInput,
   "solid.chamfer": serializeChamferInput,
   "solid.shell": serializeShellInput,
+  "solid.thicken": serializeThickenInput,
   "solid.mirror": serializeMirrorInput,
   "solid.topology": serializeTopologyInput,
   "step.import": serializeStepImportInput,
@@ -3227,6 +3367,7 @@ const INPUT_PARSERS: {
   "solid.fillet": parseFilletInput,
   "solid.chamfer": parseChamferInput,
   "solid.shell": parseShellInput,
+  "solid.thicken": parseThickenInput,
   "solid.mirror": parseMirrorInput,
   "solid.topology": parseTopologyInput,
   "step.import": parseStepImportInput,
@@ -3555,6 +3696,7 @@ const RESULT_SERIALIZERS: {
   "solid.fillet": serializeSolidResult,
   "solid.chamfer": serializeSolidResult,
   "solid.shell": serializeSolidResult,
+  "solid.thicken": serializeSolidResult,
   "solid.mirror": serializeSolidResult,
   "solid.topology": serializeTopologyResult,
   "step.import": serializeStepImportResult,
@@ -3593,6 +3735,7 @@ const RESULT_PARSERS: {
   "solid.fillet": (payload) => parseSolidResult("solid.fillet", payload),
   "solid.chamfer": (payload) => parseSolidResult("solid.chamfer", payload),
   "solid.shell": (payload) => parseSolidResult("solid.shell", payload),
+  "solid.thicken": (payload) => parseSolidResult("solid.thicken", payload),
   "solid.mirror": (payload) => parseSolidResult("solid.mirror", payload),
   "solid.topology": parseTopologyResult,
   "step.import": parseStepImportResult,
@@ -3660,6 +3803,7 @@ const RESULT_MINTS: {
   "solid.fillet": (result) => [result.solid],
   "solid.chamfer": (result) => [result.solid],
   "solid.shell": (result) => [result.solid],
+  "solid.thicken": (result) => [result.solid],
   "solid.mirror": (result) => [result.solid],
   "solid.topology": () => [],
   "step.import": (result) => result.solids.map((ref) => ref.solid),

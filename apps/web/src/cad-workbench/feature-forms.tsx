@@ -34,6 +34,14 @@ import {
   THREAD_MODE_VALUES,
   type ThreadCutInput,
 } from "./thread";
+import { RIB_DEFAULTS, type RibCutInput } from "./rib";
+import {
+  SCALE_DEFAULTS,
+  THICKEN_DEFAULTS,
+  type ScaleInput,
+  type SplitInput,
+  type ThickenInput,
+} from "./scale-thicken";
 
 /** One pickable sketch: the document record's id and its name. */
 export interface CadFeatureSketchOption {
@@ -72,6 +80,27 @@ export interface CadFeatureFormLabels {
   readonly threadHandedness: string;
   readonly threadAxis: string;
   readonly threadHint: string;
+  readonly ribTitle: string;
+  readonly ribProfile: string;
+  readonly ribThickness: string;
+  readonly ribHint: string;
+  readonly draftTitle: string;
+  readonly draftProfile: string;
+  readonly draftDistance: string;
+  readonly draftTaper: string;
+  readonly draftHint: string;
+  readonly scaleTitle: string;
+  readonly scaleFactor: string;
+  readonly scaleHint: string;
+  readonly thickenTitle: string;
+  readonly thickenThickness: string;
+  readonly thickenHint: string;
+  readonly splitTitle: string;
+  readonly splitPlane: string;
+  readonly splitSide: string;
+  readonly splitSideNormal: string;
+  readonly splitSideOpposite: string;
+  readonly splitHint: string;
   readonly submit: string;
   readonly pickSketch: string;
 }
@@ -111,6 +140,32 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   threadAxis: "Axis",
   threadHint:
     "The thread cuts the last extrusion (model the nominal major diameter, then thread it); cosmetic threads annotate without geometry.",
+  ribTitle: "Add a rib to the latest extrusion",
+  ribProfile: "Rib cross-section sketch",
+  ribThickness: "Thickness (mm)",
+  ribHint:
+    "The closed profile extrudes symmetrically by the thickness about its own sketch plane and merges with the part; draw it reaching outside the solid it strengthens.",
+  draftTitle: "Extrude a saved sketch with a draft taper",
+  draftProfile: "Profile sketch",
+  draftDistance: "Distance (mm)",
+  draftTaper: "Draft taper (deg)",
+  draftHint:
+    "Positive tapers narrow the walls away from the sketch plane (the foundry draft); negative tapers widen them. The walls lean by the angle, so cross-sections inset as they travel.",
+  scaleTitle: "Scale the latest extrusion uniformly",
+  scaleFactor: "Factor",
+  scaleHint:
+    "One uniform factor about the world origin: volume scales by its cube, bounds by itself. Non-uniform scaling is out of contract scope.",
+  thickenTitle: "Hollow the latest extrusion into a closed shell",
+  thickenThickness: "Wall thickness (mm)",
+  thickenHint:
+    "The closed hollow — uniform walls around a sealed interior void, the shell feature's complement.",
+  splitTitle: "Split the latest extrusion by a datum plane",
+  splitPlane: "Cutting datum plane",
+  splitSide: "Kept side",
+  splitSideNormal: "The plane normal's side",
+  splitSideOpposite: "The opposite side",
+  splitHint:
+    "The boolean cut keeps one side of the picked datum plane; create the plane first (the Datum button), then split.",
   submit: "Create",
   pickSketch: "Pick a sketch",
 };
@@ -742,6 +797,319 @@ export function ThreadFeatureForm({
   return (
     <form.Form
       aria-label={labels.threadTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the rib form. */
+export interface RibFormValues extends Record<string, unknown> {
+  readonly profileSketchId: string;
+  readonly thicknessMm: number;
+}
+
+/**
+ * The rib form: the cross-section sketch picker plus the thickness.
+ * Submission routes through the engine's rib action; a structured refusal
+ * surfaces verbatim in the dialog's error region.
+ */
+export function RibFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onRib,
+  sketches,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onRib: (specification: RibCutInput & { sketchId: string }) => void;
+  readonly sketches: readonly CadFeatureSketchOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<RibFormValues>[] = [
+    {
+      name: "profileSketchId",
+      options: sketchOptions(sketches),
+      placeholder: labels.pickSketch,
+      required: true,
+      type: "select",
+      label: labels.ribProfile,
+    },
+    {
+      name: "thicknessMm",
+      required: true,
+      type: "number",
+      label: labels.ribThickness,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value)
+          ? null
+          : "Enter a thickness in millimetres.",
+    },
+  ];
+  const form = useFormedible<RibFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        profileSketchId: sketches[0]?.id ?? "",
+        thicknessMm: RIB_DEFAULTS.thicknessMm,
+      },
+      onSubmit: ({ value }) => {
+        onRib({
+          sketchId: value.profileSketchId,
+          thicknessMm: value.thicknessMm,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form aria-label={labels.ribTitle} className="space-y-3" noValidate />
+  );
+}
+
+/** Form values of the scale form. */
+export interface ScaleFormValues extends Record<string, unknown> {
+  readonly factor: number;
+}
+
+/** The scale form: one uniform factor against the latest extrusion. */
+export function ScaleFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onScale,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onScale: (specification: ScaleInput) => void;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<ScaleFormValues>[] = [
+    {
+      name: "factor",
+      required: true,
+      type: "number",
+      label: labels.scaleFactor,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value) && value > 0
+          ? null
+          : "Enter a finite, strictly positive factor.",
+    },
+  ];
+  const form = useFormedible<ScaleFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: { factor: SCALE_DEFAULTS.factor },
+      onSubmit: ({ value }) => {
+        onScale({ factor: value.factor });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.scaleTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the thicken form. */
+export interface ThickenFormValues extends Record<string, unknown> {
+  readonly thicknessMm: number;
+}
+
+/** The thicken form: one wall thickness against the latest extrusion. */
+export function ThickenFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onThicken,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onThicken: (specification: ThickenInput) => void;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<ThickenFormValues>[] = [
+    {
+      name: "thicknessMm",
+      required: true,
+      type: "number",
+      label: labels.thickenThickness,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value) && value > 0
+          ? null
+          : "Enter a finite, strictly positive thickness.",
+    },
+  ];
+  const form = useFormedible<ThickenFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: { thicknessMm: THICKEN_DEFAULTS.thicknessMm },
+      onSubmit: ({ value }) => {
+        onThicken({ thicknessMm: value.thicknessMm });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.thickenTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the split form. */
+export interface SplitFormValues extends Record<string, unknown> {
+  readonly datumPlaneId: string;
+  readonly side: string;
+}
+
+/**
+ * The split form: the datum-plane picker plus the kept-side selector.
+ * Submission routes through the engine's split action; a structured
+ * refusal (an unresolvable datum, a plane that misses the solid)
+ * surfaces verbatim in the dialog's error region.
+ */
+export function SplitFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onSplit,
+  datumPlanes,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onSplit: (
+    specification: SplitInput & { datumPlaneId: string },
+  ) => void;
+  readonly datumPlanes: readonly CadFeatureDatumOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<SplitFormValues>[] = [
+    {
+      name: "datumPlaneId",
+      options: datumPlanes.map((datum) => ({
+        value: datum.id,
+        label: datum.name,
+      })),
+      placeholder: labels.splitPlane,
+      required: true,
+      type: "select",
+      label: labels.splitPlane,
+    },
+    {
+      name: "side",
+      options: [
+        { value: "normal", label: labels.splitSideNormal },
+        { value: "opposite", label: labels.splitSideOpposite },
+      ],
+      required: true,
+      type: "select",
+      label: labels.splitSide,
+    },
+  ];
+  const form = useFormedible<SplitFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        datumPlaneId: datumPlanes[0]?.id ?? "",
+        side: "normal",
+      },
+      onSubmit: ({ value }) => {
+        onSplit({
+          datumPlaneId: value.datumPlaneId,
+          side: value.side === "opposite" ? -1 : 1,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.splitTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the draft-extrude form. */
+export interface DraftFormValues extends Record<string, unknown> {
+  readonly profileSketchId: string;
+  readonly distanceMm: number;
+  readonly taperDeg: number;
+}
+
+/**
+ * The draft-extrude form: the saved profile sketch, the signed distance,
+ * and the taper angle — the Phase 41 third input of the extrude feature.
+ * Submission routes through the engine's draft action; a structured
+ * refusal (an unresolvable profile, a taper past the collapse) surfaces
+ * verbatim in the dialog's error region.
+ */
+export function DraftFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onDraft,
+  sketches,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onDraft: (specification: {
+    readonly sketchId: string;
+    readonly distanceMm: number;
+    readonly taperDeg: number;
+  }) => void;
+  readonly sketches: readonly CadFeatureSketchOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const numberField = (
+    name: keyof DraftFormValues & string,
+    label: string,
+  ): FormedibleFieldConfig<DraftFormValues> => ({
+    name,
+    required: true,
+    type: "number",
+    label,
+    inputClassName: "font-mono",
+    validation: (value) =>
+      typeof value === "number" && Number.isFinite(value)
+        ? null
+        : "Enter a finite number.",
+  });
+  const fields: readonly FormedibleFieldConfig<DraftFormValues>[] = [
+    {
+      name: "profileSketchId",
+      options: sketchOptions(sketches),
+      placeholder: labels.pickSketch,
+      required: true,
+      type: "select",
+      label: labels.draftProfile,
+    },
+    numberField("distanceMm", labels.draftDistance),
+    numberField("taperDeg", labels.draftTaper),
+  ];
+  const form = useFormedible<DraftFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        profileSketchId: sketches[0]?.id ?? "",
+        distanceMm: 10,
+        taperDeg: 5,
+      },
+      onSubmit: ({ value }) => {
+        onDraft({
+          sketchId: value.profileSketchId,
+          distanceMm: value.distanceMm,
+          taperDeg: value.taperDeg,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.draftTitle}
       className="space-y-3"
       noValidate
     />

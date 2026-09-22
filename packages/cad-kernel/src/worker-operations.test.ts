@@ -73,6 +73,7 @@ describe("operation vocabulary", () => {
       "solid.fillet",
       "solid.chamfer",
       "solid.shell",
+      "solid.thicken",
       "solid.mirror",
       "solid.topology",
       "step.import",
@@ -155,6 +156,60 @@ describe("operation input round-trips", () => {
     expectInputRoundTrip("solid.shell", {
       target: solidA,
       faces: [5],
+      thickness: mm(2),
+    });
+  });
+
+  it("round-trips the extrude input with the optional draft taper (Phase 41)", () => {
+    const placement = {
+      rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+      translation: { x: mm(0), y: mm(0), z: mm(0) },
+    };
+    const loop = [
+      { kind: "line" as const, start: [0, 0] as const, end: [4, 0] as const },
+      { kind: "line" as const, start: [4, 0] as const, end: [4, 4] as const },
+      { kind: "line" as const, start: [4, 4] as const, end: [0, 4] as const },
+      { kind: "line" as const, start: [0, 4] as const, end: [0, 0] as const },
+    ];
+    // Without the taper: the pre-extension byte shape (no field).
+    const plain = serializeWorkerOperationInput("solid.extrude", {
+      loop,
+      height: mm(10),
+      direction: 1,
+      placement,
+    });
+    expect("taper" in (plain as Record<string, unknown>)).toBe(false);
+    expectInputRoundTrip("solid.extrude", {
+      loop,
+      height: mm(10),
+      direction: 1,
+      placement,
+      taper: angle(0.08726646259971647),
+    });
+  });
+
+  it("round-trips the transform input with the optional uniform scale (Phase 41)", () => {
+    const plain = serializeWorkerOperationInput("solid.transform", {
+      solid: solidA,
+      translation: { x: mm(1), y: mm(-2), z: mm(3) },
+    });
+    expect("scale" in (plain as Record<string, unknown>)).toBe(false);
+    expectInputRoundTrip("solid.transform", {
+      solid: solidA,
+      translation: { x: mm(1), y: mm(-2), z: mm(3) },
+      scale: 2,
+    });
+    expectInputRoundTrip("solid.transform", {
+      solid: solidA,
+      translation: { x: mm(1), y: mm(-2), z: mm(3) },
+      rotation: { axis: [0, 0, 1], angle: angle(Math.PI / 2) },
+      scale: 0.5,
+    });
+  });
+
+  it("round-trips the thicken input with its wall thickness (Phase 41)", () => {
+    expectInputRoundTrip("solid.thicken", {
+      target: solidA,
       thickness: mm(2),
     });
   });
@@ -721,6 +776,7 @@ describe("operation input validation", () => {
       "solid.fillet": { target: solidA, edges: "edges", radius: 2 },
       "solid.chamfer": { target: solidA, edges: "edges", distance: 2 },
       "solid.shell": { target: solidA, faces: "faces", thickness: 2 },
+      "solid.thicken": { target: solidA, thickness: "thick" },
       "solid.mirror": { target: solidA, axis: "diagonal", offset: 2 },
       "solid.topology": {
         solid: solidA,

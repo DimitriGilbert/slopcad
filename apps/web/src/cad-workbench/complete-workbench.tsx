@@ -108,8 +108,13 @@ import {
   CAD_FEATURE_FORM_LABELS,
   DATUM_FORM_LABELS,
   DatumFeatureForm,
+  DraftFeatureForm,
   HelixFeatureForm,
+  RibFeatureForm,
+  ScaleFeatureForm,
+  SplitFeatureForm,
   ThreadFeatureForm,
+  ThickenFeatureForm,
   LoftFeatureForm,
   SweepFeatureForm,
   type CadFeatureSketchOption,
@@ -306,6 +311,11 @@ export function CompleteCadWorkbench({
     handleLoft,
     handleHelix,
     handleThread,
+    handleDraft,
+    handleRib,
+    handleScale,
+    handleThicken,
+    handleSplit,
     handleSketchOnFace,
     sketchBootWorkplane,
     datumsJson,
@@ -321,7 +331,17 @@ export function CompleteCadWorkbench({
   // kind-switched; the last submission's structured refusal rides here (the
   // parameter panel's apply-failure precedent) and clears on the next open.
   const [featureDialog, setFeatureDialog] = useState<
-    "sweep" | "loft" | "helix" | "thread" | "datum" | null
+    | "sweep"
+    | "loft"
+    | "helix"
+    | "thread"
+    | "draft"
+    | "rib"
+    | "scale"
+    | "thicken"
+    | "split"
+    | "datum"
+    | null
   >(null);
   const [featureOutcome, setFeatureOutcome] = useState<
     | { readonly ok: true }
@@ -493,6 +513,13 @@ export function CompleteCadWorkbench({
       ? [{ id: datum.id, name: datum.name }]
       : [];
   });
+  // The datum-PLANE pool the split form picks from: plane-kind records only.
+  const datumPlaneOptions = workbenchDocument.datums.flatMap((datum) => {
+    const payload = parseDatumPayload(datum.datum);
+    return payload.ok && payload.value.datumType === "plane"
+      ? [{ id: datum.id, name: datum.name }]
+      : [];
+  });
 
   /** Runs the sweep submission, surfacing the refusal and closing on success. */
   const submitSweep = (profileId: string, pathId: string): void => {
@@ -533,9 +560,68 @@ export function CompleteCadWorkbench({
     if (outcome.ok) setFeatureDialog(null);
   };
 
+  /** Runs the draft submission, surfacing the refusal and closing on success. */
+  const submitDraft = (specification: {
+    readonly sketchId: string;
+    readonly distanceMm: number;
+    readonly taperDeg: number;
+  }): void => {
+    const outcome = handleDraft(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the rib submission, surfacing the refusal and closing on success. */
+  const submitRib = (specification: {
+    readonly sketchId: string;
+    readonly thicknessMm: number;
+  }): void => {
+    const outcome = handleRib(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the scale submission, surfacing the refusal and closing on success. */
+  const submitScale = (specification: { readonly factor: number }): void => {
+    const outcome = handleScale(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the thicken submission, surfacing the refusal and closing on success. */
+  const submitThicken = (specification: {
+    readonly thicknessMm: number;
+  }): void => {
+    const outcome = handleThicken(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the split submission, surfacing the refusal and closing on success. */
+  const submitSplit = (specification: {
+    readonly datumPlaneId: string;
+    readonly side: 1 | -1;
+  }): void => {
+    const outcome = handleSplit(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
   /** Opens one feature dialog with its outcome region reset. */
   const openFeatureDialog = useCallback(
-    (kind: "sweep" | "loft" | "helix" | "thread" | "datum"): void => {
+    (
+      kind:
+        | "sweep"
+        | "loft"
+        | "helix"
+        | "thread"
+        | "draft"
+        | "rib"
+        | "scale"
+        | "thicken"
+        | "split"
+        | "datum",
+    ): void => {
       setFeatureOutcome(null);
       setFeatureDialog(kind);
     },
@@ -679,6 +765,56 @@ export function CompleteCadWorkbench({
         },
       },
       {
+        disabled: !canAuthorSketchFeatures,
+        group: "Workspace",
+        id: "draft",
+        keywords: "draft taper extrude wall angle mold create",
+        label: "Extrude with a draft taper",
+        run: () => {
+          openFeatureDialog("draft");
+        },
+      },
+      {
+        disabled: !(canAuthorSketchFeatures && hasExtrudeBase),
+        group: "Workspace",
+        id: "rib",
+        keywords: "rib stiffener gusset union create",
+        label: "Add a rib to the last extrusion",
+        run: () => {
+          openFeatureDialog("rib");
+        },
+      },
+      {
+        disabled: !hasExtrudeBase,
+        group: "Workspace",
+        id: "scale",
+        keywords: "scale uniform factor transform create",
+        label: "Scale the last extrusion",
+        run: () => {
+          openFeatureDialog("scale");
+        },
+      },
+      {
+        disabled: !hasExtrudeBase,
+        group: "Workspace",
+        id: "thicken",
+        keywords: "thicken hollow shell wall offset create",
+        label: "Hollow the last extrusion closed",
+        run: () => {
+          openFeatureDialog("thicken");
+        },
+      },
+      {
+        disabled: !(datumPlaneOptions.length >= 1 && hasExtrudeBase),
+        group: "Workspace",
+        id: "split",
+        keywords: "split cut plane half body create",
+        label: "Split the last extrusion by a plane",
+        run: () => {
+          openFeatureDialog("split");
+        },
+      },
+      {
         disabled: !hasExtrudeBase,
         group: "Workspace",
         id: "thread",
@@ -736,6 +872,7 @@ export function CompleteCadWorkbench({
     clearSelection,
     handleHole,
     hasExtrudeBase,
+    datumPlaneOptions.length,
     hasFaceSelection,
     historyApi,
     holeBase,
@@ -1472,6 +1609,101 @@ export function CompleteCadWorkbench({
         >
           Thread
         </Button>
+        {/* The Phase 41 feature verbs: draft re-extrudes a saved sketch
+            with a wall-angle taper; rib authors from a saved
+            cross-section sketch and needs an extrusion to grow; scale and
+            thicken act on the latest extrusion; split needs a datum plane
+            and an extrusion. */}
+        <Button
+          className="max-2xl:hidden"
+          data-testid="complete-draft"
+          disabled={sketchOptions.length < 1}
+          onClick={() => {
+            openFeatureDialog("draft");
+          }}
+          size="xs"
+          title={
+            sketchOptions.length >= 1
+              ? "Extrude a saved sketch with a draft taper: the walls lean by the angle away from the sketch plane."
+              : "Save a sketch first (draw one and press Save); the draft picks its profile from the saved pool."
+          }
+          type="button"
+          variant="outline"
+        >
+          Draft
+        </Button>
+        <Button
+          className="max-2xl:hidden"
+          data-testid="complete-rib"
+          disabled={!(sketchOptions.length >= 1 && hasExtrudeBase)}
+          onClick={() => {
+            openFeatureDialog("rib");
+          }}
+          size="xs"
+          title={
+            sketchOptions.length >= 1 && hasExtrudeBase
+              ? "Union a rib: pick a saved cross-section sketch and a thickness; it extrudes symmetrically into the latest extrusion."
+              : "Save a sketch and extrude a profile first; a rib needs a cross-section and a part to grow."
+          }
+          type="button"
+          variant="outline"
+        >
+          Rib
+        </Button>
+        <Button
+          className="max-2xl:hidden"
+          data-testid="complete-scale"
+          disabled={!hasExtrudeBase}
+          onClick={() => {
+            openFeatureDialog("scale");
+          }}
+          size="xs"
+          title={
+            hasExtrudeBase
+              ? "Scale the latest extrusion by one uniform factor about the world origin."
+              : "Extrude a profile first; a scale needs a solid."
+          }
+          type="button"
+          variant="outline"
+        >
+          Scale
+        </Button>
+        <Button
+          className="max-2xl:hidden"
+          data-testid="complete-thicken"
+          disabled={!hasExtrudeBase}
+          onClick={() => {
+            openFeatureDialog("thicken");
+          }}
+          size="xs"
+          title={
+            hasExtrudeBase
+              ? "Hollow the latest extrusion into a closed shell of uniform walls."
+              : "Extrude a profile first; a thicken needs a solid."
+          }
+          type="button"
+          variant="outline"
+        >
+          Thicken
+        </Button>
+        <Button
+          className="max-2xl:hidden"
+          data-testid="complete-split"
+          disabled={!(datumPlaneOptions.length >= 1 && hasExtrudeBase)}
+          onClick={() => {
+            openFeatureDialog("split");
+          }}
+          size="xs"
+          title={
+            datumPlaneOptions.length >= 1 && hasExtrudeBase
+              ? "Split the latest extrusion by a datum plane, keeping one side."
+              : "Create a datum plane and extrude a profile first; a split needs both."
+          }
+          type="button"
+          variant="outline"
+        >
+          Split
+        </Button>
         {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
             the datum form needs nothing. Both stay in the command menu on
             narrow rows. */}
@@ -1694,7 +1926,17 @@ export function CompleteCadWorkbench({
                       ? CAD_FEATURE_FORM_LABELS.helixTitle
                       : featureDialog === "thread"
                         ? CAD_FEATURE_FORM_LABELS.threadTitle
-                        : DATUM_FORM_LABELS.title}
+                        : featureDialog === "draft"
+                          ? CAD_FEATURE_FORM_LABELS.draftTitle
+                          : featureDialog === "rib"
+                            ? CAD_FEATURE_FORM_LABELS.ribTitle
+                            : featureDialog === "scale"
+                              ? CAD_FEATURE_FORM_LABELS.scaleTitle
+                              : featureDialog === "thicken"
+                                ? CAD_FEATURE_FORM_LABELS.thickenTitle
+                                : featureDialog === "split"
+                                  ? CAD_FEATURE_FORM_LABELS.splitTitle
+                                  : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -1706,7 +1948,15 @@ export function CompleteCadWorkbench({
                     ? CAD_FEATURE_FORM_LABELS.helixHint
                     : featureDialog === "thread"
                       ? CAD_FEATURE_FORM_LABELS.threadHint
-                      : DATUM_FORM_LABELS.hint}
+                      : featureDialog === "rib"
+                        ? CAD_FEATURE_FORM_LABELS.ribHint
+                        : featureDialog === "scale"
+                          ? CAD_FEATURE_FORM_LABELS.scaleHint
+                          : featureDialog === "thicken"
+                            ? CAD_FEATURE_FORM_LABELS.thickenHint
+                            : featureDialog === "split"
+                              ? CAD_FEATURE_FORM_LABELS.splitHint
+                              : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "sweep" ? (
               <SweepFeatureForm
@@ -1723,6 +1973,22 @@ export function CompleteCadWorkbench({
               />
             ) : featureDialog === "thread" ? (
               <ThreadFeatureForm onThread={submitThread} />
+            ) : featureDialog === "draft" ? (
+              <DraftFeatureForm
+                onDraft={submitDraft}
+                sketches={sketchOptions}
+              />
+            ) : featureDialog === "rib" ? (
+              <RibFeatureForm onRib={submitRib} sketches={sketchOptions} />
+            ) : featureDialog === "scale" ? (
+              <ScaleFeatureForm onScale={submitScale} />
+            ) : featureDialog === "thicken" ? (
+              <ThickenFeatureForm onThicken={submitThicken} />
+            ) : featureDialog === "split" ? (
+              <SplitFeatureForm
+                datumPlanes={datumPlaneOptions}
+                onSplit={submitSplit}
+              />
             ) : (
               <DatumFeatureForm
                 onCreateDatum={(payload) => {

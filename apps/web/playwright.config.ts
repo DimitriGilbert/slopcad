@@ -1,7 +1,12 @@
 import { defineConfig } from "@playwright/test";
 
 const PORT = 3201;
-const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
+// The shared-server fast path (root `pnpm test:fast`): the orchestrator
+// exports SLOPCAD_E2E_SHARED_URL when ONE pre-built server serves every
+// harness — no per-config rebuild, no per-config boot.
+const sharedURL = process.env.SLOPCAD_E2E_SHARED_URL;
+const baseURL =
+  sharedURL ?? process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "e2e",
@@ -23,10 +28,14 @@ export default defineConfig({
       args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
     },
   },
-  webServer: {
-    command: "pnpm dev",
-    url: baseURL,
-    timeout: 120_000,
-    reuseExistingServer: true,
-  },
+  ...(sharedURL
+    ? {}
+    : {
+        webServer: {
+          command: "pnpm dev",
+          url: baseURL,
+          timeout: 120_000,
+          reuseExistingServer: true,
+        },
+      }),
 });

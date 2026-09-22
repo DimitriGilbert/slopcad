@@ -124,6 +124,50 @@
  *   enters through the target's + face along it). See `runHoleOperation`
  *   for the composition, the through/blind semantic, and the failure
  *   taxonomy.
+ * - `extrude`'s optional taper (Phase 41) — the extrude input layout gains
+ *   an optional THIRD input, an ANGLE parameter: the draft taper, zero or
+ *   absent meaning the plain prism. A non-zero taper is capability-gated
+ *   on `extrudeTaper` BEFORE the kernel runs (Manifold declines — its
+ *   extrude's top-scale is a different solid, never a wall-angle draft),
+ *   and the kernel's own `kernel/invalid-taper` battery (the shared
+ *   `taperedExtrudeProblem` validator) judges the geometry. `parameter.set`
+ *   on the taper re-drives the draft through regeneration.
+ * - `rib` (Phase 41) — one FEATURE or BODY input (the target the rib
+ *   grows from), one SKETCH input (the rib's closed cross-section in its
+ *   own workplane), and one LENGTH parameter (the thickness): the rib is
+ *   the profile extruded SYMMETRICALLY by thickness about the sketch plane
+ *   (one half-thickness extrusion each side) and UNIONED with the target —
+ *   bridge-level composition of existing ops only (the pattern/hole
+ *   design decision). Open-profile extend-to-next-face ribbing is
+ *   structurally out of scope: the contract exposes no surface-raycast an
+ *   adapter could extend a profile along, so the profile must be closed
+ *   where it meets the part (documented, the per-shape honesty
+ *   discipline). See `runRibOperation`.
+ * - `scale` (Phase 41) — one FEATURE or BODY input (the solid to scale)
+ *   and one DIMENSIONLESS parameter (the strictly positive uniform
+ *   factor): the direct `kernel.transform` call carrying the Phase 41
+ *   `scale` field, capability-gated on `transformScale` BEFORE the call.
+ *   Volume scales by factor³ and bounds by factor — hand-derivable, the
+ *   fixtures' analytic anchors. Non-uniform scaling is documented OUT
+ *   until a kernel binding grows a general-transform route. See
+ *   `runScaleOperation`.
+ * - `thicken` (Phase 41) — one FEATURE or BODY input (the target) and one
+ *   LENGTH parameter (the wall thickness): the direct `kernel.thicken`
+ *   call building the CLOSED hollow (the shell's complement — a solid
+ *   with an interior void), capability-gated on `thicken` BEFORE the
+ *   call (Manifold and JSCAD decline; the fake kernel's pristine-leaf
+ *   subset declines non-leaf targets per shape). See `runThickenOperation`.
+ * - `split` (Phase 41) — one FEATURE or BODY input (the target), one
+ *   DATUM PLANE input (the cutting plane), and one DIMENSIONLESS
+ *   parameter (the keep side: +1 keeps the side the plane's normal points
+ *   to, −1 the opposite): the composition subtracts a covering box tool
+ *   built on the removed side of the plane (`planSplitCut`, the
+ *   `planHoleCut` precedent — a pure planner the workbench's worker scene
+ *   shares verbatim), so the cut rides `extrude` + `subtract` only and
+ *   runs on every kernel with zero new contract surface. The measured
+ *   post-condition refuses a split that removed nothing (the plane misses
+ *   the target) or everything (it swallows the kept side) — the hole
+ *   guard's both-ways form. See `runSplitOperation`.
  *
  * Feature inputs resolve to the referenced feature's (single) output body.
  * Body inputs resolve through the caller-supplied prior bodies map (solids
@@ -237,11 +281,12 @@ import {
   type ProfileLoftInput,
   type ProfileLoftSectionInput,
   type ProfileRevolveInput,
+  type ProfileSegmentInput,
   type ProfileSweepInput,
   type KernelSolid,
   type SweepPathSegmentInput,
 } from "./contract";
-import { planThreadCut } from "./thread-profile";
+import { planThreadCut, rotationAligningZTo } from "./thread-profile";
 
 /** The feature kinds the bridge interprets as kernel operations. */
 export const BRIDGE_FEATURE_KINDS = [
@@ -266,6 +311,10 @@ export const BRIDGE_FEATURE_KINDS = [
   "patternCircular",
   "mirror",
   "hole",
+  "rib",
+  "scale",
+  "thicken",
+  "split",
 ] as const;
 
 /** A feature kind the bridge knows how to execute. */
@@ -629,6 +678,133 @@ function matrixColumn(
   index: 0 | 1 | 2,
 ): DatumVec3 {
   return [matrix[0][index], matrix[1][index], matrix[2][index]];
+}
+
+/**
+ * How far the split's covering-box tool overshoots past the split plane
+ * and past the target's far side (Phase 41), in millimetres — the
+ * {@link HOLE_TOOL_OVERSHOOT_MM} discipline verbatim: boolean cuts open
+ * cleanly when the tool's faces stand clear of tangencies, and the
+ * overshoot never defines the split's geometry (the cut plane is the
+ * datum plane, exactly).
+ */
+export const SPLIT_TOOL_OVERSHOOT_MM = 1;
+
+/** The planned covering-box cut of one split (Phase 41). */
+export interface SplitCutPlan {
+  /**
+   * The tool's square loop in the LOCAL workplane frame (mm), centred on
+   * the local origin — sized to cover the target's bounds diagonal.
+   */
+  readonly toolLoop: readonly ProfileSegmentInput[];
+  /** The tool's extrusion height (mm), base to cap along the remove side. */
+  readonly toolHeightMm: number;
+  /**
+   * The placement rotation pointing the tool's local +z (the extrusion
+   * direction) along the REMOVE direction (the keep side's negated
+   * normal): a dimensionless axis and the right-hand angle in radians.
+   */
+  readonly toolRotationAxis: readonly [number, number, number];
+  readonly toolRotationAngleRad: number;
+  /** The tool's base-plane origin translation, in world coordinates. */
+  readonly toolTranslationMm: readonly [number, number, number];
+  /**
+   * The farthest the target reaches along the remove direction past the
+   * plane (mm; ≤ 0 when the removed side holds no target material — the
+   * post-condition refuses that split, this field names why).
+   */
+  readonly removedExtentMm: number;
+}
+
+/**
+ * Plans the covering-box cut of one split against the target's measured
+ * bounds (see {@link SplitCutPlan} for the semantics). Pure and
+ * kernel-independent: the bridge and the worker scene feed it the same
+ * resolved plane, keep-side sign, and bounds and get the identical tool.
+ *
+ * The tool is an extruded SQUARE, not a transformed box, for the hole
+ * tool's reason: the extrude op's placement rotation is part of the
+ * operation's own input — implemented by every kernel, never
+ * rotation-gated — so the split runs wherever `extrude` + `subtract` do.
+ */
+export function planSplitCut(input: {
+  readonly planeOrigin: readonly [number, number, number];
+  readonly planeNormal: readonly [number, number, number];
+  /** `+1` keeps the normal's side, `−1` the opposite. */
+  readonly keepSide: 1 | -1;
+  readonly bounds: KernelBounds;
+}): SplitCutPlan {
+  const n = input.planeNormal;
+  // The remove direction: away from the kept side.
+  const d: DatumVec3 = [
+    -input.keepSide * n[0],
+    -input.keepSide * n[1],
+    -input.keepSide * n[2],
+  ];
+  // The farthest target reach along the remove direction past the plane,
+  // and the bounds' centre offsets for the covering square's half size.
+  let removedExtent = -Infinity;
+  let reachAlongD = -Infinity;
+  const center: DatumVec3 = [
+    (input.bounds.min[0] + input.bounds.max[0]) / 2,
+    (input.bounds.min[1] + input.bounds.max[1]) / 2,
+    (input.bounds.min[2] + input.bounds.max[2]) / 2,
+  ];
+  let radius = 0;
+  for (const x of [input.bounds.min[0], input.bounds.max[0]]) {
+    for (const y of [input.bounds.min[1], input.bounds.max[1]]) {
+      for (const z of [input.bounds.min[2], input.bounds.max[2]]) {
+        const offset: DatumVec3 = [
+          x - input.planeOrigin[0],
+          y - input.planeOrigin[1],
+          z - input.planeOrigin[2],
+        ];
+        removedExtent = Math.max(removedExtent, vecDot(offset, d));
+        reachAlongD = Math.max(reachAlongD, vecDot(offset, d));
+        radius = Math.max(
+          radius,
+          Math.hypot(x - center[0], y - center[1], z - center[2]),
+        );
+      }
+    }
+  }
+  // The covering square centres on the PLANE'S closest point to the bounds
+  // centre (the projection), so its half-size covers every target point:
+  // |p − c_proj| ≤ radius + |centre − c_proj| for any corner p. The tool's
+  // NEAR face sits exactly ON the split plane — the resulting cut face —
+  // with the overshoot reserved for the FAR side (past the target):
+  // pushing the near face past the plane would remove kept-side material,
+  // so the coplanar cut is the honest geometry (pointwise on the fake
+  // kernel, exact mesh booleans on Manifold/JSCAD, exact BREP on OCCT —
+  // all four handle a coincident tool face).
+  const centerOffset = vecDot(
+    [
+      center[0] - input.planeOrigin[0],
+      center[1] - input.planeOrigin[1],
+      center[2] - input.planeOrigin[2],
+    ],
+    n,
+  );
+  // The plane's closest point to the bounds centre: drop the centre's
+  // normal offset (the projection), keeping the in-plane placement.
+  const projection: DatumVec3 = vecCombine(center, -centerOffset, n);
+  const half = radius + Math.abs(centerOffset) + SPLIT_TOOL_OVERSHOOT_MM;
+  const toolHeightMm = Math.max(reachAlongD, 0) + SPLIT_TOOL_OVERSHOOT_MM;
+  const rotation = rotationAligningZTo(d);
+  const base: DatumVec3 = [projection[0], projection[1], projection[2]];
+  return {
+    toolLoop: [
+      { kind: "line", start: [-half, -half], end: [half, -half] },
+      { kind: "line", start: [half, -half], end: [half, half] },
+      { kind: "line", start: [half, half], end: [-half, half] },
+      { kind: "line", start: [-half, half], end: [-half, -half] },
+    ],
+    toolHeightMm,
+    toolRotationAxis: [rotation.axis[0], rotation.axis[1], rotation.axis[2]],
+    toolRotationAngleRad: rotation.angleRad,
+    toolTranslationMm: [base[0], base[1], base[2]],
+    removedExtentMm: removedExtent,
+  };
 }
 
 function isBridgeFeatureKind(kind: string): kind is BridgeFeatureKind {
@@ -3571,6 +3747,529 @@ function runThreadOperation(
   return { ok: true, solid: cut.value };
 }
 
+/**
+ * The rib feature kind's executor path (Phase 41) — FEATURE-LEVEL
+ * COMPOSITION (the hole/pattern design decision): the picked sketch's
+ * closed cross-section extrudes by HALF the thickness on each side of its
+ * own workplane (the symmetric footing CAD ribbing pins), and the pair
+ * unions with the target.
+ *
+ * ## Input layout
+ *
+ * ONE feature/body input (the target the rib grows from), ONE sketch
+ * input (the rib's closed cross-section, resolved through the extrude
+ * profile seam — its workplane IS the rib's plane of symmetry), and ONE
+ * LENGTH parameter (the thickness, strictly positive).
+ *
+ * ## The no-op guard (the hole precedent, inverted)
+ *
+ * A union whose added solid lies entirely inside the target returns the
+ * target UNCHANGED on every kernel — a rib that merges with nothing
+ * would "succeed" while adding nothing. The bridge measures the volumes
+ * on both sides and refuses a union that did not strictly add material,
+ * with `data.reason = "rib/no-op"` and the measured volumes in `data`.
+ *
+ * ## Failure taxonomy (all structured)
+ *
+ * - Layout: not exactly one target, one sketch, one parameter →
+ *   `kernel/feature-input-invalid`.
+ * - Thickness ≤ 0 → `kernel/parameter-invalid` before any kernel call.
+ * - Profile resolution failures carry the sketch domain's own code in
+ *   `data.profileCode` (the extrude precedent).
+ * - Kernel failures ride through as `kernel/operation-failed`.
+ */
+function runRibOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const sketchRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "sketch" } =>
+      ref.kind === "sketch",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  if (
+    targetRefs.length !== 1 ||
+    sketchRefs.length !== 1 ||
+    parameterRefs.length !== 1
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "rib" needs exactly one feature/body input (the target), one sketch input (the rib's cross-section), and one parameter input (the thickness); it declares ${targetRefs.length} target(s), ${sketchRefs.length} sketch(es), and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const sketchRef = sketchRefs[0];
+  const thicknessRef = parameterRefs[0];
+  if (
+    targetRef === undefined ||
+    sketchRef === undefined ||
+    thicknessRef === undefined
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "rib" has a malformed input list.`,
+      ),
+    };
+  }
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+  const resolvedProfile = readers.resolveProfile(sketchRef);
+  if (!resolvedProfile.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "rib" has an unresolvable sketch profile ("${sketchRef.id}"): ${resolvedProfile.error.message}`,
+        location: { primary: feature.id, related: [sketchRef.id] },
+        data: { profileCode: resolvedProfile.error.code },
+      },
+    };
+  }
+  const thickness = readers.lengthParameter(thicknessRef, "thickness");
+  if (!thickness.ok) return { ok: false, diagnostic: thickness.diagnostic };
+  if (!(thickness.mm > 0)) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "rib" needs a strictly positive thickness (${thickness.mm} mm given) — a non-positive thickness extrudes nothing and the rib degenerates.`,
+        [thicknessRef],
+      ),
+    };
+  }
+  const half = thickness.mm / 2;
+  const ribUp = kernel.extrude({
+    loop: resolvedProfile.value.loop,
+    height: lengthValue(half),
+    direction: 1,
+    placement: resolvedProfile.value.placement,
+  });
+  if (!ribUp.ok) {
+    return operationFailure(feature, ribUp.error.code, ribUp.error.message);
+  }
+  const ribDown = kernel.extrude({
+    loop: resolvedProfile.value.loop,
+    height: lengthValue(half),
+    direction: -1,
+    placement: resolvedProfile.value.placement,
+  });
+  if (!ribDown.ok) {
+    return operationFailure(feature, ribDown.error.code, ribDown.error.message);
+  }
+  const before = kernel.volume(target.solid);
+  if (!before.ok) {
+    return operationFailure(feature, before.error.code, before.error.message);
+  }
+  const merged = kernel.union([target.solid, ribUp.value, ribDown.value]);
+  if (!merged.ok) {
+    return operationFailure(feature, merged.error.code, merged.error.message);
+  }
+  const after = kernel.volume(merged.value);
+  if (!after.ok) {
+    return operationFailure(feature, after.error.code, after.error.message);
+  }
+  if (after.value <= before.value) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelOperationFailed,
+        `Feature "${feature.id}" of kind "rib" added nothing: the rib cross-section lies entirely inside the target — the union's volume did not grow. Draw the rib's profile reaching outside the part it strengthens.`,
+        [targetRef],
+      ),
+    };
+  }
+  return { ok: true, solid: merged.value };
+}
+
+/**
+ * The scale feature kind's executor path (Phase 41) — the DIRECT KERNEL
+ * CALL the transform's Phase 41 `scale` field carries: one target, one
+ * dimensionless factor, capability-gated on `transformScale` BEFORE the
+ * call (the mirror gate precedent — the refusal is a feature diagnostic,
+ * never a silently unscaled solid).
+ *
+ * ## Failure taxonomy (all structured)
+ *
+ * - Layout: not exactly one feature/body input and one parameter →
+ *   `kernel/feature-input-invalid`.
+ * - Factor: wrong dimension, non-finite, or non-positive →
+ *   `kernel/parameter-invalid` (feature-level bounds before any kernel
+ *   call — a zero or negative factor mirrors or annihilates the solid).
+ * - Capability: `transformScale` not declared →
+ *   `kernel/feature-input-invalid`, the gate refusing before the kernel
+ *   can ignore the field.
+ */
+function runScaleOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  if (targetRefs.length !== 1 || parameterRefs.length !== 1) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "scale" needs exactly one feature/body input (the solid to scale) and exactly one parameter input (the factor); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const factorRef = parameterRefs[0];
+  if (targetRef === undefined || factorRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "scale" has a malformed input list.`,
+      ),
+    };
+  }
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+  const factor = readers.dimensionlessParameter(factorRef, "factor");
+  if (!factor.ok) return { ok: false, diagnostic: factor.diagnostic };
+  if (!Number.isFinite(factor.value) || !(factor.value > 0)) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "scale" needs a finite, strictly positive factor (${factor.value} given) — a non-positive factor mirrors or annihilates the solid, and uniform scaling is all the contract carries (non-uniform needs a general-transform route no binding exposes).`,
+        [factorRef],
+      ),
+    };
+  }
+  if (!kernel.capabilities.transformScale) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "scale" needs a uniform scale, but this kernel ("${kernel.id}") does not declare the transformScale capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a silently unscaled solid.`,
+      ),
+    };
+  }
+  const result = kernel.transform(target.solid, {
+    x: lengthValue(0),
+    y: lengthValue(0),
+    z: lengthValue(0),
+    scale: factor.value,
+  });
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
+/**
+ * The thicken feature kind's executor path (Phase 41) — the DIRECT KERNEL
+ * CALL building the closed hollow: one target, one wall thickness,
+ * capability-gated on `thicken` BEFORE the call. The kernel's own
+ * structured battery owns the geometry verdicts: the too-thick refusal
+ * (`kernel/thicken-failed`) and the per-shape subset declines
+ * (`kernel/unsupported-operation` on the fake kernel's non-leaf targets).
+ *
+ * ## Failure taxonomy (all structured)
+ *
+ * - Layout: not exactly one feature/body input and one parameter →
+ *   `kernel/feature-input-invalid`.
+ * - Thickness ≤ 0 → `kernel/parameter-invalid` before any kernel call.
+ * - Capability: `thicken` not declared → `kernel/feature-input-invalid`
+ *   (the gate, the scale/mirror precedent).
+ * - Kernel failures ride through as `kernel/operation-failed` with the
+ *   kernel code in `data`.
+ */
+function runThickenOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  if (targetRefs.length !== 1 || parameterRefs.length !== 1) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thicken" needs exactly one feature/body input (the target) and exactly one parameter input (the wall thickness); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const thicknessRef = parameterRefs[0];
+  if (targetRef === undefined || thicknessRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thicken" has a malformed input list.`,
+      ),
+    };
+  }
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+  const thickness = readers.lengthParameter(thicknessRef, "thickness");
+  if (!thickness.ok) return { ok: false, diagnostic: thickness.diagnostic };
+  if (!(thickness.mm > 0)) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "thicken" needs a strictly positive wall thickness (${thickness.mm} mm given) — a non-positive thickness hollows nothing.`,
+        [thicknessRef],
+      ),
+    };
+  }
+  if (!kernel.capabilities.thicken) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "thicken" needs a closed hollow, but this kernel ("${kernel.id}") does not declare the thicken capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a half-built shell.`,
+      ),
+    };
+  }
+  const result = kernel.thicken({
+    target: target.solid,
+    thickness: lengthValue(thickness.mm),
+  });
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
+/**
+ * The split feature kind's executor path (Phase 41) — FEATURE-LEVEL
+ * COMPOSITION (the roadmap's "composition or dedicated op per probe",
+ * resolved to composition): `planSplitCut` builds a covering box tool on
+ * the removed side of the resolved datum plane (the hole tool's
+ * overshoot and one-source-of-truth disciplines), one `extrude` builds
+ * it, one `subtract` cuts, and the measured post-condition guards both
+ * degenerate outcomes. The half-space the probe validated on OCCT
+ * (`BRepPrimAPI_MakeHalfSpace` + `BRepAlgoAPI_Cut`, exact) stays
+ * OCCT-internal knowledge: the composition runs on EVERY kernel through
+ * ops they all implement.
+ *
+ * ## Input layout
+ *
+ * ONE feature/body input (the target), ONE datum input (the split plane
+ * — a datum PLANE, any other datum kind is a structured mismatch), and
+ * ONE dimensionless parameter (the keep side: `+1` keeps the side the
+ * plane's normal points to, `−1` the opposite).
+ *
+ * ## The measured post-condition (the hole guard, both ways)
+ *
+ * A split that removed nothing (the plane misses the target — the kept
+ * side is the whole solid) and a split that removed everything (the kept
+ * side is empty) are both refused with `kernel/operation-failed` and the
+ * measured volumes in `data`: the feature promises ONE output body with
+ * strictly positive, strictly-diminished volume.
+ *
+ * ## Failure taxonomy (all structured)
+ *
+ * - Layout: not exactly one target, one datum, one parameter →
+ *   `kernel/feature-input-invalid`.
+ * - Datum resolution: the structured failures of `resolveDatumInput`
+ *   (`data.datumCode`), and a non-plane datum kind is a
+ *   `datum/definition-invalid` mismatch.
+ * - Side: wrong dimension or outside ±1 → `kernel/parameter-invalid`.
+ * - No-op / remove-all: `kernel/operation-failed` with
+ *   `data.reason = "split/no-op"` / `"split/removed-everything"`.
+ * - Kernel failures ride through as `kernel/operation-failed`.
+ */
+function runSplitOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const datumRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
+      ref.kind === "datum",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  if (
+    targetRefs.length !== 1 ||
+    datumRefs.length !== 1 ||
+    parameterRefs.length !== 1
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "split" needs exactly one feature/body input (the target), one datum input (the split plane), and one parameter input (the keep side); it declares ${targetRefs.length} target(s), ${datumRefs.length} datum input(s), and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const datumRef = datumRefs[0];
+  const sideRef = parameterRefs[0];
+  if (
+    targetRef === undefined ||
+    datumRef === undefined ||
+    sideRef === undefined
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "split" has a malformed input list.`,
+      ),
+    };
+  }
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+  const resolvedDatum = resolveDatumInput(
+    feature,
+    datumRef,
+    readers.document,
+    readers.datumTopology,
+    "the split plane",
+  );
+  if (!resolvedDatum.ok)
+    return { ok: false, diagnostic: resolvedDatum.diagnostic };
+  if (
+    resolvedDatum.datumType !== "plane" ||
+    resolvedDatum.plane === undefined
+  ) {
+    return datumKindMismatch(
+      feature,
+      datumRef,
+      `Feature "${feature.id}" of kind "split" needs a datum PLANE as its cutting plane; the referenced datum defines ${resolvedDatum.datumType === "axis" ? "an axis" : resolvedDatum.datumType === "point" ? "a point" : "a coordinate system"}.`,
+    );
+  }
+  const sideValue = readers.dimensionlessParameter(sideRef, "side");
+  if (!sideValue.ok) return { ok: false, diagnostic: sideValue.diagnostic };
+  if (sideValue.value !== 1 && sideValue.value !== -1) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "split" needs parameter "${sideRef.id}" (side) to select the kept half: +1 keeps the side the plane's normal points to, −1 the opposite (${sideValue.value} given).`,
+        [sideRef],
+      ),
+    };
+  }
+  const before = kernel.volume(target.solid);
+  if (!before.ok) {
+    return operationFailure(feature, before.error.code, before.error.message);
+  }
+  const measured = kernel.bounds(target.solid);
+  if (!measured.ok) {
+    return operationFailure(
+      feature,
+      measured.error.code,
+      measured.error.message,
+    );
+  }
+  const plan = planSplitCut({
+    planeOrigin: resolvedDatum.plane.origin,
+    planeNormal: resolvedDatum.plane.normal,
+    keepSide: sideValue.value,
+    bounds: measured.value,
+  });
+  const tool = kernel.extrude({
+    loop: plan.toolLoop,
+    height: lengthValue(plan.toolHeightMm),
+    direction: 1,
+    placement: {
+      rotation: {
+        axis: plan.toolRotationAxis,
+        angle: angleValue(plan.toolRotationAngleRad),
+      },
+      translation: {
+        x: lengthValue(plan.toolTranslationMm[0]),
+        y: lengthValue(plan.toolTranslationMm[1]),
+        z: lengthValue(plan.toolTranslationMm[2]),
+      },
+    },
+  });
+  if (!tool.ok) {
+    return operationFailure(feature, tool.error.code, tool.error.message);
+  }
+  const cut = kernel.subtract(target.solid, [tool.value]);
+  if (!cut.ok) {
+    return operationFailure(feature, cut.error.code, cut.error.message);
+  }
+  const after = kernel.volume(cut.value);
+  if (!after.ok) {
+    return operationFailure(feature, after.error.code, after.error.message);
+  }
+  if (after.value >= before.value) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelOperationFailed,
+        `Feature "${feature.id}" of kind "split" removed nothing: the plane's removed side holds no target material — flip the keep side or move the datum plane through the solid. (Removed-side reach: ${String(plan.removedExtentMm)} mm past the plane.)`,
+        [datumRef, sideRef],
+      ),
+    };
+  }
+  if (!(after.value > 0)) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelOperationFailed,
+        `Feature "${feature.id}" of kind "split" removed everything: the kept side of the datum plane holds no target material — flip the keep side or move the datum plane through the solid.`,
+        [datumRef, sideRef],
+      ),
+    };
+  }
+  return { ok: true, solid: cut.value };
+}
+
 function runKernelOperation(
   kernel: GeometryKernel,
   feature: FeatureRecord,
@@ -3758,19 +4457,22 @@ function runKernelOperation(
     }
     case "extrude": {
       // Input layout: one sketch input (the profile source), one signed
-      // length parameter (the distance; sign = direction).
-      if (inputs.length !== 2) {
+      // length parameter (the distance; sign = direction), and an
+      // OPTIONAL third angle parameter (the Phase 41 draft taper — zero
+      // or absent meaning the plain prism).
+      if (inputs.length !== 2 && inputs.length !== 3) {
         return {
           ok: false,
           diagnostic: diagnostic(
             feature,
             DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-            `Feature "${feature.id}" of kind "extrude" needs exactly two inputs: a sketch input (the profile source) and a signed length parameter (the distance).`,
+            `Feature "${feature.id}" of kind "extrude" needs two or three inputs: a sketch input (the profile source), a signed length parameter (the distance), and an optional angle parameter (the draft taper).`,
           ),
         };
       }
       const sketchRef = inputs[0];
       const distanceRef = inputs[1];
+      const taperRef = inputs[2];
       if (sketchRef === undefined || distanceRef === undefined) {
         return {
           ok: false,
@@ -3803,6 +4505,17 @@ function runKernelOperation(
           ),
         };
       }
+      if (taperRef !== undefined && taperRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "extrude" needs a parameter input as its draft taper; a ${taperRef.kind} input was declared.`,
+            [taperRef],
+          ),
+        };
+      }
       const resolvedProfile = readers.resolveProfile(sketchRef);
       if (!resolvedProfile.ok) {
         return {
@@ -3830,11 +4543,36 @@ function runKernelOperation(
           ),
         };
       }
+      // The Phase 41 draft taper: absent or zero = the plain prism (the
+      // compat footing — pre-Phase 41 documents execute unchanged); a
+      // non-zero taper is capability-gated before the kernel runs.
+      let taper: ReturnType<typeof angleValue> | undefined;
+      if (taperRef !== undefined) {
+        const taperValue = readers.angleParameter(taperRef, "taper");
+        if (!taperValue.ok) {
+          return { ok: false, diagnostic: taperValue.diagnostic };
+        }
+        if (taperValue.rad !== 0) {
+          if (!kernel.capabilities.extrudeTaper) {
+            return {
+              ok: false,
+              diagnostic: diagnostic(
+                feature,
+                DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+                `Feature "${feature.id}" of kind "extrude" drafts its walls by a taper angle, but this kernel ("${kernel.id}") does not declare the extrudeTaper capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a differently-shaped solid wearing the feature's name.`,
+                [taperRef],
+              ),
+            };
+          }
+          taper = angleValue(taperValue.rad);
+        }
+      }
       const result = kernel.extrude({
         loop: resolvedProfile.value.loop,
         height: lengthValue(Math.abs(distance.mm)),
         direction: distance.mm > 0 ? 1 : -1,
         placement: resolvedProfile.value.placement,
+        ...(taper === undefined ? {} : { taper }),
       });
       return result.ok
         ? { ok: true, solid: result.value }
@@ -4108,5 +4846,23 @@ function runKernelOperation(
       // subtracted from the target, with the no-op post-condition guarding
       // the silent-miss trap (see runHoleOperation).
       return runHoleOperation(kernel, feature, readers);
+    case "rib":
+      // The Phase 41 rib: the symmetric double extrusion of the picked
+      // cross-section unioned with the target, with the no-op guard in
+      // its adding direction (see runRibOperation).
+      return runRibOperation(kernel, feature, readers);
+    case "scale":
+      // The Phase 41 uniform scale: the direct transform call the scale
+      // field carries, capability-gated (see runScaleOperation).
+      return runScaleOperation(kernel, feature, readers);
+    case "thicken":
+      // The Phase 41 closed hollow: the direct thicken call, gated on the
+      // thicken capability (see runThickenOperation).
+      return runThickenOperation(kernel, feature, readers);
+    case "split":
+      // The Phase 41 split: the composed covering-box cut on the removed
+      // side of the datum plane, with the both-ways post-condition (see
+      // runSplitOperation).
+      return runSplitOperation(kernel, feature, readers);
   }
 }

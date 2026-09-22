@@ -146,6 +146,20 @@ import {
   validateThreadSubmission,
 } from "./thread";
 import {
+  documentRibSceneRequest,
+  ribTargetFeatureOf,
+  validateRibSubmission,
+} from "./rib";
+import {
+  documentScaleSceneRequest,
+  documentThickenSceneRequest,
+  richnessTargetFeatureOf,
+  validateScaleSubmission,
+  validateSplitSubmission,
+  validateThickenSubmission,
+} from "./scale-thicken";
+import { documentSplitSceneRequest } from "./split";
+import {
   sessionBackendOf,
   type FixtureSessionBackendId,
 } from "../render-fixture/session-backend";
@@ -236,6 +250,10 @@ export type WorkbenchSceneKind =
   | "loft"
   | "helix"
   | "thread"
+  | "rib"
+  | "scale"
+  | "thicken"
+  | "split"
   | "hole";
 
 /**
@@ -418,6 +436,53 @@ export interface WorkbenchEngine {
     readonly axis: number;
   }) => FeatureFormOutcome;
   /**
+   * The Phase 41 draft-extrude create action: validates the numbers,
+   * resolves the picked sketch through the profile seam, then commits the
+   * distance and taper parameters and the THREE-INPUT extrude feature in
+   * one atomic transaction. A refusal commits nothing.
+   */
+  readonly handleDraft: (specification: {
+    readonly sketchId: string;
+    readonly distanceMm: number;
+    readonly taperDeg: number;
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 41 rib create action: validates the thickness, then commits
+   * the rib parameter and the rib feature (the picked cross-section sketch,
+   * targeting the document's last extrude) in one atomic transaction. A
+   * refusal commits nothing.
+   */
+  readonly handleRib: (specification: {
+    readonly sketchId: string;
+    readonly thicknessMm: number;
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 41 scale create action: validates the factor, then commits
+   * the scale parameter and the scale feature (targeting the document's
+   * last extrude) in one atomic transaction. A refusal commits nothing.
+   */
+  readonly handleScale: (specification: {
+    readonly factor: number;
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 41 thicken create action: validates the wall thickness,
+   * then commits the thicken parameter and the thicken feature (targeting
+   * the document's last extrude) in one atomic transaction. A refusal
+   * commits nothing.
+   */
+  readonly handleThicken: (specification: {
+    readonly thicknessMm: number;
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 41 split create action: commits the side parameter and the
+   * split feature (the picked datum plane, targeting the document's last
+   * extrude) in one atomic transaction. A refusal commits nothing.
+   */
+  readonly handleSplit: (specification: {
+    readonly datumPlaneId: string;
+    readonly side: 1 | -1;
+  }) => FeatureFormOutcome;
+  /**
    * The Phase 39 sketch-on-face action: resolves the picked scene face into
    * a datum plane record (the persistent anchor) plus the face workplane,
    * commits the datum in one atomic transaction, and enters the sketch mode
@@ -526,6 +591,10 @@ export function useWorkbenchEngine(
   const [loftCount, setLoftCount] = useState(0);
   const [helixCount, setHelixCount] = useState(0);
   const [threadCount, setThreadCount] = useState(0);
+  const [ribCount, setRibCount] = useState(0);
+  const [scaleCount, setScaleCount] = useState(0);
+  const [thickenCount, setThickenCount] = useState(0);
+  const [splitCount, setSplitCount] = useState(0);
   // The Phase 39 sketch-on-face anchor: the datum record the CURRENT sketch
   // session boots on (its id commits with the extrude feature; its plane
   // booted the sketch editor). `null` in the ordinary sketch flow.
@@ -1289,6 +1358,351 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The Phase 41 draft-extrude action: resolve the picked sketch, commit
+  // the distance and taper parameters plus the THREE-INPUT extrude feature
+  // in ONE atomic transaction. The kernel's own taper battery (the shared
+  // validator) judges the geometry at regeneration; the action-time check
+  // covers only the authoring domain (finite numbers, non-zero distance,
+  // the ±90° bound).
+  const handleDraft = (specification: {
+    readonly sketchId: string;
+    readonly distanceMm: number;
+    readonly taperDeg: number;
+  }): FeatureFormOutcome => {
+    if (
+      !Number.isFinite(specification.distanceMm) ||
+      specification.distanceMm === 0
+    ) {
+      return {
+        ok: false,
+        code: "kernel/parameter-invalid",
+        message:
+          "The extrusion distance must be a finite, non-zero number of millimetres.",
+      };
+    }
+    if (
+      !Number.isFinite(specification.taperDeg) ||
+      Math.abs(specification.taperDeg) >= 90
+    ) {
+      return {
+        ok: false,
+        code: "kernel/parameter-invalid",
+        message:
+          "The draft taper must be a finite angle strictly inside ±90 degrees.",
+      };
+    }
+    const profile = sketchProfileResolverOf(workbenchDocument)(
+      createSketchDocumentId(specification.sketchId),
+    );
+    if (!profile.ok) {
+      return {
+        ok: false,
+        code: profile.error.code,
+        message: profile.error.message,
+      };
+    }
+    const n = extrudeCount + 1;
+    const suffix = String(n);
+    const bodyId = createBodyId(`body_extrude${suffix}`);
+    const featureId = createFeatureId(`feat_extrude${suffix}`);
+    const depthId = createParameterId(`param_extrude_depth${suffix}`);
+    const taperId = createParameterId(`param_extrude_taper${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: depthId,
+          name: `extrudeDepth${suffix}`,
+          value: length(specification.distanceMm),
+        },
+        {
+          type: "parameter.create",
+          id: taperId,
+          name: `extrudeTaper${suffix}`,
+          value: angle((specification.taperDeg * Math.PI) / 180),
+        },
+        { type: "body.create", id: bodyId, name: `drafted ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "extrude",
+          inputs: [
+            {
+              kind: "sketch",
+              id: createSketchDocumentId(specification.sketchId),
+            },
+            { kind: "parameter", id: depthId },
+            { kind: "parameter", id: taperId },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setExtrudeCount(n);
+    setActiveScene("extrude");
+    return { ok: true };
+  };
+
+  // The Phase 41 rib action: validate the thickness (the action-time
+  // battery), resolve the picked cross-section sketch through the same
+  // profile seam the executor bridge uses, then commit the rib parameter
+  // and the rib feature targeting the document's LAST EXTRUDE (the thread
+  // precedent) in ONE atomic transaction. A refusal commits nothing.
+  const handleRib = (specification: {
+    readonly sketchId: string;
+    readonly thicknessMm: number;
+  }): FeatureFormOutcome => {
+    const validation = validateRibSubmission({
+      thicknessMm: specification.thicknessMm,
+    });
+    if (!validation.ok) return validation;
+    const target = ribTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A rib needs a target solid: extrude a profile first (the rib grows the last extrusion, the thread's precedent).",
+      };
+    }
+    const profile = sketchProfileResolverOf(workbenchDocument)(
+      createSketchDocumentId(specification.sketchId),
+    );
+    if (!profile.ok) {
+      return {
+        ok: false,
+        code: profile.error.code,
+        message: profile.error.message,
+      };
+    }
+    const n = ribCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_rib${suffix}`);
+    const featureId = createFeatureId(`feat_rib${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_rib_thickness${suffix}`),
+          name: `ribThickness${suffix}`,
+          value: length(specification.thicknessMm),
+        },
+        { type: "body.create", id: bodyId, name: `ribbed ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "rib",
+          inputs: [
+            { kind: "feature", id: target.id },
+            {
+              kind: "sketch",
+              id: createSketchDocumentId(specification.sketchId),
+            },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_rib_thickness${suffix}`),
+            },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setRibCount(n);
+    setActiveScene("rib");
+    return { ok: true };
+  };
+
+  // The Phase 41 scale action: validate the factor, then commit the scale
+  // parameter and the scale feature targeting the document's LAST EXTRUDE
+  // in ONE atomic transaction. A refusal commits nothing.
+  const handleScale = (specification: {
+    readonly factor: number;
+  }): FeatureFormOutcome => {
+    const validation = validateScaleSubmission({
+      factor: specification.factor,
+    });
+    if (!validation.ok) return validation;
+    const target = richnessTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A scale needs a target solid: extrude a profile first (the thread's precedent).",
+      };
+    }
+    const n = scaleCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_scale${suffix}`);
+    const featureId = createFeatureId(`feat_scale${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_scale_factor${suffix}`),
+          name: `scaleFactor${suffix}`,
+          value: dimensionless(specification.factor),
+        },
+        { type: "body.create", id: bodyId, name: `scaled ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "scale",
+          inputs: [
+            { kind: "feature", id: target.id },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_scale_factor${suffix}`),
+            },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setScaleCount(n);
+    setActiveScene("scale");
+    return { ok: true };
+  };
+
+  // The Phase 41 thicken action: validate the wall thickness, then commit
+  // the thicken parameter and the thicken feature targeting the document's
+  // LAST EXTRUDE in ONE atomic transaction. A refusal commits nothing.
+  const handleThicken = (specification: {
+    readonly thicknessMm: number;
+  }): FeatureFormOutcome => {
+    const validation = validateThickenSubmission({
+      thicknessMm: specification.thicknessMm,
+    });
+    if (!validation.ok) return validation;
+    const target = richnessTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A thicken needs a target solid: extrude a profile first (the thread's precedent).",
+      };
+    }
+    const n = thickenCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_thicken${suffix}`);
+    const featureId = createFeatureId(`feat_thicken${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_thicken_thickness${suffix}`),
+          name: `wallThickness${suffix}`,
+          value: length(specification.thicknessMm),
+        },
+        { type: "body.create", id: bodyId, name: `hollowed ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "thicken",
+          inputs: [
+            { kind: "feature", id: target.id },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_thicken_thickness${suffix}`),
+            },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setThickenCount(n);
+    setActiveScene("thicken");
+    return { ok: true };
+  };
+
+  // The Phase 41 split action: commit the side parameter and the split
+  // feature (the picked datum plane, targeting the document's LAST
+  // EXTRUDE) in ONE atomic transaction. A refusal commits nothing.
+  const handleSplit = (specification: {
+    readonly datumPlaneId: string;
+    readonly side: 1 | -1;
+  }): FeatureFormOutcome => {
+    const validation = validateSplitSubmission({ side: specification.side });
+    if (!validation.ok) return validation;
+    const target = richnessTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A split needs a target solid: extrude a profile first (the thread's precedent).",
+      };
+    }
+    const n = splitCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_split${suffix}`);
+    const featureId = createFeatureId(`feat_split${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_split_side${suffix}`),
+          name: `splitSide${suffix}`,
+          value: dimensionless(specification.side),
+        },
+        { type: "body.create", id: bodyId, name: `split ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "split",
+          inputs: [
+            { kind: "feature", id: target.id },
+            { kind: "datum", id: createDatumId(specification.datumPlaneId) },
+            {
+              kind: "parameter",
+              id: createParameterId(`param_split_side${suffix}`),
+            },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setSplitCount(n);
+    setActiveScene("split");
+    return { ok: true };
+  };
+
   const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {
     if (runState === null) return null;
     // The worker's verdict outranks the document-data executor's "valid"
@@ -1427,6 +1841,34 @@ export function useWorkbenchEngine(
       }
       return;
     }
+    if (activeScene === "rib") {
+      const request = documentRibSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchRib(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "scale") {
+      const request = documentScaleSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchScale(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "thicken") {
+      const request = documentThickenSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchThicken(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "split") {
+      const request = documentSplitSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchSplit(request, request.bodyId);
+      }
+      return;
+    }
     if (activeScene === "hole") {
       const derived = documentHoleSceneRequest(workbenchDocument);
       if (derived !== null) {
@@ -1447,6 +1889,10 @@ export function useWorkbenchEngine(
     loftCount,
     helixCount,
     threadCount,
+    ribCount,
+    scaleCount,
+    thickenCount,
+    splitCount,
     holeCount,
   ]);
 
@@ -1692,6 +2138,11 @@ export function useWorkbenchEngine(
     handleLoft,
     handleHelix,
     handleThread,
+    handleDraft,
+    handleRib,
+    handleScale,
+    handleThicken,
+    handleSplit,
     handleSketchOnFace,
     sketchBootWorkplane: sketchAnchor === null ? null : sketchAnchor.workplane,
     datumsJson,

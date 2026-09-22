@@ -12,8 +12,9 @@
  *   since Phase 8; rotation input (axis + angle, applied about the world
  *   origin before the translation) arrived with the Phase 21.1 OpenCascade
  *   adapter — the first kernel to declare `transformRotation: true`. Scale
- *   has no contract input yet; the flag exists so a kernel that implements
- *   more can declare readiness before the input types grow to carry it.
+ *   input (the uniform `scale` field, about the world origin before the
+ *   translation) arrived with Phase 41; the flag existed since Phase 8 so
+ *   a kernel could declare readiness ahead of the input type.
  * - `exactPrimitiveVolumes`: primitive volumes are analytic (box, sphere,
  *   cylinder, cone), not mesh-discretized. Fake and Manifold both hold this;
  *   a tessellation-only kernel would not.
@@ -109,6 +110,27 @@
  *   still decline shapes outside its own measured model per shape (the
  *   fake kernel's boolean nodes do exactly that), the same per-shape
  *   honesty its `fillet`/`chamfer`/`shell` domains already practise.
+ * - `extrudeTaper`: the contract's DRAFT taper on `extrude` (Phase 41 —
+ *   the optional `taper` field of `ProfileExtrudeInput`) is implemented
+ *   honestly. OCCT drafts through `BRepOffsetAPI_DraftAngle` (probed
+ *   prismatoid-exact on box, cylinder, and concave fixtures; its
+ *   planar/cylindrical/conical face domain leaves ellipse/spline loops
+ *   declined per shape), the fake kernel models the two-station inset
+ *   loft (Simpson-exact, every loop kind), and JSCAD lofts the chord
+ *   polygon into its far inset — all three declare `true`. Manifold
+ *   declares `false`: its extrude's top-scale is a uniform scale (a
+ *   provably different solid from the wall-angle draft), so every tapered
+ *   call answers the structured `kernel/unsupported-operation` rather
+ *   than that wrong approximation.
+ * - `thicken`: the contract's CLOSED hollow (Phase 41 — the `thicken`
+ *   operation, the complement of `shell`'s open hollow) is implemented
+ *   honestly. OCCT composes the probed exact cavity
+ *   (`MakeThickSolidByJoin(S, [], −t)`) with one exact cut; the fake
+ *   kernel models the closed hollow over its pristine box/sphere subset,
+ *   declining everything else structurally (the shell precedent). Both
+ *   declare `true`; Manifold and JSCAD have no 3D offset at all (the
+ *   shell's probed verdict verbatim) and answer every call with the
+ *   structured `kernel/unsupported-operation`.
  */
 export interface KernelCapabilities {
   readonly booleans: boolean;
@@ -125,6 +147,8 @@ export interface KernelCapabilities {
   readonly fillet: boolean;
   readonly chamfer: boolean;
   readonly shell: boolean;
+  readonly thicken: boolean;
+  readonly extrudeTaper: boolean;
   readonly mirror: boolean;
   readonly surfaceArea: boolean;
 }
