@@ -277,6 +277,15 @@ export const KERNEL_ERROR_CODES = {
    * face's region (the hole guard's no-op refusal, carried to the replace).
    */
   faceOpFailed: "kernel/faceop-failed",
+  /**
+   * A section plane misses or grazes its target (Phase 46): the kept side
+   * holds the whole solid (the plane cut nothing) or nothing (the plane
+   * is past every material point), or the plane is tangent (the cut
+   * region has zero area). There is no cross-section face to measure, so
+   * the structured refusal is the only honest answer — never a zero-area
+   * face with a fabricated centroid.
+   */
+  sectionEmpty: "kernel/section-empty",
   /** A handle was not minted by this kernel instance (foreign or forged). */
   solidNotOwned: "kernel/solid-not-owned",
   /** Bounds were requested of an empty solid, which has no bounding box. */
@@ -1569,6 +1578,109 @@ export interface MirrorInput {
 }
 
 /**
+ * Input of `section` (Phase 46): one target solid and the plane that cuts
+ * it — three origin components and a normal naming an ARBITRARY plane (the
+ * general plane the datum system resolves; `mirror`'s world-axis subset is
+ * the special case, not the rule), plus the keep side: `+1` keeps the
+ * normal's side of the plane, `−1` the opposite.
+ *
+ * ## Semantics — the cut solid and the cross-section face
+ *
+ * The result carries BOTH halves of a section in one answer:
+ *
+ * - `solid` — the CUT SOLID: the target minus the removed half-space, a
+ *   `KernelSolid` like any operation's result (renderable, measurable,
+ *   chainable — its boundary includes the cut's CAP FACES, the planar
+ *   faces lying IN the section plane).
+ * - `section` — the CROSS-SECTION FACE's measurements: its area (mm²) and
+ *   its centroid (mm, the area-weighted centre of the cut region, world
+ *   coordinates), the quantities the mass-property readout family
+ *   displays.
+ *
+ * A plane that MISSES the target (the kept side holds everything or
+ * nothing) has no cross-section face: the call rejects with the
+ * structured `kernel/section-empty`, never a zero-area face with a
+ * fabricated centroid. A plane tangent to the target's boundary is the
+ * same verdict — the cut region has zero area.
+ *
+ * ## Failure taxonomy
+ *
+ * - A handle not minted by this kernel instance →
+ *   `kernel/solid-not-owned` (the uniform discipline).
+ * - A non-finite origin component or a zero/non-finite normal →
+ *   `kernel/invalid-length` (the normal is normalized by the kernel; a
+ *   zero vector names no plane).
+ * - `keepSide` is the closed `1 | -1` union, trusted like the split's.
+ * - The plane misses or grazes the target → `kernel/section-empty`.
+ *
+ * ## Per-kernel fidelity (the coverage matrix)
+ *
+ * - OCCT: the exact half-space boolean — one `BRepAlgoAPI_Cut` of the
+ *   target by a covering box whose near face lies exactly in the section
+ *   plane (the split composition's covering-box discipline), then the
+ *   cut result's cap faces (explored by `TopExp_Explorer`, classified by
+ *   `BRepAdaptor_Surface` as planar and lying in the section plane)
+ *   measured by exact `BRepGProp.SurfaceProperties` integration — area
+ *   and centre of mass at the BREP's own exactness. `section: true`.
+ *   (`BRepAlgoAPI_Section` is bound in this engine build — probed — and
+ *   would carry the section-wire route; the half-space cut is chosen
+ *   because it yields the cut solid and the section face from ONE
+ *   engine boolean.)
+ * - Fake: the analytic model over its documented pristine-box subset —
+ *   the cross-section polygon is the box-edge/plane intersection hull
+ *   (area and centroid exact through the shoelace and polygon-centroid
+ *   formulas in the plane's own 2D frame), and the cut solid rides the
+ *   existing `extrude` + `subtract` composition (the split's own
+ *   covering-box cut, at the kernel's documented boolean semantics).
+ *   Everything else declines with the structured
+ *   `kernel/unsupported-operation` naming the subset. `section: true`
+ *   (honestly scoped, the shell/thicken precedent).
+ * - Manifold: the covering-box composition (`extrude` + `subtract`,
+ *   both exact engine mesh booleans — the roadmap's own ruling that
+ *   Manifold CAN cut with a box tool), with the section face measured
+ *   over the cut solid's own boundary: the cap triangles (all corners
+ *   within the plane tolerance) summed exactly over that mesh —
+ *   mesh-tessellated-honest, the documented band. `section: true`.
+ * - JSCAD: the same composition over its own `extrudeLinear` +
+ *   `subtract` booleans, the cap faces measured over its own boundary
+ *   mesh the same way. `section: true`.
+ */
+export interface SectionInput {
+  /** The solid the plane sections. */
+  readonly target: KernelSolid;
+  /** The plane's origin, world millimetres, one component per axis. */
+  readonly origin: readonly [LengthValue, LengthValue, LengthValue];
+  /**
+   * The plane's normal (any finite non-zero orientation; the kernel
+   * normalizes it, like `extrude`'s direction).
+   */
+  readonly normal: readonly [number, number, number];
+  /** `+1` keeps the normal's side, `−1` the opposite. */
+  readonly keepSide: 1 | -1;
+}
+
+/**
+ * The cross-section face's measurements (Phase 46): what the mass-property
+ * readout family displays for the active section plane. Raw canonical-unit
+ * numbers, the `volume`/`area` precedent — dimensional wrapping is the
+ * cad-core consumer's job, never the kernel's.
+ */
+export interface SectionFaceMeasure {
+  /** The cross-section area in square millimetres (strictly positive). */
+  readonly areaMm2: number;
+  /** The area-weighted centroid in millimetres, world coordinates. */
+  readonly centroidMm: readonly [number, number, number];
+}
+
+/** The result of `section`: the cut solid plus its face's measurements. */
+export interface SectionResult {
+  /** The cut solid — the target minus the removed half-space. */
+  readonly solid: KernelSolid;
+  /** The cross-section face's area and centroid. */
+  readonly section: SectionFaceMeasure;
+}
+
+/**
  * An axis-aligned bounding box in canonical millimetres. Tight for
  * primitives, and for boolean results a *container* whose tightness is
  * declared by the kernel's `tightBooleanBounds` capability.
@@ -1813,6 +1925,20 @@ export interface GeometryKernel {
    * `kernel/unsupported-operation`, never a silent bad approximation.
    */
   mirror(solid: KernelSolid, input: MirrorInput): KernelResult<KernelSolid>;
+
+  /**
+   * Cuts one solid by an arbitrary plane and returns BOTH halves of the
+   * section (Phase 46): the cut solid (the target minus the removed
+   * half-space — its boundary carries the cut's cap faces) and the
+   * cross-section face's measurements (area in mm², area-weighted
+   * centroid in mm). A plane that misses or grazes the target rejects
+   * with `kernel/section-empty`. See {@link SectionInput} for the plane
+   * model, the failure taxonomy, and the per-kernel coverage matrix — a
+   * kernel declaring `section: false` answers every call with the
+   * structured `kernel/unsupported-operation`, never a silent
+   * approximation.
+   */
+  section(input: SectionInput): KernelResult<SectionResult>;
 
   /**
    * The solid's axis-aligned bounding box in mm; fails with

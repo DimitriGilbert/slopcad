@@ -19,6 +19,7 @@
 import {
   addBody,
   addDocumentParameter,
+  addDocumentSection,
   addFeature,
   angle,
   createBodyId,
@@ -26,6 +27,7 @@ import {
   createDocumentId,
   createFeatureId,
   createParameterId,
+  createSectionId,
   createSession,
   length,
   parseExpression,
@@ -125,6 +127,21 @@ export function createCadWorkbenchSession(): CadSession {
       outputs: [PLATE_BODY_ID],
     }),
     "the translate feature",
+  );
+  // The Phase 46 section display record: the plate's mid-height plane
+  // (centre, +z normal, the normal's side kept), PERSISTED DISABLED — a
+  // fresh boot clips nothing and computes no section, so the unsectioned
+  // settle and its raster stay byte-identical (the boot-state law).
+  document = requireDocumentOk(
+    addDocumentSection(document, {
+      id: createSectionId("sec_mid_height"),
+      name: "mid-height",
+      origin: [15, 10, 5],
+      normal: [0, 0, 1],
+      keepSide: 1,
+      enabled: false,
+    }),
+    "the mid-height section record",
   );
   document = requireDocumentOk(
     addFeature(document, {

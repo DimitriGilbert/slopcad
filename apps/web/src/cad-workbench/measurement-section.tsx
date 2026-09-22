@@ -21,6 +21,7 @@ import type { ReactElement, ReactNode } from "react";
 import type { BoundsReadout } from "./bounds-inspection";
 import type { MassPropertiesReadout } from "./mass-properties-inspection";
 import type { RadiusReadout } from "./radius-inspection";
+import type { SectionInspectionReadout } from "./section-inspection";
 
 export interface WorkbenchMeasurementSectionProps {
   /** The distance row's composed text, or `null` for the no-value state. */
@@ -33,6 +34,16 @@ export interface WorkbenchMeasurementSectionProps {
   readonly radiusState: RadiusReadout;
   /** The mass-properties readout (volume + area text). */
   readonly massPropertiesState: MassPropertiesReadout;
+  /** The section readout (Phase 46): area + centroid text, or nulls. */
+  readonly sectionState: SectionInspectionReadout;
+  /** Whether the section clip is on (the toggle's pressed state). */
+  readonly sectionClipped: boolean;
+  /** Whether the section VIEW mode (the cut solid) is on. */
+  readonly sectionViewMode: boolean;
+  /** Toggles the section clip. */
+  readonly onToggleSectionClipped: () => void;
+  /** Toggles the section view mode. */
+  readonly onToggleSectionViewMode: () => void;
 }
 
 /** One labeled row: muted label left, mono value right. Rendered only
@@ -62,13 +73,19 @@ export function WorkbenchMeasurementSection({
   distanceText,
   massPropertiesState,
   radiusState,
+  sectionState,
+  sectionClipped,
+  sectionViewMode,
+  onToggleSectionClipped,
+  onToggleSectionViewMode,
 }: WorkbenchMeasurementSectionProps): ReactElement {
   const measured =
     distanceText !== null ||
     boundsState.text !== null ||
     radiusState.text !== null ||
     massPropertiesState.volumeText !== null ||
-    massPropertiesState.areaText !== null;
+    massPropertiesState.areaText !== null ||
+    sectionState.areaText !== null;
   return (
     <section
       aria-label="Measurement"
@@ -76,6 +93,37 @@ export function WorkbenchMeasurementSection({
     >
       <div className="text-muted-foreground border-border bg-background/30 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         Measurement
+      </div>
+      {/* The Phase 46 section display controls: the persisted plane's clip
+          toggle and the view-mode toggle (the cut solid with cap faces). */}
+      <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px]">
+        <button
+          type="button"
+          data-testid="section-clip-toggle"
+          aria-pressed={sectionClipped}
+          onClick={onToggleSectionClipped}
+          className={`border-border rounded-sm border px-1.5 py-0.5 font-mono ${
+            sectionClipped
+              ? "bg-signal/15 border-signal/50 text-signal"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          section
+        </button>
+        <button
+          type="button"
+          data-testid="section-view-toggle"
+          aria-pressed={sectionViewMode}
+          disabled={!sectionClipped}
+          onClick={onToggleSectionViewMode}
+          className={`border-border rounded-sm border px-1.5 py-0.5 font-mono disabled:opacity-40 ${
+            sectionViewMode
+              ? "bg-signal/15 border-signal/50 text-signal"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          view cut
+        </button>
       </div>
       {measured ? (
         <div className="flex flex-col gap-2 px-2.5 py-2.5 text-xs">
@@ -125,6 +173,25 @@ export function WorkbenchMeasurementSection({
           <MeasurementRow label="Area" text={massPropertiesState.areaText}>
             <span id="workbench-area-readout" className="block break-words">
               {massPropertiesState.areaText}
+            </span>
+          </MeasurementRow>
+          {/* The Phase 46 section rows: the active section plane's kernel
+              face measurements, rendered only when the settled scene cut
+              one — a declined section carries no numbers. */}
+          <MeasurementRow label="Section" text={sectionState.areaText}>
+            <span
+              id="workbench-section-area-readout"
+              data-testid="section-area"
+              className="block break-words"
+            >
+              {sectionState.areaText}
+            </span>
+            <span
+              id="workbench-section-centroid-readout"
+              data-testid="section-centroid"
+              className="text-muted-foreground block"
+            >
+              {sectionState.centroidText}
             </span>
           </MeasurementRow>
         </div>

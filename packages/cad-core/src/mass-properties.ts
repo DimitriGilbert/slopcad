@@ -45,8 +45,10 @@
 
 import {
   type AreaValue,
+  type LengthValue,
   type VolumeValue,
   area,
+  length,
   valueIn,
   volume,
 } from "./dimensional";
@@ -57,6 +59,43 @@ export interface MassProperties {
   readonly volume: VolumeValue;
   /** The solid's total surface area, a canonical square-millimetre value. */
   readonly surfaceArea: AreaValue;
+}
+
+/**
+ * The cross-section face's measured properties (Phase 46): the section
+ * operation's face half — its area and its area-weighted centroid, the
+ * quantities the workbench's section readout displays for the active
+ * section plane. The same kernel-measurement scoping as the pair above:
+ * raw canonical-unit numbers wrapped as typed dimensional values, and no
+ * invented physics beyond them.
+ */
+export interface SectionFaceProperties {
+  /** The cross-section area, a canonical square-millimetre value. */
+  readonly area: AreaValue;
+  /**
+   * The centroid, world canonical millimetres — one length per axis
+   * (kept componentwise rather than a bespoke point type; the readout
+   * family formats components, the single dimensional-module source of
+   * truth owns the wrapping).
+   */
+  readonly centroid: readonly [LengthValue, LengthValue, LengthValue];
+}
+
+/**
+ * Wraps kernel-measured section-face numbers (Phase 46) — the same trust
+ * boundary and the same structured-failure honesty as the pair builder
+ * below.
+ */
+export function sectionFacePropertiesOf(
+  areaMm2: number,
+  centroidMm: readonly [number, number, number],
+): SectionFaceProperties {
+  const centroid: readonly [LengthValue, LengthValue, LengthValue] = [
+    length(centroidMm[0]),
+    length(centroidMm[1]),
+    length(centroidMm[2]),
+  ];
+  return Object.freeze({ area: area(areaMm2), centroid });
 }
 
 /**
@@ -106,4 +145,18 @@ export function formatMassProperties(measured: MassProperties): {
     volume: formatVolume(measured.volume),
     surfaceArea: formatSurfaceArea(measured.surfaceArea),
   };
+}
+
+/**
+ * Formats a section centroid component (mm) — the volume convention over
+ * plain millimetres; the readout renders the axis label and `mm`.
+ */
+export function formatSectionCentroid(
+  centroid: readonly [LengthValue, LengthValue, LengthValue],
+): readonly [string, string, string] {
+  return [
+    valueIn(centroid[0], "mm").toFixed(3),
+    valueIn(centroid[1], "mm").toFixed(3),
+    valueIn(centroid[2], "mm").toFixed(3),
+  ];
 }

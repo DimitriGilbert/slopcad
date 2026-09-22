@@ -252,6 +252,9 @@ import {
   type MirrorInput,
   type MoveFaceInput,
   type ProfileExtrudeInput,
+  type SectionFaceMeasure,
+  type SectionInput,
+  type SectionResult,
   type ProfileLoftInput,
   type ProfileLoftSectionInput,
   type ProfileRevolveInput,
@@ -437,6 +440,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   chamfer: true,
   shell: true,
   thicken: true,
+  section: true,
   extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
@@ -3127,6 +3131,183 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         );
         trsf.delete();
         return ok(wrapSolid(mirrored));
+      });
+    },
+
+    section(input: SectionInput): KernelResult<SectionResult> {
+      return run("section", KERNEL_ERROR_CODES.invalidLength, () => {
+        const targetShape = shapeOf(input.target, "section");
+        if (!targetShape.ok) return fail(targetShape.error);
+        const ox = lengthIn(input.origin[0], "origin.x", "section");
+        if (!ox.ok) return fail(ox.error);
+        const oy = lengthIn(input.origin[1], "origin.y", "section");
+        if (!oy.ok) return fail(oy.error);
+        const oz = lengthIn(input.origin[2], "origin.z", "section");
+        if (!oz.ok) return fail(oz.error);
+        const raw = input.normal;
+        const squared = raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2];
+        if (
+          !Number.isFinite(squared) ||
+          squared === 0 ||
+          !Number.isFinite(raw[0]) ||
+          !Number.isFinite(raw[1]) ||
+          !Number.isFinite(raw[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              `section rejected a normal [${String(raw[0])}, ${String(raw[1])}, ${String(raw[2])}]: it must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const magnitude = Math.sqrt(squared);
+        const n: readonly [number, number, number] = [
+          raw[0] / magnitude,
+          raw[1] / magnitude,
+          raw[2] / magnitude,
+        ];
+        // The target's own bounds size the covering box (AddOptimal, the
+        // bounds operation's exact source).
+        const box = new oc.Bnd_Box();
+        let bounds: KernelBounds;
+        try {
+          oc.BRepBndLib.AddOptimal(targetShape.value, box, false, false);
+          if (box.IsVoid()) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.sectionEmpty,
+                "section rejected the plane: the target is empty, so there is no cross-section face to measure.",
+              ),
+            );
+          }
+          bounds = {
+            min: [box.GetXMin(), box.GetYMin(), box.GetZMin()],
+            max: [box.GetXMax(), box.GetYMax(), box.GetZMax()],
+          };
+        } finally {
+          box.delete();
+        }
+        // The split's covering-box plan (the ONE source of that geometry):
+        // a square prism whose near face lies exactly in the section
+        // plane, extruded along the remove direction — one exact
+        // BRepAlgoAPI_Cut then yields the cut solid AND its cap face.
+        const plan = planSplitCut({
+          planeOrigin: [ox.value, oy.value, oz.value],
+          planeNormal: n,
+          keepSide: input.keepSide,
+          bounds,
+        });
+        const half = Math.max(
+          plan.toolHeightMm,
+          plan.toolLoop.reduce((reach, segment) => {
+            if (segment.kind !== "line") return reach;
+            const endX = Math.abs(segment.end[0] ?? 0);
+            const endY = Math.abs(segment.end[1] ?? 0);
+            return Math.max(reach, endX, endY);
+          }, 0),
+        );
+        const toolCornerA = new oc.gp_Pnt(-half, -half, 0);
+        const toolCornerB = new oc.gp_Pnt(half, half, plan.toolHeightMm);
+        const toolMaker = new oc.BRepPrimAPI_MakeBox(toolCornerA, toolCornerB);
+        toolCornerA.delete();
+        toolCornerB.delete();
+        let tool = buildShape(toolMaker);
+        const rot = axisAngleMatrix(
+          plan.toolRotationAxis,
+          plan.toolRotationAngleRad,
+        );
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          plan.toolTranslationMm[0],
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          plan.toolTranslationMm[1],
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          plan.toolTranslationMm[2],
+        );
+        const placedTool = buildShape(
+          new oc.BRepBuilderAPI_Transform(tool, trsf, false, true),
+        );
+        trsf.delete();
+        tool.delete();
+        tool = placedTool;
+        const cut = foldBoolean(
+          [targetShape.value, tool],
+          oc.BRepAlgoAPI_Cut,
+          "section",
+        );
+        tool.delete();
+        // The cap faces: the cut result's planar faces lying IN the
+        // section plane, measured by exact BREP surface integration.
+        // Zero matched area is the measured signature of a plane that
+        // misses or grazes the target — the structured section-empty
+        // refusal, never a zero-area face.
+        let area = 0;
+        let cx = 0;
+        let cy = 0;
+        let cz = 0;
+        const explorer = new oc.TopExp_Explorer(
+          cut,
+          oc.TopAbs_ShapeEnum.TopAbs_FACE,
+        );
+        const faceProps = new oc.GProp_GProps();
+        while (explorer.More()) {
+          const face = oc.TopoDS.Face(explorer.Value());
+          const adaptor = new oc.BRepAdaptor_Surface(face);
+          const isPlane =
+            adaptor.GetType() === oc.GeomAbs_SurfaceType.GeomAbs_Plane;
+          if (isPlane) {
+            const plane = adaptor.Plane();
+            const direction = plane.Axis().Direction();
+            const location = plane.Location();
+            const parallel =
+              Math.abs(
+                direction.X() * n[0] +
+                  direction.Y() * n[1] +
+                  direction.Z() * n[2],
+              ) - 1;
+            const offset =
+              (location.X() - ox.value) * n[0] +
+              (location.Y() - oy.value) * n[1] +
+              (location.Z() - oz.value) * n[2];
+            if (Math.abs(parallel) < 1e-9 && Math.abs(offset) < 1e-7) {
+              oc.BRepGProp.SurfaceProperties(face, faceProps, true, false);
+              const faceArea = faceProps.Mass();
+              const centre = faceProps.CentreOfMass();
+              area += faceArea;
+              cx += faceArea * centre.X();
+              cy += faceArea * centre.Y();
+              cz += faceArea * centre.Z();
+              centre.delete();
+            }
+            plane.delete();
+          }
+          adaptor.delete();
+          face.delete();
+          explorer.Next();
+        }
+        faceProps.delete();
+        explorer.delete();
+        if (!(area > 1e-9)) {
+          cut.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sectionEmpty,
+              "section rejected the plane: it misses or grazes the target (no cap face was built), so there is no cross-section face to measure.",
+            ),
+          );
+        }
+        const measure: SectionFaceMeasure = {
+          areaMm2: area,
+          centroidMm: [cx / area, cy / area, cz / area],
+        };
+        return ok({ solid: wrapSolid(cut), section: measure });
       });
     },
 

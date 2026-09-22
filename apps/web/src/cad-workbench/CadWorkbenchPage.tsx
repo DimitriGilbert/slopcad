@@ -406,6 +406,11 @@ export function WorkbenchLayout({
               distanceText={distanceText}
               massPropertiesState={massPropertiesState}
               radiusState={radiusState}
+              sectionClipped={engine.sectionClipped}
+              sectionState={engine.sectionState}
+              sectionViewMode={engine.sectionViewMode}
+              onToggleSectionClipped={engine.toggleSectionClipped}
+              onToggleSectionViewMode={engine.toggleSectionViewMode}
             />
           </div>
           {/* Fixed pixel box: part of the determinism contract (the camera

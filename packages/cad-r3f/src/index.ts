@@ -149,3 +149,14 @@ export {
   createAxesGeometry,
 } from "./scene-ground";
 export { useRenderGeometry } from "./use-render-geometry";
+
+export {
+  clippingBoxPlanesOf,
+  clippingPlanesOf,
+  SECTION_CLIP_PLANE_LIMIT,
+} from "./section-clipping";
+export type {
+  SectionClipBox,
+  SectionClipPlane,
+  SectionClipPlanes,
+} from "./section-clipping";

@@ -90,6 +90,7 @@ import {
   type CadPickCategory,
   type SceneCameraStateSnapshot,
 } from "@slopcad/cad-r3f";
+import type { SectionClipPlanes } from "@slopcad/cad-r3f";
 import { cn } from "cn";
 
 import { useCadStudioPalette } from "./cad-studio-palette";
@@ -131,6 +132,12 @@ export interface CadViewportProps {
   readonly labels?: Partial<CadViewportLabels>;
   /** Extends the container classes; sizes the viewport (default 320px tall). */
   readonly className?: string;
+  /**
+   * Section clipping planes (Phase 46): passed straight to the scene's
+   * body materials when non-empty — the render-level half of a section
+   * display record. Absent or empty is the unclipped raster.
+   */
+  readonly clippingPlanes?: SectionClipPlanes;
   /**
    * Opts the viewport into INTERACTIVE camera controls (left-drag orbit,
    * wheel dolly, middle/shift-drag pan, arrow-key orbit when the viewport
@@ -233,6 +240,7 @@ export function CadViewport({
   cameraControls = false,
   cameraOrbitDragEnabled = true,
   className,
+  clippingPlanes,
   displayMode,
   labels: labelOverrides,
   onHover,
@@ -481,6 +489,7 @@ export function CadViewport({
       ) : (
         <CadScene
           cameraControls={cameraControls}
+          clippingPlanes={clippingPlanes}
           cameraOrbitDragEnabled={cameraOrbitDragEnabled}
           displayMode={displayMode}
           onCameraState={handleCameraState}

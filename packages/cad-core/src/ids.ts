@@ -33,6 +33,7 @@ export const CAD_ID_KINDS = [
   "reference",
   "sketch",
   "datum",
+  "section",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -63,6 +64,13 @@ export type SketchDocumentId = BrandedId<"sketch">;
  * address through the `datum` input kind.
  */
 export type DatumId = BrandedId<"datum">;
+/**
+ * Identifier of a section display record (e.g. `sec_mid-height`): the
+ * document-resident, non-destructive section plane the viewport clips
+ * and measures on (Phase 46) — display state persisted as a model
+ * artifact, the roadmap's document-record recommendation.
+ */
+export type SectionId = BrandedId<"section">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -72,6 +80,7 @@ type CadIdTable = {
   reference: ReferenceId;
   sketch: SketchDocumentId;
   datum: DatumId;
+  section: SectionId;
 };
 
 /** The branded id type of a given id kind. */
@@ -92,6 +101,7 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   reference: "ref",
   sketch: "skd",
   datum: "dtm",
+  section: "sec",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -219,6 +229,13 @@ export function parseSketchDocumentId(
   input: unknown,
 ): ParseResult<SketchDocumentId, IdParseError> {
   return parseIdOfKind("sketch", input);
+}
+
+/** Parses untrusted input as a {@link SectionId}. */
+export function parseSectionId(
+  input: unknown,
+): ParseResult<SectionId, IdParseError> {
+  return parseIdOfKind("section", input);
 }
 
 /** Parses untrusted input as a {@link DatumId}. */
@@ -363,6 +380,14 @@ export function createDatumId(raw: string): DatumId {
 }
 
 /**
+ * Adopts an explicit user-provided section id exactly as given (`sec_…`
+ * wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createSectionId(raw: string): SectionId {
+  return requireId("section", raw);
+}
+
+/**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
  */
@@ -416,6 +441,7 @@ export interface IdGenerator {
   nextReferenceId(): ReferenceId;
   nextSketchDocumentId(): SketchDocumentId;
   nextDatumId(): DatumId;
+  nextSectionId(): SectionId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -428,6 +454,7 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   reference: 0,
   sketch: 0,
   datum: 0,
+  section: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -483,6 +510,7 @@ export function createIdGenerator(
     nextReferenceId: () => requireId("reference", nextRawId("reference")),
     nextSketchDocumentId: () => requireId("sketch", nextRawId("sketch")),
     nextDatumId: () => requireId("datum", nextRawId("datum")),
+    nextSectionId: () => requireId("section", nextRawId("section")),
     state: () => Object.freeze({ ...counters }),
   };
 }

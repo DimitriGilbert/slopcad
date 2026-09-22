@@ -140,6 +140,8 @@ import {
   type HelixSweepInput,
   type ProfileSweepInput,
   type ReplaceFaceInput,
+  type SectionInput,
+  type SectionResult,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -149,6 +151,8 @@ import {
 import {
   axisAngleMatrix,
   normalizeRevolveAxis,
+  capFaceMeasure,
+  planSplitCut,
   polygonSignedArea,
   PROFILE_MAX_SEGMENT_ANGLE_RAD,
   type ProfilePoint2,
@@ -256,6 +260,7 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   localFaceOps: false,
+  section: true,
 });
 
 /**
@@ -1014,6 +1019,124 @@ export function manifoldKernelFromRuntime(
           "deleteFace is unsupported by the Manifold kernel: the engine has no face identity or face selection to address (the shell verdict, probed), so the local removal cannot be built honestly.",
         ),
       );
+    },
+
+    section(input: SectionInput): KernelResult<SectionResult> {
+      return run("section", KERNEL_ERROR_CODES.invalidLength, () => {
+        const targetManifold = manifoldOf(input.target, "section");
+        if (!targetManifold.ok) return fail(targetManifold.error);
+        const origin: readonly [number, number, number] = [
+          valueIn(input.origin[0], "mm"),
+          valueIn(input.origin[1], "mm"),
+          valueIn(input.origin[2], "mm"),
+        ];
+        const raw = input.normal;
+        const squared = raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2];
+        if (
+          !Number.isFinite(squared) ||
+          squared === 0 ||
+          !Number.isFinite(raw[0]) ||
+          !Number.isFinite(raw[1]) ||
+          !Number.isFinite(raw[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              `section rejected a normal [${String(raw[0])}, ${String(raw[1])}, ${String(raw[2])}]: it must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const magnitude = Math.sqrt(squared);
+        const n: readonly [number, number, number] = [
+          raw[0] / magnitude,
+          raw[1] / magnitude,
+          raw[2] / magnitude,
+        ];
+        if (targetManifold.value.isEmpty()) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sectionEmpty,
+              "section rejected the plane: the target is empty, so there is no cross-section face to measure.",
+            ),
+          );
+        }
+        const targetBox = targetManifold.value.boundingBox();
+        const bounds: KernelBounds = {
+          min: [targetBox.min[0], targetBox.min[1], targetBox.min[2]],
+          max: [targetBox.max[0], targetBox.max[1], targetBox.max[2]],
+        };
+        // The covering-box composition the roadmap rules Manifold CAN
+        // run: the split's own square-prism tool (extrude-grade placement
+        // through the engine's affine transform), then one exact engine
+        // mesh difference.
+        const plan = planSplitCut({
+          planeOrigin: origin,
+          planeNormal: n,
+          keepSide: input.keepSide,
+          bounds,
+        });
+        const half = Math.max(
+          plan.toolHeightMm,
+          ...plan.toolLoop.map((segment) =>
+            segment.kind === "line"
+              ? Math.max(
+                  Math.abs(segment.start[0] ?? 0),
+                  Math.abs(segment.start[1] ?? 0),
+                  Math.abs(segment.end[0] ?? 0),
+                  Math.abs(segment.end[1] ?? 0),
+                )
+              : 0,
+          ),
+        );
+        const prism = manifoldCtor.cube(
+          [2 * half, 2 * half, plan.toolHeightMm],
+          false,
+        );
+        const shifted = prism.translate(-half, -half, 0);
+        prism.delete();
+        const r = axisAngleMatrix(
+          plan.toolRotationAxis,
+          plan.toolRotationAngleRad,
+        );
+        const mat4 = [
+          r[0]?.[0] ?? 0,
+          r[1]?.[0] ?? 0,
+          r[2]?.[0] ?? 0,
+          0,
+          r[0]?.[1] ?? 0,
+          r[1]?.[1] ?? 0,
+          r[2]?.[1] ?? 0,
+          0,
+          r[0]?.[2] ?? 0,
+          r[1]?.[2] ?? 0,
+          r[2]?.[2] ?? 0,
+          0,
+          plan.toolTranslationMm[0],
+          plan.toolTranslationMm[1],
+          plan.toolTranslationMm[2],
+          1,
+        ] as const;
+        const tool = shifted.transform(mat4 as never);
+        shifted.delete();
+        const cut = manifoldCtor.difference([targetManifold.value, tool]);
+        tool.delete();
+        // The section face, measured over the cut solid's own boundary:
+        // the cap triangles (every corner within the plane tolerance),
+        // summed exactly over that mesh — the mesh-tessellated-honest
+        // band the contract documents for this kernel.
+        const soup = tessellateManifold(cut);
+        const measure = capFaceMeasure(soup, origin, n);
+        if (measure === null) {
+          cut.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sectionEmpty,
+              "section rejected the plane: it misses or grazes the target (no cap face lies in the plane), so there is no cross-section face to measure.",
+            ),
+          );
+        }
+        return ok({ solid: wrapSolid(cut), section: measure });
+      });
     },
 
     subtract(

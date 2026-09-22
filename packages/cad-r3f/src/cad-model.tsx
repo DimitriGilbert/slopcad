@@ -193,6 +193,12 @@ export interface CadModelProps {
    * the model) — deduplicated, `null` when the pointer leaves.
    */
   readonly onHover?: (pick: CadPick | null) => void;
+  /**
+   * Section clipping planes (Phase 46): applied to every body material
+   * when non-empty (three.js local clipping). Absent or empty = no
+   * clipping, the unchanged boot raster.
+   */
+  readonly clippingPlanes?: THREE.Plane[];
 }
 
 export function CadModel({
@@ -207,11 +213,18 @@ export function CadModel({
   projection,
   regeneration,
   selection,
+  clippingPlanes,
 }: CadModelProps): ReactElement {
   const geometries = useRenderGeometry(projection, onSync);
   const materialProps: CadModelMaterialProps = {
     ...DEFAULT_MATERIAL,
     ...material,
+    // Section clipping (Phase 46): applied ONLY when planes exist, so an
+    // unclipped scene constructs byte-identical materials (the boot raster
+    // law) — three.js treats an absent `clippingPlanes` as no clipping.
+    ...(clippingPlanes !== undefined && clippingPlanes.length > 0
+      ? { clippingPlanes }
+      : {}),
   };
   const selectionList = selection ?? NO_SELECTION;
   const regenerationValue = regeneration ?? 0;

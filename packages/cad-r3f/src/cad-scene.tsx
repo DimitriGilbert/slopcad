@@ -60,6 +60,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type * as THREE from "three";
 import type { ReactElement } from "react";
 import {
   selectionReferenceKey,
@@ -161,6 +162,13 @@ export interface SettleLedger {
 }
 
 export interface CadSceneProps {
+  /**
+   * Section clipping planes (Phase 46): three.js local clipping applied
+   * to the model's materials when non-empty — the render-level half of a
+   * section display record, deterministic given state. Absent or empty
+   * keeps the unclipped raster byte-identical (the boot-state law).
+   */
+  readonly clippingPlanes?: THREE.Plane[];
   /** The validated render projection, camera spec included. */
   readonly projection: RenderProjection;
   /**
@@ -312,9 +320,12 @@ function SceneModel({
   regeneration,
   selection,
   settle,
+  clippingPlanes,
 }: {
   displayMode?: CadDisplayMode;
   material?: { readonly color: string };
+  /** Section clipping (Phase 46): absent/empty = the unclipped raster. */
+  clippingPlanes?: THREE.Plane[];
   onPick?: (pick: CadPick) => void;
   onPickDown?: (pick: CadPick) => void;
   onPickUp?: (pick: CadPick) => void;
@@ -337,6 +348,7 @@ function SceneModel({
   useEffect(() => {
     invalidate();
   }, [
+    clippingPlanes,
     displayMode,
     invalidate,
     material,
@@ -346,6 +358,7 @@ function SceneModel({
   ]);
   return (
     <CadModel
+      clippingPlanes={clippingPlanes}
       displayMode={displayMode}
       material={material}
       onHover={onHover}
@@ -450,6 +463,7 @@ function SelectionProbe({
  */
 export function CadScene({
   cameraControls = false,
+  clippingPlanes,
   cameraOrbitDragEnabled = true,
   displayMode,
   onCameraState,
@@ -514,7 +528,11 @@ export function CadScene({
     <Canvas
       frameloop="demand"
       dpr={1}
-      gl={{ antialias: false, preserveDrawingBuffer: true }}
+      gl={{
+        antialias: false,
+        localClippingEnabled: true,
+        preserveDrawingBuffer: true,
+      }}
     >
       <color attach="background" args={[palette.background]} />
       <SceneCameraRig settle={settle} spec={effectiveCamera} />
@@ -532,6 +550,7 @@ export function CadScene({
         <CadSceneGround colors={groundColors} target={effectiveCamera.target} />
       ) : null}
       <SceneModel
+        clippingPlanes={clippingPlanes}
         displayMode={displayMode}
         material={material}
         onHover={onHover}

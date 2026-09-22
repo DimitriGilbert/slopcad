@@ -48,6 +48,7 @@ import type { MoveBodySceneRequest } from "../cad-workbench/move-body";
 
 import {
   computePlateRenderState,
+  type SectionDisplayRequest,
   extrudeRenderState,
   type PlateRenderState,
 } from "./plate-render-scene";
@@ -83,8 +84,17 @@ const VIEWPORT_CSS_HEIGHT = 520;
 
 /** The wired session a booted fixture exposes. */
 export interface RenderFixtureSession {
-  /** Records a parameter change and dispatches the plate computation. */
-  dispatch(holeDiameterMm: number): void;
+  /**
+   * Records a parameter change and dispatches the plate computation —
+   * optionally cutting a section first (Phase 46): with a request the
+   * settle carries the face measurements, and view mode swaps the
+   * displayed body to the cut solid. Absent or `null` is the unsectioned
+   * path, byte-unchanged.
+   */
+  dispatch(
+    holeDiameterMm: number,
+    section?: SectionDisplayRequest | null,
+  ): void;
   /**
    * Dispatches the Phase 26.1 extrude computation: the REAL kernel executes
    * `solid.extrude` on the sketch-resolved profile in the worker, and the
@@ -569,7 +579,10 @@ export function bootRenderFixtureSession(
   }
 
   return {
-    dispatch(holeDiameterMm: number): void {
+    dispatch(
+      holeDiameterMm: number,
+      section?: SectionDisplayRequest | null,
+    ): void {
       counters.dispatched += 1;
       // A new dispatch supersedes the previous failure's error text: the
       // error surface must reset on recovery, not stay write-once (the
@@ -577,7 +590,9 @@ export function bootRenderFixtureSession(
       errorText = "";
       writeSurface();
       coordinator
-        .update((context) => computePlateRenderState(context, holeDiameterMm))
+        .update((context) =>
+          computePlateRenderState(context, holeDiameterMm, section ?? null),
+        )
         .then(settle, (failure: unknown) => {
           counters.settled += 1;
           errorText = failureText(failure);

@@ -61,6 +61,7 @@ import {
   type GeometryKernel,
   type KernelError,
   type KernelSolid,
+  type SectionFaceMeasure,
   type TransformInput,
 } from "./contract";
 import { createWorkerCancellationLedger } from "./worker-cancellation";
@@ -114,7 +115,8 @@ type SolidProducingOperation =
   | "solid.mirror"
   | "solid.moveFace"
   | "solid.replaceFace"
-  | "solid.deleteFace";
+  | "solid.deleteFace"
+  | "solid.section";
 
 /** What executing a request produced, before the ledger decides delivery. */
 type ExecutionOutcome =
@@ -122,6 +124,17 @@ type ExecutionOutcome =
       readonly status: "solid";
       readonly operation: SolidProducingOperation;
       readonly handle: KernelSolid;
+    }
+  | {
+      /**
+       * The Phase 46 section outcome: like "solid" it mints ONE session
+       * solid, but its response also carries the cross-section face's
+       * measurements — its own channel because the response payload is
+       * the compound `WorkerSectionResult`, not the bare solid ref.
+       */
+      readonly status: "section";
+      readonly handle: KernelSolid;
+      readonly measure: SectionFaceMeasure;
     }
   | {
       readonly status: "solids";
@@ -806,6 +819,35 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
                 error: kernelFailure("solid.deleteFace", result.error),
               };
         }
+        case "solid.section": {
+          // The Phase 46 contract op — the plane cut: the target resolves
+          // against the session map, the plane rides as its origin/normal/
+          // keep-side, and the kernel's own structured codes (foreign
+          // handle, degenerate normal, section-empty, unsupported engine)
+          // cross back as `worker/operation-failed` data. The success path
+          // is the section channel: the cut solid mints one session id and
+          // the face measurements ride beside it.
+          const solid = ownedSolid("solid.section", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.section({
+            target: solid.handle,
+            origin: request.input.origin,
+            normal: request.input.normal,
+            keepSide: request.input.keepSide,
+          });
+          return result.ok
+            ? {
+                status: "section",
+                handle: result.value.solid,
+                measure: result.value.section,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.section", result.error),
+              };
+        }
         case "solid.topology": {
           // The vocabulary's topology extension: executed through the
           // hosting extension when one exists (only a persistent-topology
@@ -1025,6 +1067,7 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
         }
       };
       if (outcome.status === "solid") release(outcome.handle);
+      if (outcome.status === "section") release(outcome.handle);
       if (outcome.status === "solids") {
         for (const handle of outcome.handles) release(handle);
       }
@@ -1037,6 +1080,17 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
       transport.send(
         createWorkerSuccessResponse(requestId, outcome.operation, {
           solid: id,
+        }),
+      );
+      return;
+    }
+    if (outcome.status === "section") {
+      const id = ids.nextSolidId();
+      solids.set(id, outcome.handle);
+      transport.send(
+        createWorkerSuccessResponse(requestId, "solid.section", {
+          solid: id,
+          section: outcome.measure,
         }),
       );
       return;

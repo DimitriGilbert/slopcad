@@ -68,7 +68,9 @@ import {
   parseParameterId,
   type ParameterId,
   parseReferenceId,
+  parseSectionId,
   type ReferenceId,
+  type SectionId,
   parseSketchDocumentId,
   type SketchDocumentId,
 } from "./ids";
@@ -270,12 +272,44 @@ export interface CadDocument {
    */
   readonly datums: readonly DocumentDatum[];
   /**
+   * The document's section display records, in add order (empty in older
+   * files; Phase 46-additive): non-destructive section planes the
+   * viewport clips and measures on — display state persisted as a MODEL
+   * ARTIFACT (the roadmap's document-record recommendation; the camera
+   * overlay stays session-scoped instead).
+   */
+  readonly sections: readonly DocumentSection[];
+  /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
    * generated ids unique across save/load.
    */
   readonly idGeneratorState: IdGeneratorState;
 }
+
+/**
+ * One section display record (Phase 46): a named, non-destructive section
+ * plane — an AD-HOC plane (origin and unit-scale normal in canonical
+ * millimetres, the resolved form a datum plane resolves to) with its kept
+ * side and its display toggle. Up to {@link DOCUMENT_SECTION_LIMIT}
+ * records address the viewport's clipping budget.
+ */
+export interface DocumentSection {
+  readonly id: SectionId;
+  /** The record's name (1-64 characters, the datum naming rule). */
+  readonly name: string;
+  /** The plane's world origin (mm), one component per axis, finite. */
+  readonly origin: readonly [number, number, number];
+  /** The plane's world normal, any finite non-zero vector (normalized on use). */
+  readonly normal: readonly [number, number, number];
+  /** `+1` keeps the normal's side, `−1` the opposite. */
+  readonly keepSide: 1 | -1;
+  /** Whether the viewport applies the record (off = persisted but inert). */
+  readonly enabled: boolean;
+}
+
+/** How many section display records a document may carry (the clip budget). */
+export const DOCUMENT_SECTION_LIMIT = 3;
 
 /** A kind-tagged view of any entity resolvable by id within a document. */
 export type DocumentEntity =
@@ -335,6 +369,8 @@ export const DOCUMENT_ERROR_CODES = {
   referenceNameInvalid: "document/reference-name-invalid",
   referencePayloadInvalid: "document/reference-payload-invalid",
   datumNameInvalid: "document/datum-name-invalid",
+  sectionNameInvalid: "document/section-name-invalid",
+  sectionLimitExceeded: "document/section-limit-exceeded",
   datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
@@ -628,6 +664,7 @@ function raiseGeneratorState(
     reference: Math.max(base.reference, floor.reference),
     sketch: Math.max(base.sketch, floor.sketch),
     datum: Math.max(base.datum, floor.datum),
+    section: Math.max(base.section, floor.section),
   };
   return Object.freeze(raised);
 }
@@ -716,6 +753,7 @@ export function createDocument(id: DocumentId): CadDocument {
     sketches: Object.freeze([]),
     references: Object.freeze([]),
     datums: Object.freeze([]),
+    sections: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -1787,6 +1825,175 @@ export function getDocumentDatum(
   return document.datums.find((datum) => datum.id === id);
 }
 
+/** Input of {@link addDocumentSection}: the record's authored fields. */
+export interface DocumentSectionInput {
+  /** An explicit id (`sec_…`), or absent to generate the next one. */
+  readonly id?: SectionId;
+  readonly name: string;
+  readonly origin: readonly [number, number, number];
+  readonly normal: readonly [number, number, number];
+  readonly keepSide: 1 | -1;
+  readonly enabled: boolean;
+}
+
+/** Result of {@link addDocumentSection}: the next document plus the record. */
+export interface DocumentSectionAddResult {
+  readonly document: CadDocument;
+  readonly section: DocumentSection;
+}
+
+/**
+ * Adds one section display record (Phase 46) — the datum builders'
+ * discipline: an explicit id must be well formed and unclaimed (or the
+ * next generated id is minted), the name carries the datum naming rule,
+ * the plane must be finite with a non-zero normal, and the document's
+ * record budget ({@link DOCUMENT_SECTION_LIMIT}) is a structured refusal,
+ * not a silent drop.
+ */
+export function addDocumentSection(
+  document: CadDocument,
+  input: DocumentSectionInput,
+): ParseResult<DocumentSectionAddResult, DocumentError> {
+  if (document.sections.length >= DOCUMENT_SECTION_LIMIT) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.sectionLimitExceeded,
+        `A document carries at most ${String(DOCUMENT_SECTION_LIMIT)} section display records (the viewport's clipping budget).`,
+        input.name,
+      ),
+    );
+  }
+  const name =
+    typeof input.name === "string" &&
+    input.name.length >= 1 &&
+    input.name.length <= 64
+      ? input.name
+      : null;
+  if (name === null) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.sectionNameInvalid,
+        "A section name must be a string of 1-64 characters.",
+        input.name,
+      ),
+    );
+  }
+  const planeOk =
+    input.origin.every((component) => Number.isFinite(component)) &&
+    input.normal.every((component) => Number.isFinite(component)) &&
+    input.normal[0] * input.normal[0] +
+      input.normal[1] * input.normal[1] +
+      input.normal[2] * input.normal[2] >
+      0;
+  if (!planeOk) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A section plane must carry a finite origin and a non-zero finite normal.",
+        { origin: input.origin, normal: input.normal },
+      ),
+    );
+  }
+  let id: SectionId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextSectionId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseSectionId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A section id must be a valid section id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("section", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `The section id ${String(parsed.value)} is already registered in this document.`,
+          parsed.value,
+        ),
+      );
+    }
+    id = parsed.value;
+  }
+  const origin: readonly [number, number, number] = [
+    input.origin[0],
+    input.origin[1],
+    input.origin[2],
+  ];
+  const normal: readonly [number, number, number] = [
+    input.normal[0],
+    input.normal[1],
+    input.normal[2],
+  ];
+  const section: DocumentSection = Object.freeze({
+    id,
+    name,
+    origin,
+    normal,
+    keepSide: input.keepSide === -1 ? -1 : 1,
+    enabled: input.enabled === true,
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      sections: Object.freeze([...document.sections, section]),
+      idGeneratorState,
+    }),
+    section,
+  });
+}
+
+/**
+ * Flips one section record's display toggle in place (Phase 46): the
+ * record persists either way — `enabled` is display state, and an unknown
+ * id is the structured not-found refusal.
+ */
+export function setDocumentSectionEnabled(
+  document: CadDocument,
+  id: SectionId,
+  enabled: boolean,
+): ParseResult<CadDocument, DocumentError> {
+  if (!document.sections.some((section) => section.id === id)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No section display record ${String(id)} exists in this document.`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      sections: Object.freeze(
+        document.sections.map((section) =>
+          section.id === id ? { ...section, enabled } : section,
+        ),
+      ),
+    }),
+  );
+}
+
+/** Reads one section display record by id, or `undefined`. */
+export function getDocumentSection(
+  document: CadDocument,
+  id: SectionId,
+): DocumentSection | undefined {
+  return document.sections.find((section) => section.id === id);
+}
+
 /** Canonical JSON form of a body (the Phase 44 display flags ride only when non-default). */
 export interface SerializedBody {
   readonly id: string;
@@ -1813,17 +2020,19 @@ export interface SerializedFeatureRecord {
 
 /**
  * Canonical JSON form of the id generator state. The `sketch` counter is
- * Phase 26.1-additive and the `datum` counter Phase 39-additive: each is
- * emitted exactly when nonzero, so documents that never carried ids of
- * that kind serialize byte-identically to their earlier form; parsing
- * defaults an absent counter to zero.
+ * Phase 26.1-additive, the `datum` counter Phase 39-additive, and the
+ * `section` counter Phase 46-additive: each is emitted exactly when
+ * nonzero, so documents that never carried ids of that kind serialize
+ * byte-identically to their earlier form; parsing defaults an absent
+ * counter to zero.
  */
 export type SerializedIdGeneratorState = Omit<
   IdGeneratorState,
-  "sketch" | "datum"
+  "sketch" | "datum" | "section"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
+  readonly section?: number;
 };
 
 function serializeIdGeneratorState(
@@ -1837,6 +2046,7 @@ function serializeIdGeneratorState(
     reference: state.reference,
     ...(state.sketch === 0 ? {} : { sketch: state.sketch }),
     ...(state.datum === 0 ? {} : { datum: state.datum }),
+    ...(state.section === 0 ? {} : { section: state.section }),
   };
 }
 
@@ -1859,6 +2069,15 @@ export interface SerializedCadDocument {
     readonly id: string;
     readonly name: string;
     readonly reference: Readonly<Record<string, unknown>>;
+  }[];
+  /** Present exactly when the document carries section records (additive). */
+  readonly sections?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly origin: readonly [number, number, number];
+    readonly normal: readonly [number, number, number];
+    readonly keepSide: 1 | -1;
+    readonly enabled: boolean;
   }[];
   /** Present exactly when the document carries datum records (additive). */
   readonly datums?: readonly {
@@ -1929,6 +2148,21 @@ export function serializeCadDocument(
             id: datum.id,
             name: datum.name,
             datum: datum.datum,
+          })),
+        }),
+    // Additive (Phase 46): emitted only when section display records
+    // exist, so documents from before sections serialize byte-identically
+    // to their old form.
+    ...(document.sections.length === 0
+      ? {}
+      : {
+          sections: document.sections.map((section) => ({
+            id: section.id,
+            name: section.name,
+            origin: [...section.origin],
+            normal: [...section.normal],
+            keepSide: section.keepSide,
+            enabled: section.enabled,
           })),
         }),
   };
@@ -2096,6 +2330,138 @@ function parseSerializedReference(input: unknown): ParseResult<
     name: name.value,
     reference: payload.value,
   });
+}
+
+function parseSerializedSection(
+  input: unknown,
+): ParseResult<DocumentSection, DocumentError> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized section record must be a plain object with id, name, origin, normal, keepSide, and enabled fields.",
+        input,
+      ),
+    );
+  }
+  const parsedId = parseSectionId(input.id);
+  if (!parsedId.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.idInvalid,
+        `A section id must be a valid section id: ${parsedId.error.message}`,
+        input.id,
+      ),
+    );
+  }
+  const origin = parseSectionTriple(input.origin);
+  if (!origin.ok) return origin;
+  const normal = parseSectionTriple(input.normal);
+  if (!normal.ok) return normal;
+  if (
+    !(
+      normal.value[0] * normal.value[0] +
+        normal.value[1] * normal.value[1] +
+        normal.value[2] * normal.value[2] >
+      0
+    )
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized section normal must be a non-zero finite vector.",
+        input.normal,
+      ),
+    );
+  }
+  if (input.keepSide !== 1 && input.keepSide !== -1) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized section keepSide must be 1 or -1.",
+        input.keepSide,
+      ),
+    );
+  }
+  if (typeof input.enabled !== "boolean") {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized section enabled field must be a boolean.",
+        input.enabled,
+      ),
+    );
+  }
+  const name = validateSectionName(input.name);
+  if (!name.ok) return name;
+  return ok(
+    Object.freeze({
+      id: parsedId.value,
+      name: name.value,
+      origin: origin.value,
+      normal: normal.value,
+      keepSide: input.keepSide,
+      enabled: input.enabled,
+    }),
+  );
+}
+
+/** Parses a finite [x, y, z] triple or fails structured. */
+function parseSectionTriple(
+  input: unknown,
+): ParseResult<[number, number, number], DocumentError> {
+  // The element-wise copy keeps the element type `unknown` (never the
+  // `any` Array.isArray narrows to), so every component narrows through
+  // its own typeof/finite check below.
+  const source: readonly unknown[] | null = Array.isArray(input)
+    ? (input as readonly unknown[])
+    : null;
+  const entries: readonly unknown[] =
+    source === null ? [] : [source[0], source[1], source[2]];
+  if (entries === null || entries.length !== 3) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized section triple must be an array of exactly three finite numbers.",
+        input,
+      ),
+    );
+  }
+  const first = entries[0];
+  const second = entries[1];
+  const third = entries[2];
+  if (
+    typeof first !== "number" ||
+    !Number.isFinite(first) ||
+    typeof second !== "number" ||
+    !Number.isFinite(second) ||
+    typeof third !== "number" ||
+    !Number.isFinite(third)
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized section triple must be an array of exactly three finite numbers.",
+        input,
+      ),
+    );
+  }
+  return ok([first, second, third]);
+}
+
+function validateSectionName(
+  input: unknown,
+): ParseResult<string, DocumentError> {
+  if (typeof input !== "string" || input.length < 1 || input.length > 64) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.sectionNameInvalid,
+        "A section name must be a string of 1-64 characters.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
 }
 
 function parseSerializedDatum(input: unknown): ParseResult<
@@ -2269,6 +2635,12 @@ export function parseCadDocument(
     parseSerializedDatum,
   );
   if (!parsedDatums.ok) return parsedDatums;
+  const parsedSections = parseSerializedList(
+    input.sections ?? [],
+    "sections",
+    parseSerializedSection,
+  );
+  if (!parsedSections.ok) return parsedSections;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -2294,6 +2666,11 @@ export function parseCadDocument(
   }
   for (const datum of parsedDatums.value) {
     const added = addDocumentDatum(document, datum);
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  for (const section of parsedSections.value) {
+    const added = addDocumentSection(document, section);
     if (!added.ok) return added;
     document = added.value.document;
   }

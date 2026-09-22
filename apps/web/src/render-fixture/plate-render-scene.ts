@@ -28,12 +28,17 @@ import {
   type RenderProjection,
   type RenderVector3,
 } from "@slopcad/cad-core";
-import type { ComputationContext } from "@slopcad/cad-kernel";
+import {
+  WorkerRequestFailure,
+  type ComputationContext,
+} from "@slopcad/cad-kernel";
 import type { ExtrudeSceneRequest } from "../worker-fixture/extrude-scene";
 
 import {
   computePlateWithHole,
+  computeSectionedPlateWithHole,
   type PlateMeasurement,
+  type PlateSectionPlane,
 } from "../worker-fixture/plate-scene";
 
 /**
@@ -52,10 +57,30 @@ const RENDER_FIXTURE_CAMERA: RenderCamera = {
 /** The projected body's stable id: `rend_plate` derives from it. */
 const PLATE_BODY_ID = createBodyId("body_plate");
 
+/**
+ * The section display request (Phase 46): the plane a document section
+ * record resolved to, plus the view mode — `true` displays the CUT solid
+ * (cap faces included in its boundary), `false` clips the whole plate at
+ * the render layer.
+ */
+export interface SectionDisplayRequest extends PlateSectionPlane {
+  readonly viewMode: boolean;
+}
+
 /** What the render fixture renders: the measurements plus their projection. */
 export interface PlateRenderState {
   readonly measurement: PlateMeasurement;
   readonly projection: RenderProjection;
+  /**
+   * The cross-section face's kernel measurements (Phase 46): present
+   * exactly when the settle ran a section — absent before, and absent
+   * when the kernel declined the cut (a declined section carries no
+   * numbers, never zeros).
+   */
+  readonly section?: {
+    readonly areaMm2: number;
+    readonly centroidMm: readonly [number, number, number];
+  };
 }
 
 function unwrap<T>(result: ParseResult<T, ProjectionError>): T {
@@ -70,25 +95,64 @@ function unwrap<T>(result: ParseResult<T, ProjectionError>): T {
  * measurement always yields the same projection bytes, which is what makes
  * the fixture's settled scene byte-reproducible.
  */
-function plateRenderState(measurement: PlateMeasurement): PlateRenderState {
+function plateRenderState(
+  measurement: PlateMeasurement,
+  section?: PlateRenderState["section"],
+): PlateRenderState {
   const object = unwrap(
     projectTessellation(PLATE_BODY_ID, measurement.tessellation),
   );
   return {
     measurement,
+    ...(section === undefined ? {} : { section }),
     projection: unwrap(createRenderProjection([object], RENDER_FIXTURE_CAMERA)),
   };
 }
 
 /**
  * Computes the plate with a through bore of `holeDiameterMm` in the worker
- * (the shared Phase 10 scene) and projects the result.
+ * (the shared Phase 10 scene) and projects the result — optionally cutting
+ * the section first (Phase 46): view mode displays and measures the CUT
+ * solid; otherwise the whole plate renders (the render layer clips it) and
+ * only the face measurements ride along. A DECLINED section (a plane the
+ * kernel refuses — `kernel/section-empty` class) settles the whole plate
+ * with no section fields: a declined section carries no numbers.
  */
 export async function computePlateRenderState(
   context: ComputationContext,
   holeDiameterMm: number,
+  section?: SectionDisplayRequest | null,
 ): Promise<PlateRenderState> {
-  return plateRenderState(await computePlateWithHole(context, holeDiameterMm));
+  if (section === undefined || section === null) {
+    return plateRenderState(
+      await computePlateWithHole(context, holeDiameterMm),
+    );
+  }
+  try {
+    const sectioned = await computeSectionedPlateWithHole(
+      context,
+      holeDiameterMm,
+      section,
+    );
+    return plateRenderState(
+      section.viewMode ? sectioned.cut : sectioned.measurement,
+      sectioned.section,
+    );
+  } catch (error) {
+    // The structured decline channel: the worker's `worker/operation-failed`
+    // carries the kernel's own `kernelCode` — matched on the code, never a
+    // message substring guess.
+    if (
+      error instanceof WorkerRequestFailure &&
+      (error.error.data as { kernelCode?: unknown } | undefined)?.kernelCode ===
+        "kernel/section-empty"
+    ) {
+      return plateRenderState(
+        await computePlateWithHole(context, holeDiameterMm),
+      );
+    }
+    throw error;
+  }
 }
 
 /**
