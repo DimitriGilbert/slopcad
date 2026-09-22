@@ -66,7 +66,9 @@ describe("orbit state seeding", () => {
     const first = createOrbitState(seedFixture());
     const second = createOrbitState(seedFixture());
     expect(orbitPosition(first)).toEqual(orbitPosition(second));
-    expect(orbitSnapshot(first, "spec")).toEqual(orbitSnapshot(second, "spec"));
+    expect(orbitSnapshot(first, "spec", "perspective")).toEqual(
+      orbitSnapshot(second, "spec", "perspective"),
+    );
   });
 
   it("seeds the elevation above the ground plane for a z-up camera", () => {
@@ -248,14 +250,18 @@ describe("the machine-surface snapshot", () => {
     expect(snapshot.azimuthDeg).toBeGreaterThanOrEqual(0);
     expect(snapshot.azimuthDeg).toBeLessThan(360);
     // Same decomposition as seeding the controller directly.
-    const seeded = orbitSnapshot(createOrbitState(seedFixture()), "spec");
+    const seeded = orbitSnapshot(
+      createOrbitState(seedFixture()),
+      "spec",
+      "perspective",
+    );
     expect(snapshot).toEqual(seeded);
   });
 
   it("rounds snapshot numbers so the surface stays stable", () => {
     const state = createOrbitState(seedFixture());
     orbitByPixels(state, 33, 17);
-    const snapshot = orbitSnapshot(state, "user");
+    const snapshot = orbitSnapshot(state, "user", "perspective");
     expect(snapshot.mode).toBe("user");
     expect(snapshot.azimuthDeg).toBe(Number(snapshot.azimuthDeg.toFixed(1)));
     expect(snapshot.elevationDeg).toBe(

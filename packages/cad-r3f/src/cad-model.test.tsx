@@ -300,3 +300,50 @@ describe("CadModel selection highlight", () => {
     expect(container.querySelector("meshbasicmaterial")).toBeNull();
   });
 });
+
+describe("CadModel display modes (Phase 45)", () => {
+  // The mode -> write-mask decisions are pinned on the pure table
+  // (`display-mode.test.ts`); React surfaces no boolean props on these
+  // custom elements, so the component level asserts what IS observable
+  // without a WebGL reconciler: the feature-edge overlay's mount,
+  // per-object count, ink, and lifecycle across mode changes.
+  it("shaded (the default): no edge overlay", () => {
+    const { container, unmount } = renderModel(BOTH_PROJECTION);
+    expect(container.querySelectorAll("linesegments").length).toBe(0);
+    unmount();
+  });
+
+  it("shaded-edges mounts one edge overlay per object with the documented ink", () => {
+    const view = render(
+      <CadModel projection={BOTH_PROJECTION} displayMode="shaded-edges" />,
+    );
+    const edges = view.container.querySelectorAll("linesegments");
+    expect(edges.length).toBe(2);
+    const ink = view.container.querySelector("linebasicmaterial");
+    expect(ink?.getAttribute("color")).toBe("#d8e2f2");
+    view.unmount();
+  });
+
+  it("wireframe and hidden-line mount the edge overlay too (surfaces stay mounted)", () => {
+    for (const mode of ["wireframe", "hidden-line"] as const) {
+      const view = render(
+        <CadModel projection={BOTH_PROJECTION} displayMode={mode} />,
+      );
+      expect(view.container.querySelectorAll("mesh").length).toBe(2);
+      expect(view.container.querySelectorAll("linesegments").length).toBe(2);
+      view.unmount();
+    }
+  });
+
+  it("a mode change onto shaded unmounts the overlay entirely", () => {
+    const view = render(
+      <CadModel projection={BOTH_PROJECTION} displayMode="shaded-edges" />,
+    );
+    expect(view.container.querySelectorAll("linesegments").length).toBe(2);
+    view.rerender(
+      <CadModel projection={BOTH_PROJECTION} displayMode="shaded" />,
+    );
+    expect(view.container.querySelectorAll("linesegments").length).toBe(0);
+    view.unmount();
+  });
+});

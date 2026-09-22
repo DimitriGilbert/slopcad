@@ -140,3 +140,41 @@ export function createSceneCamera(
   applySceneCamera(camera, spec, aspect);
   return camera;
 }
+
+/**
+ * Reads a scene camera back as a {@link RenderCamera} spec (Phase 45):
+ * the inverse view of {@link applySceneCamera} for the one place a record
+ * must be derived from live renderer state — the interactive controls
+ * committing their user-camera overlay. The caller supplies the target
+ * (the controls own it; the three camera does not store it). The mapping
+ * law is unchanged by this addition: a spec read back through this and
+ * re-applied through `applySceneCamera` reproduces the same placement.
+ */
+export function sceneCameraToSpec(
+  camera: SceneCamera,
+  target: RenderVector3,
+): RenderCamera {
+  const position: RenderVector3 = [
+    camera.position.x,
+    camera.position.y,
+    camera.position.z,
+  ];
+  const up: RenderVector3 = [camera.up.x, camera.up.y, camera.up.z];
+  if (camera instanceof THREE.PerspectiveCamera) {
+    return {
+      fovDeg: camera.fov,
+      kind: "perspective",
+      position,
+      target,
+      up,
+    };
+  }
+  return {
+    kind: "orthographic",
+    position,
+    target,
+    up,
+    viewHeight: camera.top - camera.bottom,
+    viewWidth: camera.right - camera.left,
+  };
+}

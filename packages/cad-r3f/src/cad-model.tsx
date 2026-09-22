@@ -17,7 +17,7 @@
  * updated body swaps buffer contents in place, a removed body unmounts,
  * and unrelated bodies are left untouched.
  *
- * ## Material
+ * ## Material and display modes (Phase 45)
  *
  * One documented default — `MeshStandardMaterial` with the spike's fixed
  * parameters (color `#8aadf4`, metalness 0.15, roughness 0.55) — applied
@@ -25,7 +25,14 @@
  * beyond these three parameters needs a renderer decision, not a prop
  * escape hatch, so the override surface is deliberately narrow. The Phase 12
  * exception is body-level selection, which applies the documented highlight
- * color/emissive change (see `selection-highlight.ts`).
+ * color/emissive change (see `selection-highlight.ts`). The Phase 45
+ * `displayMode` prop cycles the pass states (`display-mode.ts`): the
+ * surface meshes stay MOUNTED in every mode (picking never changes), and
+ * only the write masks plus the feature-edge overlay change — the honest
+ * consequence being that the body-level selection highlight, a surface
+ * color effect, does not read in the two surface-invisible modes
+ * (wireframe, hidden-line), while the face-level highlight mesh (its own
+ * always-writing material) still does.
  *
  * ## Picking and highlight (Phase 12)
  *
@@ -75,6 +82,12 @@ import {
   isBodySelected,
   selectedFaceIndices,
 } from "./selection-highlight";
+import {
+  buildFeatureEdgeGeometry,
+  CAD_MODEL_EDGE_COLOR,
+  displayModePasses,
+  type CadDisplayMode,
+} from "./display-mode";
 import { useRenderGeometry } from "./use-render-geometry";
 
 /** The overridable subset of the default material. */
@@ -145,6 +158,15 @@ export interface CadModelProps {
   readonly projection: RenderProjection;
   /** Per-parameter overrides applied over {@link DEFAULT_MATERIAL}. */
   readonly material?: CadModelMaterialProps;
+  /**
+   * The display mode (Phase 45): how surfaces and feature edges render.
+   * Default `"shaded"` — the established deterministic bytes; every other
+   * mode is a documented pass-state change (see `display-mode.ts`), never
+   * a different scene graph: the surface meshes stay mounted (picking
+   * works in every mode) and only their write masks and the edge overlay
+   * change.
+   */
+  readonly displayMode?: CadDisplayMode;
   /** Reports each changed geometry snapshot exactly once, post-commit. */
   readonly onSync?: (geometries: RenderGeometrySnapshot) => void;
   /**
@@ -174,6 +196,7 @@ export interface CadModelProps {
 }
 
 export function CadModel({
+  displayMode = "shaded",
   material,
   onHover,
   onPick,
@@ -193,6 +216,7 @@ export function CadModel({
   const selectionList = selection ?? NO_SELECTION;
   const regenerationValue = regeneration ?? 0;
   const categoryValue: CadPickCategory = pickCategory ?? "face";
+  const passes = displayModePasses(displayMode);
   const interactive =
     onPick !== undefined ||
     onPickDown !== undefined ||
@@ -233,6 +257,28 @@ export function CadModel({
       }
     };
   }, [highlights]);
+
+  // Feature-edge geometries, one per object, rebuilt when the drawn
+  // geometry set or the edge visibility changes (the same lifecycle as
+  // the highlights: built only when the mode draws edges, disposed with
+  // the memo).
+  const edges = useMemo(() => {
+    if (!passes.edges.visible)
+      return new Map<RenderObjectId, THREE.BufferGeometry>();
+    const map = new Map<RenderObjectId, THREE.BufferGeometry>();
+    for (const [id, geometry] of geometries) {
+      map.set(id, buildFeatureEdgeGeometry(geometry));
+    }
+    return map;
+  }, [geometries, passes.edges.visible]);
+
+  useEffect(() => {
+    return () => {
+      for (const geometry of edges.values()) {
+        geometry.dispose();
+      }
+    };
+  }, [edges]);
 
   // Latest-ref pattern: callers may pass inline closures without rebinding
   // the (already registered) R3F event handlers on every render.
@@ -319,6 +365,8 @@ export function CadModel({
         return (
           <mesh key={id} geometry={geometry} {...handlers}>
             <meshStandardMaterial
+              colorWrite={passes.surfaces.colorWrite}
+              depthWrite={passes.surfaces.depthWrite}
               {...materialProps}
               {...(selected
                 ? {
@@ -331,6 +379,28 @@ export function CadModel({
           </mesh>
         );
       })}
+      {[...edges].map(([id, geometry]) => (
+        <lineSegments
+          key={`${id}-feature-edges`}
+          geometry={geometry}
+          raycast={NO_RAYCAST}
+          renderOrder={1}
+        >
+          {/* Edges ride the depth buffer (occluded edges drop out under
+              hidden-line) but never write it: two coincident edge sets
+              must not fight each other, and the small negative polygon
+              offset lifts feature edges off their own surfaces so
+              shaded-edges reads crisp at AA-off rasterization. */}
+          <lineBasicMaterial
+            color={CAD_MODEL_EDGE_COLOR}
+            depthTest
+            depthWrite={false}
+            polygonOffset
+            polygonOffsetFactor={-1}
+            polygonOffsetUnits={-1}
+          />
+        </lineSegments>
+      ))}
       {[...highlights].map(([id, geometry]) => (
         <mesh
           key={`${id}-face-highlight`}

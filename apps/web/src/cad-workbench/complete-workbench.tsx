@@ -131,6 +131,14 @@ import {
 import { CadDatumOverlay } from "./datum-overlay";
 import { CadHolePreviewGhost } from "./hole-ghost";
 import {
+  createViewportViewSession,
+  sessionWithConvention,
+  sessionWithDisplayMode,
+  sessionWithUserCamera,
+  type ViewportViewSession,
+} from "./viewport-view";
+import { CadViewportViewTools } from "./viewport-view-tools";
+import {
   FeatureTimelineChips,
   FeatureTimelineSummary,
 } from "./feature-timeline-strip";
@@ -405,6 +413,32 @@ export function CompleteCadWorkbench({
   // The last import outcome the auto-close has seen (identity-tracked: the
   // builder-built io surface re-mints the outcome object every render).
   const seenOutcomeRef = useRef<CadImportOutcome | null>(null);
+  // The Phase 45 viewport view session: the user-camera overlay, display
+  // mode, and angle convention — session state only, never serialized
+  // (ADR: docs/architecture/adr-user-camera-overlay.md). Every writer is
+  // a user action: the strip's commands and the gesture commits that
+  // arrive through the viewport's onUserCamera.
+  const [viewSession, setViewSession] = useState<ViewportViewSession>(
+    createViewportViewSession,
+  );
+  const handleViewUserCamera = useCallback(
+    (camera: ViewportViewSession["userCamera"]) => {
+      setViewSession((session) => sessionWithUserCamera(session, camera));
+    },
+    [],
+  );
+  const handleViewDisplayMode = useCallback(
+    (displayMode: ViewportViewSession["displayMode"]) => {
+      setViewSession((session) => sessionWithDisplayMode(session, displayMode));
+    },
+    [],
+  );
+  const handleViewConvention = useCallback(
+    (convention: ViewportViewSession["convention"]) => {
+      setViewSession((session) => sessionWithConvention(session, convention));
+    },
+    [],
+  );
   // A scrimmed overlay answers Escape: an open drawer closes on the key at
   // window level — unless a tool is live, because the viewport's documented
   // Escape surface (cancel the armed tool) owns the key first.
@@ -1186,6 +1220,8 @@ export function CompleteCadWorkbench({
           cameraControls
           cameraOrbitDragEnabled={cameraOrbitDragAvailable}
           className={VIEWPORT_CLASS}
+          displayMode={viewSession.displayMode}
+          onUserCamera={handleViewUserCamera}
           projection={
             showingPreview
               ? (ioSurface.preview?.projection ?? null)
@@ -1193,6 +1229,7 @@ export function CompleteCadWorkbench({
                 ? null
                 : applied.state.projection
           }
+          userCamera={viewSession.userCamera}
           onSettled={() => {
             if (showingPreview) {
               // The imported frame stamps the IMPORT surface, never the
@@ -1280,6 +1317,37 @@ export function CompleteCadWorkbench({
                   {sketchOnFaceNote}
                 </div>
               ) : null}
+              {/* The Phase 45 navigation/display strip: view cube,
+                  standard views, projection toggle, display modes, fit,
+                  zoom window, look-at, reset — every command writing the
+                  session overlay (never the document). */}
+              <CadViewportViewTools
+                bounds={
+                  showingPreview || applied === null
+                    ? null
+                    : applied.state.measurement.bounds
+                }
+                currentCamera={
+                  viewSession.userCamera ??
+                  (showingPreview
+                    ? (ioSurface.preview?.projection.camera ?? null)
+                    : applied === null
+                      ? null
+                      : applied.state.projection.camera)
+                }
+                onConvention={handleViewConvention}
+                onDisplayMode={handleViewDisplayMode}
+                onUserCamera={handleViewUserCamera}
+                projection={
+                  showingPreview
+                    ? (ioSurface.preview?.projection ?? null)
+                    : applied === null
+                      ? null
+                      : applied.state.projection
+                }
+                selection={selectionApi.selected}
+                session={viewSession}
+              />
               {!showingPreview && !sketchHintDismissed ? (
                 <div
                   className="pointer-events-auto absolute bottom-3 left-1/2 w-max max-w-[calc(100%-1rem)] -translate-x-1/2"
@@ -1617,6 +1685,11 @@ export function CompleteCadWorkbench({
       data-tool-phase={toolsApi.phase}
       data-tool-state={JSON.stringify(toolsApi.toolState)}
       data-viewport-showing={showingPreview ? "import" : "document"}
+      data-viewport-camera-source={
+        viewSession.userCamera === null ? "spec" : "user"
+      }
+      data-viewport-display-mode={viewSession.displayMode}
+      data-viewport-convention={viewSession.convention}
       id={rootId}
     >
       {/* The command row, grouped like a machine headstock: the document

@@ -15,6 +15,7 @@ import {
   CAD_SCENE_CAMERA_NEAR_MM,
   applySceneCamera,
   createSceneCamera,
+  sceneCameraToSpec,
 } from "./scene-camera";
 
 const PERSPECTIVE: RenderCamera = {
@@ -104,6 +105,27 @@ describe("scene camera mapping", () => {
     expect(direction.distanceTo(expectedViewDirection(moved))).toBeLessThan(
       1e-9,
     );
+  });
+
+  it("reads a scene camera back as a spec that re-applies identically (round-trip)", () => {
+    for (const spec of [PERSPECTIVE, ORTHOGRAPHIC]) {
+      const camera = createSceneCamera(spec, 1.25);
+      const readBack = sceneCameraToSpec(camera, spec.target);
+      expect(readBack.kind).toBe(spec.kind);
+      expect(readBack.position).toEqual(spec.position);
+      expect(readBack.up).toEqual(spec.up);
+      expect(readBack.target).toEqual(spec.target);
+      if (spec.kind === "perspective" && readBack.kind === "perspective") {
+        expect(readBack.fovDeg).toBeCloseTo(spec.fovDeg, 9);
+      }
+      if (spec.kind === "orthographic" && readBack.kind === "orthographic") {
+        expect(readBack.viewWidth).toBeCloseTo(spec.viewWidth, 9);
+        expect(readBack.viewHeight).toBeCloseTo(spec.viewHeight, 9);
+      }
+      // The law: apply(read-back) reproduces the same placement.
+      const again = createSceneCamera(readBack, 1.25);
+      expect(again.position.toArray()).toEqual(camera.position.toArray());
+    }
   });
 
   it("refuses a spec whose kind does not match the camera instance", () => {
