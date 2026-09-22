@@ -55,7 +55,7 @@
  * window level, scoped to the viewport.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type {
   ComponentProps,
   KeyboardEvent as ReactKeyboardEvent,
@@ -166,6 +166,9 @@ export interface CadViewportProps {
    * Receives user-camera RECORDS committed by gestures (drag end, wheel
    * notch, key step) — the host stores them session-scoped and feeds the
    * value back through {@link userCamera}. Fires only from user input.
+   * Every commit advances the container's `data-camera-commit-count`
+   * (the gesture-commit ledger: one per drag, wheel notch, or key step —
+   * never per pointer move).
    */
   readonly onUserCamera?: SceneOnUserCameraProp;
   /**
@@ -298,6 +301,37 @@ export function CadViewport({
       );
     },
     [],
+  );
+
+  /**
+   * The gesture-commit ledger: how many `onUserCamera` records this mount
+   * has committed. Written to the container as `data-camera-commit-count`
+   * beside the snapshot readouts — it makes the commit-once-per-gesture
+   * law (ADR: user-camera overlay) observable from outside the page, the
+   * same machine-surface discipline as `data-rendered-frames`.
+   */
+  const userCameraCommitsRef = useRef(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container === null) return;
+    container.setAttribute(
+      "data-camera-commit-count",
+      String(userCameraCommitsRef.current),
+    );
+  }, []);
+  const handleUserCamera = useCallback(
+    (camera: Parameters<NonNullable<SceneOnUserCameraProp>>[0]): void => {
+      userCameraCommitsRef.current += 1;
+      const container = containerRef.current;
+      if (container !== null) {
+        container.setAttribute(
+          "data-camera-commit-count",
+          String(userCameraCommitsRef.current),
+        );
+      }
+      onUserCamera?.(camera);
+    },
+    [onUserCamera],
   );
 
   const toolActive = toolsApi !== null && toolsApi.phase === "active";
@@ -452,7 +486,13 @@ export function CadViewport({
           onCameraState={handleCameraState}
           onSelectionRendered={onSelectionRendered}
           onSettled={onSettled}
-          onUserCamera={onUserCamera}
+          // The wrapper counts commits for the machine surface; it must
+          // stay `undefined` without the prop (the scene treats a missing
+          // callback as "no overlay host" — a defined wrapper would flip
+          // that law).
+          onUserCamera={
+            onUserCamera === undefined ? undefined : handleUserCamera
+          }
           palette={studioPalette}
           pickCategory={pickCategory}
           projection={projection}

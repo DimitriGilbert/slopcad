@@ -13,6 +13,10 @@ import { dispatchedCount, waitForSettledScene } from "../e2e-render/helpers";
  *  - ORBIT — a real pointer drag takes the camera ("user" source), the
  *    document is untouched (the settle volume and frame count stand),
  *    and RESET returns to spec law explicitly;
+ *  - COMMIT LEDGER — one full drag gesture commits the user-camera
+ *    record EXACTLY ONCE (the `data-camera-commit-count` ledger reads
+ *    one per gesture, never per pointer move — the drag stays off the
+ *    React render path);
  *  - STANDARD VIEWS — Front/Top command the analytic cameras (azimuth/
  *    elevation pinned to the Z-up decomposition of the commanded
  *    direction), and the ISO corner follows the angle convention;
@@ -154,6 +158,40 @@ test("orbit takes the camera; the document is untouched; reset returns to spec",
     .poll(async () => rootAttribute(page, "data-viewport-camera-source"))
     .toBe("spec");
   expect(await cameraAttribute(page, "mode")).toBe("spec");
+});
+
+test("a drag commits the user camera exactly once per gesture (never per move)", async ({
+  page,
+}) => {
+  // The gesture-commit ledger starts at zero on the camera machine
+  // surface (`data-camera-commit-count` on the viewport container).
+  expect(await cameraAttribute(page, "commit-count")).toBe("0");
+
+  const box = await page.locator(CANVAS).boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  // One full orbit gesture: many pointer moves past the drag threshold.
+  await page.mouse.move(cx - 120, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 40, cy - 30, { steps: 8 });
+  await page.mouse.up();
+  // The overlay record lands EXACTLY ONCE — at gesture end, not per
+  // pointer move (the ADR law: a drag stays off the React render path).
+  await expect
+    .poll(async () => cameraAttribute(page, "commit-count"))
+    .toBe("1");
+  expect(await cameraAttribute(page, "mode")).toBe("user");
+
+  // A second gesture commits a second record — exactly one more.
+  await page.mouse.move(cx - 120, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx - 60, cy - 20, { steps: 4 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => cameraAttribute(page, "commit-count"))
+    .toBe("2");
 });
 
 test("standard views command the analytic cameras (front/top pinned, iso follows the convention)", async ({

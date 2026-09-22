@@ -58,7 +58,7 @@
  * stands. See `docs/architecture/adr-user-camera-overlay.md`.
  */
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { RenderCamera } from "@slopcad/cad-core";
 import { PerspectiveCamera } from "three";
 import { useThree } from "@react-three/fiber";
@@ -194,8 +194,17 @@ export function SceneCameraControls({
     return state;
   };
 
+  /** The live camera's projection kind (snapshot metadata). */
+  const cameraRefKind = useCallback(
+    (): "perspective" | "orthographic" =>
+      get().camera instanceof PerspectiveCamera
+        ? "perspective"
+        : "orthographic",
+    [get],
+  );
+
   /** Places the camera at the user state and schedules the demand frame. */
-  const applyAndReport = (): void => {
+  const applyAndReport = useCallback((): void => {
     const state = orbitRef.current;
     if (state === null) return;
     const camera = get().camera;
@@ -208,11 +217,7 @@ export function SceneCameraControls({
     onCameraStateRef.current(
       orbitSnapshot(state, cameraSourceRef.current, cameraRefKind()),
     );
-  };
-
-  /** The live camera's projection kind (snapshot metadata). */
-  const cameraRefKind = (): "perspective" | "orthographic" =>
-    get().camera instanceof PerspectiveCamera ? "perspective" : "orthographic";
+  }, [cameraRefKind, get, invalidate]);
 
   /**
    * Commits the user-camera RECORD (the session overlay) from the live
@@ -233,22 +238,25 @@ export function SceneCameraControls({
   };
 
   /** The snapshot of one effective camera, source-true. */
-  const publishSpec = (camera: RenderCamera): void => {
-    const snapshot = sceneCameraStateFromSpec(
-      camera,
-      Math.max(1, get().size.height),
-    );
-    onCameraStateRef.current({ ...snapshot, mode: cameraSourceRef.current });
-  };
+  const publishSpec = useCallback(
+    (camera: RenderCamera): void => {
+      const snapshot = sceneCameraStateFromSpec(
+        camera,
+        Math.max(1, get().size.height),
+      );
+      onCameraStateRef.current({ ...snapshot, mode: cameraSourceRef.current });
+    },
+    [get],
+  );
 
   /** Returns to spec law (the overlay cleared): the next gesture re-seeds. */
-  const resetToSpec = (): void => {
+  const resetToSpec = useCallback((): void => {
     orbitRef.current = null;
     gestureRef.current = null;
     onCameraStateRef.current(
       sceneCameraStateFromSpec(specRef.current, Math.max(1, get().size.height)),
     );
-  };
+  }, [get]);
 
   // The initial report: the boot camera is the effective camera (the
   // user overlay's, when the host mounted with one), published so tests
@@ -295,9 +303,11 @@ export function SceneCameraControls({
     } else {
       publishSpec(spec);
     }
-    // `spec` identity changes every projection rebuild; the content check
-    // above decides whether the view actually changed.
-  }, [spec]);
+    // The helpers are stable (refs plus the fiber store's stable
+    // accessors): the effect still runs exactly when `spec` identity
+    // changes, and the content check above decides whether the view
+    // actually changed.
+  }, [applyAndReport, publishSpec, resetToSpec, spec]);
 
   // A viewport resize re-applies the SPEC via the rig's own effect; a user
   // camera re-applies itself right after (this effect runs later in the

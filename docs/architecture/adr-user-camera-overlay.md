@@ -82,7 +82,26 @@ spec stays the default:
 - The machine surface grows `data-viewport-camera-source`
   (`spec`/`user`), `data-viewport-display-mode`,
   `data-viewport-convention`, and `data-camera-projection` beside the
-  existing `data-camera-*` readouts.
+  existing `data-camera-*` readouts, plus `data-camera-commit-count` on
+  the viewport container — the gesture-commit ledger (one per drag end,
+  wheel notch, or key step), which makes the commit-once-per-gesture law
+  assertable from outside the page.
 - Session overlay means page reload returns to spec law — accepted; a
   persistent per-document camera would be document display state (the
   roadmap reserves that decision for section planes, Phase 46).
+
+## What the suites pin, honestly
+
+The render suites' byte checks are **self-relative**: a suite asserts
+that two runs of the same scene (a second context, a fresh reload, a
+re-entry, an undo/redo round trip) reproduce the _same_ bytes
+run-vs-run — they never compare pixels against a stored absolute golden
+image. They pin determinism, not any particular camera. The absolute
+boot-camera law — the settled first frame is the projection's spec
+camera, byte for byte — is enforced _indirectly_, by the
+anchor-projecting suites (selection, hole, fillet): those click at
+screen points derived by projecting known world geometry through the
+spec camera, so any boot-camera drift moves the projections off their
+targets and fails the picks. Do not mistake the determinism suites for
+absolute-baseline pins; the anchor projections are the only suites that
+would catch a wrong (but self-consistent) boot camera.
