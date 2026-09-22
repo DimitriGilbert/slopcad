@@ -195,6 +195,47 @@ describe("operation input round-trips", () => {
     });
   });
 
+  it("round-trips the four profile-op inputs carrying the sheet flag (Phase 48)", () => {
+    const placement = {
+      rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+      translation: { x: mm(0), y: mm(0), z: mm(0) },
+    };
+    const loop = [
+      { kind: "line" as const, start: [0, 0] as const, end: [4, 0] as const },
+      { kind: "line" as const, start: [4, 0] as const, end: [4, 4] as const },
+      { kind: "line" as const, start: [4, 4] as const, end: [0, 4] as const },
+      { kind: "line" as const, start: [0, 4] as const, end: [0, 0] as const },
+    ];
+    expectInputRoundTrip("solid.extrude", {
+      loop,
+      height: mm(10),
+      direction: 1,
+      placement,
+      sheet: true,
+    });
+    expectInputRoundTrip("solid.revolve", {
+      loop,
+      axis: { point: [3, -4], direction: [0.6, 0.8] },
+      angle: angle(Math.PI / 2),
+      placement,
+      sheet: true,
+    });
+    expectInputRoundTrip("solid.sweep", {
+      loop,
+      path: [{ kind: "line", start: [0, 0], end: [0, 10] }],
+      placement,
+      sheet: true,
+    });
+    expectInputRoundTrip("solid.loft", {
+      sections: [
+        { loop, z: mm(0) },
+        { loop, z: mm(8) },
+      ],
+      placement,
+      sheet: true,
+    });
+  });
+
   it("round-trips the extrude input with the optional draft taper (Phase 41)", () => {
     const placement = {
       rotation: { axis: [0, 0, 1] as const, angle: angle(0) },

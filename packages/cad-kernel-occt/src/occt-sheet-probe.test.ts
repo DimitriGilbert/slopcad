@@ -60,11 +60,13 @@ function rectWire(x0: number, y0: number, w: number, h: number, z = 0) {
   return { wire, mkWire, edges };
 }
 
-function areaOf(shape: unknown): number {
+type OcctShape = InstanceType<OpenCascadeInstance["TopoDS_Shape"]>;
+
+function areaOf(shape: OcctShape): number {
   const instance = oc();
   const props = new instance.GProp_GProps();
   try {
-    instance.BRepGProp.SurfaceProperties(shape as never, props, true, false);
+    instance.BRepGProp.SurfaceProperties(shape, props, true, false);
     return props.Mass();
   } finally {
     props.delete();
@@ -144,7 +146,7 @@ describe("OCCT sheet probe (Phase 48)", () => {
     const slant = Math.sqrt(10 * 10 + (4 - 2) ** 2);
     const halfAngle = Math.atan2(4 - 2, 10);
     const patches: Array<{
-      face: () => { shape: unknown; dispose: () => void };
+      face: () => { shape: OcctShape; dispose: () => void };
       expected: number;
       label: string;
     }> = [];
@@ -256,7 +258,7 @@ describe("OCCT sheet probe (Phase 48)", () => {
     for (const patch of patches) {
       const { shape, dispose } = patch.face();
       expect(areaOf(shape), patch.label).toBeCloseTo(patch.expected, 5);
-      (shape as { delete(): void }).delete();
+      shape.delete();
       dispose();
     }
     coordinate.delete();

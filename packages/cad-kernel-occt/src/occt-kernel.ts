@@ -560,13 +560,13 @@ export interface ImportedStepModel {
  * provenance discipline as the STEP twin: `origin` is the literal marking
  * the geometry as imported BREP — answerable to every `GeometryKernel`
  * operation, backed by no feature, parameter, or construction history
- * anywhere.
+ * anywhere. The importer answers SOLIDS only (a shells-only BREP is
+ * declined structurally), so unlike the STEP twin there is no sheet
+ * class to mark.
  */
 export interface ImportedBrepSolid {
   readonly solid: KernelSolid;
   readonly origin: "imported-brep";
-  /** Present exactly when the ref is an open shell (Phase 48, the STEP twin). */
-  readonly sheet?: true;
 }
 
 /**
@@ -2081,12 +2081,19 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
                   );
                 }
                 const surface = new oc.gp_Sphere(coordinate, radius.value);
+                // gp_Sphere parametrizes v as LATITUDE from the equator
+                // (v = +π/2 the +z pole, −π/2 the −z pole), while the
+                // contract's v is the POLAR angle from +z measured DOWNWARD
+                // (0 the north pole, π the south pole). The order-swapped
+                // map occtV = π/2 − contractV keeps the contract semantics:
+                // passing the contract v through unmapped doubly covers the
+                // north hemisphere for any band reaching past the equator.
                 const mkFace = new oc.BRepBuilderAPI_MakeFace(
                   surface,
                   0,
                   uSweep.value,
-                  vMin.value,
-                  vMax.value,
+                  Math.PI / 2 - vMax.value,
+                  Math.PI / 2 - vMin.value,
                 );
                 patch = faceOf(mkFace, "sphere");
                 surface.delete();
@@ -2120,7 +2127,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
                 // The single-thread binding carries no Geom_ToroidalSurface
                 // (probed): the torus patch rides the WIRE-REVOLUTION route
                 // — the tube arc (from the outer equator, over the tube's
-                // +z side, the standard P(u,v) parametrization) revolved
+                // −z side, the standard P(u,v) parametrization) revolved
                 // about the local z axis by uSweep. Analytically the same
                 // trimmed toroidal patch (probed: full circle × 2π answers
                 // exactly 4π²Rr).

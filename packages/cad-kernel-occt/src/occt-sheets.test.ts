@@ -298,6 +298,39 @@ describe("occt createSheet (Phase 48)", () => {
       bounds: { min: [-5, -5, 0], max: [5, 5, 5] },
     },
     {
+      // The SOUTHERN band — the hemisphere pin above is order-swap
+      // symmetric, so it alone cannot tell the contract's polar-from-+z
+      // domain from OCCT's equator latitude: this band (and the full
+      // sphere below) pins the south side against a doubly-covered north.
+      label: "south band π/2→3π/4 r5",
+      input: {
+        kind: "sphere",
+        placement: identityPlacement,
+        radius: length(5),
+        vMin: angle(Math.PI / 2),
+        vMax: angle((3 * Math.PI) / 4),
+        uSweep: angle(2 * Math.PI),
+      },
+      area: 2 * Math.PI * 25 * (0 - Math.cos((3 * Math.PI) / 4)),
+      bounds: {
+        min: [-5, -5, 5 * Math.cos((3 * Math.PI) / 4)],
+        max: [5, 5, 0],
+      },
+    },
+    {
+      label: "full sphere r5",
+      input: {
+        kind: "sphere",
+        placement: identityPlacement,
+        radius: length(5),
+        vMin: angle(0),
+        vMax: angle(Math.PI),
+        uSweep: angle(2 * Math.PI),
+      },
+      area: 4 * Math.PI * 25,
+      bounds: { min: [-5, -5, -5], max: [5, 5, 5] },
+    },
+    {
       label: "full torus R8 r2",
       input: {
         kind: "torus",

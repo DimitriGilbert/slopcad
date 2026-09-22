@@ -1751,8 +1751,9 @@ export interface SectionResult {
  *   along local z from `0` to `height`.
  * - `cone`: the local z axis; `bottomRadius` at local z = 0, `topRadius`
  *   at local z = `height` (the half-angle is analytically derived,
- *   `atan2(bottom − top, height)`; `topRadius` may be `0` — the apex);
- *   u the azimuth sweeping `uSweep`, v the height from `0` to `height`.
+ *   `atan2(top − bottom, height)` — negative when the cone narrows toward
+ *   +z; `topRadius` may be `0` — the apex); u the azimuth sweeping
+ *   `uSweep`, v the height from `0` to `height`.
  * - `sphere`: centred at the local origin; u the azimuth from local +x
  *   toward +y sweeping `uSweep`; v the POLAR angle from the local +z
  *   (north), measured DOWNWARD — `vMin`/`vMax` in `[0, π]` with
