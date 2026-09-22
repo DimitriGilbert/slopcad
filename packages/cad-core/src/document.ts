@@ -45,6 +45,11 @@
  */
 
 import {
+  type SerializedCurve,
+  curveRecordProblems,
+  parseSerializedCurve,
+} from "./curve";
+import {
   FEATURE_HISTORY_ERROR_CODES,
   reorderFeatureRecords,
 } from "./feature-history";
@@ -57,6 +62,7 @@ import {
   type CadIdKind,
   createIdGenerator,
   type DatumId,
+  type CurveId,
   type DocumentId,
   type FeatureId,
   type IdGenerator,
@@ -64,6 +70,7 @@ import {
   type OccurrenceId,
   parseBodyId,
   parseDatumId,
+  parseCurveId,
   parseDocumentId,
   parseFeatureId,
   parseOccurrenceId,
@@ -214,6 +221,37 @@ export interface DocumentDatumInput {
 }
 
 /**
+ * A named 3D curve entity (Phase 47): the document-resident record of a
+ * free-standing curve — interpolated spline, control spline, helix/spiral,
+ * or equation curve — carrying the curve module's canonical serialized
+ * payload verbatim (the curve module owns the payload's schema and its
+ * parse; the document guarantees only identity, a name, and JSON-safe
+ * frozen storage — the sketch/datum discipline). A curve is a RECORD, not
+ * a body: sweep features address it through a `{ kind: "curve" }` input,
+ * and the kernel's wire vocabulary re-derives its geometry from the same
+ * payload every regeneration (the wire/record duality the roadmap pins).
+ */
+export interface DocumentCurve {
+  readonly id: CurveId;
+  readonly name: string;
+  /** The curve module's canonical serialized payload, stored verbatim. */
+  readonly curve: SerializedCurve;
+}
+
+/** Input accepted by {@link addDocumentCurve}. */
+export interface DocumentCurveInput {
+  readonly id?: CurveId;
+  readonly name: string;
+  readonly curve: SerializedCurve;
+}
+
+/** Result of {@link addDocumentCurve}: the next document plus the record. */
+export interface DocumentCurveAddResult {
+  readonly document: CadDocument;
+  readonly curve: DocumentCurve;
+}
+
+/**
  * A typed reference to an entity a feature consumes. The `kind`/`id` pair is
  * validated for consistency (the id must carry the wire prefix of its
  * declared kind).
@@ -224,7 +262,8 @@ export type FeatureInputRef =
   | { readonly kind: "body"; readonly id: BodyId }
   | { readonly kind: "sketch"; readonly id: SketchDocumentId }
   | { readonly kind: "reference"; readonly id: ReferenceId }
-  | { readonly kind: "datum"; readonly id: DatumId };
+  | { readonly kind: "datum"; readonly id: DatumId }
+  | { readonly kind: "curve"; readonly id: CurveId };
 
 /** The entity kinds a feature input may reference. */
 export const FEATURE_INPUT_KINDS = [
@@ -234,6 +273,7 @@ export const FEATURE_INPUT_KINDS = [
   "sketch",
   "reference",
   "datum",
+  "curve",
 ] as const;
 
 export type FeatureInputKind = (typeof FEATURE_INPUT_KINDS)[number];
@@ -303,6 +343,11 @@ export interface CadDocument {
    * referenced as occurrence sources; nesting crosses document bounds.
    */
   readonly occurrences: readonly DocumentOccurrence[];
+  /**
+   * The document's 3D curve records, in add order (empty in older files;
+   * Phase 47-additive).
+   */
+  readonly curves: readonly DocumentCurve[];
   /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
@@ -428,7 +473,8 @@ export type DocumentEntity =
   | { readonly kind: "body"; readonly body: Body }
   | { readonly kind: "feature"; readonly feature: FeatureRecord }
   | { readonly kind: "sketch"; readonly sketch: DocumentSketch }
-  | { readonly kind: "datum"; readonly datum: DocumentDatum };
+  | { readonly kind: "datum"; readonly datum: DocumentDatum }
+  | { readonly kind: "curve"; readonly curve: DocumentCurve };
 
 /** Result of {@link addBody}: the next document plus the added body. */
 export interface BodyAddResult {
@@ -493,6 +539,8 @@ export const DOCUMENT_ERROR_CODES = {
   occurrenceSourceUnknown: "assembly/occurrence-source-unknown",
   occurrencePlacementInvalid: "assembly/occurrence-placement-invalid",
   occurrenceBomFlagInvalid: "assembly/occurrence-bom-flag-invalid",
+  curveNameInvalid: "document/curve-name-invalid",
+  curvePayloadInvalid: "document/curve-payload-invalid",
   datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
@@ -664,6 +712,19 @@ export function parseFeatureInputRef(
     }
     return ok(Object.freeze({ kind, id: parsed.value }));
   }
+  if (kind === "curve") {
+    const parsed = parseCurveId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A curve input reference must carry a valid curve id: ${parsed.error.message}`,
+          input,
+        ),
+      );
+    }
+    return ok(Object.freeze({ kind, id: parsed.value }));
+  }
   return fail(
     docError(
       DOCUMENT_ERROR_CODES.inputKindInvalid,
@@ -788,6 +849,7 @@ function raiseGeneratorState(
     datum: Math.max(base.datum, floor.datum),
     section: Math.max(base.section, floor.section),
     occurrence: Math.max(base.occurrence, floor.occurrence),
+    curve: Math.max(base.curve, floor.curve),
   };
   return Object.freeze(raised);
 }
@@ -836,7 +898,8 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
     document.references.some((reference) => reference.id === id) ||
     document.datums.some((datum) => datum.id === id) ||
     document.sections.some((section) => section.id === id) ||
-    document.occurrences.some((occurrence) => occurrence.id === id)
+    document.occurrences.some((occurrence) => occurrence.id === id) ||
+    document.curves.some((curve) => curve.id === id)
   );
 }
 
@@ -861,6 +924,9 @@ function featureInputResolves(
   if (ref.kind === "datum") {
     return document.datums.some((datum) => datum.id === ref.id);
   }
+  if (ref.kind === "curve") {
+    return document.curves.some((curve) => curve.id === ref.id);
+  }
   return document.bodies.some((body) => body.id === ref.id);
 }
 
@@ -880,6 +946,7 @@ export function createDocument(id: DocumentId): CadDocument {
     datums: Object.freeze([]),
     sections: Object.freeze([]),
     occurrences: Object.freeze([]),
+    curves: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -934,6 +1001,8 @@ export function getDocumentEntity(
   if (sketch !== undefined) return { kind: "sketch", sketch };
   const datum = document.datums.find((candidate) => candidate.id === id);
   if (datum !== undefined) return { kind: "datum", datum };
+  const curve = document.curves.find((candidate) => candidate.id === id);
+  if (curve !== undefined) return { kind: "curve", curve };
   return undefined;
 }
 
@@ -2294,6 +2363,164 @@ export function getOccurrence(
   return document.occurrences.find((occurrence) => occurrence.id === id);
 }
 
+function validateCurveName(name: unknown): ParseResult<string, DocumentError> {
+  if (
+    typeof name !== "string" ||
+    name.length === 0 ||
+    name.length > BODY_NAME_MAX_LENGTH
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.curveNameInvalid,
+        `A curve name must be a string of 1-${BODY_NAME_MAX_LENGTH} characters.`,
+        name,
+      ),
+    );
+  }
+  return ok(name);
+}
+
+/**
+ * A curve payload must parse through the curve module's own
+ * {@link parseSerializedCurve} and pass the shared semantic battery
+ * ({@link curveRecordProblems}) — a document never stores a curve whose
+ * geometry cannot be re-derived.
+ */
+function validateCurvePayload(
+  curve: unknown,
+): ParseResult<SerializedCurve, DocumentError> {
+  const parsed = parseSerializedCurve(curve);
+  if (!parsed.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.curvePayloadInvalid,
+        `A curve record's payload was rejected: ${parsed.error.message}`,
+        curve,
+      ),
+    );
+  }
+  const problems = curveRecordProblems(parsed.value);
+  if (problems.length > 0) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.curvePayloadInvalid,
+        `A curve record's payload was rejected: ${problems[0]?.message ?? "the curve is semantically invalid."}`,
+        curve,
+      ),
+    );
+  }
+  return ok(parsed.value);
+}
+
+/**
+ * Adds a named 3D curve document entity. The payload is validated through
+ * the curve module's own parser and semantic battery, then stored deeply
+ * frozen (the sketch/datum discipline).
+ */
+export function addDocumentCurve(
+  document: CadDocument,
+  input: DocumentCurveInput,
+): ParseResult<DocumentCurveAddResult, DocumentError> {
+  const name = validateCurveName(input.name);
+  if (!name.ok) return name;
+  const payload = validateCurvePayload(input.curve);
+  if (!payload.ok) return payload;
+  let id: CurveId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextCurveId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseCurveId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A curve id must be a valid curve id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("curve", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${parsed.value}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    id = parsed.value;
+    idGeneratorState = claimExplicitId(idGeneratorState, "curve", parsed.value);
+  }
+  const record = Object.freeze({
+    id,
+    name: name.value,
+    curve: deepFreezePlainData(payload.value) as SerializedCurve,
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      curves: Object.freeze([...document.curves, record]),
+      idGeneratorState,
+    }),
+    curve: record,
+  });
+}
+
+/**
+ * Removes the curve record with the given id. Refused with `in-use` while
+ * any feature declares it as an input; removal never cascades.
+ */
+export function removeDocumentCurve(
+  document: CadDocument,
+  id: CurveId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getDocumentCurve(document, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No curve with id "${id}" exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const blocking = document.features.find((feature) =>
+    feature.inputs.some((ref) => ref.kind === "curve" && ref.id === id),
+  );
+  if (blocking !== undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.inUse,
+        `Curve "${id}" is referenced by feature "${blocking.id}".`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      curves: Object.freeze(document.curves.filter((curve) => curve.id !== id)),
+    }),
+  );
+}
+
+/**
+ * Returns the curve record with the given id, or undefined.
+ */
+export function getDocumentCurve(
+  document: CadDocument,
+  id: CurveId,
+): DocumentCurve | undefined {
+  return document.curves.find((curve) => curve.id === id);
+}
+
 /** Input of {@link addDocumentSection}: the record's authored fields. */
 export interface DocumentSectionInput {
   /** An explicit id (`sec_…`), or absent to generate the next one. */
@@ -2491,20 +2718,23 @@ export interface SerializedFeatureRecord {
 
 /**
  * Canonical JSON form of the id generator state. The `sketch` counter is
- * Phase 26.1-additive, the `datum` counter Phase 39-additive, and the
- * `section` counter Phase 46-additive: each is emitted exactly when
+ * Phase 26.1-additive, the `datum` counter Phase 39-additive, the
+ * `section` counter Phase 46-additive, the `curve` counter
+ * Phase 47-additive, and the `occurrence` counter Phase 50-additive: each
+ * is emitted exactly when
  * nonzero, so documents that never carried ids of that kind serialize
  * byte-identically to their earlier form; parsing defaults an absent
  * counter to zero.
  */
 export type SerializedIdGeneratorState = Omit<
   IdGeneratorState,
-  "sketch" | "datum" | "section" | "occurrence"
+  "sketch" | "datum" | "section" | "occurrence" | "curve"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
   readonly section?: number;
   readonly occurrence?: number;
+  readonly curve?: number;
 };
 
 function serializeIdGeneratorState(
@@ -2520,6 +2750,7 @@ function serializeIdGeneratorState(
     ...(state.datum === 0 ? {} : { datum: state.datum }),
     ...(state.section === 0 ? {} : { section: state.section }),
     ...(state.occurrence === 0 ? {} : { occurrence: state.occurrence }),
+    ...(state.curve === 0 ? {} : { curve: state.curve }),
   };
 }
 
@@ -2565,6 +2796,12 @@ export interface SerializedCadDocument {
     readonly source: OccurrenceSource;
     readonly placement: OccurrencePlacement;
     readonly bomFlag?: Exclude<OccurrenceBomFlag, "default">;
+  }[];
+  /** Present exactly when the document carries curve records (additive). */
+  readonly curves?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly curve: SerializedCurve;
   }[];
 }
 
@@ -2665,6 +2902,18 @@ export function serializeCadDocument(
             ...(occurrence.bomFlag === undefined
               ? {}
               : { bomFlag: occurrence.bomFlag }),
+          })),
+        }),
+    // Additive (Phase 47): emitted only when curve records exist, so
+    // documents from before curves serialize byte-identically to their
+    // old form.
+    ...(document.curves.length === 0
+      ? {}
+      : {
+          curves: document.curves.map((curve) => ({
+            id: curve.id,
+            name: curve.name,
+            curve: curve.curve,
           })),
         }),
   };
@@ -3159,6 +3408,55 @@ function validateSectionName(
   return ok(input);
 }
 
+function parseSerializedCurveRecord(input: unknown): ParseResult<
+  {
+    id: CurveId;
+    name: string;
+    curve: SerializedCurve;
+  },
+  DocumentError
+> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized curve record must be a plain object with id, name, and curve fields.",
+        input,
+      ),
+    );
+  }
+  const parsedId = parseCurveId(input.id);
+  if (typeof input.id !== "string" || !parsedId.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.idInvalid,
+        "A curve id must be a valid curve id.",
+        input.id,
+      ),
+    );
+  }
+  if (typeof input.name !== "string") {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized curve record's name must be a string.",
+        input.name,
+      ),
+    );
+  }
+  const parsedCurve = parseSerializedCurve(input.curve);
+  if (!parsedCurve.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.curvePayloadInvalid,
+        `A curve record's payload was rejected: ${parsedCurve.error.message}`,
+        input.curve,
+      ),
+    );
+  }
+  return ok({ id: parsedId.value, name: input.name, curve: parsedCurve.value });
+}
+
 function parseSerializedDatum(input: unknown): ParseResult<
   {
     id: DatumId;
@@ -3342,6 +3640,12 @@ export function parseCadDocument(
     parseSerializedOccurrence,
   );
   if (!parsedOccurrences.ok) return parsedOccurrences;
+  const parsedCurves = parseSerializedList(
+    input.curves ?? [],
+    "curves",
+    parseSerializedCurveRecord,
+  );
+  if (!parsedCurves.ok) return parsedCurves;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -3372,6 +3676,11 @@ export function parseCadDocument(
   }
   for (const section of parsedSections.value) {
     const added = addDocumentSection(document, section);
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  for (const curve of parsedCurves.value) {
+    const added = addDocumentCurve(document, curve);
     if (!added.ok) return added;
     document = added.value.document;
   }

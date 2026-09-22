@@ -106,6 +106,7 @@
  */
 
 import { CAD_COMMAND_TYPES, isCadCommandType } from "./command";
+import { parseSerializedCurve } from "./curve";
 import { parseDiagnostic } from "./diagnostics";
 import {
   type CadDocument,
@@ -135,6 +136,7 @@ import {
 import {
   CAD_ID_KINDS,
   parseBodyId,
+  parseCurveId,
   parseDatumId,
   parseOccurrenceId,
   parseDocumentId,
@@ -1149,6 +1151,70 @@ function validateSerializedDatumListShape(
   });
 }
 
+/**
+ * Validates the additive curves section's shape (the substrate parser's
+ * `parseSerializedCurveRecord` requirements): an array of plain records,
+ * each with a valid curve id, a 1-64 character name, and a curve payload
+ * that parses through the curve module's own parser. Absent or null parses
+ * as the empty list, so absent validates clean.
+ */
+function validateSerializedCurveListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized curves must be an array of curve records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const entryPath = `${path}[${String(index)}]`;
+    if (!isPlainRecord(entry)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        entryPath,
+        "A serialized curve record must be a plain object with id, name, and curve fields.",
+      );
+      return;
+    }
+    if (!parseCurveId(entry.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.id`,
+        "A curve id must carry the curve id prefix and payload rules.",
+      );
+    }
+    if (
+      typeof entry.name !== "string" ||
+      entry.name.length < 1 ||
+      entry.name.length > BODY_NAME_MAX_LENGTH
+    ) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.name`,
+        "A curve name must be a string of 1-64 characters.",
+      );
+    }
+    if (!parseSerializedCurve(entry.curve).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.curve`,
+        "A curve record's payload must parse through the curve module's canonical serialized form.",
+      );
+    }
+  });
+}
+
 function validateSerializedCadDocumentShape(
   input: unknown,
   path: string,
@@ -1333,6 +1399,7 @@ function validateSerializedCadDocumentShape(
     `${path}.occurrences`,
     issues,
   );
+  validateSerializedCurveListShape(input.curves, `${path}.curves`, issues);
 }
 
 /**

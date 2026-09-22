@@ -342,3 +342,25 @@ the same 30×20×10 box's top face (ordinal 5 of the explorer order):
   contract op exists so the vocabulary and the feature kind are honest
   surface today and a kernel that grows an honest route lights up
   without another contract change.
+
+## Phase 47 — wire entities (probes)
+
+- `BRepAlgoAPI_Section` + `TopExp_Explorer` + `BRepAdaptor_Curve`
+  (Value/FirstParameter/LastParameter) are present and sufficient for the
+  EXACT intersection curve: the section edges' geometry walked at a fixed
+  uniform-parameter station rule (the equation curves' discipline). The
+  `GCPnts_*` deflection samplers are ABSENT from the binding — the
+  station rule is the honest polyline.
+- `BRepOffsetAPI_MakePipeShell` over the station-polyline spine (the G0
+  chordal route) yields INVERTED solids for curved spines on this
+  binding — a 2.5-turn helix of radius 6, pitch 4, 2 mm tube piped to a
+  NEGATIVE volume (−5.18 mm³ against the Cavalieri reference ≈ 268 mm³),
+  while COLLINEAR spines pipe exact (the straight diagonal prism pinned
+  at A·L to 1e-6 relative). The OCCT sweepWire scope is therefore
+  collinear-only with the structured decline naming this probe.
+- `GeomAPI_Interpolate` EXISTS in the binding but its
+  `NCollection_HArray1_gp_Pnt` typings expose no `SetValue`, so the exact
+  C2 interpolated spine cannot be fed points through the typed surface —
+  the deferred route for curved sweepWire spines.
+- `ProjLib` is ABSENT outright — the projected-curve family is declined
+  with this probe (the contract's pinned vocabulary carries forward).

@@ -104,6 +104,7 @@ describe("the native document compatibility suite", () => {
   it("enrolls every committed fixture (the golden set is not silently shrinking)", () => {
     const names = fixtureNames();
     expect(names).toEqual([
+      "curve-entities.native.json",
       "failed-feature.native.json",
       "helix-thread.native.json",
       "plate-with-hole.native.json",

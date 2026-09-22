@@ -148,6 +148,11 @@ import {
   type Tessellation,
   type ThickenInput,
   type TransformInput,
+  type IntersectionCurveInput,
+  type KernelWire,
+  type ProfileSweepWireInput,
+  type WireCurveInput,
+  evaluateWire,
 } from "@slopcad/cad-kernel";
 import {
   axisAngleMatrix,
@@ -263,6 +268,8 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   sheets: false,
   localFaceOps: false,
   section: true,
+  sweepWire: false,
+  intersectionCurve: false,
 });
 
 /**
@@ -903,6 +910,42 @@ export function manifoldKernelFromRuntime(
       });
     },
 
+    wire(input: WireCurveInput): KernelResult<KernelWire> {
+      // Pure shared math (Phase 47): canonicalize, validate, and walk the
+      // deterministic stations — identical in every kernel by construction,
+      // so this adapter simply answers the shared evaluation.
+      const evaluated = evaluateWire(input);
+      if (!evaluated.ok) {
+        return fail(
+          kernelError(KERNEL_ERROR_CODES.invalidProfile, evaluated.message),
+        );
+      }
+      return ok(evaluated.wire);
+    },
+
+    sweepWire(input: ProfileSweepWireInput): KernelResult<KernelSolid> {
+      void input;
+      // The capability-flag discipline: manifold declares sweepWire: false this
+      // phase — the engine verdict (or the adapter's honest scope) is
+      // documented in the kernels guide; every call answers the
+      // structured unsupported code, never an approximation.
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "sweepWire is not implemented by the manifold kernel.",
+        ),
+      );
+    },
+
+    intersectionCurve(input: IntersectionCurveInput): KernelResult<KernelWire> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "intersectionCurve is not implemented by the manifold kernel.",
+        ),
+      );
+    },
     sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {
       if (input.sheet === true) {
         return fail(

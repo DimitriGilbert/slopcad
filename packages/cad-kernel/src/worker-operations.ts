@@ -148,6 +148,8 @@ import {
   type LengthValue,
   type ParseFailure,
   type ParseResult,
+  type SerializedCurve,
+  parseSerializedCurve,
   type SerializedDimensionalValue,
   type TopologyEntitySnapshot,
   type TopologySnapshot,
@@ -163,6 +165,7 @@ import type {
   MirrorPlaneAxis,
   ProfilePlacementInput,
   ProfileSegmentInput,
+  KernelWire,
   SheetSurfaceInput,
   Tessellation,
 } from "./contract";
@@ -190,6 +193,8 @@ export const WORKER_OPERATION_IDS = [
   "solid.revolve",
   "solid.sweep",
   "solid.helixSweep",
+  "solid.wire",
+  "solid.sweepWire",
   "solid.loft",
   "solid.union",
   "solid.subtract",
@@ -373,6 +378,34 @@ export interface WorkerHelixSweepInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly spine: WorkerHelixSpineInput;
   readonly placement: ProfilePlacementInput;
+}
+
+/**
+ * Input of `solid.wire` (Phase 47): the curve entity's payload VERBATIM —
+ * the shared {@link SerializedCurve} schema the document record stores
+ * (the record/wire duality: one schema, no translation). Structure is
+ * checked by the curve module's own parser; the semantic battery
+ * (degenerate helices, non-length equations) is the kernel contract's
+ * call (`kernel/invalid-profile`).
+ */
+export interface WorkerWireInput {
+  readonly curve: SerializedCurve;
+}
+
+/**
+ * Input of `solid.sweepWire` (Phase 47): the closed profile loop, the 3D
+ * wire spine payload (verbatim, same as `solid.wire`), and the placement
+ * — the contract's `ProfileSweepWireInput` carried across the wire.
+ */
+export interface WorkerSweepWireInput {
+  readonly loop: readonly ProfileSegmentInput[];
+  readonly spine: SerializedCurve;
+  readonly placement: ProfilePlacementInput;
+}
+
+/** Result of `solid.wire`: the evaluated wire geometry (JSON-safe). */
+export interface WorkerWireResult {
+  readonly wire: KernelWire;
 }
 
 /**
@@ -933,6 +966,8 @@ export interface WorkerOperationInputs {
   readonly "solid.revolve": WorkerRevolveInput;
   readonly "solid.sweep": WorkerSweepInput;
   readonly "solid.helixSweep": WorkerHelixSweepInput;
+  readonly "solid.wire": WorkerWireInput;
+  readonly "solid.sweepWire": WorkerSweepWireInput;
   readonly "solid.loft": WorkerLoftInput;
   readonly "solid.union": WorkerUnionInput;
   readonly "solid.subtract": WorkerSubtractInput;
@@ -975,6 +1010,8 @@ export interface WorkerOperationResults {
   readonly "solid.revolve": WorkerSolidResult;
   readonly "solid.sweep": WorkerSolidResult;
   readonly "solid.helixSweep": WorkerSolidResult;
+  readonly "solid.wire": WorkerWireResult;
+  readonly "solid.sweepWire": WorkerSolidResult;
   readonly "solid.loft": WorkerSolidResult;
   readonly "solid.union": WorkerSolidResult;
   readonly "solid.subtract": WorkerSolidResult;
@@ -1109,6 +1146,14 @@ export interface SerializedWorkerOperationInputs {
       readonly startAngle: SerializedWorkerAngle;
       readonly taper?: SerializedWorkerLength;
     };
+    readonly placement: SerializedProfilePlacement;
+  };
+  readonly "solid.wire": {
+    readonly curve: SerializedCurve;
+  };
+  readonly "solid.sweepWire": {
+    readonly loop: readonly SerializedProfileSegment[];
+    readonly spine: SerializedCurve;
     readonly placement: SerializedProfilePlacement;
   };
   readonly "solid.loft": {
@@ -1291,6 +1336,24 @@ export interface SerializedWorkerOperationResults {
   };
   readonly "solid.helixSweep": {
     readonly solid: string;
+  };
+  readonly "solid.sweepWire": {
+    readonly solid: string;
+  };
+  readonly "solid.wire": {
+    readonly wire: {
+      readonly polyline: readonly (readonly [number, number, number])[];
+      readonly chains: readonly (readonly (readonly [
+        number,
+        number,
+        number,
+      ])[])[];
+      readonly length: number;
+      readonly bounds: {
+        readonly min: readonly [number, number, number];
+        readonly max: readonly [number, number, number];
+      };
+    };
   };
   readonly "solid.loft": {
     readonly solid: string;
@@ -2669,6 +2732,147 @@ function serializeLoftInput(
   };
 }
 
+function parseWireInput(
+  payload: unknown,
+): ParseResult<WorkerWireInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.wire", payload);
+  if (!record.ok) return record;
+  const curve = parseSerializedCurve(record.value.curve);
+  if (!curve.ok) {
+    return payloadError(
+      `The "solid.wire" field "curve" was rejected: ${curve.error.message}`,
+      record.value.curve,
+    );
+  }
+  return ok({ curve: curve.value });
+}
+
+function serializeWireInput(
+  input: WorkerWireInput,
+): SerializedWorkerOperationInput<"solid.wire"> {
+  return { curve: input.curve };
+}
+
+function serializeSweepWireInput(
+  input: WorkerSweepWireInput,
+): SerializedWorkerOperationInput<"solid.sweepWire"> {
+  return {
+    loop: input.loop.map((segment) => serializeProfileSegment(segment)),
+    spine: input.spine,
+    placement: serializeProfilePlacement(input.placement),
+  };
+}
+
+function parsePoint3List(
+  operation: WorkerOperationId,
+  field: string,
+  input: unknown,
+): ParseResult<
+  readonly (readonly [number, number, number])[],
+  WorkerParseError
+> {
+  if (!Array.isArray(input)) {
+    return payloadError(
+      `The "${operation}" field "${field}" must be an array of points.`,
+      input,
+    );
+  }
+  const points: (readonly [number, number, number])[] = [];
+  for (const entry of input) {
+    const point = parsePoint3(operation, field, entry);
+    if (!point.ok) return point;
+    points.push(point.value);
+  }
+  return ok(points);
+}
+
+function serializeWireResult(
+  result: WorkerWireResult,
+): SerializedWorkerOperationResult<"solid.wire"> {
+  return { wire: result.wire };
+}
+
+function parseWireResult(
+  payload: unknown,
+): ParseResult<WorkerWireResult, WorkerParseError> {
+  if (!isPlainRecord(payload) || !isPlainRecord(payload.wire)) {
+    return payloadError(
+      'The "solid.wire" result must be an object with a "wire" field.',
+      payload,
+    );
+  }
+  const wire = payload.wire;
+  if (!Array.isArray(wire.polyline) || !Array.isArray(wire.chains)) {
+    return payloadError(
+      'The "solid.wire" result wire must carry polyline and chains arrays.',
+      payload,
+    );
+  }
+  const polyline = parsePoint3List(
+    "solid.sweepWire",
+    "wire.polyline",
+    wire.polyline,
+  );
+  if (!polyline.ok) return polyline;
+  const chains: (readonly (readonly [number, number, number])[])[] = [];
+  for (const entry of wire.chains) {
+    const chain = parsePoint3List("solid.sweepWire", "wire.chains", entry);
+    if (!chain.ok) return chain;
+    chains.push(chain.value);
+  }
+  if (typeof wire.length !== "number" || !Number.isFinite(wire.length)) {
+    return payloadError(
+      'The "solid.wire" result length must be a finite number.',
+      wire.length,
+    );
+  }
+  const bounds = wire.bounds;
+  if (!isPlainRecord(bounds)) {
+    return payloadError(
+      'The "solid.wire" result bounds must be an object with min and max.',
+      bounds,
+    );
+  }
+  const min = parsePoint3("solid.sweepWire", "bounds.min", bounds.min);
+  if (!min.ok) return min;
+  const max = parsePoint3("solid.sweepWire", "bounds.max", bounds.max);
+  if (!max.ok) return max;
+  return ok({
+    wire: {
+      polyline: polyline.value,
+      chains,
+      length: wire.length,
+      bounds: { min: min.value, max: max.value },
+    },
+  });
+}
+
+function parseSweepWireInput(
+  payload: unknown,
+): ParseResult<WorkerSweepWireInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.sweepWire", payload);
+  if (!record.ok) return record;
+  const loop = parseProfileLoop("solid.sweepWire", record.value.loop);
+  if (!loop.ok) return loop;
+  const spine = parseSerializedCurve(record.value.spine);
+  if (!spine.ok) {
+    return payloadError(
+      `The "solid.sweepWire" field "spine" was rejected: ${spine.error.message}`,
+      record.value.spine,
+    );
+  }
+  const placement = parseProfilePlacement(
+    "solid.sweepWire",
+    record.value.placement,
+  );
+  if (!placement.ok) return placement;
+  return ok({
+    loop: loop.value,
+    spine: spine.value,
+    placement: placement.value,
+  });
+}
+
 function parseLoftInput(
   payload: unknown,
 ): ParseResult<WorkerLoftInput, WorkerParseError> {
@@ -3959,6 +4163,8 @@ const INPUT_SERIALIZERS: {
   "solid.revolve": serializeRevolveInput,
   "solid.sweep": serializeSweepInput,
   "solid.helixSweep": serializeHelixSweepInput,
+  "solid.wire": serializeWireInput,
+  "solid.sweepWire": serializeSweepWireInput,
   "solid.loft": serializeLoftInput,
   "solid.union": serializeOperandsInput,
   "solid.subtract": serializeSubtractInput,
@@ -3999,6 +4205,8 @@ const INPUT_PARSERS: {
   "solid.revolve": withSheetFlag(parseRevolveInput),
   "solid.sweep": withSheetFlag(parseSweepInput),
   "solid.helixSweep": parseHelixSweepInput,
+  "solid.wire": parseWireInput,
+  "solid.sweepWire": parseSweepWireInput,
   "solid.loft": withSheetFlag(parseLoftInput),
   "solid.union": (payload) => parseOperandsInput("solid.union", payload),
   "solid.subtract": parseSubtractInput,
@@ -4383,6 +4591,8 @@ const RESULT_SERIALIZERS: {
   "solid.revolve": serializeSolidResult,
   "solid.sweep": serializeSolidResult,
   "solid.helixSweep": serializeSolidResult,
+  "solid.sweepWire": serializeSolidResult,
+  "solid.wire": serializeWireResult,
   "solid.loft": serializeSolidResult,
   "solid.union": serializeSolidResult,
   "solid.subtract": serializeSolidResult,
@@ -4426,6 +4636,8 @@ const RESULT_PARSERS: {
   "solid.extrude": (payload) => parseSolidResult("solid.extrude", payload),
   "solid.revolve": (payload) => parseSolidResult("solid.revolve", payload),
   "solid.sweep": (payload) => parseSolidResult("solid.sweep", payload),
+  "solid.sweepWire": (payload) => parseSolidResult("solid.sweepWire", payload),
+  "solid.wire": parseWireResult,
   "solid.helixSweep": (payload) =>
     parseSolidResult("solid.helixSweep", payload),
   "solid.loft": (payload) => parseSolidResult("solid.loft", payload),
@@ -4503,6 +4715,8 @@ const RESULT_MINTS: {
   "solid.revolve": (result) => [result.solid],
   "solid.sweep": (result) => [result.solid],
   "solid.helixSweep": (result) => [result.solid],
+  "solid.sweepWire": (result) => [result.solid],
+  "solid.wire": () => [],
   "solid.loft": (result) => [result.solid],
   "solid.union": (result) => [result.solid],
   "solid.subtract": (result) => [result.solid],

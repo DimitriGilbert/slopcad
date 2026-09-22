@@ -61,6 +61,8 @@ describe("operation vocabulary", () => {
       "solid.revolve",
       "solid.sweep",
       "solid.helixSweep",
+      "solid.wire",
+      "solid.sweepWire",
       "solid.loft",
       "solid.union",
       "solid.subtract",
@@ -850,6 +852,8 @@ describe("operation input validation", () => {
   it("rejects a corrupted field for every operation in the vocabulary", () => {
     const malformedByOperation: Readonly<Record<WorkerOperationId, unknown>> = {
       "solid.createBox": { width: "wide", depth: 2, height: 3 },
+      "solid.wire": { curve: { kind: "interpolated-spline", points: "nope" } },
+      "solid.sweepWire": { loop: "nope", spine: null, placement: null },
       "solid.createSphere": { radius: null },
       "solid.createCylinder": { radius: 1, height: "tall" },
       "solid.createCone": {

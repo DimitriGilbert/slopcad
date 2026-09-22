@@ -206,4 +206,6 @@ export interface KernelCapabilities {
   readonly surfaceArea: boolean;
   readonly sheets: boolean;
   readonly localFaceOps: boolean;
+  readonly sweepWire: boolean;
+  readonly intersectionCurve: boolean;
 }

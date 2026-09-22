@@ -668,6 +668,24 @@ exact, mesh-tessellated-honest.
 
 ### Phase 47 — 3D curve entities
 
+> **Status (wt-47 pass 2)**: DELIVERED — curve records (`crv_*`, the
+> `curves` collection, native additive section, `{ kind: "curve" }`
+> feature inputs), the four curve kinds' pure geometry, the `wire` op
+> (byte-identical across all four kernels), `sweepWire` (fake: the exact
+> Cavalieri `V = A·L` node with the station loft and the generalized
+> G1/self-intersection battery; OCCT: exact collinear-spine pipes with
+> the curved-spine G0-polyline probe documented in the prespike
+> findings; JSCAD/Manifold: structured declines), `intersectionCurve`
+> (OCCT exact via `BRepAlgoAPI_Section` + the edge station walk; others
+> decline), workbench curve authoring (payload builders, validators,
+> Formedible field config, the deterministic scene soup —
+> `cad-workbench/curves.ts`), docs + probe evidence. DECLINED with
+> probes: projected curves (`ProjLib` absent from the binding) — the
+> pinned vocabulary carries to the surface phases. OPEN: workbench React
+> wiring (command-menu/toolbar entry + live render host), worker ops
+> (`solid.wire`/`solid.sweepWire`), the core-bridge feature seam, and
+> the native golden-list enrollment.
+
 **Type**: Sequential (after 38; enables 48, generalizes 40).
 
 **Requirements**:

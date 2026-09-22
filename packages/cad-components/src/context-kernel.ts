@@ -77,6 +77,8 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   sheets: false,
   localFaceOps: false,
   section: true,
+  sweepWire: false,
+  intersectionCurve: false,
 });
 
 /**

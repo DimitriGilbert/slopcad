@@ -41,6 +41,7 @@
 import { type FeatureInputRef, type FeatureRecord } from "./document";
 import {
   type BodyId,
+  type CurveId,
   type DatumId,
   type FeatureId,
   type ParameterId,
@@ -52,11 +53,11 @@ import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 /**
  * The source nodes of the graph: entities that features consume but that
  * no feature can depend on — parameters, bodies, sketches, persistent
- * reference records, and datum records (a datum edit drives the stale
- * invalidation of every feature that addresses it).
+ * reference records, datum records, and curve records (a datum or curve
+ * edit drives the stale invalidation of every feature that addresses it).
  */
 export type FeatureGraphSourceId =
-  ParameterId | BodyId | SketchDocumentId | ReferenceId | DatumId;
+  ParameterId | BodyId | SketchDocumentId | ReferenceId | DatumId | CurveId;
 
 /**
  * Any node id accepted by affected-node queries: a feature, or a source

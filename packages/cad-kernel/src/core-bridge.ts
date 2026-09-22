@@ -1,4 +1,88 @@
 /**
+ * The sweep-along-curve feature kind's executor path (Phase 47): the
+ * generalized sweep — the profile sketch's loop carried along a 3D wire
+ * spine from the document's curve records, capability-gated, one direct
+ * kernel `sweepWire` call. The spine resolves through the document (the
+ * curve record's payload is the wire vocabulary verbatim — no
+ * translation layer), and the kernel's own battery (the generalized G1
+ * and self-intersection rules, the per-kernel scope) answers every
+ * degenerate spine as a structured feature diagnostic.
+ */
+function runSweepWireOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const sketchRefs: (FeatureInputRef & { readonly kind: "sketch" })[] = [];
+  let curveRef: (FeatureInputRef & { readonly kind: "curve" }) | null = null;
+  for (const ref of feature.inputs) {
+    if (ref.kind === "sketch") sketchRefs.push(ref);
+    else if (ref.kind === "curve") curveRef = ref;
+  }
+  if (
+    sketchRefs.length !== 1 ||
+    curveRef === null ||
+    feature.inputs.length !== 2
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "sweepWire" needs exactly one sketch input (the profile loop) and one curve input (the wire spine); it declares ${String(sketchRefs.length)} sketch(es) and ${curveRef === null ? "no" : "one"} curve input(s) across ${String(feature.inputs.length)} input(s).`,
+      ),
+    };
+  }
+  if (!kernel.capabilities.sweepWire) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "sweepWire" needs a wire sweep, but this kernel ("${kernel.id}") does not declare the sweepWire capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a silent approximation.`,
+      ),
+    };
+  }
+  const curveRecord = getDocumentCurve(readers.document, curveRef.id);
+  if (curveRecord === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "sweepWire" addresses curve "${curveRef.id}", which the document does not carry (removed or never added).`,
+      ),
+    };
+  }
+  const resolvedProfile = readers.resolveProfile(
+    sketchRefs[0] as FeatureInputRef & { readonly kind: "sketch" },
+  );
+  if (!resolvedProfile.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "sweepWire" has an unresolvable profile sketch ("${sketchRefs[0]?.id ?? ""}"): ${resolvedProfile.error.message}`,
+        location: {
+          primary: feature.id,
+          related: sketchRefs[0] === undefined ? [] : [sketchRefs[0].id],
+        },
+        data: { profileCode: resolvedProfile.error.code },
+      },
+    };
+  }
+  const result = kernel.sweepWire({
+    loop: resolvedProfile.value.loop,
+    spine: curveRecord.curve,
+    placement: resolvedProfile.value.placement,
+  });
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
+/**
  * The core-executes-against-kernel bridge (Phase 8): a cad-core
  * {@link FeatureExecutor} backed by a kernel contract instance. This is the
  * seam that proves "core can execute against a kernel": cad-core's
@@ -341,6 +425,7 @@ import {
   resolveDocumentReference,
   transientSelectionOf,
   valueIn,
+  getDocumentCurve,
 } from "@slopcad/cad-core";
 
 import {
@@ -382,6 +467,7 @@ export const BRIDGE_FEATURE_KINDS = [
   "extrude",
   "revolve",
   "sweep",
+  "sweepWire",
   "loft",
   "helix",
   "thread",
@@ -7239,6 +7325,12 @@ function runKernelOperation(
       // path seam, capability-gated, one direct kernel sweep call (see
       // runSweepOperation).
       return runSweepOperation(kernel, feature, readers);
+    case "sweepWire":
+      // The Phase 47 sweep-along-curve: one sketch input (the profile
+      // loop) plus one CURVE input (the 3D wire spine, resolved against
+      // the document's curve records), capability-gated, one direct
+      // kernel sweepWire call (see runSweepWireOperation).
+      return runSweepWireOperation(kernel, feature, readers);
     case "loft":
       // The Phase 38 loft: ordered section sketches + their station-z
       // parameters through ONE frame, capability-gated, one direct kernel
