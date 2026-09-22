@@ -156,6 +156,66 @@ Five more kinds ride the same bridge:
 Each has its workbench command and Formedible form (Draft, Rib, Scale,
 Thicken, Split) and re-drives through `parameter.set` on its numbers.
 
+## The structured hole (Phase 42)
+
+The flat five-parameter hole grew a TYPE-DIRECTED sibling — one feature,
+one type, many positions. A hole feature whose FIRST parameter is a
+DIMENSIONLESS value rides the structured form (the flat form's first
+parameter is the LENGTH diameter — the dimension is the dispatch, so
+the forms never reinterpret each other):
+
+- `type` (1 straight, 2 counterbore, 3 countersink, 4 taper,
+  5 threaded) selects the parameter schema — the ordered role list
+  `structuredHoleRoles(type, …)` that the feature's parameter inputs
+  follow: the type's own dimensions, then `positionX`/`positionY`
+  (absent when a SKETCH input carries the positions) and the world
+  `axis` selector (absent when a DATUM AXIS input carries the axis).
+- Conventions (documented in `hole-specification.ts`, the one source
+  both the bridge and the worker scene compose from): DEPTH is the full
+  axial extent to the drill TIP point; the tip angle is INCLUDED
+  (180° = flat, extent `(d/2)/tan(θ/2)`); blind vs through stays the
+  one-distance rule (`depth ≥ extent` drills through, overshooting past
+  both faces); a counterbore is entry-measured; a countersink is the
+  entry cone to its rim diameter at its included angle; a taper
+  narrows from its entry diameter and its through verdict is geometric
+  (walls that close first cut a blind taper); a threaded hole drills
+  the ISO BASIC MINOR `d₁ = d − 2·(5H/8)` and cuts the Phase 40 ISO
+  ridge (the table's tap-drill column is shop advice the picker shows,
+  not the modeled pilot).
+- The tool is ONE revolved MERIDIAN per position (a straight-edge
+  polygon touching the revolve axis) plus, for the threaded type, the
+  Phase 40 ridge sweep — `revolve` + `subtract` everywhere (every
+  kernel), `helixSweep` for threaded (the `helix` capability: OCCT and
+  the fake kernel; Manifold and JSCAD decline the feature structurally
+  before any geometry).
+- POSITIONS: a sketch input whose POINT entities are the hole centres
+  (drawn with the sketch editor's point tool), read as in-plane
+  coordinates — one feature, many holes. The sketch's own workplane
+  placement does not carry (the sweep path seam's simplification).
+- Hole SERIES at assembly level are deferred to assemblies (Phase 52).
+
+```ts
+// feature: {
+//   kind: "hole",
+//   inputs: [
+//     feature target,
+//     p type, p diameter, p depth, p tipAngle, p cboreDiameter,
+//     p cboreDepth, p positionX, p positionY, p axis, // the type's roles
+//     sketch positions?, // the point entities — many holes
+//     datum axis?,       // parallel drilling along a datum axis
+//   ],
+//   outputs: [body],
+// }
+```
+
+The workbench's hole dialog (Formedible) is schema-driven from the same
+role lists — the ISO designation picker (Phase 40's table) fills the
+threaded type's numbers, the positions picker chooses the parameter
+position or a sketch's points, and the preview ghost draws the planned
+entry footprint over the settled scene (a pure overlay, never a
+dispatch). The composed cut's post-condition is unchanged: a cut that
+removed nothing refuses (`hole/no-op`).
+
 ## Transactions, undo, redo
 
 Features and parameters change through commands — the vocabulary is

@@ -88,6 +88,10 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "Circle",
       tooltip: "Draw a circle: click the center, then the radius",
     },
+    point: {
+      label: "Point",
+      tooltip: "Place a point entity: one click (hole positions, picks)",
+    },
     rectangle: {
       label: "Rectangle",
       tooltip: "Draw a rectangle: click two opposite corners",

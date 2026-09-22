@@ -1319,3 +1319,31 @@ describe("sketch editor Phase 37 entity ops and drag", () => {
     expect(ignored.state.drag).toBeNull();
   });
 });
+
+describe("the point drawing tool (Phase 42)", () => {
+  it("places a point entity in ONE pick, no gesture", () => {
+    let state = createSketchEditorState();
+    state = sketchEditorReducer(
+      state,
+      { tool: "point", type: "activate-tool" },
+      sketchWithLines(),
+    ).state;
+    expect(state.status.message).toContain("Point: click to place");
+    const placed = sketchEditorReducer(
+      state,
+      { point: { x: 12, y: -8 }, entityId: null, type: "canvas-pick" },
+      sketchWithLines(),
+    );
+    expect(placed.transaction).not.toBeNull();
+    expect(placed.transaction?.commands).toHaveLength(1);
+    const command = placed.transaction?.commands[0];
+    expect(command).toMatchObject({ type: "sketch.entity.create" });
+    if (command === undefined || command.type !== "sketch.entity.create") {
+      throw new Error("the point command");
+    }
+    expect(command.entity.kind).toBe("point");
+    expect(command.entity).toMatchObject({ x: 12, y: -8 });
+    expect(placed.state.gesture.kind).toBe("none");
+    expect(placed.state.selectedEntityIds).toEqual([command.entity.id]);
+  });
+});

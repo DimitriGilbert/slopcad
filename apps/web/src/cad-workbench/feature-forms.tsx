@@ -23,8 +23,11 @@ import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/li
 import { useRef, type ReactElement } from "react";
 import { DATUM_FORMAT_VERSION } from "@slopcad/cad-core";
 import {
+  HOLE_TYPE_VALUES,
   ISO_METRIC_THREAD_TABLE,
   isoMetricThreadByDesignation,
+  structuredHoleRoles,
+  structuredHoleTypeOf,
 } from "@slopcad/cad-kernel";
 
 import { LOFT_DEFAULT_STATION_STEP_MM, type LoftSectionChoice } from "./loft";
@@ -42,6 +45,10 @@ import {
   type SplitInput,
   type ThickenInput,
 } from "./scale-thicken";
+import {
+  STRUCTURED_HOLE_DEFAULTS,
+  type StructuredHoleSubmission,
+} from "./hole-dialog";
 
 /** One pickable sketch: the document record's id and its name. */
 export interface CadFeatureSketchOption {
@@ -101,6 +108,32 @@ export interface CadFeatureFormLabels {
   readonly splitSideNormal: string;
   readonly splitSideOpposite: string;
   readonly splitHint: string;
+  readonly holeTitle: string;
+  readonly holeType: string;
+  readonly holeTypeStraight: string;
+  readonly holeTypeCounterbore: string;
+  readonly holeTypeCountersink: string;
+  readonly holeTypeTaper: string;
+  readonly holeTypeThreaded: string;
+  readonly holeDesignation: string;
+  readonly holeDiameter: string;
+  readonly holeDepth: string;
+  readonly holeTipAngle: string;
+  readonly holeCboreDiameter: string;
+  readonly holeCboreDepth: string;
+  readonly holeCsinkDiameter: string;
+  readonly holeCsinkAngle: string;
+  readonly holeTaperAngle: string;
+  readonly holeThreadMajor: string;
+  readonly holeThreadPitch: string;
+  readonly holePositionsSketch: string;
+  readonly holePositionsParameter: string;
+  readonly holePositionX: string;
+  readonly holePositionY: string;
+  readonly holeDatumAxis: string;
+  readonly holeWorldAxis: string;
+  readonly holeAxis: string;
+  readonly holeHint: string;
   readonly submit: string;
   readonly pickSketch: string;
 }
@@ -166,6 +199,33 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   splitSideOpposite: "The opposite side",
   splitHint:
     "The boolean cut keeps one side of the picked datum plane; create the plane first (the Datum button), then split.",
+  holeTitle: "Cut a structured hole",
+  holeType: "Hole type",
+  holeTypeStraight: "Straight (drill)",
+  holeTypeCounterbore: "Counterbore",
+  holeTypeCountersink: "Countersink",
+  holeTypeTaper: "Taper",
+  holeTypeThreaded: "Threaded (ISO tap)",
+  holeDesignation: "ISO designation",
+  holeDiameter: "Diameter (mm)",
+  holeDepth: "Depth to the drill tip (mm)",
+  holeTipAngle: "Drill tip angle (deg, included; 180 = flat)",
+  holeCboreDiameter: "Counterbore Ø (mm)",
+  holeCboreDepth: "Counterbore depth (mm)",
+  holeCsinkDiameter: "Countersink rim Ø (mm)",
+  holeCsinkAngle: "Countersink angle (deg, included)",
+  holeTaperAngle: "Taper angle (deg, included)",
+  holeThreadMajor: "Thread major diameter (mm)",
+  holeThreadPitch: "Thread pitch (mm)",
+  holePositionsSketch: "Positions sketch (point entities)",
+  holePositionsParameter: "Parameter position (one hole)",
+  holePositionX: "Position x (mm, in-plane)",
+  holePositionY: "Position y (mm, in-plane)",
+  holeDatumAxis: "Axis datum (optional)",
+  holeWorldAxis: "World axis",
+  holeAxis: "Axis",
+  holeHint:
+    "One feature, one type, many positions: the depth runs to the drill tip; blind or through is the depth-versus-extent rule; threaded holes tap the ISO basic minor and cut the ISO ridge (helix-capable kernels only).",
   submit: "Create",
   pickSketch: "Pick a sketch",
 };
@@ -1040,7 +1100,6 @@ export interface DraftFormValues extends Record<string, unknown> {
   readonly distanceMm: number;
   readonly taperDeg: number;
 }
-
 /**
  * The draft-extrude form: the saved profile sketch, the signed distance,
  * and the taper angle — the Phase 41 third input of the extrude feature.
@@ -1114,4 +1173,312 @@ export function DraftFeatureForm({
       noValidate
     />
   );
+}
+
+/** Form values of the structured hole dialog (every role, type-directed). */
+export interface HoleFormValues extends Record<string, unknown> {
+  readonly holeType: string;
+  readonly designation: string;
+  readonly diameterMm: number;
+  readonly depthMm: number;
+  readonly tipAngleDeg: number;
+  readonly cboreDiameterMm: number;
+  readonly cboreDepthMm: number;
+  readonly csinkDiameterMm: number;
+  readonly csinkAngleDeg: number;
+  readonly taperAngleDeg: number;
+  readonly threadMajorMm: number;
+  readonly threadPitchMm: number;
+  readonly positionsSketchId: string;
+  readonly positionXMm: number;
+  readonly positionYMm: number;
+  readonly axis: string;
+  readonly datumAxisId: string;
+}
+
+/**
+ * The structured hole dialog (Phase 42): Formedible, SCHEMA-DRIVEN from the
+ * kernel's `structuredHoleRoles` parameter schema — the field list is
+ * derived by scanning the schema per type, each role's field showing for
+ * exactly the types whose role list carries it (`conditional` on the live
+ * type value), so the form and the bridge reader share ONE source of the
+ * parameter layout. The ISO designation picker (the standard-table picker,
+ * Phase 40's table verbatim) fills the threaded type's major diameter and
+ * pitch through the thread form's change-hook discipline; the positions
+ * picker chooses the parameter position or a sketch's point entities (one
+ * feature, many holes); the axis picker chooses a world axis or a datum
+ * axis (the helix form's precedent). Submission routes through the
+ * engine's structured hole action; a structured refusal surfaces verbatim
+ * in the dialog's error region.
+ */
+export function HoleFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onHole,
+  onValuesChange,
+  sketches,
+  datumAxes,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onHole: (submission: StructuredHoleSubmission) => void;
+  /** Live values for the viewport's preview ghost (every change). */
+  readonly onValuesChange?: (values: HoleFormValues) => void;
+  readonly sketches: readonly CadFeatureSketchOption[];
+  readonly datumAxes: readonly CadFeatureDatumOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const typeValue = (raw: string): number =>
+    raw === "counterbore"
+      ? HOLE_TYPE_VALUES.counterbore
+      : raw === "countersink"
+        ? HOLE_TYPE_VALUES.countersink
+        : raw === "taper"
+          ? HOLE_TYPE_VALUES.taper
+          : raw === "threaded"
+            ? HOLE_TYPE_VALUES.threaded
+            : HOLE_TYPE_VALUES.straight;
+  // The schema-driven applicability table: role name → the selector values
+  // whose role list carries it (built by scanning `structuredHoleRoles`,
+  // never hand-maintained — the parameter schema is the single source).
+  const roleApplicability = new Map<string, readonly number[]>();
+  for (const name of [
+    "diameter",
+    "depth",
+    "tipAngle",
+    "cboreDiameter",
+    "cboreDepth",
+    "csinkDiameter",
+    "csinkAngle",
+    "taperAngle",
+    "threadMajor",
+    "threadPitch",
+  ]) {
+    const carriers: number[] = [];
+    for (const type of [1, 2, 3, 4, 5]) {
+      const resolved = structuredHoleTypeOf(type);
+      if (resolved === null) continue;
+      if (
+        structuredHoleRoles(resolved, {}).some((role) => role.name === name)
+      ) {
+        carriers.push(type);
+      }
+    }
+    roleApplicability.set(name, carriers);
+  }
+  const roleLabels: Record<string, string> = {
+    diameter: labels.holeDiameter,
+    depth: labels.holeDepth,
+    tipAngle: labels.holeTipAngle,
+    cboreDiameter: labels.holeCboreDiameter,
+    cboreDepth: labels.holeCboreDepth,
+    csinkDiameter: labels.holeCsinkDiameter,
+    csinkAngle: labels.holeCsinkAngle,
+    taperAngle: labels.holeTaperAngle,
+    threadMajor: labels.holeThreadMajor,
+    threadPitch: labels.holeThreadPitch,
+  };
+  const numberFieldFor = (
+    role: string,
+  ): FormedibleFieldConfig<HoleFormValues> => ({
+    name: roleNumberFieldOf(role),
+    required: true,
+    type: "number",
+    label: roleLabels[role] ?? role,
+    inputClassName: "font-mono",
+    conditional: (values) =>
+      (roleApplicability.get(role) ?? []).includes(typeValue(values.holeType)),
+    validation: (value) =>
+      typeof value === "number" && Number.isFinite(value)
+        ? null
+        : "Enter a finite number.",
+  });
+  const fields: readonly FormedibleFieldConfig<HoleFormValues>[] = [
+    {
+      name: "holeType",
+      options: [
+        { value: "straight", label: labels.holeTypeStraight },
+        { value: "counterbore", label: labels.holeTypeCounterbore },
+        { value: "countersink", label: labels.holeTypeCountersink },
+        { value: "taper", label: labels.holeTypeTaper },
+        { value: "threaded", label: labels.holeTypeThreaded },
+      ],
+      required: true,
+      type: "select",
+      label: labels.holeType,
+    },
+    {
+      name: "designation",
+      options: ISO_METRIC_THREAD_TABLE.map((size) => ({
+        value: size.designation,
+        label: `${size.designation} — pitch ${String(size.pitchMm)} mm, tap drill ${String(size.tapDrillMm)} mm`,
+      })),
+      required: true,
+      type: "select",
+      label: labels.holeDesignation,
+      conditional: (values) =>
+        typeValue(values.holeType) === HOLE_TYPE_VALUES.threaded,
+    },
+    numberFieldFor("diameter"),
+    numberFieldFor("depth"),
+    numberFieldFor("tipAngle"),
+    numberFieldFor("cboreDiameter"),
+    numberFieldFor("cboreDepth"),
+    numberFieldFor("csinkDiameter"),
+    numberFieldFor("csinkAngle"),
+    numberFieldFor("taperAngle"),
+    numberFieldFor("threadMajor"),
+    numberFieldFor("threadPitch"),
+    {
+      name: "positionsSketchId",
+      options: [
+        { value: "", label: labels.holePositionsParameter },
+        ...sketches.map((sketch) => ({
+          value: sketch.id,
+          label: sketch.name,
+        })),
+      ],
+      type: "select",
+      label: labels.holePositionsSketch,
+    },
+    {
+      name: "positionXMm",
+      required: true,
+      type: "number",
+      label: labels.holePositionX,
+      inputClassName: "font-mono",
+      conditional: (values) => values.positionsSketchId === "",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value)
+          ? null
+          : "Enter a finite in-plane coordinate.",
+    },
+    {
+      name: "positionYMm",
+      required: true,
+      type: "number",
+      label: labels.holePositionY,
+      inputClassName: "font-mono",
+      conditional: (values) => values.positionsSketchId === "",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value)
+          ? null
+          : "Enter a finite in-plane coordinate.",
+    },
+    {
+      name: "datumAxisId",
+      options: [
+        { value: "", label: labels.holeWorldAxis },
+        ...datumAxes.map((datum) => ({
+          value: datum.id,
+          label: datum.name,
+        })),
+      ],
+      // Not required: the empty value IS a choice (the world axis).
+      type: "select",
+      label: labels.holeDatumAxis,
+    },
+    {
+      name: "axis",
+      options: [
+        { value: "x", label: "World X" },
+        { value: "y", label: "World Y" },
+        { value: "z", label: "World Z" },
+      ],
+      required: true,
+      type: "select",
+      label: labels.holeAxis,
+      conditional: (values) => values.datumAxisId === "",
+    },
+  ];
+  // The last designation the fill hook saw (the thread form's discipline):
+  // only a DESIGNATION change copies the table row's numbers.
+  const designationRef = useRef("M6");
+  const form = useFormedible<HoleFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        holeType: "straight",
+        designation: "M6",
+        diameterMm: STRUCTURED_HOLE_DEFAULTS.spec.diameterMm,
+        depthMm: STRUCTURED_HOLE_DEFAULTS.spec.depthMm,
+        tipAngleDeg: STRUCTURED_HOLE_DEFAULTS.spec.tipAngleDeg,
+        cboreDiameterMm: STRUCTURED_HOLE_DEFAULTS.spec.cboreDiameterMm,
+        cboreDepthMm: STRUCTURED_HOLE_DEFAULTS.spec.cboreDepthMm,
+        csinkDiameterMm: STRUCTURED_HOLE_DEFAULTS.spec.csinkDiameterMm,
+        csinkAngleDeg: STRUCTURED_HOLE_DEFAULTS.spec.csinkAngleDeg,
+        taperAngleDeg: STRUCTURED_HOLE_DEFAULTS.spec.taperAngleDeg,
+        threadMajorMm: STRUCTURED_HOLE_DEFAULTS.spec.threadMajorMm,
+        threadPitchMm: STRUCTURED_HOLE_DEFAULTS.spec.threadPitchMm,
+        positionsSketchId: "",
+        positionXMm: STRUCTURED_HOLE_DEFAULTS.positionXMm,
+        positionYMm: STRUCTURED_HOLE_DEFAULTS.positionYMm,
+        axis: "z",
+        datumAxisId: "",
+      },
+      onChange: ({ value }) => {
+        onValuesChange?.(value);
+        if (value.designation === designationRef.current) return;
+        designationRef.current = value.designation;
+        const size = isoMetricThreadByDesignation(value.designation);
+        if (size === undefined) return;
+        form.form.setFieldValue("threadMajorMm", size.majorDiameterMm);
+        form.form.setFieldValue("threadPitchMm", size.pitchMm);
+      },
+      onSubmit: ({ value }) => {
+        onHole({
+          spec: {
+            type: typeValue(value.holeType),
+            diameterMm: value.diameterMm,
+            depthMm: value.depthMm,
+            tipAngleDeg: value.tipAngleDeg,
+            cboreDiameterMm: value.cboreDiameterMm,
+            cboreDepthMm: value.cboreDepthMm,
+            csinkDiameterMm: value.csinkDiameterMm,
+            csinkAngleDeg: value.csinkAngleDeg,
+            taperAngleDeg: value.taperAngleDeg,
+            threadMajorMm: value.threadMajorMm,
+            threadPitchMm: value.threadPitchMm,
+          },
+          positionXMm: value.positionXMm,
+          positionYMm: value.positionYMm,
+          axis: value.axis === "x" ? 1 : value.axis === "y" ? 2 : 3,
+          positionsSketchId:
+            value.positionsSketchId === "" ? null : value.positionsSketchId,
+          datumAxisId: value.datumAxisId === "" ? null : value.datumAxisId,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form aria-label={labels.holeTitle} className="space-y-3" noValidate />
+  );
+}
+
+/** The role's form field name (the spec field names, camelCase + Mm). */
+function roleNumberFieldOf(role: string): string {
+  switch (role) {
+    case "diameter":
+      return "diameterMm";
+    case "depth":
+      return "depthMm";
+    case "tipAngle":
+      return "tipAngleDeg";
+    case "cboreDiameter":
+      return "cboreDiameterMm";
+    case "cboreDepth":
+      return "cboreDepthMm";
+    case "csinkDiameter":
+      return "csinkDiameterMm";
+    case "csinkAngle":
+      return "csinkAngleDeg";
+    case "taperAngle":
+      return "taperAngleDeg";
+    case "threadMajor":
+      return "threadMajorMm";
+    case "threadPitch":
+      return "threadPitchMm";
+    default:
+      return role;
+  }
 }

@@ -287,6 +287,14 @@ import {
   type SweepPathSegmentInput,
 } from "./contract";
 import { planThreadCut, rotationAligningZTo } from "./thread-profile";
+import {
+  type StructuredHoleSpec,
+  planStructuredHoleCut,
+  structuredHoleDatumInPlaneAxes,
+  structuredHoleRoles,
+  structuredHoleTypeOf,
+  structuredHoleWorldInPlaneAxes,
+} from "./hole-specification";
 
 /** The feature kinds the bridge interprets as kernel operations. */
 export const BRIDGE_FEATURE_KINDS = [
@@ -368,6 +376,33 @@ export type KernelPathResolver = (
   sketchId: SketchDocumentId,
 ) => KernelPathResolution;
 
+/**
+ * The POINT entities a sketch resolves to, in the sketch's own workplane
+ * coordinates (millimetres): the POSITION LIST a many-positions feature
+ * addresses (Phase 42's structured hole). The bridge never imports the
+ * sketch domain — the resolver is caller-supplied, typically backed by
+ * cad-sketch's entity reader; the sketch's workplane PLACEMENT does not
+ * carry (the caller maps points into the feature's own in-plane basis, the
+ * path seam's simplification precedent).
+ */
+export interface KernelResolvedSketchPoints {
+  readonly points: readonly {
+    readonly x: number;
+    readonly y: number;
+  }[];
+}
+
+/** The points resolver's outcome: the point list or a structured failure. */
+export type KernelSketchPointsResolution = ParseResult<
+  KernelResolvedSketchPoints,
+  ParseFailure
+>;
+
+/** Resolves a document sketch record into its point-entity positions. */
+export type KernelSketchPointsResolver = (
+  sketchId: SketchDocumentId,
+) => KernelSketchPointsResolution;
+
 /** Context the bridge executes against. */
 export interface KernelExecutorContext {
   /** The document whose features and parameters are being regenerated. */
@@ -393,6 +428,15 @@ export interface KernelExecutorContext {
    * the sketch domain's own code in `data.pathCode`.
    */
   readonly paths?: KernelPathResolver;
+  /**
+   * Resolves the sketch records whose POINT entities position features
+   * ({@link KernelResolvedSketchPoints}, Phase 42's structured hole input —
+   * one feature, many positions). A context without one cannot run a
+   * sketch-positioned hole: the feature fails with a structured diagnostic
+   * naming the missing seam instead of guessing positions. A resolver
+   * failure carries the sketch domain's own code in `data.pointsCode`.
+   */
+  readonly points?: KernelSketchPointsResolver;
   /**
    * The optional reference-resolution view that the topology-addressed
    * features' (`fillet`, `chamfer`, `shell`) references resolve against
@@ -1469,6 +1513,18 @@ export function createKernelFeatureExecutor(
               },
             } as const)
           : context.paths(ref.id),
+      resolveSketchPoints: (ref) =>
+        context.points === undefined
+          ? ({
+              ok: false,
+              error: {
+                code: "kernel/feature-input-invalid",
+                message:
+                  "The executor context provides no sketch-points resolver; sketch-positioned hole features cannot resolve their positions sketch.",
+                input: ref.id,
+              },
+            } as const)
+          : context.points(ref.id),
       bodyIdOf: (ref) => {
         if (ref.kind === "body") return ref.id;
         if (ref.kind === "feature") return featureOutputs.get(ref.id);
@@ -1508,6 +1564,13 @@ interface InputReaders {
   readonly resolvePath: (
     ref: FeatureInputRef & { readonly kind: "sketch" },
   ) => KernelPathResolution;
+  /**
+   * Resolves a sketch ref as a POINT-position list (the structured hole's
+   * seam, Phase 42 — the paths precedent's shape).
+   */
+  readonly resolveSketchPoints: (
+    ref: FeatureInputRef & { readonly kind: "sketch" },
+  ) => KernelSketchPointsResolution;
   /**
    * The output body a feature/body ref addresses: a body ref names itself,
    * a feature ref its (single) output body, anything else `undefined`. The
@@ -2583,6 +2646,23 @@ function runHoleOperation(
     (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
       ref.kind === "parameter",
   );
+  // Phase 42: the structured form's first parameter is the DIMENSIONLESS
+  // type selector (the flat form's first parameter is the LENGTH diameter)
+  // — the dimension is the dispatch, so the two forms never reinterpret
+  // each other's layouts.
+  const firstParameterRef = parameterRefs[0];
+  const firstParameter =
+    firstParameterRef === undefined
+      ? undefined
+      : readers.document.parameters.parameters.find(
+          (candidate) => candidate.id === firstParameterRef.id,
+        );
+  if (
+    firstParameterRef !== undefined &&
+    firstParameter?.value.dimension === "dimensionless"
+  ) {
+    return runStructuredHoleOperation(kernel, feature, readers);
+  }
   const datumRefs = inputs.filter(
     (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
       ref.kind === "datum",
@@ -2865,6 +2945,448 @@ function executeHoleCut(
         data: {
           reason: "hole/no-op",
           holeThrough: plan.through,
+          targetVolumeMm3: targetVolume.value,
+          resultVolumeMm3: resultVolume.value,
+        },
+      },
+    };
+  }
+  return { ok: true, solid: cut.value };
+}
+
+/**
+ * The structured hole form's executor path (Phase 42) — the type-directed
+ * sibling of the flat five-parameter form above, composed from the SAME
+ * contract ops every kernel implements: one `revolve` per position (the
+ * planned meridian tool, `planStructuredHoleCut` — the ONE tool-geometry
+ * source, shared with the worker scene), one `helixSweep` per position for
+ * the threaded type (Phase 40's ISO ridge, gated on the `helix`
+ * capability), one `subtract` of every tool, and the same measured
+ * post-condition: a cut that removed nothing refuses.
+ *
+ * ## Input layout (the type-directed parameter schema)
+ *
+ * ONE feature/body input (the target), at most ONE sketch input (whose
+ * point entities are the POSITIONS — one feature, many holes), at most ONE
+ * datum input (a datum AXIS the hole runs parallel to), and the
+ * type-directed parameter list of {@link structuredHoleRoles} in declared
+ * order: `type` first (a DIMENSIONLESS selector — its presence as the first
+ * parameter's dimension is what DISPATCHES this form; the flat form's first
+ * parameter is a LENGTH diameter), then the type's own dimensions, then
+ * `positionX`/`positionY` (absent with a positions sketch) and the world
+ * `axis` selector (absent with a datum axis).
+ *
+ * ## Semantics (the planner's own documented conventions)
+ *
+ * Depth to the drill tip, through = `depth ≥ extent`, the tip angle's
+ * included convention, entry-measured counterbore/countersink, the taper's
+ * geometric through verdict, the threaded pilot at the ISO basic minor —
+ * every convention lives in `hole-specification.ts`'s module doc, the one
+ * source both composition sites share.
+ *
+ * ## Failure taxonomy (all structured)
+ *
+ * - Layout: wrong target/sketch/datum counts, or a parameter count that
+ *   does not match the type's role list → `kernel/feature-input-invalid`
+ *   (the message names the expected roles).
+ * - Type selector outside 1–5 → `kernel/parameter-invalid`.
+ * - Role dimension mismatches ride the readers' own diagnostics.
+ * - The shared structural battery (diameter/depth/angles/domains) and the
+ *   target-relative verdicts (tip fit, entry-feature fit) arrive from the
+ *   planner as `kernel/parameter-invalid`.
+ * - A positions sketch with no points, or past the position ceiling →
+ *   `kernel/feature-input-invalid`.
+ * - Threaded on a kernel without the `helix` capability →
+ *   `kernel/feature-input-invalid` (the mirror/scale gate precedent — the
+ *   refusal is a feature diagnostic, never a silently unthreaded hole).
+ * - No-op: the composed cut removed no material → `kernel/operation-failed`
+ *   with `data.reason = "hole/no-op"` and the measured volumes in `data`
+ *   (the flat form's post-condition verbatim — the contract of the
+ *   composed cut is unchanged).
+ */
+function runStructuredHoleOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const sketchRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "sketch" } =>
+      ref.kind === "sketch",
+  );
+  const datumRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
+      ref.kind === "datum",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  const sketchPositions = sketchRefs.length === 1;
+  const datumAxisForm = datumRefs.length === 1;
+  if (
+    targetRefs.length !== 1 ||
+    sketchRefs.length > 1 ||
+    datumRefs.length > 1 ||
+    inputs.length !==
+      targetRefs.length +
+        sketchRefs.length +
+        datumRefs.length +
+        parameterRefs.length
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "hole" in structured form needs exactly one feature/body input (the target solid), at most one sketch input (the positions), at most one datum input (the axis), and its type-directed parameter list; it declares ${targetRefs.length} target(s), ${sketchRefs.length} sketch(es), ${datumRefs.length} datum(s), and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const sketchRef = sketchRefs[0];
+  const datumRef = datumRefs[0];
+  const typeRef = parameterRefs[0];
+  if (targetRef === undefined || typeRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "hole" has a malformed input list.`,
+      ),
+    };
+  }
+  const typeValue = readers.dimensionlessParameter(typeRef, "type");
+  if (!typeValue.ok) {
+    return { ok: false, diagnostic: typeValue.diagnostic };
+  }
+  const type = structuredHoleTypeOf(typeValue.value);
+  if (type === null) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "hole" needs parameter "${typeRef.id}" (type) to select a hole type: 1 = straight, 2 = counterbore, 3 = countersink, 4 = taper, 5 = threaded (${typeValue.value} given).`,
+        [typeRef],
+      ),
+    };
+  }
+
+  // The type-directed role list the layout must match exactly — a parameter
+  // edit that changes the type alone mismatches the count and this refusal
+  // names the roles the new type needs (type changes re-create the feature,
+  // the same reconfiguration every real hole dialog performs).
+  const roles = structuredHoleRoles(type, {
+    sketchPositions,
+    datumAxis: datumAxisForm,
+  });
+  if (parameterRefs.length !== roles.length) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "hole" of type "${type}" needs exactly ${String(roles.length)} parameter inputs in declared order (${roles.map((role) => role.name).join(", ")}); it declares ${String(parameterRefs.length)}.`,
+      ),
+    };
+  }
+
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+
+  // The roles in order: read each by its declared kind.
+  const values: Record<string, number> = {};
+  for (let index = 0; index < roles.length; index += 1) {
+    const role = roles[index];
+    const ref = parameterRefs[index];
+    if (role === undefined || ref === undefined) continue;
+    if (role.kind === "length") {
+      const outcome = readers.lengthParameter(ref, role.name);
+      if (!outcome.ok) return { ok: false, diagnostic: outcome.diagnostic };
+      values[role.name] = outcome.mm;
+    } else if (role.kind === "angle") {
+      const outcome = readers.angleParameter(ref, role.name);
+      if (!outcome.ok) return { ok: false, diagnostic: outcome.diagnostic };
+      // The planner's documented authoring unit is degrees.
+      values[role.name] = (outcome.rad * 180) / Math.PI;
+    } else {
+      const outcome = readers.dimensionlessParameter(ref, role.name);
+      if (!outcome.ok) return { ok: false, diagnostic: outcome.diagnostic };
+      values[role.name] = outcome.value;
+    }
+  }
+  const spec: StructuredHoleSpec = {
+    type: values.type ?? typeValue.value,
+    diameterMm: values.diameter ?? 0,
+    depthMm: values.depth ?? 0,
+    tipAngleDeg: values.tipAngle ?? 180,
+    cboreDiameterMm: values.cboreDiameter ?? 0,
+    cboreDepthMm: values.cboreDepth ?? 0,
+    csinkDiameterMm: values.csinkDiameter ?? 0,
+    csinkAngleDeg: values.csinkAngle ?? 0,
+    taperAngleDeg: values.taperAngle ?? 0,
+    threadMajorMm: values.threadMajor ?? 0,
+    threadPitchMm: values.threadPitch ?? 0,
+  };
+
+  // The axis: the datum form resolves the datum axis (Phase 39's machinery,
+  // the flat form's twin); the world form reads the selector. The in-plane
+  // position basis rides each form's own documented convention: the world
+  // form's the two world axes in order skipping the hole axis; the datum
+  // form's the rotated frame's local axes (whose +y the hole axis is).
+  let axisDirection: readonly [number, number, number];
+  let inPlaneU: readonly [number, number, number];
+  let inPlaneV: readonly [number, number, number];
+  let axisRefs: readonly FeatureInputRef[] = [];
+  if (datumAxisForm) {
+    if (datumRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "hole" has a malformed datum input.`,
+        ),
+      };
+    }
+    const resolvedDatum = resolveDatumInput(
+      feature,
+      datumRef,
+      readers.document,
+      readers.datumTopology,
+      "the hole axis",
+    );
+    if (!resolvedDatum.ok) {
+      return { ok: false, diagnostic: resolvedDatum.diagnostic };
+    }
+    if (
+      resolvedDatum.datumType !== "axis" ||
+      resolvedDatum.axis === undefined
+    ) {
+      return datumKindMismatch(
+        feature,
+        datumRef,
+        `Feature "${feature.id}" of kind "hole" needs a datum AXIS as its axis; the referenced datum defines ${resolvedDatum.datumType === "plane" ? "a plane" : resolvedDatum.datumType === "point" ? "a point" : "a coordinate system"}.`,
+      );
+    }
+    axisDirection = resolvedDatum.axis.direction;
+    const basis = structuredHoleDatumInPlaneAxes(axisDirection);
+    inPlaneU = basis.u;
+    inPlaneV = basis.v;
+    axisRefs = [datumRef];
+  } else {
+    // The role loop above already read the world-axis selector by name; the
+    // ref (the role list's last entry) rides along for diagnostics.
+    const axisRef = parameterRefs[roles.length - 1];
+    const axisRaw = values.axis;
+    if (axisRef === undefined || axisRaw === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "hole" has a malformed input list.`,
+        ),
+      };
+    }
+    if (!Number.isInteger(axisRaw) || axisRaw < 1 || axisRaw > 3) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelParameterInvalid,
+          `Feature "${feature.id}" of kind "hole" needs parameter "${axisRef.id}" (axis) to select a world axis: 1 = X, 2 = Y, 3 = Z (${String(axisRaw)} given).`,
+          [axisRef],
+        ),
+      };
+    }
+    axisDirection =
+      axisRaw === 1 ? [1, 0, 0] : axisRaw === 2 ? [0, 1, 0] : [0, 0, 1];
+    // The flat world form's in-plane convention: the two world axes in
+    // order, skipping the hole axis (planHoleCut's documented mapping) —
+    // one shared source with the worker scene.
+    const basis = structuredHoleWorldInPlaneAxes(
+      axisRaw === 1 ? 1 : axisRaw === 2 ? 2 : 3,
+    );
+    inPlaneU = basis.u;
+    inPlaneV = basis.v;
+    axisRefs = [axisRef];
+  }
+
+  // The positions: the sketch's point entities (one feature, many holes)
+  // or the positionX/positionY parameters — the same in-plane convention.
+  let positions: readonly {
+    readonly u: number;
+    readonly v: number;
+  }[];
+  let positionRefs: readonly FeatureInputRef[] = [];
+  if (sketchPositions) {
+    if (sketchRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "hole" has a malformed sketch input.`,
+        ),
+      };
+    }
+    const resolvedPoints = readers.resolveSketchPoints(sketchRef);
+    if (!resolvedPoints.ok) {
+      return {
+        ok: false,
+        diagnostic: {
+          severity: "error",
+          code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          message: `Feature "${feature.id}" of kind "hole" has an unresolvable positions sketch ("${sketchRef.id}"): ${resolvedPoints.error.message}`,
+          location: { primary: feature.id, related: [sketchRef.id] },
+          data: { pointsCode: resolvedPoints.error.code },
+        },
+      };
+    }
+    positions = resolvedPoints.value.points.map((point) => ({
+      u: point.x,
+      v: point.y,
+    }));
+  } else {
+    // The role loop above already read positionX/positionY by name; the
+    // refs (the role list's trailing pair) ride along for diagnostics.
+    const xRef = parameterRefs[roles.length - (datumAxisForm ? 2 : 3)];
+    const yRef = parameterRefs[roles.length - (datumAxisForm ? 1 : 2)];
+    if (xRef === undefined || yRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "hole" has a malformed input list.`,
+        ),
+      };
+    }
+    const positionX = values.positionX;
+    const positionY = values.positionY;
+    if (positionX === undefined || positionY === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "hole" has a malformed input list.`,
+        ),
+      };
+    }
+    positions = [{ u: positionX, v: positionY }];
+    positionRefs = [xRef, yRef];
+  }
+
+  // The capability gate: the threaded type composes Phase 40's ridge sweep,
+  // which kernels without the `helix` capability decline structurally — the
+  // gate refuses BEFORE any geometry so the unsupported verdict is a
+  // feature diagnostic (the mirror/scale precedent).
+  if (type === "threaded" && !kernel.capabilities.helix) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "hole" of type "threaded" composes an ISO thread sweep, but this kernel ("${kernel.id}") does not declare the helix capability — the gate refuses before the kernel can answer, so the unsupported verdict is a feature diagnostic rather than a silently unthreaded hole. Every other hole type composes revolve + subtract and runs wherever those do.`,
+      ),
+    };
+  }
+
+  const measured = kernel.bounds(target.solid);
+  if (!measured.ok) {
+    return operationFailure(
+      feature,
+      measured.error.code,
+      measured.error.message,
+    );
+  }
+  const planned = planStructuredHoleCut({
+    spec,
+    positions,
+    axisDirection,
+    inPlaneU,
+    inPlaneV,
+    bounds: measured.value,
+  });
+  if (!planned.ok) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        planned.problem.code === "kernel/parameter-invalid"
+          ? DIAGNOSTIC_CODES.kernelParameterInvalid
+          : DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "hole" of type "${type}": ${planned.problem.message}`,
+        [...axisRefs, ...positionRefs],
+      ),
+    };
+  }
+
+  // The composed cut: one tool solid per position (plus the threaded
+  // type's ridge sweep), ONE subtract, the measured post-condition.
+  const tools: KernelSolid[] = [];
+  for (const position of planned.plan.positions) {
+    const tool = kernel.revolve(position.revolveTool);
+    if (!tool.ok) {
+      return operationFailure(feature, tool.error.code, tool.error.message);
+    }
+    tools.push(tool.value);
+    if (position.threadTool !== undefined) {
+      const thread = kernel.helixSweep(position.threadTool);
+      if (!thread.ok) {
+        return operationFailure(
+          feature,
+          thread.error.code,
+          thread.error.message,
+        );
+      }
+      tools.push(thread.value);
+    }
+  }
+  const targetVolume = kernel.volume(target.solid);
+  if (!targetVolume.ok) {
+    return operationFailure(
+      feature,
+      targetVolume.error.code,
+      targetVolume.error.message,
+    );
+  }
+  const cut = kernel.subtract(target.solid, tools);
+  if (!cut.ok) {
+    return operationFailure(feature, cut.error.code, cut.error.message);
+  }
+  const resultVolume = kernel.volume(cut.value);
+  if (!resultVolume.ok) {
+    return operationFailure(
+      feature,
+      resultVolume.error.code,
+      resultVolume.error.message,
+    );
+  }
+  const epsilon = Math.max(1e-9, Math.abs(targetVolume.value) * 1e-9);
+  if (resultVolume.value >= targetVolume.value - epsilon) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelOperationFailed,
+        message: `Feature "${feature.id}" of kind "hole" of type "${type}" removed no material: the ${planned.plan.through ? "through" : "blind"} hole at ${String(positions.length)} position(s) misses its target (bounds [${measured.value.min.join(", ")}] → [${measured.value.max.join(", ")}]). Move the positions onto the target or grow the diameter — the subtract would otherwise silently return the target unchanged.`,
+        location: {
+          primary: feature.id,
+          related: [targetRef.id, ...positionRefs.map((ref) => ref.id)],
+        },
+        data: {
+          reason: "hole/no-op",
+          holeType: type,
+          holeThrough: planned.plan.through,
           targetVolumeMm3: targetVolume.value,
           resultVolumeMm3: resultVolume.value,
         },

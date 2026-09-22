@@ -77,6 +77,7 @@ import {
   type DatumId,
 } from "@slopcad/cad-core";
 import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
+import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
 import type { Workplane } from "@slopcad/cad-sketch";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
@@ -102,7 +103,13 @@ import {
   HOLE_DEFAULT_AXIS,
   HOLE_DEFAULT_DEPTH_MM,
   HOLE_DEFAULT_DIAMETER_MM,
+  sketchPointsResolverOf,
 } from "./hole";
+import {
+  STRUCTURED_HOLE_DEFAULTS,
+  validateStructuredHoleSubmission,
+  type StructuredHoleSubmission,
+} from "./hole-dialog";
 import {
   documentRevolveRequest,
   type RevolveSceneRequest,
@@ -128,6 +135,7 @@ import {
   resolveSessionDatumPlane,
   sceneFacePickOfSelection,
   sessionFaceReferenceOf,
+  resolveSessionDatumAxis,
   type SceneFacePick,
 } from "./datum";
 import { boundsReadout } from "./bounds-inspection";
@@ -377,6 +385,17 @@ export interface WorkbenchEngine {
   readonly handleRevolve: (submission: SketchRevolveSubmission) => void;
   /** The hole create action (parameter-panel-driven defaults). */
   readonly handleHole: () => void;
+  /**
+   * The Phase 42 structured hole create action (the hole dialog's engine
+   * side): validates the submission (the shared authoring battery), then
+   * commits the type-directed parameter list, the output body, and the
+   * `hole` feature — with a positions sketch and/or a datum axis input —
+   * in ONE atomic transaction. A refusal commits nothing and surfaces
+   * verbatim in the dialog's error region.
+   */
+  readonly handleStructuredHole: (
+    submission: StructuredHoleSubmission,
+  ) => FeatureFormOutcome;
   /**
    * The Phase 38 save-sketch action: commits the CURRENT sketch as a
    * STANDALONE document sketch record (no feature) — the sketch pool the
@@ -967,6 +986,184 @@ export function useWorkbenchEngine(
     if (!committed.ok) return;
     setHoleCount(n);
     setActiveScene("hole");
+  };
+
+  // The Phase 42 structured hole action (the hole dialog's engine side):
+  // validate the submission (the shared authoring battery — one source with
+  // the kernel's own structural checks), resolve the picked positions
+  // sketch's POINT entities and the datum axis through the session seams
+  // BEFORE anything commits, then commit the type-directed parameter list
+  // (the kernel's `structuredHoleRoles` schema, in declared order), the
+  // output body, and the `hole` feature in ONE atomic transaction. A
+  // refusal commits nothing and surfaces verbatim in the dialog's error
+  // region; the target-relative verdicts (tip fit, the no-op miss) are the
+  // dispatch's own structured failures, never the form's guesses.
+  const [structuredHoleCount, setStructuredHoleCount] = useState(0);
+  const handleStructuredHole = (
+    submission: StructuredHoleSubmission,
+  ): FeatureFormOutcome => {
+    const target = holeBaseFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A hole needs a target solid: extrude a profile first (the hole cuts the last extrusion).",
+      };
+    }
+    const validation = validateStructuredHoleSubmission(submission);
+    if (!validation.ok) return validation;
+    const type = structuredHoleTypeOf(submission.spec.type);
+    if (type === null) {
+      return {
+        ok: false,
+        code: "kernel/parameter-invalid",
+        message: "The hole type selector must be 1–5.",
+      };
+    }
+    // The positions sketch must exist and carry at least one point — the
+    // resolver failure verbatim, before any commit.
+    if (submission.positionsSketchId !== null) {
+      const resolved = sketchPointsResolverOf(workbenchDocument)(
+        submission.positionsSketchId,
+      );
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          code: resolved.code,
+          message: resolved.message,
+        };
+      }
+      if (resolved.points.length === 0) {
+        return {
+          ok: false,
+          code: "kernel/feature-input-invalid",
+          message:
+            "The positions sketch carries no point entities; draw the hole centres as points (one feature, many holes) or use the parameter position.",
+        };
+      }
+    }
+    // The datum axis must resolve in-session (the thread reader's
+    // discipline — never a silent world-axis fallback).
+    if (submission.datumAxisId !== null) {
+      const resolved = resolveSessionDatumAxis(
+        workbenchDocument,
+        submission.datumAxisId,
+      );
+      if (!resolved.ok) {
+        return {
+          ok: false,
+          code: resolved.error.code,
+          message: resolved.error.message,
+        };
+      }
+    }
+    const roles = structuredHoleRoles(type, {
+      sketchPositions: submission.positionsSketchId !== null,
+      datumAxis: submission.datumAxisId !== null,
+    });
+    const spec = { ...STRUCTURED_HOLE_DEFAULTS.spec, ...submission.spec };
+    const roleValueOf = (
+      role: string,
+    ):
+      | ReturnType<typeof length>
+      | ReturnType<typeof angle>
+      | ReturnType<typeof dimensionless> => {
+      switch (role) {
+        case "type":
+          return dimensionless(spec.type);
+        case "diameter":
+          return length(spec.diameterMm);
+        case "depth":
+          return length(spec.depthMm);
+        case "tipAngle":
+          return angle((spec.tipAngleDeg * Math.PI) / 180);
+        case "cboreDiameter":
+          return length(spec.cboreDiameterMm);
+        case "cboreDepth":
+          return length(spec.cboreDepthMm);
+        case "csinkDiameter":
+          return length(spec.csinkDiameterMm);
+        case "csinkAngle":
+          return angle((spec.csinkAngleDeg * Math.PI) / 180);
+        case "taperAngle":
+          return angle((spec.taperAngleDeg * Math.PI) / 180);
+        case "threadMajor":
+          return length(spec.threadMajorMm);
+        case "threadPitch":
+          return length(spec.threadPitchMm);
+        case "positionX":
+          return length(submission.positionXMm);
+        case "positionY":
+          return length(submission.positionYMm);
+        case "axis":
+          return dimensionless(submission.axis);
+        default:
+          throw new Error(`unknown structured hole role ${role}`);
+      }
+    };
+    const n = structuredHoleCount + 1;
+    const suffix = String(n);
+    const roleIds = roles.map((role) =>
+      createParameterId(`param_shole_${role.name}${suffix}`),
+    );
+    const bodyId = createBodyId(`body_shole${suffix}`);
+    const featureId = createFeatureId(`feat_shole${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        ...roles.map((role, index) => {
+          const id = roleIds[index];
+          if (id === undefined) throw new Error("the role id list");
+          return {
+            type: "parameter.create" as const,
+            id,
+            name: `hole${role.name.charAt(0).toUpperCase()}${role.name.slice(1)}${suffix}`,
+            value: roleValueOf(role.name),
+          };
+        }),
+        {
+          type: "body.create" as const,
+          id: bodyId,
+          name: `holed ${String(n)}`,
+        },
+        {
+          type: "feature.create" as const,
+          id: featureId,
+          kind: "hole",
+          inputs: [
+            { kind: "feature", id: target.id },
+            ...roleIds.map((id) => ({ kind: "parameter" as const, id })),
+            ...(submission.positionsSketchId !== null
+              ? [
+                  {
+                    kind: "sketch" as const,
+                    id: createSketchDocumentId(submission.positionsSketchId),
+                  },
+                ]
+              : []),
+            ...(submission.datumAxisId !== null
+              ? [
+                  {
+                    kind: "datum" as const,
+                    id: createDatumId(submission.datumAxisId),
+                  },
+                ]
+              : []),
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setStructuredHoleCount(n);
+    setActiveScene("hole");
+    return { ok: true };
   };
 
   // The Phase 38 save-sketch action: commit the CURRENT sketch as a
@@ -1894,6 +2091,7 @@ export function useWorkbenchEngine(
     thickenCount,
     splitCount,
     holeCount,
+    structuredHoleCount,
   ]);
 
   // The host pushes the CURRENT projection into the store — the projection
@@ -2133,6 +2331,7 @@ export function useWorkbenchEngine(
     handleExtrude,
     handleRevolve,
     handleHole,
+    handleStructuredHole,
     handleSaveSketch,
     handleSweep,
     handleLoft,

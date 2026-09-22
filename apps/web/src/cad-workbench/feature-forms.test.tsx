@@ -15,9 +15,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { HoleFormValues } from "./feature-forms";
+import type { StructuredHoleSubmission } from "./hole-dialog";
 import type { ThreadCutInput } from "./thread";
 
-import { ThreadFeatureForm } from "./feature-forms";
+import { HoleFeatureForm, ThreadFeatureForm } from "./feature-forms";
 
 afterEach(cleanup);
 
@@ -125,5 +127,117 @@ describe("ThreadFeatureForm: the designation picker fills the linked numbers", (
     await pickDesignation("M12");
     await waitFor(() => expect(numberFieldValue(/^Major diameter/)).toBe("12"));
     await waitFor(() => expect(numberFieldValue(/^Pitch/)).toBe("1.75"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The structured hole dialog (Phase 42)
+// ---------------------------------------------------------------------------
+
+/** The select triggers in form order (type, designation, …). */
+function selectTriggers(): readonly HTMLElement[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>("[data-slot=select-trigger]"),
+  ];
+}
+
+/** Opens the indexed select and clicks the option starting with `text`. */
+async function pickSelectOption(
+  triggerIndex: number,
+  optionText: string,
+): Promise<void> {
+  const trigger = selectTriggers()[triggerIndex];
+  if (trigger === undefined) {
+    throw new Error(`the select trigger ${String(triggerIndex)} is absent`);
+  }
+  fireEvent.click(trigger);
+  await waitFor(() => {
+    expect(document.querySelector("[data-slot=select-item]")).not.toBeNull();
+  });
+  const item = [...document.querySelectorAll("[data-slot=select-item]")].find(
+    (element) => element.textContent?.startsWith(optionText) === true,
+  );
+  if (item === undefined) {
+    throw new Error(`the select option ${optionText} is absent`);
+  }
+  fireEvent.pointerDown(item, { pointerType: "mouse" });
+  fireEvent.click(item, { detail: 1, pointerType: "mouse" });
+}
+
+describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
+  it("renders the straight type's schema fields and hides the other types'", () => {
+    const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
+    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    // The straight type's load-bearing fields are present…
+    expect(screen.getByLabelText(/^Diameter/)).toBeDefined();
+    expect(screen.getByLabelText(/^Depth/)).toBeDefined();
+    expect(screen.getByLabelText(/Drill tip angle/)).toBeDefined();
+    // …and every other type's are conditionally hidden (the schema drives
+    // the field list — counterbore/countersink/taper/thread fields absent
+    // from the rendered form until their type carries them).
+    expect(screen.queryByLabelText(/Counterbore/)).toBeNull();
+    expect(screen.queryByLabelText(/Countersink/)).toBeNull();
+    expect(screen.queryByLabelText(/Taper angle/)).toBeNull();
+    expect(screen.queryByLabelText(/Thread major/)).toBeNull();
+  });
+
+  it("reveals the counterbore fields when the type selects them", async () => {
+    const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
+    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    expect(screen.queryByLabelText(/Counterbore/)).toBeNull();
+    await pickSelectOption(0, "Counterbore");
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Counterbore Ø/)).toBeDefined();
+    });
+    expect(screen.getByLabelText(/Counterbore depth/)).toBeDefined();
+    // The taper fields stay hidden.
+    expect(screen.queryByLabelText(/Taper angle/)).toBeNull();
+  });
+
+  it("fills the threaded type's numbers from the ISO designation picker", async () => {
+    const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
+    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    await pickSelectOption(0, "Threaded");
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Thread major/)).toBeDefined();
+    });
+    // With the threaded type selected, the designation select is the
+    // SECOND trigger; picking M10 copies the table row's 10 / 1.5.
+    await pickSelectOption(1, "M10");
+    await waitFor(() => expect(numberFieldValue(/Thread major/)).toBe("10"));
+    await waitFor(() => expect(numberFieldValue(/Thread pitch/)).toBe("1.5"));
+  });
+
+  it("submits the structured specification with positions and axis, never the designation", async () => {
+    const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
+    const onValuesChange = vi.fn<(values: HoleFormValues) => void>();
+    render(
+      <HoleFeatureForm
+        datumAxes={[]}
+        onHole={onHole}
+        onValuesChange={onValuesChange}
+        sketches={[]}
+      />,
+    );
+    // Every change reaches the preview ghost's input.
+    editNumberField(/^Diameter/, "5");
+    await waitFor(() =>
+      expect(onValuesChange).toHaveBeenCalledWith(
+        expect.objectContaining({ diameterMm: 5 }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onHole).toHaveBeenCalledTimes(1));
+    const submission = onHole.mock.calls[0]?.[0];
+    expect(submission).toBeDefined();
+    if (submission === undefined) return;
+    expect(submission.spec.type).toBe(1);
+    expect(submission.spec.diameterMm).toBe(5);
+    expect(submission.spec.depthMm).toBe(6);
+    expect(submission.positionXMm).toBe(15);
+    expect(submission.positionYMm).toBe(10);
+    expect(submission.axis).toBe(3);
+    expect(submission.positionsSketchId).toBeNull();
+    expect(submission.datumAxisId).toBeNull();
   });
 });

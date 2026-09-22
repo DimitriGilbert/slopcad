@@ -43,10 +43,27 @@ import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
 const ROOT = "workbench-complete-root";
 const MODE_TOGGLE = '[data-testid="complete-mode-toggle"]';
 const EXTRUDE_BUTTON = '[data-testid="sketch-extrude"]';
-const SKETCH_ON_FACE = '[data-testid="complete-sketch-on-face"]';
 const SKETCH = "#sketch-root";
 const VIEWPORT_ID = "workbench-complete-viewport";
 const TOP_NORMAL = [0, 0, 1] as const;
+
+/**
+ * Runs the sketch-on-face verb through the COMMAND MENU (Ctrl+K → query →
+ * Enter): the toolbar's button is the row's widest CONTEXTUAL verb (it needs
+ * a prior face selection to mean anything), so below 1800 px it yields its
+ * row width for the fit and the palette is the verb's always-reachable path
+ * — the same route a keyboard-first author takes (the hole-dialog spec's
+ * discipline).
+ */
+async function runSketchOnFace(page: Page): Promise<void> {
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
+    "data-command-menu-open",
+    "true",
+  );
+  await page.keyboard.type("sketch on face");
+  await page.keyboard.press("Enter");
+}
 
 /** The sketch rectangle the journeys draw (workplane mm). */
 const RECT = { x0: 10, y0: 10, x1: 30, y1: 25 } as const;
@@ -143,7 +160,7 @@ test("sketch on a face, extrude, edit the driving face — geometry follows", as
 
   // SKETCH ON FACE: the datum verb anchors the plane and boots the editor
   // on the face's workplane; the datum surface reports it RESOLVED.
-  await page.locator(SKETCH_ON_FACE).click();
+  await runSketchOnFace(page);
   await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
     "data-sketch-mode",
     "sketch",
@@ -236,7 +253,7 @@ test("a plain sketch re-entry after a face-anchored extrude boots the DEFAULT wo
     "data-selection-key",
     new RegExp(`^face\\|body_extrude\\|\\d+\\|${String(top.faceIndex)}$`),
   );
-  await page.locator(SKETCH_ON_FACE).click();
+  await runSketchOnFace(page);
   await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
     "data-sketch-mode",
     "sketch",
@@ -318,7 +335,7 @@ test("face anchors and the datum overlay track a resized viewport (live-size pro
       `^face\\|body_extrude\\d*\\|\\d+\\|${String(topFirst.faceIndex)}$`,
     ),
   );
-  await page.locator(SKETCH_ON_FACE).click();
+  await runSketchOnFace(page);
   await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
     "data-sketch-mode",
     "sketch",

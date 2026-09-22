@@ -50,7 +50,18 @@ import {
   HOLE_DEFAULT_AXIS,
   HOLE_DEFAULT_DIAMETER_MM,
   HOLE_DEFAULT_DEPTH_MM,
+  type HoleCutInput,
+  type HoleSceneRequest,
 } from "./hole";
+
+/** The request's flat-form entry at `index` (undefined for structured). */
+function flatHoleAt(
+  request: HoleSceneRequest,
+  index: number,
+): HoleCutInput | undefined {
+  const entry = request.holes[index];
+  return entry !== undefined && !("kind" in entry) ? entry : undefined;
+}
 
 const DOC = createDocumentId("doc_hole_wiring");
 const SKETCH = createSketchDocumentId("skd_profile");
@@ -219,8 +230,10 @@ describe("documentHoleSceneRequest", () => {
     });
     if (!set.ok) throw new Error(set.error.message);
     const derived = documentHoleSceneRequest(set.value);
-    expect(derived?.request.holes[0]?.diameterMm).toBe(12);
-    expect(derived?.request.holes[0]?.depthMm).toBe(4);
+    expect(derived).not.toBeNull();
+    if (derived === null) return;
+    expect(flatHoleAt(derived.request, 0)?.diameterMm).toBe(12);
+    expect(flatHoleAt(derived.request, 0)?.depthMm).toBe(4);
   });
 
   it("carries a position parameter.set into the request", () => {
@@ -232,7 +245,9 @@ describe("documentHoleSceneRequest", () => {
     });
     if (!set.ok) throw new Error(set.error.message);
     const derived = documentHoleSceneRequest(set.value);
-    expect(derived?.request.holes[0]?.positionXMm).toBe(24);
+    expect(derived).not.toBeNull();
+    if (derived === null) return;
+    expect(flatHoleAt(derived.request, 0)?.positionXMm).toBe(24);
   });
 
   it("returns null for a document without a hole feature", () => {

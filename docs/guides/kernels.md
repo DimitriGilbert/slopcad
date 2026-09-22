@@ -65,6 +65,28 @@ OCCT territory (its ruled meridian stations sit at the derived
 That discipline is the point of the flags: callers and suites branch on
 the declaration upfront instead of discovering limits through failures.
 
+## Derived coverage: the structured hole types (Phase 42)
+
+The structured hole feature composes EXISTING ops — no new capability
+flag — so its per-kernel coverage DERIVES from the flags above: every
+type except the threaded one is one revolved meridian per position plus
+one subtract (`revolve` + `booleans`, which every kernel implements),
+and the threaded type adds Phase 40's ISO ridge sweep (`helix`):
+
+| structured hole type                         | manifold | opencascade | jscad | fake |
+| -------------------------------------------- | -------- | ----------- | ----- | ---- |
+| straight / counterbore / countersink / taper | ✓        | ✓           | ✓     | ✓    |
+| threaded (pilot + ISO ridge)                 | —        | ✓           | —     | ✓    |
+
+The threaded decline is the bridge's capability gate (a feature
+diagnostic naming the `helix` flag, before any geometry — the
+mirror/scale precedent), not a per-call `kernel/unsupported-operation`.
+Volumes: straight-edge meridians revolve to EXACT analytic
+cylinders/cones on the fake kernel (Pappus closed form) and OCCT
+(BREP), with the mesh kernels inside their documented sweep-angle chord
+band; the threaded ridge rides Phase 40's exact screw-volume model and
+OCCT's ruled band.
+
 ## Booting a kernel
 
 ```ts
