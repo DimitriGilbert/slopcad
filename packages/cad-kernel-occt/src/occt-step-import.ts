@@ -151,6 +151,14 @@ function opensLikeStep(text: string): boolean {
  * shape, in exploration order. Deleting the compound wrapper and explorer
  * afterwards frees only the wrapper handles — the extracted solids are
  * independent, reference-counted copies (probed).
+ *
+ * Phase 48: the extraction ALSO carries open shells — every
+ * `TopAbs_SHELL` the file's model holds that is NOT inside one of the
+ * extracted solids (a solid's own boundary shells stay with their solid;
+ * only free-standing shells — sheet bodies the exchange carried — are
+ * separate shapes). The kernel's `importStep` classifies each ref's body
+ * kind from its own topology, so a STEP round-trip of a sheet answers a
+ * sheet back (the roadmap's `imported-step` sheet class).
  */
 function extractSolids(
   oc: OpenCascadeInstance,
@@ -166,7 +174,39 @@ function extractSolids(
     explorer.Next();
   }
   explorer.delete();
-  return solids;
+  const shells: TopoDS_Shape[] = [];
+  // The boundary shells of every extracted solid, collected for the
+  // ownership test below (the binding carries no shape-map type; IsSame
+  // pairwise over the small import set is exact and deterministic).
+  const ownedShells: TopoDS_Shape[] = [];
+  for (const solid of solids) {
+    const solidShells = new oc.TopExp_Explorer(
+      solid,
+      oc.TopAbs_ShapeEnum.TopAbs_SHELL,
+    );
+    while (solidShells.More()) {
+      ownedShells.push(solidShells.Current());
+      solidShells.Next();
+    }
+    solidShells.delete();
+  }
+  const shellExplorer = new oc.TopExp_Explorer(
+    oneShape,
+    oc.TopAbs_ShapeEnum.TopAbs_SHELL,
+  );
+  try {
+    while (shellExplorer.More()) {
+      const candidate = shellExplorer.Current();
+      const owned = ownedShells.some((ownedShell) =>
+        ownedShell.IsSame(candidate),
+      );
+      if (!owned) shells.push(candidate);
+      shellExplorer.Next();
+    }
+  } finally {
+    shellExplorer.delete();
+  }
+  return [...solids, ...shells];
 }
 
 /**

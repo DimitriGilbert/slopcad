@@ -46,4 +46,5 @@ export const CAPABILITY_FLAG_NAMES: readonly (keyof KernelCapabilities)[] = [
   "shell",
   "mirror",
   "surfaceArea",
+  "sheets",
 ] as const;

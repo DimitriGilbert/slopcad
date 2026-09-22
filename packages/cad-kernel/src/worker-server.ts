@@ -99,6 +99,7 @@ type SolidProducingOperation =
   | "solid.createSphere"
   | "solid.createCylinder"
   | "solid.createCone"
+  | "solid.createSheet"
   | "solid.extrude"
   | "solid.revolve"
   | "solid.sweep"
@@ -344,6 +345,19 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             : {
                 status: "failed",
                 error: kernelFailure("solid.createCone", result.error),
+              };
+        }
+        case "solid.createSheet": {
+          const result = kernel.createSheet(request.input);
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.createSheet",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.createSheet", result.error),
               };
         }
         case "solid.extrude": {

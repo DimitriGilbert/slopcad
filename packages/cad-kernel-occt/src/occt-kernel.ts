@@ -228,6 +228,7 @@ import { fail, ok, valueIn } from "@slopcad/cad-core";
 import type {
   BRepBuilderAPI_MakeEdge,
   gp_Pnt,
+  OpenCascadeInstance,
   TopoDS_Edge,
   TopoDS_Face,
   TopoDS_Shape,
@@ -261,6 +262,7 @@ import {
   type ProfileSweepInput,
   type ReplaceFaceInput,
   type ShellInput,
+  type SheetSurfaceInput,
   type SphereInput,
   type SweepPathSegmentInput,
   type Tessellation,
@@ -444,6 +446,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
+  sheets: true,
   localFaceOps: true,
 });
 
@@ -467,9 +470,55 @@ export const OCCT_TESSELLATION_ANGULAR_TOLERANCE_RAD = 0.5;
  * The per-handle payload: the OCCT shape, or `null` once the handle was
  * disposed (subsequent operations read as `kernel/solid-not-owned`, the
  * same code that guards foreign handles).
+ *
+ * `sheet` (Phase 48) classifies the payload's body kind at wrap time from
+ * the shape's own topology: a `TopAbs_SHELL` or `TopAbs_FACE` (or a
+ * compound whose members are all shells/faces) is an OPEN SHEET — it
+ * measures (`area`, `bounds`), tessellates, and transforms, while
+ * `volume` and every solid-consuming operation decline it structurally
+ * (an open shell bounds no material; a closed-solid approximation of one
+ * would be a fabrication, the no-silent-wrong-number rule).
  */
 interface SolidPayload {
   shape: TopoDS_Shape | null;
+  sheet: boolean;
+}
+
+/**
+ * Classifies a freshly built shape's body kind: open sheet (shell/face, or
+ * a compound of only shells/faces — the imported open-shell class) versus
+ * closed solid. The classification is the shape's own topology, read once
+ * at wrap; nothing mutates it afterwards.
+ */
+function shapeIsSheet(shape: TopoDS_Shape, oc: OpenCascadeInstance): boolean {
+  const type = shape.ShapeType();
+  if (type === oc.TopAbs_ShapeEnum.TopAbs_SHELL) return true;
+  if (type === oc.TopAbs_ShapeEnum.TopAbs_FACE) return true;
+  if (type === oc.TopAbs_ShapeEnum.TopAbs_COMPOUND) {
+    // A compound is a sheet only when it carries free shells/faces and NO
+    // solid: an empty compound (the booleans' empty result) is the empty
+    // SOLID — volume 0, bounds failure — never a sheet.
+    const solids = new oc.TopExp_Explorer(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+    );
+    const hasSolid = solids.More();
+    solids.delete();
+    if (hasSolid) return false;
+    const shells = new oc.TopExp_Explorer(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_SHELL,
+    );
+    const faces = new oc.TopExp_Explorer(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    );
+    const isSheet = shells.More() || faces.More();
+    shells.delete();
+    faces.delete();
+    return isSheet;
+  }
+  return false;
 }
 
 /**
@@ -486,6 +535,14 @@ interface SolidPayload {
 export interface ImportedStepSolid {
   readonly solid: KernelSolid;
   readonly origin: "imported-step";
+  /**
+   * Present exactly when the ref is an OPEN SHELL (Phase 48 — the sheet
+   * class of the `imported-step` provenance): a free-standing shell the
+   * exchange carried, not the boundary of a solid. A sheet ref answers
+   * the sheet body kind's semantics — `area`/`bounds`/`tessellate`
+   * measure it, `volume` and every solid-consuming operation decline it.
+   */
+  readonly sheet?: true;
 }
 
 /**
@@ -508,6 +565,8 @@ export interface ImportedStepModel {
 export interface ImportedBrepSolid {
   readonly solid: KernelSolid;
   readonly origin: "imported-brep";
+  /** Present exactly when the ref is an open shell (Phase 48, the STEP twin). */
+  readonly sheet?: true;
 }
 
 /**
@@ -633,7 +692,8 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const oc = runtime[RUNTIME_BRAND];
   const tag = createSolidTag<SolidPayload>();
 
-  const wrapSolid = (shape: TopoDS_Shape): KernelSolid => tag.wrap({ shape });
+  const wrapSolid = (shape: TopoDS_Shape): KernelSolid =>
+    tag.wrap({ shape, sheet: shapeIsSheet(shape, oc) });
 
   const shapeOf = (
     solid: KernelSolid,
@@ -645,6 +705,38 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         kernelError(
           KERNEL_ERROR_CODES.solidNotOwned,
           `${operation} rejected a solid handle that this kernel instance did not create (or has already disposed).`,
+        ),
+      );
+    }
+    return ok(payload.shape);
+  };
+
+  /**
+   * The Phase 48 sheet gate: resolves a handle that must be a CLOSED
+   * SOLID, declining an open-sheet payload with the structured
+   * unsupported code — the per-op "does this accept sheets?" answer every
+   * solid-consuming operation gives honestly instead of feeding an open
+   * shell to a closed-solid engine route (which would either throw raw or
+   * fabricate a closure).
+   */
+  const closedSolidOf = (
+    solid: KernelSolid,
+    operation: string,
+  ): KernelResult<TopoDS_Shape> => {
+    const payload = tag.unwrap(solid);
+    if (payload === undefined || payload.shape === null) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.solidNotOwned,
+          `${operation} rejected a solid handle that this kernel instance did not create (or has already disposed).`,
+        ),
+      );
+    }
+    if (payload.sheet) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          `${operation} declined a sheet body: the operation consumes closed solids, and an open shell bounds no material (trim/knit/thicken a sheet into a solid first — Phase 48 builds sheets; the surface-mending operations are Phase 49).`,
         ),
       );
     }
@@ -798,7 +890,9 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     }
     const shapes: TopoDS_Shape[] = [];
     for (const solid of solids) {
-      const shape = shapeOf(solid, operation);
+      // Phase 48: booleans consume CLOSED SOLIDS only — a sheet operand
+      // declines structurally (the closedSolidOf gate names the reason).
+      const shape = closedSolidOf(solid, operation);
       if (!shape.ok) return fail(shape.error);
       shapes.push(shape.value);
     }
@@ -1066,15 +1160,54 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * Extracts the face of a UV-bounded `BRepBuilderAPI_MakeFace` build
+   * (Phase 48's `createSheet` patch route), disposing the maker either
+   * way and failing total inside the caller's no-throw boundary.
+   */
+  const faceOf = (
+    mkFace: { IsDone(): boolean; Face(): TopoDS_Face; delete(): void },
+    label: string,
+  ): TopoDS_Shape => {
+    if (!mkFace.IsDone()) {
+      mkFace.delete();
+      throw new Error(`the ${label} patch did not build.`);
+    }
+    const face = mkFace.Face();
+    mkFace.delete();
+    return face;
+  };
+
+  /**
    * The exact prism (Phase 26.1): profile wire → face →
    * `BRepPrimAPI_MakePrism` along local z, then the placement transform
    * (rotation first about the world-origin axis, translation second).
+   *
+   * The Phase 48 SHEET variant prisms the WIRE itself: OCCT sweeps every
+   * edge of an un-faced wire into a face of the result shell, so the
+   * product is the lateral wall set with NO caps (probed: the 30×20×10
+   * rectangle prism's `BRepGProp` area is exactly the perimeter × height,
+   * the shape type `TopAbs_SHELL`).
    */
   const newExtrusion = (
     input: ProfileExtrudeInput,
     height: number,
   ): TopoDS_Shape => {
-    const face = profileFace(profileWire(input.loop));
+    const wire = profileWire(input.loop);
+    if (input.sheet === true) {
+      const sweep =
+        input.direction === -1
+          ? new oc.gp_Vec(0, 0, -height)
+          : new oc.gp_Vec(0, 0, height);
+      const mkPrism = new oc.BRepPrimAPI_MakePrism(wire, sweep, false, true);
+      wire.delete();
+      sweep.delete();
+      if (!mkPrism.IsDone()) {
+        mkPrism.delete();
+        throw new Error("the sheet prism did not build.");
+      }
+      return buildShape(mkPrism);
+    }
+    const face = profileFace(wire);
     const sweep =
       input.direction === -1
         ? new oc.gp_Vec(0, 0, -height)
@@ -1186,7 +1319,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     input: ProfileRevolveInput,
     sweep: number,
   ): TopoDS_Shape => {
-    const face = profileFace(profileWire(input.loop));
+    const wire = profileWire(input.loop);
     const [px, py] = input.axis.point;
     const [dx, dy] = input.axis.direction;
     const origin = new oc.gp_Pnt(px, py, 0);
@@ -1194,9 +1327,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     const axis = new oc.gp_Ax1(origin, direction);
     origin.delete();
     direction.delete();
-    const mkRevol = new oc.BRepPrimAPI_MakeRevol(face, axis, sweep, false);
+    // Phase 48 sheet variant: revolve the WIRE — the surface of revolution
+    // the loop's own boundary sweeps, no start/end meridian caps (probed:
+    // the π-swept 5..10×0..5 rectangle answers exactly walls + annuli).
+    const carrier: TopoDS_Shape =
+      input.sheet === true ? wire : profileFace(wire);
+    const mkRevol = new oc.BRepPrimAPI_MakeRevol(carrier, axis, sweep, false);
     axis.delete();
-    face.delete();
+    carrier.delete();
     if (!mkRevol.IsDone()) {
       mkRevol.delete();
       throw new Error("the revolution did not build.");
@@ -1304,10 +1442,13 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     if (ready) {
       mkPipe.Build();
     }
-    const solidOk = ready && mkPipe.MakeSolid();
+    // Phase 48 sheet variant: without MakeSolid the pipe stays the OPEN
+    // swept wall — the profile boundary carried along the spine, no end
+    // caps and no closure (the solid twin's exact machinery otherwise).
+    const built = ready && (input.sheet === true || mkPipe.MakeSolid());
     spine.delete();
     profile.delete();
-    if (!ready || !solidOk) {
+    if (!ready || !built) {
       mkPipe.delete();
       throw new Error("the swept pipe did not build into a solid.");
     }
@@ -1338,8 +1479,16 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const newLoft = (
     sections: readonly ProfileLoftSectionInput[],
     stations: readonly number[],
+    sheetLoft?: boolean,
   ): TopoDS_Shape => {
-    const mkLoft = new oc.BRepOffsetAPI_ThruSections(true, true, 1e-6);
+    // Phase 48: isSolid=false is the SHEET form — the ruled walls between
+    // consecutive loops, no first/last caps (the probed 20×10 stations at
+    // distance 8 answer exactly perimeter × distance).
+    const mkLoft = new oc.BRepOffsetAPI_ThruSections(
+      sheetLoft !== true,
+      true,
+      1e-6,
+    );
     const segmentCount = sections[0]?.loop.length ?? 0;
     const authoredCorrespondence = sections.every(
       (section) => section.loop.length === segmentCount,
@@ -1745,6 +1894,307 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       });
     },
 
+    createSheet(input: SheetSurfaceInput): KernelResult<KernelSolid> {
+      return run(
+        "createSheet",
+        KERNEL_ERROR_CODES.invalidLength,
+        (): KernelResult<KernelSolid> => {
+          // Validation BEFORE any OCCT call: placement first (the shared
+          // battery), then the per-kind parameter domain — every rejection
+          // structured, none reaching the engine.
+          const angle = angleIn(input.placement.rotation.angle, "createSheet");
+          if (!angle.ok) return fail(angle.error);
+          const axis = axisIn(input.placement.rotation.axis, "createSheet");
+          if (!axis.ok) return fail(axis.error);
+          const tx = lengthIn(
+            input.placement.translation.x,
+            "translation.x",
+            "createSheet",
+          );
+          if (!tx.ok) return fail(tx.error);
+          const ty = lengthIn(
+            input.placement.translation.y,
+            "translation.y",
+            "createSheet",
+          );
+          if (!ty.ok) return fail(ty.error);
+          const tz = lengthIn(
+            input.placement.translation.z,
+            "translation.z",
+            "createSheet",
+          );
+          if (!tz.ok) return fail(tz.error);
+          const sweepIn = (
+            value: AngleValue,
+            name: string,
+          ): KernelResult<number> => {
+            const swept = angleIn(value, "createSheet");
+            if (!swept.ok) return fail(swept.error);
+            if (!(swept.value > 0) || swept.value > Math.PI * 2) {
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.invalidSweepAngle,
+                  `createSheet rejected ${name} ${String(swept.value)} rad: the domain is (0, 2π] — zero sweeps no patch, beyond a full turn double-covers it.`,
+                ),
+              );
+            }
+            return swept;
+          };
+          // The untrimmed patch in the LOCAL frame (gp_Ax3 at the origin,
+          // +z the placement's carried axis), then the placement transform.
+          let patch: TopoDS_Shape;
+          const coordinate = new oc.gp_Ax3();
+          try {
+            switch (input.kind) {
+              case "plane": {
+                const uMin = lengthIn(input.uMin, "uMin", "createSheet");
+                if (!uMin.ok) return fail(uMin.error);
+                const uMax = lengthIn(input.uMax, "uMax", "createSheet");
+                if (!uMax.ok) return fail(uMax.error);
+                const vMin = lengthIn(input.vMin, "vMin", "createSheet");
+                if (!vMin.ok) return fail(vMin.error);
+                const vMax = lengthIn(input.vMax, "vMax", "createSheet");
+                if (!vMax.ok) return fail(vMax.error);
+                if (!(uMax.value > uMin.value) || !(vMax.value > vMin.value)) {
+                  return fail(
+                    kernelError(
+                      KERNEL_ERROR_CODES.invalidLength,
+                      `createSheet rejected the plane patch [${String(uMin.value)}, ${String(uMax.value)}] × [${String(vMin.value)}, ${String(vMax.value)}]: each parameter range must be strictly increasing.`,
+                    ),
+                  );
+                }
+                const plane = new oc.gp_Pln(
+                  new oc.gp_Pnt(0, 0, 0),
+                  new oc.gp_Dir(0, 0, 1),
+                );
+                const mkFace = new oc.BRepBuilderAPI_MakeFace(
+                  plane,
+                  uMin.value,
+                  uMax.value,
+                  vMin.value,
+                  vMax.value,
+                );
+                patch = faceOf(mkFace, "plane");
+                plane.delete();
+                break;
+              }
+              case "cylinder": {
+                const radius = positiveLength(
+                  input.radius,
+                  "radius",
+                  "createSheet",
+                );
+                if (!radius.ok) return fail(radius.error);
+                const height = positiveLength(
+                  input.height,
+                  "height",
+                  "createSheet",
+                );
+                if (!height.ok) return fail(height.error);
+                const uSweep = sweepIn(input.uSweep, "uSweep");
+                if (!uSweep.ok) return fail(uSweep.error);
+                const surface = new oc.gp_Cylinder(coordinate, radius.value);
+                const mkFace = new oc.BRepBuilderAPI_MakeFace(
+                  surface,
+                  0,
+                  uSweep.value,
+                  0,
+                  height.value,
+                );
+                patch = faceOf(mkFace, "cylinder");
+                surface.delete();
+                break;
+              }
+              case "cone": {
+                const bottom = positiveLength(
+                  input.bottomRadius,
+                  "bottomRadius",
+                  "createSheet",
+                );
+                if (!bottom.ok) return fail(bottom.error);
+                const top = nonNegativeLength(
+                  input.topRadius,
+                  "topRadius",
+                  "createSheet",
+                );
+                if (!top.ok) return fail(top.error);
+                const height = positiveLength(
+                  input.height,
+                  "height",
+                  "createSheet",
+                );
+                if (!height.ok) return fail(height.error);
+                const uSweep = sweepIn(input.uSweep, "uSweep");
+                if (!uSweep.ok) return fail(uSweep.error);
+                // The analytic half-angle (negative narrows toward +z) and
+                // the slant-parameter range: gp_Cone parametrizes
+                // P(u,v) = O + (R + v·sin α)(cos u·X + sin u·Y) + v·cos α·Z,
+                // so v runs the SLANT from the base circle (probed).
+                const halfAngle = Math.atan2(
+                  top.value - bottom.value,
+                  height.value,
+                );
+                const slant = Math.hypot(
+                  height.value,
+                  bottom.value - top.value,
+                );
+                const surface = new oc.Geom_ConicalSurface(
+                  coordinate,
+                  halfAngle,
+                  bottom.value,
+                );
+                const mkFace = new oc.BRepBuilderAPI_MakeFace(
+                  surface,
+                  0,
+                  uSweep.value,
+                  0,
+                  slant,
+                  1e-6,
+                );
+                patch = faceOf(mkFace, "cone");
+                surface.delete();
+                break;
+              }
+              case "sphere": {
+                const radius = positiveLength(
+                  input.radius,
+                  "radius",
+                  "createSheet",
+                );
+                if (!radius.ok) return fail(radius.error);
+                const vMin = angleIn(input.vMin, "createSheet");
+                if (!vMin.ok) return fail(vMin.error);
+                const vMax = angleIn(input.vMax, "createSheet");
+                if (!vMax.ok) return fail(vMax.error);
+                const uSweep = sweepIn(input.uSweep, "uSweep");
+                if (!uSweep.ok) return fail(uSweep.error);
+                if (
+                  !(vMin.value >= 0) ||
+                  !(vMax.value <= Math.PI) ||
+                  !(vMax.value > vMin.value)
+                ) {
+                  return fail(
+                    kernelError(
+                      KERNEL_ERROR_CODES.invalidSweepAngle,
+                      `createSheet rejected the sphere polar range [${String(vMin.value)}, ${String(vMax.value)}] rad: it must be strictly increasing inside [0, π] (0 the +z pole, π/2 the equator, π the −z pole).`,
+                    ),
+                  );
+                }
+                const surface = new oc.gp_Sphere(coordinate, radius.value);
+                const mkFace = new oc.BRepBuilderAPI_MakeFace(
+                  surface,
+                  0,
+                  uSweep.value,
+                  vMin.value,
+                  vMax.value,
+                );
+                patch = faceOf(mkFace, "sphere");
+                surface.delete();
+                break;
+              }
+              case "torus": {
+                const major = positiveLength(
+                  input.majorRadius,
+                  "majorRadius",
+                  "createSheet",
+                );
+                if (!major.ok) return fail(major.error);
+                const minor = positiveLength(
+                  input.minorRadius,
+                  "minorRadius",
+                  "createSheet",
+                );
+                if (!minor.ok) return fail(minor.error);
+                const uSweep = sweepIn(input.uSweep, "uSweep");
+                if (!uSweep.ok) return fail(uSweep.error);
+                const vSweep = sweepIn(input.vSweep, "vSweep");
+                if (!vSweep.ok) return fail(vSweep.error);
+                if (!(major.value > minor.value)) {
+                  return fail(
+                    kernelError(
+                      KERNEL_ERROR_CODES.invalidLength,
+                      `createSheet rejected the torus (major ${String(major.value)} mm, minor ${String(minor.value)} mm): a ring torus needs majorRadius > minorRadius — a spindle or self-intersecting torus is outside the honest subset.`,
+                    ),
+                  );
+                }
+                // The single-thread binding carries no Geom_ToroidalSurface
+                // (probed): the torus patch rides the WIRE-REVOLUTION route
+                // — the tube arc (from the outer equator, over the tube's
+                // +z side, the standard P(u,v) parametrization) revolved
+                // about the local z axis by uSweep. Analytically the same
+                // trimmed toroidal patch (probed: full circle × 2π answers
+                // exactly 4π²Rr).
+                const centre = new oc.gp_Pnt(major.value, 0, 0);
+                const tubeNormal = new oc.gp_Dir(0, 1, 0);
+                const tubeX = new oc.gp_Dir(1, 0, 0);
+                const tubeFrame = new oc.gp_Ax2(centre, tubeNormal, tubeX);
+                const circ = new oc.gp_Circ(tubeFrame, minor.value);
+                const mkEdge = new oc.BRepBuilderAPI_MakeEdge(
+                  circ,
+                  0,
+                  vSweep.value,
+                );
+                const edge = mkEdge.Edge();
+                const mkWire = new oc.BRepBuilderAPI_MakeWire(edge);
+                const wire = mkWire.Wire();
+                const zOrigin = new oc.gp_Pnt(0, 0, 0);
+                const zDir = new oc.gp_Dir(0, 0, 1);
+                const axis = new oc.gp_Ax1(zOrigin, zDir);
+                const mkRevol = new oc.BRepPrimAPI_MakeRevol(
+                  wire,
+                  axis,
+                  uSweep.value,
+                  false,
+                );
+                wire.delete();
+                mkWire.delete();
+                edge.delete();
+                mkEdge.delete();
+                circ.delete();
+                tubeFrame.delete();
+                tubeX.delete();
+                tubeNormal.delete();
+                centre.delete();
+                axis.delete();
+                zDir.delete();
+                zOrigin.delete();
+                if (!mkRevol.IsDone()) {
+                  mkRevol.delete();
+                  throw new Error("the torus patch did not build.");
+                }
+                patch = buildShape(mkRevol);
+                break;
+              }
+            }
+          } finally {
+            coordinate.delete();
+          }
+          const rot = axisAngleMatrix(axis.value, angle.value);
+          const trsf = new oc.gp_Trsf();
+          trsf.SetValues(
+            rot[0]?.[0] ?? 0,
+            rot[0]?.[1] ?? 0,
+            rot[0]?.[2] ?? 0,
+            tx.value,
+            rot[1]?.[0] ?? 0,
+            rot[1]?.[1] ?? 0,
+            rot[1]?.[2] ?? 0,
+            ty.value,
+            rot[2]?.[0] ?? 0,
+            rot[2]?.[1] ?? 0,
+            rot[2]?.[2] ?? 0,
+            tz.value,
+          );
+          const placed = buildShape(
+            new oc.BRepBuilderAPI_Transform(patch, trsf, false, true),
+          );
+          trsf.delete();
+          patch.delete();
+          return ok(wrapSolid(placed));
+        },
+      );
+    },
+
     extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
       return run("extrude", KERNEL_ERROR_CODES.invalidProfile, () => {
         // Validation BEFORE any OCCT call (the silent-mirror rule): height,
@@ -1839,6 +2289,17 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             }
             taper = taperAngle.value;
           }
+        }
+        // Phase 48: the sheet + taper combination declines — the drafting
+        // engine pulls the faces of a SOLID; on an open wall set its
+        // closure-free inset is undefined geometry, not a draft.
+        if (input.sheet === true && taper !== undefined && taper !== 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.unsupportedOperation,
+              "extrude declined a sheet extrusion with a taper: the drafting engine pulls the faces of a closed solid; draft the solid form instead.",
+            ),
+          );
         }
         let prism = newExtrusion(input, height.value);
         if (taper !== undefined) {
@@ -2234,7 +2695,11 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        const lofted = newLoft(input.sections, loftStations(input.sections));
+        const lofted = newLoft(
+          input.sections,
+          loftStations(input.sections),
+          input.sheet === true,
+        );
         // Placement: the transform composition (rotation first, translation
         // second), applied via BRepBuilderAPI_Transform like every placed
         // shape here.
@@ -2269,7 +2734,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         // radius, and the edge-address structure; then the ordinal
         // resolution against the target's own snapshot numbering (the
         // stale-reference check), and only then the builder.
-        const shape = shapeOf(input.target, "fillet");
+        const shape = closedSolidOf(input.target, "fillet");
         if (!shape.ok) return fail(shape.error);
         const radius = positiveLength(input.radius, "radius", "fillet");
         if (!radius.ok) return fail(radius.error);
@@ -2340,7 +2805,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         // THROWS inside the WASM boundary (MakeFillet declines the same
         // edge with IsDone = false), and this boundary is what normalizes
         // that throw into the structured chamfer failure.
-        const shape = shapeOf(input.target, "chamfer");
+        const shape = closedSolidOf(input.target, "chamfer");
         if (!shape.ok) return fail(shape.error);
         const distance = positiveLength(input.distance, "distance", "chamfer");
         if (!distance.ok) return fail(distance.error);
@@ -2412,7 +2877,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         // NEVER fail IsDone, so the no-throw boundary (the exact-collapse
         // `Shape()` throw) and the closing post-condition are what surface
         // them structured.
-        const shape = shapeOf(input.target, "shell");
+        const shape = closedSolidOf(input.target, "shell");
         if (!shape.ok) return fail(shape.error);
         const thickness = positiveLength(input.thickness, "thickness", "shell");
         if (!thickness.ok) return fail(thickness.error);
@@ -2521,7 +2986,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       // answer carries a NEGATIVE volume, a silent degenerate), so the
       // adapter measures and refuses.
       return run("thicken", KERNEL_ERROR_CODES.thickenFailed, () => {
-        const shape = shapeOf(input.target, "thicken");
+        const shape = closedSolidOf(input.target, "thicken");
         if (!shape.ok) return fail(shape.error);
         const thickness = positiveLength(
           input.thickness,
@@ -2598,7 +3063,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       // only then sweep and close. The no-throw boundary normalizes any
       // WASM-side throw into the structured face-op failure.
       return run("moveFace", KERNEL_ERROR_CODES.faceOpFailed, () => {
-        const shape = shapeOf(input.target, "moveFace");
+        const shape = closedSolidOf(input.target, "moveFace");
         if (!shape.ok) return fail(shape.error);
         const direction = axisIn(input.direction, "moveFace");
         if (!direction.ok) return fail(direction.error);
@@ -2658,7 +3123,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       // side, with the planner's own removed-extent measure refusing the
       // no-op before anything builds.
       return run("replaceFace", KERNEL_ERROR_CODES.faceOpFailed, () => {
-        const shape = shapeOf(input.target, "replaceFace");
+        const shape = closedSolidOf(input.target, "replaceFace");
         if (!shape.ok) return fail(shape.error);
         if (!Number.isInteger(input.face) || input.face < 0) {
           return fail(
@@ -2923,7 +3388,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       // unsupported answer names the probe — never a degenerate solid, and
       // never a fake close.
       return run("deleteFace", KERNEL_ERROR_CODES.faceOpFailed, () => {
-        const shape = shapeOf(input.target, "deleteFace");
+        const shape = closedSolidOf(input.target, "deleteFace");
         if (!shape.ok) return fail(shape.error);
         if (!Number.isInteger(input.face) || input.face < 0) {
           return fail(
@@ -2967,7 +3432,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       tools: readonly KernelSolid[],
     ): KernelResult<KernelSolid> {
       return run("subtract", KERNEL_ERROR_CODES.invalidOperands, () => {
-        const targetShape = shapeOf(target, "subtract");
+        const targetShape = closedSolidOf(target, "subtract");
         if (!targetShape.ok) return fail(targetShape.error);
         const toolShapes = operandsOf(tools, 1, "subtract");
         if (!toolShapes.ok) return fail(toolShapes.error);
@@ -3345,6 +3810,18 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       // Same no-throw boundary: a VolumeProperties binding throw is
       // normalized, never escaped (the props wrapper's finally stays inside).
       return run("volume", KERNEL_ERROR_CODES.invalidOperands, () => {
+        // Phase 48: an open sheet bounds no material — VolumeProperties
+        // over an open shell would fabricate a divergence-theorem number,
+        // so the measurement declines structurally instead.
+        const payload = tag.unwrap(solid);
+        if (payload !== undefined && payload.sheet) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.unsupportedOperation,
+              "volume declined a sheet body: an open shell bounds no material — measure its area, or thicken it into a solid (Phase 49) first.",
+            ),
+          );
+        }
         const shape = shapeOf(solid, "volume");
         if (!shape.ok) return fail(shape.error);
         // Exact BREP integration; an empty solid measures exactly 0.
@@ -3479,6 +3956,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           solids: shapes.value.shapes.map((shape) => ({
             solid: wrapSolid(shape),
             origin: "imported-step",
+            ...(shapeIsSheet(shape, oc) ? { sheet: true as const } : {}),
           })),
         });
       } catch (error) {

@@ -49,6 +49,7 @@ import {
   type ProfileRevolveInput,
   type ProfileSegmentInput,
   type ProfileSweepInput,
+  type SheetSurfaceInput,
   type Tessellation,
   tessellationTriangleCount,
 } from "./contract";
@@ -3072,6 +3073,116 @@ export function defineKernelContractSuite(
         KERNEL_ERROR_CODES.invalidOperands,
         "negative face ordinal",
       );
+    });
+
+    it("answers every sheet call with the structured unsupported code on a sheets:false kernel (the closed-solid probe)", () => {
+      // Phase 48's cross-kernel decline spec: the fake, Manifold, and
+      // JSCAD engines are closed-solid — their currencies carry a volume
+      // and an inside, and an open shell has neither — so every sheet
+      // entry point declines upfront, exactly like their sweep/loft
+      // siblings. On a sheets:true kernel the same calls SUCCEED, so the
+      // spec gates on the declared capability.
+      const kernel = createKernel();
+      const loop = [
+        { kind: "line", start: [0, 0], end: [30, 0] },
+        { kind: "line", start: [30, 0], end: [30, 20] },
+        { kind: "line", start: [30, 20], end: [0, 20] },
+        { kind: "line", start: [0, 20], end: [0, 0] },
+      ] as const;
+      const placement = {
+        rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+        translation: { x: length(0), y: length(0), z: length(0) },
+      };
+      const planeSheet: SheetSurfaceInput = {
+        kind: "plane",
+        placement,
+        uMin: length(0),
+        uMax: length(30),
+        vMin: length(0),
+        vMax: length(20),
+      };
+      if (!kernel.capabilities.sheets) {
+        expectKernelFailure(
+          kernel.extrude({
+            loop,
+            height: length(10),
+            direction: 1,
+            placement,
+            sheet: true,
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "sheet extrude",
+        );
+        expectKernelFailure(
+          kernel.revolve({
+            loop,
+            axis: { point: [0, 0], direction: [0, 1] },
+            angle: angle(Math.PI),
+            placement,
+            sheet: true,
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "sheet revolve",
+        );
+        expectKernelFailure(
+          kernel.sweep({
+            loop,
+            path: [{ kind: "line", start: [0, 0], end: [0, 10] }],
+            placement,
+            sheet: true,
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "sheet sweep",
+        );
+        expectKernelFailure(
+          kernel.loft({
+            sections: [
+              { loop, z: length(0) },
+              { loop, z: length(8) },
+            ],
+            placement,
+            sheet: true,
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "sheet loft",
+        );
+        expectKernelFailure(
+          kernel.createSheet(planeSheet),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "createSheet",
+        );
+        return;
+      }
+      // The producing kernel builds every sheet form; each one measures
+      // (exact-area fixtures live in the OCCT adapter's own suite, judged
+      // at the exact band) and declines volume structurally.
+      const sheets = [
+        unwrapKernelResult(
+          kernel.extrude({
+            loop,
+            height: length(10),
+            direction: 1,
+            placement,
+            sheet: true,
+          }),
+          "sheet extrude",
+        ),
+        unwrapKernelResult(kernel.createSheet(planeSheet), "createSheet plane"),
+      ];
+      for (const sheet of sheets) {
+        const area = unwrapKernelResult(kernel.area(sheet), "sheet area");
+        expect(area).toBeGreaterThan(0);
+        expectKernelFailure(
+          kernel.volume(sheet),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "sheet volume",
+        );
+        expectKernelFailure(
+          kernel.union([sheet, box(kernel, 10, 10, 10)]),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "sheet union operand",
+        );
+      }
     });
 
     it("declines deleteFace with the structured unsupported code on every kernel (the probed-out op)", () => {

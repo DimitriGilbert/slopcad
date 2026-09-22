@@ -35,7 +35,11 @@ export type { KernelBackendId } from "./backend-ids";
 
 export type { KernelCapabilities } from "./capabilities";
 
-export { KERNEL_ERROR_CODES, tessellationTriangleCount } from "./contract";
+export {
+  KERNEL_ERROR_CODES,
+  SHEET_SURFACE_KINDS,
+  tessellationTriangleCount,
+} from "./contract";
 export type {
   BoxInput,
   ChamferInput,
@@ -67,6 +71,8 @@ export type {
   SectionFaceMeasure,
   SectionInput,
   SectionResult,
+  SheetSurfaceInput,
+  SheetSurfaceKind,
   ShellInput,
   SphereInput,
   SweepPathSegmentInput,

@@ -560,6 +560,7 @@ describe("bridge feature kinds", () => {
       "moveFace",
       "replaceFace",
       "deleteFace",
+      "extrude-surface",
     ]);
   });
 });

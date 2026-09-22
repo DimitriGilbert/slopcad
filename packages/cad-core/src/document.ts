@@ -108,6 +108,18 @@ import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 export interface Body {
   readonly id: BodyId;
   readonly name: string;
+  /**
+   * Present exactly when the body is a SHEET body (Phase 48 — the second
+   * body kind): an OPEN SHELL with open-shell semantics — it measures
+   * (area, bounds), tessellates, and transforms, carries no volume, and
+   * every solid-consuming feature declines it. Absent = the default SOLID
+   * body (every pre-Phase-48 body), so solid-only documents serialize
+   * byte-identically to their pre-kind form and an old reader's tolerant
+   * body parse drops the field (a display-class marker on the record: no
+   * geometry, feature, or parameter changes with it — the display-flags
+   * additive precedent).
+   */
+  readonly kind?: "sheet";
   /** Present exactly when the body is hidden (`false`); default visible. */
   readonly visible?: boolean;
   /** Present exactly when the body is isolated (`true`); default not. */
@@ -118,6 +130,8 @@ export interface Body {
 export interface BodyInput {
   readonly id?: BodyId;
   readonly name: string;
+  /** Present exactly when the body is a sheet body; absent = solid. */
+  readonly kind?: "sheet";
   /** Present exactly when the body is hidden (`false`); default visible. */
   readonly visible?: boolean;
   /** Present exactly when the body is isolated (`true`); default not. */
@@ -860,6 +874,7 @@ export function addBody(
   const body = Object.freeze({
     id,
     name: name.value,
+    ...(input.kind === "sheet" ? { kind: "sheet" as const } : {}),
     ...(input.visible === undefined ? {} : { visible: input.visible }),
     ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
   });
@@ -1998,6 +2013,8 @@ export function getDocumentSection(
 export interface SerializedBody {
   readonly id: string;
   readonly name: string;
+  /** Present exactly when the body is a sheet; absent = solid (additive). */
+  readonly kind?: "sheet";
   /** Present exactly when the body is hidden; absent = visible (additive). */
   readonly visible?: false;
   /** Present exactly when the body is isolated; absent = not (additive). */
@@ -2099,6 +2116,10 @@ export function serializeCadDocument(
     bodies: document.bodies.map((body) => ({
       id: body.id,
       name: body.name,
+      // The sheet kind rides only when present (Phase 48) — the display
+      // flags' additive precedent — so solid-only documents serialize
+      // byte-identically to their pre-kind form.
+      ...(body.kind === "sheet" ? { kind: "sheet" as const } : {}),
       // The display flags ride only when non-default (Phase 44) — the
       // id-generator counter precedent — so a flagless document
       // serializes byte-identically to its pre-flag form.
@@ -2226,6 +2247,21 @@ function parseSerializedBody(input: unknown): ParseResult<Body, DocumentError> {
   }
   const name = validateBodyName(input.name);
   if (!name.ok) return name;
+  // The Phase 48 body kind: the only declared sheet literal — anything
+  // else on the field is a malformed body, never a silent solid.
+  if (
+    input.kind !== undefined &&
+    input.kind !== null &&
+    input.kind !== "sheet"
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        'A serialized body\'s kind must be "sheet" when present; any other value is unknown (this reader knows solid bodies and sheet bodies).',
+        input.kind,
+      ),
+    );
+  }
   // The Phase 44 display flags: strictly boolean when present (never a
   // smuggled truthy), absent meaning the default (visible, not isolated).
   if (input.visible !== undefined && typeof input.visible !== "boolean") {
@@ -2250,6 +2286,7 @@ function parseSerializedBody(input: unknown): ParseResult<Body, DocumentError> {
     Object.freeze({
       id: parsedId.value,
       name: name.value,
+      ...(input.kind === "sheet" ? { kind: "sheet" as const } : {}),
       ...(input.visible === undefined ? {} : { visible: input.visible }),
       ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
     }),
@@ -2678,6 +2715,7 @@ export function parseCadDocument(
     const added = addBody(document, {
       id: body.id,
       name: body.name,
+      ...(body.kind === "sheet" ? { kind: "sheet" as const } : {}),
       ...(body.visible === undefined ? {} : { visible: body.visible }),
       ...(body.isolated === undefined ? {} : { isolated: body.isolated }),
     });

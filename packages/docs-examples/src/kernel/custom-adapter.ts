@@ -29,6 +29,7 @@ import {
   type ProfileRevolveInput,
   type ProfileSweepInput,
   type ReplaceFaceInput,
+  type SheetSurfaceInput,
   type ShellInput,
   type SphereInput,
   type ThickenInput,
@@ -67,6 +68,8 @@ export function withOperationLog(kernel: GeometryKernel): LoggedKernel {
       log("createCylinder", () => kernel.createCylinder(input)),
     createCone: (input: ConeInput) =>
       log("createCone", () => kernel.createCone(input)),
+    createSheet: (input: SheetSurfaceInput) =>
+      log("createSheet", () => kernel.createSheet(input)),
     extrude: (input: ProfileExtrudeInput) =>
       log("extrude", () => kernel.extrude(input)),
     revolve: (input: ProfileRevolveInput) =>

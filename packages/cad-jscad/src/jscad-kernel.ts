@@ -177,6 +177,7 @@ import {
   type ReplaceFaceInput,
   type SectionInput,
   type SectionResult,
+  type SheetSurfaceInput,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -359,6 +360,7 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
+  sheets: false,
   localFaceOps: false,
   section: true,
 });
@@ -645,7 +647,25 @@ export function createJscadKernel(): GeometryKernel {
       });
     },
 
+    createSheet(input: SheetSurfaceInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "JSCAD's engine declined createSheet: the engine is closed-solid — its currency carries a volume and an inside, and an open sheet has neither (the sheets capability is false; the Phase 48 probe).",
+        ),
+      );
+    },
+
     extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "JSCAD's engine declined a sheet extrude: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       return run("extrude", KERNEL_ERROR_CODES.invalidProfile, () => {
         const height = positiveLength(input.height, "height", "extrude");
         if (!height.ok) return fail(height.error);
@@ -803,6 +823,14 @@ export function createJscadKernel(): GeometryKernel {
     },
 
     revolve(input: ProfileRevolveInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "JSCAD's engine declined a sheet revolve: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       return run("revolve", KERNEL_ERROR_CODES.invalidProfile, () => {
         // The shared 26.2 validation battery, before any JSCAD work: the
         // sweep-angle domain, the axis direction, the placement, the
@@ -995,6 +1023,14 @@ export function createJscadKernel(): GeometryKernel {
     },
 
     sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "JSCAD's engine declined a sheet sweep: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       return run("sweep", KERNEL_ERROR_CODES.invalidProfile, () => {
         // The shared 26.3 validation battery, before any JSCAD work — the
         // same structured rejections every implementing kernel runs.
@@ -1159,6 +1195,14 @@ export function createJscadKernel(): GeometryKernel {
     },
 
     loft(input: ProfileLoftInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "JSCAD's engine declined a sheet loft: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       return run("loft", KERNEL_ERROR_CODES.invalidProfile, () => {
         // The shared 26.4 validation battery, before any JSCAD work — the
         // same structured rejections every implementing kernel runs. The

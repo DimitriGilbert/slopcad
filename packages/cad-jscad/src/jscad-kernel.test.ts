@@ -63,6 +63,7 @@ describe("createJscadKernel", () => {
       mirror: true,
       section: true,
       surfaceArea: true,
+      sheets: false,
       localFaceOps: false,
     });
   });

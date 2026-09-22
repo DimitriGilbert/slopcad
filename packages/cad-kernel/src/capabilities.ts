@@ -131,6 +131,25 @@
  *   declare `true`; Manifold and JSCAD have no 3D offset at all (the
  *   shell's probed verdict verbatim) and answer every call with the
  *   structured `kernel/unsupported-operation`.
+ * - `sheets`: the contract's SHEET bodies (Phase 48 — open shells) are
+ *   implemented honestly. A sheet is the contract's second body kind: the
+ *   `sheet` flag on `extrude`/`revolve`/`sweep`/`loft` returns the SWEPT
+ *   WALLS only (no caps), and `createSheet` answers the five untrimmed
+ *   analytic patches (plane, cylinder, cone, sphere, torus). Only OCCT
+ *   declares `true` — its BREP carries open shells natively (probed: the
+ *   wire prism, the wire revolution, `ThruSections(isSolid=false)`, the
+ *   pipe shell without `MakeSolid`, and `MakeFace(surface, u1, u2, v1, v2)`
+ *   all yield shells whose `BRepGProp` areas are analytically exact). The
+ *   fake, Manifold, and JSCAD engines are closed-solid (their currencies
+ *   are triangle soups and manifold meshes — an open shell has no volume
+ *   and no inside/outside, which is what those engines compute), so every
+ *   sheet call answers the structured `kernel/unsupported-operation`, the
+ *   sweep/loft discipline applied to a whole body class. Sheets measure
+ *   (`area`, `bounds`, `tessellate`) and transform (`transform`, `mirror`)
+ *   on the producing kernel; `volume` and every solid-consuming operation
+ *   (booleans, fillet/chamfer/shell/thicken, the local face family, the
+ *   hole/rib/thread compositions) decline a sheet operand structurally —
+ *   never a silently wrong number or a closed-solid approximation.
  * - `localFaceOps`: the contract's LOCAL FACE operations (Phase 44 —
  *   `moveFace`, `replaceFace`, `deleteFace`, the direct-manipulation
  *   family real CAD pair with persistent face selection) are implemented
@@ -185,5 +204,6 @@ export interface KernelCapabilities {
   readonly extrudeTaper: boolean;
   readonly mirror: boolean;
   readonly surfaceArea: boolean;
+  readonly sheets: boolean;
   readonly localFaceOps: boolean;
 }

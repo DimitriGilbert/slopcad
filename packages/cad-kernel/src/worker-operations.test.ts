@@ -56,6 +56,7 @@ describe("operation vocabulary", () => {
       "solid.createSphere",
       "solid.createCylinder",
       "solid.createCone",
+      "solid.createSheet",
       "solid.extrude",
       "solid.revolve",
       "solid.sweep",
@@ -161,6 +162,36 @@ describe("operation input round-trips", () => {
       target: solidA,
       faces: [5],
       thickness: mm(2),
+    });
+  });
+
+  it("round-trips the createSheet input for each analytic patch kind (Phase 48)", () => {
+    const placement = {
+      rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+      translation: { x: mm(0), y: mm(0), z: mm(0) },
+    };
+    expectInputRoundTrip("solid.createSheet", {
+      kind: "plane",
+      placement,
+      uMin: mm(0),
+      uMax: mm(30),
+      vMin: mm(0),
+      vMax: mm(20),
+    });
+    expectInputRoundTrip("solid.createSheet", {
+      kind: "cylinder",
+      placement,
+      radius: mm(5),
+      height: mm(10),
+      uSweep: angle(Math.PI),
+    });
+    expectInputRoundTrip("solid.createSheet", {
+      kind: "torus",
+      placement,
+      majorRadius: mm(8),
+      minorRadius: mm(2),
+      uSweep: angle(Math.PI * 2),
+      vSweep: angle(Math.PI),
     });
   });
 
@@ -784,6 +815,13 @@ describe("operation input validation", () => {
         bottomRadius: 1,
         topRadius: "pointy",
         height: 2,
+      },
+      "solid.createSheet": {
+        kind: "hyperboloid",
+        placement: {},
+        radius: 1,
+        height: 2,
+        uSweep: 6,
       },
       "solid.extrude": { loop: "not-a-loop", height: 2, direction: 1 },
       "solid.revolve": { loop: [], axis: { point: [0, 0] }, angle: 2 },

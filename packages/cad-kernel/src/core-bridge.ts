@@ -402,6 +402,7 @@ export const BRIDGE_FEATURE_KINDS = [
   "moveFace",
   "replaceFace",
   "deleteFace",
+  "extrude-surface",
 ] as const;
 
 /** A feature kind the bridge knows how to execute. */
@@ -1562,6 +1563,26 @@ export function createKernelFeatureExecutor(
       };
     }
     if (ref.kind === "body") {
+      // Phase 48: a SHEET body feeding a solid-consuming feature is a
+      // structured refusal — the per-op "does this accept sheets?" answer,
+      // answered once here for every feature that resolves solids (the
+      // booleans, fillet/chamfer/shell/thicken, the local face family,
+      // holes, ribs, patterns, mirror, split, scale, threads).
+      if (
+        context.document.bodies.some(
+          (body) => body.id === ref.id && body.kind === "sheet",
+        )
+      ) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${feature.kind}" consumes solid bodies, but body "${ref.id}" is a SHEET body (an open shell — it bounds no material). Trim, knit, or thicken the sheet into a solid first; sheet-consuming operations arrive with the surface phases.`,
+            [ref],
+          ),
+        };
+      }
       const solid = solids.get(ref.id);
       if (solid === undefined) {
         return {
@@ -6773,6 +6794,117 @@ function runKernelOperation(
       return result.ok
         ? { ok: true, solid: result.value }
         : operationFailure(feature, result.error.code, result.error.message);
+    }
+    case "extrude-surface": {
+      // Phase 48's sheet seam (the one-op-at-a-time discipline the risk
+      // note pins): one sketch input (the profile source), one signed
+      // length parameter (the distance; sign = direction). The product is
+      // the OPEN lateral wall set — the kernel's `sheet: true` extrude —
+      // and the feature's output body is the document's SHEET body kind
+      // (the caller declares it with `kind: "sheet"`, the record's
+      // additive field; the executor only builds the geometry). The
+      // revolve/sweep/loft sheet twins and the datum-parametrized base
+      // sheets arrive with the Phase 49 surface tab, where their
+      // workbench authoring lands; the CONTRACT carries all of them
+      // today (the capability flag gates the whole class).
+      if (!kernel.capabilities.sheets) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "extrude-surface" builds sheet bodies, but this kernel ("${kernel.id}") does not declare the sheets capability — its engine is closed-solid, so the feature refuses before the kernel can answer (the sweep/loft capability gate convention).`,
+          ),
+        };
+      }
+      if (inputs.length !== 2) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "extrude-surface" needs exactly two inputs: a sketch input (the profile source) and a signed length parameter (the distance).`,
+          ),
+        };
+      }
+      const sheetSketchRef = inputs[0];
+      const sheetDistanceRef = inputs[1];
+      if (sheetSketchRef === undefined || sheetDistanceRef === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "extrude-surface" has a malformed input list.`,
+          ),
+        };
+      }
+      if (sheetSketchRef.kind !== "sketch") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "extrude-surface" needs a sketch input as its profile source; a ${sheetSketchRef.kind} input was declared.`,
+            [sheetSketchRef],
+          ),
+        };
+      }
+      if (sheetDistanceRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "extrude-surface" needs a parameter input as its distance; a ${sheetDistanceRef.kind} input was declared.`,
+            [sheetDistanceRef],
+          ),
+        };
+      }
+      const sheetProfile = readers.resolveProfile(sheetSketchRef);
+      if (!sheetProfile.ok) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "extrude-surface" has an unresolvable sketch profile ("${sheetSketchRef.id}"): ${sheetProfile.error.message}`,
+            [sheetSketchRef],
+          ),
+        };
+      }
+      const sheetDistance = readers.lengthParameter(
+        sheetDistanceRef,
+        "distance",
+      );
+      if (!sheetDistance.ok) {
+        return { ok: false, diagnostic: sheetDistance.diagnostic };
+      }
+      if (sheetDistance.mm === 0) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "extrude-surface" needs a non-zero distance (0 mm was given): a zero-height sheet sweeps no walls.`,
+            [sheetDistanceRef],
+          ),
+        };
+      }
+      const sheetResult = kernel.extrude({
+        loop: sheetProfile.value.loop,
+        height: lengthValue(Math.abs(sheetDistance.mm)),
+        direction: sheetDistance.mm > 0 ? 1 : -1,
+        placement: sheetProfile.value.placement,
+        sheet: true,
+      });
+      return sheetResult.ok
+        ? { ok: true, solid: sheetResult.value }
+        : operationFailure(
+            feature,
+            sheetResult.error.code,
+            sheetResult.error.message,
+          );
     }
     case "extrude": {
       // Input layout: one sketch input (the profile source), one signed
