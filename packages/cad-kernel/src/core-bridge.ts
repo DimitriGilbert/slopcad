@@ -168,6 +168,49 @@
  *   post-condition refuses a split that removed nothing (the plane misses
  *   the target) or everything (it swallows the kept side) — the hole
  *   guard's both-ways form. See `runSplitOperation`.
+ * - `patternFeature` (Phase 43) — ONE OR MORE FEATURE/BODY inputs (the
+ *   FEATURE RANGE: every instance transforms every member as one group)
+ *   plus parameter inputs read as LEG TRIPLES then SKIP ORDINALS: each
+ *   leg is a direction (ANGLE, counter-clockwise in the world XY plane)
+ *   + count (DIMENSIONLESS integer ≥ 2) + spacing (LENGTH > 0) triple —
+ *   the ASYMMETRIC SPACING ARRAY, one leg per array direction, the
+ *   instance grid the legs' cross product; the trailing DIMENSIONLESS
+ *   integers name instance ordinals to SKIP. The composition unions
+ *   every unskipped instance at the end. See `runPatternFeatureOperation`
+ *   and the shared planner `planArrayPatternInstances`.
+ * - `patternPath` (Phase 43) — one FEATURE or BODY input (the solid to
+ *   repeat), one SKETCH input (the path — resolved through the same
+ *   `paths` seam the sweep rides), and THREE parameters: count
+ *   (DIMENSIONLESS integer ≥ 2), spacing (LENGTH > 0, the arc-length
+ *   step), orientation (DIMENSIONLESS 1 = fixed, 2 = tangent-follow).
+ *   Instances sit at arc length i·spacing along the resolved chain in
+ *   the world XZ plane (local (x, z) → world (x, 0, z) — the identity
+ *   placement, documented); tangent-follow rotates each copy's world +z
+ *   onto the local tangent and is gated on `transformRotation`. See
+ *   `runPatternPathOperation` and `./path-geometry` (the shared walk).
+ * - `patternFace` (Phase 43) — one FEATURE or BODY input (the solid to
+ *   repeat, whose own face bounds the grid), one REFERENCE input (a FACE
+ *   reference addressing the target's body, resolved through the fillet
+ *   battery), and SIX parameters (two leg triples: direction + count +
+ *   spacing each, the RECTANGULAR grid in the face's plane from its
+ *   xAxis). The face's plane resolves through the datum seam
+ *   (`facePlane`); the boundary test is the tessellated point-in-region
+ *   walk (the synthetic-face discipline: the target's tessellation,
+ *   filtered to the plane, projected to 2D, tested per grid point).
+ *   Grid points outside the face boundary drop out silently-by-design
+ *   (that is the clipping the feature exists to do); a grid where NO
+ *   point qualifies declines structurally. See `runPatternFaceOperation`.
+ * - `patternLinear`'s direction generalization (Phase 43) — the direction
+ *   may ride a DATUM AXIS input (the resolved axis's full 3D unit
+ *   direction — the patternCircular datum-axis precedent) or a SKETCH
+ *   input (the resolved open chain's unit end−start vector, local
+ *   (x, z) → world (x, 0, z) — the path-pattern frame), replacing the
+ *   ANGLE parameter's world-XY direction. The angle form is unchanged.
+ * - `mirror`'s merge option (Phase 43) — the datum-plane form carries an
+ *   optional DIMENSIONLESS parameter: 1 (or absent) keeps the mirrored
+ *   copy STANDALONE (the feature's output is the reflection alone, the
+ *   Phase 39 behavior); 2 MERGES — one `union` of the target and its
+ *   reflection, the symmetric-part route. See `runMirrorOperation`.
  *
  * Feature inputs resolve to the referenced feature's (single) output body.
  * Body inputs resolve through the caller-supplied prior bodies map (solids
@@ -295,6 +338,8 @@ import {
   structuredHoleTypeOf,
   structuredHoleWorldInPlaneAxes,
 } from "./hole-specification";
+import { sweepPathProblem } from "./profile-geometry";
+import { sweepPathStationAt, sweepPathTotalLength } from "./path-geometry";
 
 /** The feature kinds the bridge interprets as kernel operations. */
 export const BRIDGE_FEATURE_KINDS = [
@@ -317,6 +362,9 @@ export const BRIDGE_FEATURE_KINDS = [
   "shell",
   "patternLinear",
   "patternCircular",
+  "patternFeature",
+  "patternPath",
+  "patternFace",
   "mirror",
   "hole",
   "rib",
@@ -956,9 +1004,10 @@ function applyMatrixTranspose(
  * The rotation carrying `from` onto `to` (both unit): axis = from × to,
  * angle = atan2(|axis|, from·to). Parallel vectors map to the identity
  * (angle 0); antiparallel to a half turn about `fallback` — deterministic
- * picks, never arbitrary.
+ * picks, never arbitrary. Shared by the executor bridge and the
+ * workbench's worker scenes (the pattern kinds' tangent-follow rotation).
  */
-function rotationFromTo(
+export function rotationFromTo(
   from: DatumVec3,
   to: DatumVec3,
   fallback: DatumVec3,
@@ -1122,14 +1171,80 @@ function resolveDatumInput(
 }
 
 /**
- * Plans one mirrored copy of `solid` about the arbitrary plane
- * {@link ResolvedDatumPlane} (Phase 39): an AXIS-ALIGNED plane (normal ± a
+ * The planned reflection of a solid about an arbitrary datum plane (the
+ * ONE source of the recipe, Phase 43): an AXIS-ALIGNED plane (normal ± a
  * world axis, the datum's resolved frame being exact) rides the DIRECT
- * `kernel.mirror` call at the plane's offset; an OBLIQUE plane composes the
+ * world-axis mirror at the plane's offset; an OBLIQUE plane composes the
  * reflection from existing contract ops — translate the plane origin to
  * the world origin, rotate the plane normal onto +x, world-plane mirror,
- * rotate back, translate back — the composition the mirror op's own
- * documentation names as the pre-datum route, now driven BY the datum.
+ * rotate back, translate back. The executor bridge
+ * ({@link runDatumPlaneMirror}) and the workbench's worker mirror scene
+ * both consume this plan, so the two routes build the identical
+ * arrangement (the `planHoleCut`/`planSplitCut` precedent).
+ *
+ * The composed form needs `transformRotation` in addition to `mirror`;
+ * callers gate the capabilities before composing (the mirror op's own
+ * documentation names the reason: a rotation-less kernel may IGNORE the
+ * rotation and silently misplace the reflection).
+ */
+export type DatumMirrorPlan =
+  | {
+      readonly kind: "direct";
+      readonly axis: MirrorPlaneAxis;
+      readonly offsetMm: number;
+    }
+  | {
+      readonly kind: "composed";
+      /** Translate by −origin, bringing the plane through the world origin. */
+      readonly toOriginMm: readonly [number, number, number];
+      /** The rotation carrying the plane normal onto +x (unit axis, rad). */
+      readonly align: { readonly axis: DatumVec3; readonly angleRad: number };
+      /** Translate back by +origin after the reflection. */
+      readonly fromOriginMm: readonly [number, number, number];
+    };
+
+/** Plans the reflection of a solid about `plane` (see {@link DatumMirrorPlan}). */
+export function planDatumMirror(plane: {
+  readonly origin: DatumVec3;
+  readonly normal: DatumVec3;
+}): DatumMirrorPlan {
+  const axes: readonly {
+    readonly axis: MirrorPlaneAxis;
+    readonly unit: DatumVec3;
+  }[] = [
+    { axis: "x", unit: [1, 0, 0] },
+    { axis: "y", unit: [0, 1, 0] },
+    { axis: "z", unit: [0, 0, 1] },
+  ];
+  const aligned = axes.find(
+    (entry) =>
+      Math.abs(Math.abs(vecDot(plane.normal, entry.unit)) - 1) <=
+      DATUM_AXIS_ALIGNMENT_TOLERANCE,
+  );
+  if (aligned !== undefined) {
+    // Direct call: the plane {p : p·unit = p·origin} is the world-axis
+    // plane at offset p·unit — identical for either normal orientation.
+    return {
+      kind: "direct",
+      axis: aligned.axis,
+      offsetMm: vecDot(plane.origin, aligned.unit),
+    };
+  }
+  const turn = rotationFromTo(plane.normal, [1, 0, 0], [0, 1, 0]);
+  return {
+    kind: "composed",
+    toOriginMm: [-plane.origin[0], -plane.origin[1], -plane.origin[2]],
+    align: { axis: turn.axis, angleRad: turn.angle },
+    fromOriginMm: [plane.origin[0], plane.origin[1], plane.origin[2]],
+  };
+}
+
+/**
+ * Plans one mirrored copy of `solid` about the arbitrary plane
+ * {@link ResolvedDatumPlane} (Phase 39): the {@link planDatumMirror} plan
+ * driven against the kernel — the direct route is one `kernel.mirror`
+ * call; the composed route is the documented translate/rotate/mirror/
+ * rotate/translate chain.
  *
  * The composition needs `transformRotation` in addition to `mirror`; a
  * kernel without either refuses structurally (the capability-gate
@@ -1142,27 +1257,14 @@ function runDatumPlaneMirror(
   solid: KernelSolid,
   plane: ResolvedDatumPlane,
 ): OperationOutcome {
-  const normal = plane.normal;
-  const axes: readonly {
-    readonly axis: MirrorPlaneAxis;
-    readonly unit: DatumVec3;
-  }[] = [
-    { axis: "x", unit: [1, 0, 0] },
-    { axis: "y", unit: [0, 1, 0] },
-    { axis: "z", unit: [0, 0, 1] },
-  ];
-  const aligned = axes.find(
-    (entry) =>
-      Math.abs(Math.abs(vecDot(normal, entry.unit)) - 1) <=
-      DATUM_AXIS_ALIGNMENT_TOLERANCE,
-  );
-  if (aligned !== undefined) {
-    // Direct call: the plane {p : p·unit = p·origin} is the world-axis
-    // plane at offset p·unit — identical for either normal orientation.
-    const offset = vecDot(plane.origin, aligned.unit);
+  const plan = planDatumMirror({
+    origin: plane.origin,
+    normal: plane.normal,
+  });
+  if (plan.kind === "direct") {
     const mirrored = kernel.mirror(solid, {
-      axis: aligned.axis,
-      offset: lengthValue(offset),
+      axis: plan.axis,
+      offset: lengthValue(plan.offsetMm),
     });
     return mirrored.ok
       ? { ok: true, solid: mirrored.value }
@@ -1178,11 +1280,10 @@ function runDatumPlaneMirror(
       ),
     };
   }
-  const turn = rotationFromTo(normal, [1, 0, 0], [0, 1, 0]);
   const toOrigin = kernel.transform(solid, {
-    x: lengthValue(-plane.origin[0]),
-    y: lengthValue(-plane.origin[1]),
-    z: lengthValue(-plane.origin[2]),
+    x: lengthValue(plan.toOriginMm[0]),
+    y: lengthValue(plan.toOriginMm[1]),
+    z: lengthValue(plan.toOriginMm[2]),
   });
   if (!toOrigin.ok) {
     return operationFailure(
@@ -1195,7 +1296,10 @@ function runDatumPlaneMirror(
     x: lengthValue(0),
     y: lengthValue(0),
     z: lengthValue(0),
-    rotation: { axis: turn.axis, angle: angleValue(turn.angle, "rad") },
+    rotation: {
+      axis: plan.align.axis,
+      angle: angleValue(plan.align.angleRad, "rad"),
+    },
   });
   if (!rotated.ok) {
     return operationFailure(feature, rotated.error.code, rotated.error.message);
@@ -1215,7 +1319,10 @@ function runDatumPlaneMirror(
     x: lengthValue(0),
     y: lengthValue(0),
     z: lengthValue(0),
-    rotation: { axis: turn.axis, angle: angleValue(-turn.angle, "rad") },
+    rotation: {
+      axis: plan.align.axis,
+      angle: angleValue(-plan.align.angleRad, "rad"),
+    },
   });
   if (!backTurn.ok) {
     return operationFailure(
@@ -1225,9 +1332,9 @@ function runDatumPlaneMirror(
     );
   }
   const final = kernel.transform(backTurn.value, {
-    x: lengthValue(plane.origin[0]),
-    y: lengthValue(plane.origin[1]),
-    z: lengthValue(plane.origin[2]),
+    x: lengthValue(plan.fromOriginMm[0]),
+    y: lengthValue(plan.fromOriginMm[1]),
+    z: lengthValue(plan.fromOriginMm[2]),
   });
   return final.ok
     ? { ok: true, solid: final.value }
@@ -1499,6 +1606,7 @@ export function createKernelFeatureExecutor(
       angleParameter: (ref, name) => angleParameter(feature, ref, name),
       dimensionlessParameter: (ref, name) =>
         dimensionlessParameter(feature, ref, name),
+      parameterValue: (ref) => parameters.get(ref.id),
       solidInput: (ref) => solidInput(feature, ref),
       resolveProfile: (ref) => context.profiles(ref.id),
       resolvePath: (ref) =>
@@ -1556,6 +1664,15 @@ interface InputReaders {
     ref: FeatureInputRef,
     name: string,
   ) => DimensionlessOutcome;
+  /**
+   * The raw parameter value a ref addresses (`undefined` when the document
+   * does not define it) — the patternFeature leg parser's dimension probe:
+   * the leg triple's greedy read needs each parameter's DIMENSION before
+   * committing a typed reader to it.
+   */
+  readonly parameterValue: (
+    ref: FeatureInputRef,
+  ) => AnyDimensionalValue | undefined;
   readonly solidInput: (ref: FeatureInputRef) => SolidOutcome;
   readonly resolveProfile: (
     ref: FeatureInputRef & { readonly kind: "sketch" },
@@ -2059,13 +2176,32 @@ function runPatternOperation(
   );
   // Phase 39: patternCircular's axis may ride a DATUM AXIS instead of the
   // dimensionless world-axis selector — one target, count + total angle
-  // parameters, and one datum input. Linearity keeps the three-parameter
-  // form only.
-  const datumAxisForm =
-    kind === "patternCircular" &&
+  // parameters, and one datum input. Phase 43 generalizes patternLinear's
+  // DIRECTION the same two ways: a DATUM AXIS input (the resolved axis's
+  // full 3D unit direction) or a SKETCH input (the resolved open chain's
+  // unit end−start vector, the path-pattern frame) replace the direction
+  // angle parameter — count + spacing parameters plus the one direction
+  // input.
+  const sketchRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "sketch" } =>
+      ref.kind === "sketch",
+  );
+  const linearDatumDirectionForm =
+    kind === "patternLinear" &&
     datumRefs.length === 1 &&
+    sketchRefs.length === 0 &&
     parameterRefs.length === 2;
-  const expectedParameters = datumAxisForm ? 2 : 3;
+  const linearSketchDirectionForm =
+    kind === "patternLinear" &&
+    sketchRefs.length === 1 &&
+    datumRefs.length === 0 &&
+    parameterRefs.length === 2;
+  const datumAxisForm =
+    (kind === "patternCircular" &&
+      datumRefs.length === 1 &&
+      parameterRefs.length === 2) ||
+    linearDatumDirectionForm;
+  const expectedParameters = datumAxisForm || linearSketchDirectionForm ? 2 : 3;
   if (targetRefs.length !== 1 || parameterRefs.length !== expectedParameters) {
     return {
       ok: false,
@@ -2073,22 +2209,26 @@ function runPatternOperation(
         feature,
         DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
         datumAxisForm
-          ? `Feature "${feature.id}" of kind "${kind}" in datum-axis form needs exactly one feature/body input (the solid to repeat), two parameter inputs (count, totalAngle), and exactly one datum input (the axis); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`
-          : `Feature "${feature.id}" of kind "${kind}" needs exactly one feature/body input (the solid to repeat) and exactly three parameter inputs (${parameterNames.join(", ")}); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
+          ? `Feature "${feature.id}" of kind "${kind}" in datum-axis form needs exactly one feature/body input (the solid to repeat), two parameter inputs (count, ${kind === "patternLinear" ? "spacing" : "totalAngle"}), and exactly one datum input (the ${kind === "patternLinear" ? "direction axis" : "axis"}); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`
+          : linearSketchDirectionForm
+            ? `Feature "${feature.id}" of kind "${kind}" in sketch-line form needs exactly one feature/body input (the solid to repeat), two parameter inputs (count, spacing), and exactly one sketch input (the direction line); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`
+            : `Feature "${feature.id}" of kind "${kind}" needs exactly one feature/body input (the solid to repeat) and exactly three parameter inputs (${parameterNames.join(", ")}); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
       ),
     };
   }
   // In the compat form every non-target, non-parameter input (a datum among
-  // them) is a misdeclaration; in the datum-axis form the input list must
-  // be exactly target + two parameters + one datum.
-  if (datumAxisForm) {
-    if (inputs.length !== 4 || otherRefs.length !== datumRefs.length) {
+  // them) is a misdeclaration; in the datum-axis and sketch-line forms the
+  // input list must be exactly target + two parameters + the one
+  // direction input.
+  if (datumAxisForm || linearSketchDirectionForm) {
+    const directionKind = datumAxisForm ? "datum" : "sketch";
+    if (inputs.length !== 4 || otherRefs.length !== 1) {
       return {
         ok: false,
         diagnostic: diagnostic(
           feature,
           DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-          `Feature "${feature.id}" of kind "${kind}" in datum-axis form must carry exactly one target input, two parameter inputs (count, totalAngle), and one datum input (the axis); it declares ${inputs.length} input(s).`,
+          `Feature "${feature.id}" of kind "${kind}" in ${datumAxisForm ? "datum-axis" : "sketch-line"} form must carry exactly one target input, two parameter inputs (count, ${kind === "patternLinear" ? "spacing" : "totalAngle"}), and one ${directionKind} input (the ${kind === "patternLinear" ? "direction" : "axis"}); it declares ${inputs.length} input(s).`,
         ),
       };
     }
@@ -2112,7 +2252,7 @@ function runPatternOperation(
     targetRef === undefined ||
     countRef === undefined ||
     secondRef === undefined ||
-    (thirdRef === undefined && !datumAxisForm)
+    (thirdRef === undefined && !datumAxisForm && !linearSketchDirectionForm)
   ) {
     return {
       ok: false,
@@ -2167,16 +2307,6 @@ function runPatternOperation(
   // The copies: copy 0 is the target itself; the bridge composes the rest.
   const copies: KernelSolid[] = [target.solid];
   if (kind === "patternLinear") {
-    if (thirdRef === undefined) {
-      return {
-        ok: false,
-        diagnostic: diagnostic(
-          feature,
-          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-          `Feature "${feature.id}" of kind "${kind}" needs a direction parameter input.`,
-        ),
-      };
-    }
     const spacing = readers.lengthParameter(secondRef, "spacing");
     if (!spacing.ok) return { ok: false, diagnostic: spacing.diagnostic };
     if (!(spacing.mm > 0)) {
@@ -2190,18 +2320,130 @@ function runPatternOperation(
         ),
       };
     }
-    const direction = readers.angleParameter(thirdRef, "direction");
-    if (!direction.ok) {
-      return { ok: false, diagnostic: direction.diagnostic };
+    // Phase 43: the direction generalizes to a resolved DATUM AXIS (a
+    // full 3D unit direction) or a SKETCH LINE (the resolved open chain's
+    // unit end−start vector, local (x, z) → world (x, 0, z) — the
+    // path-pattern frame), each replacing the angle parameter's world-XY
+    // direction.
+    let unit: readonly [number, number, number] | null = null;
+    if (linearDatumDirectionForm) {
+      const datumRef = datumRefs[0];
+      if (datumRef === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${kind}" has a malformed input list.`,
+          ),
+        };
+      }
+      const resolved = resolveDatumInput(
+        feature,
+        datumRef,
+        readers.document,
+        readers.datumTopology,
+        "the pattern direction axis",
+      );
+      if (!resolved.ok) return { ok: false, diagnostic: resolved.diagnostic };
+      if (resolved.datumType !== "axis" || resolved.axis === undefined) {
+        return datumKindMismatch(
+          feature,
+          datumRef,
+          `Feature "${feature.id}" of kind "${kind}" needs a datum AXIS as its pattern direction; the referenced datum defines ${resolved.datumType === "plane" ? "a plane" : resolved.datumType === "point" ? "a point" : "a coordinate system"}.`,
+        );
+      }
+      unit = vecUnit(resolved.axis.direction);
+      if (unit === null) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${kind}" resolved a degenerate direction axis (the datum's direction does not normalize); the pattern has no direction to march.`,
+            [datumRef],
+          ),
+        };
+      }
+    } else if (linearSketchDirectionForm) {
+      const sketchRef = sketchRefs[0];
+      if (sketchRef === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${kind}" has a malformed input list.`,
+          ),
+        };
+      }
+      const resolvedPath = readers.resolvePath(sketchRef);
+      if (!resolvedPath.ok) {
+        return {
+          ok: false,
+          diagnostic: {
+            severity: "error",
+            code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            message: `Feature "${feature.id}" of kind "${kind}" could not resolve its direction sketch "${sketchRef.id}": ${resolvedPath.error.message}`,
+            location: { primary: feature.id, related: [sketchRef.id] },
+            data: { pathCode: resolvedPath.error.code },
+          },
+        };
+      }
+      const structural = sweepPathProblem(resolvedPath.value.path);
+      if (structural !== null) {
+        return {
+          ok: false,
+          diagnostic: {
+            severity: "error",
+            code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            message: `Feature "${feature.id}" of kind "${kind}" has an invalid direction sketch: ${structural}.`,
+            location: { primary: feature.id, related: [sketchRef.id] },
+            data: { pathCode: "kernel/invalid-path" },
+          },
+        };
+      }
+      const chain = resolvedPath.value.path;
+      const start = sweepPathStationAt(chain, 0).point;
+      const end = sweepPathStationAt(chain, sweepPathTotalLength(chain)).point;
+      unit = vecUnit([end[0] - start[0], 0, end[1] - start[1]]);
+      if (unit === null) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "${kind}" resolved a degenerate direction from sketch "${sketchRef.id}" — the chain's start and end coincide (a closed loop is not a direction).`,
+            [sketchRef],
+          ),
+        };
+      }
+    } else {
+      if (thirdRef === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${kind}" needs a direction parameter input.`,
+          ),
+        };
+      }
+      const direction = readers.angleParameter(thirdRef, "direction");
+      if (!direction.ok) {
+        return { ok: false, diagnostic: direction.diagnostic };
+      }
+      unit = [Math.cos(direction.rad), Math.sin(direction.rad), 0];
     }
-    const dx = Math.cos(direction.rad);
-    const dy = Math.sin(direction.rad);
+    const dx = unit[0];
+    const dy = unit[1];
+    const dz = unit[2];
     for (let i = 1; i < count; i += 1) {
       const offset = i * spacing.mm;
       const placed = kernel.transform(target.solid, {
         x: lengthValue(offset * dx),
         y: lengthValue(offset * dy),
-        z: lengthValue(0),
+        z: lengthValue(offset * dz),
       });
       if (!placed.ok) {
         return operationFailure(
@@ -2371,11 +2613,1038 @@ function runPatternOperation(
     : operationFailure(feature, merged.error.code, merged.error.message);
 }
 
+// ---------------------------------------------------------------------------
+// Phase 43: pattern & mirror completion — the feature-level pattern kinds
+// ---------------------------------------------------------------------------
+
+/**
+ * One array leg of the Phase 43 feature patterns: a direction angle
+ * (radians, counter-clockwise in the world XY plane from +x — the
+ * `patternLinear` direction precedent), a copy count, and the spacing
+ * between neighbouring copies along that direction (mm). ASYMMETRIC
+ * arrays carry one leg per direction, each with its own count and
+ * spacing — the roadmap's direction + count pairs.
+ */
+export interface ArrayPatternLeg {
+  readonly directionRad: number;
+  readonly count: number;
+  readonly spacingMm: number;
+}
+
+/** The array planner's outcome: the instance offsets in ordinal order. */
+export interface ArrayPatternPlan {
+  /**
+   * The world translation of every instance, `offsets[ordinal]`, the
+   * ordinal numbered over the legs' cross product odometer-style with the
+   * FIRST leg most significant (leg 1 picks the row, leg 2 the column
+   * within it, and so on — the documented enumeration).
+   */
+  readonly offsets: readonly (readonly [number, number, number])[];
+  /** The total instance count: the product of the legs' counts. */
+  readonly total: number;
+}
+
+/**
+ * Plans the instance offsets of an array pattern (Phase 43): a PURE
+ * function shared verbatim by the executor bridge and the workbench's
+ * worker scene (the `planHoleCut`/`planSplitCut` one-source-of-truth
+ * precedent) — the same offsets, in the same order, on every route.
+ * Leg counts and spacings arrive pre-validated (the bridge's own battery
+ * declines the invalid input before planning); the planner itself is
+ * total.
+ */
+export function planArrayPatternInstances(
+  legs: readonly ArrayPatternLeg[],
+): ArrayPatternPlan {
+  let total = 1;
+  for (const leg of legs) total *= leg.count;
+  const offsets: (readonly [number, number, number])[] = [];
+  const indices = legs.map(() => 0);
+  for (let ordinal = 0; ordinal < total; ordinal += 1) {
+    let x = 0;
+    let y = 0;
+    for (let leg = 0; leg < legs.length; leg += 1) {
+      const spec = legs[leg];
+      const index = indices[leg] ?? 0;
+      if (spec === undefined) continue;
+      const reach = index * spec.spacingMm;
+      x += reach * Math.cos(spec.directionRad);
+      y += reach * Math.sin(spec.directionRad);
+    }
+    offsets.push([x, y, 0]);
+    // The odometer increments from the LAST leg (the fastest-varying
+    // index), rolling into the earlier legs on overflow.
+    for (let leg = legs.length - 1; leg >= 0; leg -= 1) {
+      const spec = legs[leg];
+      const next = (indices[leg] ?? 0) + 1;
+      if (spec === undefined || next < spec.count) {
+        indices[leg] = next;
+        break;
+      }
+      indices[leg] = 0;
+    }
+  }
+  return { offsets, total };
+}
+
+/** Reads and validates one leg triple of the feature-pattern kinds. */
+function readArrayLeg(
+  feature: FeatureRecord,
+  readers: InputReaders,
+  refs: readonly FeatureInputRef[],
+  legIndex: number,
+):
+  | {
+      readonly ok: true;
+      readonly leg: ArrayPatternLeg;
+    }
+  | { readonly ok: false; readonly diagnostic: Diagnostic } {
+  const directionRef = refs[0];
+  const countRef = refs[1];
+  const spacingRef = refs[2];
+  if (
+    directionRef === undefined ||
+    countRef === undefined ||
+    spacingRef === undefined
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${feature.kind}" has a malformed leg ${String(legIndex)} (a leg is three parameters: direction, count, spacing).`,
+      ),
+    };
+  }
+  const direction = readers.angleParameter(directionRef, "direction");
+  if (!direction.ok) return { ok: false, diagnostic: direction.diagnostic };
+  const spacing = readers.lengthParameter(spacingRef, "spacing");
+  if (!spacing.ok) return { ok: false, diagnostic: spacing.diagnostic };
+  if (!(spacing.mm > 0)) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "${feature.kind}" needs a strictly positive spacing on leg ${String(legIndex)} (${spacing.mm} mm given) — zero or negative spacing stacks the copies and the leg degenerates.`,
+        [spacingRef],
+      ),
+    };
+  }
+  const countValue = readers.dimensionlessParameter(countRef, "count");
+  if (!countValue.ok) return { ok: false, diagnostic: countValue.diagnostic };
+  if (!Number.isInteger(countValue.value)) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "${feature.kind}" needs leg ${String(legIndex)}'s count to be a whole number of copies; ${countValue.value} is not an integer.`,
+        [countRef],
+      ),
+    };
+  }
+  if (countValue.value < 2) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "${feature.kind}" needs leg ${String(legIndex)}'s count to be at least 2 (${countValue.value} given) — a leg of one copy is no leg.`,
+        [countRef],
+      ),
+    };
+  }
+  return {
+    ok: true,
+    leg: {
+      directionRad: direction.rad,
+      count: countValue.value,
+      spacingMm: spacing.mm,
+    },
+  };
+}
+
+/**
+ * The `patternFeature` executor path (Phase 43) — FEATURE-LEVEL ARRAYS:
+ * the roadmap's "repeat a feature — or a feature range — not just a
+ * body", composed from the contract's existing ops exactly the Phase
+ * 26.8 pattern verdict prescribes (transforms + one union).
+ *
+ * ## Input layout
+ *
+ * ONE OR MORE feature/body inputs — the FEATURE RANGE: every instance
+ * transforms every member identically and the union at the end covers
+ * them all (a rib patterned together with the boss it grew on, one
+ * group). Then parameter inputs read in declared order as LEG TRIPLES
+ * then SKIP ORDINALS:
+ *
+ * - Each leg triple is direction (ANGLE), count (DIMENSIONLESS integer
+ *   ≥ 2), spacing (LENGTH > 0) — the ASYMMETRIC spacing array, one leg
+ *   per direction. Legs parse GREEDILY from the front: while the next
+ *   three parameters' dimensions read (angle, dimensionless, length), a
+ *   leg consumes them.
+ * - Every remaining parameter is a SKIP ORDINAL: a DIMENSIONLESS
+ *   integer in `[0, total)` naming an instance whose copies drop out of
+ *   the union (instance 0 is the untranslated group). Duplicates and
+ *   out-of-range ordinals decline — a skip that silently misses is a
+ *   stale authoring artifact, not a pattern.
+ *
+ * `parameter.set` on any leg number or skip ordinal re-drives the whole
+ * arrangement — the bridge re-reads the parameters each regeneration.
+ *
+ * ## Failure taxonomy (all structured, before any kernel call)
+ *
+ * - Layout: no feature/body input, fewer than three parameters, or a
+ *   sketch/datum/reference input → `kernel/feature-input-invalid`.
+ * - Legs: wrong dimensions anywhere in a triple, count < 2, non-integer
+ *   count, spacing ≤ 0, or a trailing parameter that is neither part of
+ *   a leg nor a dimensionless skip → `kernel/parameter-invalid` (the
+ *   greedy parser's leftover rule).
+ * - Total: the legs' product over `PATTERN_COUNT_LIMIT` →
+ *   `kernel/parameter-invalid` (the synchronous-regeneration guard).
+ * - Skips: non-integer, out of `[0, total)`, duplicated, or skipping
+ *   EVERY instance → `kernel/parameter-invalid`.
+ * - Kernel failures (a transform or the union rejecting) ride through as
+ *   `kernel/operation-failed` with the kernel code in `data`.
+ */
+function runPatternFeatureOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  const otherRefs = inputs.filter(
+    (ref) =>
+      ref.kind !== "feature" && ref.kind !== "body" && ref.kind !== "parameter",
+  );
+  if (targetRefs.length < 1 || parameterRefs.length < 3) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFeature" needs at least one feature/body input (the feature range) and at least three parameter inputs (one leg triple: direction, count, spacing); it declares ${targetRefs.length} target(s) and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  if (otherRefs.length > 0) {
+    const offender = otherRefs[0];
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFeature" needs feature/body and parameter inputs only; a ${offender?.kind ?? "unknown"} input cannot be patterned.`,
+        offender === undefined ? [] : [offender],
+      ),
+    };
+  }
+  // The greedy leg parse: consume (angle, dimensionless, length) triples
+  // from the front — the dimensions alone distinguish a leg triple from
+  // the trailing skip ordinals (every leg BEGINS with an angle; every
+  // skip is a lone dimensionless).
+  const legRefs: FeatureInputRef[][] = [];
+  let cursor = 0;
+  while (cursor + 2 < parameterRefs.length) {
+    const direction = readers.parameterValue(
+      parameterRefs[cursor] as FeatureInputRef,
+    );
+    const count = readers.parameterValue(
+      parameterRefs[cursor + 1] as FeatureInputRef,
+    );
+    const spacing = readers.parameterValue(
+      parameterRefs[cursor + 2] as FeatureInputRef,
+    );
+    if (
+      direction?.dimension === "angle" &&
+      count?.dimension === "dimensionless" &&
+      spacing?.dimension === "length"
+    ) {
+      legRefs.push([
+        parameterRefs[cursor] as FeatureInputRef,
+        parameterRefs[cursor + 1] as FeatureInputRef,
+        parameterRefs[cursor + 2] as FeatureInputRef,
+      ]);
+      cursor += 3;
+    } else {
+      break;
+    }
+  }
+  const skipRefs = parameterRefs.slice(cursor);
+  if (legRefs.length === 0) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFeature" declares no leg triple: its leading parameters must read direction (an angle), count (dimensionless), spacing (a length) — one triple per array direction.`,
+      ),
+    };
+  }
+  const legs: ArrayPatternLeg[] = [];
+  for (let index = 0; index < legRefs.length; index += 1) {
+    const refs = legRefs[index];
+    if (refs === undefined) continue;
+    const leg = readArrayLeg(feature, readers, refs, index + 1);
+    if (!leg.ok) return leg;
+    legs.push(leg.leg);
+  }
+  let total = 1;
+  for (const leg of legs) total *= leg.count;
+  if (total > PATTERN_COUNT_LIMIT) {
+    const countRef = legRefs[0]?.[1];
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternFeature" needs a total instance count (the legs' product) of at most ${PATTERN_COUNT_LIMIT} (${total} given) — regeneration issues one kernel transform per copy synchronously; compose nested patterns for larger arrays.`,
+        countRef === undefined ? [] : [countRef],
+      ),
+    };
+  }
+  // The skip ordinals: dimensionless integers in range, no duplicates.
+  const skips: number[] = [];
+  for (const skipRef of skipRefs) {
+    const value = readers.dimensionlessParameter(skipRef, "skip");
+    if (!value.ok) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelParameterInvalid,
+          `Feature "${feature.id}" of kind "patternFeature" has a trailing parameter that is neither part of a leg triple nor a valid skip ordinal: ${value.diagnostic.message}`,
+          [skipRef],
+        ),
+      };
+    }
+    if (
+      !Number.isInteger(value.value) ||
+      value.value < 0 ||
+      value.value >= total
+    ) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelParameterInvalid,
+          `Feature "${feature.id}" of kind "patternFeature" needs skip ordinals to be whole instance numbers in [0, ${String(total)}) (${value.value} given) — a skip that addresses no instance is a stale authoring artifact, not a pattern.`,
+          [skipRef],
+        ),
+      };
+    }
+    if (skips.includes(value.value)) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelParameterInvalid,
+          `Feature "${feature.id}" of kind "patternFeature" skips instance ${value.value} more than once — a duplicate skip is an authoring error, never a quieter pattern.`,
+          [skipRef],
+        ),
+      };
+    }
+    skips.push(value.value);
+  }
+  if (skips.length >= total) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternFeature" skips every one of its ${String(total)} instances — nothing would remain to union.`,
+        skipRefs.length > 0 && skipRefs[0] !== undefined ? [skipRefs[0]] : [],
+      ),
+    };
+  }
+  const targets = readSolids(feature, readers, targetRefs, 1);
+  if (!targets.ok) return targets;
+  const skipSet = new Set(skips);
+  const plan = planArrayPatternInstances(legs);
+  const copies: KernelSolid[] = [];
+  for (let ordinal = 0; ordinal < plan.total; ordinal += 1) {
+    if (skipSet.has(ordinal)) continue;
+    const offset = plan.offsets[ordinal];
+    if (offset === undefined) continue;
+    const zero = offset[0] === 0 && offset[1] === 0 && offset[2] === 0;
+    for (const solid of targets.solids) {
+      if (zero) {
+        copies.push(solid);
+        continue;
+      }
+      const placed = kernel.transform(solid, {
+        x: lengthValue(offset[0]),
+        y: lengthValue(offset[1]),
+        z: lengthValue(offset[2]),
+      });
+      if (!placed.ok) {
+        return operationFailure(
+          feature,
+          placed.error.code,
+          placed.error.message,
+        );
+      }
+      copies.push(placed.value);
+    }
+  }
+  const merged = kernel.union(copies);
+  return merged.ok
+    ? { ok: true, solid: merged.value }
+    : operationFailure(feature, merged.error.code, merged.error.message);
+}
+
+/** The path-pattern orientation options (the DIMENSIONLESS parameter's domain). */
+const PATTERN_PATH_ORIENTATION = { fixed: 1, tangentFollow: 2 } as const;
+
+/**
+ * The `patternPath` executor path (Phase 43) — instances distributed
+ * along a sketch path, the Phase 36/38 path machinery's arc-length walk:
+ * `./path-geometry` stations the chain, the composition translates (and
+ * for tangent-follow, rotates) the target to each station.
+ *
+ * ## Input layout
+ *
+ * ONE feature/body input (the solid to repeat), ONE sketch input (the
+ * path, resolved through the executor context's `paths` seam — the
+ * sweep's resolver, so the sketch's workplane does not carry: the
+ * resolved chain's LOCAL (x, z) plane rides the WORLD XZ plane, local
+ * (x, z) → world (x, 0, z) — the identity placement, documented), and
+ * exactly THREE parameters: count (DIMENSIONLESS integer ≥ 2), spacing
+ * (LENGTH > 0, the arc-length step), orientation (DIMENSIONLESS: 1 =
+ * fixed, 2 = tangent-follow).
+ *
+ * ## Semantics
+ *
+ * Instance i sits at arc length `i·spacing`, `i = 0` the untranslated
+ * target. Fixed orientation translates only. Tangent-follow composes
+ * the rotation carrying world +z (the path's initial tangent, the
+ * perpendicular-attachment rule) onto the station's tangent — the
+ * contract's fixed order (rotation about the world origin, then the
+ * translation), the placement-composition precedent — and is gated on
+ * `transformRotation` BEFORE any call (the circular pattern's gate: a
+ * kernel that may ignore a rotation would silently stack every copy).
+ * Every station must lie on the chain: `i·spacing` past the path's end
+ * declines.
+ *
+ * ## Failure taxonomy
+ *
+ * - Layout: not exactly one target, one sketch, three parameters →
+ *   `kernel/feature-input-invalid`.
+ * - Count: wrong dimension, non-integer, < 2, > `PATTERN_COUNT_LIMIT` →
+ *   `kernel/parameter-invalid`.
+ * - Spacing: wrong dimension or ≤ 0 → `kernel/parameter-invalid`.
+ * - Orientation: wrong dimension or not 1/2 → `kernel/parameter-invalid`.
+ * - Path: an unresolvable sketch or a structurally invalid chain → the
+ *   resolver/battery's own code in `data.pathCode`.
+ * - Stations: `i·spacing` beyond the chain's total length →
+ *   `kernel/parameter-invalid`.
+ * - Rotation capability (tangent-follow): a kernel without
+ *   `transformRotation` → `kernel/feature-input-invalid`.
+ * - Kernel failures ride through as `kernel/operation-failed`.
+ */
+function runPatternPathOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const sketchRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "sketch" } =>
+      ref.kind === "sketch",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  if (
+    targetRefs.length !== 1 ||
+    sketchRefs.length !== 1 ||
+    parameterRefs.length !== 3
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternPath" needs exactly one feature/body input (the solid to repeat), one sketch input (the path), and three parameter inputs (count, spacing, orientation); it declares ${targetRefs.length} target(s), ${sketchRefs.length} sketch input(s), and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const sketchRef = sketchRefs[0];
+  const countRef = parameterRefs[0];
+  const spacingRef = parameterRefs[1];
+  const orientationRef = parameterRefs[2];
+  if (
+    targetRef === undefined ||
+    sketchRef === undefined ||
+    countRef === undefined ||
+    spacingRef === undefined ||
+    orientationRef === undefined
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternPath" has a malformed input list.`,
+      ),
+    };
+  }
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+  const countValue = readers.dimensionlessParameter(countRef, "count");
+  if (!countValue.ok) return { ok: false, diagnostic: countValue.diagnostic };
+  if (!Number.isInteger(countValue.value) || countValue.value < 2) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternPath" needs a whole-number count of at least 2 (${countValue.value} given) — a pattern of one copy is no pattern.`,
+        [countRef],
+      ),
+    };
+  }
+  if (countValue.value > PATTERN_COUNT_LIMIT) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternPath" needs a count of at most ${PATTERN_COUNT_LIMIT} (${countValue.value} given) — regeneration issues one kernel transform per copy synchronously.`,
+        [countRef],
+      ),
+    };
+  }
+  const spacing = readers.lengthParameter(spacingRef, "spacing");
+  if (!spacing.ok) return { ok: false, diagnostic: spacing.diagnostic };
+  if (!(spacing.mm > 0)) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternPath" needs a strictly positive spacing (${spacing.mm} mm given) — zero or negative spacing stacks the copies on the path's start.`,
+        [spacingRef],
+      ),
+    };
+  }
+  const orientation = readers.dimensionlessParameter(
+    orientationRef,
+    "orientation",
+  );
+  if (!orientation.ok) return { ok: false, diagnostic: orientation.diagnostic };
+  const tangentFollow =
+    orientation.value === PATTERN_PATH_ORIENTATION.tangentFollow;
+  if (!tangentFollow && orientation.value !== PATTERN_PATH_ORIENTATION.fixed) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternPath" needs parameter "${orientationRef.id}" (orientation) to select 1 = fixed or 2 = tangent-follow (${orientation.value} given).`,
+        [orientationRef],
+      ),
+    };
+  }
+  const resolvedPath = readers.resolvePath(sketchRef);
+  if (!resolvedPath.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "patternPath" could not resolve its path sketch "${sketchRef.id}": ${resolvedPath.error.message}`,
+        location: { primary: feature.id, related: [sketchRef.id] },
+        data: { pathCode: resolvedPath.error.code },
+      },
+    };
+  }
+  const path = resolvedPath.value.path;
+  const structural = sweepPathProblem(path);
+  if (structural !== null) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "patternPath" has an invalid path: ${structural}.`,
+        location: { primary: feature.id, related: [sketchRef.id] },
+        data: { pathCode: "kernel/invalid-path" },
+      },
+    };
+  }
+  const totalLength = sweepPathTotalLength(path);
+  const lastStation = (countValue.value - 1) * spacing.mm;
+  if (lastStation > totalLength + 1e-9) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternPath" runs past its path: the last instance stands at ${lastStation.toFixed(6)} mm of arc length but the chain spans only ${totalLength.toFixed(6)} mm — lower the count or the spacing.`,
+        [countRef, spacingRef],
+      ),
+    };
+  }
+  if (tangentFollow && !kernel.capabilities.transformRotation) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternPath" needs tangent-following orientations, but this kernel ("${kernel.id}") does not declare the transformRotation capability — the contract allows such a kernel to ignore a rotation, which would silently stack every copy, so the pattern refuses to run rather than build that wrong answer.`,
+      ),
+    };
+  }
+  const copies: KernelSolid[] = [target.solid];
+  for (let i = 1; i < countValue.value; i += 1) {
+    const station = sweepPathStationAt(path, i * spacing.mm);
+    const translation: DatumVec3 = [station.point[0], 0, station.point[1]];
+    const placed = tangentFollow
+      ? kernel.transform(target.solid, {
+          x: lengthValue(translation[0]),
+          y: lengthValue(translation[1]),
+          z: lengthValue(translation[2]),
+          rotation: (() => {
+            const turn = rotationFromTo(
+              [0, 0, 1],
+              [station.tangent[0], 0, station.tangent[1]],
+              [1, 0, 0],
+            );
+            return {
+              axis: [turn.axis[0], turn.axis[1], turn.axis[2]],
+              angle: angleValue(turn.angle, "rad"),
+            };
+          })(),
+        })
+      : kernel.transform(target.solid, {
+          x: lengthValue(translation[0]),
+          y: lengthValue(translation[1]),
+          z: lengthValue(translation[2]),
+        });
+    if (!placed.ok) {
+      return operationFailure(feature, placed.error.code, placed.error.message);
+    }
+    copies.push(placed.value);
+  }
+  const merged = kernel.union(copies);
+  return merged.ok
+    ? { ok: true, solid: merged.value }
+    : operationFailure(feature, merged.error.code, merged.error.message);
+}
+
+/**
+ * How far a tessellation vertex may sit off the referenced face's plane
+ * and still belong to the plane's coplanar region (mm): planar faces
+ * tessellate exactly ON their plane (the vertices are the BREP's own),
+ * so a micrometre bounds honest coplanarity with orders of margin while
+ * excluding every curved face's off-plane sampling.
+ */
+const PATTERN_FACE_COPLANAR_TOLERANCE_MM = 1e-6;
+
+/** The 2D containment epsilon of the point-in-region test (mm² scale-free). */
+const PATTERN_FACE_CONTAINMENT_EPSILON = 1e-9;
+
+/**
+ * The `patternFace` executor path (Phase 43) — a RECTANGULAR grid within
+ * a face boundary: one solid repeated at the grid points that fall
+ * inside the referenced face, the roadmap's pattern-on-face.
+ *
+ * ## Input layout
+ *
+ * ONE feature/body input (the solid to repeat — the face belongs to its
+ * own output body, the fillet battery's same-body discipline), ONE
+ * REFERENCE input (a FACE reference, resolved through the exact
+ * fillet/shell battery: parse, same-body check, re-resolve against the
+ * current topology, valid/repaired), and SIX parameters — TWO leg
+ * triples (direction + count + spacing each): the grid lives in the
+ * face's resolved plane, directions measured counter-clockwise from the
+ * plane's xAxis, the grid origin at the plane's origin.
+ *
+ * ## The boundary test (the synthetic-face discipline, documented)
+ *
+ * The face's plane resolves through the executor context's datum seam
+ * (`facePlane` — a curved face declines there, the seam's own verdict).
+ * The boundary is the target's TESSELLATION filtered to that plane —
+ * every triangle whose three vertices sit on it — projected into the
+ * plane's (xAxis, normal×xAxis) frame; a grid point qualifies exactly
+ * when it lies inside some triangle of that region. This is the
+ * synthetic-face machinery's tessellation-derived-boundary honesty
+ * (`groupSyntheticFaces` discipline): planar faces measure exactly; the
+ * boundary is the plane's full coplanar material, which for a prismatic
+ * solid's face is exactly the referenced face.
+ *
+ * Grid points OUTSIDE the boundary drop out by design — the clipping is
+ * the feature — and a grid where fewer than two points qualify declines
+ * structurally (a pattern of one copy is no pattern; zero copies never
+ * unions).
+ *
+ * ## Failure taxonomy
+ *
+ * - Layout: not exactly one target, one reference, six parameters →
+ *   `kernel/feature-input-invalid`.
+ * - Legs: the `readArrayLeg` battery verbatim (dimensions, count ≥ 2,
+ *   spacing > 0) → `kernel/parameter-invalid`.
+ * - Grid size: `count₁·count₂` over `PATTERN_COUNT_LIMIT` →
+ *   `kernel/parameter-invalid`.
+ * - Reference: the fillet battery's structured failures (unknown record,
+ *   unparseable payload, wrong kind, cross-body, stale validity) →
+ *   `kernel/feature-input-invalid` with the reference code in `data`.
+ * - Topology/datum seams: no topology view, or no datum seam →
+ *   `kernel/feature-input-invalid` (the resolution seams the feature
+ *   needs).
+ * - Plane: `facePlane`'s structured failure (curved face, vanished face)
+ *   → `kernel/feature-input-invalid` with `data.datumCode`.
+ * - Region: no tessellated material on the plane, or fewer than two
+ *   qualifying grid points → `kernel/operation-failed` with
+ *   `data.reason = "patternFace/no-region"` / `"patternFace/no-instance"`.
+ * - Kernel failures ride through as `kernel/operation-failed`.
+ */
+function runPatternFaceOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const referenceRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "reference" } =>
+      ref.kind === "reference",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  if (
+    targetRefs.length !== 1 ||
+    referenceRefs.length !== 1 ||
+    parameterRefs.length !== 6
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" needs exactly one feature/body input (the solid to repeat), one reference input (the bounding face), and six parameter inputs (two leg triples: direction, count, spacing each); it declares ${targetRefs.length} target(s), ${referenceRefs.length} reference(s), and ${parameterRefs.length} parameter(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const referenceRef = referenceRefs[0];
+  if (targetRef === undefined || referenceRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" has a malformed input list.`,
+      ),
+    };
+  }
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+  const legOne = readArrayLeg(feature, readers, parameterRefs.slice(0, 3), 1);
+  if (!legOne.ok) return legOne;
+  const legTwo = readArrayLeg(feature, readers, parameterRefs.slice(3, 6), 2);
+  if (!legTwo.ok) return legTwo;
+  if (legOne.leg.count * legTwo.leg.count > PATTERN_COUNT_LIMIT) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "patternFace" needs a grid of at most ${PATTERN_COUNT_LIMIT} candidate points (${legOne.leg.count} × ${legTwo.leg.count} given) — regeneration tests every candidate synchronously.`,
+        [
+          parameterRefs[1] as FeatureInputRef,
+          parameterRefs[4] as FeatureInputRef,
+        ],
+      ),
+    };
+  }
+  // The reference battery (the fillet/shell discipline): the record's
+  // payload must parse as a FACE reference addressing the target's own
+  // body and resolve against the CURRENT regeneration.
+  const record = getDocumentReference(readers.document, referenceRef.id);
+  if (record === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" references record "${referenceRef.id}", which the document does not define.`,
+        [referenceRef],
+      ),
+    };
+  }
+  const parsed = parseTopologyReference(record.reference);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "patternFace" has an unparseable reference record ("${referenceRef.id}"): ${parsed.error.message}`,
+        location: { primary: feature.id, related: [referenceRef.id] },
+        data: { referenceCode: parsed.error.code },
+      },
+    };
+  }
+  if (parsed.value.kind !== "face") {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" needs a FACE reference to bound the grid; reference "${referenceRef.id}" addresses a ${parsed.value.kind}.`,
+        [referenceRef],
+      ),
+    };
+  }
+  const targetBody = readers.bodyIdOf(targetRef);
+  if (targetBody !== undefined && parsed.value.bodyId !== targetBody) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" mixes bodies: reference "${referenceRef.id}" addresses body "${parsed.value.bodyId}", but the pattern target's output body is "${targetBody}".`,
+        [referenceRef],
+      ),
+    };
+  }
+  const view = readers.topology;
+  if (view === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" carries a face reference, but the executor context provides no topology view to resolve it against; the bounding face cannot resolve without one.`,
+      ),
+    };
+  }
+  const resolved = resolveDocumentReference(
+    readers.document,
+    parsed.value,
+    view,
+  );
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "patternFace" could not resolve reference "${referenceRef.id}": ${resolved.error.message}`,
+        location: { primary: feature.id, related: [referenceRef.id] },
+        data: { referenceCode: resolved.error.code },
+      },
+    };
+  }
+  const { state, reason } = resolved.value.validity;
+  if (state !== "valid" && state !== "repaired") {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "patternFace" has an unresolved face reference ("${referenceRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the face to mint a fresh reference.`,
+        location: { primary: feature.id, related: [referenceRef.id] },
+        data: {
+          validityState: state,
+          ...(reason !== undefined ? { reason } : {}),
+        },
+      },
+    };
+  }
+  const datumSeam = readers.datumTopology;
+  if (datumSeam === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" needs the referenced face's plane, but the executor context provides no datum topology resolver to resolve it through.`,
+      ),
+    };
+  }
+  const planeResult = datumSeam.facePlane(record.reference);
+  if (!planeResult.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "patternFace" could not resolve the bounding face's plane: ${planeResult.error.message}`,
+        location: { primary: feature.id, related: [referenceRef.id] },
+        data: { datumCode: planeResult.error.code },
+      },
+    };
+  }
+  const plane = planeResult.value;
+  // The tessellated region on the plane: the target's tessellation
+  // filtered to the triangles whose three vertices sit on it.
+  const tessellated = kernel.tessellate(target.solid);
+  if (!tessellated.ok) {
+    return operationFailure(
+      feature,
+      tessellated.error.code,
+      tessellated.error.message,
+    );
+  }
+  const soup = tessellated.value;
+  const xAxis = vecUnit(plane.xAxis);
+  const yAxis = xAxis === null ? null : vecUnit(vecCross(plane.normal, xAxis));
+  if (xAxis === null || yAxis === null) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "patternFace" resolved a degenerate plane frame (the plane's xAxis does not normalize against its normal); the grid has no in-plane axes to measure from.`,
+        [referenceRef],
+      ),
+    };
+  }
+  const signedOffset = (p: readonly [number, number, number]): number =>
+    (p[0] - plane.origin[0]) * plane.normal[0] +
+    (p[1] - plane.origin[1]) * plane.normal[1] +
+    (p[2] - plane.origin[2]) * plane.normal[2];
+  const vertex = (index: number): readonly [number, number, number] => {
+    const p = soup.positions;
+    return [p[index * 3] ?? 0, p[index * 3 + 1] ?? 0, p[index * 3 + 2] ?? 0];
+  };
+  const region: (readonly [
+    readonly [number, number],
+    readonly [number, number],
+    readonly [number, number],
+  ])[] = [];
+  for (let triangle = 0; triangle < soup.indices.length / 3; triangle += 1) {
+    const a = vertex(soup.indices[triangle * 3] ?? 0);
+    const b = vertex(soup.indices[triangle * 3 + 1] ?? 0);
+    const c = vertex(soup.indices[triangle * 3 + 2] ?? 0);
+    if (
+      Math.abs(signedOffset(a)) > PATTERN_FACE_COPLANAR_TOLERANCE_MM ||
+      Math.abs(signedOffset(b)) > PATTERN_FACE_COPLANAR_TOLERANCE_MM ||
+      Math.abs(signedOffset(c)) > PATTERN_FACE_COPLANAR_TOLERANCE_MM
+    ) {
+      continue;
+    }
+    const project = (
+      p: readonly [number, number, number],
+    ): readonly [number, number] => [
+      (p[0] - plane.origin[0]) * xAxis[0] +
+        (p[1] - plane.origin[1]) * xAxis[1] +
+        (p[2] - plane.origin[2]) * xAxis[2],
+      (p[0] - plane.origin[0]) * yAxis[0] +
+        (p[1] - plane.origin[1]) * yAxis[1] +
+        (p[2] - plane.origin[2]) * yAxis[2],
+    ];
+    region.push([project(a), project(b), project(c)]);
+  }
+  if (region.length === 0) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelOperationFailed,
+        message: `Feature "${feature.id}" of kind "patternFace" found no tessellated material on the bounding face's plane — the face's region is empty against the current solid.`,
+        location: { primary: feature.id, related: [referenceRef.id] },
+        data: { reason: "patternFace/no-region" },
+      },
+    };
+  }
+  const inside = (u: number, v: number): boolean => {
+    for (const [a, b, c] of region) {
+      const abX = b[0] - a[0];
+      const abY = b[1] - a[1];
+      const acX = c[0] - a[0];
+      const acY = c[1] - a[1];
+      const apX = u - a[0];
+      const apY = v - a[1];
+      const area = abX * acY - abY * acX;
+      if (Math.abs(area) < 1e-18) continue;
+      const w1 = (apX * acY - apY * acX) / area;
+      const w2 = (abX * apY - abY * apX) / area;
+      if (
+        w1 >= -PATTERN_FACE_CONTAINMENT_EPSILON &&
+        w2 >= -PATTERN_FACE_CONTAINMENT_EPSILON &&
+        w1 + w2 <= 1 + PATTERN_FACE_CONTAINMENT_EPSILON
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const plan = planArrayPatternInstances([legOne.leg, legTwo.leg]);
+  const copies: KernelSolid[] = [];
+  let qualifying = 0;
+  for (let ordinal = 0; ordinal < plan.total; ordinal += 1) {
+    const offset = plan.offsets[ordinal];
+    if (offset === undefined) continue;
+    if (!inside(offset[0], offset[1])) continue;
+    qualifying += 1;
+    const zero = offset[0] === 0 && offset[1] === 0 && offset[2] === 0;
+    if (zero) {
+      copies.push(target.solid);
+      continue;
+    }
+    const world: DatumVec3 = [
+      offset[0] * xAxis[0] + offset[1] * yAxis[0],
+      offset[0] * xAxis[1] + offset[1] * yAxis[1],
+      offset[0] * xAxis[2] + offset[1] * yAxis[2],
+    ];
+    const placed = kernel.transform(target.solid, {
+      x: lengthValue(world[0]),
+      y: lengthValue(world[1]),
+      z: lengthValue(world[2]),
+    });
+    if (!placed.ok) {
+      return operationFailure(feature, placed.error.code, placed.error.message);
+    }
+    copies.push(placed.value);
+  }
+  if (qualifying < 2) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelOperationFailed,
+        message: `Feature "${feature.id}" of kind "patternFace" placed ${String(qualifying)} grid point(s) inside the bounding face (a pattern needs at least 2) — move the grid's origin onto the face, widen its spacing, or raise its counts.`,
+        location: { primary: feature.id, related: [referenceRef.id] },
+        data: { reason: "patternFace/no-instance", qualifying },
+      },
+    };
+  }
+  const merged = kernel.union(copies);
+  return merged.ok
+    ? { ok: true, solid: merged.value }
+    : operationFailure(feature, merged.error.code, merged.error.message);
+}
+
 /**
  * The mirror feature kind's executor path (Phase 26.9; datum-plane
- * generalization Phase 39) — the DIRECT KERNEL CALL the negative
- * determinant forces, plus the datum composition for arbitrary planes.
- * THE COMPAT SHIM: the bridge validates EITHER input form.
+ * generalization Phase 39; merge option Phase 43) — the DIRECT KERNEL CALL
+ * the negative determinant forces, plus the datum composition for
+ * arbitrary planes. THE COMPAT SHIM: the bridge validates EITHER input
+ * form.
  *
  * ## Input layout — the world-axis selector form (compat)
  *
@@ -2392,23 +3661,31 @@ function runPatternOperation(
  * `parameter.set` on either parameter re-drives the reflection through
  * regeneration — the bridge re-reads the plane and offset each run.
  *
- * ## Input layout — the datum-plane form (Phase 39)
+ * ## Input layout — the datum-plane form (Phase 39; merge option Phase 43)
  *
- * ONE feature/body input (the solid to reflect), then exactly ONE `datum`
- * input naming a datum-plane record. The datum's RESOLVED plane defines
- * the mirror: an axis-aligned plane rides the direct `kernel.mirror` call
- * at its offset; an oblique plane composes the reflection through
- * rotations (see {@link runDatumPlaneMirror}). Editing the datum record
- * re-drives the feature — the datum is the parameter plane.
+ * ONE feature/body input (the solid to reflect — a FEATURE or a BODY, the
+ * pattern vocabulary), then exactly ONE `datum` input naming a
+ * datum-plane record, then at most ONE parameter: the MERGE option
+ * (DIMENSIONLESS, `1` = standalone copy — the default when absent, the
+ * Phase 39 behavior; `2` = merge, one `union` of the target and its
+ * reflection — the symmetric-part route). The datum's RESOLVED plane
+ * defines the mirror: an axis-aligned plane rides the direct
+ * `kernel.mirror` call at its offset; an oblique plane composes the
+ * reflection through rotations (see {@link runDatumPlaneMirror}). Editing
+ * the datum record re-drives the feature — the datum is the parameter
+ * plane — and `parameter.set` on the merge option re-drives the union.
  *
  * ## Failure taxonomy (all structured, before any kernel call)
  *
  * - Layout: neither exactly one target + two parameters (compat) nor
- *   exactly one target + one datum (datum form), or a sketch input in the
- *   target's place → `kernel/feature-input-invalid`.
+ *   exactly one target + one datum + at most one parameter (datum form),
+ *   or a sketch input in the target's place →
+ *   `kernel/feature-input-invalid`.
  * - Plane selector (compat): wrong dimension, non-integer, or outside
  *   `1..3` → `kernel/parameter-invalid`.
  * - Offset (compat): wrong dimension → `kernel/parameter-invalid`.
+ * - Merge (datum form): wrong dimension or not `1`/`2` →
+ *   `kernel/parameter-invalid`.
  * - Datum resolution (datum form): the structured failures of
  *   {@link resolveDatumInput}, `data.datumCode` carrying the datum layer's
  *   own code.
@@ -2438,11 +3715,12 @@ function runMirrorOperation(
       ref.kind === "datum",
   );
 
-  // The datum-plane form: one target + one datum input, no parameters.
+  // The datum-plane form: one target + one datum input + an optional MERGE
+  // parameter (Phase 43).
   if (datumRefs.length > 0) {
     if (
       targetRefs.length !== 1 ||
-      parameterRefs.length !== 0 ||
+      parameterRefs.length > 1 ||
       datumRefs.length !== 1
     ) {
       return {
@@ -2450,7 +3728,7 @@ function runMirrorOperation(
         diagnostic: diagnostic(
           feature,
           DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-          `Feature "${feature.id}" of kind "mirror" in datum-plane form needs exactly one feature/body input (the solid to reflect) and exactly one datum input (the mirror plane); it declares ${targetRefs.length} target(s), ${parameterRefs.length} parameter(s), and ${datumRefs.length} datum input(s).`,
+          `Feature "${feature.id}" of kind "mirror" in datum-plane form needs exactly one feature/body input (the solid to reflect), exactly one datum input (the mirror plane), and at most one parameter input (the merge option); it declares ${targetRefs.length} target(s), ${parameterRefs.length} parameter(s), and ${datumRefs.length} datum input(s).`,
         ),
       };
     }
@@ -2465,6 +3743,29 @@ function runMirrorOperation(
           `Feature "${feature.id}" of kind "mirror" has a malformed input list.`,
         ),
       };
+    }
+    // The merge option (Phase 43): 1 (or absent) keeps the reflection
+    // STANDALONE — the Phase 39 behavior; 2 MERGES, one union of the
+    // target and its reflection (the symmetric-part route). `union` is a
+    // contract op every kernel carries, so merge adds no capability gate.
+    let merge = false;
+    const mergeRef = parameterRefs[0];
+    if (mergeRef !== undefined) {
+      const mergeValue = readers.dimensionlessParameter(mergeRef, "merge");
+      if (!mergeValue.ok)
+        return { ok: false, diagnostic: mergeValue.diagnostic };
+      if (mergeValue.value !== 1 && mergeValue.value !== 2) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "mirror" needs parameter "${mergeRef.id}" (merge) to select 1 = standalone copy or 2 = merge with the original (${mergeValue.value} given).`,
+            [mergeRef],
+          ),
+        };
+      }
+      merge = mergeValue.value === 2;
     }
     const target = readers.solidInput(targetRef);
     if (!target.ok) return target;
@@ -2483,7 +3784,18 @@ function runMirrorOperation(
         `Feature "${feature.id}" of kind "mirror" needs a datum PLANE as its mirror; the referenced datum defines ${resolved.datumType === "axis" ? "an axis" : resolved.datumType === "point" ? "a point" : "a coordinate system"}.`,
       );
     }
-    return runDatumPlaneMirror(kernel, feature, target.solid, resolved.plane);
+    const mirrored = runDatumPlaneMirror(
+      kernel,
+      feature,
+      target.solid,
+      resolved.plane,
+    );
+    if (!mirrored.ok) return mirrored;
+    if (!merge) return mirrored;
+    const merged = kernel.union([target.solid, mirrored.solid]);
+    return merged.ok
+      ? { ok: true, solid: merged.value }
+      : operationFailure(feature, merged.error.code, merged.error.message);
   }
 
   // The world-axis selector form (compat).
@@ -5358,6 +6670,21 @@ function runKernelOperation(
       // axis, composed as origin-axis rotations + one union (capability-
       // gated — see runPatternOperation).
       return runPatternOperation(kernel, feature, "patternCircular", readers);
+    case "patternFeature":
+      // The Phase 43 feature-level array: the feature RANGE repeated over
+      // asymmetric direction+count+spacing legs with a skip-instance list,
+      // one union at the end (see runPatternFeatureOperation).
+      return runPatternFeatureOperation(kernel, feature, readers);
+    case "patternPath":
+      // The Phase 43 path pattern: instances at i·spacing arc length along
+      // a sketch path, fixed or tangent-following (see
+      // runPatternPathOperation).
+      return runPatternPathOperation(kernel, feature, readers);
+    case "patternFace":
+      // The Phase 43 face-bounded grid: the target repeated at the grid
+      // points inside the referenced face's tessellated boundary (see
+      // runPatternFaceOperation).
+      return runPatternFaceOperation(kernel, feature, readers);
     case "mirror":
       // The Phase 26.9 reflection: the direct kernel call the negative
       // determinant forces — plane selector validated, capability gated,

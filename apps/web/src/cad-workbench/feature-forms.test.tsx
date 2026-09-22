@@ -19,7 +19,13 @@ import type { HoleFormValues } from "./feature-forms";
 import type { StructuredHoleSubmission } from "./hole-dialog";
 import type { ThreadCutInput } from "./thread";
 
-import { HoleFeatureForm, ThreadFeatureForm } from "./feature-forms";
+import {
+  HoleFeatureForm,
+  MirrorFeatureForm,
+  PatternFeatureForm,
+  PatternPathFeatureForm,
+  ThreadFeatureForm,
+} from "./feature-forms";
 
 afterEach(cleanup);
 
@@ -239,5 +245,103 @@ describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
     expect(submission.axis).toBe(3);
     expect(submission.positionsSketchId).toBeNull();
     expect(submission.datumAxisId).toBeNull();
+  });
+});
+
+describe("PatternFeatureForm: the pattern editor's legs and skips", () => {
+  it("submits the default leg with no skips", async () => {
+    const onPattern = vi.fn<
+      (specification: {
+        readonly legs: readonly {
+          readonly directionDeg: number;
+          readonly count: number;
+          readonly spacingMm: number;
+        }[];
+        readonly skips: readonly number[];
+      }) => void
+    >();
+    render(<PatternFeatureForm onPattern={onPattern} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onPattern).toHaveBeenCalledTimes(1));
+    expect(onPattern.mock.calls[0]?.[0]).toEqual({
+      legs: [{ directionDeg: 0, count: 3, spacingMm: 20 }],
+      skips: [],
+    });
+  });
+
+  it("adds a skip row and carries the ordinal into the submission", async () => {
+    const onPattern = vi.fn<
+      (specification: {
+        readonly legs: readonly {
+          readonly directionDeg: number;
+          readonly count: number;
+          readonly spacingMm: number;
+        }[];
+        readonly skips: readonly number[];
+      }) => void
+    >();
+    render(<PatternFeatureForm onPattern={onPattern} />);
+    fireEvent.click(screen.getByRole("button", { name: "Skip an instance" }));
+    // The new skip row's default ordinal (1) rides the submission.
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onPattern).toHaveBeenCalledTimes(1));
+    expect(onPattern.mock.calls[0]?.[0]).toEqual({
+      legs: [{ directionDeg: 0, count: 3, spacingMm: 20 }],
+      skips: [1],
+    });
+  });
+});
+
+describe("PatternPathFeatureForm: the path picker and orientation", () => {
+  it("submits the picked sketch with the numbers and the orientation option", async () => {
+    const onPatternPath =
+      vi.fn<
+        (specification: {
+          readonly sketchId: string;
+          readonly count: number;
+          readonly spacingMm: number;
+          readonly orientation: number;
+        }) => void
+      >();
+    render(
+      <PatternPathFeatureForm
+        onPatternPath={onPatternPath}
+        sketches={[{ id: "skd_path", name: "the path" }]}
+      />,
+    );
+    expect(numberFieldValue(/^Instances/)).toBe("4");
+    expect(numberFieldValue(/^Spacing along the path/)).toBe("10");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onPatternPath).toHaveBeenCalledTimes(1));
+    expect(onPatternPath.mock.calls[0]?.[0]).toEqual({
+      sketchId: "skd_path",
+      count: 4,
+      spacingMm: 10,
+      orientation: 1,
+    });
+  });
+});
+
+describe("MirrorFeatureForm: the plane picker and merge option", () => {
+  it("submits the picked plane with the standalone default", async () => {
+    const onMirror =
+      vi.fn<
+        (specification: {
+          readonly datumPlaneId: string;
+          readonly merge: number;
+        }) => void
+      >();
+    render(
+      <MirrorFeatureForm
+        datumPlanes={[{ id: "dtm_plane", name: "the plane" }]}
+        onMirror={onMirror}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onMirror).toHaveBeenCalledTimes(1));
+    expect(onMirror.mock.calls[0]?.[0]).toEqual({
+      datumPlaneId: "dtm_plane",
+      merge: 1,
+    });
   });
 });

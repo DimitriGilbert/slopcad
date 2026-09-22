@@ -30,6 +30,11 @@ import {
   documentThickenSceneRequest,
 } from "./scale-thicken";
 import { documentSplitSceneRequest } from "./split";
+import {
+  documentMirrorSceneRequest,
+  documentPatternFeatureSceneRequest,
+  documentPatternPathSceneRequest,
+} from "./pattern";
 
 /**
  * The workbench scene kinds the engine's dispatch can follow (the same
@@ -49,6 +54,9 @@ export type WorkbenchSceneKind =
   | "scale"
   | "thicken"
   | "split"
+  | "patternFeature"
+  | "patternPath"
+  | "mirror"
   | "hole";
 
 /**
@@ -62,6 +70,13 @@ export function highestResolvableScene(
 ): WorkbenchSceneKind {
   if (documentHoleSceneRequest(document) !== null) return "hole";
   if (documentThreadSceneRequest(document) !== null) return "thread";
+  if (documentMirrorSceneRequest(document) !== null) return "mirror";
+  if (documentPatternPathSceneRequest(document) !== null) {
+    return "patternPath";
+  }
+  if (documentPatternFeatureSceneRequest(document) !== null) {
+    return "patternFeature";
+  }
   if (documentSplitSceneRequest(document) !== null) return "split";
   if (documentThickenSceneRequest(document) !== null) return "thicken";
   if (documentScaleSceneRequest(document) !== null) return "scale";
@@ -92,22 +107,28 @@ export function honestSceneFallback(
       ? documentHoleSceneRequest(document) !== null
       : activeScene === "thread"
         ? documentThreadSceneRequest(document) !== null
-        : activeScene === "split"
-          ? documentSplitSceneRequest(document) !== null
-          : activeScene === "thicken"
-            ? documentThickenSceneRequest(document) !== null
-            : activeScene === "scale"
-              ? documentScaleSceneRequest(document) !== null
-              : activeScene === "rib"
-                ? documentRibSceneRequest(document) !== null
-                : activeScene === "helix"
-                  ? documentHelixRequest(document) !== null
-                  : activeScene === "loft"
-                    ? documentLoftRequest(document) !== null
-                    : activeScene === "sweep"
-                      ? documentSweepRequest(document) !== null
-                      : activeScene === "revolve"
-                        ? documentRevolveRequest(document) !== null
-                        : documentExtrudeRequest(document) !== null;
+        : activeScene === "mirror"
+          ? documentMirrorSceneRequest(document) !== null
+          : activeScene === "patternPath"
+            ? documentPatternPathSceneRequest(document) !== null
+            : activeScene === "patternFeature"
+              ? documentPatternFeatureSceneRequest(document) !== null
+              : activeScene === "split"
+                ? documentSplitSceneRequest(document) !== null
+                : activeScene === "thicken"
+                  ? documentThickenSceneRequest(document) !== null
+                  : activeScene === "scale"
+                    ? documentScaleSceneRequest(document) !== null
+                    : activeScene === "rib"
+                      ? documentRibSceneRequest(document) !== null
+                      : activeScene === "helix"
+                        ? documentHelixRequest(document) !== null
+                        : activeScene === "loft"
+                          ? documentLoftRequest(document) !== null
+                          : activeScene === "sweep"
+                            ? documentSweepRequest(document) !== null
+                            : activeScene === "revolve"
+                              ? documentRevolveRequest(document) !== null
+                              : documentExtrudeRequest(document) !== null;
   return resolved ? null : highestResolvableScene(document);
 }

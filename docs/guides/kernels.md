@@ -87,6 +87,21 @@ cylinders/cones on the fake kernel (Pappus closed form) and OCCT
 band; the threaded ridge rides Phase 40's exact screw-volume model and
 OCCT's ruled band.
 
+Phase 43's pattern & mirror completion adds NO new capability flags —
+it needs none: the three new feature kinds (`patternFeature`,
+`patternPath`, `patternFace`) and the mirror merge option are
+FEATURE-LEVEL COMPOSITION over `transform`, `union`, and `mirror` —
+contract operations every kernel already carries. The one capability
+that gates is `transformRotation`, the existing flag: circular patterns
+and the path pattern's tangent-follow orientation need real rotations,
+and the bridge refuses structurally on a kernel that may ignore one
+(the probed fake-kernel verdict) rather than silently stack copies —
+the same gate Phase 26.8 established. `patternFace`'s boundary test is
+the synthetic-face discipline (the target's own tessellation, filtered
+to the referenced face's resolved plane), so it runs wherever
+`tessellate` does; its face references resolve through the topology
+view and the datum seam like `fillet`'s and `split`'s inputs.
+
 ## Booting a kernel
 
 ```ts
