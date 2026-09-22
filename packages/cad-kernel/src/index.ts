@@ -196,12 +196,18 @@ export {
   BRIDGE_FEATURE_KINDS,
   HOLE_TOOL_OVERSHOOT_MM,
   PATTERN_COUNT_LIMIT,
+  planArrayPatternInstances,
+  planDatumMirror,
   planHoleCut,
   planSplitCut,
+  rotationFromTo,
   SPLIT_TOOL_OVERSHOOT_MM,
 } from "./core-bridge";
 export type {
+  ArrayPatternLeg,
+  ArrayPatternPlan,
   BridgeFeatureKind,
+  DatumMirrorPlan,
   HoleAxisSelector,
   HoleCutPlan,
   SplitCutPlan,
@@ -217,6 +223,8 @@ export type {
   KernelSketchPointsResolution,
   KernelSketchPointsResolver,
 } from "./core-bridge";
+export { sweepPathStationAt, sweepPathTotalLength } from "./path-geometry";
+export type { SweepPathStation } from "./path-geometry";
 
 export {
   HOLE_POSITION_LIMIT,

@@ -111,6 +111,9 @@ import {
   DraftFeatureForm,
   HelixFeatureForm,
   HoleFeatureForm,
+  MirrorFeatureForm,
+  PatternFeatureForm,
+  PatternPathFeatureForm,
   RibFeatureForm,
   ScaleFeatureForm,
   SplitFeatureForm,
@@ -320,6 +323,9 @@ export function CompleteCadWorkbench({
     handleThicken,
     handleSplit,
     handleStructuredHole,
+    handlePattern,
+    handlePatternPath,
+    handleMirror,
     handleSketchOnFace,
     sketchBootWorkplane,
     datumsJson,
@@ -345,6 +351,9 @@ export function CompleteCadWorkbench({
     | "thicken"
     | "split"
     | "hole"
+    | "pattern"
+    | "patternPath"
+    | "mirror"
     | "datum"
     | null
   >(null);
@@ -625,6 +634,42 @@ export function CompleteCadWorkbench({
     if (outcome.ok) setFeatureDialog(null);
   };
 
+  /** Runs the pattern submission, surfacing the refusal and closing on success. */
+  const submitPattern = (specification: {
+    readonly legs: readonly {
+      readonly directionDeg: number;
+      readonly count: number;
+      readonly spacingMm: number;
+    }[];
+    readonly skips: readonly number[];
+  }): void => {
+    const outcome = handlePattern(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the path-pattern submission, surfacing the refusal and closing. */
+  const submitPatternPath = (specification: {
+    readonly sketchId: string;
+    readonly count: number;
+    readonly spacingMm: number;
+    readonly orientation: number;
+  }): void => {
+    const outcome = handlePatternPath(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the mirror submission, surfacing the refusal and closing on success. */
+  const submitMirror = (specification: {
+    readonly datumPlaneId: string;
+    readonly merge: number;
+  }): void => {
+    const outcome = handleMirror(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
   /**
    * Opens one feature dialog with its outcome region reset. The hole dialog
    * additionally resets the preview ghost's live values (a fresh form mount
@@ -643,6 +688,9 @@ export function CompleteCadWorkbench({
         | "thicken"
         | "split"
         | "hole"
+        | "pattern"
+        | "patternPath"
+        | "mirror"
         | "datum",
     ): void => {
       setFeatureOutcome(null);
@@ -850,6 +898,37 @@ export function CompleteCadWorkbench({
         label: "Split the last extrusion by a plane",
         run: () => {
           openFeatureDialog("split");
+        },
+      },
+      {
+        disabled: !hasExtrudeBase,
+        group: "Workspace",
+        id: "pattern",
+        keywords: "pattern array repeat instances legs skip linear create",
+        label: "Pattern the last extrusion",
+        run: () => {
+          openFeatureDialog("pattern");
+        },
+      },
+      {
+        disabled: !(canAuthorSketchFeatures && hasExtrudeBase),
+        group: "Workspace",
+        id: "pattern-path",
+        keywords:
+          "pattern path chain arc length stations tangent follow create",
+        label: "Repeat the last extrusion along a path",
+        run: () => {
+          openFeatureDialog("patternPath");
+        },
+      },
+      {
+        disabled: !(datumPlaneOptions.length >= 1 && hasExtrudeBase),
+        group: "Workspace",
+        id: "mirror",
+        keywords: "mirror reflect datum plane symmetric merge copy create",
+        label: "Mirror the last extrusion by a plane",
+        run: () => {
+          openFeatureDialog("mirror");
         },
       },
       {
@@ -1784,6 +1863,64 @@ export function CompleteCadWorkbench({
         >
           Split
         </Button>
+        {/* The Phase 43 pattern verbs: the editor arrays the last
+            extrusion (asymmetric legs, skip instances), the path pattern
+            distributes it along a saved sketch path, and the mirror
+            reflects it about a datum plane with a merge option. */}
+        <Button
+          className="max-[1799px]:hidden"
+          data-testid="complete-pattern"
+          disabled={!hasExtrudeBase}
+          onClick={() => {
+            openFeatureDialog("pattern");
+          }}
+          size="xs"
+          title={
+            hasExtrudeBase
+              ? "Pattern the latest extrusion: one leg per direction with its own count and spacing, instances skippable by ordinal."
+              : "Extrude a profile first; a pattern needs a solid."
+          }
+          type="button"
+          variant="outline"
+        >
+          Pattern
+        </Button>
+        <Button
+          className="max-[1799px]:hidden"
+          data-testid="complete-pattern-path"
+          disabled={!(sketchOptions.length >= 1 && hasExtrudeBase)}
+          onClick={() => {
+            openFeatureDialog("patternPath");
+          }}
+          size="xs"
+          title={
+            sketchOptions.length >= 1 && hasExtrudeBase
+              ? "Repeat the latest extrusion along a saved path sketch at an arc-length spacing."
+              : "Save a path sketch and extrude a profile first; a path pattern needs both."
+          }
+          type="button"
+          variant="outline"
+        >
+          Path pattern
+        </Button>
+        <Button
+          className="max-[1799px]:hidden"
+          data-testid="complete-mirror"
+          disabled={!(datumPlaneOptions.length >= 1 && hasExtrudeBase)}
+          onClick={() => {
+            openFeatureDialog("mirror");
+          }}
+          size="xs"
+          title={
+            datumPlaneOptions.length >= 1 && hasExtrudeBase
+              ? "Mirror the latest extrusion about a datum plane, standalone or merged with the original."
+              : "Create a datum plane and extrude a profile first; a mirror needs both."
+          }
+          type="button"
+          variant="outline"
+        >
+          Mirror
+        </Button>
         {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
             the datum form needs nothing. Both stay in the command menu on
             narrow rows. Sketch-on-face is the row's widest contextual verb
@@ -2025,7 +2162,13 @@ export function CompleteCadWorkbench({
                                   ? CAD_FEATURE_FORM_LABELS.splitTitle
                                   : featureDialog === "hole"
                                     ? CAD_FEATURE_FORM_LABELS.holeTitle
-                                    : DATUM_FORM_LABELS.title}
+                                    : featureDialog === "pattern"
+                                      ? CAD_FEATURE_FORM_LABELS.patternTitle
+                                      : featureDialog === "patternPath"
+                                        ? CAD_FEATURE_FORM_LABELS.patternPathTitle
+                                        : featureDialog === "mirror"
+                                          ? CAD_FEATURE_FORM_LABELS.mirrorTitle
+                                          : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -2047,7 +2190,13 @@ export function CompleteCadWorkbench({
                               ? CAD_FEATURE_FORM_LABELS.splitHint
                               : featureDialog === "hole"
                                 ? CAD_FEATURE_FORM_LABELS.holeHint
-                                : DATUM_FORM_LABELS.hint}
+                                : featureDialog === "pattern"
+                                  ? CAD_FEATURE_FORM_LABELS.patternHint
+                                  : featureDialog === "patternPath"
+                                    ? CAD_FEATURE_FORM_LABELS.patternPathHint
+                                    : featureDialog === "mirror"
+                                      ? CAD_FEATURE_FORM_LABELS.mirrorHint
+                                      : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "sweep" ? (
               <SweepFeatureForm
@@ -2086,6 +2235,18 @@ export function CompleteCadWorkbench({
                 onHole={submitStructuredHole}
                 onValuesChange={setHoleDialogValues}
                 sketches={sketchOptions}
+              />
+            ) : featureDialog === "pattern" ? (
+              <PatternFeatureForm onPattern={submitPattern} />
+            ) : featureDialog === "patternPath" ? (
+              <PatternPathFeatureForm
+                onPatternPath={submitPatternPath}
+                sketches={sketchOptions}
+              />
+            ) : featureDialog === "mirror" ? (
+              <MirrorFeatureForm
+                datumPlanes={datumPlaneOptions}
+                onMirror={submitMirror}
               />
             ) : (
               <DatumFeatureForm

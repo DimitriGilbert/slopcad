@@ -168,6 +168,15 @@ import {
 } from "./scale-thicken";
 import { documentSplitSceneRequest } from "./split";
 import {
+  documentMirrorSceneRequest,
+  documentPatternFeatureSceneRequest,
+  documentPatternPathSceneRequest,
+  patternTargetFeatureOf,
+  validateMirrorSubmission,
+  validatePatternPathSubmission,
+  validatePatternSubmission,
+} from "./pattern";
+import {
   sessionBackendOf,
   type FixtureSessionBackendId,
 } from "../render-fixture/session-backend";
@@ -248,7 +257,8 @@ export function useWorkbenchStore() {
 /**
  * The scene kinds the dispatch effect follows — the plate computation until
  * the first solid action commits, then the worker-executed composition the
- * document names (Phase 38 adds the sweep and loft scenes).
+ * document names (Phase 38 adds the sweep and loft scenes; Phase 43 adds
+ * the pattern and mirror scenes).
  */
 export type WorkbenchSceneKind =
   | "plate"
@@ -262,6 +272,9 @@ export type WorkbenchSceneKind =
   | "scale"
   | "thicken"
   | "split"
+  | "patternFeature"
+  | "patternPath"
+  | "mirror"
   | "hole";
 
 /**
@@ -502,6 +515,45 @@ export interface WorkbenchEngine {
     readonly side: 1 | -1;
   }) => FeatureFormOutcome;
   /**
+   * The Phase 43 pattern create action (the pattern editor's submission
+   * seam): validates the legs and skip list through the action-time
+   * battery, then commits each leg's three parameters, each skip's
+   * ordinal parameter, and the patternFeature feature (targeting the
+   * document's last extrude) in one atomic transaction. A refusal
+   * commits nothing.
+   */
+  readonly handlePattern: (specification: {
+    readonly legs: readonly {
+      readonly directionDeg: number;
+      readonly count: number;
+      readonly spacingMm: number;
+    }[];
+    readonly skips: readonly number[];
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 43 path-pattern create action: validates the numbers and
+   * resolves the picked path sketch through the same path seam the
+   * executor bridge rides, then commits the count/spacing/orientation
+   * parameters and the patternPath feature in one atomic transaction. A
+   * refusal commits nothing.
+   */
+  readonly handlePatternPath: (specification: {
+    readonly sketchId: string;
+    readonly count: number;
+    readonly spacingMm: number;
+    readonly orientation: number;
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 43 mirror create action: validates the merge option, then
+   * commits the merge parameter and the mirror feature (the picked datum
+   * plane, targeting the document's last extrude) in one atomic
+   * transaction. A refusal commits nothing.
+   */
+  readonly handleMirror: (specification: {
+    readonly datumPlaneId: string;
+    readonly merge: number;
+  }) => FeatureFormOutcome;
+  /**
    * The Phase 39 sketch-on-face action: resolves the picked scene face into
    * a datum plane record (the persistent anchor) plus the face workplane,
    * commits the datum in one atomic transaction, and enters the sketch mode
@@ -614,6 +666,9 @@ export function useWorkbenchEngine(
   const [scaleCount, setScaleCount] = useState(0);
   const [thickenCount, setThickenCount] = useState(0);
   const [splitCount, setSplitCount] = useState(0);
+  const [patternCount, setPatternCount] = useState(0);
+  const [patternPathCount, setPatternPathCount] = useState(0);
+  const [mirrorCount, setMirrorCount] = useState(0);
   // The Phase 39 sketch-on-face anchor: the datum record the CURRENT sketch
   // session boots on (its id commits with the extrude feature; its plane
   // booted the sketch editor). `null` in the ordinary sketch flow.
@@ -1900,6 +1955,296 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The Phase 43 pattern action (the pattern editor's submission seam):
+  // validate the legs and skips (the action-time battery), then commit
+  // each leg's direction/count/spacing parameters, each skip's ordinal
+  // parameter, and the patternFeature feature targeting the document's
+  // LAST EXTRUDE (the thread precedent) in ONE atomic transaction — the
+  // bridge's own greedy layout: leg triples first, skip ordinals after.
+  // A refusal commits nothing.
+  const handlePattern = (specification: {
+    readonly legs: readonly {
+      readonly directionDeg: number;
+      readonly count: number;
+      readonly spacingMm: number;
+    }[];
+    readonly skips: readonly number[];
+  }): FeatureFormOutcome => {
+    const validation = validatePatternSubmission(specification);
+    if (!validation.ok) return validation;
+    const target = patternTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A pattern needs a target solid: extrude a profile first (the thread's precedent).",
+      };
+    }
+    const n = patternCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_pattern${suffix}`);
+    const featureId = createFeatureId(`feat_pattern${suffix}`);
+    const parameterCommands: Parameters<
+      typeof documentApi.applyTransaction
+    >[0]["commands"][number][] = [
+      {
+        type: "parameter.create",
+        id: createParameterId(`param_pattern${suffix}_direction1`),
+        name: `pattern${suffix}Direction1`,
+        value: angle(
+          ((specification.legs[0]?.directionDeg ?? 0) * Math.PI) / 180,
+        ),
+      },
+      {
+        type: "parameter.create",
+        id: createParameterId(`param_pattern${suffix}_count1`),
+        name: `pattern${suffix}Count1`,
+        value: dimensionless(specification.legs[0]?.count ?? 3),
+      },
+      {
+        type: "parameter.create",
+        id: createParameterId(`param_pattern${suffix}_spacing1`),
+        name: `pattern${suffix}Spacing1`,
+        value: length(specification.legs[0]?.spacingMm ?? 20),
+      },
+    ];
+    const legParameterIds: ReturnType<typeof createParameterId>[] = [
+      createParameterId(`param_pattern${suffix}_direction1`),
+      createParameterId(`param_pattern${suffix}_count1`),
+      createParameterId(`param_pattern${suffix}_spacing1`),
+    ];
+    for (let index = 1; index < specification.legs.length; index += 1) {
+      const leg = specification.legs[index];
+      if (leg === undefined) continue;
+      const number = String(index + 1);
+      parameterCommands.push(
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_pattern${suffix}_direction${number}`),
+          name: `pattern${suffix}Direction${number}`,
+          value: angle((leg.directionDeg * Math.PI) / 180),
+        },
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_pattern${suffix}_count${number}`),
+          name: `pattern${suffix}Count${number}`,
+          value: dimensionless(leg.count),
+        },
+        {
+          type: "parameter.create",
+          id: createParameterId(`param_pattern${suffix}_spacing${number}`),
+          name: `pattern${suffix}Spacing${number}`,
+          value: length(leg.spacingMm),
+        },
+      );
+      legParameterIds.push(
+        createParameterId(`param_pattern${suffix}_direction${number}`),
+        createParameterId(`param_pattern${suffix}_count${number}`),
+        createParameterId(`param_pattern${suffix}_spacing${number}`),
+      );
+    }
+    for (const [index, skip] of specification.skips.entries()) {
+      const number = String(index + 1);
+      parameterCommands.push({
+        type: "parameter.create",
+        id: createParameterId(`param_pattern${suffix}_skip${number}`),
+        name: `pattern${suffix}Skip${number}`,
+        value: dimensionless(skip),
+      });
+      legParameterIds.push(
+        createParameterId(`param_pattern${suffix}_skip${number}`),
+      );
+    }
+    const committed = documentApi.applyTransaction({
+      commands: [
+        ...parameterCommands,
+        {
+          type: "body.create",
+          id: bodyId,
+          name: `patterned ${String(n)}`,
+        },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "patternFeature",
+          inputs: [
+            { kind: "feature", id: target.id },
+            ...legParameterIds.map((id) => ({
+              kind: "parameter" as const,
+              id,
+            })),
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setPatternCount(n);
+    setActiveScene("patternFeature");
+    return { ok: true };
+  };
+
+  // The Phase 43 path-pattern action: validate the numbers, resolve the
+  // picked path sketch through the same path seam the executor bridge
+  // rides (a doomed path never commits), then commit the count/spacing/
+  // orientation parameters and the patternPath feature in ONE atomic
+  // transaction. A refusal commits nothing.
+  const handlePatternPath = (specification: {
+    readonly sketchId: string;
+    readonly count: number;
+    readonly spacingMm: number;
+    readonly orientation: number;
+  }): FeatureFormOutcome => {
+    const validation = validatePatternPathSubmission(specification);
+    if (!validation.ok) return validation;
+    const target = patternTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A path pattern needs a target solid: extrude a profile first (the thread's precedent).",
+      };
+    }
+    const path = sketchPathResolverOf(workbenchDocument)(
+      createSketchDocumentId(specification.sketchId),
+    );
+    if (!path.ok) {
+      return {
+        ok: false,
+        code: path.error.code,
+        message: path.error.message,
+      };
+    }
+    const n = patternPathCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_patternpath${suffix}`);
+    const featureId = createFeatureId(`feat_patternpath${suffix}`);
+    const countId = createParameterId(`param_patternpath_count${suffix}`);
+    const spacingId = createParameterId(`param_patternpath_spacing${suffix}`);
+    const orientationId = createParameterId(
+      `param_patternpath_orientation${suffix}`,
+    );
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: countId,
+          name: `pathCount${suffix}`,
+          value: dimensionless(specification.count),
+        },
+        {
+          type: "parameter.create",
+          id: spacingId,
+          name: `pathSpacing${suffix}`,
+          value: length(specification.spacingMm),
+        },
+        {
+          type: "parameter.create",
+          id: orientationId,
+          name: `pathOrientation${suffix}`,
+          value: dimensionless(specification.orientation),
+        },
+        {
+          type: "body.create",
+          id: bodyId,
+          name: `path patterned ${String(n)}`,
+        },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "patternPath",
+          inputs: [
+            { kind: "feature", id: target.id },
+            {
+              kind: "sketch",
+              id: createSketchDocumentId(specification.sketchId),
+            },
+            { kind: "parameter", id: countId },
+            { kind: "parameter", id: spacingId },
+            { kind: "parameter", id: orientationId },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setPatternPathCount(n);
+    setActiveScene("patternPath");
+    return { ok: true };
+  };
+
+  // The Phase 43 mirror action: validate the merge option, then commit
+  // the merge parameter and the mirror feature (the picked datum plane,
+  // targeting the document's LAST EXTRUDE) in ONE atomic transaction. A
+  // refusal commits nothing.
+  const handleMirror = (specification: {
+    readonly datumPlaneId: string;
+    readonly merge: number;
+  }): FeatureFormOutcome => {
+    const validation = validateMirrorSubmission({ merge: specification.merge });
+    if (!validation.ok) return validation;
+    const target = patternTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A mirror needs a target solid: extrude a profile first (the thread's precedent).",
+      };
+    }
+    const n = mirrorCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_mirror${suffix}`);
+    const featureId = createFeatureId(`feat_mirror${suffix}`);
+    const mergeId = createParameterId(`param_mirror_merge${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: mergeId,
+          name: `mirrorMerge${suffix}`,
+          value: dimensionless(specification.merge),
+        },
+        { type: "body.create", id: bodyId, name: `mirrored ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "mirror",
+          inputs: [
+            { kind: "feature", id: target.id },
+            { kind: "datum", id: createDatumId(specification.datumPlaneId) },
+            { kind: "parameter", id: mergeId },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setMirrorCount(n);
+    setActiveScene("mirror");
+    return { ok: true };
+  };
+
   const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {
     if (runState === null) return null;
     // The worker's verdict outranks the document-data executor's "valid"
@@ -2066,6 +2411,27 @@ export function useWorkbenchEngine(
       }
       return;
     }
+    if (activeScene === "patternFeature") {
+      const request = documentPatternFeatureSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchPatternFeature(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "patternPath") {
+      const request = documentPatternPathSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchPatternPath(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "mirror") {
+      const request = documentMirrorSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchMirror(request, request.bodyId);
+      }
+      return;
+    }
     if (activeScene === "hole") {
       const derived = documentHoleSceneRequest(workbenchDocument);
       if (derived !== null) {
@@ -2090,6 +2456,9 @@ export function useWorkbenchEngine(
     scaleCount,
     thickenCount,
     splitCount,
+    patternCount,
+    patternPathCount,
+    mirrorCount,
     holeCount,
     structuredHoleCount,
   ]);
@@ -2342,6 +2711,9 @@ export function useWorkbenchEngine(
     handleScale,
     handleThicken,
     handleSplit,
+    handlePattern,
+    handlePatternPath,
+    handleMirror,
     handleSketchOnFace,
     sketchBootWorkplane: sketchAnchor === null ? null : sketchAnchor.workplane,
     datumsJson,

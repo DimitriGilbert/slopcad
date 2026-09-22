@@ -28,9 +28,54 @@ The bridge vocabulary is `BRIDGE_FEATURE_KINDS` (`@slopcad/cad-kernel`'s
 `core-bridge`): `box`, `sphere`, `cylinder`, `cone`, `union`,
 `subtract`, `intersect`, `translate`, `extrude`, `revolve`, `sweep`,
 `loft`, `helix`, `thread`, `fillet`, `chamfer`, `shell`,
-`patternLinear`, `patternCircular`, `mirror`, `hole`, `rib`, `scale`,
-`thicken`, `split` — each kind documents its input contract in the
-`core-bridge.ts` header.
+`patternLinear`, `patternCircular`, `patternFeature`, `patternPath`,
+`patternFace`, `mirror`, `hole`, `rib`, `scale`, `thicken`, `split` —
+each kind documents its input contract in the `core-bridge.ts` header.
+
+## Patterns and mirror (Phase 26.8/26.9; completion Phase 43)
+
+Patterns are FEATURE-LEVEL COMPOSITION, never kernel operations: the
+bridge issues one `transform` per copy and one `union` at the end, so
+every kernel that translates and unions runs every pattern.
+
+- `patternLinear` — one target, count + spacing, and a direction: an
+  ANGLE parameter (counter-clockwise in the world XY plane), a DATUM
+  AXIS input (the resolved axis's full 3D direction — Phase 43's
+  generalization), or a SKETCH input (the resolved open chain's
+  end−start direction, sketch `(x, y)` → world `(x, 0, z)`).
+- `patternCircular` — count copies at `i·Δ` about a world axis or a
+  resolved DATUM AXIS. Rotations need the `transformRotation`
+  capability: the bridge gates BEFORE any call, so a rotation-less
+  kernel refuses structurally instead of silently stacking copies.
+- `patternFeature` (Phase 43) — the FEATURE RANGE: one or more
+  feature/body inputs repeated as ONE group, over asymmetric
+  direction+count+spacing LEG triples (greedily parsed: legs read
+  (angle, dimensionless, length); the trailing dimensionless
+  parameters are SKIP ordinals naming instances that drop out of the
+  union). `parameter.set` on any leg number or skip ordinal re-drives
+  the whole arrangement.
+- `patternPath` (Phase 43) — one target, one sketch path (the sweep's
+  `paths` seam; the chain's local `(x, z)` rides the world XZ plane),
+  count + spacing (arc length) + orientation (1 fixed, 2
+  tangent-follow — the latter gated on `transformRotation`).
+  `@slopcad/cad-kernel`'s `path-geometry` walk (`sweepPathStationAt`)
+  is the one source of the stations.
+- `patternFace` (Phase 43) — one target whose own FACE bounds the grid:
+  a face REFERENCE (the fillet battery's resolution), the plane through
+  the datum seam, and two leg triples; grid points outside the face's
+  TESSELLATED boundary drop out (the synthetic-face discipline), and a
+  grid that places fewer than two points declines structurally.
+- `mirror` — the direct `kernel.mirror` call a reflection's negative
+  determinant forces. The datum-plane form (Phase 39) carries an
+  optional MERGE parameter (Phase 43): `1`/absent keeps the standalone
+  reflection, `2` unions it with the original — the symmetric-part
+  route. `planDatumMirror` is the one source of the reflection recipe
+  (the direct world-axis mirror or the composed oblique chain), shared
+  by the bridge and the workbench's worker scene.
+
+The workbench authors the pattern editor (legs + skips, Formedible),
+the path pattern, and the datum-plane mirror with its merge option;
+`parameter.set` re-drives each through regeneration.
 
 ## Sweep and loft (Phase 38)
 

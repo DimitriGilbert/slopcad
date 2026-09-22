@@ -49,6 +49,13 @@ import {
   STRUCTURED_HOLE_DEFAULTS,
   type StructuredHoleSubmission,
 } from "./hole-dialog";
+import {
+  PATTERN_DEFAULTS,
+  PATTERN_PATH_DEFAULTS,
+  type MirrorInput,
+  type PatternFeatureInput,
+  type PatternPathInput,
+} from "./pattern";
 
 /** One pickable sketch: the document record's id and its name. */
 export interface CadFeatureSketchOption {
@@ -134,6 +141,28 @@ export interface CadFeatureFormLabels {
   readonly holeWorldAxis: string;
   readonly holeAxis: string;
   readonly holeHint: string;
+  readonly patternTitle: string;
+  readonly patternLegs: string;
+  readonly patternLegDirection: string;
+  readonly patternLegCount: string;
+  readonly patternLegSpacing: string;
+  readonly patternSkips: string;
+  readonly patternSkipOrdinal: string;
+  readonly patternHint: string;
+  readonly patternPathTitle: string;
+  readonly patternPathSketch: string;
+  readonly patternPathCount: string;
+  readonly patternPathSpacing: string;
+  readonly patternPathOrientation: string;
+  readonly patternPathOrientationFixed: string;
+  readonly patternPathOrientationTangent: string;
+  readonly patternPathHint: string;
+  readonly mirrorTitle: string;
+  readonly mirrorPlane: string;
+  readonly mirrorMerge: string;
+  readonly mirrorMergeStandalone: string;
+  readonly mirrorMergeMerged: string;
+  readonly mirrorHint: string;
   readonly submit: string;
   readonly pickSketch: string;
 }
@@ -226,6 +255,31 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   holeAxis: "Axis",
   holeHint:
     "One feature, one type, many positions: the depth runs to the drill tip; blind or through is the depth-versus-extent rule; threaded holes tap the ISO basic minor and cut the ISO ridge (helix-capable kernels only).",
+  patternTitle: "Pattern the latest extrusion",
+  patternLegs: "Array legs (one per direction)",
+  patternLegDirection: "Direction (deg)",
+  patternLegCount: "Count",
+  patternLegSpacing: "Spacing (mm)",
+  patternSkips: "Skipped instances",
+  patternSkipOrdinal: "Instance ordinal",
+  patternHint:
+    "Each leg repeats the extrusion along its own direction at its own spacing — asymmetric grids carry one leg per direction. Skips drop whole instances by ordinal (0 is the untranslated original); edit them later in the parameters panel.",
+  patternPathTitle: "Repeat the latest extrusion along a sketch path",
+  patternPathSketch: "Path sketch",
+  patternPathCount: "Instances",
+  patternPathSpacing: "Spacing along the path (mm)",
+  patternPathOrientation: "Orientation",
+  patternPathOrientationFixed: "Fixed (translate only)",
+  patternPathOrientationTangent: "Tangent-follow (rotate with the path)",
+  patternPathHint:
+    "The path sketch draws in the world XZ plane — sketch (x, y) becomes world (x, z), drawn upward from the origin. Instances stand every spacing of arc length; tangent-follow needs a rotating kernel (the OCCT route).",
+  mirrorTitle: "Mirror the latest extrusion about a datum plane",
+  mirrorPlane: "Mirror datum plane",
+  mirrorMerge: "Merge option",
+  mirrorMergeStandalone: "Standalone copy",
+  mirrorMergeMerged: "Merge with the original",
+  mirrorHint:
+    "The reflection about the picked datum plane; merging unions it with the original — the symmetric-part route. Create the plane first (the Datum button).",
   submit: "Create",
   pickSketch: "Pick a sketch",
 };
@@ -1481,4 +1535,320 @@ function roleNumberFieldOf(role: string): string {
     default:
       return role;
   }
+}
+
+/** Form values of the pattern editor (the Phase 43 feature array). */
+export interface PatternFormValues extends Record<string, unknown> {
+  readonly legs: {
+    readonly directionDeg: number;
+    readonly count: number;
+    readonly spacingMm: number;
+  }[];
+  readonly skips: { readonly ordinal: number }[];
+}
+
+/**
+ * The pattern editor form (Phase 43): an ordered, sortable array of LEGS
+ * (direction + count + spacing — one row per array direction, asymmetric
+ * grids included) plus the SKIP-INSTANCE list. Submission routes through
+ * the engine's pattern action; a structured refusal surfaces verbatim in
+ * the dialog's error region.
+ */
+export function PatternFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onPattern,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onPattern: (specification: PatternFeatureInput) => void;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<PatternFormValues>[] = [
+    {
+      arrayConfig: {
+        addButtonLabel: "Add leg",
+        defaultValue: {
+          directionDeg: PATTERN_DEFAULTS.legs[0]?.directionDeg ?? 0,
+          count: PATTERN_DEFAULTS.legs[0]?.count ?? 3,
+          spacingMm: PATTERN_DEFAULTS.legs[0]?.spacingMm ?? 20,
+        },
+        itemLabel: "Leg",
+        minItems: 1,
+        objectConfig: {
+          columns: 3,
+          fields: [
+            {
+              name: "directionDeg",
+              required: true,
+              type: "number",
+              label: labels.patternLegDirection,
+              inputClassName: "font-mono",
+              validation: (value) =>
+                typeof value === "number" && Number.isFinite(value)
+                  ? null
+                  : "Enter a finite angle in degrees.",
+            },
+            {
+              name: "count",
+              required: true,
+              type: "number",
+              label: labels.patternLegCount,
+              inputClassName: "font-mono",
+              validation: (value) =>
+                typeof value === "number" &&
+                Number.isInteger(value) &&
+                value >= 2
+                  ? null
+                  : "Enter a whole count of at least 2.",
+            },
+            {
+              name: "spacingMm",
+              required: true,
+              type: "number",
+              label: labels.patternLegSpacing,
+              inputClassName: "font-mono",
+              validation: (value) =>
+                typeof value === "number" && Number.isFinite(value) && value > 0
+                  ? null
+                  : "Enter a strictly positive spacing.",
+            },
+          ],
+          layout: "grid",
+        },
+        sortable: true,
+      },
+      name: "legs",
+      type: "array",
+      label: labels.patternLegs,
+    },
+    {
+      arrayConfig: {
+        addButtonLabel: "Skip an instance",
+        defaultValue: { ordinal: 1 },
+        itemLabel: "Skip",
+        minItems: 0,
+        objectConfig: {
+          columns: 1,
+          fields: [
+            {
+              name: "ordinal",
+              required: true,
+              type: "number",
+              label: labels.patternSkipOrdinal,
+              inputClassName: "font-mono",
+              validation: (value) =>
+                typeof value === "number" &&
+                Number.isInteger(value) &&
+                value >= 0
+                  ? null
+                  : "Enter a whole instance ordinal (0 is the untranslated original).",
+            },
+          ],
+          layout: "grid",
+        },
+        sortable: false,
+      },
+      name: "skips",
+      type: "array",
+      label: labels.patternSkips,
+    },
+  ];
+  const form = useFormedible<PatternFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        legs: PATTERN_DEFAULTS.legs.map((leg) => ({ ...leg })),
+        skips: [],
+      },
+      onSubmit: ({ value }) => {
+        onPattern({
+          legs: value.legs.map((leg) => ({
+            directionDeg: leg.directionDeg,
+            count: leg.count,
+            spacingMm: leg.spacingMm,
+          })),
+          skips: value.skips.map((skip) => skip.ordinal),
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.patternTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the path-pattern form. */
+export interface PatternPathFormValues extends Record<string, unknown> {
+  readonly pathSketchId: string;
+  readonly count: number;
+  readonly spacingMm: number;
+  readonly orientation: string;
+}
+
+/**
+ * The path-pattern form (Phase 43): the saved path sketch picker, the
+ * instance count and arc-length spacing, and the orientation option
+ * (fixed vs tangent-follow). Submission routes through the engine's
+ * pattern-path action; a structured refusal surfaces verbatim.
+ */
+export function PatternPathFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onPatternPath,
+  sketches,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onPatternPath: (
+    specification: PatternPathInput & { readonly sketchId: string },
+  ) => void;
+  readonly sketches: readonly CadFeatureSketchOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<PatternPathFormValues>[] = [
+    {
+      name: "pathSketchId",
+      options: sketchOptions(sketches),
+      placeholder: labels.pickSketch,
+      required: true,
+      type: "select",
+      label: labels.patternPathSketch,
+    },
+    {
+      name: "count",
+      required: true,
+      type: "number",
+      label: labels.patternPathCount,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isInteger(value) && value >= 2
+          ? null
+          : "Enter a whole count of at least 2.",
+    },
+    {
+      name: "spacingMm",
+      required: true,
+      type: "number",
+      label: labels.patternPathSpacing,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value) && value > 0
+          ? null
+          : "Enter a strictly positive spacing.",
+    },
+    {
+      name: "orientation",
+      options: [
+        { value: "fixed", label: labels.patternPathOrientationFixed },
+        { value: "tangent", label: labels.patternPathOrientationTangent },
+      ],
+      required: true,
+      type: "select",
+      label: labels.patternPathOrientation,
+    },
+  ];
+  const form = useFormedible<PatternPathFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        pathSketchId: sketches[0]?.id ?? "",
+        count: PATTERN_PATH_DEFAULTS.count,
+        spacingMm: PATTERN_PATH_DEFAULTS.spacingMm,
+        orientation: "fixed",
+      },
+      onSubmit: ({ value }) => {
+        onPatternPath({
+          sketchId: value.pathSketchId,
+          count: value.count,
+          spacingMm: value.spacingMm,
+          orientation: value.orientation === "tangent" ? 2 : 1,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.patternPathTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the mirror form. */
+export interface MirrorFormValues extends Record<string, unknown> {
+  readonly datumPlaneId: string;
+  readonly merge: string;
+}
+
+/**
+ * The mirror form (Phase 43): the datum-plane picker plus the merge
+ * option (a standalone reflection or one union with the original).
+ * Submission routes through the engine's mirror action; a structured
+ * refusal surfaces verbatim in the dialog's error region.
+ */
+export function MirrorFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onMirror,
+  datumPlanes,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onMirror: (
+    specification: MirrorInput & { readonly datumPlaneId: string },
+  ) => void;
+  readonly datumPlanes: readonly CadFeatureDatumOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<MirrorFormValues>[] = [
+    {
+      name: "datumPlaneId",
+      options: datumPlanes.map((datum) => ({
+        value: datum.id,
+        label: datum.name,
+      })),
+      placeholder: labels.mirrorPlane,
+      required: true,
+      type: "select",
+      label: labels.mirrorPlane,
+    },
+    {
+      name: "merge",
+      options: [
+        { value: "standalone", label: labels.mirrorMergeStandalone },
+        { value: "merge", label: labels.mirrorMergeMerged },
+      ],
+      required: true,
+      type: "select",
+      label: labels.mirrorMerge,
+    },
+  ];
+  const form = useFormedible<MirrorFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        datumPlaneId: datumPlanes[0]?.id ?? "",
+        merge: "standalone",
+      },
+      onSubmit: ({ value }) => {
+        onMirror({
+          datumPlaneId: value.datumPlaneId,
+          merge: value.merge === "merge" ? 2 : 1,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.mirrorTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
 }

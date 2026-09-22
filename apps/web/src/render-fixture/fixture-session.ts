@@ -38,6 +38,11 @@ import type {
   ThickenSceneRequest,
 } from "../cad-workbench/scale-thicken";
 import type { SplitSceneRequest } from "../cad-workbench/split";
+import type {
+  MirrorSceneRequest,
+  PatternFeatureSceneRequest,
+  PatternPathSceneRequest,
+} from "../cad-workbench/pattern";
 
 import {
   computePlateRenderState,
@@ -58,6 +63,11 @@ import {
   computeSplitScene,
   computeThickenScene,
 } from "../worker-fixture/feature-richness-scenes";
+import {
+  computeMirrorScene,
+  computePatternFeatureScene,
+  computePatternPathScene,
+} from "../worker-fixture/pattern-scene";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
  * authored for exactly this size (and the scene runs at dpr 1), which is
@@ -146,6 +156,27 @@ export interface RenderFixtureSession {
    * computation rejection).
    */
   dispatchSplit(request: SplitSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 43 patternFeature computation: the REAL kernel
+   * composes the base extrusion, the shared leg-grid planner's per-
+   * instance transforms (skips dropped), and one union in the worker.
+   */
+  dispatchPatternFeature(
+    request: PatternFeatureSceneRequest,
+    bodyId: string,
+  ): void;
+  /**
+   * Dispatches the Phase 43 patternPath computation: the REAL kernel
+   * composes the base extrusion and the shared path-geometry walk's
+   * per-station transforms (fixed or tangent-following) in the worker.
+   */
+  dispatchPatternPath(request: PatternPathSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 43 mirror computation: the REAL kernel executes
+   * the shared `planDatumMirror` recipe on the base extrusion in the
+   * worker (one union more when the merge option asks for it).
+   */
+  dispatchMirror(request: MirrorSceneRequest, bodyId: string): void;
   /**
    * Dispatches the Phase 26.10 hole computation: the REAL kernel composes
    * the base extrusion, one planned tool per hole, and the subtract in the
@@ -297,6 +328,9 @@ export type FeatureSceneKind =
   | "scale"
   | "thicken"
   | "split"
+  | "patternFeature"
+  | "patternPath"
+  | "mirror"
   | "hole"
   | "pad";
 
@@ -686,6 +720,60 @@ export function bootRenderFixtureSession(
         .then(
           settleWithVerdict("split", bodyId),
           failWithVerdict("split", bodyId),
+        );
+    },
+    dispatchPatternFeature(
+      request: PatternFeatureSceneRequest,
+      bodyId: string,
+    ): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computePatternFeatureScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(
+          settleWithVerdict("patternFeature", bodyId),
+          failWithVerdict("patternFeature", bodyId),
+        );
+    },
+    dispatchPatternPath(
+      request: PatternPathSceneRequest,
+      bodyId: string,
+    ): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computePatternPathScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(
+          settleWithVerdict("patternPath", bodyId),
+          failWithVerdict("patternPath", bodyId),
+        );
+    },
+    dispatchMirror(request: MirrorSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computeMirrorScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(
+          settleWithVerdict("mirror", bodyId),
+          failWithVerdict("mirror", bodyId),
         );
     },
     dispose(): void {
