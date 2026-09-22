@@ -27,6 +27,7 @@ import {
   type ProfileSweepInput,
   type ShellInput,
   type SphereInput,
+  type ThickenInput,
   type TransformInput,
 } from "@slopcad/cad-kernel";
 
@@ -75,6 +76,8 @@ export function withOperationLog(kernel: GeometryKernel): LoggedKernel {
     chamfer: (input: ChamferInput) =>
       log("chamfer", () => kernel.chamfer(input)),
     shell: (input: ShellInput) => log("shell", () => kernel.shell(input)),
+    thicken: (input: ThickenInput) =>
+      log("thicken", () => kernel.thicken(input)),
     union: (operands: readonly KernelSolid[]) =>
       log("union", () => kernel.union(operands)),
     subtract: (target: KernelSolid, tools: readonly KernelSolid[]) =>

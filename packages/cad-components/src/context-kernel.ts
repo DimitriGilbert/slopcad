@@ -68,6 +68,8 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   loft: false,
   fillet: true,
   chamfer: true,
+  thicken: false,
+  extrudeTaper: false,
   shell: true,
   mirror: true,
   surfaceArea: true,

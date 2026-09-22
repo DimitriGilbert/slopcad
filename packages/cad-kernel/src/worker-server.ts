@@ -110,6 +110,7 @@ type SolidProducingOperation =
   | "solid.fillet"
   | "solid.chamfer"
   | "solid.shell"
+  | "solid.thicken"
   | "solid.mirror";
 
 /** What executing a request produced, before the ledger decides delivery. */
@@ -467,22 +468,22 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             return { status: "failed", error: solid.error };
           }
           // The full placement crosses into the kernel: translation plus
-          // the optional rotation (Phase 21.2 wire extension), applied in
-          // the contract's order — rotation first, translation second.
+          // the optional rotation (Phase 21.2 wire extension) and the
+          // optional uniform scale (Phase 41), applied in the contract's
+          // order — scale and rotation about the world origin first,
+          // translation second.
           const translation = request.input.translation;
-          const input: TransformInput =
-            request.input.rotation === undefined
-              ? {
-                  x: translation.x,
-                  y: translation.y,
-                  z: translation.z,
-                }
-              : {
-                  x: translation.x,
-                  y: translation.y,
-                  z: translation.z,
-                  rotation: request.input.rotation,
-                };
+          const input: TransformInput = {
+            ...(request.input.rotation === undefined
+              ? {}
+              : { rotation: request.input.rotation }),
+            ...(request.input.scale === undefined
+              ? {}
+              : { scale: request.input.scale }),
+            x: translation.x,
+            y: translation.y,
+            z: translation.z,
+          };
           const result = kernel.transform(solid.handle, input);
           return result.ok
             ? {
@@ -672,6 +673,32 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             : {
                 status: "failed",
                 error: kernelFailure("solid.shell", result.error),
+              };
+        }
+        case "solid.thicken": {
+          // The Phase 41 contract op — the closed hollow: the target
+          // resolves against the session map, the wall thickness rides as
+          // a length, and the kernel's own structured codes (non-positive
+          // thickness, too-thick walls, unsupported engine, per-shape
+          // subset declines) cross back as `worker/operation-failed`
+          // data.
+          const solid = ownedSolid("solid.thicken", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.thicken({
+            target: solid.handle,
+            thickness: request.input.thickness,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.thicken",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.thicken", result.error),
               };
         }
         case "solid.mirror": {

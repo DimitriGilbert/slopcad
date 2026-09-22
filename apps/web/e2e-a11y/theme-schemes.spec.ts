@@ -135,7 +135,20 @@ for (const { id: scheme } of SCHEMES) {
             { timeout: 30_000 },
           );
         }
-        await page.waitForTimeout(500);
+        // Both axes must actually BE applied on the document root before
+        // anything is probed: the register via the dark class, the scheme
+        // via data-scheme. Event-driven (replaces a blind 500 ms dwell):
+        // next-themes applies the register after hydration, so wait for
+        // the applied state itself instead of parking for a beat.
+        await page.waitForFunction(
+          ({ expectDark, expectedScheme }) =>
+            document.documentElement.classList.contains("dark") ===
+              expectDark &&
+            document.documentElement.getAttribute("data-scheme") ===
+              expectedScheme,
+          { expectDark: theme === "dark", expectedScheme: scheme },
+          { timeout: 30_000 },
+        );
 
         // Both axes must actually BE applied on the document root: the
         // register via the dark class, the scheme via data-scheme.

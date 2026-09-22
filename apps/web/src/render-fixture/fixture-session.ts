@@ -32,6 +32,12 @@ import type {
 } from "../worker-fixture/plate-scene-extra";
 import type { HelixSceneRequest } from "../worker-fixture/helix-scene";
 import type { ThreadSceneRequest } from "../worker-fixture/thread-scene";
+import type { RibSceneRequest } from "../cad-workbench/rib";
+import type {
+  ScaleSceneRequest,
+  ThickenSceneRequest,
+} from "../cad-workbench/scale-thicken";
+import type { SplitSceneRequest } from "../cad-workbench/split";
 
 import {
   computePlateRenderState,
@@ -46,6 +52,12 @@ import { computeHoleScene } from "../worker-fixture/hole-scene";
 import { computePadScene } from "../worker-fixture/pad-scene";
 import { computeHelixScene } from "../worker-fixture/helix-scene";
 import { computeThreadScene } from "../worker-fixture/thread-scene";
+import {
+  computeRibScene,
+  computeScaleScene,
+  computeSplitScene,
+  computeThickenScene,
+} from "../worker-fixture/feature-richness-scenes";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
  * authored for exactly this size (and the scene runs at dpr 1), which is
@@ -104,6 +116,36 @@ export interface RenderFixtureSession {
    * the base alone.
    */
   dispatchThread(request: ThreadSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 41 rib computation: the REAL kernel composes the
+   * base extrusion, the rib profile's symmetric half-thickness extrusion
+   * pair, and their union in the worker (the no-op guard rides the
+   * computation rejection), and the settled solid's measurement +
+   * projection become the visible scene.
+   */
+  dispatchRib(request: RibSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 41 scale computation: the REAL kernel executes
+   * the base extrusion and one `solid.transform` carrying the uniform
+   * scale field in the worker. On a kernel without the transformScale
+   * capability the structured `kernel/unsupported-operation` lands on the
+   * error surface.
+   */
+  dispatchScale(request: ScaleSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 41 thicken computation: the REAL kernel executes
+   * the base extrusion and one `solid.thicken` in the worker. On a kernel
+   * without the thicken capability the structured
+   * `kernel/unsupported-operation` lands on the error surface.
+   */
+  dispatchThicken(request: ThickenSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 41 split computation: the REAL kernel composes
+   * the base extrusion, the bridge's planned covering-box tool, and the
+   * subtract in the worker (the both-ways post-condition rides the
+   * computation rejection).
+   */
+  dispatchSplit(request: SplitSceneRequest, bodyId: string): void;
   /**
    * Dispatches the Phase 26.10 hole computation: the REAL kernel composes
    * the base extrusion, one planned tool per hole, and the subtract in the
@@ -251,6 +293,10 @@ export type FeatureSceneKind =
   | "loft"
   | "helix"
   | "thread"
+  | "rib"
+  | "scale"
+  | "thicken"
+  | "split"
   | "hole"
   | "pad";
 
@@ -588,6 +634,58 @@ export function bootRenderFixtureSession(
         .then(
           settleWithVerdict("thread", bodyId),
           failWithVerdict("thread", bodyId),
+        );
+    },
+    dispatchRib(request: RibSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computeRibScene(context, request), bodyId),
+        )
+        .then(settleWithVerdict("rib", bodyId), failWithVerdict("rib", bodyId));
+    },
+    dispatchScale(request: ScaleSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computeScaleScene(context, request), bodyId),
+        )
+        .then(
+          settleWithVerdict("scale", bodyId),
+          failWithVerdict("scale", bodyId),
+        );
+    },
+    dispatchThicken(request: ThickenSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computeThickenScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(
+          settleWithVerdict("thicken", bodyId),
+          failWithVerdict("thicken", bodyId),
+        );
+    },
+    dispatchSplit(request: SplitSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(await computeSplitScene(context, request), bodyId),
+        )
+        .then(
+          settleWithVerdict("split", bodyId),
+          failWithVerdict("split", bodyId),
         );
     },
     dispose(): void {

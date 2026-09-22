@@ -550,6 +550,10 @@ describe("bridge feature kinds", () => {
       "patternCircular",
       "mirror",
       "hole",
+      "rib",
+      "scale",
+      "thicken",
+      "split",
     ]);
   });
 });

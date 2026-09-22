@@ -165,6 +165,12 @@ export interface ExtrudeSceneRequest {
   readonly placement: KernelResolvedProfile["placement"];
   /** The SIGNED distance in mm (sign = direction). */
   readonly distanceMm: number;
+  /**
+   * The optional draft taper (Phase 41) in canonical radians — present
+   * exactly when the feature declares its third, angle-typed parameter
+   * with a non-zero value, and carried to `solid.extrude` verbatim.
+   */
+  readonly taperRad?: number;
   /** The extrude feature's output body id (the rendered body). */
   readonly bodyId: string;
 }
@@ -207,6 +213,26 @@ export function extrudeSceneRequestOfFeature(
   if (parameter === undefined) return null;
   const distanceMm = signedLengthMm(parameter.value);
   if (distanceMm === null || distanceMm === 0) return null;
+  // The Phase 41 draft taper: an optional THIRD input, an angle-typed
+  // parameter after the distance. Zero or absent = the plain prism.
+  let taperRad: number | undefined;
+  const taperRef = feature.inputs.find(
+    (ref) =>
+      ref.kind === "parameter" &&
+      ref.id !== (distanceRef as { readonly id: string }).id,
+  );
+  if (taperRef !== undefined && taperRef.kind === "parameter") {
+    const taperParameter = document.parameters.parameters.find(
+      (candidate) => candidate.id === taperRef.id,
+    );
+    if (
+      taperParameter !== undefined &&
+      taperParameter.value.dimension === "angle"
+    ) {
+      const radians = valueIn(taperParameter.value, "rad");
+      if (Number.isFinite(radians) && radians !== 0) taperRad = radians;
+    }
+  }
   const resolved = sketchProfileResolverOf(document)(sketchRef.id);
   if (!resolved.ok) return null;
   // The datum override: the sketch's baked workplane is the authoring-time
@@ -233,6 +259,7 @@ export function extrudeSceneRequestOfFeature(
     loop: resolved.value.loop,
     placement,
     distanceMm,
+    ...(taperRad === undefined ? {} : { taperRad }),
     bodyId,
   };
 }

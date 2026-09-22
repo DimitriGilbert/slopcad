@@ -97,7 +97,7 @@ describe("manifold kernel identity and capabilities", () => {
       booleans: true,
       transformTranslation: true,
       transformRotation: false,
-      transformScale: false,
+      transformScale: true,
       exactPrimitiveVolumes: true,
       exactBooleanVolumes: true,
       tightBooleanBounds: true,
@@ -108,6 +108,8 @@ describe("manifold kernel identity and capabilities", () => {
       fillet: false,
       chamfer: false,
       shell: false,
+      thicken: false,
+      extrudeTaper: false,
       mirror: true,
       surfaceArea: true,
     });

@@ -136,7 +136,33 @@ test("the interactive React example edits a real parameter", async ({
 }) => {
   const value = page.getByTestId("guide-hole-value");
   await expect(value).toHaveText("10");
-  await page.getByRole("button", { name: "Widen the hole" }).click();
+  // Hydration gate: SSR paints the same "10", so the text alone cannot
+  // prove the button's onClick is attached — a click landing inside the
+  // hydrating window is silently lost (observed under full-battery load).
+  // A live example reaching "ok" is client-only output (useEffect flips
+  // "running" → "ok") from the same hydration root, so it proves the
+  // client has committed and the listener is live before the click.
+  await expect(page.getByTestId("docs-example-status").first()).toHaveText(
+    "ok",
+    { timeout: 30_000 },
+  );
+  // Even past the hydration gate a click can still be lost under full
+  // 10-harness concurrency (the event's landing races the last hydrating
+  // commit), so the click itself carries a bounded verify-and-retry: click,
+  // poll for the parameter change, and click again only when a short
+  // deadline proves the click never landed — three attempts, then the
+  // ordinary assertion reports the honest failure.
+  const widen = page.getByRole("button", { name: "Widen the hole" });
+  await expect(widen).toBeEnabled();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await widen.click();
+    try {
+      await expect(value).toHaveText("12", { timeout: 1_500 });
+      break;
+    } catch {
+      // The value never moved: the click was lost — click again.
+    }
+  }
   await expect(value).toHaveText("12");
 });
 

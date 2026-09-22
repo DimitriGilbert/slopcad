@@ -175,6 +175,7 @@ import {
   type ShellInput,
   type SphereInput,
   type Tessellation,
+  type ThickenInput,
   type TransformInput,
 } from "@slopcad/cad-kernel";
 import {
@@ -200,9 +201,12 @@ import {
   sweepPieceStations,
   sweepProfileArcAxisCrossing,
   type SweepStation,
+  taperedExtrudeProblem,
+  taperInsetDistanceMm,
   tessellateProfileLoop,
   tessellateRevolveProfile,
 } from "@slopcad/cad-kernel";
+import { insetPolygon } from "@slopcad/cad-kernel";
 import { createSolidTag } from "@slopcad/cad-kernel";
 
 import { JSCAD_BACKEND_ID } from "./jscad-backend";
@@ -239,6 +243,7 @@ const { fromPoints: sliceFromPoints } = slice;
 const {
   create: mat4Create,
   fromRotation,
+  fromScaling: mat4FromScaling,
   fromValues: mat4FromValues,
 } = maths.mat4;
 
@@ -333,7 +338,7 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
   transformTranslation: true,
   transformRotation: true,
-  transformScale: false,
+  transformScale: true,
   exactPrimitiveVolumes: true,
   exactBooleanVolumes: false,
   tightBooleanBounds: true,
@@ -344,6 +349,8 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   fillet: false,
   chamfer: false,
   shell: false,
+  thicken: false,
+  extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
 });
@@ -688,6 +695,87 @@ export function createJscadKernel(): GeometryKernel {
         // CCW winding keeps extrudeLinear's side normals outward.
         const ccw =
           polygonSignedArea(polygon) > 0 ? polygon : [...polygon].reverse();
+        // The Phase 41 draft taper: the shared battery first, then the
+        // two-slice route the contract pins — the chord polygon and its
+        // far miter inset become the two slices, and extrudeFromSlices
+        // walls them vertex-to-vertex (the index morph). For straight-
+        // edged loops the blend IS the inset family at every parameter
+        // (the inset corner moves linearly), so the solid is exact; curved
+        // loops carry the same chord band as the plain prism.
+        if (input.taper !== undefined) {
+          const taperProblem = taperedExtrudeProblem(
+            input.loop,
+            height.value,
+            input.taper,
+          );
+          if (taperProblem !== null) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidTaper,
+                `extrude rejected the taper: ${taperProblem.message}`,
+              ),
+            );
+          }
+          const inset = taperInsetDistanceMm(height.value, input.taper) ?? 0;
+          if (inset !== 0) {
+            const far = insetPolygon(ccw, inset);
+            if (far === null) {
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.invalidTaper,
+                  "extrude rejected the taper: the far-end inset degenerates the chord polygon.",
+                ),
+              );
+            }
+            const farZ = input.direction === -1 ? -height.value : height.value;
+            // Each slice carries its own station z (the loft route): the
+            // base at the profile plane, the far inset at the extrusion's
+            // end — extrudeFromSlices walls them at their authored heights.
+            const slices = [
+              ccw.map(
+                (vertex) => [vertex.x, vertex.y, 0] as [number, number, number],
+              ),
+              far.map(
+                (vertex) =>
+                  [vertex.x, vertex.y, farZ] as [number, number, number],
+              ),
+            ].map((section) => sliceFromPoints(section));
+            const firstSlice = slices[0];
+            if (firstSlice === undefined) {
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.invalidProfile,
+                  "extrude rejected the profile loop: the chord polygon did not build.",
+                ),
+              );
+            }
+            const tapered = extrudeFromSlices(
+              {
+                numberOfSlices: 2,
+                capStart: true,
+                capEnd: true,
+                close: false,
+                callback: (_progress: number, index: number) => {
+                  const sectionSlice = slices[index];
+                  if (sectionSlice === undefined) {
+                    throw new Error(
+                      "Invariant violation: both taper slices exist for every index extrudeFromSlices requests.",
+                    );
+                  }
+                  return sectionSlice;
+                },
+              },
+              firstSlice,
+            );
+            const matrix = fromRotation(mat4Create(), angleRad, [
+              axis.value[0],
+              axis.value[1],
+              axis.value[2],
+            ]);
+            const placed = transformGeom3(matrix, tapered);
+            return ok(wrapSolid(translate([tx, ty, tz], placed)));
+          }
+        }
         const footprint = geom2FromPoints(
           ccw.map((point) => [point.x, point.y] as [number, number]),
         );
@@ -1214,6 +1302,21 @@ export function createJscadKernel(): GeometryKernel {
       );
     },
 
+    thicken(input: ThickenInput): KernelResult<KernelSolid> {
+      // The Phase 41 closed hollow: the shell's verdict verbatim — the
+      // engine carries no 3D offset (its `expandShell` is the outward
+      // Minkowski expansion's internal helper, probed), so the cavity the
+      // closed hollow needs cannot be built, and carving it with
+      // subtraction would be adapter-side meshing, not a kernel operation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "thicken is unsupported by the JSCAD kernel: the engine carries no 3D offset or hollowing operation (the shell verdict, probed), so the closed hollow's cavity cannot be built honestly.",
+        ),
+      );
+    },
+
     union(operands: readonly KernelSolid[]): KernelResult<KernelSolid> {
       return run("union", KERNEL_ERROR_CODES.invalidOperands, () => {
         const geometriesIn = operandsOf(operands, 2, "union");
@@ -1293,6 +1396,30 @@ export function createJscadKernel(): GeometryKernel {
           // Rotation first: about the world-origin axis (probed exact on
           // the quarter-turned box), then the world-space translation.
           placed = transformGeom3(matrix, placed);
+        }
+        // The Phase 41 uniform scale: `mat4.fromScaling` about the world
+        // origin, applied before the world-space translation — the
+        // contract's p ↦ s·R·p + t order (a uniform scale commutes past
+        // the rotation, so either composition builds the same solid). A
+        // strictly positive factor never trips the library's mirroring
+        // vertex reversal, so the facets stay outward untouched.
+        if (input.scale !== undefined) {
+          if (!(input.scale > 0) || !Number.isFinite(input.scale)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidLength,
+                `transform rejected the scale factor ${String(input.scale)}: it must be a finite, strictly positive number.`,
+              ),
+            );
+          }
+          placed = transformGeom3(
+            mat4FromScaling(mat4Create(), [
+              input.scale,
+              input.scale,
+              input.scale,
+            ]),
+            placed,
+          );
         }
         return ok(wrapSolid(translate([x, y, z], placed)));
       });

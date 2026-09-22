@@ -157,7 +157,7 @@ describe("occt kernel identity and capabilities", () => {
       booleans: true,
       transformTranslation: true,
       transformRotation: true,
-      transformScale: false,
+      transformScale: true,
       exactPrimitiveVolumes: true,
       exactBooleanVolumes: true,
       tightBooleanBounds: true,
@@ -168,6 +168,8 @@ describe("occt kernel identity and capabilities", () => {
       fillet: true,
       chamfer: true,
       shell: true,
+      thicken: true,
+      extrudeTaper: true,
       mirror: true,
       surfaceArea: true,
     });

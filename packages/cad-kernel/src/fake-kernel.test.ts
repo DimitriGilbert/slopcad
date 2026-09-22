@@ -55,7 +55,7 @@ describe("fake kernel identity and capabilities", () => {
       booleans: true,
       transformTranslation: true,
       transformRotation: false,
-      transformScale: false,
+      transformScale: true,
       exactPrimitiveVolumes: true,
       exactBooleanVolumes: false,
       tightBooleanBounds: false,
@@ -66,6 +66,8 @@ describe("fake kernel identity and capabilities", () => {
       loft: true,
       chamfer: true,
       shell: true,
+      thicken: true,
+      extrudeTaper: true,
       mirror: true,
       surfaceArea: true,
     });

@@ -28,8 +28,9 @@ The bridge vocabulary is `BRIDGE_FEATURE_KINDS` (`@slopcad/cad-kernel`'s
 `core-bridge`): `box`, `sphere`, `cylinder`, `cone`, `union`,
 `subtract`, `intersect`, `translate`, `extrude`, `revolve`, `sweep`,
 `loft`, `helix`, `thread`, `fillet`, `chamfer`, `shell`,
-`patternLinear`, `patternCircular`, `mirror`, `hole` — each kind
-documents its input contract in the `core-bridge.ts` header.
+`patternLinear`, `patternCircular`, `mirror`, `hole`, `rib`, `scale`,
+`thicken`, `split` — each kind documents its input contract in the
+`core-bridge.ts` header.
 
 ## Sweep and loft (Phase 38)
 
@@ -117,6 +118,43 @@ no geometry, every kernel.
 //   outputs: [body],
 // }
 ```
+
+## Feature richness (Phase 41)
+
+Five more kinds ride the same bridge:
+
+- `extrude`'s optional THIRD input — an ANGLE parameter, the draft taper.
+  Positive tapers narrow the walls away from the sketch plane; the
+  cross-sections are the loop's MITER inset (probed equal to OCCT's
+  `BRepOffsetAPI_DraftAngle` to 15 digits, concave loops included, so
+  every kernel builds the same solid). Gated on `extrudeTaper`
+  (Manifold declines — its top-scale is a different solid); the kernel
+  battery `kernel/invalid-taper` refuses angles at/past ±90° and tapers
+  whose far inset collapses the loop.
+- `rib` — one target (feature/body), one sketch (the closed
+  cross-section in its own workplane), one thickness LENGTH: the profile
+  extrudes by half the thickness on EACH side of its plane and unions
+  with the target. A union that added nothing (the profile lies inside
+  the target) refuses as a structured no-op — the hole guard, inverted.
+  Open-profile extend-to-next-face ribbing is structurally out of scope:
+  no contract op exposes the surface raycast an extension needs.
+- `scale` — one target, one dimensionless factor: the direct
+  `transform` call with the uniform `scale` field (volume ×f³, bounds
+  ×f, both hand-derivable). Gated on `transformScale`; non-uniform
+  scaling is out until a binding grows a general transform.
+- `thicken` — one target, one thickness LENGTH: the CLOSED hollow
+  (`kernel.thicken`), the shell feature's complement — uniform walls
+  around a sealed interior void. Gated on `thicken` (Manifold and JSCAD
+  decline; the fake kernel's analytic subset covers pristine box and
+  sphere leaves).
+- `split` — one target, one datum PLANE, one side selector (`+1` keeps
+  the normal's side, `−1` the opposite): the covering-box cut
+  (`planSplitCut`, shared verbatim with the workbench's worker scene)
+  rides `extrude` + `subtract`, so every kernel splits. The measured
+  post-condition refuses a split that removed nothing or everything.
+
+Each has its workbench command and Formedible form (Draft, Rib, Scale,
+Thicken, Split) and re-drives through `parameter.set` on its numbers.
 
 ## Transactions, undo, redo
 

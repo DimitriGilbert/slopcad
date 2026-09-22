@@ -115,7 +115,7 @@
  * are sliced out next to the positions.
  */
 
-import type { Manifold } from "manifold-3d";
+import type { Manifold, Mat4 } from "manifold-3d";
 import { type LengthValue, fail, ok, valueIn } from "@slopcad/cad-core";
 import {
   type BoxInput,
@@ -140,7 +140,8 @@ import {
   type ShellInput,
   type SphereInput,
   type Tessellation,
-  type TranslationInput,
+  type ThickenInput,
+  type TransformInput,
 } from "@slopcad/cad-kernel";
 import {
   axisAngleMatrix,
@@ -236,7 +237,7 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
   transformTranslation: true,
   transformRotation: false,
-  transformScale: false,
+  transformScale: true,
   exactPrimitiveVolumes: true,
   exactBooleanVolumes: true,
   tightBooleanBounds: true,
@@ -247,6 +248,8 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   fillet: false,
   chamfer: false,
   shell: false,
+  thicken: false,
+  extrudeTaper: false,
   mirror: true,
   surfaceArea: true,
 });
@@ -538,6 +541,20 @@ export function manifoldKernelFromRuntime(
 
     extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
       return run("extrude", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // The Phase 41 draft taper declines BEFORE anything else: the
+        // engine's extrude carries a uniform top-SCALE only — a provably
+        // different solid from the wall-angle draft (one factor moves
+        // every wall by its distance from the origin, not by the wall
+        // angle) — so a tapered call answers the structured unsupported
+        // code rather than that wrong approximation.
+        if (input.taper !== undefined && valueIn(input.taper, "rad") !== 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.unsupportedOperation,
+              "extrude with a draft taper is unsupported by the Manifold kernel: the engine's extrude carries a uniform top-scale, which builds a different solid from the wall-angle draft — the adapter declines rather than approximates.",
+            ),
+          );
+        }
         const height = positiveLength(input.height, "height", "extrude");
         if (!height.ok) return fail(height.error);
         // Placement validation before any WASM work: a finite rotation
@@ -944,6 +961,20 @@ export function manifoldKernelFromRuntime(
       );
     },
 
+    thicken(input: ThickenInput): KernelResult<KernelSolid> {
+      // The Phase 41 closed hollow: the shell's verdict verbatim — the
+      // engine has no 3D offset (probed), so the cavity the closed hollow
+      // needs cannot be built, and carving it with subtraction would be
+      // adapter-side meshing, not a kernel operation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "thicken is unsupported by the Manifold kernel: the engine has no 3D offset or hollowing operation (the shell verdict, probed), so the closed hollow's cavity cannot be built honestly.",
+        ),
+      );
+    },
+
     subtract(
       target: KernelSolid,
       tools: readonly KernelSolid[],
@@ -974,7 +1005,7 @@ export function manifoldKernelFromRuntime(
 
     transform(
       solid: KernelSolid,
-      translation: TranslationInput,
+      translation: TransformInput,
     ): KernelResult<KernelSolid> {
       return run("transform", KERNEL_ERROR_CODES.invalidLength, () => {
         const manifold = manifoldOf(solid, "transform");
@@ -984,7 +1015,47 @@ export function manifoldKernelFromRuntime(
         const x = valueIn(translation.x, "mm");
         const y = valueIn(translation.y, "mm");
         const z = valueIn(translation.z, "mm");
-        return ok(wrapSolid(manifold.value.translate(x, y, z)));
+        // The Phase 41 uniform scale: the engine's affine transform with
+        // the positive scale on the diagonal (the same mat4 surface the
+        // mirror rides), applied about the world origin BEFORE the
+        // translation — the contract's p ↦ s·R·p + t order. A positive
+        // factor keeps the determinant positive, so the engine's winding
+        // stands untouched.
+        let scaled = manifold.value;
+        if (translation.scale !== undefined) {
+          if (!(translation.scale > 0) || !Number.isFinite(translation.scale)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidLength,
+                `transform rejected the scale factor ${String(translation.scale)}: it must be a finite, strictly positive number.`,
+              ),
+            );
+          }
+          const s = translation.scale;
+          // The engine's own column-major 4×4 tuple type (`Mat4`), so the
+          // diagonal scale matrix is checked element-by-element at compile
+          // time — no blanket escape from the engine's matrix typing.
+          const scaleMatrix: Mat4 = [
+            s,
+            0,
+            0,
+            0,
+            0,
+            s,
+            0,
+            0,
+            0,
+            0,
+            s,
+            0,
+            0,
+            0,
+            0,
+            1,
+          ];
+          scaled = manifold.value.transform(scaleMatrix);
+        }
+        return ok(wrapSolid(scaled.translate(x, y, z)));
       });
     },
 

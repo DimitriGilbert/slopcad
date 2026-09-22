@@ -229,6 +229,7 @@ import type {
   BRepBuilderAPI_MakeEdge,
   gp_Pnt,
   TopoDS_Edge,
+  TopoDS_Face,
   TopoDS_Shape,
   TopoDS_Wire,
 } from "replicad-opencascadejs";
@@ -257,6 +258,7 @@ import {
   type SphereInput,
   type SweepPathSegmentInput,
   type Tessellation,
+  type ThickenInput,
   type TransformInput,
 } from "@slopcad/cad-kernel";
 import {
@@ -278,6 +280,7 @@ import {
   sweepPathProblem,
   sweepPathSelfIntersects,
   sweepProfileArcAxisCrossing,
+  taperedExtrudeProblem,
   tessellateProfileLoop,
 } from "@slopcad/cad-kernel";
 import { createSolidTag } from "@slopcad/cad-kernel";
@@ -399,7 +402,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
   transformTranslation: true,
   transformRotation: true,
-  transformScale: false,
+  transformScale: true,
   exactPrimitiveVolumes: true,
   exactBooleanVolumes: true,
   tightBooleanBounds: true,
@@ -410,6 +413,8 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   fillet: true,
   chamfer: true,
   shell: true,
+  thicken: true,
+  extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
 });
@@ -1057,6 +1062,91 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * Drafts a prism's LATERAL faces by `taper` radians (Phase 41):
+   * `BRepOffsetAPI_DraftAngle` over every face except the caps — the
+   * neutral plane at the PROFILE plane (local z = 0, where the loop was
+   * drawn) and the pull direction along the extrusion direction, the
+   * probed sign convention ((pull +z, +5°) on the 30×20×10 prism narrows
+   * to the exact prismatoid; the cylinder at 3° becomes the exact cone
+   * frustum; the CONCAVE L-prism matches the miter quadratic — all at
+   * 15-digit agreement). Caps are the planar faces whose normal is the
+   * extrusion axis (their Add fails — no intersection with the neutral
+   * plane); every lateral face of a line/arc/circle prism is planar or
+   * cylindrical, the engine's draft domain. The caller has already run
+   * the segment gate, so the surface-type classification below is a
+   * defensive re-check, not the gate.
+   */
+  const draftPrismFaces = (
+    prism: TopoDS_Shape,
+    taper: number,
+    direction: 1 | -1,
+  ): ParseResult<TopoDS_Shape, KernelError> => {
+    const neutralOrigin = new oc.gp_Pnt(0, 0, 0);
+    const neutralNormal = new oc.gp_Dir(0, 0, 1);
+    const neutral = new oc.gp_Pln(neutralOrigin, neutralNormal);
+    neutralOrigin.delete();
+    neutralNormal.delete();
+    const pull = new oc.gp_Dir(0, 0, direction);
+    const drafter = new oc.BRepOffsetAPI_DraftAngle(prism);
+    const faces: TopoDS_Face[] = [];
+    const explorer = new oc.TopExp_Explorer(
+      prism,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    );
+    let failure: KernelError | null = null;
+    while (explorer.More() && failure === null) {
+      const face = oc.TopoDS.Face(explorer.Value());
+      faces.push(face);
+      const adaptor = new oc.BRepAdaptor_Surface(face);
+      const surfaceType = adaptor.GetType();
+      adaptor.delete();
+      if (surfaceType === oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+        // The caps: planar faces normal to the extrusion axis — their
+        // supporting planes never cross the neutral plane usefully and
+        // their Add fails, so they stay out of the drafting set.
+        const planeAdaptor = new oc.BRepAdaptor_Surface(face);
+        const normalZ = planeAdaptor.Plane().Axis().Direction().Z();
+        planeAdaptor.delete();
+        if (Math.abs(normalZ) > 1 - 1e-9) {
+          explorer.Next();
+          continue;
+        }
+      } else if (
+        surfaceType !== oc.GeomAbs_SurfaceType.GeomAbs_Cylinder &&
+        surfaceType !== oc.GeomAbs_SurfaceType.GeomAbs_Cone
+      ) {
+        failure = kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "extrude declined the taper: a lateral face carries a surface the drafting engine cannot handle (only planar and cylindrical walls draft).",
+        );
+        explorer.Next();
+        continue;
+      }
+      drafter.Add(face, pull, taper, neutral, true);
+      if (!drafter.AddDone()) {
+        failure = kernelError(
+          KERNEL_ERROR_CODES.invalidTaper,
+          `extrude rejected the taper of ${String(taper)} rad: the drafting engine declined a lateral face (AddDone false). Reduce the taper angle.`,
+        );
+      }
+      explorer.Next();
+    }
+    explorer.delete();
+    let result: ParseResult<TopoDS_Shape, KernelError>;
+    if (failure !== null) {
+      drafter.delete();
+      result = fail(failure);
+    } else {
+      // buildShape extracts Shape() and deletes the drafter exactly once.
+      result = ok(buildShape(drafter));
+    }
+    pull.delete();
+    neutral.delete();
+    for (const face of faces) face.delete();
+    return result;
+  };
+
+  /**
    * The exact revolution (Phase 26.2): profile wire → face →
    * `BRepPrimAPI_MakeRevol` about the in-plane axis by the sweep angle —
    * the same exact-surface path `createCone` composes from — then the
@@ -1525,7 +1615,56 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        const prism = newExtrusion(input, height.value);
+        // The Phase 41 draft taper: the shared battery first (every kernel
+        // rejects identically), then the segment-domain gate —
+        // BRepOffsetAPI_DraftAngle drafts planar, cylindrical, and conical
+        // faces, so the loop's segments must be lines, arcs, or circles
+        // (their prisms' lateral faces); an ellipse or spline wall is a
+        // general extrusion surface the engine cannot draft, and the
+        // adapter declines the subset structurally instead of handing the
+        // engine a face whose Add would silently do nothing.
+        let taper: number | undefined;
+        if (input.taper !== undefined) {
+          const taperAngle = angleIn(input.taper, "extrude");
+          if (!taperAngle.ok) return fail(taperAngle.error);
+          if (taperAngle.value !== 0) {
+            const problem = taperedExtrudeProblem(
+              input.loop,
+              height.value,
+              input.taper,
+            );
+            if (problem !== null) {
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.invalidTaper,
+                  `extrude rejected the taper: ${problem.message}`,
+                ),
+              );
+            }
+            for (const segment of input.loop) {
+              if (
+                segment.kind !== "line" &&
+                segment.kind !== "arc" &&
+                segment.kind !== "circle"
+              ) {
+                return fail(
+                  kernelError(
+                    KERNEL_ERROR_CODES.unsupportedOperation,
+                    `extrude declined the taper over a "${segment.kind}" segment: the OpenCascade drafting engine handles planar and cylindrical walls (lines, arcs, circles); elliptical and spline walls carry general surfaces it cannot draft. Model the drafted wall from arcs and lines, or taper it on a kernel whose chord model accepts every loop kind.`,
+                  ),
+                );
+              }
+            }
+            taper = taperAngle.value;
+          }
+        }
+        let prism = newExtrusion(input, height.value);
+        if (taper !== undefined) {
+          const drafted = draftPrismFaces(prism, taper, input.direction);
+          prism.delete();
+          if (!drafted.ok) return fail(drafted.error);
+          prism = drafted.value;
+        }
         // Placement: rotation about the world-origin axis first, then the
         // translation — the transform composition, applied via
         // BRepBuilderAPI_Transform like every placed shape here.
@@ -2187,6 +2326,88 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       });
     },
 
+    thicken(input: ThickenInput): KernelResult<KernelSolid> {
+      // The Phase 41 closed hollow — the probed cavity composition: with an
+      // EMPTY closing list, MakeThickSolidByJoin at the inward (negative)
+      // offset returns the offset CAVITY REGION exactly (the 26×16×6 inner
+      // box on the 30×20×10 fixture at t = 2, 0 relative error — the
+      // Phase 26.7 probe's finding, re-used as the building block), and one
+      // exact BRepAlgoAPI_Cut of that cavity from the target builds the
+      // hollow (probed 3 504 mm³ = 6 000 − 2 496 exactly). The semantic
+      // post-condition mirrors the shell's: the engine does not fail
+      // degenerate input itself (probed: the positive-offset empty-list
+      // answer carries a NEGATIVE volume, a silent degenerate), so the
+      // adapter measures and refuses.
+      return run("thicken", KERNEL_ERROR_CODES.thickenFailed, () => {
+        const shape = shapeOf(input.target, "thicken");
+        if (!shape.ok) return fail(shape.error);
+        const thickness = positiveLength(
+          input.thickness,
+          "thickness",
+          "thicken",
+        );
+        if (!thickness.ok) return fail(thickness.error);
+        const t = thickness.value;
+        const targetVolume = volumeOfShape(shape.value);
+        const closing = new oc.NCollection_List_TopoDS_Shape();
+        const maker = new oc.BRepOffsetAPI_MakeThickSolid();
+        maker.MakeThickSolidByJoin(
+          shape.value,
+          closing,
+          -t,
+          1e-6,
+          oc.BRepOffset_Mode.BRepOffset_Skin,
+          false,
+          false,
+          oc.GeomAbs_JoinType.GeomAbs_Arc,
+          true,
+        );
+        closing.delete();
+        if (!maker.IsDone()) {
+          maker.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.thickenFailed,
+              `thicken failed for thickness ${String(t)} mm: the offset algorithm could not build the cavity. Reduce the thickness.`,
+            ),
+          );
+        }
+        const cavity = maker.Shape();
+        maker.delete();
+        const cut = new oc.BRepAlgoAPI_Cut(shape.value, cavity);
+        cavity.delete();
+        if (!cut.IsDone()) {
+          cut.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.thickenFailed,
+              `thicken failed for thickness ${String(t)} mm: the cavity cut did not build. Reduce the thickness.`,
+            ),
+          );
+        }
+        const hollowed = cut.Shape();
+        cut.delete();
+        // The closed-hollow post-condition: strictly positive volume,
+        // strictly below the target's (the cavity removed material); the
+        // engine's silently-degenerate answers never cross back.
+        const hollowVolume = volumeOfShape(hollowed);
+        if (
+          !(hollowVolume > 0) ||
+          hollowVolume >= targetVolume ||
+          !Number.isFinite(hollowVolume)
+        ) {
+          hollowed.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.thickenFailed,
+              `thicken failed for thickness ${String(t)} mm: the cavity meets or crosses itself, so no closed hollow remains (probed: the engine itself would silently return a degenerate solid — the structured refusal is the adapter's). Reduce the thickness below half the target's smallest extent.`,
+            ),
+          );
+        }
+        return ok(wrapSolid(hollowed));
+      });
+    },
+
     union(operands: readonly KernelSolid[]): KernelResult<KernelSolid> {
       return run("union", KERNEL_ERROR_CODES.invalidOperands, () => {
         const shapes = operandsOf(operands, 2, "union");
@@ -2280,6 +2501,32 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           const combined = translationTrsf.Multiplied(rotationTrsf);
           rotationTrsf.delete();
           translationTrsf.delete();
+          trsf = combined;
+        }
+        // The Phase 41 uniform scale: gp_Trsf.SetScale about the WORLD
+        // ORIGIN, composed innermost (Multiplied's right factor applies
+        // first), so the full mapping is p ↦ s·R·p + t — the contract's
+        // order. Probed: box(30,20,10) at s = 2 measures 48 000 mm³ and
+        // spans [0,60]×[0,40]×[0,20] (the ×s³ volume and ×s bounds the
+        // fixtures pin); a negative factor would mirror (probed), so the
+        // positivity is validated BEFORE any OCCT object exists.
+        if (input.scale !== undefined) {
+          if (!(input.scale > 0) || !Number.isFinite(input.scale)) {
+            trsf.delete();
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidLength,
+                `transform rejected the scale factor ${String(input.scale)}: it must be a finite, strictly positive number.`,
+              ),
+            );
+          }
+          const scaleOrigin = new oc.gp_Pnt(0, 0, 0);
+          const scaleTrsf = new oc.gp_Trsf();
+          scaleTrsf.SetScale(scaleOrigin, input.scale);
+          scaleOrigin.delete();
+          const combined = trsf.Multiplied(scaleTrsf);
+          scaleTrsf.delete();
+          trsf.delete();
           trsf = combined;
         }
         const moved = buildShape(

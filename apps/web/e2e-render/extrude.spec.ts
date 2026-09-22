@@ -70,7 +70,27 @@ function canvasPoint(x: number, y: number): { x: number; y: number } {
 /** Enters sketch mode from a fresh workbench page. */
 async function enterSketchMode(page: Page): Promise<void> {
   await page.goto("/workbench");
-  await page.locator(MODE_TOGGLE).click();
+  // The mode toggle's SSR-painted shell can be clicked before the client
+  // commit attaches its onClick, and under full 10-harness concurrency a
+  // click landing in that window is silently lost — observed as #sketch-root
+  // never appearing within the 10s expect timeout (2 of 4 battery runs).
+  // Same hardening as the docs interactive example: the click carries a
+  // bounded verify-and-retry — click, poll #sketch-root with a short
+  // deadline, and re-click only when that deadline proves the click never
+  // landed (the sketch DOM mounts in the same commit as the mode state, so
+  // a landed click cannot miss the probe); three attempts, then the
+  // ordinary assertions report the honest failure.
+  const toggle = page.locator(MODE_TOGGLE);
+  await expect(toggle).toBeEnabled();
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await toggle.click();
+    try {
+      await expect(page.locator(SKETCH)).toBeVisible({ timeout: 1_500 });
+      break;
+    } catch {
+      // The sketch root never mounted: the click was lost — click again.
+    }
+  }
   await expect(page.locator(SKETCH)).toBeVisible();
   await expect(page.locator(ROOT)).toHaveAttribute(
     "data-sketch-mode",

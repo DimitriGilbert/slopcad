@@ -47,7 +47,7 @@ describe("createJscadKernel", () => {
       booleans: true,
       transformTranslation: true,
       transformRotation: true,
-      transformScale: false,
+      transformScale: true,
       exactPrimitiveVolumes: true,
       exactBooleanVolumes: false,
       tightBooleanBounds: true,
@@ -58,6 +58,8 @@ describe("createJscadKernel", () => {
       fillet: false,
       chamfer: false,
       shell: false,
+      thicken: false,
+      extrudeTaper: true,
       mirror: true,
       surfaceArea: true,
     });
