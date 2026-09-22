@@ -652,9 +652,11 @@ export function manifoldKernelFromRuntime(
           input.direction === -1 ? prism.translate(0, 0, -height.value) : prism;
         if (input.direction === -1) prism.delete();
         // Placement: one column-major 4×4 affine (rotation, then
-        // translation — the contract's composition order).
+        // translation — the contract's composition order). The engine's
+        // own `Mat4` tuple type carries the WASM binding's shape, so the
+        // literal needs no cast (the Phase 41 `transformScale` precedent).
         const r = axisAngleMatrix(axis, angle);
-        const mat4 = [
+        const mat4: Mat4 = [
           r[0]?.[0] ?? 0,
           r[1]?.[0] ?? 0,
           r[2]?.[0] ?? 0,
@@ -671,8 +673,8 @@ export function manifoldKernelFromRuntime(
           translation[1],
           translation[2],
           1,
-        ] as const;
-        return ok(wrapSolid(oriented.transform(mat4 as never)));
+        ];
+        return ok(wrapSolid(oriented.transform(mat4)));
       });
     },
 
@@ -843,7 +845,7 @@ export function manifoldKernelFromRuntime(
         );
         const r = placement.rotation;
         const t = placement.translation;
-        const mat4 = [
+        const mat4: Mat4 = [
           r[0]?.[0] ?? 0,
           r[1]?.[0] ?? 0,
           r[2]?.[0] ?? 0,
@@ -860,8 +862,8 @@ export function manifoldKernelFromRuntime(
           t[1],
           t[2],
           1,
-        ] as const;
-        return ok(wrapSolid(revolved.transform(mat4 as never)));
+        ];
+        return ok(wrapSolid(revolved.transform(mat4)));
       });
     },
 
@@ -1098,7 +1100,7 @@ export function manifoldKernelFromRuntime(
           plan.toolRotationAxis,
           plan.toolRotationAngleRad,
         );
-        const mat4 = [
+        const mat4: Mat4 = [
           r[0]?.[0] ?? 0,
           r[1]?.[0] ?? 0,
           r[2]?.[0] ?? 0,
@@ -1115,8 +1117,8 @@ export function manifoldKernelFromRuntime(
           plan.toolTranslationMm[1],
           plan.toolTranslationMm[2],
           1,
-        ] as const;
-        const tool = shifted.transform(mat4 as never);
+        ];
+        const tool = shifted.transform(mat4);
         shifted.delete();
         const cut = manifoldCtor.difference([targetManifold.value, tool]);
         tool.delete();
@@ -1236,13 +1238,13 @@ export function manifoldKernelFromRuntime(
         // the negative determinant and re-winds its triangles itself
         // (probed) — the adapter does no mesh surgery.
         const doubled = 2 * offset;
-        const mat4 =
+        const mat4: Mat4 =
           input.axis === "x"
             ? [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, doubled, 0, 0, 1]
             : input.axis === "y"
               ? [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, doubled, 0, 1]
               : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, doubled, 1];
-        return ok(wrapSolid(manifold.value.transform(mat4 as never)));
+        return ok(wrapSolid(manifold.value.transform(mat4)));
       });
     },
 
