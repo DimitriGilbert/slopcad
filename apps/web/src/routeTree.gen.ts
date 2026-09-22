@@ -19,6 +19,7 @@ import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
+import { Route as WorkbenchAssemblyRouteImport } from './routes/workbench-assembly'
 import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
 import { Route as WorkbenchCompleteRouteImport } from './routes/workbench-complete'
 import { Route as WorkbenchCompleteOcctRouteImport } from './routes/workbench-complete-occt'
@@ -81,6 +82,11 @@ const UiViewportRoute = UiViewportRouteImport.update({
 const WorkbenchRoute = WorkbenchRouteImport.update({
   id: '/workbench',
   path: '/workbench',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkbenchAssemblyRoute = WorkbenchAssemblyRouteImport.update({
+  id: '/workbench-assembly',
+  path: '/workbench-assembly',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkbenchChainRoute = WorkbenchChainRouteImport.update({
@@ -164,6 +170,7 @@ export interface FileRoutesByFullPath {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-assembly': typeof WorkbenchAssemblyRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
@@ -189,6 +196,7 @@ export interface FileRoutesByTo {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-assembly': typeof WorkbenchAssemblyRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
@@ -216,6 +224,7 @@ export interface FileRoutesById {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-assembly': typeof WorkbenchAssemblyRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
@@ -243,6 +252,7 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-assembly'
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
@@ -268,6 +278,7 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-assembly'
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
@@ -294,6 +305,7 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-assembly'
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
@@ -321,6 +333,7 @@ export interface RootRouteChildren {
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
   WorkbenchRoute: typeof WorkbenchRoute
+  WorkbenchAssemblyRoute: typeof WorkbenchAssemblyRoute
   WorkbenchChainRoute: typeof WorkbenchChainRoute
   WorkbenchCompleteRoute: typeof WorkbenchCompleteRoute
   WorkbenchCompleteOcctRoute: typeof WorkbenchCompleteOcctRoute
@@ -403,6 +416,13 @@ declare module '@tanstack/react-router' {
       path: '/workbench'
       fullPath: '/workbench'
       preLoaderRoute: typeof WorkbenchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workbench-assembly': {
+      id: '/workbench-assembly'
+      path: '/workbench-assembly'
+      fullPath: '/workbench-assembly'
+      preLoaderRoute: typeof WorkbenchAssemblyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workbench-chain': {
@@ -535,6 +555,7 @@ const rootRouteChildren: RootRouteChildren = {
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
   WorkbenchRoute: WorkbenchRoute,
+  WorkbenchAssemblyRoute: WorkbenchAssemblyRoute,
   WorkbenchChainRoute: WorkbenchChainRoute,
   WorkbenchCompleteRoute: WorkbenchCompleteRoute,
   WorkbenchCompleteOcctRoute: WorkbenchCompleteOcctRoute,

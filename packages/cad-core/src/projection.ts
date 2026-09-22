@@ -93,10 +93,17 @@ import {
   CAD_ID_PREFIXES,
   type BodyId,
   type FeatureId,
+  type OccurrenceId,
   createBodyId,
   parseBodyId,
   parseFeatureId,
+  parseOccurrenceId,
 } from "./ids";
+import {
+  parsePlacementTransform,
+  placementTransformBounds,
+  type PlacementTransform,
+} from "./placement";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_PROJECTION_FORMAT_VERSION } from "./version";
 
@@ -200,6 +207,117 @@ export function renderObjectIdBodyId(id: RenderObjectId): BodyId {
   return createBodyId(
     `${CAD_ID_PREFIXES.body}_${id.slice(RENDER_OBJECT_ID_PREFIX.length)}`,
   );
+}
+
+/**
+ * Derives the render object id of a PLACED INSTANCE (Phase 50):
+ * `rend_` + the occurrence path's id payloads (outermost first) joined
+ * with the body id's payload by `.` — e.g. path `[occ_0001, occ_0003]`
+ * over `body_0002` gives `rend_0001.0003.0002`. Unique per (path, body),
+ * deterministic, and distinct from every direct-body id. Throws a
+ * `RangeError` when the joined payload would exceed the wire bound —
+ * occurrence paths past roughly nine hops overflow a bound the
+ * assembly walk's own depth limit (16) can reach with long payloads;
+ * resolution surfaces that as a structured failure before render data
+ * is ever built.
+ */
+export function placementRenderObjectId(
+  path: readonly OccurrenceId[],
+  bodyId: BodyId,
+): RenderObjectId {
+  const segments = [
+    ...path.map((id) => id.slice(CAD_ID_PREFIXES.occurrence.length + 1)),
+    bodyId.slice(CAD_ID_PREFIXES.body.length + 1),
+  ];
+  const payload = segments.join(".");
+  if (!RENDER_ID_PAYLOAD_PATTERN.test(payload)) {
+    throw new RangeError(
+      `A placed-instance render id payload must be 1-${CAD_ID_MAX_PAYLOAD_LENGTH} characters matching the wire rules; the path ${String(path.map((id) => String(id)))} over body ${String(bodyId)} exceeds it.`,
+    );
+  }
+  return `${RENDER_OBJECT_ID_PREFIX}${payload}` as RenderObjectId;
+}
+
+/**
+ * Projects a PLACED INSTANCE (Phase 50) from an already-projected source
+ * object: the source's soup passes through VERBATIM (no copy, no
+ * re-index, no re-computation — instances of one body share it), the id
+ * derives from the occurrence path and body (stable across
+ * regenerations), and the bounds are the exact WORLD-space AABB (the
+ * transformed corners of the local bounds under the rigid transform —
+ * tight by construction). The transform itself rides as data; the
+ * renderer applies it as its scene-node matrix. Deterministic: identical
+ * inputs give identical objects.
+ */
+export function projectPlacedInstance(
+  base: RenderObject,
+  occurrencePath: readonly OccurrenceId[],
+  transform: PlacementTransform,
+): ParseResult<RenderObject, ProjectionError> {
+  for (const id of occurrencePath) {
+    const parsed = parseOccurrenceId(id);
+    if (!parsed.ok) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          `A placed instance's occurrence path must carry valid occurrence ids: ${parsed.error.message}`,
+          occurrencePath,
+        ),
+      );
+    }
+  }
+  if (base.bodyId === undefined) {
+    return fail(
+      projectionError(
+        PROJECTION_ERROR_CODES.malformed,
+        "A placed instance's source object must carry its body id: an instance without provenance cannot be placed.",
+        base,
+      ),
+    );
+  }
+  let id: RenderObjectId;
+  try {
+    id = placementRenderObjectId(occurrencePath, base.bodyId);
+  } catch (error) {
+    return fail(
+      projectionError(
+        PROJECTION_ERROR_CODES.malformed,
+        error instanceof Error
+          ? error.message
+          : "The placed instance id overflowed the wire bound.",
+        occurrencePath,
+      ),
+    );
+  }
+  const world = placementTransformBounds(
+    transform,
+    base.bounds.min,
+    base.bounds.max,
+  );
+  const record: {
+    id: RenderObjectId;
+    positions: readonly number[];
+    indices: readonly number[];
+    normals?: readonly number[];
+    bounds: RenderBounds;
+    bodyId?: BodyId;
+    featureId?: FeatureId;
+    openShell?: true;
+    occurrencePath: readonly OccurrenceId[];
+    occurrenceTransform: PlacementTransform;
+  } = {
+    id,
+    positions: base.positions,
+    indices: base.indices,
+    bounds: Object.freeze({ min: world.min, max: world.max }),
+    ...(base.bodyId !== undefined ? { bodyId: base.bodyId } : {}),
+    ...(base.featureId !== undefined ? { featureId: base.featureId } : {}),
+    ...(base.openShell === true ? { openShell: true as const } : {}),
+    ...(base.normals !== undefined ? { normals: base.normals } : {}),
+    occurrencePath: [...occurrencePath],
+    occurrenceTransform: transform,
+  };
+  return ok(Object.freeze(record));
 }
 
 /**
@@ -345,6 +463,28 @@ export interface RenderObject {
    * unspecified — the module's winding-agnostic rule).
    */
   readonly openShell?: true;
+  /**
+   * Present exactly when the object is a PLACED INSTANCE (Phase 50): the
+   * occurrence path — the chain of occurrence ids from the root document
+   * to the leaf, OUTERMOST FIRST — that identifies the instance. Absent =
+   * a direct body render (the id follows the rend_<body payload> rule);
+   * present = the id derives from the path and body payloads instead (see
+   * {@link placementRenderObjectId}).
+   */
+  readonly occurrencePath?: readonly OccurrenceId[];
+  /**
+   * The composed placement transform for a placed instance — world =
+   * transform ∘ local, the instance path order composed OUTERMOST FIRST
+   * (the assembly ADR's fixed rule). Present exactly when
+   * `occurrencePath` is. When present, `positions`/`normals`/`indices`
+   * stay the SOURCE body's LOCAL soup (shared, unmodified — instances of
+   * one body reuse it verbatim) while `bounds` are the WORLD-space AABB
+   * (exact: the transformed-corners bounds of the local bounds under the
+   * rigid transform), so camera fitting and measurement read world extent
+   * without re-transforming. A renderer applies the transform as its
+   * scene-node matrix; rotation is rigid so the local normals stay valid.
+   */
+  readonly occurrenceTransform?: PlacementTransform;
 }
 
 /** The validated, copied buffer triple shared by the conversion and parse paths. */
@@ -847,8 +987,9 @@ export type SerializedRenderCamera = RenderCamera;
 /**
  * Canonical JSON form of a render object. Fixed key order: `formatVersion`,
  * `id`, `positions`, `indices`, `bounds`, then the optional `normals`,
- * `bodyId`, `featureId` (present only when the source carries them), so
- * equal projections always serialize to identical bytes.
+ * `bodyId`, `featureId` (present only when the source carries them), then
+ * the optional placed-instance pair (present only on instances, Phase 50),
+ * so equal projections always serialize to identical bytes.
  */
 export interface SerializedRenderObject {
   readonly formatVersion: number;
@@ -861,6 +1002,10 @@ export interface SerializedRenderObject {
   readonly featureId?: string;
   /** Present exactly when the source render object is an open sheet. */
   readonly openShell?: true;
+  /** Present exactly when the object is a placed instance (its path). */
+  readonly occurrencePath?: readonly string[];
+  /** Present exactly when the object is a placed instance (its transform). */
+  readonly occurrenceTransform?: PlacementTransform;
 }
 
 /**
@@ -908,6 +1053,8 @@ function serializeRenderObject(object: RenderObject): SerializedRenderObject {
     bodyId?: string;
     featureId?: string;
     openShell?: true;
+    occurrencePath?: readonly string[];
+    occurrenceTransform?: PlacementTransform;
   } = {
     formatVersion: CAD_PROJECTION_FORMAT_VERSION,
     id: object.id,
@@ -922,6 +1069,18 @@ function serializeRenderObject(object: RenderObject): SerializedRenderObject {
   }
   if (object.openShell === true) {
     serialized.openShell = true;
+  }
+  // The placed-instance pair rides only when present (Phase 50 — the
+  // display-flags additive precedent), so direct-body projections
+  // serialize byte-identically to their pre-instance form.
+  if (object.occurrencePath !== undefined) {
+    serialized.occurrencePath = [...object.occurrencePath];
+  }
+  if (object.occurrenceTransform !== undefined) {
+    serialized.occurrenceTransform = {
+      rotation: [...object.occurrenceTransform.rotation],
+      translation: [...object.occurrenceTransform.translation],
+    };
   }
   return serialized;
 }
@@ -1012,7 +1171,96 @@ function parseSerializedRenderObject(
     }
     bodyId = parsed.value;
   }
-  if (bodyId !== undefined && createRenderObjectId(bodyId) !== id.value) {
+  // Placed instances (Phase 50) parse their path/transform pair and follow
+  // the instance id rule (path + body payloads); direct objects keep the
+  // rend_<body payload> rule.
+  let occurrencePath: readonly OccurrenceId[] | undefined;
+  if (input.occurrencePath !== undefined) {
+    if (!isUnknownArray(input.occurrencePath)) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          "A serialized render object occurrencePath must be an array of occurrence ids.",
+          input.occurrencePath,
+        ),
+      );
+    }
+    const path: OccurrenceId[] = [];
+    for (const entry of input.occurrencePath) {
+      const parsed = parseOccurrenceId(entry);
+      if (!parsed.ok) {
+        return fail(
+          projectionError(
+            PROJECTION_ERROR_CODES.malformed,
+            `A serialized occurrencePath entry is invalid: ${parsed.error.message}`,
+            input.occurrencePath,
+          ),
+        );
+      }
+      path.push(parsed.value);
+    }
+    occurrencePath = path;
+  }
+  let occurrenceTransform: PlacementTransform | undefined;
+  if (input.occurrenceTransform !== undefined) {
+    const parsed = parsePlacementTransform(input.occurrenceTransform);
+    if (!parsed.ok) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          `A serialized render object occurrenceTransform is invalid: ${parsed.error.message}`,
+          input.occurrenceTransform,
+        ),
+      );
+    }
+    occurrenceTransform = parsed.value;
+  }
+  if ((occurrencePath === undefined) !== (occurrenceTransform === undefined)) {
+    return fail(
+      projectionError(
+        PROJECTION_ERROR_CODES.malformed,
+        "A placed instance carries its path AND its transform together; exactly one is malformed.",
+        input,
+      ),
+    );
+  }
+  if (occurrencePath !== undefined) {
+    if (bodyId === undefined) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          "A placed-instance render object must carry its bodyId: an instance without provenance cannot be placed.",
+          input,
+        ),
+      );
+    }
+    let expected: RenderObjectId;
+    try {
+      expected = placementRenderObjectId(occurrencePath, bodyId);
+    } catch (error) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          error instanceof Error
+            ? error.message
+            : "The placed instance id overflowed the wire bound.",
+          input,
+        ),
+      );
+    }
+    if (expected !== id.value) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          `Render object id "${id.value}" does not derive from its occurrence path and bodyId "${bodyId}"; instance ids must follow the rend_<path payload>.<body payload> rule.`,
+          input,
+        ),
+      );
+    }
+  } else if (
+    bodyId !== undefined &&
+    createRenderObjectId(bodyId) !== id.value
+  ) {
     return fail(
       projectionError(
         PROJECTION_ERROR_CODES.malformed,
@@ -1044,6 +1292,8 @@ function parseSerializedRenderObject(
     bodyId?: BodyId;
     featureId?: FeatureId;
     openShell?: true;
+    occurrencePath?: readonly OccurrenceId[];
+    occurrenceTransform?: PlacementTransform;
   } = { id: id.value, positions, indices, bounds: bounds.value };
   if (normals !== undefined) record.normals = normals;
   if (bodyId !== undefined) record.bodyId = bodyId;
@@ -1052,6 +1302,10 @@ function parseSerializedRenderObject(
   // non-`true` value is ignored (absent = closed-solid soup), the unknown
   // field tolerance an older writer relies on.
   if (input.openShell === true) record.openShell = true;
+  if (occurrencePath !== undefined) record.occurrencePath = occurrencePath;
+  if (occurrenceTransform !== undefined) {
+    record.occurrenceTransform = occurrenceTransform;
+  }
   return ok(Object.freeze(record));
 }
 

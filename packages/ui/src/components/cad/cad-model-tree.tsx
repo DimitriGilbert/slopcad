@@ -107,7 +107,6 @@ import {
   type Body,
   type BodyId,
   type CadDocument,
-  type FeatureId,
   type FeatureRecord,
   type FeatureRegenerationState,
   type FeatureRegenerationStatus,
@@ -146,6 +145,20 @@ export interface CadModelTreeLabels {
   readonly bodyUnIsolate: string;
   /** `title` of the body rename affordance (Phase 44). */
   readonly bodyRename: string;
+  /** The assembly group header (Phase 50), rendered before the occurrences. */
+  readonly assemblyLabel: string;
+  /** The BOM chip for a `phantom` occurrence. */
+  readonly bomPhantom: string;
+  /** The BOM chip for a `purchased` occurrence. */
+  readonly bomPurchased: string;
+  /** The stale chip on an occurrence whose source moved ahead. */
+  readonly occurrenceStale: string;
+  /** `title` prefix describing a body-source occurrence. */
+  readonly sourceBody: string;
+  /** `title` prefix describing a document-source occurrence. */
+  readonly sourceDocument: string;
+  /** `title` prefix describing a component-source occurrence. */
+  readonly sourceComponent: string;
 }
 
 /** Documented label defaults; every render-output string lives here. */
@@ -164,6 +177,13 @@ export const CAD_MODEL_TREE_LABELS: CadModelTreeLabels = {
   bodyIsolate: "Isolate body",
   bodyUnIsolate: "Un-isolate body",
   bodyRename: "Rename body",
+  assemblyLabel: "Instances",
+  bomPhantom: "phantom",
+  bomPurchased: "purchased",
+  occurrenceStale: "stale",
+  sourceBody: "Body",
+  sourceDocument: "Document",
+  sourceComponent: "Component",
 };
 
 /**
@@ -184,6 +204,37 @@ export type CadBodyTreeAction =
 export interface CadBodyDisplayState {
   readonly visible: boolean;
   readonly isolated: boolean;
+}
+
+/**
+ * One node of the host-supplied ASSEMBLY tree (Phase 50): an occurrence
+ * (or a nested sub-assembly occurrence) rendered as its own tree section.
+ * The component displays ONLY what the host derives — the resolution of
+ * sources, placements, and staleness stays host-side (cad-core's assembly
+ * module) — so the tree remains a pure function of its props. Keys must
+ * be stable and unique (the occurrence path joined is the natural choice);
+ * they drive expansion state and the DOM ids, never persistence.
+ */
+export interface CadModelTreeAssemblyNode {
+  /** Stable, unique node id (the occurrence path joined). */
+  readonly key: string;
+  /** The row's display label (the occurrence name). */
+  readonly label: string;
+  /** What kind of source the occurrence places. */
+  readonly source: "body" | "document" | "component";
+  /** The source's display name (body name, document name, component id). */
+  readonly sourceName: string;
+  /** The occurrence's BOM structure flag (absent = default — no chip). */
+  readonly bomFlag?: "phantom" | "purchased";
+  /** Whether a transitive source document is newer (host-derived). */
+  readonly stale?: boolean;
+  /** Nested sub-assembly occurrences, rendered one level deeper. */
+  readonly children?: readonly CadModelTreeAssemblyNode[];
+}
+
+/** The host-derived assembly section of the tree. */
+export interface CadModelTreeAssembly {
+  readonly nodes: readonly CadModelTreeAssemblyNode[];
 }
 
 /** Props of {@link CadModelTree}. */
@@ -214,6 +265,14 @@ export interface CadModelTreeProps {
    * `bodyDisplay`) the tree renders no body affordances.
    */
   readonly onBodyAction?: (action: CadBodyTreeAction) => void;
+  /**
+   * The host-derived assembly tree (Phase 50), rendered after the
+   * document's features and bodies. Occurrence rows are INERT — the
+   * selection domain has no occurrence references yet (Phase 51
+   * generalizes selection through instance paths) — so they never pick:
+   * the tree's documented inert discipline.
+   */
+  readonly assembly?: CadModelTreeAssembly;
   /** Label token overrides, merged over {@link CAD_MODEL_TREE_LABELS}. */
   readonly labels?: Partial<CadModelTreeLabels>;
   /** Extends the container classes; width defaults to the content. */
@@ -268,16 +327,21 @@ const STATUS_LABEL_KEYS: Readonly<
  */
 interface CadTreeRow {
   readonly key: string;
-  readonly reference: SelectionReference;
+  /** `null` on assembly rows — the selection domain has no occurrence
+   * references yet (Phase 51 generalizes selection through paths), so
+   * those rows are inert by construction. */
+  readonly reference: SelectionReference | null;
   readonly label: string;
   readonly depth: number;
   readonly parentKey: string | null;
   readonly childCount: number;
-  readonly groupId: FeatureId | undefined;
+  readonly groupId: string | undefined;
   readonly status: FeatureRegenerationStatus | undefined;
   readonly children: readonly CadTreeRow[];
   /** The body the row IS (body rows only — the affordances' address). */
   readonly bodyId: BodyId | undefined;
+  /** The occurrence payload (assembly rows only — the chips' data). */
+  readonly assembly: CadModelTreeAssemblyNode | undefined;
 }
 
 /**
@@ -291,6 +355,8 @@ interface CadTreeShape {
     readonly children: readonly CadTreeRow[];
   }[];
   readonly rootBodies: readonly CadTreeRow[];
+  /** The host-derived assembly section (empty when no assembly prop). */
+  readonly assemblyRows: readonly CadTreeRow[];
 }
 
 function featureRowOf(
@@ -310,6 +376,7 @@ function featureRowOf(
     status,
     children,
     bodyId: undefined,
+    assembly: undefined,
   };
 }
 
@@ -329,6 +396,31 @@ function bodyRowOf(
     status: undefined,
     children: [],
     bodyId: body.id,
+    assembly: undefined,
+  };
+}
+
+/** Builds an assembly row (and its nested children) from a host node. */
+function assemblyRowOf(
+  node: CadModelTreeAssemblyNode,
+  depth: number,
+  parentKey: string | null,
+): CadTreeRow {
+  const children = (node.children ?? []).map((child) =>
+    assemblyRowOf(child, depth + 1, node.key),
+  );
+  return {
+    key: node.key,
+    reference: null,
+    label: node.label,
+    depth,
+    parentKey,
+    childCount: children.length,
+    groupId: node.key,
+    status: undefined,
+    children,
+    bodyId: undefined,
+    assembly: node,
   };
 }
 
@@ -341,6 +433,7 @@ function deriveCadTreeShape(
   document: CadDocument,
   featureLabel: (feature: FeatureRecord) => string,
   states: RegenerationStateMap | undefined,
+  assembly: readonly CadModelTreeAssemblyNode[],
 ): CadTreeShape {
   const bodiesById = new Map<BodyId, Body>(
     document.bodies.map((body) => [body.id, body]),
@@ -375,7 +468,8 @@ function deriveCadTreeShape(
   const rootBodies = document.bodies
     .filter((body) => !claimed.has(body.id))
     .map((body) => bodyRowOf(body, 0, null));
-  return { groups, rootBodies };
+  const assemblyRows = assembly.map((node) => assemblyRowOf(node, 0, null));
+  return { groups, rootBodies, assemblyRows };
 }
 
 /**
@@ -385,7 +479,7 @@ function deriveCadTreeShape(
  */
 function visibleCadTreeRows(
   shape: CadTreeShape,
-  collapsed: ReadonlySet<FeatureId>,
+  collapsed: ReadonlySet<string>,
 ): readonly CadTreeRow[] {
   const rows: CadTreeRow[] = [];
   for (const group of shape.groups) {
@@ -399,6 +493,16 @@ function visibleCadTreeRows(
     }
   }
   rows.push(...shape.rootBodies);
+  for (const assemblyRow of shape.assemblyRows) {
+    rows.push(assemblyRow);
+    if (
+      assemblyRow.childCount > 0 &&
+      assemblyRow.groupId !== undefined &&
+      !collapsed.has(assemblyRow.groupId)
+    ) {
+      rows.push(...assemblyRow.children);
+    }
+  }
   return rows;
 }
 
@@ -430,9 +534,9 @@ function domIdForKey(key: string): string {
 
 /** The collapsed set with `id` added (immutably). */
 function collapsedWith(
-  collapsed: ReadonlySet<FeatureId>,
-  id: FeatureId,
-): ReadonlySet<FeatureId> {
+  collapsed: ReadonlySet<string>,
+  id: string,
+): ReadonlySet<string> {
   const next = new Set(collapsed);
   next.add(id);
   return next;
@@ -440,9 +544,9 @@ function collapsedWith(
 
 /** The collapsed set without `id` (immutably). */
 function collapsedWithout(
-  collapsed: ReadonlySet<FeatureId>,
-  id: FeatureId,
-): ReadonlySet<FeatureId> {
+  collapsed: ReadonlySet<string>,
+  id: string,
+): ReadonlySet<string> {
   const next = new Set(collapsed);
   next.delete(id);
   return next;
@@ -596,6 +700,53 @@ function StatusChip({
  * removing a provider above a mounted tree re-renders fewer hooks and
  * fails loudly in React, a programming error reported as one).
  */
+/**
+ * The assembly row's chips (Phase 50): the source kind, the BOM structure
+ * flag when non-default, and the host-derived staleness marker. All three
+ * are DATA the host resolved — the tree invents nothing.
+ */
+function AssemblyChips({
+  labels,
+  node,
+}: {
+  readonly labels: CadModelTreeLabels;
+  readonly node: CadModelTreeAssemblyNode;
+}): ReactElement {
+  const sourceLabel =
+    node.source === "body"
+      ? labels.sourceBody
+      : node.source === "document"
+        ? labels.sourceDocument
+        : labels.sourceComponent;
+  const sourceTitle = `${sourceLabel}: ${node.sourceName}`;
+  return (
+    <span aria-hidden="true" className="flex shrink-0 items-center gap-1">
+      <span
+        className="text-muted-foreground/70 hidden font-mono text-[9.5px] group-hover:inline"
+        title={sourceTitle}
+      >
+        {sourceLabel}
+      </span>
+      {node.bomFlag !== undefined ? (
+        <span
+          className="border-border bg-background/60 rounded-[3px] border px-1 font-mono text-[9.5px] leading-[15px]"
+          data-cad-tree-bom={node.bomFlag}
+        >
+          {node.bomFlag === "phantom" ? labels.bomPhantom : labels.bomPurchased}
+        </span>
+      ) : null}
+      {node.stale === true ? (
+        <span
+          className="rounded-[3px] bg-amber-500/15 px-1 font-mono text-[9.5px] leading-[15px] text-amber-600 dark:text-amber-400"
+          data-cad-tree-stale="true"
+        >
+          {labels.occurrenceStale}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function useOptionalCadDocument(): ReturnType<typeof useCadDocument> | null {
   try {
     return useCadDocument();
@@ -696,6 +847,7 @@ function bodyAffordances({
  * groups, in one mountable component.
  */
 export function CadModelTree({
+  assembly,
   bodyDisplay,
   className,
   document: documentProp,
@@ -724,7 +876,7 @@ export function CadModelTree({
 
   // Component-local UI state: the collapsed feature groups (default
   // expanded). Never document state; resets on unmount.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<FeatureId>>(
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   // Roving tabindex: the row focus sits on (falls back to the first row).
@@ -736,7 +888,12 @@ export function CadModelTree({
   const shape =
     cadDocument === undefined
       ? null
-      : deriveCadTreeShape(cadDocument, featureLabel, regenerationStates);
+      : deriveCadTreeShape(
+          cadDocument,
+          featureLabel,
+          regenerationStates,
+          assembly?.nodes ?? [],
+        );
   const rows = shape === null ? [] : visibleCadTreeRows(shape, collapsed);
   const focusedKey =
     activeKey !== null && rows.some((row) => row.key === activeKey)
@@ -750,6 +907,7 @@ export function CadModelTree({
   };
 
   const activateRow = (row: CadTreeRow, additive: boolean): void => {
+    if (row.reference === null) return; // inert assembly row — no pick path
     pick?.(row.reference, additive);
   };
 
@@ -829,7 +987,8 @@ export function CadModelTree({
 
   const renderRow = (row: CadTreeRow): ReactElement => {
     const groupId = row.groupId;
-    const selected = selectionTargetsRow(selection, row.reference);
+    const selected =
+      row.reference !== null && selectionTargetsRow(selection, row.reference);
     const collapsible = groupId !== undefined && row.childCount > 0;
     const expanded =
       collapsible && groupId !== undefined && !collapsed.has(groupId);
@@ -842,7 +1001,6 @@ export function CadModelTree({
     return (
       <div
         aria-describedby={failureId}
-        aria-disabled={pick === undefined || undefined}
         aria-expanded={collapsible ? expanded : undefined}
         aria-level={row.depth + 1}
         aria-selected={selected}
@@ -855,8 +1013,14 @@ export function CadModelTree({
               ? "opacity-80"
               : "hover:bg-muted",
         )}
+        aria-disabled={
+          pick === undefined || row.reference === null || undefined
+        }
         data-cad-tree-node=""
         data-node-key={row.key}
+        {...(row.assembly !== undefined
+          ? { "data-cad-tree-occurrence": row.assembly.source }
+          : {})}
         data-selected={selected ? "true" : "false"}
         data-status={row.status?.state}
         id={domIdForKey(row.key)}
@@ -929,6 +1093,9 @@ export function CadModelTree({
           {row.status !== undefined ? (
             <StatusChip labels={labels} status={row.status} />
           ) : null}
+          {row.assembly !== undefined ? (
+            <AssemblyChips labels={labels} node={row.assembly} />
+          ) : null}
         </div>
         {collapsible && expanded ? (
           <div className="border-border ml-[11px] border-l pl-1" role="group">
@@ -971,6 +1138,7 @@ export function CadModelTree({
         >
           {shape?.groups.map((group) => renderRow(group.row))}
           {shape?.rootBodies.map((body) => renderRow(body))}
+          {shape?.assemblyRows.map((assemblyRow) => renderRow(assemblyRow))}
         </div>
       )}
     </div>

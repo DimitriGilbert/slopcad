@@ -625,3 +625,126 @@ function fireClick(element: HTMLElement | null): void {
   if (element === null) return;
   element.click();
 }
+
+describe("CadModelTree assembly section (Phase 50)", () => {
+  it("renders host-derived occurrence rows with source, BOM, and stale chips", () => {
+    let cadDocument = createDocument(createDocumentId("doc_tree_asm"));
+    cadDocument = requireOk(
+      addBody(cadDocument, { id: PLATE_BODY, name: "plate" }),
+      "the plate body",
+    ).document;
+    cleanup();
+    render(
+      <CadModelTree
+        document={cadDocument}
+        assembly={{
+          nodes: [
+            {
+              key: "occ_000001",
+              label: "Bolt pattern",
+              source: "body",
+              sourceName: "plate",
+              children: [
+                {
+                  key: "occ_000001/occ_000002",
+                  label: "Motor",
+                  source: "component",
+                  sourceName: "nema17-mount",
+                  bomFlag: "purchased",
+                  stale: true,
+                },
+              ],
+            },
+            {
+              key: "occ_000003",
+              label: "Kit",
+              source: "document",
+              sourceName: "bracket",
+              bomFlag: "phantom",
+            },
+          ],
+        }}
+      />,
+    );
+    const bolt = row("occ_000001");
+    expect(bolt.getAttribute("aria-level")).toBe("1");
+    expect(bolt.getAttribute("data-cad-tree-occurrence")).toBe("body");
+    // Inert: no selection surface exists for occurrences (Phase 51).
+    expect(bolt.getAttribute("aria-selected")).toBe("false");
+    // The nested sub-assembly occurrence renders one level deeper with its
+    // BOM and staleness chips.
+    const motor = row("occ_000001/occ_000002");
+    expect(motor.getAttribute("aria-level")).toBe("2");
+    expect(motor.getAttribute("data-cad-tree-occurrence")).toBe("component");
+    expect(
+      motor.querySelector('[data-cad-tree-bom="purchased"]'),
+    ).not.toBeNull();
+    expect(motor.querySelector('[data-cad-tree-stale="true"]')).not.toBeNull();
+    const kit = row("occ_000003");
+    expect(kit.querySelector('[data-cad-tree-bom="phantom"]')).not.toBeNull();
+    expect(kit.querySelector('[data-cad-tree-stale="true"]')).toBeNull();
+  });
+
+  it("collapses and expands a sub-assembly occurrence through its twisty", () => {
+    let cadDocument = createDocument(createDocumentId("doc_tree_asm2"));
+    cadDocument = requireOk(
+      addBody(cadDocument, { id: PLATE_BODY, name: "plate" }),
+      "the plate body",
+    ).document;
+    cleanup();
+    render(
+      <CadModelTree
+        document={cadDocument}
+        assembly={{
+          nodes: [
+            {
+              key: "occ_000001",
+              label: "Kit",
+              source: "document",
+              sourceName: "kit",
+              children: [
+                {
+                  key: "occ_000001/occ_000002",
+                  label: "Washer",
+                  source: "body",
+                  sourceName: "plate",
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    const kit = row("occ_000001");
+    expect(
+      kit.querySelector('[data-node-key="occ_000001/occ_000002"]'),
+    ).not.toBeNull();
+    const toggle = kit.querySelector("[data-cad-tree-toggle]");
+    expect(toggle).not.toBeNull();
+    act(() => {
+      toggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(
+      kit.querySelector('[data-node-key="occ_000001/occ_000002"]'),
+    ).toBeNull();
+    act(() => {
+      toggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(
+      kit.querySelector('[data-node-key="occ_000001/occ_000002"]'),
+    ).not.toBeNull();
+  });
+
+  it("renders no assembly rows when the prop is absent", () => {
+    let cadDocument = createDocument(createDocumentId("doc_tree_asm3"));
+    cadDocument = requireOk(
+      addBody(cadDocument, { id: PLATE_BODY, name: "plate" }),
+      "the plate body",
+    ).document;
+    cleanup();
+    render(<CadModelTree document={cadDocument} />);
+    expect(
+      document.querySelectorAll("[data-cad-tree-occurrence]"),
+    ).toHaveLength(0);
+  });
+});

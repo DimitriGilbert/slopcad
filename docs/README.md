@@ -22,6 +22,7 @@ This directory is the documentation home. Two rules govern it:
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Foundations             | [installation](guides/installation.md) · [CAD core](guides/cad-core.md) · [parameters](guides/parameters.md) · [expressions](guides/expressions.md) · [units](guides/units.md) |
 | Geometry                | [primitives](guides/primitives.md) · [booleans](guides/booleans.md) · [features](guides/features.md) · [kernels](guides/kernels.md) · [workers](guides/workers.md)             |
+| Assemblies              | [assemblies](guides/assemblies.md)                                                                                                                                             |
 | Rendering & interaction | [R3F](guides/r3f.md) · [selection](guides/selection.md) · [tools](guides/tools.md) · [UI components](guides/ui.md)                                                             |
 | Data exchange           | [native files](guides/native-files.md) · [STL/3MF/GLB](guides/mesh-exchange.md) · [STEP/IGES](guides/step-iges.md)                                                             |
 | Sketching               | [sketches](guides/sketches.md) · [constraints](guides/constraints.md)                                                                                                          |

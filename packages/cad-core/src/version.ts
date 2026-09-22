@@ -44,8 +44,17 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * and a standalone `datums` section is silently dropped by the old
  * reader's unknown-field tolerance — both are data the old reader cannot
  * carry, so the envelope stamp is the gate.
+ *
+ * v4 (Phase 50): the document substrate grew component occurrences — the
+ * assembly-as-document decision (docs/architecture/
+ * adr-assemblies-structure.md). The additive `occurrences` section and
+ * the `occurrence` id-generator counter are content-additive (v3 content
+ * is valid v4 content and the v3→v4 migration is content-preserving),
+ * but the version moves because an old reader would silently drop the
+ * standalone section and its counter — assembly structure is data the
+ * old reader cannot carry, so the envelope stamp is the gate.
  */
-export const CAD_NATIVE_FORMAT_VERSION = 3;
+export const CAD_NATIVE_FORMAT_VERSION = 4;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

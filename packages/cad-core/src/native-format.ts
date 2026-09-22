@@ -136,6 +136,7 @@ import {
   CAD_ID_KINDS,
   parseBodyId,
   parseDatumId,
+  parseOccurrenceId,
   parseDocumentId,
   parseFeatureId,
   parseParameterId,
@@ -1327,6 +1328,164 @@ function validateSerializedCadDocumentShape(
     issues,
   );
   validateSerializedDatumListShape(input.datums, `${path}.datums`, issues);
+  validateSerializedOccurrenceListShape(
+    input.occurrences,
+    `${path}.occurrences`,
+    issues,
+  );
+}
+
+/**
+ * Inspects a PRESENT serialized occurrence list with the substrate parser's
+ * per-record requirements (Phase 50): identity, datum naming, source
+ * discrimination, placement discrimination, and the optional BOM flag.
+ * Absent means empty — the additive discipline.
+ */
+function validateSerializedOccurrenceListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized occurrences must be an array of occurrence records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const entryPath = `${path}[${String(index)}]`;
+    if (!isPlainRecord(entry)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        entryPath,
+        "A serialized occurrence must be a plain object with id, name, source, and placement fields.",
+      );
+      return;
+    }
+    if (!parseOccurrenceId(entry.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.id`,
+        "An occurrence id must carry the occurrence id prefix and payload rules.",
+      );
+    }
+    if (
+      typeof entry.name !== "string" ||
+      entry.name.length < 1 ||
+      entry.name.length > BODY_NAME_MAX_LENGTH
+    ) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.name`,
+        "An occurrence name must be a string of 1-64 characters.",
+      );
+    }
+    const source = entry.source;
+    if (!isPlainRecord(source)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.source`,
+        "An occurrence source must be a plain object with a kind field.",
+      );
+    } else if (source.kind === "body") {
+      if (!parseBodyId(source.bodyId).ok) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${entryPath}.source.bodyId`,
+          "A body source must carry a valid body id.",
+        );
+      }
+    } else if (source.kind === "document" || source.kind === "component") {
+      const raw =
+        source.kind === "document" ? source.documentId : source.componentId;
+      if (typeof raw !== "string" || raw.length === 0 || raw.length > 128) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${entryPath}.source.${source.kind === "document" ? "documentId" : "componentId"}`,
+          `A ${source.kind} source id must be a string of 1-128 characters.`,
+        );
+      }
+    } else {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.source.kind`,
+        "An occurrence source kind must be one of: body, document, component.",
+      );
+    }
+    const placement = entry.placement;
+    if (!isPlainRecord(placement)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.placement`,
+        "An occurrence placement must be a plain object with a kind field.",
+      );
+    } else {
+      if (
+        placement.kind !== "identity" &&
+        placement.kind !== "offset" &&
+        placement.kind !== "datum"
+      ) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${entryPath}.placement.kind`,
+          "An occurrence placement kind must be one of: identity, offset, datum.",
+        );
+      }
+      if (
+        (placement.kind === "offset" || placement.kind === "datum") &&
+        placement.translation !== undefined &&
+        !isFiniteTriple(placement.translation)
+      ) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${entryPath}.placement.translation`,
+          "A placement translation must be a finite xyz triple.",
+        );
+      }
+      if (placement.kind === "datum" && !parseDatumId(placement.datumId).ok) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${entryPath}.placement.datumId`,
+          "A datum placement must carry a valid datum id.",
+        );
+      }
+    }
+    if (
+      entry.bomFlag !== undefined &&
+      entry.bomFlag !== "phantom" &&
+      entry.bomFlag !== "purchased"
+    ) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${entryPath}.bomFlag`,
+        'A serialized occurrence BOM flag must be "phantom" or "purchased" when present.',
+      );
+    }
+  });
+}
+
+/** Whether the input is a length-3 array of finite numbers. */
+function isFiniteTriple(input: unknown): boolean {
+  if (!Array.isArray(input) || input.length !== 3) return false;
+  return input.every(
+    (entry) => typeof entry === "number" && Number.isFinite(entry),
+  );
 }
 
 /** Validates a create-command's display name (a non-empty string). */
