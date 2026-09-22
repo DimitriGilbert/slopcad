@@ -58,6 +58,7 @@ import {
   createMidpointConstraint,
   createParallelConstraint,
   createPerpendicularConstraint,
+  createPointEntity,
   createPointOnEntityConstraint,
   createPointOnTangentConstraint,
   createPolygonEntity,
@@ -130,7 +131,10 @@ export const SKETCH_DRAWING_TOOLS = [
 /**
  * The entity-operation tools of the second cluster (Phase 37): offset,
  * mirror, the arrays, extend, and convert — the multi-entity grammar the
- * domain's `entity-ops`/`convert` modules back.
+ * domain's `entity-ops`/`convert` modules back — plus the POINT entity
+ * placement (Phase 42): a single-pick primitive that rides the edit
+ * cluster's tail so the DRAWING cluster's positional shortcut row (the
+ * digit keys) keeps its documented assignment.
  */
 export const SKETCH_EDIT_TOOLS = [
   "offset",
@@ -139,6 +143,7 @@ export const SKETCH_EDIT_TOOLS = [
   "rectArray",
   "circArray",
   "convert",
+  "point",
 ] as const;
 
 /** The constraint tools of the third cluster (the domain's kind names). */
@@ -308,6 +313,7 @@ export const SKETCH_EDITOR_STATUS_TEXT = {
   lineEnd: "Line: click the end point.",
   readyCircle: "Circle: click the center.",
   circleRadius: "Circle: click to set the radius.",
+  readyPoint: "Point: click to place a point entity.",
   readyRectangle: "Rectangle: click the first corner.",
   rectangleSecond: "Rectangle: click the opposite corner.",
   readyEllipse: "Ellipse: click the center.",
@@ -1683,6 +1689,8 @@ function readyStatusFor(tool: SketchToolId): SketchEditorStatus {
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyLine);
     case "circle":
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyCircle);
+    case "point":
+      return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyPoint);
     case "rectangle":
       return statusOf("ready", SKETCH_EDITOR_STATUS_TEXT.readyRectangle);
     case "ellipse":
@@ -1791,6 +1799,27 @@ function canvasPick(
           status: statusOf("hint", SKETCH_EDITOR_STATUS_TEXT.lineEnd),
         },
         transaction: null,
+      };
+    }
+    case "point": {
+      // The single-pick entity: one click places the point (Phase 42 —
+      // the hole dialog's positions sketches are drawn with it; also the
+      // constraint tools' point pick operand).
+      const id = createSketchEntityId(mint("skent", "point"));
+      return {
+        state: {
+          ...state,
+          selectedEntityIds: [id],
+          status: statusOf("hint", `Created point ${id}.`),
+        },
+        transaction: {
+          commands: [
+            {
+              entity: createPointEntity(id, event.point),
+              type: "sketch.entity.create",
+            },
+          ],
+        },
       };
     }
     case "circle": {

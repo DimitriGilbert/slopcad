@@ -135,6 +135,7 @@ import {
   HOLE_DEFAULT_AXIS,
   HOLE_DEFAULT_DEPTH_MM,
   HOLE_DEFAULT_DIAMETER_MM,
+  isStructuredHoleFeature,
 } from "./hole";
 import {
   chainFilletInputOf,
@@ -223,9 +224,15 @@ function structuralOutcome(
       : unresolvable("the sketch or the distance parameter is gone");
   }
   if (feature.kind === "hole") {
-    return holeCutInputOfFeature(document, feature) !== null
-      ? { ok: true }
-      : unresolvable("the target or one of the five hole parameters is gone");
+    if (holeCutInputOfFeature(document, feature) !== null) return { ok: true };
+    // The STRUCTURED hole (Phase 42's type-directed layout) never reads as
+    // five parameters, so the flat form's decline would misname it — it
+    // defers to the Phase 52 chain composition instead.
+    return unresolvable(
+      isStructuredHoleFeature(document, feature)
+        ? "the structured hole defers to the Phase 52 chain composition (this page executes the flat five-parameter form)"
+        : "the target or one of the five hole parameters is gone",
+    );
   }
   if (feature.kind === "fillet") {
     return chainFilletInputOf(document, feature) !== null

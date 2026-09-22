@@ -213,7 +213,34 @@ export type {
   KernelProfileResolver,
   KernelResolvedPath,
   KernelResolvedProfile,
+  KernelResolvedSketchPoints,
+  KernelSketchPointsResolution,
+  KernelSketchPointsResolver,
 } from "./core-bridge";
+
+export {
+  HOLE_POSITION_LIMIT,
+  HOLE_TYPE_VALUES,
+  STRUCTURED_HOLE_TYPES,
+  holeTipExtentMm,
+  planStructuredHoleCut,
+  rotationAligningYTo,
+  structuredHoleAnalyticVolumeMm3,
+  structuredHoleDatumInPlaneAxes,
+  structuredHoleProblem,
+  structuredHoleRoles,
+  structuredHoleTypeOf,
+  structuredHoleWorldInPlaneAxes,
+} from "./hole-specification";
+export type {
+  StructuredHolePlan,
+  StructuredHolePositionPlan,
+  StructuredHoleProblem,
+  StructuredHoleRole,
+  StructuredHoleRoleKind,
+  StructuredHoleSpec,
+  StructuredHoleType,
+} from "./hole-specification";
 
 export {
   assertAreaClose,

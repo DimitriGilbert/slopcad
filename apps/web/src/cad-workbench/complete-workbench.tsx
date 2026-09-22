@@ -110,6 +110,7 @@ import {
   DatumFeatureForm,
   DraftFeatureForm,
   HelixFeatureForm,
+  HoleFeatureForm,
   RibFeatureForm,
   ScaleFeatureForm,
   SplitFeatureForm,
@@ -118,8 +119,10 @@ import {
   LoftFeatureForm,
   SweepFeatureForm,
   type CadFeatureSketchOption,
+  type HoleFormValues,
 } from "./feature-forms";
 import { CadDatumOverlay } from "./datum-overlay";
+import { CadHolePreviewGhost } from "./hole-ghost";
 import {
   FeatureTimelineChips,
   FeatureTimelineSummary,
@@ -316,6 +319,7 @@ export function CompleteCadWorkbench({
     handleScale,
     handleThicken,
     handleSplit,
+    handleStructuredHole,
     handleSketchOnFace,
     sketchBootWorkplane,
     datumsJson,
@@ -340,6 +344,7 @@ export function CompleteCadWorkbench({
     | "scale"
     | "thicken"
     | "split"
+    | "hole"
     | "datum"
     | null
   >(null);
@@ -348,6 +353,10 @@ export function CompleteCadWorkbench({
     | { readonly ok: false; readonly code: string; readonly message: string }
     | null
   >(null);
+  // The hole dialog's LIVE values (the preview ghost's input): written by
+  // the form's own change hook, cleared when the dialog closes.
+  const [holeDialogValues, setHoleDialogValues] =
+    useState<HoleFormValues | null>(null);
   const [importedFrames, setImportedFrames] = useState(0);
   // The settle lamp's honest state: the document whose pixels the last
   // settled frame actually rendered. A commit flips the lamp to "waiting"
@@ -607,7 +616,20 @@ export function CompleteCadWorkbench({
     if (outcome.ok) setFeatureDialog(null);
   };
 
-  /** Opens one feature dialog with its outcome region reset. */
+  /** Runs the structured hole submission, surfacing the refusal. */
+  const submitStructuredHole = (
+    submission: Parameters<typeof handleStructuredHole>[0],
+  ): void => {
+    const outcome = handleStructuredHole(submission);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /**
+   * Opens one feature dialog with its outcome region reset. The hole dialog
+   * additionally resets the preview ghost's live values (a fresh form mount
+   * re-seeds them through its change hook).
+   */
   const openFeatureDialog = useCallback(
     (
       kind:
@@ -620,9 +642,13 @@ export function CompleteCadWorkbench({
         | "scale"
         | "thicken"
         | "split"
+        | "hole"
         | "datum",
     ): void => {
       setFeatureOutcome(null);
+      if (kind === "hole") {
+        setHoleDialogValues(null);
+      }
       setFeatureDialog(kind);
     },
     [],
@@ -733,6 +759,18 @@ export function CompleteCadWorkbench({
         keywords: "cut drill solid create",
         label: "Hole the last extrusion",
         run: handleHole,
+      },
+      {
+        disabled: !hasExtrudeBase,
+        group: "Workspace",
+        id: "hole-spec",
+        keywords:
+          "hole counterbore countersink taper threaded tap drill iso positions spec create",
+        label:
+          "Cut a structured hole (counterbore, countersink, taper, thread)",
+        run: () => {
+          openFeatureDialog("hole");
+        },
       },
       {
         disabled: !canAuthorSketchFeatures,
@@ -1055,6 +1093,21 @@ export function CompleteCadWorkbench({
                 <CadDatumOverlay
                   document={workbenchDocument}
                   projection={applied.state.projection}
+                />
+              ) : null}
+              {/* The Phase 42 hole dialog's preview ghost: the planned
+                  hole's footprint over the settled scene, a pure function
+                  of the dialog's live values — never a dispatch, never
+                  serialized (the datum overlay's discipline). */}
+              {!showingPreview &&
+              applied !== null &&
+              featureDialog === "hole" &&
+              holeDialogValues !== null ? (
+                <CadHolePreviewGhost
+                  bounds={applied.state.measurement.bounds}
+                  document={workbenchDocument}
+                  projection={applied.state.projection}
+                  values={holeDialogValues}
                 />
               ) : null}
               {sketchOnFaceNote !== null ? (
@@ -1531,6 +1584,33 @@ export function CompleteCadWorkbench({
         >
           Hole
         </Button>
+        {/* The Phase 42 structured hole verb: the hole dialog (type,
+            counterbore/countersink/taper/thread spec, sketch-point
+            positions, preview ghost) — the quick Hole button's sibling.
+            The full verb row with every verb present measures ~1745 px
+            (measured at 1800 px, scene settled), so below 1800 px the two
+            widest contextual verbs — this one and Sketch on face — yield
+            their width entirely and the extruded row fits the 1600 px
+            band with ~45 px slack; the command menu keeps both dialogs
+            reachable everywhere (the e2e drives that path). */}
+        <Button
+          className="max-[1799px]:hidden"
+          data-testid="complete-hole-spec"
+          disabled={!hasExtrudeBase}
+          onClick={() => {
+            openFeatureDialog("hole");
+          }}
+          size="xs"
+          title={
+            hasExtrudeBase
+              ? "Open the hole dialog: type, dimensions, thread spec, and positions (one feature, many holes)."
+              : "Sketch and extrude a profile first; a hole cuts an existing solid."
+          }
+          type="button"
+          variant="outline"
+        >
+          Hole spec…
+        </Button>
         {/* The Phase 38 feature verbs: sweep and loft author from the
             document's SAVED sketches (at least two), so the buttons state
             their enablement condition in the title instead of pretending. */}
@@ -1706,9 +1786,13 @@ export function CompleteCadWorkbench({
         </Button>
         {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
             the datum form needs nothing. Both stay in the command menu on
-            narrow rows. */}
+            narrow rows. Sketch-on-face is the row's widest contextual verb
+            (it needs a prior selection to mean anything), so below 1800 px
+            it yields its width entirely — the same tier as the Hole spec…
+            verb — and the command menu keeps it reachable everywhere (the
+            e2e drives that path). */}
         <Button
-          className="max-xl:hidden"
+          className="max-[1799px]:hidden"
           data-testid="complete-sketch-on-face"
           disabled={!hasFaceSelection}
           onClick={sketchOnSelectedFace}
@@ -1908,7 +1992,10 @@ export function CompleteCadWorkbench({
       {featureDialog !== null ? (
         <Dialog
           onOpenChange={(open) => {
-            if (!open) setFeatureDialog(null);
+            if (!open) {
+              setFeatureDialog(null);
+              setHoleDialogValues(null);
+            }
           }}
           open
         >
@@ -1936,7 +2023,9 @@ export function CompleteCadWorkbench({
                                 ? CAD_FEATURE_FORM_LABELS.thickenTitle
                                 : featureDialog === "split"
                                   ? CAD_FEATURE_FORM_LABELS.splitTitle
-                                  : DATUM_FORM_LABELS.title}
+                                  : featureDialog === "hole"
+                                    ? CAD_FEATURE_FORM_LABELS.holeTitle
+                                    : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -1956,7 +2045,9 @@ export function CompleteCadWorkbench({
                             ? CAD_FEATURE_FORM_LABELS.thickenHint
                             : featureDialog === "split"
                               ? CAD_FEATURE_FORM_LABELS.splitHint
-                              : DATUM_FORM_LABELS.hint}
+                              : featureDialog === "hole"
+                                ? CAD_FEATURE_FORM_LABELS.holeHint
+                                : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "sweep" ? (
               <SweepFeatureForm
@@ -1988,6 +2079,13 @@ export function CompleteCadWorkbench({
               <SplitFeatureForm
                 datumPlanes={datumPlaneOptions}
                 onSplit={submitSplit}
+              />
+            ) : featureDialog === "hole" ? (
+              <HoleFeatureForm
+                datumAxes={datumAxisOptions}
+                onHole={submitStructuredHole}
+                onValuesChange={setHoleDialogValues}
+                sketches={sketchOptions}
               />
             ) : (
               <DatumFeatureForm
