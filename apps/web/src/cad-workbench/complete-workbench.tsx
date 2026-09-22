@@ -102,6 +102,7 @@ import type { RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { LoftSectionChoice } from "./loft";
 import type { ThreadCutInput } from "./thread";
+import { clippingPlanesOf } from "@slopcad/cad-r3f";
 
 import { completionJson } from "../render-fixture/fixture-session";
 import {
@@ -1206,6 +1207,10 @@ export function CompleteCadWorkbench({
     </>
   );
 
+  // The document's first section record (Phase 46): the persisted plane the
+  // clip and view toggles act on — absent when the document carries none.
+  const engineSectionRecord = workbenchDocument.sections[0];
+
   const defaultViewport = (
     <div
       className="flex min-h-0 min-w-0 flex-1 flex-col"
@@ -1219,6 +1224,17 @@ export function CompleteCadWorkbench({
         <CadViewport
           cameraControls
           cameraOrbitDragEnabled={cameraOrbitDragAvailable}
+          clippingPlanes={
+            engine.sectionClipped && !engine.sectionViewMode
+              ? clippingPlanesOf([
+                  {
+                    origin: engineSectionRecord?.origin ?? [0, 0, 0],
+                    normal: engineSectionRecord?.normal ?? [0, 0, 1],
+                    keepSide: engineSectionRecord?.keepSide ?? 1,
+                  },
+                ])
+              : undefined
+          }
           className={VIEWPORT_CLASS}
           displayMode={viewSession.displayMode}
           onUserCamera={handleViewUserCamera}
@@ -2273,6 +2289,11 @@ export function CompleteCadWorkbench({
               distanceText={distanceText}
               massPropertiesState={engine.massPropertiesState}
               radiusState={engine.radiusState}
+              sectionClipped={engine.sectionClipped}
+              sectionState={engine.sectionState}
+              sectionViewMode={engine.sectionViewMode}
+              onToggleSectionClipped={engine.toggleSectionClipped}
+              onToggleSectionViewMode={engine.toggleSectionViewMode}
             />
           </div>
         </div>

@@ -10,6 +10,7 @@ export type {
   CadId,
   CadIdKind,
   DatumId,
+  SectionId,
   DocumentId,
   FeatureId,
   IdGenerator,
@@ -29,6 +30,7 @@ export {
   CadIdValidationError,
   createBodyId,
   createDatumId,
+  createSectionId,
   createDocumentId,
   createFeatureId,
   createIdGenerator,
@@ -39,6 +41,7 @@ export {
   parseAnyCadId,
   parseBodyId,
   parseDatumId,
+  parseSectionId,
   parseDocumentId,
   parseFeatureId,
   parseParameterId,
@@ -303,6 +306,7 @@ export type {
   BodyInput,
   CadDocument,
   DocumentDatum,
+  DocumentSection,
   DocumentDatumAddResult,
   DocumentDatumInput,
   DocumentEntity,
@@ -331,6 +335,9 @@ export {
   addBody,
   updateBody,
   addDocumentDatum,
+  addDocumentSection,
+  setDocumentSectionEnabled,
+  DOCUMENT_SECTION_LIMIT,
   addDocumentParameter,
   addFeature,
   createDocument,
@@ -338,6 +345,7 @@ export {
   FEATURE_INPUT_KINDS,
   getBody,
   getDocumentDatum,
+  getDocumentSection,
   getDocumentEntity,
   getDocumentSketch,
   addDocumentSketch,
@@ -679,12 +687,14 @@ export {
   formatBoundsExtents,
   selectedBoundsBody,
 } from "./bounds";
-export type { MassProperties } from "./mass-properties";
+export type { MassProperties, SectionFaceProperties } from "./mass-properties";
 export {
   formatMassProperties,
+  formatSectionCentroid,
   formatSurfaceArea,
   formatVolume,
   massPropertiesOf,
+  sectionFacePropertiesOf,
 } from "./mass-properties";
 export type {
   DistanceError,

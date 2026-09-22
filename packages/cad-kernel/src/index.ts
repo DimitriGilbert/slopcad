@@ -64,6 +64,9 @@ export type {
   ReplaceFaceInput,
   ReplaceFacePlaneInput,
   RotationInput,
+  SectionFaceMeasure,
+  SectionInput,
+  SectionResult,
   ShellInput,
   SphereInput,
   SweepPathSegmentInput,
@@ -207,6 +210,7 @@ export {
   rotationFromTo,
   SPLIT_TOOL_OVERSHOOT_MM,
 } from "./core-bridge";
+export { capFaceMeasure, CAP_FACE_PLANE_TOLERANCE } from "./section-geometry";
 export type {
   ArrayPatternLeg,
   ArrayPatternPlan,

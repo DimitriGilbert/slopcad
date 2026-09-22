@@ -140,6 +140,8 @@ import {
   type HelixSweepInput,
   type ProfileSweepInput,
   type ReplaceFaceInput,
+  type SectionInput,
+  type SectionResult,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -149,6 +151,8 @@ import {
 import {
   axisAngleMatrix,
   normalizeRevolveAxis,
+  capFaceMeasure,
+  planSplitCut,
   polygonSignedArea,
   PROFILE_MAX_SEGMENT_ANGLE_RAD,
   type ProfilePoint2,
@@ -256,6 +260,7 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   localFaceOps: false,
+  section: true,
 });
 
 /**
@@ -647,9 +652,11 @@ export function manifoldKernelFromRuntime(
           input.direction === -1 ? prism.translate(0, 0, -height.value) : prism;
         if (input.direction === -1) prism.delete();
         // Placement: one column-major 4×4 affine (rotation, then
-        // translation — the contract's composition order).
+        // translation — the contract's composition order). The engine's
+        // own `Mat4` tuple type carries the WASM binding's shape, so the
+        // literal needs no cast (the Phase 41 `transformScale` precedent).
         const r = axisAngleMatrix(axis, angle);
-        const mat4 = [
+        const mat4: Mat4 = [
           r[0]?.[0] ?? 0,
           r[1]?.[0] ?? 0,
           r[2]?.[0] ?? 0,
@@ -666,8 +673,8 @@ export function manifoldKernelFromRuntime(
           translation[1],
           translation[2],
           1,
-        ] as const;
-        return ok(wrapSolid(oriented.transform(mat4 as never)));
+        ];
+        return ok(wrapSolid(oriented.transform(mat4)));
       });
     },
 
@@ -838,7 +845,7 @@ export function manifoldKernelFromRuntime(
         );
         const r = placement.rotation;
         const t = placement.translation;
-        const mat4 = [
+        const mat4: Mat4 = [
           r[0]?.[0] ?? 0,
           r[1]?.[0] ?? 0,
           r[2]?.[0] ?? 0,
@@ -855,8 +862,8 @@ export function manifoldKernelFromRuntime(
           t[1],
           t[2],
           1,
-        ] as const;
-        return ok(wrapSolid(revolved.transform(mat4 as never)));
+        ];
+        return ok(wrapSolid(revolved.transform(mat4)));
       });
     },
 
@@ -1016,6 +1023,124 @@ export function manifoldKernelFromRuntime(
       );
     },
 
+    section(input: SectionInput): KernelResult<SectionResult> {
+      return run("section", KERNEL_ERROR_CODES.invalidLength, () => {
+        const targetManifold = manifoldOf(input.target, "section");
+        if (!targetManifold.ok) return fail(targetManifold.error);
+        const origin: readonly [number, number, number] = [
+          valueIn(input.origin[0], "mm"),
+          valueIn(input.origin[1], "mm"),
+          valueIn(input.origin[2], "mm"),
+        ];
+        const raw = input.normal;
+        const squared = raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2];
+        if (
+          !Number.isFinite(squared) ||
+          squared === 0 ||
+          !Number.isFinite(raw[0]) ||
+          !Number.isFinite(raw[1]) ||
+          !Number.isFinite(raw[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              `section rejected a normal [${String(raw[0])}, ${String(raw[1])}, ${String(raw[2])}]: it must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const magnitude = Math.sqrt(squared);
+        const n: readonly [number, number, number] = [
+          raw[0] / magnitude,
+          raw[1] / magnitude,
+          raw[2] / magnitude,
+        ];
+        if (targetManifold.value.isEmpty()) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sectionEmpty,
+              "section rejected the plane: the target is empty, so there is no cross-section face to measure.",
+            ),
+          );
+        }
+        const targetBox = targetManifold.value.boundingBox();
+        const bounds: KernelBounds = {
+          min: [targetBox.min[0], targetBox.min[1], targetBox.min[2]],
+          max: [targetBox.max[0], targetBox.max[1], targetBox.max[2]],
+        };
+        // The covering-box composition the roadmap rules Manifold CAN
+        // run: the split's own square-prism tool (extrude-grade placement
+        // through the engine's affine transform), then one exact engine
+        // mesh difference.
+        const plan = planSplitCut({
+          planeOrigin: origin,
+          planeNormal: n,
+          keepSide: input.keepSide,
+          bounds,
+        });
+        const half = Math.max(
+          plan.toolHeightMm,
+          ...plan.toolLoop.map((segment) =>
+            segment.kind === "line"
+              ? Math.max(
+                  Math.abs(segment.start[0] ?? 0),
+                  Math.abs(segment.start[1] ?? 0),
+                  Math.abs(segment.end[0] ?? 0),
+                  Math.abs(segment.end[1] ?? 0),
+                )
+              : 0,
+          ),
+        );
+        const prism = manifoldCtor.cube(
+          [2 * half, 2 * half, plan.toolHeightMm],
+          false,
+        );
+        const shifted = prism.translate(-half, -half, 0);
+        prism.delete();
+        const r = axisAngleMatrix(
+          plan.toolRotationAxis,
+          plan.toolRotationAngleRad,
+        );
+        const mat4: Mat4 = [
+          r[0]?.[0] ?? 0,
+          r[1]?.[0] ?? 0,
+          r[2]?.[0] ?? 0,
+          0,
+          r[0]?.[1] ?? 0,
+          r[1]?.[1] ?? 0,
+          r[2]?.[1] ?? 0,
+          0,
+          r[0]?.[2] ?? 0,
+          r[1]?.[2] ?? 0,
+          r[2]?.[2] ?? 0,
+          0,
+          plan.toolTranslationMm[0],
+          plan.toolTranslationMm[1],
+          plan.toolTranslationMm[2],
+          1,
+        ];
+        const tool = shifted.transform(mat4);
+        shifted.delete();
+        const cut = manifoldCtor.difference([targetManifold.value, tool]);
+        tool.delete();
+        // The section face, measured over the cut solid's own boundary:
+        // the cap triangles (every corner within the plane tolerance),
+        // summed exactly over that mesh — the mesh-tessellated-honest
+        // band the contract documents for this kernel.
+        const soup = tessellateManifold(cut);
+        const measure = capFaceMeasure(soup, origin, n);
+        if (measure === null) {
+          cut.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sectionEmpty,
+              "section rejected the plane: it misses or grazes the target (no cap face lies in the plane), so there is no cross-section face to measure.",
+            ),
+          );
+        }
+        return ok({ solid: wrapSolid(cut), section: measure });
+      });
+    },
+
     subtract(
       target: KernelSolid,
       tools: readonly KernelSolid[],
@@ -1113,13 +1238,13 @@ export function manifoldKernelFromRuntime(
         // the negative determinant and re-winds its triangles itself
         // (probed) — the adapter does no mesh surgery.
         const doubled = 2 * offset;
-        const mat4 =
+        const mat4: Mat4 =
           input.axis === "x"
             ? [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, doubled, 0, 0, 1]
             : input.axis === "y"
               ? [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, doubled, 0, 1]
               : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, doubled, 1];
-        return ok(wrapSolid(manifold.value.transform(mat4 as never)));
+        return ok(wrapSolid(manifold.value.transform(mat4)));
       });
     },
 

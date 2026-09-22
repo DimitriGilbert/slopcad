@@ -149,6 +149,21 @@
  *   operation. The fake, Manifold, and JSCAD kernels declare `false`:
  *   their engines carry no face-addressed geometry at all, so every call
  *   of every local face op answers `kernel/unsupported-operation`.
+ * - `section`: the contract's plane cut (Phase 46 — the `section`
+ *   operation: target × plane → the cut solid plus the cross-section
+ *   face's area/centroid) is implemented honestly. OCCT cuts with one
+ *   exact `BRepAlgoAPI_Cut` by a covering box and measures the cap faces
+ *   by exact BREP surface integration; the fake kernel models the
+ *   cross-section polygon analytically over its pristine-box subset and
+ *   composes the cut solid from its own `extrude` + `subtract` (the
+ *   split's covering-box discipline); the mesh kernels (Manifold, JSCAD)
+ *   compose the cut from their own exact box booleans — the roadmap's
+ *   ruling that a mesh kernel CAN cut with a box tool — and measure the
+ *   cap faces over the cut solid's own boundary mesh (the documented
+ *   mesh-tessellated-honest band). All four declare `true`; a kernel
+ *   without an honest cut or honest cap measurement would declare
+ *   `false` and answer every call with the structured
+ *   `kernel/unsupported-operation`.
  */
 export interface KernelCapabilities {
   readonly booleans: boolean;
@@ -166,6 +181,7 @@ export interface KernelCapabilities {
   readonly chamfer: boolean;
   readonly shell: boolean;
   readonly thicken: boolean;
+  readonly section: boolean;
   readonly extrudeTaper: boolean;
   readonly mirror: boolean;
   readonly surfaceArea: boolean;

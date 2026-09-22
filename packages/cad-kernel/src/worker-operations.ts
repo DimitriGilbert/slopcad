@@ -206,6 +206,7 @@ export const WORKER_OPERATION_IDS = [
   "solid.moveFace",
   "solid.replaceFace",
   "solid.deleteFace",
+  "solid.section",
   "solid.topology",
   "step.import",
   "step.export",
@@ -585,6 +586,21 @@ export interface WorkerDeleteFaceInput {
 }
 
 /**
+ * Input of `solid.section` (Phase 46): the target solid, the section
+ * plane's origin components and normal (the contract's `SectionInput`
+ * carried across the wire), and the keep side. Whether the normal is
+ * non-zero and the plane actually cuts is the kernel contract's semantic
+ * call (`kernel/invalid-length`, `kernel/section-empty`); the codec
+ * checks structure only.
+ */
+export interface WorkerSectionInput {
+  readonly target: WorkerSolidId;
+  readonly origin: readonly [LengthValue, LengthValue, LengthValue];
+  readonly normal: readonly [number, number, number];
+  readonly keepSide: 1 | -1;
+}
+
+/**
  * Input of `solid.topology` (Phase 26.5): the solid to report plus the
  * labeling context the kernel-neutral snapshot carries — the document body
  * the solid stands for and the regeneration the snapshot stands at. Both
@@ -848,6 +864,19 @@ export interface WorkerVolumeResult {
 }
 
 /**
+ * Result of `solid.section`: the cut solid's worker id plus the
+ * cross-section face's measurements (mm² area, mm centroid) — raw
+ * canonical-unit numbers, the volume/area precedent.
+ */
+export interface WorkerSectionResult {
+  readonly solid: WorkerSolidId;
+  readonly section: {
+    readonly areaMm2: number;
+    readonly centroidMm: readonly [number, number, number];
+  };
+}
+
+/**
  * Result of `solid.area` (Phase 27.4): the whole-solid surface area in
  * mm² (0 for an empty solid), measured with the booted kernel's own
  * semantics (see the contract's `area` documentation).
@@ -892,6 +921,7 @@ export interface WorkerOperationInputs {
   readonly "solid.moveFace": WorkerMoveFaceInput;
   readonly "solid.replaceFace": WorkerReplaceFaceInput;
   readonly "solid.deleteFace": WorkerDeleteFaceInput;
+  readonly "solid.section": WorkerSectionInput;
   readonly "solid.topology": WorkerTopologyInput;
   readonly "step.import": WorkerStepImportInput;
   readonly "step.export": WorkerStepExportInput;
@@ -932,6 +962,7 @@ export interface WorkerOperationResults {
   readonly "solid.moveFace": WorkerSolidResult;
   readonly "solid.replaceFace": WorkerSolidResult;
   readonly "solid.deleteFace": WorkerSolidResult;
+  readonly "solid.section": WorkerSectionResult;
   readonly "solid.topology": WorkerTopologyResult;
   readonly "step.import": WorkerStepImportResult;
   readonly "step.export": WorkerStepExportResult;
@@ -1141,6 +1172,16 @@ export interface SerializedWorkerOperationInputs {
     readonly face: number;
     readonly heal: boolean;
   };
+  readonly "solid.section": {
+    readonly target: string;
+    readonly origin: readonly [
+      SerializedWorkerLength,
+      SerializedWorkerLength,
+      SerializedWorkerLength,
+    ];
+    readonly normal: readonly [number, number, number];
+    readonly keepSide: 1 | -1;
+  };
   readonly "solid.topology": {
     readonly solid: string;
     readonly bodyId: string;
@@ -1251,6 +1292,13 @@ export interface SerializedWorkerOperationResults {
   };
   readonly "solid.deleteFace": {
     readonly solid: string;
+  };
+  readonly "solid.section": {
+    readonly solid: string;
+    readonly section: {
+      readonly areaMm2: number;
+      readonly centroidMm: readonly [number, number, number];
+    };
   };
   /**
    * The snapshot is already plain kernel-neutral data (the Phase 22
@@ -3235,6 +3283,76 @@ function parseMirrorInput(
   return ok({ target: target.value, axis, offset: offset.value });
 }
 
+function serializeSectionInput(
+  input: WorkerSectionInput,
+): SerializedWorkerOperationInput<"solid.section"> {
+  return {
+    target: input.target,
+    origin: [
+      serializeDimensionalValue(input.origin[0]),
+      serializeDimensionalValue(input.origin[1]),
+      serializeDimensionalValue(input.origin[2]),
+    ],
+    normal: [...input.normal],
+    keepSide: input.keepSide,
+  };
+}
+
+function parseSectionInput(
+  payload: unknown,
+): ParseResult<WorkerSectionInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.section", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.section",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const originInput = record.value.origin;
+  if (!Array.isArray(originInput) || originInput.length !== 3) {
+    return payloadError(
+      'The "solid.section" field "origin" must be an array of exactly three lengths.',
+      originInput,
+    );
+  }
+  const ox = requireLengthField("solid.section", "origin.x", originInput[0]);
+  if (!ox.ok) return ox;
+  const oy = requireLengthField("solid.section", "origin.y", originInput[1]);
+  if (!oy.ok) return oy;
+  const oz = requireLengthField("solid.section", "origin.z", originInput[2]);
+  if (!oz.ok) return oz;
+  const normal = finiteNumberArray(record.value.normal);
+  if (normal === undefined || normal.length !== 3) {
+    return payloadError(
+      'The "solid.section" field "normal" must be an array of exactly three finite numbers.',
+      record.value.normal,
+    );
+  }
+  const nx = normal[0];
+  const ny = normal[1];
+  const nz = normal[2];
+  if (nx === undefined || ny === undefined || nz === undefined) {
+    return payloadError(
+      'The "solid.section" field "normal" must be an array of exactly three finite numbers.',
+      record.value.normal,
+    );
+  }
+  const keepSide = record.value.keepSide;
+  if (keepSide !== 1 && keepSide !== -1) {
+    return payloadError(
+      'The "solid.section" field "keepSide" must be 1 or -1.',
+      keepSide,
+    );
+  }
+  return ok({
+    target: target.value,
+    origin: [ox.value, oy.value, oz.value],
+    normal: [nx, ny, nz],
+    keepSide,
+  });
+}
+
 function serializeTopologyInput(
   input: WorkerTopologyInput,
 ): SerializedWorkerOperationInput<"solid.topology"> {
@@ -3611,6 +3729,7 @@ const INPUT_SERIALIZERS: {
   "solid.moveFace": serializeMoveFaceInput,
   "solid.replaceFace": serializeReplaceFaceInput,
   "solid.deleteFace": serializeDeleteFaceInput,
+  "solid.section": serializeSectionInput,
   "solid.topology": serializeTopologyInput,
   "step.import": serializeStepImportInput,
   "step.export": serializeStepExportInput,
@@ -3651,6 +3770,7 @@ const INPUT_PARSERS: {
   "solid.moveFace": parseMoveFaceInput,
   "solid.replaceFace": parseReplaceFaceInput,
   "solid.deleteFace": parseDeleteFaceInput,
+  "solid.section": parseSectionInput,
   "solid.topology": parseTopologyInput,
   "step.import": parseStepImportInput,
   "step.export": parseStepExportInput,
@@ -3800,6 +3920,54 @@ function parseVolumeResult(
     );
   }
   return ok({ volume });
+}
+
+function serializeSectionResult(
+  result: WorkerSectionResult,
+): SerializedWorkerOperationResult<"solid.section"> {
+  return {
+    solid: result.solid,
+    section: {
+      areaMm2: result.section.areaMm2,
+      centroidMm: [...result.section.centroidMm],
+    },
+  };
+}
+
+function parseSectionResult(
+  payload: unknown,
+): ParseResult<WorkerSectionResult, WorkerParseError> {
+  const record = requirePayloadRecord("solid.section", payload);
+  if (!record.ok) return record;
+  const solid = requireSolidIdField(
+    "solid.section",
+    "solid",
+    record.value.solid,
+  );
+  if (!solid.ok) return solid;
+  if (!isPlainRecord(record.value.section)) {
+    return payloadError(
+      'The "solid.section" result field "section" must be a plain object with areaMm2 and centroidMm.',
+      record.value.section,
+    );
+  }
+  const areaMm2 = record.value.section.areaMm2;
+  if (!isFiniteNumber(areaMm2) || !(areaMm2 > 0)) {
+    return payloadError(
+      'The "solid.section" result field "section.areaMm2" must be a finite, strictly positive number (an empty section rejects kernel-side).',
+      areaMm2,
+    );
+  }
+  const centroidMm = parsePoint3(
+    "solid.section",
+    "section.centroidMm",
+    record.value.section.centroidMm,
+  );
+  if (!centroidMm.ok) return centroidMm;
+  return ok({
+    solid: solid.value,
+    section: { areaMm2, centroidMm: centroidMm.value },
+  });
 }
 
 /**
@@ -3983,6 +4151,7 @@ const RESULT_SERIALIZERS: {
   "solid.moveFace": serializeSolidResult,
   "solid.replaceFace": serializeSolidResult,
   "solid.deleteFace": serializeSolidResult,
+  "solid.section": serializeSectionResult,
   "solid.topology": serializeTopologyResult,
   "step.import": serializeStepImportResult,
   "step.export": serializeStepExportResult,
@@ -4027,6 +4196,7 @@ const RESULT_PARSERS: {
     parseSolidResult("solid.replaceFace", payload),
   "solid.deleteFace": (payload) =>
     parseSolidResult("solid.deleteFace", payload),
+  "solid.section": parseSectionResult,
   "solid.topology": parseTopologyResult,
   "step.import": parseStepImportResult,
   "step.export": parseStepExportResult,
@@ -4098,6 +4268,7 @@ const RESULT_MINTS: {
   "solid.moveFace": (result) => [result.solid],
   "solid.replaceFace": (result) => [result.solid],
   "solid.deleteFace": (result) => [result.solid],
+  "solid.section": (result) => [result.solid],
   "solid.topology": () => [],
   "step.import": (result) => result.solids.map((ref) => ref.solid),
   "step.export": () => [],

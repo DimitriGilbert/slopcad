@@ -78,6 +78,7 @@ describe("operation vocabulary", () => {
       "solid.moveFace",
       "solid.replaceFace",
       "solid.deleteFace",
+      "solid.section",
       "solid.topology",
       "step.import",
       "step.export",
@@ -223,6 +224,39 @@ describe("operation input round-trips", () => {
       axis: "x",
       offset: mm(-7),
     });
+  });
+
+  it("round-trips the section input with its plane and keep side (Phase 46)", () => {
+    expectInputRoundTrip("solid.section", {
+      target: solidA,
+      origin: [mm(1), mm(-2), mm(3)],
+      normal: [0, 0, 1],
+      keepSide: -1,
+    });
+  });
+
+  it("round-trips the section result with its cut solid and face measures", () => {
+    const serialized = serializeWorkerOperationResult("solid.section", {
+      solid: solidA,
+      section: { areaMm2: 600, centroidMm: [15, 10, 5] },
+    });
+    expect(serialized).toEqual({
+      solid: solidA,
+      section: { areaMm2: 600, centroidMm: [15, 10, 5] },
+    });
+    const parsed = parseWorkerOperationResult("solid.section", serialized);
+    expect(parsed).toEqual({
+      ok: true,
+      value: {
+        solid: solidA,
+        section: { areaMm2: 600, centroidMm: [15, 10, 5] },
+      },
+    });
+    const rejected = parseWorkerOperationResult("solid.section", {
+      solid: solidA,
+      section: { areaMm2: 0, centroidMm: [0, 0, 0] },
+    });
+    expect(rejected.ok).toBe(false);
   });
 
   it("round-trips the topology input with its labeled body and regeneration", () => {
@@ -789,6 +823,7 @@ describe("operation input validation", () => {
       },
       "solid.replaceFace": { target: solidA, face: 0.5, plane: "flat" },
       "solid.deleteFace": { target: solidA, face: 0, heal: "yes" },
+      "solid.section": { target: solidA, origin: "at-origin", keepSide: 0 },
       "solid.topology": {
         solid: solidA,
         bodyId: "not-a-body",

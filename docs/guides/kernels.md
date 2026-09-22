@@ -41,11 +41,24 @@ Read the flags from the kernels' own constants
 | mirror                | ✓        | ✓           | ✓     | ✓    |
 | surfaceArea           | ✓        | ✓           | ✓     | ✓    |
 | localFaceOps          | —        | ✓           | —     | —    |
+| section               | ✓        | ✓           | ✓     | ✓    |
 
 Every capability-gated decline answers the structured
 `kernel/unsupported-operation` — Manifold's `sweep`, its `fillet`,
 JSCAD's `shell`, Manifold's and JSCAD's `helix`, all of them — never a
-silently wrong approximation. Phase 41's additions: the uniform
+silently wrong approximation. Phase 46's `section` (the arbitrary-plane
+cut: the cut solid plus the cross-section face's area/centroid) is the
+mirror precedent — every kernel implements it, each by its own honest
+route: OCCT by one exact `BRepAlgoAPI_Cut` with a covering box and
+exact BREP cap-face integration, the fake kernel by the analytic
+cross-section polygon over its pristine-box subset (declining other
+targets structurally) with the cut solid riding the split composition,
+and the mesh kernels (Manifold, JSCAD) by the same covering-box
+composition through their own exact booleans with the cap faces summed
+over the cut solid's own boundary mesh — the mesh-tessellated-honest
+band. A plane that misses or grazes the target answers the structured
+`kernel/section-empty` on every kernel, never a zero-area face.
+Phase 41's additions: the uniform
 `transformScale` is the mirror precedent (every kernel implements it —
 OCCT through `gp_Trsf.SetScale`, the mesh kernels through their affine
 matrices); `thicken` (the CLOSED hollow, `MakeThickSolidByJoin`'s cavity

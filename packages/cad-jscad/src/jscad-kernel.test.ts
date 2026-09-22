@@ -61,6 +61,7 @@ describe("createJscadKernel", () => {
       thicken: false,
       extrudeTaper: true,
       mirror: true,
+      section: true,
       surfaceArea: true,
       localFaceOps: false,
     });

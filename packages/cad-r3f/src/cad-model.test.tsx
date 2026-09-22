@@ -10,6 +10,7 @@
 
 import { cleanup, render } from "@testing-library/react";
 import type * as THREE from "three";
+import { Plane, MeshStandardMaterial } from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBodyId } from "@slopcad/cad-core";
 import type {
@@ -345,5 +346,77 @@ describe("CadModel display modes (Phase 45)", () => {
     );
     expect(view.container.querySelectorAll("linesegments").length).toBe(0);
     view.unmount();
+  });
+});
+
+describe("CadModel section clipping material law (Phase 46)", () => {
+  // The boot-raster law's material-construction half: the material host
+  // prop is ALWAYS defined (empty-but-present when nothing clips), and an
+  // empty value constructs a material byte-identical to one built without
+  // the prop at all. The prop must never be REMOVED by a state transition
+  // — R3F's removed-prop reset writes a literal `0` for classes whose
+  // constructor takes parameters (`MeshStandardMaterial`'s does), which
+  // poisons `material.clippingPlanes` and kills the mesh's draw (the
+  // Phase 46 empty-canvas regression).
+  const materialHost = (container: HTMLElement): Element => {
+    const host = container.querySelector("meshstandardmaterial");
+    if (host === null) throw new Error("expected a material host element");
+    return host;
+  };
+
+  it("keeps the clipping host prop defined for absent, empty, and live planes", () => {
+    const absent = render(<CadModel projection={BOTH_PROJECTION} />);
+    expect(materialHost(absent.container).getAttribute("clippingplanes")).toBe(
+      "",
+    );
+    absent.unmount();
+
+    const empty = render(
+      <CadModel projection={BOTH_PROJECTION} clippingPlanes={[]} />,
+    );
+    expect(materialHost(empty.container).getAttribute("clippingplanes")).toBe(
+      "",
+    );
+    empty.unmount();
+
+    const clipped = render(
+      <CadModel projection={BOTH_PROJECTION} clippingPlanes={[new Plane()]} />,
+    );
+    expect(
+      materialHost(clipped.container).getAttribute("clippingplanes"),
+    ).not.toBe("");
+    clipped.unmount();
+  });
+
+  it("constructs byte-identical materials for empty-but-defined and absent clipping planes", () => {
+    // three's local-clipping contract (WebGLClipping.setState): a null
+    // value and an empty array both name NO clipping, so the program and
+    // uniform state a frame builds from either material are identical.
+    const absent = new MeshStandardMaterial({
+      color: "#aabdd6",
+      metalness: 0.15,
+      roughness: 0.55,
+    });
+    const emptyDefined = new MeshStandardMaterial({
+      color: "#aabdd6",
+      metalness: 0.15,
+      roughness: 0.55,
+      clippingPlanes: [],
+    });
+    const serializable = (material: MeshStandardMaterial): unknown => {
+      const record = material.toJSON() as unknown as Record<string, unknown>;
+      delete record.uuid;
+      delete record.metadata;
+      return record;
+    };
+    expect(
+      absent.clippingPlanes === null || absent.clippingPlanes.length === 0,
+    ).toBe(true);
+    expect(emptyDefined.clippingPlanes).toEqual([]);
+    // Byte-identical construction: the same serializable material state
+    // and the same version (no needsUpdate pressure the always-apply
+    // path would introduce — that divergence goes red here).
+    expect(serializable(emptyDefined)).toEqual(serializable(absent));
+    expect(emptyDefined.version).toBe(absent.version);
   });
 });

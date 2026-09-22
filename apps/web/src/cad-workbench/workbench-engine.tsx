@@ -80,6 +80,7 @@ import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
 import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
 import type { Workplane } from "@slopcad/cad-sketch";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
+import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene";
 
 import {
   bootRenderFixtureSession,
@@ -141,6 +142,7 @@ import {
 import { boundsReadout } from "./bounds-inspection";
 import { distanceReadout } from "./distance-inspection";
 import { massPropertiesReadout } from "./mass-properties-inspection";
+import { sectionInspectionReadout } from "./section-inspection";
 import { radiusReadout } from "./radius-inspection";
 import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
 import {
@@ -404,6 +406,12 @@ export interface WorkbenchEngine {
   readonly referenceDistance: ReturnType<typeof distanceReadout>;
   readonly radiusState: ReturnType<typeof radiusReadout>;
   readonly massPropertiesState: ReturnType<typeof massPropertiesReadout>;
+  /** The Phase 46 section display state and its readout (see the module docs). */
+  readonly sectionClipped: boolean;
+  readonly sectionViewMode: boolean;
+  readonly toggleSectionClipped: () => void;
+  readonly toggleSectionViewMode: () => void;
+  readonly sectionState: ReturnType<typeof sectionInspectionReadout>;
   /** The machine timeline JSON (rollback, entries, executed). */
   readonly timelineJson: string;
   /** The extrude create action (the sketch → solid UX bridge). */
@@ -665,6 +673,7 @@ export function useWorkbenchEngine(
   const { beginRegeneration } = selectionApi;
 
   const [applied, setApplied] = useState<AppliedRenderState | null>(null);
+
   const [renderedFrames, setRenderedFrames] = useState(0);
   const sessionRef = useRef<RenderFixtureSession | null>(null);
 
@@ -756,6 +765,17 @@ export function useWorkbenchEngine(
   }, []);
 
   const workbenchDocument = documentApi.document;
+
+  // The Phase 46 section display: the document's FIRST section record is
+  // the persisted model artifact (its plane and kept side serialize with
+  // the document); the CLIP and VIEW toggles are session display state,
+  // seeded from the record's enabled flag — off at boot, so the unsectioned
+  // settle and its raster are byte-unchanged (the boot-state law).
+  const documentSection = workbenchDocument.sections[0] ?? null;
+  const [sectionClipped, setSectionClipped] = useState(
+    documentSection?.enabled === true,
+  );
+  const [sectionViewMode, setSectionViewMode] = useState(false);
   const suppressedKey = useMemo(
     () =>
       [...suppressed]
@@ -2612,6 +2632,32 @@ export function useWorkbenchEngine(
     onSceneOutcome,
   ]);
 
+  /**
+   * The active section display request: present exactly when the document
+   * carries a section record AND the clip toggle is on — view mode rides
+   * along as the display choice. Absent when clipped off: the unsectioned
+   * path (the boot state).
+   */
+  const activeSectionRequest: SectionDisplayRequest | null = useMemo(() => {
+    if (documentSection === null || !sectionClipped) return null;
+    return {
+      origin: documentSection.origin,
+      normal: documentSection.normal,
+      keepSide: documentSection.keepSide,
+      viewMode: sectionViewMode,
+    };
+  }, [documentSection, sectionClipped, sectionViewMode]);
+
+  /** Toggles the section clip on/off (session display state, Phase 46). */
+  const toggleSectionClipped = useCallback((): void => {
+    setSectionClipped((current) => !current);
+  }, []);
+
+  /** Toggles the section VIEW mode (the cut solid with cap faces). */
+  const toggleSectionViewMode = useCallback((): void => {
+    setSectionViewMode((current) => !current);
+  }, []);
+
   // The scene dispatch: whichever computation the active scene names follows
   // the DOCUMENT (the parameter edit → regenerate criterion) — the plate
   // scene follows the hole diameter, the extrude scene re-reads the
@@ -2746,12 +2792,13 @@ export function useWorkbenchEngine(
       return;
     }
     if (storedHole !== null) {
-      sessionRef.current?.dispatch(storedHole);
+      sessionRef.current?.dispatch(storedHole, activeSectionRequest);
     }
   }, [
     activeScene,
     workbenchDocument,
     storedHole,
+    activeSectionRequest,
     extrudeCount,
     revolveCount,
     sweepCount,
@@ -2863,6 +2910,28 @@ export function useWorkbenchEngine(
   // The mass-properties inspection (Phase 27.4): the scene solid's
   // kernel-measured volume and surface area (see
   // ./mass-properties-inspection).
+  // The section inspection (Phase 46): the active section plane's kernel
+  // face measurements — present exactly when the settled scene cut one (see
+  // ./section-inspection).
+  const sectionState = sectionInspectionReadout({
+    selected: selectionApi.selected,
+    features: workbenchDocument.features,
+    sceneBodyId:
+      applied === null
+        ? undefined
+        : applied.state.projection.objects.find(
+            (object) => object.bodyId !== undefined,
+          )?.bodyId,
+    sectionArea:
+      applied === null || applied.state.section === undefined
+        ? undefined
+        : applied.state.section.areaMm2,
+    sectionCentroid:
+      applied === null || applied.state.section === undefined
+        ? undefined
+        : applied.state.section.centroidMm,
+  });
+
   const massPropertiesState = massPropertiesReadout({
     selected: selectionApi.selected,
     features: workbenchDocument.features,
@@ -3004,6 +3073,11 @@ export function useWorkbenchEngine(
     referenceDistance,
     radiusState,
     massPropertiesState,
+    sectionClipped,
+    sectionViewMode,
+    toggleSectionClipped,
+    toggleSectionViewMode,
+    sectionState,
     timelineJson,
     handleExtrude,
     handleRevolve,

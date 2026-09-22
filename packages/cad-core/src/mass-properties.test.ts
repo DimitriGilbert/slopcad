@@ -10,12 +10,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatMassProperties,
+  formatSectionCentroid,
   formatSurfaceArea,
   formatVolume,
   massPropertiesOf,
+  sectionFacePropertiesOf,
   type MassProperties,
 } from "./mass-properties";
-import { valueIn } from "./dimensional";
+import { length, valueIn } from "./dimensional";
 
 describe("mass properties (Phase 27.4)", () => {
   it("wraps kernel-measured numbers as canonical mm³/mm² dimensional values", () => {
@@ -109,5 +111,27 @@ describe("mass properties (Phase 27.4)", () => {
     const measured: MassProperties = massPropertiesOf(1000, 600);
     expect(measured.volume.value).toBe(1000);
     expect(measured.surfaceArea.value).toBe(600);
+  });
+
+  it("wraps the section face's measurements as typed values (Phase 46)", () => {
+    const section = sectionFacePropertiesOf(600, [15, 10, 5]);
+    expect(section.area.value).toBe(600);
+    expect(section.centroid.map((component) => component.value)).toEqual([
+      15, 10, 5,
+    ]);
+    expect(section.area.unit).toBe("mm2");
+  });
+
+  it("formats the section centroid components byte-stably", () => {
+    expect(formatSectionCentroid([length(15), length(10), length(5)])).toEqual([
+      "15.000",
+      "10.000",
+      "5.000",
+    ]);
+  });
+
+  it("rejects a non-finite section measurement through the constructors", () => {
+    expect(() => sectionFacePropertiesOf(Number.NaN, [0, 0, 0])).toThrow();
+    expect(() => sectionFacePropertiesOf(600, [0, Number.NaN, 0])).toThrow();
   });
 });

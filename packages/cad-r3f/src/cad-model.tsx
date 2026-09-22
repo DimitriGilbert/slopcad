@@ -111,6 +111,20 @@ const DEFAULT_MATERIAL: CadModelMaterialProps = {
 const NO_SELECTION: readonly SelectionReference[] = [];
 
 /**
+ * The stable "no clipping" value (Phase 46): the material host prop is
+ * ALWAYS defined — `NO_CLIPPING_PLANES` when there is nothing to clip —
+ * so it is never REMOVED between renders. R3F resets a removed host prop
+ * by writing a literal `0` whenever the target class's constructor takes
+ * parameters (`MeshStandardMaterial`'s does), which poisons
+ * `material.clippingPlanes` with a Number and kills the mesh's draw;
+ * a value swap between two arrays never touches that path. Empty is
+ * byte-identical to absent for construction: three's local-clipping
+ * contract treats `planes === null || planes.length === 0` as no
+ * clipping, so the boot raster law holds.
+ */
+const NO_CLIPPING_PLANES: THREE.Plane[] = [];
+
+/**
  * Generation-mismatch guard for the highlight memo: `renderData`/`grouping`
  * memoize on the NEW projection while `geometries` lags one effect flush, so
  * one render can cross the new grouping's selected faces with the previous
@@ -193,6 +207,14 @@ export interface CadModelProps {
    * the model) — deduplicated, `null` when the pointer leaves.
    */
   readonly onHover?: (pick: CadPick | null) => void;
+  /**
+   * Section clipping planes (Phase 46): applied to every body material
+   * when non-empty (three.js local clipping). Absent or empty = no
+   * clipping, the unchanged boot raster — the material host prop stays
+   * DEFINED either way (an empty-but-present value, never a removed prop:
+   * see `NO_CLIPPING_PLANES` for why removal is forbidden).
+   */
+  readonly clippingPlanes?: THREE.Plane[];
 }
 
 export function CadModel({
@@ -207,12 +229,26 @@ export function CadModel({
   projection,
   regeneration,
   selection,
+  clippingPlanes,
 }: CadModelProps): ReactElement {
   const geometries = useRenderGeometry(projection, onSync);
   const materialProps: CadModelMaterialProps = {
     ...DEFAULT_MATERIAL,
     ...material,
   };
+  // Section clipping (Phase 46): the host prop is ALWAYS defined — the
+  // planes when any exist, `NO_CLIPPING_PLANES` otherwise — so toggling a
+  // section off (or entering view mode) SWAPS the value instead of REMOVING
+  // the prop. R3F's removed-prop reset writes a literal `0` for classes
+  // whose constructor takes parameters (`MeshStandardMaterial`'s does);
+  // a Number in `material.clippingPlanes` breaks three's local-clipping
+  // state so badly the mesh stops drawing (see `NO_CLIPPING_PLANES`).
+  // Empty is construction-identical to absent: three's clipping contract
+  // reads `planes === null || planes.length === 0` as no clipping.
+  const effectiveClippingPlanes: THREE.Plane[] =
+    clippingPlanes !== undefined && clippingPlanes.length > 0
+      ? clippingPlanes
+      : NO_CLIPPING_PLANES;
   const selectionList = selection ?? NO_SELECTION;
   const regenerationValue = regeneration ?? 0;
   const categoryValue: CadPickCategory = pickCategory ?? "face";
@@ -365,6 +401,7 @@ export function CadModel({
         return (
           <mesh key={id} geometry={geometry} {...handlers}>
             <meshStandardMaterial
+              clippingPlanes={effectiveClippingPlanes}
               colorWrite={passes.surfaces.colorWrite}
               depthWrite={passes.surfaces.depthWrite}
               {...materialProps}

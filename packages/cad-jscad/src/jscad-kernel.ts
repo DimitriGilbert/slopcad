@@ -175,6 +175,8 @@ import {
   type HelixSweepInput,
   type ProfileSweepInput,
   type ReplaceFaceInput,
+  type SectionInput,
+  type SectionResult,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -210,6 +212,7 @@ import {
   tessellateRevolveProfile,
 } from "@slopcad/cad-kernel";
 import { insetPolygon } from "@slopcad/cad-kernel";
+import { capFaceMeasure, planSplitCut } from "@slopcad/cad-kernel";
 import { createSolidTag } from "@slopcad/cad-kernel";
 
 import { JSCAD_BACKEND_ID } from "./jscad-backend";
@@ -357,6 +360,7 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   localFaceOps: false,
+  section: true,
 });
 
 /**
@@ -1363,6 +1367,117 @@ export function createJscadKernel(): GeometryKernel {
         const geometriesIn = operandsOf(operands, 2, "union");
         if (!geometriesIn.ok) return fail(geometriesIn.error);
         return ok(wrapSolid(jscadUnion(...geometriesIn.value)));
+      });
+    },
+
+    section(input: SectionInput): KernelResult<SectionResult> {
+      return run("section", KERNEL_ERROR_CODES.invalidLength, () => {
+        const targetGeometry = geometryOf(input.target, "section");
+        if (!targetGeometry.ok) return fail(targetGeometry.error);
+        let origin: readonly [number, number, number];
+        try {
+          origin = [
+            valueIn(input.origin[0], "mm"),
+            valueIn(input.origin[1], "mm"),
+            valueIn(input.origin[2], "mm"),
+          ];
+        } catch {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "section rejected the plane origin: components must be finite lengths.",
+            ),
+          );
+        }
+        const raw = input.normal;
+        const squared = raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2];
+        if (
+          !Number.isFinite(squared) ||
+          squared === 0 ||
+          !Number.isFinite(raw[0]) ||
+          !Number.isFinite(raw[1]) ||
+          !Number.isFinite(raw[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              `section rejected a normal [${String(raw[0])}, ${String(raw[1])}, ${String(raw[2])}]: it must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const magnitude = Math.sqrt(squared);
+        const n: readonly [number, number, number] = [
+          raw[0] / magnitude,
+          raw[1] / magnitude,
+          raw[2] / magnitude,
+        ];
+        const [min, max] = measureBoundingBox(targetGeometry.value);
+        if (min === undefined || max === undefined) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sectionEmpty,
+              "section rejected the plane: the target is empty, so there is no cross-section face to measure.",
+            ),
+          );
+        }
+        // The covering-box composition (the roadmap's mesh-kernel ruling,
+        // Manifold's verbatim): the split's square-prism tool through the
+        // library's own cuboid/rotate/translate, then one exact polygon-
+        // set subtraction.
+        const plan = planSplitCut({
+          planeOrigin: origin,
+          planeNormal: n,
+          keepSide: input.keepSide,
+          bounds: {
+            min: [min[0], min[1], min[2]],
+            max: [max[0], max[1], max[2]],
+          },
+        });
+        const half = Math.max(
+          plan.toolHeightMm,
+          ...plan.toolLoop.map((segment) =>
+            segment.kind === "line"
+              ? Math.max(
+                  Math.abs(segment.start[0] ?? 0),
+                  Math.abs(segment.start[1] ?? 0),
+                  Math.abs(segment.end[0] ?? 0),
+                  Math.abs(segment.end[1] ?? 0),
+                )
+              : 0,
+          ),
+        );
+        const prism = cuboid({
+          size: [2 * half, 2 * half, plan.toolHeightMm],
+          center: [0, 0, plan.toolHeightMm / 2],
+        });
+        const matrix = fromRotation(mat4Create(), plan.toolRotationAngleRad, [
+          plan.toolRotationAxis[0],
+          plan.toolRotationAxis[1],
+          plan.toolRotationAxis[2],
+        ]);
+        const rotated = transformGeom3(matrix, prism);
+        const tool = translate(
+          [
+            plan.toolTranslationMm[0],
+            plan.toolTranslationMm[1],
+            plan.toolTranslationMm[2],
+          ],
+          rotated,
+        );
+        const cut = jscadSubtract(targetGeometry.value, tool);
+        // The section face, measured over the cut solid's own boundary
+        // (the shared cap-triangle sum — the mesh-tessellated-honest
+        // band; an empty total is the measured section-empty signature).
+        const measure = capFaceMeasure(tessellateGeometry(cut), origin, n);
+        if (measure === null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.sectionEmpty,
+              "section rejected the plane: it misses or grazes the target (no cap face lies in the plane), so there is no cross-section face to measure.",
+            ),
+          );
+        }
+        return ok({ solid: wrapSolid(cut), section: measure });
       });
     },
 

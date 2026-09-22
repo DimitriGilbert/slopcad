@@ -65,7 +65,14 @@
  * determinism guarantees to agree.
  */
 
-import { type LengthValue, fail, ok, valueIn } from "@slopcad/cad-core";
+import {
+  angle as angleValue,
+  type LengthValue,
+  length as lengthValue,
+  fail,
+  ok,
+  valueIn,
+} from "@slopcad/cad-core";
 import type { KernelCapabilities } from "./capabilities";
 
 import { type KernelBackendId } from "./backend-ids";
@@ -92,11 +99,15 @@ import {
   type ProfileSweepInput,
   type ReplaceFaceInput,
   type ShellInput,
+  type SectionFaceMeasure,
+  type SectionInput,
+  type SectionResult,
   type SphereInput,
   type Tessellation,
   type ThickenInput,
   type TransformInput,
 } from "./contract";
+import { planSplitCut } from "./core-bridge";
 import { createSolidTag } from "./opaque";
 import {
   type CanonicalHelixSpine,
@@ -209,6 +220,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   localFaceOps: false,
+  section: true,
 });
 
 /** The fake kernel's backend id. */
@@ -4018,7 +4030,7 @@ export function createFakeKernel(): GeometryKernel {
     return ok(shapes);
   };
 
-  return {
+  const kernel: GeometryKernel = {
     id: FAKE_KERNEL_ID,
     capabilities: FAKE_KERNEL_CAPABILITIES,
 
@@ -4971,5 +4983,270 @@ export function createFakeKernel(): GeometryKernel {
     dispose(solid: KernelSolid): void {
       volumeCache.delete(solid);
     },
+
+    section(input: SectionInput): KernelResult<SectionResult> {
+      // The throwing seams are only the valueIn parses of the plane's
+      // origin (non-finite magnitudes), normalized into the shared
+      // invalid-length failure; the subset and emptiness rules return
+      // structured failures (the shell/thicken discipline).
+      try {
+        const shape = shapeOf(input.target, "section");
+        if (!shape.ok) return fail(shape.error);
+        const origin: Vec3 = [
+          valueIn(input.origin[0], "mm"),
+          valueIn(input.origin[1], "mm"),
+          valueIn(input.origin[2], "mm"),
+        ];
+        if (!origin.every((c) => Number.isFinite(c))) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "section rejected the plane origin: components must be finite lengths.",
+            ),
+          );
+        }
+        const raw = input.normal;
+        const squared = raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2];
+        if (
+          !Number.isFinite(squared) ||
+          squared === 0 ||
+          !Number.isFinite(raw[0]) ||
+          !Number.isFinite(raw[1]) ||
+          !Number.isFinite(raw[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              `section rejected a normal [${String(raw[0])}, ${String(raw[1])}, ${String(raw[2])}]: it must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const magnitude = Math.sqrt(squared);
+        const normal: Vec3 = [
+          raw[0] / magnitude,
+          raw[1] / magnitude,
+          raw[2] / magnitude,
+        ];
+        // The analytic face model's honest subset: a pristine box leaf
+        // (the fillet/chamfer/shell subset discipline — the cross-section
+        // polygon has a closed form exactly there).
+        if (shape.value.kind !== "box") {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.unsupportedOperation,
+              `section declined the solid: the fake kernel's cross-section model is its pristine-box subset; this solid is a "${shape.value.kind}" node. The general section reference kernel is the OpenCascade backend.`,
+            ),
+          );
+        }
+        const face = boxSectionFace(
+          shape.value.size,
+          origin,
+          normal,
+          input.keepSide,
+        );
+        if (!face.ok) return fail(face.error);
+        // The cut solid rides the split's own covering-box composition —
+        // extrude + subtract, every step an existing operation of THIS
+        // kernel (no adapter-side geometry), so the cut answers volume,
+        // bounds, membership, and tessellation with the kernel's own
+        // documented boolean semantics.
+        const plan = planSplitCut({
+          planeOrigin: origin,
+          planeNormal: normal,
+          keepSide: input.keepSide,
+          bounds: shapeBounds(shape.value),
+        });
+        const tool = kernel.extrude({
+          loop: plan.toolLoop,
+          height: lengthValue(plan.toolHeightMm),
+          direction: 1,
+          placement: {
+            rotation: {
+              axis: plan.toolRotationAxis,
+              angle: angleValue(plan.toolRotationAngleRad),
+            },
+            translation: {
+              x: lengthValue(plan.toolTranslationMm[0]),
+              y: lengthValue(plan.toolTranslationMm[1]),
+              z: lengthValue(plan.toolTranslationMm[2]),
+            },
+          },
+        });
+        if (!tool.ok) return fail(tool.error);
+        const cut = kernel.subtract(input.target, [tool.value]);
+        if (!cut.ok) return fail(cut.error);
+        return ok({ solid: cut.value, section: face.value });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidLength,
+            `section rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
   };
+  return kernel;
+}
+
+/**
+ * The analytic cross-section of a pristine box leaf by an arbitrary plane
+ * (Phase 46): the box's twelve edge/plane intersection points, hulled in
+ * the plane's own 2D frame (an angular sort around the centroid — the
+ * region is convex, so the sort IS the hull), measured by the shoelace
+ * area and the polygon-centroid formula, exact. A plane that misses the
+ * box (one side holds every corner) or grazes it (fewer than three
+ * intersection points, a tangent or edge-touching cut) has no face: the
+ * structured `kernel/section-empty` refusal.
+ */
+function boxSectionFace(
+  size: Vec3,
+  origin: Vec3,
+  normal: Vec3,
+  keepSide: 1 | -1,
+): KernelResult<SectionFaceMeasure> {
+  const corners: Vec3[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    corners.push([
+      i & 1 ? at(size, 0) : 0,
+      i & 2 ? at(size, 1) : 0,
+      i & 4 ? at(size, 2) : 0,
+    ]);
+  }
+  const distanceOf = (point: Vec3): number =>
+    normal[0] * (point[0] - origin[0]) +
+    normal[1] * (point[1] - origin[1]) +
+    normal[2] * (point[2] - origin[2]);
+  const distances = corners.map(distanceOf);
+  let kept = 0;
+  let removed = 0;
+  for (const distance of distances) {
+    if (keepSide * distance > 0) kept += 1;
+    else if (keepSide * distance < 0) removed += 1;
+  }
+  if (removed === 0 || kept === 0) {
+    return fail(
+      kernelError(
+        KERNEL_ERROR_CODES.sectionEmpty,
+        "section rejected the plane: it misses the target (one side holds the whole solid), so there is no cross-section face to measure.",
+      ),
+    );
+  }
+  // The twelve cube edges as corner-index pairs differing in one bit.
+  const edgePoints: Vec3[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    for (const bit of [1, 2, 4]) {
+      const j = i ^ bit;
+      if (j <= i) continue;
+      const di = distances[i];
+      const dj = distances[j];
+      if (di === undefined || dj === undefined) continue;
+      if (di * dj < 0) {
+        const t = di / (di - dj);
+        const pi = corners[i];
+        const pj = corners[j];
+        if (pi === undefined || pj === undefined) continue;
+        edgePoints.push([
+          pi[0] + t * (pj[0] - pi[0]),
+          pi[1] + t * (pj[1] - pi[1]),
+          pi[2] + t * (pj[2] - pi[2]),
+        ]);
+      }
+    }
+  }
+  if (edgePoints.length < 3) {
+    return fail(
+      kernelError(
+        KERNEL_ERROR_CODES.sectionEmpty,
+        "section rejected the plane: it grazes the target (the cut region degenerates), so there is no cross-section face to measure.",
+      ),
+    );
+  }
+  // A deterministic in-plane frame: the world axis least aligned with the
+  // normal seeds the u axis; v completes the right-handed pair.
+  const axis: Axis =
+    Math.abs(normal[0]) <= Math.abs(normal[1]) &&
+    Math.abs(normal[0]) <= Math.abs(normal[2])
+      ? 0
+      : Math.abs(normal[1]) <= Math.abs(normal[2])
+        ? 1
+        : 2;
+  const seed: Vec3 = [
+    axis === 0 ? 1 : 0,
+    axis === 1 ? 1 : 0,
+    axis === 2 ? 1 : 0,
+  ];
+  const crossNS = [
+    normal[1] * seed[2] - normal[2] * seed[1],
+    normal[2] * seed[0] - normal[0] * seed[2],
+    normal[0] * seed[1] - normal[1] * seed[0],
+  ];
+  const crossLength = Math.hypot(
+    crossNS[0] ?? 0,
+    crossNS[1] ?? 0,
+    crossNS[2] ?? 0,
+  );
+  if (!(crossLength > 0)) {
+    return fail(
+      kernelError(
+        KERNEL_ERROR_CODES.invalidLength,
+        "section rejected the plane: its in-plane frame degenerated.",
+      ),
+    );
+  }
+  const u: Vec3 = [
+    (crossNS[0] ?? 0) / crossLength,
+    (crossNS[1] ?? 0) / crossLength,
+    (crossNS[2] ?? 0) / crossLength,
+  ];
+  const v: Vec3 = [
+    normal[1] * u[2] - normal[2] * u[1],
+    normal[2] * u[0] - normal[0] * u[2],
+    normal[0] * u[1] - normal[1] * u[0],
+  ];
+  const flat = edgePoints.map((point) => ({
+    a:
+      u[0] * (point[0] - origin[0]) +
+      u[1] * (point[1] - origin[1]) +
+      u[2] * (point[2] - origin[2]),
+    b:
+      v[0] * (point[0] - origin[0]) +
+      v[1] * (point[1] - origin[1]) +
+      v[2] * (point[2] - origin[2]),
+  }));
+  const centroidA = flat.reduce((sum, point) => sum + point.a, 0) / flat.length;
+  const centroidB = flat.reduce((sum, point) => sum + point.b, 0) / flat.length;
+  flat.sort(
+    (p, q) =>
+      Math.atan2(p.b - centroidB, p.a - centroidA) -
+      Math.atan2(q.b - centroidB, q.a - centroidA),
+  );
+  let doubleArea = 0;
+  let centroidXA = 0;
+  let centroidXB = 0;
+  for (let i = 0; i < flat.length; i += 1) {
+    const p = flat[i];
+    const q = flat[(i + 1) % flat.length];
+    if (p === undefined || q === undefined) continue;
+    const cross = p.a * q.b - q.a * p.b;
+    doubleArea += cross;
+    centroidXA += (p.a + q.a) * cross;
+    centroidXB += (p.b + q.b) * cross;
+  }
+  const area = Math.abs(doubleArea) / 2;
+  if (!(area > 1e-9)) {
+    return fail(
+      kernelError(
+        KERNEL_ERROR_CODES.sectionEmpty,
+        "section rejected the plane: it grazes the target (the cut region degenerates), so there is no cross-section face to measure.",
+      ),
+    );
+  }
+  const centroidMm: Vec3 = [
+    origin[0] + (u[0] * centroidXA + v[0] * centroidXB) / (3 * doubleArea),
+    origin[1] + (u[1] * centroidXA + v[1] * centroidXB) / (3 * doubleArea),
+    origin[2] + (u[2] * centroidXA + v[2] * centroidXB) / (3 * doubleArea),
+  ];
+  return ok({ areaMm2: area, centroidMm: centroidMm });
 }

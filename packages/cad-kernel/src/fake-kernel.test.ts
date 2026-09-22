@@ -69,6 +69,7 @@ describe("fake kernel identity and capabilities", () => {
       thicken: true,
       extrudeTaper: true,
       mirror: true,
+      section: true,
       surfaceArea: true,
       localFaceOps: false,
     });
