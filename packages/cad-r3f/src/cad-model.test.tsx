@@ -9,7 +9,7 @@
  */
 
 import { cleanup, render } from "@testing-library/react";
-import type * as THREE from "three";
+import * as THREE from "three";
 import { Plane, MeshStandardMaterial } from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBodyId } from "@slopcad/cad-core";
@@ -81,6 +81,27 @@ function geometryOf(
 afterEach(cleanup);
 
 describe("CadModel", () => {
+  it("renders an open-shell sheet with the two-sided material (Phase 48)", () => {
+    // The open-shell flag is data, not policy: the mesh's material carries
+    // DoubleSide exactly when the render object declares openShell, so the
+    // sheet draws (and raycasts) from BOTH sides — a front-face-only
+    // material would eat every backface triangle.
+    const sheet = {
+      ...makeObject("wall", FOLDED_SHEET_SHARED),
+      openShell: true as const,
+    };
+    const solid = makeObject("block", FOLDED_SHEET_SHARED);
+    const view = renderModel(makeProjection([sheet, solid]));
+    const meshes = [
+      ...view.container.querySelectorAll("mesh"),
+    ] as unknown as HTMLElement[];
+    expect(meshes.length).toBe(2);
+    const sheetMaterial = meshes[0]?.querySelector("meshstandardmaterial");
+    const solidMaterial = meshes[1]?.querySelector("meshstandardmaterial");
+    expect(sheetMaterial?.getAttribute("side")).toBe(String(THREE.DoubleSide));
+    expect(solidMaterial?.getAttribute("side")).toBe(String(THREE.FrontSide));
+  });
+
   it("renders one mesh per render object with the documented default material", () => {
     const { container } = renderModel(BOTH_PROJECTION);
     const meshes = container.querySelectorAll("mesh");

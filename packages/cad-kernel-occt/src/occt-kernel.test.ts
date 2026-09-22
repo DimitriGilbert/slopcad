@@ -173,6 +173,7 @@ describe("occt kernel identity and capabilities", () => {
       mirror: true,
       section: true,
       surfaceArea: true,
+      sheets: true,
       localFaceOps: true,
     });
   });

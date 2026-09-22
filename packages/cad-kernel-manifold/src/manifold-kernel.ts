@@ -142,6 +142,7 @@ import {
   type ReplaceFaceInput,
   type SectionInput,
   type SectionResult,
+  type SheetSurfaceInput,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -259,6 +260,7 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   extrudeTaper: false,
   mirror: true,
   surfaceArea: true,
+  sheets: false,
   localFaceOps: false,
   section: true,
 });
@@ -548,7 +550,25 @@ export function manifoldKernelFromRuntime(
       });
     },
 
+    createSheet(input: SheetSurfaceInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "Manifold's engine declined createSheet: the engine is closed-solid — its currency carries a volume and an inside, and an open sheet has neither (the sheets capability is false; the Phase 48 probe).",
+        ),
+      );
+    },
+
     extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "Manifold's engine declined a sheet extrude: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       return run("extrude", KERNEL_ERROR_CODES.invalidProfile, () => {
         // The Phase 41 draft taper declines BEFORE anything else: the
         // engine's extrude carries a uniform top-SCALE only — a provably
@@ -679,6 +699,14 @@ export function manifoldKernelFromRuntime(
     },
 
     revolve(input: ProfileRevolveInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "Manifold's engine declined a sheet revolve: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       return run("revolve", KERNEL_ERROR_CODES.invalidProfile, () => {
         // The shared 26.2 validation battery, before any WASM work: the
         // sweep-angle domain, the axis direction, the placement, the
@@ -876,6 +904,14 @@ export function manifoldKernelFromRuntime(
     },
 
     sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "Manifold's engine declined a sheet sweep: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       // The declared-capability answer, structured: the Manifold engine has
       // no sweep or loft primitive (probed), so the input — valid or not —
       // cannot be executed honestly here. Never a silent approximation.
@@ -904,6 +940,14 @@ export function manifoldKernelFromRuntime(
     },
 
     loft(input: ProfileLoftInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "Manifold's engine declined a sheet loft: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       // The sweep convention's twin (Phase 26.4): the engine has no loft
       // primitive (probed — its constructors are extrude/revolve/hull/
       // levelSet, and extrude's twistDegrees/scaleTop options cover only

@@ -43,6 +43,7 @@ const BASE_CAPABILITIES: KernelCapabilities = {
   persistentTopology: false,
   sweep: false,
   loft: false,
+  sheets: false,
   thicken: false,
   section: false,
   extrudeTaper: false,

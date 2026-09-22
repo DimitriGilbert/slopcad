@@ -163,6 +163,7 @@ import type {
   MirrorPlaneAxis,
   ProfilePlacementInput,
   ProfileSegmentInput,
+  SheetSurfaceInput,
   Tessellation,
 } from "./contract";
 
@@ -184,6 +185,7 @@ export const WORKER_OPERATION_IDS = [
   "solid.createSphere",
   "solid.createCylinder",
   "solid.createCone",
+  "solid.createSheet",
   "solid.extrude",
   "solid.revolve",
   "solid.sweep",
@@ -270,6 +272,12 @@ export interface WorkerExtrudeInput {
    * (`kernel/invalid-taper`); the codec checks structure only.
    */
   readonly taper?: AngleValue;
+  /**
+   * The Phase 48 sheet flag, carried across the wire exactly when present
+   * (the taper's optional-field discipline): the product is the open
+   * lateral wall set, not the closed solid.
+   */
+  readonly sheet?: true;
 }
 
 /**
@@ -294,6 +302,8 @@ export interface WorkerRevolveInput {
   readonly axis: WorkerRevolveAxisInput;
   readonly angle: AngleValue;
   readonly placement: ProfilePlacementInput;
+  /** The Phase 48 sheet flag — the open surface of revolution product. */
+  readonly sheet?: true;
 }
 
 /**
@@ -331,6 +341,8 @@ export interface WorkerSweepInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly path: readonly WorkerSweepPathSegmentInput[];
   readonly placement: ProfilePlacementInput;
+  /** The Phase 48 sheet flag — the open swept wall product. */
+  readonly sheet?: true;
 }
 
 /**
@@ -385,7 +397,18 @@ export interface WorkerLoftSectionInput {
 export interface WorkerLoftInput {
   readonly sections: readonly WorkerLoftSectionInput[];
   readonly placement: ProfilePlacementInput;
+  /** The Phase 48 sheet flag — the open ruled-wall product. */
+  readonly sheet?: true;
 }
+
+/**
+ * Input of `solid.createSheet` (Phase 48): the contract's
+ * `SheetSurfaceInput` carried across the wire — one of the five analytic
+ * patch kinds, the placement, and the per-kind parameter ranges. Whether
+ * the parameters are in-domain is the kernel contract's semantic call;
+ * the codec checks structure only.
+ */
+export type WorkerCreateSheetInput = SheetSurfaceInput;
 
 /** Input of `solid.union`: the operands to unite. */
 export interface WorkerUnionInput {
@@ -648,6 +671,12 @@ export interface WorkerStepImportInput {
 export interface WorkerImportedSolidRef {
   readonly solid: WorkerSolidId;
   readonly origin: "imported-step";
+  /**
+   * Present exactly when the ref is an OPEN SHELL (Phase 48 — the
+   * `imported-step` sheet class): the STEP file carried a free-standing
+   * shell, so the host's body for it is the document's sheet body kind.
+   */
+  readonly sheet?: true;
 }
 
 /**
@@ -899,6 +928,7 @@ export interface WorkerOperationInputs {
   readonly "solid.createSphere": WorkerSphereInput;
   readonly "solid.createCylinder": WorkerCylinderInput;
   readonly "solid.createCone": WorkerConeInput;
+  readonly "solid.createSheet": WorkerCreateSheetInput;
   readonly "solid.extrude": WorkerExtrudeInput;
   readonly "solid.revolve": WorkerRevolveInput;
   readonly "solid.sweep": WorkerSweepInput;
@@ -940,6 +970,7 @@ export interface WorkerOperationResults {
   readonly "solid.createSphere": WorkerSolidResult;
   readonly "solid.createCylinder": WorkerSolidResult;
   readonly "solid.createCone": WorkerSolidResult;
+  readonly "solid.createSheet": WorkerSolidResult;
   readonly "solid.extrude": WorkerSolidResult;
   readonly "solid.revolve": WorkerSolidResult;
   readonly "solid.sweep": WorkerSolidResult;
@@ -1047,6 +1078,8 @@ export interface SerializedWorkerOperationInputs {
       };
     };
     readonly taper?: SerializedWorkerAngle;
+    /** The Phase 48 sheet flag — present exactly when the input carried it. */
+    readonly sheet?: true;
   };
   readonly "solid.revolve": {
     readonly loop: readonly SerializedProfileSegment[];
@@ -1056,11 +1089,15 @@ export interface SerializedWorkerOperationInputs {
     };
     readonly angle: SerializedWorkerAngle;
     readonly placement: SerializedProfilePlacement;
+    /** The Phase 48 sheet flag — present exactly when the input carried it. */
+    readonly sheet?: true;
   };
   readonly "solid.sweep": {
     readonly loop: readonly SerializedProfileSegment[];
     readonly path: readonly SerializedWorkerSweepPathSegment[];
     readonly placement: SerializedProfilePlacement;
+    /** The Phase 48 sheet flag — present exactly when the input carried it. */
+    readonly sheet?: true;
   };
   readonly "solid.helixSweep": {
     readonly loop: readonly SerializedProfileSegment[];
@@ -1080,6 +1117,24 @@ export interface SerializedWorkerOperationInputs {
       readonly z: SerializedWorkerLength;
     }[];
     readonly placement: SerializedProfilePlacement;
+    /** The Phase 48 sheet flag — present exactly when the input carried it. */
+    readonly sheet?: true;
+  };
+  readonly "solid.createSheet": {
+    readonly kind: "plane" | "cylinder" | "cone" | "sphere" | "torus";
+    readonly placement: SerializedProfilePlacement;
+    readonly uMin?: SerializedWorkerLength;
+    readonly uMax?: SerializedWorkerLength;
+    readonly vMin?: SerializedWorkerLength;
+    readonly vMax?: SerializedWorkerLength;
+    readonly radius?: SerializedWorkerLength;
+    readonly height?: SerializedWorkerLength;
+    readonly uSweep?: SerializedWorkerAngle;
+    readonly bottomRadius?: SerializedWorkerLength;
+    readonly topRadius?: SerializedWorkerLength;
+    readonly majorRadius?: SerializedWorkerLength;
+    readonly minorRadius?: SerializedWorkerLength;
+    readonly vSweep?: SerializedWorkerAngle;
   };
   readonly "solid.union": {
     readonly operands: readonly string[];
@@ -1220,6 +1275,9 @@ export interface SerializedWorkerOperationResults {
     readonly solid: string;
   };
   readonly "solid.createCone": {
+    readonly solid: string;
+  };
+  readonly "solid.createSheet": {
     readonly solid: string;
   };
   readonly "solid.extrude": {
@@ -1900,6 +1958,187 @@ function parseConeInput(
   });
 }
 
+function serializeCreateSheetInput(
+  input: WorkerCreateSheetInput,
+): SerializedWorkerOperationInput<"solid.createSheet"> {
+  const placement = serializeProfilePlacement(input.placement);
+  switch (input.kind) {
+    case "plane":
+      return {
+        kind: "plane",
+        placement,
+        uMin: serializeDimensionalValue(input.uMin),
+        uMax: serializeDimensionalValue(input.uMax),
+        vMin: serializeDimensionalValue(input.vMin),
+        vMax: serializeDimensionalValue(input.vMax),
+      };
+    case "cylinder":
+      return {
+        kind: "cylinder",
+        placement,
+        radius: serializeDimensionalValue(input.radius),
+        height: serializeDimensionalValue(input.height),
+        uSweep: serializeDimensionalValue(input.uSweep),
+      };
+    case "cone":
+      return {
+        kind: "cone",
+        placement,
+        bottomRadius: serializeDimensionalValue(input.bottomRadius),
+        topRadius: serializeDimensionalValue(input.topRadius),
+        height: serializeDimensionalValue(input.height),
+        uSweep: serializeDimensionalValue(input.uSweep),
+      };
+    case "sphere":
+      return {
+        kind: "sphere",
+        placement,
+        radius: serializeDimensionalValue(input.radius),
+        vMin: serializeDimensionalValue(input.vMin),
+        vMax: serializeDimensionalValue(input.vMax),
+        uSweep: serializeDimensionalValue(input.uSweep),
+      };
+    case "torus":
+      return {
+        kind: "torus",
+        placement,
+        majorRadius: serializeDimensionalValue(input.majorRadius),
+        minorRadius: serializeDimensionalValue(input.minorRadius),
+        uSweep: serializeDimensionalValue(input.uSweep),
+        vSweep: serializeDimensionalValue(input.vSweep),
+      };
+  }
+}
+
+function parseCreateSheetInput(
+  payload: unknown,
+): ParseResult<WorkerCreateSheetInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.createSheet", payload);
+  if (!record.ok) return record;
+  const placement = parseProfilePlacement(
+    "solid.createSheet",
+    record.value.placement,
+  );
+  if (!placement.ok) return placement;
+  const lengthField = (name: string) =>
+    requireLengthField("solid.createSheet", name, record.value[name]);
+  const angleField = (name: string) =>
+    requireAngleField("solid.createSheet", name, record.value[name]);
+  switch (record.value.kind) {
+    case "plane": {
+      const uMin = lengthField("uMin");
+      if (!uMin.ok) return uMin;
+      const uMax = lengthField("uMax");
+      if (!uMax.ok) return uMax;
+      const vMin = lengthField("vMin");
+      if (!vMin.ok) return vMin;
+      const vMax = lengthField("vMax");
+      if (!vMax.ok) return vMax;
+      return ok({
+        kind: "plane",
+        placement: placement.value,
+        uMin: uMin.value,
+        uMax: uMax.value,
+        vMin: vMin.value,
+        vMax: vMax.value,
+      });
+    }
+    case "cylinder": {
+      const radius = lengthField("radius");
+      if (!radius.ok) return radius;
+      const height = lengthField("height");
+      if (!height.ok) return height;
+      const uSweep = angleField("uSweep");
+      if (!uSweep.ok) return uSweep;
+      return ok({
+        kind: "cylinder",
+        placement: placement.value,
+        radius: radius.value,
+        height: height.value,
+        uSweep: uSweep.value,
+      });
+    }
+    case "cone": {
+      const bottomRadius = lengthField("bottomRadius");
+      if (!bottomRadius.ok) return bottomRadius;
+      const topRadius = lengthField("topRadius");
+      if (!topRadius.ok) return topRadius;
+      const height = lengthField("height");
+      if (!height.ok) return height;
+      const uSweep = angleField("uSweep");
+      if (!uSweep.ok) return uSweep;
+      return ok({
+        kind: "cone",
+        placement: placement.value,
+        bottomRadius: bottomRadius.value,
+        topRadius: topRadius.value,
+        height: height.value,
+        uSweep: uSweep.value,
+      });
+    }
+    case "sphere": {
+      const radius = lengthField("radius");
+      if (!radius.ok) return radius;
+      const vMin = angleField("vMin");
+      if (!vMin.ok) return vMin;
+      const vMax = angleField("vMax");
+      if (!vMax.ok) return vMax;
+      const uSweep = angleField("uSweep");
+      if (!uSweep.ok) return uSweep;
+      return ok({
+        kind: "sphere",
+        placement: placement.value,
+        radius: radius.value,
+        vMin: vMin.value,
+        vMax: vMax.value,
+        uSweep: uSweep.value,
+      });
+    }
+    case "torus": {
+      const majorRadius = lengthField("majorRadius");
+      if (!majorRadius.ok) return majorRadius;
+      const minorRadius = lengthField("minorRadius");
+      if (!minorRadius.ok) return minorRadius;
+      const uSweep = angleField("uSweep");
+      if (!uSweep.ok) return uSweep;
+      const vSweep = angleField("vSweep");
+      if (!vSweep.ok) return vSweep;
+      return ok({
+        kind: "torus",
+        placement: placement.value,
+        majorRadius: majorRadius.value,
+        minorRadius: minorRadius.value,
+        uSweep: uSweep.value,
+        vSweep: vSweep.value,
+      });
+    }
+    default:
+      return payloadError(
+        'The "solid.createSheet" field "kind" must be one of plane, cylinder, cone, sphere, torus.',
+        record.value.kind,
+      );
+  }
+}
+
+/**
+ * Wraps a profile-op input parser with the Phase 48 sheet flag's wire
+ * read: a strictly-`true` `sheet` field rides onto the parsed input, any
+ * other value is ignored (absent = the closed solid — the taper's
+ * optional-field tolerance discipline).
+ */
+function withSheetFlag<P extends { readonly sheet?: true }>(
+  parse: (payload: unknown) => ParseResult<P, WorkerParseError>,
+): (payload: unknown) => ParseResult<P, WorkerParseError> {
+  return (payload) => {
+    const result = parse(payload);
+    if (!result.ok) return result;
+    if (isPlainRecord(payload) && payload.sheet === true) {
+      return ok({ ...result.value, sheet: true });
+    }
+    return result;
+  };
+}
+
 function serializeExtrudeInput(
   input: WorkerExtrudeInput,
 ): SerializedWorkerOperationInput<"solid.extrude"> {
@@ -1924,6 +2163,8 @@ function serializeExtrudeInput(
     ...(input.taper === undefined
       ? {}
       : { taper: serializeDimensionalValue(input.taper) }),
+    // The Phase 48 sheet flag rides last, exactly when present.
+    ...(input.sheet === true ? { sheet: true } : {}),
   };
 }
 
@@ -2046,6 +2287,8 @@ function serializeRevolveInput(
         z: serializeDimensionalValue(input.placement.translation.z),
       },
     },
+    // The Phase 48 sheet flag rides last, exactly when present.
+    ...(input.sheet === true ? { sheet: true } : {}),
   };
 }
 
@@ -2230,6 +2473,8 @@ function serializeSweepInput(
           },
     ),
     placement: serializeProfilePlacement(input.placement),
+    // The Phase 48 sheet flag rides last, exactly when present.
+    ...(input.sheet === true ? { sheet: true } : {}),
   };
 }
 
@@ -2419,6 +2664,8 @@ function serializeLoftInput(
       z: serializeDimensionalValue(section.z),
     })),
     placement: serializeProfilePlacement(input.placement),
+    // The Phase 48 sheet flag rides last, exactly when present.
+    ...(input.sheet === true ? { sheet: true } : {}),
   };
 }
 
@@ -3707,6 +3954,7 @@ const INPUT_SERIALIZERS: {
   "solid.createSphere": serializeSphereInput,
   "solid.createCylinder": serializeCylinderInput,
   "solid.createCone": serializeConeInput,
+  "solid.createSheet": serializeCreateSheetInput,
   "solid.extrude": serializeExtrudeInput,
   "solid.revolve": serializeRevolveInput,
   "solid.sweep": serializeSweepInput,
@@ -3746,11 +3994,12 @@ const INPUT_PARSERS: {
   "solid.createSphere": parseSphereInput,
   "solid.createCylinder": parseCylinderInput,
   "solid.createCone": parseConeInput,
-  "solid.extrude": parseExtrudeInput,
-  "solid.revolve": parseRevolveInput,
-  "solid.sweep": parseSweepInput,
+  "solid.createSheet": parseCreateSheetInput,
+  "solid.extrude": withSheetFlag(parseExtrudeInput),
+  "solid.revolve": withSheetFlag(parseRevolveInput),
+  "solid.sweep": withSheetFlag(parseSweepInput),
   "solid.helixSweep": parseHelixSweepInput,
-  "solid.loft": parseLoftInput,
+  "solid.loft": withSheetFlag(parseLoftInput),
   "solid.union": (payload) => parseOperandsInput("solid.union", payload),
   "solid.subtract": parseSubtractInput,
   "solid.intersect": (payload) =>
@@ -4129,6 +4378,7 @@ const RESULT_SERIALIZERS: {
   "solid.createSphere": serializeSolidResult,
   "solid.createCylinder": serializeSolidResult,
   "solid.createCone": serializeSolidResult,
+  "solid.createSheet": serializeSolidResult,
   "solid.extrude": serializeSolidResult,
   "solid.revolve": serializeSolidResult,
   "solid.sweep": serializeSolidResult,
@@ -4171,6 +4421,8 @@ const RESULT_PARSERS: {
     parseSolidResult("solid.createCylinder", payload),
   "solid.createCone": (payload) =>
     parseSolidResult("solid.createCone", payload),
+  "solid.createSheet": (payload) =>
+    parseSolidResult("solid.createSheet", payload),
   "solid.extrude": (payload) => parseSolidResult("solid.extrude", payload),
   "solid.revolve": (payload) => parseSolidResult("solid.revolve", payload),
   "solid.sweep": (payload) => parseSolidResult("solid.sweep", payload),
@@ -4245,6 +4497,7 @@ const RESULT_MINTS: {
   "solid.createBox": (result) => [result.solid],
   "solid.createSphere": (result) => [result.solid],
   "solid.createCylinder": (result) => [result.solid],
+  "solid.createSheet": (result) => [result.solid],
   "solid.createCone": (result) => [result.solid],
   "solid.extrude": (result) => [result.solid],
   "solid.revolve": (result) => [result.solid],

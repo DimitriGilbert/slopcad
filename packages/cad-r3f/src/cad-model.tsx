@@ -55,7 +55,7 @@
  */
 
 import type { ThreeElements, ThreeEvent } from "@react-three/fiber";
-import type * as THREE from "three";
+import * as THREE from "three";
 import type { ReactElement } from "react";
 import type {
   RenderObject,
@@ -404,6 +404,14 @@ export function CadModel({
               clippingPlanes={effectiveClippingPlanes}
               colorWrite={passes.surfaces.colorWrite}
               depthWrite={passes.surfaces.depthWrite}
+              // Phase 48: an open sheet's soup renders BOTH sides — a
+              // front-face-only material would eat every triangle viewed
+              // from behind the sheet, and picking counts backface hits.
+              side={
+                data.object.openShell === true
+                  ? THREE.DoubleSide
+                  : THREE.FrontSide
+              }
               {...materialProps}
               {...(selected
                 ? {

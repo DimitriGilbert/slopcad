@@ -98,6 +98,7 @@ import {
   type ProfileRevolveInput,
   type ProfileSweepInput,
   type ReplaceFaceInput,
+  type SheetSurfaceInput,
   type ShellInput,
   type SectionFaceMeasure,
   type SectionInput,
@@ -219,6 +220,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
+  sheets: false,
   localFaceOps: false,
   section: true,
 });
@@ -4123,7 +4125,25 @@ export function createFakeKernel(): GeometryKernel {
       return ok(tag.wrap({ kind: "intersect", operands: shapes.value }));
     },
 
+    createSheet(input: SheetSurfaceInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined createSheet: the engine is closed-solid — its currency carries a volume and an inside, and an open sheet has neither (the sheets capability is false; the Phase 48 probe).",
+        ),
+      );
+    },
+
     extrude(input: ProfileExtrudeInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "the fake kernel declined a sheet extrude: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       // The whole construction runs inside the no-throw boundary: validation
       // failures return structured codes, and a dynamically-parsed
       // non-finite value (which makes valueIn throw) normalizes into
@@ -4283,6 +4303,14 @@ export function createFakeKernel(): GeometryKernel {
     },
 
     revolve(input: ProfileRevolveInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "the fake kernel declined a sheet revolve: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       // The same no-throw discipline as extrude: structured codes for every
       // degenerate input, shared validators before any shape is built.
       try {
@@ -4434,6 +4462,14 @@ export function createFakeKernel(): GeometryKernel {
     },
 
     sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "the fake kernel declined a sheet sweep: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       // The same no-throw discipline as extrude and revolve: shared
       // validators before any geometry, structured codes for every
       // degenerate input.
@@ -4659,6 +4695,14 @@ export function createFakeKernel(): GeometryKernel {
     },
 
     loft(input: ProfileLoftInput): KernelResult<KernelSolid> {
+      if (input.sheet === true) {
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            "the fake kernel declined a sheet loft: the engine is closed-solid — its currency carries a volume and an inside, and an open shell has neither (the sheets capability is false; the Phase 48 probe).",
+          ),
+        );
+      }
       // The same no-throw discipline as the other profile ops: placement
       // validation, then the shared 26.4 collection battery — member
       // validity, station ordering, vertex-count compatibility — before

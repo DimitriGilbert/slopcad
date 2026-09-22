@@ -547,6 +547,25 @@ export interface ProfileExtrudeInput {
    *   that wrong approximation.
    */
   readonly taper?: AngleValue;
+  /**
+   * The SHEET flag (Phase 48): present and `true` exactly when the
+   * extrusion's product is an OPEN SHELL — the swept LATERAL walls only,
+   * no caps at either station — the contract's second body kind. The
+   * profile requirements are the plain `extrude`'s verbatim (the same
+   * loop validation runs first); what changes is the product class:
+   * `area`/`bounds`/`tessellate`/`transform`/`mirror` answer normally on
+   * a sheets-capable kernel, `volume` declines with the structured
+   * `kernel/unsupported-operation` (an open shell bounds no material —
+   * a number would be fabrication), and every solid-consuming operation
+   * declines a sheet operand. Requires the `sheets` capability: a kernel
+   * declaring `sheets: false` answers every `sheet: true` call with
+   * `kernel/unsupported-operation` (the sweep/loft discipline, applied to
+   * a body class — the fake, Manifold, and JSCAD engines are closed-solid,
+   * probed). A sheet extrusion carries no `taper` (the combination is
+   * declined: the drafting engine pulls faces of a solid; on an open
+   * wall set its closure-free inset is undefined geometry, not a draft).
+   */
+  readonly sheet?: true;
 }
 
 /**
@@ -595,6 +614,18 @@ export interface ProfileRevolveInput {
   readonly axis: ProfileRevolveAxisInput;
   readonly angle: AngleValue;
   readonly placement: ProfilePlacementInput;
+  /**
+   * The SHEET flag (Phase 48): present and `true` exactly when the
+   * revolution's product is the OPEN SURFACE OF REVOLUTION the loop sweeps
+   * — every wall the loop's own boundary generates, and NO caps: a partial
+   * sweep's start/end meridian caps are absent by construction, and a full
+   * `2π` sweep of a loop that does not touch the axis closes into itself
+   * with no caps to omit. Requires the `sheets` capability (a
+   * `sheets: false` kernel answers `kernel/unsupported-operation`); see
+   * {@link ProfileExtrudeInput.sheet} for the shared sheet semantics
+   * (measure/transform answer, `volume` declines).
+   */
+  readonly sheet?: true;
 }
 
 /**
@@ -704,6 +735,15 @@ export interface ProfileSweepInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly path: readonly SweepPathSegmentInput[];
   readonly placement: ProfilePlacementInput;
+  /**
+   * The SHEET flag (Phase 48): present and `true` exactly when the sweep's
+   * product is the OPEN SWEPT WALL — the profile's boundary carried along
+   * the path, no end caps and no closure at the path ends. Requires the
+   * `sheets` capability (a `sheets: false` kernel answers
+   * `kernel/unsupported-operation`); see {@link ProfileExtrudeInput.sheet}
+   * for the shared sheet semantics.
+   */
+  readonly sheet?: true;
 }
 
 /**
@@ -941,6 +981,15 @@ export interface ProfileLoftSectionInput {
 export interface ProfileLoftInput {
   readonly sections: readonly ProfileLoftSectionInput[];
   readonly placement: ProfilePlacementInput;
+  /**
+   * The SHEET flag (Phase 48): present and `true` exactly when the loft's
+   * product is the OPEN RULED WALL — the piecewise morph between
+   * consecutive stations' LOOPS, no caps at the first or last section.
+   * Requires the `sheets` capability (a `sheets: false` kernel answers
+   * `kernel/unsupported-operation`); see {@link ProfileExtrudeInput.sheet}
+   * for the shared sheet semantics.
+   */
+  readonly sheet?: true;
 }
 
 /**
@@ -1578,6 +1627,7 @@ export interface MirrorInput {
 }
 
 /**
+/**
  * Input of `section` (Phase 46): one target solid and the plane that cuts
  * it — three origin components and a normal naming an ARBITRARY plane (the
  * general plane the datum system resolves; `mirror`'s world-axis subset is
@@ -1681,6 +1731,101 @@ export interface SectionResult {
 }
 
 /**
+ * The input of `createSheet` (Phase 48): one UNTRIMMED BASE SHEET — a
+ * rectangular parametric patch of one of the five analytic surfaces
+ * (plane, cylinder, cone, sphere, torus), placed in world space by the
+ * same rotation-then-translation composition the profile ops use.
+ *
+ * ## Parametrization (the local frame)
+ *
+ * Every kind places its patch through `placement` exactly like the
+ * profile ops: the rotation about the world origin is applied FIRST
+ * (mapping the surface's local frame to its world orientation), the
+ * translation second. In the LOCAL frame the patch is canonical:
+ *
+ * - `plane`: the local z = 0 plane; u runs along local x, v along local y
+ *   (both millimetres, `uMin < uMax`, `vMin < vMax` — any finite bounds,
+ *   the patch may sit anywhere in the plane).
+ * - `cylinder`: the local z axis; `radius` the radius; u is the azimuth
+ *   from local +x toward +y sweeping `uSweep` (right-handed), v the height
+ *   along local z from `0` to `height`.
+ * - `cone`: the local z axis; `bottomRadius` at local z = 0, `topRadius`
+ *   at local z = `height` (the half-angle is analytically derived,
+ *   `atan2(top − bottom, height)` — negative when the cone narrows toward
+ *   +z; `topRadius` may be `0` — the apex); u the azimuth sweeping
+ *   `uSweep`, v the height from `0` to `height`.
+ * - `sphere`: centred at the local origin; u the azimuth from local +x
+ *   toward +y sweeping `uSweep`; v the POLAR angle from the local +z
+ *   (north), measured DOWNWARD — `vMin`/`vMax` in `[0, π]` with
+ *   `vMin < vMax` (`0` the north pole, `π/2` the equator, `π` the south).
+ * - `torus`: the local z axis through the centre; `majorRadius` the
+ *   equatorial circle's radius, `minorRadius` the tube's; u the major
+ *   azimuth from local +x sweeping `uSweep`, v the MINOR tube angle from
+ *   the outer equator sweeping `vSweep` right-handed about the local z.
+ *
+ * ## Validation (structured, before any geometry)
+ *
+ * Radii and heights strictly positive (`topRadius ≥ 0`), the torus a RING
+ * torus (`majorRadius > minorRadius` — a spindle or self-intersecting
+ * torus is declined, the honest subset), angle sweeps in `(0, 2π]`
+ * (`kernel/invalid-sweep-angle`), and u/v bounds finite and strictly
+ * ordered (`kernel/invalid-length`). Requires the `sheets` capability; a
+ * kernel declaring `sheets: false` answers every call with the structured
+ * `kernel/unsupported-operation`.
+ */
+export type SheetSurfaceInput =
+  | {
+      readonly kind: "plane";
+      readonly placement: ProfilePlacementInput;
+      readonly uMin: LengthValue;
+      readonly uMax: LengthValue;
+      readonly vMin: LengthValue;
+      readonly vMax: LengthValue;
+    }
+  | {
+      readonly kind: "cylinder";
+      readonly placement: ProfilePlacementInput;
+      readonly radius: LengthValue;
+      readonly height: LengthValue;
+      readonly uSweep: AngleValue;
+    }
+  | {
+      readonly kind: "cone";
+      readonly placement: ProfilePlacementInput;
+      readonly bottomRadius: LengthValue;
+      readonly topRadius: LengthValue;
+      readonly height: LengthValue;
+      readonly uSweep: AngleValue;
+    }
+  | {
+      readonly kind: "sphere";
+      readonly placement: ProfilePlacementInput;
+      readonly radius: LengthValue;
+      readonly vMin: AngleValue;
+      readonly vMax: AngleValue;
+      readonly uSweep: AngleValue;
+    }
+  | {
+      readonly kind: "torus";
+      readonly placement: ProfilePlacementInput;
+      readonly majorRadius: LengthValue;
+      readonly minorRadius: LengthValue;
+      readonly uSweep: AngleValue;
+      readonly vSweep: AngleValue;
+    };
+
+/** The surface kinds `createSheet` builds (Phase 48). */
+export const SHEET_SURFACE_KINDS = [
+  "plane",
+  "cylinder",
+  "cone",
+  "sphere",
+  "torus",
+] as const;
+
+export type SheetSurfaceKind = (typeof SHEET_SURFACE_KINDS)[number];
+
+/**
  * An axis-aligned bounding box in canonical millimetres. Tight for
  * primitives, and for boolean results a *container* whose tightness is
  * declared by the kernel's `tightBooleanBounds` capability.
@@ -1744,6 +1889,20 @@ export interface GeometryKernel {
   createCylinder(input: CylinderInput): KernelResult<KernelSolid>;
   /** Creates a cone/frustum on the +z axis from `z = 0` to `z = height`. */
   createCone(input: ConeInput): KernelResult<KernelSolid>;
+
+  /**
+   * Creates one UNTRIMMED BASE SHEET (Phase 48): a rectangular patch of
+   * the plane, cylinder, cone, sphere, or torus, parametrized from the
+   * datum-style placement + parameters — see {@link SheetSurfaceInput}
+   * for the parametrization, the validation battery, and the per-kernel
+   * coverage matrix — a kernel declaring `sheets: false` answers every
+   * call with the structured `kernel/unsupported-operation`, never a
+   * silently wrong closed-solid stand-in. The result is the contract's
+   * sheet body kind: it measures (`area`, `bounds`), tessellates, and
+   * transforms; `volume` and every solid-consuming operation decline it
+   * structurally (an open shell bounds no material).
+   */
+  createSheet(input: SheetSurfaceInput): KernelResult<KernelSolid>;
 
   /**
    * Extrudes one closed profile loop into a prismatic solid (Phase 26.1):

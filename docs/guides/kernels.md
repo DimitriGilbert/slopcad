@@ -40,6 +40,7 @@ Read the flags from the kernels' own constants
 | extrudeTaper          | —        | ✓           | ✓     | ✓    |
 | mirror                | ✓        | ✓           | ✓     | ✓    |
 | surfaceArea           | ✓        | ✓           | ✓     | ✓    |
+| sheets                | —        | ✓           | —     | —    |
 | localFaceOps          | —        | ✓           | —     | —    |
 | section               | ✓        | ✓           | ✓     | ✓    |
 

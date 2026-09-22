@@ -335,6 +335,16 @@ export interface RenderObject {
   readonly bounds: RenderBounds;
   readonly bodyId?: BodyId;
   readonly featureId?: FeatureId;
+  /**
+   * Present exactly when the object is an OPEN SHEET (Phase 48): the soup
+   * is an open shell's faces, so a renderer must draw BOTH sides — a
+   * front-face-only material would eat every triangle viewed from behind
+   * the sheet. The flag is data, not policy: renderers read it to set
+   * their two-sided material mode, and picking treats a backface hit as a
+   * hit. Absent = the default closed-solid soup (winding still
+   * unspecified — the module's winding-agnostic rule).
+   */
+  readonly openShell?: true;
 }
 
 /** The validated, copied buffer triple shared by the conversion and parse paths. */
@@ -486,6 +496,7 @@ export function projectTessellation(
   bodyId: BodyId,
   tessellation: KernelTessellationSource,
   featureId?: FeatureId,
+  openShell?: boolean,
 ): ParseResult<RenderObject, ProjectionError> {
   const buffers = validateGeometry(
     tessellation,
@@ -503,9 +514,11 @@ export function projectTessellation(
     bounds: RenderBounds;
     bodyId: BodyId;
     featureId?: FeatureId;
+    openShell?: true;
   } = { id, positions, indices, bounds, bodyId };
   if (normals !== undefined) record.normals = normals;
   if (featureId !== undefined) record.featureId = featureId;
+  if (openShell === true) record.openShell = true;
   return ok(Object.freeze(record));
 }
 
@@ -846,6 +859,8 @@ export interface SerializedRenderObject {
   readonly normals?: readonly number[];
   readonly bodyId?: string;
   readonly featureId?: string;
+  /** Present exactly when the source render object is an open sheet. */
+  readonly openShell?: true;
 }
 
 /**
@@ -892,6 +907,7 @@ function serializeRenderObject(object: RenderObject): SerializedRenderObject {
     normals?: readonly number[];
     bodyId?: string;
     featureId?: string;
+    openShell?: true;
   } = {
     formatVersion: CAD_PROJECTION_FORMAT_VERSION,
     id: object.id,
@@ -903,6 +919,9 @@ function serializeRenderObject(object: RenderObject): SerializedRenderObject {
   if (object.bodyId !== undefined) serialized.bodyId = object.bodyId;
   if (object.featureId !== undefined) {
     serialized.featureId = object.featureId;
+  }
+  if (object.openShell === true) {
+    serialized.openShell = true;
   }
   return serialized;
 }
@@ -1024,10 +1043,15 @@ function parseSerializedRenderObject(
     bounds: RenderBounds;
     bodyId?: BodyId;
     featureId?: FeatureId;
+    openShell?: true;
   } = { id: id.value, positions, indices, bounds: bounds.value };
   if (normals !== undefined) record.normals = normals;
   if (bodyId !== undefined) record.bodyId = bodyId;
   if (featureId !== undefined) record.featureId = featureId;
+  // The open-sheet flag is boolean-tolerant like the display fields: any
+  // non-`true` value is ignored (absent = closed-solid soup), the unknown
+  // field tolerance an older writer relies on.
+  if (input.openShell === true) record.openShell = true;
   return ok(Object.freeze(record));
 }
 
