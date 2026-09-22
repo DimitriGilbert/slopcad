@@ -177,6 +177,18 @@ import {
   validatePatternSubmission,
 } from "./pattern";
 import {
+  documentBooleanSceneRequest,
+  featureProducingBody,
+  validateBooleanSubmission,
+  type BooleanOperation,
+} from "./boolean";
+import {
+  documentMoveBodySceneRequest,
+  moveBodyTargetFeatureOf,
+  validateMoveBodySubmission,
+} from "./move-body";
+import { validateBodyRenameSubmission } from "./body-management";
+import {
   sessionBackendOf,
   type FixtureSessionBackendId,
 } from "../render-fixture/session-backend";
@@ -268,6 +280,8 @@ export type WorkbenchSceneKind =
   | "loft"
   | "helix"
   | "thread"
+  | "boolean"
+  | "moveBody"
   | "rib"
   | "scale"
   | "thicken"
@@ -554,6 +568,48 @@ export interface WorkbenchEngine {
     readonly merge: number;
   }) => FeatureFormOutcome;
   /**
+   * The Phase 44 boolean create action: commits the boolean feature (the
+   * EXISTING union/subtract/intersect bridge kind over the operands'
+   * producing features) — and, when the tools are consumed, the tool
+   * bodies' visibility flags — in one atomic transaction. A refusal
+   * commits nothing.
+   */
+  readonly handleBoolean: (specification: {
+    readonly operation: BooleanOperation;
+    readonly targetBodyId: string;
+    readonly toolBodyIds: readonly string[];
+    readonly keepToolBodies: boolean;
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 44 move-body create action: commits the translate
+   * parameters and the translate feature (the existing kind, grown with
+   * the optional rotation pair) targeting the document's last extrude in
+   * one atomic transaction. A refusal commits nothing.
+   */
+  readonly handleMoveBody: (specification: {
+    readonly offsetMm: readonly [number, number, number];
+    readonly rotation: {
+      readonly axis: 1 | 2 | 3;
+      readonly angleDeg: number;
+    } | null;
+  }) => FeatureFormOutcome;
+  /**
+   * The Phase 44 body-management actions: rename, visibility, and
+   * isolation — each one `body.update` command in its own transaction.
+   */
+  readonly handleBodyRename: (
+    bodyId: string,
+    name: string,
+  ) => FeatureFormOutcome;
+  readonly handleBodyVisibility: (
+    bodyId: string,
+    visible: boolean,
+  ) => FeatureFormOutcome;
+  readonly handleBodyIsolate: (
+    bodyId: string,
+    isolated: boolean,
+  ) => FeatureFormOutcome;
+  /**
    * The Phase 39 sketch-on-face action: resolves the picked scene face into
    * a datum plane record (the persistent anchor) plus the face workplane,
    * commits the datum in one atomic transaction, and enters the sketch mode
@@ -669,6 +725,8 @@ export function useWorkbenchEngine(
   const [patternCount, setPatternCount] = useState(0);
   const [patternPathCount, setPatternPathCount] = useState(0);
   const [mirrorCount, setMirrorCount] = useState(0);
+  const [booleanCount, setBooleanCount] = useState(0);
+  const [moveBodyCount, setMoveBodyCount] = useState(0);
   // The Phase 39 sketch-on-face anchor: the datum record the CURRENT sketch
   // session boots on (its id commits with the extrude feature; its plane
   // booted the sketch editor). `null` in the ordinary sketch flow.
@@ -2245,6 +2303,240 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The Phase 44 boolean action: validate the operand selection, then
+  // commit the boolean feature (the EXISTING union/subtract/intersect
+  // bridge kinds over the operands' producing features) — and, when the
+  // tools are consumed rather than kept, the tool bodies' visibility
+  // flags — in ONE atomic transaction. A refusal commits nothing.
+  const handleBoolean = (specification: {
+    readonly operation: BooleanOperation;
+    readonly targetBodyId: string;
+    readonly toolBodyIds: readonly string[];
+    readonly keepToolBodies: boolean;
+  }): FeatureFormOutcome => {
+    const validation = validateBooleanSubmission(specification);
+    if (!validation.ok) return validation;
+    const targetFeature = featureProducingBody(
+      workbenchDocument,
+      specification.targetBodyId,
+    );
+    if (targetFeature === undefined || targetFeature.kind !== "extrude") {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A boolean's target body must be an extrusion's output — the boolean scene pairs every operand with its own extrusion.",
+      };
+    }
+    const toolFeatures: { kind: "feature"; id: FeatureId }[] = [];
+    for (const toolBodyId of specification.toolBodyIds) {
+      const toolFeature = featureProducingBody(workbenchDocument, toolBodyId);
+      if (toolFeature === undefined || toolFeature.kind !== "extrude") {
+        return {
+          ok: false,
+          code: "kernel/feature-input-invalid",
+          message:
+            "A boolean's tool body must be an extrusion's output — the boolean scene pairs every operand with its own extrusion.",
+        };
+      }
+      toolFeatures.push({ kind: "feature", id: toolFeature.id });
+    }
+    const n = booleanCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_boolean${suffix}`);
+    const featureId = createFeatureId(`feat_boolean${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "body.create",
+          id: bodyId,
+          name: `${specification.operation} ${String(n)}`,
+        },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: specification.operation,
+          inputs: [{ kind: "feature", id: targetFeature.id }, ...toolFeatures],
+          outputs: [bodyId],
+        },
+        // Consume = hide the TOOL bodies (the keep-tool toggle's exact
+        // scope): the display flags land in the same atomic transaction,
+        // so undo restores the display state with the feature.
+        ...(specification.keepToolBodies
+          ? []
+          : specification.toolBodyIds.map((toolBodyId) => ({
+              type: "body.update" as const,
+              id: createBodyId(toolBodyId),
+              visible: false,
+            }))),
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setBooleanCount(n);
+    setActiveScene("boolean");
+    return { ok: true };
+  };
+
+  // The Phase 44 move-body action: commit the translate parameters and
+  // the translate feature (the EXISTING kind, grown with the optional
+  // rotation pair) targeting the document's LAST EXTRUDE in ONE atomic
+  // transaction. A refusal commits nothing.
+  const handleMoveBody = (specification: {
+    readonly offsetMm: readonly [number, number, number];
+    readonly rotation: {
+      readonly axis: 1 | 2 | 3;
+      readonly angleDeg: number;
+    } | null;
+  }): FeatureFormOutcome => {
+    const validation = validateMoveBodySubmission(specification);
+    if (!validation.ok) return validation;
+    const target = moveBodyTargetFeatureOf(workbenchDocument);
+    if (target === undefined) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A move needs a body to move: extrude a profile first (the thread's precedent).",
+      };
+    }
+    const n = moveBodyCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_moved${suffix}`);
+    const featureId = createFeatureId(`feat_move${suffix}`);
+    const parameterIds = [
+      createParameterId(`param_move_x${suffix}`),
+      createParameterId(`param_move_y${suffix}`),
+      createParameterId(`param_move_z${suffix}`),
+      ...(specification.rotation === null
+        ? []
+        : [
+            createParameterId(`param_move_axis${suffix}`),
+            createParameterId(`param_move_angle${suffix}`),
+          ]),
+    ];
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create",
+          id: parameterIds[0],
+          name: `moveX${suffix}`,
+          value: length(specification.offsetMm[0]),
+        },
+        {
+          type: "parameter.create",
+          id: parameterIds[1],
+          name: `moveY${suffix}`,
+          value: length(specification.offsetMm[1]),
+        },
+        {
+          type: "parameter.create",
+          id: parameterIds[2],
+          name: `moveZ${suffix}`,
+          value: length(specification.offsetMm[2]),
+        },
+        ...(specification.rotation === null
+          ? []
+          : [
+              {
+                type: "parameter.create" as const,
+                id: parameterIds[3],
+                name: `moveAxis${suffix}`,
+                value: dimensionless(specification.rotation.axis),
+              },
+              {
+                type: "parameter.create" as const,
+                id: parameterIds[4],
+                name: `moveAngle${suffix}`,
+                value: angle(specification.rotation.angleDeg, "deg"),
+              },
+            ]),
+        { type: "body.create", id: bodyId, name: `moved ${String(n)}` },
+        {
+          type: "feature.create",
+          id: featureId,
+          kind: "translate",
+          inputs: [
+            { kind: "feature", id: target.id },
+            ...parameterIds.map((id) => ({ kind: "parameter" as const, id })),
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setMoveBodyCount(n);
+    setActiveScene("moveBody");
+    return { ok: true };
+  };
+
+  // The Phase 44 body-management actions: each concern rides its own
+  // `body.update` command (the command layer's partial-update design),
+  // committed as a one-command transaction the history records.
+  const handleBodyRename = (
+    bodyId: string,
+    name: string,
+  ): FeatureFormOutcome => {
+    const validation = validateBodyRenameSubmission({ name });
+    if (!validation.ok) return validation;
+    const committed = documentApi.applyTransaction({
+      commands: [{ type: "body.update", id: createBodyId(bodyId), name }],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    return { ok: true };
+  };
+
+  const handleBodyVisibility = (
+    bodyId: string,
+    visible: boolean,
+  ): FeatureFormOutcome => {
+    const committed = documentApi.applyTransaction({
+      commands: [{ type: "body.update", id: createBodyId(bodyId), visible }],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    return { ok: true };
+  };
+
+  const handleBodyIsolate = (
+    bodyId: string,
+    isolated: boolean,
+  ): FeatureFormOutcome => {
+    const committed = documentApi.applyTransaction({
+      commands: [{ type: "body.update", id: createBodyId(bodyId), isolated }],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    return { ok: true };
+  };
+
   const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {
     if (runState === null) return null;
     // The worker's verdict outranks the document-data executor's "valid"
@@ -2432,6 +2724,20 @@ export function useWorkbenchEngine(
       }
       return;
     }
+    if (activeScene === "boolean") {
+      const request = documentBooleanSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchBoolean(request, request.bodyId);
+      }
+      return;
+    }
+    if (activeScene === "moveBody") {
+      const request = documentMoveBodySceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchMoveBody(request, request.bodyId);
+      }
+      return;
+    }
     if (activeScene === "hole") {
       const derived = documentHoleSceneRequest(workbenchDocument);
       if (derived !== null) {
@@ -2459,6 +2765,8 @@ export function useWorkbenchEngine(
     patternCount,
     patternPathCount,
     mirrorCount,
+    booleanCount,
+    moveBodyCount,
     holeCount,
     structuredHoleCount,
   ]);
@@ -2714,6 +3022,11 @@ export function useWorkbenchEngine(
     handlePattern,
     handlePatternPath,
     handleMirror,
+    handleBoolean,
+    handleMoveBody,
+    handleBodyRename,
+    handleBodyVisibility,
+    handleBodyIsolate,
     handleSketchOnFace,
     sketchBootWorkplane: sketchAnchor === null ? null : sketchAnchor.workplane,
     datumsJson,

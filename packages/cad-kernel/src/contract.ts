@@ -260,6 +260,23 @@ export const KERNEL_ERROR_CODES = {
   helixTurnOverlap: "kernel/helix-turn-overlap",
   /** A boolean operand list was malformed (wrong operand count). */
   invalidOperands: "kernel/invalid-operands",
+  /**
+   * A local face operation's face ordinal does not address a face of the
+   * target solid's topology snapshot (Phase 44) — the shell's
+   * stale-reference signature on the local face op family: a well-formed
+   * `(kind: "face", ordinal)` address that names nothing in the target's
+   * current face numbering. Distinct from malformed input
+   * (`kernel/invalid-operands`), which covers non-integers and negatives.
+   */
+  faceOpFaceUnknown: "kernel/faceop-face-unknown",
+  /**
+   * A local face operation could not be built (Phase 44): the engine's own
+   * route failed after validation passed — canonically a displacement the
+   * face's neighbourhood cannot carry (the swept region inverts or
+   * degenerates), or a datum plane that changes nothing about the replaced
+   * face's region (the hole guard's no-op refusal, carried to the replace).
+   */
+  faceOpFailed: "kernel/faceop-failed",
   /** A handle was not minted by this kernel instance (foreign or forged). */
   solidNotOwned: "kernel/solid-not-owned",
   /** Bounds were requested of an empty solid, which has no bounding box. */
@@ -1225,6 +1242,193 @@ export interface ThickenInput {
 }
 
 /**
+ * Input of `moveFace` (Phase 44): one target solid, ONE face addressed by
+ * topology-snapshot ordinal, and a displacement as direction + signed
+ * distance — the DRAFT-FREE local move (the face translates rigidly; the
+ * neighbouring faces extend or retract to meet it; no wall angle is
+ * introduced anywhere).
+ *
+ * ## Face addressing — snapshot ordinals (the shell rules, verbatim)
+ *
+ * `face` carries one `(kind: "face", ordinal)` address into the target's
+ * TOPOLOGY SNAPSHOT — the same within-regeneration numbering `shell`
+ * consumes. A feature resolves its persistent face reference against the
+ * CURRENT regeneration's snapshot and passes the resolved ordinal here. A
+ * well-formed ordinal that names nothing rejects with
+ * `kernel/faceop-face-unknown` (the stale-reference signature); a
+ * non-integer or negative ordinal rejects with `kernel/invalid-operands`
+ * before any geometry runs.
+ *
+ * ## Displacement semantics — the swept prism composition
+ *
+ * `direction` is a dimensionless direction in canonical space (any
+ * non-zero finite vector, normalized by the kernel — the rotation axis's
+ * discipline) and `distance` a SIGNED length: the displacement vector is
+ * `distance · direction̂`, so a negative distance moves against the
+ * direction. The moved solid is the target with the selected face's swept
+ * prism `distance · direction̂` fused (a displacement with a positive
+ * out-of-material component) or cut (negative) — the composition the OCCT
+ * adapter probed exact: the 30×20×10 box's +z face moved +2 mm measures
+ * 7 200 mm³, −2 mm measures 4 800 mm³, and an oblique (1.2, 0, 1.6)
+ * displacement of the same face measures 6 960 mm³ — each the prism
+ * volume `A·(n̂·d⃗)` exactly, the analytic anchor the fixtures pin (A the
+ * face's area, n̂ its outward unit normal, d⃗ the displacement).
+ *
+ * ## Failure taxonomy (all structured)
+ *
+ * - Degenerate direction (zero, non-finite, or un-normalizable) →
+ *   `kernel/invalid-rotation` (the axis discipline — the move's direction
+ *   is a direction exactly as a rotation's axis is).
+ * - Non-finite distance magnitude → `kernel/invalid-length`. ZERO is
+ *   legal geometry (the identity move) but refuses with
+ *   `kernel/faceop-failed` as a no-op — the hole guard's both-ways rule:
+ *   an operation that changed nothing never settles as success.
+ * - A displacement perpendicular to the face (n̂·d⃗ = 0) sweeps zero
+ *   prism volume — the same no-op refusal, never a silent pass-through.
+ * - The swept region inverts or degenerates (an inward move past the
+ *   opposite face collapsing the solid) → the engine's own failure or the
+ *   adapter's post-condition, surfaced as `kernel/faceop-failed`.
+ *
+ * ## Per-kernel fidelity (the coverage matrix)
+ *
+ * - OCCT: the probed exact composition (`BRepPrimAPI_MakePrism` of the
+ *   selected face along the displacement, one `BRepAlgoAPI_Fuse` when the
+ *   out-of-material component is positive, one `BRepAlgoAPI_Cut` when
+ *   negative) — axial and oblique fixtures exact; the bound
+ *   `BRepFeat_MakeDPrism` builds the fuse direction exactly too but its
+ *   cut mode silently returns the unchanged target on this binding
+ *   (probed), so the composition is the route the adapter pins.
+ *   `localFaceOps: true`.
+ * - Fake / Manifold / JSCAD: `localFaceOps: false` — no face-addressed
+ *   geometry exists in their engines (the fake kernel's shape model has
+ *   no face identity to move; the mesh engines have no face selection at
+ *   all), so every call answers `kernel/unsupported-operation`.
+ */
+export interface MoveFaceInput {
+  /** The solid whose face moves. */
+  readonly target: KernelSolid;
+  /** The face to move, as the target's topology-snapshot face ordinal. */
+  readonly face: number;
+  /** The move's direction (dimensionless, non-zero, kernel-normalized). */
+  readonly direction: readonly [number, number, number];
+  /** The signed distance along the direction (zero refuses as a no-op). */
+  readonly distance: LengthValue;
+}
+
+/**
+ * The datum plane a `replaceFace` closes at (Phase 44): one point on the
+ * plane (canonical lengths) and the plane's normal (dimensionless,
+ * kernel-normalized — the move direction's discipline).
+ */
+export interface ReplaceFacePlaneInput {
+  /** One point on the plane, in canonical millimetres (any finite lengths). */
+  readonly origin: TranslationInput;
+  /** The plane's normal direction (dimensionless, non-zero, normalized). */
+  readonly normal: readonly [number, number, number];
+}
+
+/**
+ * Input of `replaceFace` (Phase 44): one target solid, ONE face addressed
+ * by topology-snapshot ordinal, and the DATUM PLANE the face is replaced
+ * by — the local re-closing of the solid at the plane.
+ *
+ * ## Semantics — the re-closed solid
+ *
+ * The selected face is replaced by the plane's own patch, trimmed to the
+ * neighbouring faces: the result is the target cut by the half-space
+ * beyond the plane on the selected face's side (the plane inside the
+ * material shrinks the solid) or extended flat out to the plane (the plane
+ * beyond the face grows it). Two geometric regimes, both probed on the
+ * OCCT adapter:
+ *
+ * - PARALLEL plane (normal parallel to the face's own, within the
+ *   snapshot normal's tolerance): the face MOVES to the plane's station —
+ *   the `moveFace` composition with the displacement
+ *   `(signed station distance) · n̂`, exact in both directions (the
+ *   probe's 7 200 / 4 800 mm³ stations on the 30×20×10 box).
+ * - OBLIQUE plane: the SHrink-only half-space cut — a covering box built
+ *   in the plane's own frame (`planSplitCut`'s geometry, the split's
+ *   covering-box precedent) removes everything on the far side of the
+ *   plane from the kept material; a plane that holds no material beyond
+ *   it refuses as the no-op (`kernel/faceop-failed`, the hole guard's
+ *   rule), and extension across an oblique plane is OUT of scope — the
+ *   swept region between an oblique plane and the old face is not a
+ *   prism, and approximating it would be the silent wrong answer the
+ *   contract never gives.
+ *
+ * ## Failure taxonomy (all structured)
+ *
+ * - Unknown face ordinal → `kernel/faceop-face-unknown`; malformed
+ *   ordinal → `kernel/invalid-operands`.
+ * - Degenerate plane normal or non-finite origin →
+ *   `kernel/invalid-rotation` / `kernel/invalid-length` (the direction
+ *   and length disciplines).
+ * - A plane that changes nothing (parallel at the face's own station, or
+ *   oblique with no material beyond it) → `kernel/faceop-failed`, the
+ *   no-op refusal.
+ * - A parallel plane on the far side of the solid whose station distance
+ *   would collapse the solid to zero volume → `kernel/faceop-failed` (the
+ *   engine's failure or the post-condition, surfaced structured).
+ *
+ * ## Per-kernel fidelity (the coverage matrix)
+ *
+ * - OCCT: the probed composition above — parallel stations through the
+ *   move machinery, oblique through the frame-aligned covering-box cut.
+ *   `localFaceOps: true`.
+ * - Fake / Manifold / JSCAD: `localFaceOps: false` — every call answers
+ *   `kernel/unsupported-operation`.
+ */
+export interface ReplaceFaceInput {
+  /** The solid whose face is replaced. */
+  readonly target: KernelSolid;
+  /** The face to replace, as the target's topology-snapshot face ordinal. */
+  readonly face: number;
+  /** The datum plane the face is replaced by (see the module doc). */
+  readonly plane: ReplaceFacePlaneInput;
+}
+
+/**
+ * Input of `deleteFace` (Phase 44): one target solid, ONE face addressed
+ * by topology-snapshot ordinal, and the heal flag — the local removal of
+ * a face from the boundary.
+ *
+ * ## Semantics and the probed scope (the honest decline)
+ *
+ * WITHOUT heal the result would be an OPEN solid — the boundary minus the
+ * face, unclosed. WITH heal the neighbouring faces would extend and trim
+ * to close the gap (the fillet-removal idiom). NEITHER is buildable on
+ * the contract's current kernels, a probed truth, not a guess: on the
+ * OCCT binding, sewing the remaining faces of a box-minus-one yields a
+ * shell whose `BRepBuilderAPI_MakeSolid` wrap is INVALID (BRepCheck
+ * rejects it, volume 0, four free edges) and `ShapeFix_Solid`'s close of
+ * the same shell is invalid identically — and the contract's solid
+ * semantics (a solid's volume is its closed-boundary measure; an
+ * unbounded region has none honestly) cannot carry an open shell without
+ * inventing a volume for it. Every kernel therefore declines this
+ * operation TODAY: OCCT with `kernel/unsupported-operation` naming the
+ * probe (its `localFaceOps: true` covers the two operations it builds
+ * exactly — the fake kernel's documented-subset discipline carried to a
+ * whole operation), the fake/Manifold/JSCAD kernels through the
+ * capability flag outright. The operation exists in the contract so the
+ * feature vocabulary, the bridge kind, and the workbench command are
+ * honest surface NOW (a submission surfaces the structured refusal
+ * verbatim) and a kernel that grows an honest route lights up without
+ * another contract change.
+ *
+ * The heal flag rides the input anyway — the two modes are DIFFERENT
+ * operations semantically, and a caller must not be able to silently get
+ * one for the other when a kernel does implement them.
+ */
+export interface DeleteFaceInput {
+  /** The solid whose face is deleted. */
+  readonly target: KernelSolid;
+  /** The face to delete, as the target's topology-snapshot face ordinal. */
+  readonly face: number;
+  /** `true` extends the neighbouring faces to close the gap; `false` leaves it open. */
+  readonly heal: boolean;
+}
+
+/**
  * The full input of `transform`: a translation vector plus an optional
  * rotation. Application order is fixed by the contract: the rotation is
  * applied first, about the world-origin axis, and the translation second,
@@ -1539,6 +1743,42 @@ export interface GeometryKernel {
    * `kernel/unsupported-operation`, never a silent approximation).
    */
   thicken(input: ThickenInput): KernelResult<KernelSolid>;
+
+  /**
+   * Moves ONE face of a solid by a signed displacement along a direction —
+   * the DRAFT-FREE local move (Phase 44): the face translates rigidly and
+   * the neighbours extend or retract to meet it. The face is addressed by
+   * the target's topology-snapshot FACE ordinal (the shell vocabulary), the
+   * displacement is `distance · direction̂`, and the moved solid's volume
+   * is the target's plus the swept prism's `A·(n̂·d⃗)` exactly on
+   * implementing kernels. See {@link MoveFaceInput} for the addressing
+   * rules, the probed composition, the failure taxonomy, and the per-kernel
+   * coverage matrix — a kernel declaring `localFaceOps: false` answers
+   * every call with the structured `kernel/unsupported-operation`, never a
+   * silent approximation.
+   */
+  moveFace(input: MoveFaceInput): KernelResult<KernelSolid>;
+
+  /**
+   * Replaces ONE face of a solid with a DATUM PLANE (Phase 44): the solid
+   * re-closes at the plane — a parallel plane moves the face to its
+   * station (extend or shrink), an oblique plane cuts the far half-space
+   * away (shrink only). See {@link ReplaceFaceInput} for the two regimes,
+   * the failure taxonomy, and the per-kernel coverage matrix — a kernel
+   * declaring `localFaceOps: false` answers every call with the structured
+   * `kernel/unsupported-operation`.
+   */
+  replaceFace(input: ReplaceFaceInput): KernelResult<KernelSolid>;
+
+  /**
+   * Deletes ONE face of a solid, optionally healing the gap (Phase 44).
+   * PROBED OUT on every current kernel — see {@link DeleteFaceInput} for
+   * the probe evidence and the honest-decline design: the operation is
+   * contract surface (so the vocabulary, bridge kind, and workbench
+   * command exist and surface the structured refusal verbatim) while
+   * every kernel answers `kernel/unsupported-operation` today.
+   */
+  deleteFace(input: DeleteFaceInput): KernelResult<KernelSolid>;
 
   /** Unions two or more solids. */
   union(operands: readonly KernelSolid[]): KernelResult<KernelSolid>;

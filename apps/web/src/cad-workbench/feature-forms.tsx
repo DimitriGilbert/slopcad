@@ -31,6 +31,8 @@ import {
 } from "@slopcad/cad-kernel";
 
 import { LOFT_DEFAULT_STATION_STEP_MM, type LoftSectionChoice } from "./loft";
+import { BOOLEAN_DEFAULTS, type BooleanOperation } from "./boolean";
+import { MOVE_BODY_DEFAULTS } from "./move-body";
 import { HELIX_DEFAULTS } from "./helix";
 import {
   THREAD_DEFAULTS,
@@ -163,6 +165,28 @@ export interface CadFeatureFormLabels {
   readonly mirrorMergeStandalone: string;
   readonly mirrorMergeMerged: string;
   readonly mirrorHint: string;
+  readonly booleanTitle: string;
+  readonly booleanOperation: string;
+  readonly booleanOpUnion: string;
+  readonly booleanOpSubtract: string;
+  readonly booleanOpIntersect: string;
+  readonly booleanTarget: string;
+  readonly booleanTools: string;
+  readonly booleanKeepTools: string;
+  readonly booleanHint: string;
+  readonly moveBodyTitle: string;
+  readonly moveBodyX: string;
+  readonly moveBodyY: string;
+  readonly moveBodyZ: string;
+  readonly moveBodyRotate: string;
+  readonly moveBodyAxis: string;
+  readonly moveBodyAxisX: string;
+  readonly moveBodyAxisY: string;
+  readonly moveBodyAxisZ: string;
+  readonly moveBodyAngle: string;
+  readonly moveBodyHint: string;
+  readonly renameBodyTitle: string;
+  readonly renameBodyName: string;
   readonly submit: string;
   readonly pickSketch: string;
 }
@@ -280,6 +304,30 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   mirrorMergeMerged: "Merge with the original",
   mirrorHint:
     "The reflection about the picked datum plane; merging unions it with the original — the symmetric-part route. Create the plane first (the Datum button).",
+  booleanTitle: "Combine bodies with a boolean",
+  booleanOperation: "Operation",
+  booleanOpUnion: "Union (join)",
+  booleanOpSubtract: "Subtract (cut)",
+  booleanOpIntersect: "Intersect",
+  booleanTarget: "Target body",
+  booleanTools: "Tool bodies",
+  booleanKeepTools: "Keep tool bodies visible",
+  booleanHint:
+    "Pick the body to modify and the bodies to combine with it; subtract cuts the tools from the target. Keep tools leaves every operand visible; consuming hides the tool bodies (undo restores them with the feature).",
+  moveBodyTitle: "Move a body",
+  moveBodyX: "Offset x (mm)",
+  moveBodyY: "Offset y (mm)",
+  moveBodyZ: "Offset z (mm)",
+  moveBodyRotate: "Also rotate about a world axis",
+  moveBodyAxis: "Rotation axis",
+  moveBodyAxisX: "X axis",
+  moveBodyAxisY: "Y axis",
+  moveBodyAxisZ: "Z axis",
+  moveBodyAngle: "Rotation angle (deg)",
+  moveBodyHint:
+    "The move translates the latest extrusion by the offsets; the optional rotation turns it about the world axis through the origin first (rotation-capable kernels only).",
+  renameBodyTitle: "Rename a body",
+  renameBodyName: "Name",
   submit: "Create",
   pickSketch: "Pick a sketch",
 };
@@ -1780,6 +1828,108 @@ export function PatternPathFeatureForm({
   );
 }
 
+/** The boolean form's pickable body: the document record's id and name. */
+export interface CadFeatureBodyOption {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** Form values of the boolean form (one dynamic tool checkbox per body). */
+export interface BooleanFormValues extends Record<string, unknown> {
+  readonly operation: string;
+  readonly targetBodyId: string;
+  readonly keepToolBodies: boolean;
+}
+
+/**
+ * The Phase 44 boolean form: the operation selector, the target body, one
+ * tool checkbox per document body, and the keep-tool toggle. Submission
+ * routes through the engine's boolean action; a structured refusal (an
+ * empty or overlapping tool list) surfaces verbatim in the dialog's error
+ * region.
+ */
+export function BooleanFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onBoolean,
+  bodies,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onBoolean: (specification: {
+    readonly operation: BooleanOperation;
+    readonly targetBodyId: string;
+    readonly toolBodyIds: readonly string[];
+    readonly keepToolBodies: boolean;
+  }) => void;
+  readonly bodies: readonly CadFeatureBodyOption[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<BooleanFormValues>[] = [
+    {
+      name: "operation",
+      options: [
+        { value: "union", label: labels.booleanOpUnion },
+        { value: "subtract", label: labels.booleanOpSubtract },
+        { value: "intersect", label: labels.booleanOpIntersect },
+      ],
+      required: true,
+      type: "select",
+      label: labels.booleanOperation,
+    },
+    {
+      name: "targetBodyId",
+      options: bodies.map((body) => ({ value: body.id, label: body.name })),
+      placeholder: labels.booleanTarget,
+      required: true,
+      type: "select",
+      label: labels.booleanTarget,
+    },
+    ...bodies.map((body): FormedibleFieldConfig<BooleanFormValues> => ({
+      name: `tool_${body.id}`,
+      type: "checkbox",
+      label: body.name,
+    })),
+    {
+      name: "keepToolBodies",
+      type: "checkbox",
+      label: labels.booleanKeepTools,
+    },
+  ];
+  const form = useFormedible<BooleanFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        operation: BOOLEAN_DEFAULTS.operation,
+        targetBodyId: bodies[0]?.id ?? "",
+        keepToolBodies: BOOLEAN_DEFAULTS.keepToolBodies,
+      },
+      onSubmit: ({ value }) => {
+        const toolBodyIds = bodies
+          .filter((body) => value[`tool_${body.id}`] === true)
+          .filter((body) => body.id !== value.targetBodyId)
+          .map((body) => body.id);
+        onBoolean({
+          operation:
+            value.operation === "union" || value.operation === "intersect"
+              ? value.operation
+              : "subtract",
+          targetBodyId: value.targetBodyId,
+          toolBodyIds,
+          keepToolBodies: value.keepToolBodies === true,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.booleanTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
 /** Form values of the mirror form. */
 export interface MirrorFormValues extends Record<string, unknown> {
   readonly datumPlaneId: string;
@@ -1847,6 +1997,185 @@ export function MirrorFeatureForm({
   return (
     <form.Form
       aria-label={labels.mirrorTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the move-body form. */
+export interface MoveBodyFormValues extends Record<string, unknown> {
+  readonly offsetX: number;
+  readonly offsetY: number;
+  readonly offsetZ: number;
+  readonly rotate: boolean;
+  readonly axis: string;
+  readonly angleDeg: number;
+}
+
+/**
+ * The Phase 44 move-body form: the translation offsets plus an OPTIONAL
+ * rotation (a world-axis selector and an angle in degrees — the translate
+ * kind's Phase 44 growth). Submission routes through the engine's
+ * move-body action; a structured refusal surfaces verbatim in the
+ * dialog's error region.
+ */
+export function MoveBodyFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onMoveBody,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onMoveBody: (specification: {
+    readonly offsetMm: readonly [number, number, number];
+    readonly rotation: {
+      readonly axis: 1 | 2 | 3;
+      readonly angleDeg: number;
+    } | null;
+  }) => void;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const finiteNumber = (value: unknown, message: string): string | null =>
+    typeof value === "number" && Number.isFinite(value) ? null : message;
+  const fields: readonly FormedibleFieldConfig<MoveBodyFormValues>[] = [
+    {
+      name: "offsetX",
+      required: true,
+      type: "number",
+      label: labels.moveBodyX,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        finiteNumber(value, "Enter a finite offset in millimetres."),
+    },
+    {
+      name: "offsetY",
+      required: true,
+      type: "number",
+      label: labels.moveBodyY,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        finiteNumber(value, "Enter a finite offset in millimetres."),
+    },
+    {
+      name: "offsetZ",
+      required: true,
+      type: "number",
+      label: labels.moveBodyZ,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        finiteNumber(value, "Enter a finite offset in millimetres."),
+    },
+    {
+      name: "rotate",
+      type: "checkbox",
+      label: labels.moveBodyRotate,
+    },
+    {
+      name: "axis",
+      options: [
+        { value: "1", label: labels.moveBodyAxisX },
+        { value: "2", label: labels.moveBodyAxisY },
+        { value: "3", label: labels.moveBodyAxisZ },
+      ],
+      required: true,
+      type: "select",
+      label: labels.moveBodyAxis,
+      conditional: (values) => values.rotate === true,
+    },
+    {
+      name: "angleDeg",
+      required: true,
+      type: "number",
+      label: labels.moveBodyAngle,
+      inputClassName: "font-mono",
+      conditional: (values) => values.rotate === true,
+      validation: (value) =>
+        finiteNumber(value, "Enter a finite angle in degrees."),
+    },
+  ];
+  const form = useFormedible<MoveBodyFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        offsetX: MOVE_BODY_DEFAULTS.offsetMm[0],
+        offsetY: MOVE_BODY_DEFAULTS.offsetMm[1],
+        offsetZ: MOVE_BODY_DEFAULTS.offsetMm[2],
+        rotate: false,
+        axis: "3",
+        angleDeg: 90,
+      },
+      onSubmit: ({ value }) => {
+        onMoveBody({
+          offsetMm: [value.offsetX, value.offsetY, value.offsetZ],
+          rotation:
+            value.rotate === true
+              ? {
+                  axis: (value.axis === "1" || value.axis === "2"
+                    ? Number(value.axis)
+                    : 3) as 1 | 2 | 3,
+                  angleDeg: value.angleDeg,
+                }
+              : null,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.moveBodyTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the body rename form. */
+export interface BodyRenameFormValues extends Record<string, unknown> {
+  readonly name: string;
+}
+
+/**
+ * The Phase 44 body rename form: one text field seeded with the body's
+ * current name. Submission routes through the engine's rename action (one
+ * `body.update` command); a structured refusal surfaces verbatim.
+ */
+export function BodyRenameForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onRename,
+  currentName,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onRename: (name: string) => void;
+  readonly currentName: string;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<BodyRenameFormValues>[] = [
+    {
+      name: "name",
+      required: true,
+      type: "text",
+      label: labels.renameBodyName,
+      validation: (value) =>
+        typeof value === "string" && value.trim().length > 0
+          ? null
+          : "Enter a non-empty name.",
+    },
+  ];
+  const form = useFormedible<BodyRenameFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: { name: currentName },
+      onSubmit: ({ value }) => {
+        onRename(value.name);
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.renameBodyTitle}
       className="space-y-3"
       noValidate
     />

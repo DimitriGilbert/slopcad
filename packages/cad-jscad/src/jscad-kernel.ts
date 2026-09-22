@@ -167,11 +167,14 @@ import {
   KERNEL_ERROR_CODES,
   type KernelSolid,
   type MirrorInput,
+  type MoveFaceInput,
+  type DeleteFaceInput,
   type ProfileExtrudeInput,
   type ProfileLoftInput,
   type ProfileRevolveInput,
   type HelixSweepInput,
   type ProfileSweepInput,
+  type ReplaceFaceInput,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -353,6 +356,7 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
+  localFaceOps: false,
 });
 
 /**
@@ -1313,6 +1317,43 @@ export function createJscadKernel(): GeometryKernel {
         kernelError(
           KERNEL_ERROR_CODES.unsupportedOperation,
           "thicken is unsupported by the JSCAD kernel: the engine carries no 3D offset or hollowing operation (the shell verdict, probed), so the closed hollow's cavity cannot be built honestly.",
+        ),
+      );
+    },
+
+    moveFace(input: MoveFaceInput): KernelResult<KernelSolid> {
+      // Phase 44: the local face ops need face-addressed geometry — a
+      // face identity to sweep and re-close against. The JSCAD engine
+      // carries no face selection or face identity at all (the shell's
+      // probed verdict), and re-meshing a moved face's neighbourhood by
+      // hand would be adapter-side meshing, not a kernel operation.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "moveFace is unsupported by the JSCAD kernel: the engine has no face identity or face selection to address (the shell verdict, probed), so the local face move cannot be built honestly.",
+        ),
+      );
+    },
+
+    replaceFace(input: ReplaceFaceInput): KernelResult<KernelSolid> {
+      // The move's verdict, verbatim, on the datum-plane re-close.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "replaceFace is unsupported by the JSCAD kernel: the engine has no face identity or face selection to address (the shell verdict, probed), so the local re-close cannot be built honestly.",
+        ),
+      );
+    },
+
+    deleteFace(input: DeleteFaceInput): KernelResult<KernelSolid> {
+      // The move's verdict, verbatim, on the removal.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "deleteFace is unsupported by the JSCAD kernel: the engine has no face identity or face selection to address (the shell verdict, probed), so the local removal cannot be built honestly.",
         ),
       );
     },

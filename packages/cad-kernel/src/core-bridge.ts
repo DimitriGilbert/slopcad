@@ -25,7 +25,13 @@
  * - `subtract` — two or more feature/body inputs: first the target, then
  *   the tools.
  * - `translate` — one feature/body input followed by three parameter
- *   inputs: x, y, z.
+ *   inputs: x, y, z. Phase 44 grows the layout with an OPTIONAL rotation
+ *   pair — two further parameter inputs, axis (DIMENSIONLESS integer
+ *   1 = X, 2 = Y, 3 = Z) and angle (ANGLE) — carrying the contract's own
+ *   `transform` rotation (applied first about the world-origin axis, then
+ *   the translation; capability-gated on `transformRotation`, the
+ *   extrude-taper growth pattern). Absent pair = the plain Phase 8
+ *   translation, unchanged.
  * - `extrude` — one SKETCH input (a document sketch record whose resolved
  *   profile supplies the loop and the workplane placement, via the
  *   caller-supplied {@link KernelExecutorContext.profiles} resolver) and
@@ -211,6 +217,28 @@
  *   copy STANDALONE (the feature's output is the reflection alone, the
  *   Phase 39 behavior); 2 MERGES — one `union` of the target and its
  *   reflection, the symmetric-part route. See `runMirrorOperation`.
+ * - `moveFace` (Phase 44) — one FEATURE or BODY input (the target solid),
+ *   exactly one REFERENCE input (the FACE selection, resolved through the
+ *   fillet/shell battery against the current regeneration), and TWO
+ *   parameter inputs in declared order: axis (DIMENSIONLESS integer 1 = X,
+ *   2 = Y, 3 = Z — the pattern/mirror selector precedent: the world-axis
+ *   direction the face moves along; oblique moves compose from a
+ *   `translate` feature ahead of the move) and distance (LENGTH, signed —
+ *   positive along the axis, negative against). Capability-gated on
+ *   `localFaceOps` BEFORE the call. See `runLocalFaceOperation`.
+ * - `replaceFace` (Phase 44) — the same one-target/one-face-reference
+ *   layout plus ONE DATUM PLANE input (no parameters — the plane carries
+ *   the geometry): the parallel-regime station move and the oblique
+ *   covering-box cut the contract's `replaceFace` builds, gated on
+ *   `localFaceOps`. See `runLocalFaceOperation`.
+ * - `deleteFace` (Phase 44) — the same one-target/one-face-reference
+ *   layout plus ONE DIMENSIONLESS parameter (the heal flag: 1 extends the
+ *   neighbouring faces to close the gap, 0 leaves it open). Probed out on
+ *   every current kernel (the contract op's documentation carries the
+ *   invalid-shell evidence), so the feature is honest surface: the
+ *   executor runs the call and the kernel's structured refusal surfaces
+ *   as the feature's diagnostic — never a fake close. See
+ *   `runLocalFaceOperation`.
  *
  * Feature inputs resolve to the referenced feature's (single) output body.
  * Body inputs resolve through the caller-supplied prior bodies map (solids
@@ -371,6 +399,9 @@ export const BRIDGE_FEATURE_KINDS = [
   "scale",
   "thicken",
   "split",
+  "moveFace",
+  "replaceFace",
+  "deleteFace",
 ] as const;
 
 /** A feature kind the bridge knows how to execute. */
@@ -6104,6 +6135,382 @@ function runSplitOperation(
   return { ok: true, solid: cut.value };
 }
 
+/**
+ * The world-axis selector's direction mapping (the pattern/mirror
+ * precedent): 1 = X, 2 = Y, 3 = Z.
+ */
+const WORLD_AXIS_DIRECTIONS: Readonly<
+  Record<number, readonly [number, number, number]>
+> = Object.freeze({
+  1: [1, 0, 0] as const,
+  2: [0, 1, 0] as const,
+  3: [0, 0, 1] as const,
+});
+
+/**
+ * Resolves ONE face reference of a local face operation (Phase 44)
+ * through the fillet/shell battery's steps: the record's payload parses
+ * through `parseTopologyReference`, addresses the target's own output
+ * body, resolves against the CURRENT regeneration's {@link TopologyView}
+ * with a valid-or-repaired validity, and maps through
+ * `transientSelectionOf` to the snapshot face ordinal the kernel's local
+ * face ops consume. Every failure is a structured diagnostic — the same
+ * never-silently-re-attach discipline.
+ */
+function resolveLocalFaceReference(
+  feature: FeatureRecord,
+  kind: "moveFace" | "replaceFace" | "deleteFace",
+  targetRef: FeatureInputRef,
+  faceRef: FeatureInputRef & { readonly kind: "reference" },
+  readers: InputReaders,
+):
+  | { readonly ok: true; readonly ordinal: number }
+  | { readonly ok: false; readonly diagnostic: Diagnostic } {
+  const record = getDocumentReference(readers.document, faceRef.id);
+  if (record === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${kind}" references record "${faceRef.id}", which the document does not define.`,
+        [faceRef],
+      ),
+    };
+  }
+  const parsed = parseTopologyReference(record.reference);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" has an unparseable reference record ("${faceRef.id}"): ${parsed.error.message}`,
+        location: { primary: feature.id, related: [faceRef.id] },
+        data: { referenceCode: parsed.error.code },
+      },
+    };
+  }
+  if (parsed.value.kind !== "face") {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${kind}" needs FACE references; reference "${faceRef.id}" addresses a ${parsed.value.kind}.`,
+        [faceRef],
+      ),
+    };
+  }
+  const targetBody = readers.bodyIdOf(targetRef);
+  if (targetBody !== undefined && parsed.value.bodyId !== targetBody) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${kind}" mixes bodies: reference "${faceRef.id}" addresses body "${parsed.value.bodyId}", but the ${kind} target's output body is "${targetBody}".`,
+        [faceRef],
+      ),
+    };
+  }
+  const view = readers.topology;
+  if (view === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${kind}" carries face references, but the executor context provides no topology view to resolve them against; ${kind} is face-addressed and cannot run without resolution.`,
+      ),
+    };
+  }
+  const resolved = resolveDocumentReference(
+    readers.document,
+    parsed.value,
+    view,
+  );
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" could not resolve reference "${faceRef.id}": ${resolved.error.message}`,
+        location: { primary: feature.id, related: [faceRef.id] },
+        data: { referenceCode: resolved.error.code },
+      },
+    };
+  }
+  const { state, reason } = resolved.value.validity;
+  if (state !== "valid" && state !== "repaired") {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" has an unresolved face reference ("${faceRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the face to mint a fresh reference.`,
+        location: { primary: feature.id, related: [faceRef.id] },
+        data: {
+          validityState: state,
+          ...(reason !== undefined ? { reason } : {}),
+        },
+      },
+    };
+  }
+  const selection = transientSelectionOf(resolved.value);
+  if (!selection.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" could not map reference "${faceRef.id}" to its snapshot coordinates: ${selection.error.message}`,
+        location: { primary: feature.id, related: [faceRef.id] },
+        data: { referenceCode: selection.error.code },
+      },
+    };
+  }
+  if (selection.value.kind !== "face") {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Invariant violation: reference "${faceRef.id}" resolved as a face but mapped to a ${selection.value.kind} selection.`,
+        [faceRef],
+      ),
+    };
+  }
+  return { ok: true, ordinal: selection.value.faceIndex };
+}
+
+/**
+ * The local face operation kinds' shared executor path (Phase 44) —
+ * `moveFace`, `replaceFace`, and `deleteFace`, the direct-manipulation
+ * family the roadmap pairs with persistent face selection. The input
+ * layouts share ONE feature/body target and EXACTLY ONE face REFERENCE
+ * (resolved through the fillet/shell battery — a moved or vanished face
+ * is a structured diagnostic, never a silent re-attachment); the kinds
+ * differ in what rides along:
+ *
+ * - `moveFace`: TWO parameters in declared order — axis (DIMENSIONLESS
+ *   integer 1 = X, 2 = Y, 3 = Z) and distance (LENGTH, signed).
+ * - `replaceFace`: ONE datum PLANE input (no parameters — the plane
+ *   carries the geometry).
+ * - `deleteFace`: ONE DIMENSIONLESS parameter — the heal flag (1 heal,
+ *   0 raw).
+ *
+ * `moveFace` and `replaceFace` gate on the `localFaceOps` capability
+ * BEFORE the kernel call (the mirror precedent's gate: a kernel that has
+ * not declared it answers the structured unsupported code, surfaced as
+ * the feature diagnostic without building anything); `deleteFace` runs
+ * its call on every kernel — the operation is contract surface whose
+ * honest answer today IS the structured refusal (the probe evidence
+ * lives on the contract op). `parameter.set` on the axis, distance, or
+ * heal flag re-drives the feature through regeneration.
+ */
+function runLocalFaceOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  kind: "moveFace" | "replaceFace" | "deleteFace",
+  readers: InputReaders,
+): OperationOutcome {
+  const inputs = feature.inputs;
+  const targetRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "feature" | "body" } =>
+      ref.kind === "feature" || ref.kind === "body",
+  );
+  const faceRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "reference" } =>
+      ref.kind === "reference",
+  );
+  const parameterRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "parameter" } =>
+      ref.kind === "parameter",
+  );
+  const datumRefs = inputs.filter(
+    (ref): ref is FeatureInputRef & { readonly kind: "datum" } =>
+      ref.kind === "datum",
+  );
+  const expectedParameters =
+    kind === "moveFace" ? 2 : kind === "deleteFace" ? 1 : 0;
+  const expectedDatums = kind === "replaceFace" ? 1 : 0;
+  if (
+    targetRefs.length !== 1 ||
+    faceRefs.length !== 1 ||
+    parameterRefs.length !== expectedParameters ||
+    datumRefs.length !== expectedDatums
+  ) {
+    const layout =
+      kind === "moveFace"
+        ? "exactly one feature/body input (the target), exactly one reference input (the face), and exactly two parameter inputs (axis, distance)"
+        : kind === "replaceFace"
+          ? "exactly one feature/body input (the target), exactly one reference input (the face), and exactly one datum input (the plane)"
+          : "exactly one feature/body input (the target), exactly one reference input (the face), and exactly one parameter input (the heal flag)";
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${kind}" needs ${layout}; it declares ${targetRefs.length} target(s), ${faceRefs.length} reference(s), ${parameterRefs.length} parameter(s), and ${datumRefs.length} datum input(s).`,
+      ),
+    };
+  }
+  const targetRef = targetRefs[0];
+  const faceRef = faceRefs[0];
+  if (targetRef === undefined || faceRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${kind}" has a malformed input list.`,
+      ),
+    };
+  }
+  const target = readers.solidInput(targetRef);
+  if (!target.ok) return target;
+  const face = resolveLocalFaceReference(
+    feature,
+    kind,
+    targetRef,
+    faceRef,
+    readers,
+  );
+  if (!face.ok) return { ok: false, diagnostic: face.diagnostic };
+  if (kind !== "deleteFace" && !kernel.capabilities.localFaceOps) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${kind}" needs the local face operations, but kernel "${kernel.id}" declares localFaceOps: false — its engine carries no face-addressed geometry, and the bridge does not approximate a local face move in its place.`,
+      ),
+    };
+  }
+  if (kind === "moveFace") {
+    const axisRef = parameterRefs[0];
+    const distanceRef = parameterRefs[1];
+    if (axisRef === undefined || distanceRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "moveFace" has a malformed input list.`,
+        ),
+      };
+    }
+    const axis = readers.dimensionlessParameter(axisRef, "axis");
+    if (!axis.ok) return { ok: false, diagnostic: axis.diagnostic };
+    const direction = WORLD_AXIS_DIRECTIONS[axis.value];
+    if (!Number.isInteger(axis.value) || direction === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelParameterInvalid,
+          `Feature "${feature.id}" of kind "moveFace" needs parameter "${axisRef.id}" (axis) to select a world axis: 1 = X, 2 = Y, 3 = Z (${String(axis.value)} given).`,
+          [axisRef],
+        ),
+      };
+    }
+    const distance = readers.lengthParameter(distanceRef, "distance");
+    if (!distance.ok) return { ok: false, diagnostic: distance.diagnostic };
+    const result = kernel.moveFace({
+      target: target.solid,
+      face: face.ordinal,
+      direction,
+      distance: lengthValue(distance.mm),
+    });
+    return result.ok
+      ? { ok: true, solid: result.value }
+      : operationFailure(feature, result.error.code, result.error.message);
+  }
+  if (kind === "replaceFace") {
+    const datumRef = datumRefs[0];
+    if (datumRef === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "replaceFace" has a malformed input list.`,
+        ),
+      };
+    }
+    const resolvedDatum = resolveDatumInput(
+      feature,
+      datumRef,
+      readers.document,
+      readers.datumTopology,
+      "the replace plane",
+    );
+    if (!resolvedDatum.ok)
+      return { ok: false, diagnostic: resolvedDatum.diagnostic };
+    if (
+      resolvedDatum.datumType !== "plane" ||
+      resolvedDatum.plane === undefined
+    ) {
+      return datumKindMismatch(
+        feature,
+        datumRef,
+        `Feature "${feature.id}" of kind "replaceFace" needs a datum PLANE to replace the face with; the referenced datum defines ${resolvedDatum.datumType === "axis" ? "an axis" : resolvedDatum.datumType === "point" ? "a point" : "a coordinate system"}.`,
+      );
+    }
+    const result = kernel.replaceFace({
+      target: target.solid,
+      face: face.ordinal,
+      plane: {
+        origin: {
+          x: lengthValue(resolvedDatum.plane.origin[0]),
+          y: lengthValue(resolvedDatum.plane.origin[1]),
+          z: lengthValue(resolvedDatum.plane.origin[2]),
+        },
+        normal: resolvedDatum.plane.normal,
+      },
+    });
+    return result.ok
+      ? { ok: true, solid: result.value }
+      : operationFailure(feature, result.error.code, result.error.message);
+  }
+  // deleteFace: the heal flag rides a dimensionless parameter (1 heal,
+  // 0 raw); the kernel's structured refusal is the honest answer today.
+  const healRef = parameterRefs[0];
+  if (healRef === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "deleteFace" has a malformed input list.`,
+      ),
+    };
+  }
+  const heal = readers.dimensionlessParameter(healRef, "heal");
+  if (!heal.ok) return { ok: false, diagnostic: heal.diagnostic };
+  if (heal.value !== 0 && heal.value !== 1) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "deleteFace" needs parameter "${healRef.id}" (heal) to be 1 (extend the neighbours to close the gap) or 0 (leave the gap open) — ${String(heal.value)} given.`,
+        [healRef],
+      ),
+    };
+  }
+  const result = kernel.deleteFace({
+    target: target.solid,
+    face: face.ordinal,
+    heal: heal.value === 1,
+  });
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
 function runKernelOperation(
   kernel: GeometryKernel,
   feature: FeatureRecord,
@@ -6250,6 +6657,13 @@ function runKernelOperation(
         : operationFailure(feature, result.error.code, result.error.message);
     }
     case "translate": {
+      // Input layout: one feature/body input, THREE length parameters
+      // (x, y, z), and — Phase 44's move-body completion — an OPTIONAL
+      // rotation pair (axis: DIMENSIONLESS integer 1 = X, 2 = Y, 3 = Z;
+      // angle: ANGLE), exactly the Phase 41 extrude-taper growth pattern
+      // on the transform's own contract extension. The rotation applies
+      // first about the world-origin axis, then the translation — the
+      // contract's fixed order.
       const solidRef = inputs[0];
       if (solidRef === undefined) {
         return {
@@ -6257,13 +6671,24 @@ function runKernelOperation(
           diagnostic: diagnostic(
             feature,
             DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-            `Feature "${feature.id}" of kind "translate" needs one feature/body input followed by three parameter inputs.`,
+            `Feature "${feature.id}" of kind "translate" needs one feature/body input followed by three translation parameters.`,
           ),
         };
       }
       const solid = readers.solidInput(solidRef);
       if (!solid.ok) return solid;
-      const lengths = readLengths(feature, readers, inputs.slice(1), [
+      const rest = inputs.slice(1);
+      if (rest.length !== 3 && rest.length !== 5) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "translate" needs exactly three translation parameters (x, y, z), optionally followed by the rotation pair (axis, angle); it declares ${rest.length}.`,
+          ),
+        };
+      }
+      const lengths = readLengths(feature, readers, rest.slice(0, 3), [
         "x",
         "y",
         "z",
@@ -6280,10 +6705,70 @@ function runKernelOperation(
           ),
         };
       }
+      let rotation:
+        | {
+            readonly axis: readonly [number, number, number];
+            readonly angleRad: number;
+          }
+        | undefined;
+      if (rest.length === 5) {
+        const axisRef = rest[3];
+        const angleRef = rest[4];
+        if (
+          axisRef === undefined ||
+          angleRef === undefined ||
+          axisRef.kind !== "parameter" ||
+          angleRef.kind !== "parameter"
+        ) {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "translate" needs parameter inputs for its rotation pair (axis, angle).`,
+            ),
+          };
+        }
+        if (!kernel.capabilities.transformRotation) {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "translate" carries a rotation, but kernel "${kernel.id}" declares transformRotation: false — the bridge refuses before the kernel could silently mis-apply it.`,
+            ),
+          };
+        }
+        const axis = readers.dimensionlessParameter(axisRef, "axis");
+        if (!axis.ok) return { ok: false, diagnostic: axis.diagnostic };
+        const direction = WORLD_AXIS_DIRECTIONS[axis.value];
+        if (!Number.isInteger(axis.value) || direction === undefined) {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelParameterInvalid,
+              `Feature "${feature.id}" of kind "translate" needs parameter "${axisRef.id}" (axis) to select a world axis: 1 = X, 2 = Y, 3 = Z (${String(axis.value)} given).`,
+              [axisRef],
+            ),
+          };
+        }
+        const angle = readers.angleParameter(angleRef, "angle");
+        if (!angle.ok) return { ok: false, diagnostic: angle.diagnostic };
+        rotation = { axis: direction, angleRad: angle.rad };
+      }
       const result = kernel.transform(solid.solid, {
         x: lengthValue(x),
         y: lengthValue(y),
         z: lengthValue(z),
+        ...(rotation === undefined
+          ? {}
+          : {
+              rotation: {
+                axis: rotation.axis,
+                angle: angleValue(rotation.angleRad),
+              },
+            }),
       });
       return result.ok
         ? { ok: true, solid: result.value }
@@ -6713,5 +7198,19 @@ function runKernelOperation(
       // side of the datum plane, with the both-ways post-condition (see
       // runSplitOperation).
       return runSplitOperation(kernel, feature, readers);
+    case "moveFace":
+      // The Phase 44 local face move: the direct kernel call the probed
+      // face-sweep composition backs, gated on localFaceOps (see
+      // runLocalFaceOperation).
+      return runLocalFaceOperation(kernel, feature, "moveFace", readers);
+    case "replaceFace":
+      // The Phase 44 datum-plane re-close: the same executor path with
+      // the datum plane riding in the place of the parameters (see
+      // runLocalFaceOperation).
+      return runLocalFaceOperation(kernel, feature, "replaceFace", readers);
+    case "deleteFace":
+      // The Phase 44 removal — the probed-out op whose honest answer
+      // today is the structured refusal (see runLocalFaceOperation).
+      return runLocalFaceOperation(kernel, feature, "deleteFace", readers);
   }
 }

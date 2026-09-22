@@ -86,6 +86,8 @@
  * exactly — including stable render object ids.
  */
 
+import type { Body } from "./document";
+
 import {
   CAD_ID_MAX_PAYLOAD_LENGTH,
   CAD_ID_PREFIXES,
@@ -756,6 +758,60 @@ export function createRenderProjection(
       camera: cameraCheck.value,
     }),
   );
+}
+
+/**
+ * The body-display keep rule (Phase 44): a body renders when it is
+ * VISIBLE (no `visible: false` flag) and, whenever ANY body is marked
+ * isolated, it is one of the ISOLATED bodies — isolation is the
+ * exclusive focus mode, exactly the model-tree affordance real CAD pairs
+ * with multi-body documents. Bodies the map does not carry keep the
+ * visible-not-isolated defaults, so a document that never touched the
+ * flags keeps every body rendering — the filter changes nothing until a
+ * flag exists.
+ */
+export function bodyRendersInProjection(
+  flags: ReadonlyMap<BodyId, Pick<Body, "visible" | "isolated">> | undefined,
+  bodyId: BodyId,
+  anyIsolated: boolean,
+): boolean {
+  const flag = flags?.get(bodyId);
+  if (flag !== undefined && flag.visible === false) return false;
+  if (!anyIsolated) return true;
+  return flag?.isolated === true;
+}
+
+/**
+ * Filters a projection's objects by the body-display keep rule (Phase
+ * 44): hidden bodies drop, and when any body is isolated ONLY the
+ * isolated bodies keep rendering. The camera passes through untouched —
+ * display state never moves the deterministic spec (the Phase 45 law's
+ * precedent). Objects without a body association (if a producer ever
+ * emits one) render unconditionally: the flags are BODY display state,
+ * not a projection-wide mute. A projection whose every object dropped is
+ * LEGAL (an all-hidden scene is the user's own display state, not an
+ * error) — its objects list is simply empty.
+ */
+export function filterProjectionByBodyDisplay(
+  projection: RenderProjection,
+  flags: ReadonlyMap<BodyId, Pick<Body, "visible" | "isolated">>,
+): RenderProjection {
+  let anyIsolated = false;
+  for (const flag of flags.values()) {
+    if (flag.isolated === true) {
+      anyIsolated = true;
+      break;
+    }
+  }
+  const objects = projection.objects.filter((object) => {
+    const bodyId = renderObjectIdBodyId(object.id);
+    if (bodyId === null) return true;
+    return bodyRendersInProjection(flags, bodyId, anyIsolated);
+  });
+  return Object.freeze({
+    objects: Object.freeze(objects),
+    camera: projection.camera,
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -172,6 +172,7 @@ describe("occt kernel identity and capabilities", () => {
       extrudeTaper: true,
       mirror: true,
       surfaceArea: true,
+      localFaceOps: true,
     });
   });
 

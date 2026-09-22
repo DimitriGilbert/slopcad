@@ -136,6 +136,16 @@ export interface CadModelTreeLabels {
   readonly collapse: string;
   /** Display labels keyed by feature kind; a missing kind falls back to it. */
   readonly featureKinds: Readonly<Record<string, string>>;
+  /** `title` of the body visibility toggle, shown body visible (Phase 44). */
+  readonly bodyHide: string;
+  /** `title` of the body visibility toggle, shown body hidden (Phase 44). */
+  readonly bodyShow: string;
+  /** `title` of the body isolation toggle, not isolated (Phase 44). */
+  readonly bodyIsolate: string;
+  /** `title` of the body isolation toggle, isolated (Phase 44). */
+  readonly bodyUnIsolate: string;
+  /** `title` of the body rename affordance (Phase 44). */
+  readonly bodyRename: string;
 }
 
 /** Documented label defaults; every render-output string lives here. */
@@ -149,7 +159,32 @@ export const CAD_MODEL_TREE_LABELS: CadModelTreeLabels = {
   expand: "Expand",
   collapse: "Collapse",
   featureKinds: {},
+  bodyHide: "Hide body",
+  bodyShow: "Show body",
+  bodyIsolate: "Isolate body",
+  bodyUnIsolate: "Un-isolate body",
+  bodyRename: "Rename body",
 };
+
+/**
+ * One body-management action the tree's body affordances emit (Phase 44):
+ * the visibility and isolation toggles and the rename request. The tree
+ * renders the affordances; the HOST owns the mutation (a `body.update`
+ * command through its transaction choreography) — the tree never mutates.
+ */
+export type CadBodyTreeAction =
+  | { readonly type: "toggle-visibility"; readonly bodyId: BodyId }
+  | { readonly type: "toggle-isolate"; readonly bodyId: BodyId }
+  | { readonly type: "rename"; readonly bodyId: BodyId };
+
+/**
+ * The per-body display state the tree's affordances render (Phase 44):
+ * the defaulted visibility/isolation flags of the document's body record.
+ */
+export interface CadBodyDisplayState {
+  readonly visible: boolean;
+  readonly isolated: boolean;
+}
 
 /** Props of {@link CadModelTree}. */
 export interface CadModelTreeProps {
@@ -167,6 +202,18 @@ export interface CadModelTreeProps {
    * rule in the module doc). `additive` mirrors the Shift modifier.
    */
   readonly onPick?: (reference: SelectionReference, additive: boolean) => void;
+  /**
+   * The body display states (Phase 44), prop-only: the host reads the
+   * document's body records. Without the map the affordances stay hidden —
+   * the tree displays only what it was given.
+   */
+  readonly bodyDisplay?: (bodyId: BodyId) => CadBodyDisplayState | undefined;
+  /**
+   * The body-management action surface (Phase 44): the visibility,
+   * isolation, and rename affordances emit here. Without it (and without
+   * `bodyDisplay`) the tree renders no body affordances.
+   */
+  readonly onBodyAction?: (action: CadBodyTreeAction) => void;
   /** Label token overrides, merged over {@link CAD_MODEL_TREE_LABELS}. */
   readonly labels?: Partial<CadModelTreeLabels>;
   /** Extends the container classes; width defaults to the content. */
@@ -229,6 +276,8 @@ interface CadTreeRow {
   readonly groupId: FeatureId | undefined;
   readonly status: FeatureRegenerationStatus | undefined;
   readonly children: readonly CadTreeRow[];
+  /** The body the row IS (body rows only — the affordances' address). */
+  readonly bodyId: BodyId | undefined;
 }
 
 /**
@@ -260,6 +309,7 @@ function featureRowOf(
     groupId: feature.id,
     status,
     children,
+    bodyId: undefined,
   };
 }
 
@@ -278,6 +328,7 @@ function bodyRowOf(
     groupId: undefined,
     status: undefined,
     children: [],
+    bodyId: body.id,
   };
 }
 
@@ -397,6 +448,84 @@ function collapsedWithout(
   return next;
 }
 
+/** The visibility eye (Phase 44): inline SVG, the ChevronIcon precedent. */
+function EyeIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  );
+}
+
+/** The hidden-body eye with its slash (Phase 44). */
+function EyeOffIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <path d="M3.5 4.7C2.2 5.8 1.5 8 1.5 8s2.5 4.5 6.5 4.5c1.2 0 2.2-.4 3.1-.9" />
+      <path d="M6.2 6.4a2 2 0 0 0 2.6 2.8" />
+      <path d="M13.9 10.1c.4-.8.6-1.4.6-2.1 0 0-2.5-4.5-6.5-4.5-.5 0-1 .1-1.5.2" />
+      <path d="M2 14 14 2" />
+    </svg>
+  );
+}
+
+/** The isolation crosshair (Phase 44). */
+function CrosshairIcon({ signal }: { readonly signal: boolean }): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className={cn("size-3", signal ? "text-signal" : "")}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <circle cx="8" cy="8" r="4.5" />
+      <path d="M8 1v3M8 12v3M1 8h3M12 8h3" />
+    </svg>
+  );
+}
+
+/** The rename pencil (Phase 44). */
+function PencilIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <path d="M11 2.5 13.5 5 5.5 13 2.5 13.5 3 10.5Z" />
+      <path d="M9.5 4 12 6.5" />
+    </svg>
+  );
+}
+
 /** The expansion twisty: a pointer affordance; the keyboard uses the arrows. */
 function ChevronIcon({
   expanded,
@@ -487,14 +616,91 @@ function useOptionalCadSelection(): ReturnType<typeof useCadSelection> | null {
 }
 
 /**
+ * The body-management affordances (Phase 44): the visibility eye, the
+ * isolation crosshair, and the rename pencil, rendered on BODY rows when
+ * the host supplies the display states and the action surface. Pure
+ * presentation — every mutation is the host's (`body.update` through its
+ * transaction choreography); the buttons stop propagation so activation
+ * (selection) never rides an affordance click.
+ */
+function bodyAffordances({
+  bodyId,
+  display,
+  labels,
+  onBodyAction,
+}: {
+  readonly bodyId: BodyId;
+  readonly display: CadBodyDisplayState | undefined;
+  readonly labels: CadModelTreeLabels;
+  readonly onBodyAction: (action: CadBodyTreeAction) => void;
+}): ReactElement {
+  const visible = display?.visible ?? true;
+  const isolated = display?.isolated ?? false;
+  const buttonClass = cn(
+    "text-muted-foreground hover:text-foreground",
+    "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center",
+  );
+  return (
+    <span
+      className="flex shrink-0 items-center gap-0.5"
+      data-cad-tree-body-actions=""
+    >
+      <button
+        aria-label={visible ? labels.bodyHide : labels.bodyShow}
+        aria-pressed={!visible}
+        className={buttonClass}
+        data-cad-tree-body-visibility={visible ? "visible" : "hidden"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onBodyAction({ type: "toggle-visibility", bodyId });
+        }}
+        title={visible ? labels.bodyHide : labels.bodyShow}
+        type="button"
+      >
+        {visible ? <EyeIcon /> : <EyeOffIcon />}
+      </button>
+      <button
+        aria-label={isolated ? labels.bodyUnIsolate : labels.bodyIsolate}
+        aria-pressed={isolated}
+        className={buttonClass}
+        data-cad-tree-body-isolate={isolated ? "isolated" : "normal"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onBodyAction({ type: "toggle-isolate", bodyId });
+        }}
+        title={isolated ? labels.bodyUnIsolate : labels.bodyIsolate}
+        type="button"
+      >
+        <CrosshairIcon signal={isolated} />
+      </button>
+      <button
+        aria-label={labels.bodyRename}
+        className={buttonClass}
+        data-cad-tree-body-rename=""
+        onClick={(event) => {
+          event.stopPropagation();
+          onBodyAction({ type: "rename", bodyId });
+        }}
+        title={labels.bodyRename}
+        type="button"
+      >
+        <PencilIcon />
+      </button>
+    </span>
+  );
+}
+
+/**
  * The CAD model tree: the document's feature/body hierarchy with live
  * selection synchronization, regeneration statuses, and collapsible
  * groups, in one mountable component.
  */
 export function CadModelTree({
+  bodyDisplay,
   className,
   document: documentProp,
   labels: labelOverrides,
+  onBodyAction,
   onPick,
   regenerationStates,
   selection: selectionProp,
@@ -710,6 +916,16 @@ export function CadModelTree({
           >
             {row.label}
           </span>
+          {row.bodyId !== undefined &&
+          bodyDisplay !== undefined &&
+          onBodyAction !== undefined
+            ? bodyAffordances({
+                bodyId: row.bodyId,
+                display: bodyDisplay(row.bodyId),
+                labels,
+                onBodyAction,
+              })
+            : null}
           {row.status !== undefined ? (
             <StatusChip labels={labels} status={row.status} />
           ) : null}

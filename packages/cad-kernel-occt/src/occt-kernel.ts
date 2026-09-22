@@ -238,6 +238,7 @@ import {
   type ChamferInput,
   type ConeInput,
   type CylinderInput,
+  type DeleteFaceInput,
   type FilletInput,
   type GeometryKernel,
   type HelixSweepInput,
@@ -249,11 +250,13 @@ import {
   KERNEL_ERROR_CODES,
   type KernelSolid,
   type MirrorInput,
+  type MoveFaceInput,
   type ProfileExtrudeInput,
   type ProfileLoftInput,
   type ProfileLoftSectionInput,
   type ProfileRevolveInput,
   type ProfileSweepInput,
+  type ReplaceFaceInput,
   type ShellInput,
   type SphereInput,
   type SweepPathSegmentInput,
@@ -271,6 +274,7 @@ import {
   loftSectionsProblem,
   loftStations,
   normalizeRevolveAxis,
+  planSplitCut,
   polygonSignedArea,
   profileLoopProblem,
   revolveCrossesAxis,
@@ -397,6 +401,25 @@ import {
  *   the surface sibling of the volume integration; probed: the 30×20×10
  *   box measures exactly 2200 mm², the plate-with-bore exactly
  *   2 200 + 48π mm² at delta 0, an empty compound 0) (`surfaceArea`).
+ * - The Phase 44 local face operations are the probed face-sweep
+ *   composition: `moveFace` sweeps the selected face by
+ *   `BRepPrimAPI_MakePrism` along the displacement and closes with one
+ *   `BRepAlgoAPI_Fuse` (out-of-material component positive) or one
+ *   `BRepAlgoAPI_Cut` (negative) — probed exact on the 30×20×10 box's
+ *   top face at +2 mm (7 200), −2 mm (4 800), and the oblique
+ *   (1.2, 0, 1.6) displacement (6 960), each the prism `A·(n̂·d⃗)` at 0
+ *   relative error. The bound `BRepFeat_MakeDPrism` builds the fuse
+ *   direction exactly too, but its cut mode silently returns the
+ *   UNCHANGED target on this binding (probed: 6 000 where the inward
+ *   prism measures 4 800), so the composition is the route the adapter
+ *   pins — both directions exact, one mechanism. `replaceFace` re-closes
+ *   at a datum plane through the same machinery (a parallel plane is a
+ *   station move; an oblique plane is `planSplitCut`'s covering-box cut
+ *   in the plane's own frame, shrink-only). `deleteFace` — raw or healed
+ *   — is probed OUT (the sewn-minus-one shell's `MakeSolid` wrap is
+ *   invalid: BRepCheck rejects, volume 0, free edges; `ShapeFix_Solid`'s
+ *   close invalid identically), so it declines per-op with the
+ *   structured unsupported code naming the probe (`localFaceOps`).
  */
 export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
@@ -417,6 +440,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
+  localFaceOps: true,
 });
 
 /**
@@ -1507,6 +1531,160 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     }
   };
 
+  // --- local face operation helpers (Phase 44 — the probed composition)
+
+  /**
+   * The relative volume-change floor below which a local face operation is
+   * refused as a no-op (the hole guard's value, the workbench scenes'
+   * shared floor): an operation that changed nothing never settles.
+   */
+  const FACE_OP_NOOP_EPSILON_RELATIVE = 1e-9;
+
+  /**
+   * Measures one face's outward unit normal and centre point at the face's
+   * parametric middle (`BRepGProp_Face.Normal` — the orientation-aware
+   * surface normal, the probe's measurement route). The wrappers are freed
+   * before the values return.
+   */
+  const faceNormalAndCenter = (
+    face: TopoDS_Face,
+  ): {
+    readonly normal: readonly [number, number, number];
+    readonly center: readonly [number, number, number];
+  } => {
+    const gprop = new oc.BRepGProp_Face(face);
+    const p = new oc.gp_Pnt();
+    const n = new oc.gp_Vec();
+    try {
+      const b = gprop.Bounds();
+      gprop.Normal((b.U1 + b.U2) / 2, (b.V1 + b.V2) / 2, p, n);
+      const length = Math.hypot(n.X(), n.Y(), n.Z());
+      if (!(length > 0) || !Number.isFinite(length)) {
+        throw new Error("the face's parametric-middle normal degenerated.");
+      }
+      return {
+        normal: [n.X() / length, n.Y() / length, n.Z() / length],
+        center: [p.X(), p.Y(), p.Z()],
+      };
+    } finally {
+      p.delete();
+      n.delete();
+      gprop.delete();
+    }
+  };
+
+  /**
+   * The probed face-sweep composition both local face movers ride
+   * (`moveFace` directly, `replaceFace`'s parallel regime as its station
+   * move): sweep the selected face along `displacement` with
+   * `BRepPrimAPI_MakePrism`, then close with one `BRepAlgoAPI_Fuse` when
+   * the displacement's out-of-material component is positive (material
+   * grows) or one `BRepAlgoAPI_Cut` when negative (material shrinks) —
+   * measured exact in both directions and obliquely (the probe: 7 200 /
+   * 4 800 / 6 960 mm³ on the 30×20×10 box, each the prism `A·(n̂·d⃗)`).
+   * The post-conditions are the adapter's honesty, not the engine's: a
+   * result that collapsed (non-positive volume) or changed nothing
+   * (within the no-op floor) is refused structured.
+   */
+  const moveFaceByDisplacement = (
+    operation: string,
+    shape: TopoDS_Shape,
+    face: TopoDS_Face,
+    displacement: readonly [number, number, number],
+  ): KernelResult<TopoDS_Shape> => {
+    const [dx, dy, dz] = displacement;
+    const { normal } = faceNormalAndCenter(face);
+    const outOfMaterial =
+      (normal[0] ?? 0) * (dx ?? 0) +
+      (normal[1] ?? 0) * (dy ?? 0) +
+      (normal[2] ?? 0) * (dz ?? 0);
+    const magnitude = Math.hypot(dx ?? 0, dy ?? 0, dz ?? 0);
+    if (
+      !(magnitude > 0) ||
+      Math.abs(outOfMaterial) <= magnitude * FACE_OP_NOOP_EPSILON_RELATIVE
+    ) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.faceOpFailed,
+          `${operation} refused a displacement that moves the face nowhere: the swept prism's volume A·(n̂·d⃗) is zero (a zero displacement, or one perpendicular to the face's plane).`,
+        ),
+      );
+    }
+    const before = volumeOfShape(shape);
+    const vec = new oc.gp_Vec(dx ?? 0, dy ?? 0, dz ?? 0);
+    const prism = new oc.BRepPrimAPI_MakePrism(face, vec);
+    vec.delete();
+    prism.Build();
+    if (!prism.IsDone()) {
+      prism.delete();
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.faceOpFailed,
+          `${operation} failed: the selected face's swept prism did not build (the face may be degenerate for rigid sweeping).`,
+        ),
+      );
+    }
+    const swept = prism.Shape();
+    prism.delete();
+    const algo =
+      outOfMaterial > 0
+        ? new oc.BRepAlgoAPI_Fuse(shape, swept)
+        : new oc.BRepAlgoAPI_Cut(shape, swept);
+    swept.delete();
+    if (!algo.IsDone()) {
+      algo.delete();
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.faceOpFailed,
+          `${operation} failed: the swept prism's ${outOfMaterial > 0 ? "fuse" : "cut"} did not build (the displacement outruns the neighbouring faces' reach).`,
+        ),
+      );
+    }
+    const moved = algo.Shape();
+    algo.delete();
+    const after = volumeOfShape(moved);
+    if (!Number.isFinite(after) || !(after > 0)) {
+      moved.delete();
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.faceOpFailed,
+          `${operation} failed: the moved solid collapsed (a displacement past the solid's own extent — the measured volume is ${String(after)} mm³).`,
+        ),
+      );
+    }
+    if (Math.abs(after - before) <= before * FACE_OP_NOOP_EPSILON_RELATIVE) {
+      moved.delete();
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.faceOpFailed,
+          `${operation} refused a move that changed nothing: the measured volume stayed ${String(before)} mm³ (the swept region lies entirely inside the target — nothing to fuse, nothing to cut).`,
+        ),
+      );
+    }
+    return ok(moved);
+  };
+
+  /**
+   * The tight bounds of a shape via `BRepBndLib.AddOptimal` (the `bounds`
+   * operation's own geometry), as the covering-box cut's sizing input.
+   * Throws on a void box — every caller holds a non-empty solid.
+   */
+  const tightBoundsOfShape = (shape: TopoDS_Shape): KernelBounds => {
+    const box = new oc.Bnd_Box();
+    try {
+      oc.BRepBndLib.AddOptimal(shape, box, false, false);
+      if (box.IsVoid()) {
+        throw new Error("the target's bounds came back void.");
+      }
+      return {
+        min: [box.GetXMin(), box.GetYMin(), box.GetZMin()],
+        max: [box.GetXMax(), box.GetYMax(), box.GetZMax()],
+      };
+    } finally {
+      box.delete();
+    }
+  };
+
   return {
     id: OCCT_BACKEND_ID,
     capabilities: OCCT_KERNEL_CAPABILITIES,
@@ -2405,6 +2583,368 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           );
         }
         return ok(wrapSolid(hollowed));
+      });
+    },
+
+    moveFace(input: MoveFaceInput): KernelResult<KernelSolid> {
+      // Phase 44 — the probed face-sweep composition (see the helper's
+      // doc): validate handle, direction, distance, and the face-address
+      // structure BEFORE any OCCT call; resolve the ordinal against the
+      // target's own snapshot numbering (the stale-reference check); and
+      // only then sweep and close. The no-throw boundary normalizes any
+      // WASM-side throw into the structured face-op failure.
+      return run("moveFace", KERNEL_ERROR_CODES.faceOpFailed, () => {
+        const shape = shapeOf(input.target, "moveFace");
+        if (!shape.ok) return fail(shape.error);
+        const direction = axisIn(input.direction, "moveFace");
+        if (!direction.ok) return fail(direction.error);
+        const distance = lengthIn(input.distance, "distance", "moveFace");
+        if (!distance.ok) return fail(distance.error);
+        if (!Number.isInteger(input.face) || input.face < 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              `moveFace rejected face ordinal ${String(input.face)}: ordinals are non-negative integers (snapshot face addresses).`,
+            ),
+          );
+        }
+        const resolved = occtFacesAtOrdinals(oc, shape.value, [input.face]);
+        if (resolved.missing.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFaceUnknown,
+              `moveFace rejected face ordinal ${String(input.face)}: it addresses no face of the target's current topology snapshot (a stale reference resolved against an older regeneration, or an out-of-range ordinal).`,
+            ),
+          );
+        }
+        const face = resolved.faces[0];
+        if (face === undefined) {
+          throw new Error(
+            "Invariant violation: ordinal resolution guarantees the face.",
+          );
+        }
+        const length = Math.hypot(
+          direction.value[0],
+          direction.value[1],
+          direction.value[2],
+        );
+        const unit: readonly [number, number, number] = [
+          direction.value[0] / length,
+          direction.value[1] / length,
+          direction.value[2] / length,
+        ];
+        const moved = moveFaceByDisplacement("moveFace", shape.value, face, [
+          unit[0] * distance.value,
+          unit[1] * distance.value,
+          unit[2] * distance.value,
+        ]);
+        face.delete();
+        if (!moved.ok) return fail(moved.error);
+        return ok(wrapSolid(moved.value));
+      });
+    },
+
+    replaceFace(input: ReplaceFaceInput): KernelResult<KernelSolid> {
+      // Phase 44 — the datum-plane re-close, two probed regimes (see the
+      // contract op's doc): a plane PARALLEL to the face (cross magnitude
+      // at the double-precision floor) is a station move through the
+      // shared face-sweep machinery, extending or shrinking exactly; an
+      // OBLIQUE plane is `planSplitCut`'s covering-box cut in the plane's
+      // own frame — shrink-only, keeping the target's volume-centroid
+      // side, with the planner's own removed-extent measure refusing the
+      // no-op before anything builds.
+      return run("replaceFace", KERNEL_ERROR_CODES.faceOpFailed, () => {
+        const shape = shapeOf(input.target, "replaceFace");
+        if (!shape.ok) return fail(shape.error);
+        if (!Number.isInteger(input.face) || input.face < 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              `replaceFace rejected face ordinal ${String(input.face)}: ordinals are non-negative integers (snapshot face addresses).`,
+            ),
+          );
+        }
+        const ox = lengthIn(
+          input.plane.origin.x,
+          "plane origin x",
+          "replaceFace",
+        );
+        if (!ox.ok) return fail(ox.error);
+        const oy = lengthIn(
+          input.plane.origin.y,
+          "plane origin y",
+          "replaceFace",
+        );
+        if (!oy.ok) return fail(oy.error);
+        const oz = lengthIn(
+          input.plane.origin.z,
+          "plane origin z",
+          "replaceFace",
+        );
+        if (!oz.ok) return fail(oz.error);
+        const planeNormal = axisIn(input.plane.normal, "replaceFace");
+        if (!planeNormal.ok) return fail(planeNormal.error);
+        const planeLength = Math.hypot(
+          planeNormal.value[0],
+          planeNormal.value[1],
+          planeNormal.value[2],
+        );
+        const n: readonly [number, number, number] = [
+          planeNormal.value[0] / planeLength,
+          planeNormal.value[1] / planeLength,
+          planeNormal.value[2] / planeLength,
+        ];
+        const resolved = occtFacesAtOrdinals(oc, shape.value, [input.face]);
+        if (resolved.missing.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFaceUnknown,
+              `replaceFace rejected face ordinal ${String(input.face)}: it addresses no face of the target's current topology snapshot (a stale reference resolved against an older regeneration, or an out-of-range ordinal).`,
+            ),
+          );
+        }
+        const face = resolved.faces[0];
+        if (face === undefined) {
+          throw new Error(
+            "Invariant violation: ordinal resolution guarantees the face.",
+          );
+        }
+        const origin: readonly [number, number, number] = [
+          ox.value,
+          oy.value,
+          oz.value,
+        ];
+        const { normal, center } = faceNormalAndCenter(face);
+        const cross: readonly [number, number, number] = [
+          normal[1] * n[2] - normal[2] * n[1],
+          normal[2] * n[0] - normal[0] * n[2],
+          normal[0] * n[1] - normal[1] * n[0],
+        ];
+        const crossMagnitude = Math.hypot(cross[0], cross[1], cross[2]);
+        if (crossMagnitude <= 1e-9) {
+          // PARALLEL: the station move — displacement along the face's own
+          // outward normal by the plane's signed station distance.
+          const station =
+            (origin[0] - center[0]) * normal[0] +
+            (origin[1] - center[1]) * normal[1] +
+            (origin[2] - center[2]) * normal[2];
+          const moved = moveFaceByDisplacement(
+            "replaceFace",
+            shape.value,
+            face,
+            [normal[0] * station, normal[1] * station, normal[2] * station],
+          );
+          face.delete();
+          if (!moved.ok) return fail(moved.error);
+          return ok(wrapSolid(moved.value));
+        }
+        // OBLIQUE: the covering-box cut keeping the volume-centroid side.
+        // The centroid fixes the kept half-space from measured geometry —
+        // the side the solid's material is on — never a guessed sign.
+        const props = new oc.GProp_GProps();
+        let centroid: readonly [number, number, number];
+        try {
+          oc.BRepGProp.VolumeProperties(shape.value, props, true, false, false);
+          const com = props.CentreOfMass();
+          centroid = [com.X(), com.Y(), com.Z()];
+          com.delete();
+        } finally {
+          props.delete();
+        }
+        const keepSide: 1 | -1 =
+          (centroid[0] - origin[0]) * n[0] +
+            (centroid[1] - origin[1]) * n[1] +
+            (centroid[2] - origin[2]) * n[2] >=
+          0
+            ? 1
+            : -1;
+        // The oblique replace is scoped to a plane that actually BOUNDS
+        // the replaced face's region: the face's centre must lie strictly
+        // on the removed side (a plane that cuts elsewhere replaces some
+        // other boundary, not this face — the honest refusal, never a
+        // reinterpreted cut).
+        const faceSide =
+          (center[0] - origin[0]) * n[0] +
+          (center[1] - origin[1]) * n[1] +
+          (center[2] - origin[2]) * n[2];
+        if (faceSide * keepSide >= 0) {
+          face.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFailed,
+              "replaceFace refused an oblique plane that does not bound the replaced face's region: the face's centre lies on the kept side of the plane (the cut would replace a different boundary, not this face). Move the plane past the face, or pass a parallel plane to extend.",
+            ),
+          );
+        }
+        const bounds = tightBoundsOfShape(shape.value);
+        const plan = planSplitCut({
+          planeOrigin: origin,
+          planeNormal: n,
+          keepSide,
+          bounds,
+        });
+        face.delete();
+        if (plan.removedExtentMm <= 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFailed,
+              `replaceFace refused an oblique plane that changes nothing: the kept side holds the whole target (the removed side's extent is ${String(plan.removedExtentMm)} mm — move the plane through the solid, or pass a parallel plane to extend).`,
+            ),
+          );
+        }
+        // The covering box: the planner's square loop and height in the
+        // plane's own frame, placed by its rotation + translation — the
+        // split tool's geometry, one source of truth.
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const segment of plan.toolLoop) {
+          if (segment.kind !== "line") continue;
+          for (const point of [segment.start, segment.end]) {
+            minX = Math.min(minX, point[0]);
+            maxX = Math.max(maxX, point[0]);
+            minY = Math.min(minY, point[1]);
+            maxY = Math.max(maxY, point[1]);
+          }
+        }
+        if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+          throw new Error(
+            "Invariant violation: the planner's tool loop always carries line extents.",
+          );
+        }
+        const corner = new oc.gp_Pnt(minX, minY, 0);
+        const mkBox = new oc.BRepPrimAPI_MakeBox(
+          corner,
+          maxX - minX,
+          maxY - minY,
+          plan.toolHeightMm,
+        );
+        corner.delete();
+        mkBox.Build();
+        if (!mkBox.IsDone()) {
+          mkBox.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFailed,
+              "replaceFace failed: the covering-box tool did not build.",
+            ),
+          );
+        }
+        const rawBox = mkBox.Shape();
+        mkBox.delete();
+        const rot = axisAngleMatrix(
+          plan.toolRotationAxis,
+          plan.toolRotationAngleRad,
+        );
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          plan.toolTranslationMm[0],
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          plan.toolTranslationMm[1],
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          plan.toolTranslationMm[2],
+        );
+        const transform = new oc.BRepBuilderAPI_Transform(
+          rawBox,
+          trsf,
+          false,
+          true,
+        );
+        rawBox.delete();
+        trsf.delete();
+        if (!transform.IsDone()) {
+          transform.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFailed,
+              "replaceFace failed: the covering-box tool's placement did not build.",
+            ),
+          );
+        }
+        const tool = transform.Shape();
+        transform.delete();
+        const before = volumeOfShape(shape.value);
+        const cut = new oc.BRepAlgoAPI_Cut(shape.value, tool);
+        tool.delete();
+        if (!cut.IsDone()) {
+          cut.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFailed,
+              "replaceFace failed: the covering-box cut did not build.",
+            ),
+          );
+        }
+        const replaced = cut.Shape();
+        cut.delete();
+        const after = volumeOfShape(replaced);
+        if (!Number.isFinite(after) || !(after > 0)) {
+          replaced.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFailed,
+              `replaceFace failed: the re-closed solid collapsed (the measured volume is ${String(after)} mm³ — the plane swallows the kept side).`,
+            ),
+          );
+        }
+        if (
+          Math.abs(after - before) <=
+          before * FACE_OP_NOOP_EPSILON_RELATIVE
+        ) {
+          replaced.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFailed,
+              `replaceFace refused a plane that changed nothing: the measured volume stayed ${String(before)} mm³.`,
+            ),
+          );
+        }
+        return ok(wrapSolid(replaced));
+      });
+    },
+
+    deleteFace(input: DeleteFaceInput): KernelResult<KernelSolid> {
+      // Phase 44 — the probed-out operation (see the contract op's doc for
+      // the full honesty design): the ordinal is still validated and
+      // resolved FIRST, so a stale reference surfaces as the
+      // stale-reference code even on a declined call; then the structured
+      // unsupported answer names the probe — never a degenerate solid, and
+      // never a fake close.
+      return run("deleteFace", KERNEL_ERROR_CODES.faceOpFailed, () => {
+        const shape = shapeOf(input.target, "deleteFace");
+        if (!shape.ok) return fail(shape.error);
+        if (!Number.isInteger(input.face) || input.face < 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              `deleteFace rejected face ordinal ${String(input.face)}: ordinals are non-negative integers (snapshot face addresses).`,
+            ),
+          );
+        }
+        const resolved = occtFacesAtOrdinals(oc, shape.value, [input.face]);
+        if (resolved.missing.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.faceOpFaceUnknown,
+              `deleteFace rejected face ordinal ${String(input.face)}: it addresses no face of the target's current topology snapshot (a stale reference resolved against an older regeneration, or an out-of-range ordinal).`,
+            ),
+          );
+        }
+        for (const face of resolved.faces) face.delete();
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.unsupportedOperation,
+            `deleteFace is unsupported by the OpenCascade kernel${input.heal ? " (with heal)" : " (without heal)"}: both modes are probed out on this binding — sewing the remaining faces yields a shell whose solid wrap is invalid (BRepCheck rejects it, volume 0, free edges remain), and ShapeFix_Solid's healed close of the same shell is invalid identically — and the contract's closed-solid semantics cannot carry an unbounded region's volume honestly. The structured refusal is the honest answer.`,
+          ),
+        );
       });
     },
 

@@ -73,6 +73,7 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   shell: true,
   mirror: true,
   surfaceArea: true,
+  localFaceOps: false,
 });
 
 /**

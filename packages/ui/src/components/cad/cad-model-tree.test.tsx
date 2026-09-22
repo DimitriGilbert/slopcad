@@ -537,3 +537,91 @@ describe("CadModelTree", () => {
     expect(row("feature|feat_hole").textContent).toContain("hole");
   });
 });
+
+describe("CadModelTree body management affordances (Phase 44)", () => {
+  it("renders no affordances without the display and action props", () => {
+    renderInProvider(
+      createCadStore({ session: createSession(buildTreeDocument()) }),
+    );
+    expect(document.querySelector("[data-cad-tree-body-actions]")).toBeNull();
+  });
+
+  it("renders the eye, crosshair, and pencil on body rows only, carrying the flags", () => {
+    renderInProvider(
+      createCadStore({ session: createSession(buildTreeDocument()) }),
+      {
+        bodyDisplay: (bodyId) =>
+          bodyId === PLATE_BODY
+            ? { visible: false, isolated: true }
+            : { visible: true, isolated: false },
+        onBodyAction: () => {},
+      },
+    );
+    const plateRow = row("body|body_plate");
+    const spareRow = row("body|body_spare");
+    const featureRow = row("feature|feat_pad");
+    for (const scope of [plateRow, spareRow]) {
+      expect(
+        scope.querySelector("[data-cad-tree-body-actions]"),
+      ).not.toBeNull();
+    }
+    // Exactly the THREE body rows carry affordances (the plate, the spare,
+    // and the unproduced blank); the feature row's own content line — its
+    // first child, before the nested group — carries none.
+    expect(
+      document.querySelectorAll("[data-cad-tree-body-actions]").length,
+    ).toBe(3);
+    expect(
+      featureRow.firstElementChild?.querySelector(
+        "[data-cad-tree-body-actions]",
+      ),
+    ).toBeNull();
+    expect(
+      plateRow.querySelector('[data-cad-tree-body-visibility="hidden"]'),
+    ).not.toBeNull();
+    expect(
+      plateRow.querySelector('[data-cad-tree-body-isolate="isolated"]'),
+    ).not.toBeNull();
+    expect(
+      spareRow.querySelector('[data-cad-tree-body-visibility="visible"]'),
+    ).not.toBeNull();
+    expect(
+      spareRow.querySelector('[data-cad-tree-body-isolate="normal"]'),
+    ).not.toBeNull();
+  });
+
+  it("emits the visibility, isolation, and rename actions from the affordances", () => {
+    const actions: string[] = [];
+    renderInProvider(
+      createCadStore({ session: createSession(buildTreeDocument()) }),
+      {
+        bodyDisplay: () => ({ visible: true, isolated: false }),
+        onBodyAction: (action) => {
+          actions.push(action.type);
+        },
+      },
+    );
+    const spareRow = row("body|body_spare");
+    fireClick(
+      spareRow.querySelector<HTMLElement>(
+        '[data-cad-tree-body-visibility="visible"]',
+      ),
+    );
+    fireClick(
+      spareRow.querySelector<HTMLElement>(
+        '[data-cad-tree-body-isolate="normal"]',
+      ),
+    );
+    fireClick(
+      spareRow.querySelector<HTMLElement>("[data-cad-tree-body-rename]"),
+    );
+    expect(actions).toEqual(["toggle-visibility", "toggle-isolate", "rename"]);
+  });
+});
+
+/** Fires a click on an asserted-present element. */
+function fireClick(element: HTMLElement | null): void {
+  expect(element).not.toBeNull();
+  if (element === null) return;
+  element.click();
+}

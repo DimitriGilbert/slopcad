@@ -18,7 +18,8 @@ pair).
 `solid.union`, `solid.subtract`,
 `solid.intersect`, `solid.transform`, `solid.bounds`, `solid.volume`,
 `solid.area`, `solid.tessellate`, `solid.dispose`, `solid.fillet`,
-`solid.chamfer`, `solid.shell`, `solid.thicken`, `solid.mirror`, `solid.topology`,
+`solid.chamfer`, `solid.shell`, `solid.thicken`, `solid.mirror`,
+`solid.moveFace`, `solid.replaceFace`, `solid.deleteFace`, `solid.topology`,
 `step.import`, `step.export`, `brep.import`, `brep.export`. Inputs and
 results serialize with every length normalized to canonical millimetres
 — two equal quantities always produce identical bytes.

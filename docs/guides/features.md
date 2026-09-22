@@ -29,8 +29,9 @@ The bridge vocabulary is `BRIDGE_FEATURE_KINDS` (`@slopcad/cad-kernel`'s
 `subtract`, `intersect`, `translate`, `extrude`, `revolve`, `sweep`,
 `loft`, `helix`, `thread`, `fillet`, `chamfer`, `shell`,
 `patternLinear`, `patternCircular`, `patternFeature`, `patternPath`,
-`patternFace`, `mirror`, `hole`, `rib`, `scale`, `thicken`, `split` —
-each kind documents its input contract in the `core-bridge.ts` header.
+`patternFace`, `mirror`, `hole`, `rib`, `scale`, `thicken`, `split`,
+`moveFace`, `replaceFace`, `deleteFace` — each kind documents its input
+contract in the `core-bridge.ts` header.
 
 ## Patterns and mirror (Phase 26.8/26.9; completion Phase 43)
 
@@ -200,6 +201,57 @@ Five more kinds ride the same bridge:
 
 Each has its workbench command and Formedible form (Draft, Rib, Scale,
 Thicken, Split) and re-drives through `parameter.set` on its numbers.
+
+## The local face operations (Phase 44)
+
+Three direct-manipulation kinds over the persistent FACE reference
+vocabulary (the fillet/shell resolution battery — one target, exactly
+one face reference):
+
+- `moveFace` — one target, one FACE reference, two parameters in order:
+  axis (DIMENSIONLESS 1 = X, 2 = Y, 3 = Z) and distance (LENGTH,
+  signed). The draft-free local move: the face translates rigidly and
+  the neighbours extend or retract; the volume changes by the swept
+  prism `A·(n̂·d⃗)` exactly on OCCT. Gated on `localFaceOps`.
+- `replaceFace` — one target, one FACE reference, one datum PLANE: the
+  solid re-closes at the plane. A parallel plane moves the face to its
+  station (extend or shrink); an oblique plane cuts the far half-space
+  away (shrink only — the kept side holds the target's volume
+  centroid). Gated on `localFaceOps`.
+- `deleteFace` — one target, one FACE reference, one DIMENSIONLESS heal
+  flag (1 extends the neighbours to close the gap, 0 leaves it open).
+  PROBED OUT on every current kernel (the sewn-minus-one shell and
+  `ShapeFix_Solid`'s close are both invalid on the OCCT binding — see
+  `docs/architecture/occt-prespike-findings.md`): the kind is honest
+  surface, its submission surfaces the structured refusal verbatim.
+
+The `translate` kind also grows an OPTIONAL rotation pair (Phase 44's
+move-body completion): two further parameters, axis (1|2|3) and angle —
+the contract `transform`'s own rotation, applied about the world-origin
+axis before the translation, gated on `transformRotation`. Absent pair
+= the plain translation, unchanged.
+
+## Body management (Phase 44)
+
+Body records carry two display flags — `visible` (default true) and
+`isolated` (default false) — mutated by the `body.update` command (a
+PARTIAL update: only the carried fields change, so rename, visibility,
+and isolation each ride their own undoable command):
+
+```ts
+doc = applyCommand(doc, {
+  type: "body.update",
+  id: B_BOSS,
+  visible: false, // hide; isolated: true isolates
+}).value;
+```
+
+The flags serialize additively (emitted only when non-default, so
+flagless documents resave byte-identically) and feed the renderer
+projection filter (`filterProjectionByBodyDisplay`): hidden bodies
+drop, and when ANY body is isolated only the isolated bodies render.
+The workbench's model tree carries the affordances — the visibility
+eye, the isolation crosshair, and rename (a Formedible form).
 
 ## The structured hole (Phase 42)
 

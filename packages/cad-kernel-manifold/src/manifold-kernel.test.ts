@@ -112,6 +112,7 @@ describe("manifold kernel identity and capabilities", () => {
       extrudeTaper: false,
       mirror: true,
       surfaceArea: true,
+      localFaceOps: false,
     });
   });
 

@@ -111,7 +111,10 @@ type SolidProducingOperation =
   | "solid.chamfer"
   | "solid.shell"
   | "solid.thicken"
-  | "solid.mirror";
+  | "solid.mirror"
+  | "solid.moveFace"
+  | "solid.replaceFace"
+  | "solid.deleteFace";
 
 /** What executing a request produced, before the ledger decides delivery. */
 type ExecutionOutcome =
@@ -725,6 +728,82 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             : {
                 status: "failed",
                 error: kernelFailure("solid.mirror", result.error),
+              };
+        }
+        case "solid.moveFace": {
+          // The Phase 44 local face move: the target resolves against the
+          // session map, the face rides as a snapshot ordinal, the
+          // displacement as a direction triple plus a signed length, and
+          // the kernel's own structured codes (unknown ordinal, no-op
+          // refusal, unsupported engine) cross back as
+          // `worker/operation-failed` data.
+          const solid = ownedSolid("solid.moveFace", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.moveFace({
+            target: solid.handle,
+            face: request.input.face,
+            direction: request.input.direction,
+            distance: request.input.distance,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.moveFace",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.moveFace", result.error),
+              };
+        }
+        case "solid.replaceFace": {
+          // The Phase 44 datum-plane re-close: the move dispatch's shape
+          // with the plane riding in the displacement's place.
+          const solid = ownedSolid("solid.replaceFace", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.replaceFace({
+            target: solid.handle,
+            face: request.input.face,
+            plane: request.input.plane,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.replaceFace",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.replaceFace", result.error),
+              };
+        }
+        case "solid.deleteFace": {
+          // The Phase 44 removal — the probed-out op: the dispatch runs
+          // the call on every kernel, and the structured refusal is the
+          // honest answer that crosses back (the fake-kernel subset
+          // discipline carried to a whole operation).
+          const solid = ownedSolid("solid.deleteFace", request.input.target);
+          if (solid.status === "failed") {
+            return { status: "failed", error: solid.error };
+          }
+          const result = kernel.deleteFace({
+            target: solid.handle,
+            face: request.input.face,
+            heal: request.input.heal,
+          });
+          return result.ok
+            ? {
+                status: "solid",
+                operation: "solid.deleteFace",
+                handle: result.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("solid.deleteFace", result.error),
               };
         }
         case "solid.topology": {
