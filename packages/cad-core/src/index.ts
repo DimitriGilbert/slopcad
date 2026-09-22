@@ -329,6 +329,7 @@ export type {
 } from "./document";
 export {
   addBody,
+  updateBody,
   addDocumentDatum,
   addDocumentParameter,
   addFeature,
@@ -447,6 +448,8 @@ export {
   boundsFromPositions,
   createRenderObjectId,
   createRenderProjection,
+  bodyRendersInProjection,
+  filterProjectionByBodyDisplay,
   parseRenderCamera,
   parseRenderObjectId,
   parseRenderProjection,

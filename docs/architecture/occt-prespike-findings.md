@@ -307,3 +307,38 @@ validates before any OCCT object exists. `BRepBuilderAPI_GTransform`
 doc-comment mention beside `Geom2d_Curve` factories], confirming the
 roadmap's ruling: non-uniform scaling stays documented OUT until the
 binding grows it.
+
+## Addendum — Phase 44 local face operation probes (move/replace/delete face)
+
+The binding truth for the Phase 44 direct-manipulation family, probed on
+the same 30×20×10 box's top face (ordinal 5 of the explorer order):
+
+- `BRepFeat` carries exactly ONE feature class on this binding:
+  `BRepFeat_MakeDPrism` (plus the `Form` base). No `MakeCylindricalHole`,
+  no `SplitShape`, no glue machinery [probed against
+  `dist/replicad_multi.d.ts`].
+- `BRepFeat_MakeDPrism`'s FUSE direction is exact: DPrism(solid, face,
+  face, ..., fuse) at +2 mm measured **7200** mm³ — the prism delta. Its
+  CUT mode is UNTRUSTWORTHY here: the inward call returned the UNCHANGED
+  target (**6000** where the inward prism measures 4800), silently [probed]
+  — so the adapter does not ride it.
+- The COMPOSITION route is exact in both directions and obliquely:
+  `BRepPrimAPI_MakePrism(face, displacement)` + one
+  `BRepAlgoAPI_Fuse` (out-of-material component positive) or
+  `BRepAlgoAPI_Cut` (negative) measured **7200** / **4800** mm³ axial and
+  **6960** mm³ for the oblique (1.2, 0, 1.6) displacement — each the
+  prism `A·(n̂·d⃗)` at 0 relative error [probed]. This is the adapter's
+  route; `replaceFace`'s parallel regime rides it (station move) and its
+  oblique regime rides `planSplitCut`'s frame-aligned covering box (the
+  split's own planner).
+- `deleteFace` is probed OUT, both modes: sewing the remaining five
+  faces (`BRepBuilderAPI_Sewing` at 1e-6) yields a shell whose
+  `BRepBuilderAPI_MakeSolid` wrap is INVALID (BRepCheck rejects it,
+  volume **0**, **4 free edges**), and `ShapeFix_Solid.SolidFromShell`'s
+  close of the same shell is invalid identically [probed] — and the
+  kernel contract's closed-solid semantics cannot carry an unbounded
+  region's volume honestly. Every kernel therefore declines the
+  operation with the structured `kernel/unsupported-operation`; the
+  contract op exists so the vocabulary and the feature kind are honest
+  surface today and a kernel that grows an honest route lights up
+  without another contract change.

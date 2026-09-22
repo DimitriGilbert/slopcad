@@ -43,6 +43,9 @@ describe("occt kernel contract", () => {
       // exploration): ordinal 5 is the fixture box's top face — the z-high
       // 10 mm-extent opening the shell fixtures require.
       shell: { openFace: 5 },
+      // The same top-face ordinal addresses the Phase 44 local face
+      // fixtures' moves and parallel-plane replaces.
+      localFace: { topFace: 5 },
     },
   );
 });

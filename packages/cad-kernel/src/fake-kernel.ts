@@ -84,10 +84,13 @@ import {
   KERNEL_ERROR_CODES,
   type KernelSolid,
   type MirrorInput,
+  type MoveFaceInput,
+  type DeleteFaceInput,
   type ProfileExtrudeInput,
   type ProfileLoftInput,
   type ProfileRevolveInput,
   type ProfileSweepInput,
+  type ReplaceFaceInput,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -205,6 +208,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   extrudeTaper: true,
   mirror: true,
   surfaceArea: true,
+  localFaceOps: false,
 });
 
 /** The fake kernel's backend id. */
@@ -4781,6 +4785,46 @@ export function createFakeKernel(): GeometryKernel {
           ),
         );
       }
+    },
+
+    moveFace(input: MoveFaceInput): KernelResult<KernelSolid> {
+      // Phase 44: the local face ops are OCCT's family — the fake
+      // kernel's analytic shape model carries no face identity to address
+      // (its `persistentTopology` is false; there is no snapshot ordinal
+      // vocabulary to resolve against), and modelling the swept prism of
+      // a boolean node's boundary would be an approximation over an
+      // approximation. The structured decline, never that.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "moveFace is unsupported by the fake kernel: its analytic shape model carries no face identity to address (persistentTopology is false), and no honest swept-prism model exists over its boolean nodes.",
+        ),
+      );
+    },
+
+    replaceFace(input: ReplaceFaceInput): KernelResult<KernelSolid> {
+      // The move's verdict, verbatim, on the datum-plane re-close.
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "replaceFace is unsupported by the fake kernel: its analytic shape model carries no face identity to address (persistentTopology is false), and no honest re-closing model exists over its boolean nodes.",
+        ),
+      );
+    },
+
+    deleteFace(input: DeleteFaceInput): KernelResult<KernelSolid> {
+      // The move's verdict, verbatim, on the removal — with the probe's
+      // extra honesty: no kernel builds this one today (see the contract
+      // op's documentation for the OCCT binding's invalid-shell probe).
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "deleteFace is unsupported by the fake kernel: its analytic shape model carries no face identity to address (persistentTopology is false), and no honest open-shell or healed model exists over its boolean nodes.",
+        ),
+      );
     },
 
     transform(

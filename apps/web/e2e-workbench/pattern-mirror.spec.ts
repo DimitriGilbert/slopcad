@@ -22,11 +22,12 @@ import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
 /**
  * The Phase 43 verbs sit in the toolbar's full-width row (below 2xl they
  * yield to the command menu), so these journeys run a wide viewport —
- * the row's authored usage. The row grew by three verbs this phase, so
- * 1920 is the width that keeps the Sketch toggle (the row's last button)
+ * the row's authored usage. The row grew by three verbs that phase and
+ * two more in Phase 44 (Boolean and Move, both yielding below 1800), so
+ * 2080 is the width that keeps the Sketch toggle (the row's last button)
  * inside the viewport.
  */
-test.use({ viewport: { width: 1920, height: 1080 } });
+test.use({ viewport: { width: 2080, height: 1080 } });
 
 const OCCT_ROOT = "workbench-complete-occt-root";
 const SKETCH = "#sketch-root";

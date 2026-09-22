@@ -51,6 +51,7 @@ const BASE_CAPABILITIES: KernelCapabilities = {
   shell: false,
   mirror: false,
   surfaceArea: false,
+  localFaceOps: false,
 };
 
 function capabilities(

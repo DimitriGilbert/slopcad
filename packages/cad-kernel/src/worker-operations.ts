@@ -203,6 +203,9 @@ export const WORKER_OPERATION_IDS = [
   "solid.shell",
   "solid.thicken",
   "solid.mirror",
+  "solid.moveFace",
+  "solid.replaceFace",
+  "solid.deleteFace",
   "solid.topology",
   "step.import",
   "step.export",
@@ -521,6 +524,67 @@ export interface WorkerThickenInput {
 }
 
 /**
+ * Input of `solid.moveFace` (Phase 44): the target solid, the ONE face to
+ * move as the target's topology-snapshot FACE ordinal, and the
+ * displacement as a direction triple plus a signed distance — the
+ * contract's `MoveFaceInput` carried across the wire. Whether the ordinal
+ * names a face, the direction normalizes, and the move changes anything
+ * is the kernel contract's semantic call
+ * (`kernel/faceop-face-unknown`, `kernel/faceop-failed`); the codec
+ * checks structure only.
+ */
+export interface WorkerMoveFaceInput {
+  readonly target: WorkerSolidId;
+  readonly face: number;
+  readonly direction: readonly [number, number, number];
+  readonly distance: LengthValue;
+}
+
+/**
+ * The datum plane of `solid.replaceFace` (Phase 44) on the wire: one
+ * point on the plane as canonical lengths and the plane's normal as a
+ * dimensionless direction triple — the contract's
+ * `ReplaceFacePlaneInput` carried across the wire.
+ */
+export interface WorkerReplaceFacePlaneInput {
+  readonly origin: {
+    readonly x: LengthValue;
+    readonly y: LengthValue;
+    readonly z: LengthValue;
+  };
+  readonly normal: readonly [number, number, number];
+}
+
+/**
+ * Input of `solid.replaceFace` (Phase 44): the target solid, the ONE face
+ * to replace as the target's topology-snapshot FACE ordinal, and the
+ * datum plane the face is re-closed at — the contract's
+ * `ReplaceFaceInput` carried across the wire. Whether the plane bounds
+ * the face's region is the kernel contract's semantic call
+ * (`kernel/faceop-failed`); the codec checks structure only.
+ */
+export interface WorkerReplaceFaceInput {
+  readonly target: WorkerSolidId;
+  readonly face: number;
+  readonly plane: WorkerReplaceFacePlaneInput;
+}
+
+/**
+ * Input of `solid.deleteFace` (Phase 44): the target solid, the ONE face
+ * to delete as the target's topology-snapshot FACE ordinal, and the heal
+ * flag — the contract's `DeleteFaceInput` carried across the wire. Every
+ * current kernel declines the operation (the probed-out honest surface;
+ * see the contract op's documentation), so the wire form exists for
+ * vocabulary completeness: the structured refusal crosses back through
+ * the ordinary failure path.
+ */
+export interface WorkerDeleteFaceInput {
+  readonly target: WorkerSolidId;
+  readonly face: number;
+  readonly heal: boolean;
+}
+
+/**
  * Input of `solid.topology` (Phase 26.5): the solid to report plus the
  * labeling context the kernel-neutral snapshot carries — the document body
  * the solid stands for and the regeneration the snapshot stands at. Both
@@ -825,6 +889,9 @@ export interface WorkerOperationInputs {
   readonly "solid.shell": WorkerShellInput;
   readonly "solid.thicken": WorkerThickenInput;
   readonly "solid.mirror": WorkerMirrorInput;
+  readonly "solid.moveFace": WorkerMoveFaceInput;
+  readonly "solid.replaceFace": WorkerReplaceFaceInput;
+  readonly "solid.deleteFace": WorkerDeleteFaceInput;
   readonly "solid.topology": WorkerTopologyInput;
   readonly "step.import": WorkerStepImportInput;
   readonly "step.export": WorkerStepExportInput;
@@ -862,6 +929,9 @@ export interface WorkerOperationResults {
   readonly "solid.shell": WorkerSolidResult;
   readonly "solid.thicken": WorkerSolidResult;
   readonly "solid.mirror": WorkerSolidResult;
+  readonly "solid.moveFace": WorkerSolidResult;
+  readonly "solid.replaceFace": WorkerSolidResult;
+  readonly "solid.deleteFace": WorkerSolidResult;
   readonly "solid.topology": WorkerTopologyResult;
   readonly "step.import": WorkerStepImportResult;
   readonly "step.export": WorkerStepExportResult;
@@ -1048,6 +1118,29 @@ export interface SerializedWorkerOperationInputs {
     readonly axis: MirrorPlaneAxis;
     readonly offset: SerializedWorkerLength;
   };
+  readonly "solid.moveFace": {
+    readonly target: string;
+    readonly face: number;
+    readonly direction: readonly [number, number, number];
+    readonly distance: SerializedWorkerLength;
+  };
+  readonly "solid.replaceFace": {
+    readonly target: string;
+    readonly face: number;
+    readonly plane: {
+      readonly origin: {
+        readonly x: SerializedWorkerLength;
+        readonly y: SerializedWorkerLength;
+        readonly z: SerializedWorkerLength;
+      };
+      readonly normal: readonly [number, number, number];
+    };
+  };
+  readonly "solid.deleteFace": {
+    readonly target: string;
+    readonly face: number;
+    readonly heal: boolean;
+  };
   readonly "solid.topology": {
     readonly solid: string;
     readonly bodyId: string;
@@ -1148,6 +1241,15 @@ export interface SerializedWorkerOperationResults {
     readonly solid: string;
   };
   readonly "solid.mirror": {
+    readonly solid: string;
+  };
+  readonly "solid.moveFace": {
+    readonly solid: string;
+  };
+  readonly "solid.replaceFace": {
+    readonly solid: string;
+  };
+  readonly "solid.deleteFace": {
     readonly solid: string;
   };
   /**
@@ -2911,6 +3013,180 @@ function parseThickenInput(
   return ok({ target: target.value, thickness: thickness.value });
 }
 
+/** A single non-negative integer ordinal, or `undefined` when malformed. */
+function nonNegativeOrdinal(field: unknown): number | undefined {
+  return typeof field === "number" && Number.isInteger(field) && field >= 0
+    ? field
+    : undefined;
+}
+
+function serializeMoveFaceInput(
+  input: WorkerMoveFaceInput,
+): SerializedWorkerOperationInput<"solid.moveFace"> {
+  return {
+    target: input.target,
+    face: input.face,
+    direction: [...input.direction],
+    distance: serializeDimensionalValue(input.distance),
+  };
+}
+
+function parseMoveFaceInput(
+  payload: unknown,
+): ParseResult<WorkerMoveFaceInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.moveFace", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.moveFace",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const face = nonNegativeOrdinal(record.value.face);
+  if (face === undefined) {
+    return payloadError(
+      'The "solid.moveFace" field "face" must be a non-negative integer ordinal.',
+      record.value.face,
+    );
+  }
+  const direction = requireAxisField(
+    "solid.moveFace",
+    "direction",
+    record.value.direction,
+  );
+  if (!direction.ok) return direction;
+  const distance = requireLengthField(
+    "solid.moveFace",
+    "distance",
+    record.value.distance,
+  );
+  if (!distance.ok) return distance;
+  return ok({
+    target: target.value,
+    face,
+    direction: direction.value,
+    distance: distance.value,
+  });
+}
+
+function serializeReplaceFaceInput(
+  input: WorkerReplaceFaceInput,
+): SerializedWorkerOperationInput<"solid.replaceFace"> {
+  return {
+    target: input.target,
+    face: input.face,
+    plane: {
+      origin: {
+        x: serializeDimensionalValue(input.plane.origin.x),
+        y: serializeDimensionalValue(input.plane.origin.y),
+        z: serializeDimensionalValue(input.plane.origin.z),
+      },
+      normal: [...input.plane.normal],
+    },
+  };
+}
+
+function parseReplaceFaceInput(
+  payload: unknown,
+): ParseResult<WorkerReplaceFaceInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.replaceFace", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.replaceFace",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const face = nonNegativeOrdinal(record.value.face);
+  if (face === undefined) {
+    return payloadError(
+      'The "solid.replaceFace" field "face" must be a non-negative integer ordinal.',
+      record.value.face,
+    );
+  }
+  if (!isPlainRecord(record.value.plane)) {
+    return payloadError(
+      'The "solid.replaceFace" field "plane" must be a plain object with origin and normal fields.',
+      record.value.plane,
+    );
+  }
+  if (!isPlainRecord(record.value.plane.origin)) {
+    return payloadError(
+      'The "solid.replaceFace" field "plane.origin" must be a plain object with x, y, z length fields.',
+      record.value.plane.origin,
+    );
+  }
+  const ox = requireLengthField(
+    "solid.replaceFace",
+    "plane.origin.x",
+    record.value.plane.origin.x,
+  );
+  if (!ox.ok) return ox;
+  const oy = requireLengthField(
+    "solid.replaceFace",
+    "plane.origin.y",
+    record.value.plane.origin.y,
+  );
+  if (!oy.ok) return oy;
+  const oz = requireLengthField(
+    "solid.replaceFace",
+    "plane.origin.z",
+    record.value.plane.origin.z,
+  );
+  if (!oz.ok) return oz;
+  const normal = requireAxisField(
+    "solid.replaceFace",
+    "plane.normal",
+    record.value.plane.normal,
+  );
+  if (!normal.ok) return normal;
+  return ok({
+    target: target.value,
+    face,
+    plane: {
+      origin: { x: ox.value, y: oy.value, z: oz.value },
+      normal: normal.value,
+    },
+  });
+}
+
+function serializeDeleteFaceInput(
+  input: WorkerDeleteFaceInput,
+): SerializedWorkerOperationInput<"solid.deleteFace"> {
+  return {
+    target: input.target,
+    face: input.face,
+    heal: input.heal,
+  };
+}
+
+function parseDeleteFaceInput(
+  payload: unknown,
+): ParseResult<WorkerDeleteFaceInput, WorkerParseError> {
+  const record = requirePayloadRecord("solid.deleteFace", payload);
+  if (!record.ok) return record;
+  const target = requireSolidIdField(
+    "solid.deleteFace",
+    "target",
+    record.value.target,
+  );
+  if (!target.ok) return target;
+  const face = nonNegativeOrdinal(record.value.face);
+  if (face === undefined) {
+    return payloadError(
+      'The "solid.deleteFace" field "face" must be a non-negative integer ordinal.',
+      record.value.face,
+    );
+  }
+  if (typeof record.value.heal !== "boolean") {
+    return payloadError(
+      'The "solid.deleteFace" field "heal" must be a boolean.',
+      record.value.heal,
+    );
+  }
+  return ok({ target: target.value, face, heal: record.value.heal });
+}
+
 /**
  * Reads the optional `solid.transform` scale field: `undefined` when
  * absent (the pre-extension wire), the finite number when present, and
@@ -3332,6 +3608,9 @@ const INPUT_SERIALIZERS: {
   "solid.shell": serializeShellInput,
   "solid.thicken": serializeThickenInput,
   "solid.mirror": serializeMirrorInput,
+  "solid.moveFace": serializeMoveFaceInput,
+  "solid.replaceFace": serializeReplaceFaceInput,
+  "solid.deleteFace": serializeDeleteFaceInput,
   "solid.topology": serializeTopologyInput,
   "step.import": serializeStepImportInput,
   "step.export": serializeStepExportInput,
@@ -3369,6 +3648,9 @@ const INPUT_PARSERS: {
   "solid.shell": parseShellInput,
   "solid.thicken": parseThickenInput,
   "solid.mirror": parseMirrorInput,
+  "solid.moveFace": parseMoveFaceInput,
+  "solid.replaceFace": parseReplaceFaceInput,
+  "solid.deleteFace": parseDeleteFaceInput,
   "solid.topology": parseTopologyInput,
   "step.import": parseStepImportInput,
   "step.export": parseStepExportInput,
@@ -3698,6 +3980,9 @@ const RESULT_SERIALIZERS: {
   "solid.shell": serializeSolidResult,
   "solid.thicken": serializeSolidResult,
   "solid.mirror": serializeSolidResult,
+  "solid.moveFace": serializeSolidResult,
+  "solid.replaceFace": serializeSolidResult,
+  "solid.deleteFace": serializeSolidResult,
   "solid.topology": serializeTopologyResult,
   "step.import": serializeStepImportResult,
   "step.export": serializeStepExportResult,
@@ -3737,6 +4022,11 @@ const RESULT_PARSERS: {
   "solid.shell": (payload) => parseSolidResult("solid.shell", payload),
   "solid.thicken": (payload) => parseSolidResult("solid.thicken", payload),
   "solid.mirror": (payload) => parseSolidResult("solid.mirror", payload),
+  "solid.moveFace": (payload) => parseSolidResult("solid.moveFace", payload),
+  "solid.replaceFace": (payload) =>
+    parseSolidResult("solid.replaceFace", payload),
+  "solid.deleteFace": (payload) =>
+    parseSolidResult("solid.deleteFace", payload),
   "solid.topology": parseTopologyResult,
   "step.import": parseStepImportResult,
   "step.export": parseStepExportResult,
@@ -3805,6 +4095,9 @@ const RESULT_MINTS: {
   "solid.shell": (result) => [result.solid],
   "solid.thicken": (result) => [result.solid],
   "solid.mirror": (result) => [result.solid],
+  "solid.moveFace": (result) => [result.solid],
+  "solid.replaceFace": (result) => [result.solid],
+  "solid.deleteFace": (result) => [result.solid],
   "solid.topology": () => [],
   "step.import": (result) => result.solids.map((ref) => ref.solid),
   "step.export": () => [],

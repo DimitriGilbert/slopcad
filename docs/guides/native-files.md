@@ -34,8 +34,17 @@ same undo/redo reach, same regeneration picture, same metadata.
    record the last executor run's outcomes — recomputing them at load
    would mean executing geometry before the document is even visible.
 3. **Derived kernel objects never become canonical.** Bodies persist as
-   `{ id, name }`; geometry is rebuilt by regeneration. Nothing derived
-   from a kernel appears in the file.
+   `{ id, name }` (plus the Phase 44 display flags `visible`/`isolated`,
+   emitted only when non-default — `visible: false`, `isolated: true` —
+   so a flagless document serializes byte-identically to its pre-flag
+   form); geometry is rebuilt by regeneration. Nothing derived from a
+   kernel appears in the file. The flags' growth stays at envelope v3 by
+   the stated reasoning: an old reader's tolerant body parse ignores the
+   additive fields (display state dropped, never corrupted — no model
+   data rides them), and the `body.update` command that writes them is
+   the Phase 20 command-type disclosure pattern (written only by this
+   version, rejected loudly — never mis-applied — by an older reader's
+   strict log parse), which arrived without an envelope bump.
 
 ## The API
 

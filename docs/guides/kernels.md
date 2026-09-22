@@ -40,6 +40,7 @@ Read the flags from the kernels' own constants
 | extrudeTaper          | —        | ✓           | ✓     | ✓    |
 | mirror                | ✓        | ✓           | ✓     | ✓    |
 | surfaceArea           | ✓        | ✓           | ✓     | ✓    |
+| localFaceOps          | —        | ✓           | —     | —    |
 
 Every capability-gated decline answers the structured
 `kernel/unsupported-operation` — Manifold's `sweep`, its `fillet`,

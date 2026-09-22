@@ -557,6 +557,9 @@ describe("bridge feature kinds", () => {
       "scale",
       "thicken",
       "split",
+      "moveFace",
+      "replaceFace",
+      "deleteFace",
     ]);
   });
 });

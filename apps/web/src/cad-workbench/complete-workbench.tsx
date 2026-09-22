@@ -117,6 +117,10 @@ import {
   RibFeatureForm,
   ScaleFeatureForm,
   SplitFeatureForm,
+  BooleanFeatureForm,
+  MoveBodyFeatureForm,
+  BodyRenameForm,
+  type CadFeatureBodyOption,
   ThreadFeatureForm,
   ThickenFeatureForm,
   LoftFeatureForm,
@@ -322,6 +326,11 @@ export function CompleteCadWorkbench({
     handleScale,
     handleThicken,
     handleSplit,
+    handleBoolean,
+    handleMoveBody,
+    handleBodyRename,
+    handleBodyVisibility,
+    handleBodyIsolate,
     handleStructuredHole,
     handlePattern,
     handlePatternPath,
@@ -355,8 +364,12 @@ export function CompleteCadWorkbench({
     | "patternPath"
     | "mirror"
     | "datum"
+    | "boolean"
+    | "moveBody"
     | null
   >(null);
+  // The Phase 44 body rename dialog: which body's rename form is open.
+  const [renameBodyId, setRenameBodyId] = useState<string | null>(null);
   const [featureOutcome, setFeatureOutcome] = useState<
     | { readonly ok: true }
     | { readonly ok: false; readonly code: string; readonly message: string }
@@ -538,6 +551,27 @@ export function CompleteCadWorkbench({
       ? [{ id: datum.id, name: datum.name }]
       : [];
   });
+  // The body pool the boolean form picks from (Phase 44): the bodies an
+  // EXTRUDE outputs — the boolean scene's operand contract
+  // (`documentBooleanSceneRequest` pairs every operand with its own
+  // extrusion, so any other producer — the seeded document's translate
+  // and rotate bodies — cannot pair and the scene would silently keep
+  // the prior render), name verbatim — the sketch pool's discipline.
+  const featureProducedBodies: readonly CadFeatureBodyOption[] =
+    workbenchDocument.bodies.flatMap((body) =>
+      workbenchDocument.features.some(
+        (feature) =>
+          feature.kind === "extrude" && feature.outputs.includes(body.id),
+      )
+        ? [{ id: body.id, name: body.name }]
+        : [],
+    );
+  // The body the rename dialog is renaming (its current name seeds the form).
+  const renameBody =
+    renameBodyId === null
+      ? null
+      : (workbenchDocument.bodies.find((body) => body.id === renameBodyId) ??
+        null);
 
   /** Runs the sweep submission, surfacing the refusal and closing on success. */
   const submitSweep = (profileId: string, pathId: string): void => {
@@ -625,6 +659,31 @@ export function CompleteCadWorkbench({
     if (outcome.ok) setFeatureDialog(null);
   };
 
+  /** Runs the boolean submission (Phase 44), surfacing the refusal. */
+  const submitBoolean = (specification: {
+    readonly operation: "union" | "subtract" | "intersect";
+    readonly targetBodyId: string;
+    readonly toolBodyIds: readonly string[];
+    readonly keepToolBodies: boolean;
+  }): void => {
+    const outcome = handleBoolean(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the move-body submission (Phase 44), surfacing the refusal. */
+  const submitMoveBody = (specification: {
+    readonly offsetMm: readonly [number, number, number];
+    readonly rotation: {
+      readonly axis: 1 | 2 | 3;
+      readonly angleDeg: number;
+    } | null;
+  }): void => {
+    const outcome = handleMoveBody(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
   /** Runs the structured hole submission, surfacing the refusal. */
   const submitStructuredHole = (
     submission: Parameters<typeof handleStructuredHole>[0],
@@ -691,7 +750,9 @@ export function CompleteCadWorkbench({
         | "pattern"
         | "patternPath"
         | "mirror"
-        | "datum",
+        | "datum"
+        | "boolean"
+        | "moveBody",
     ): void => {
       setFeatureOutcome(null);
       if (kind === "hole") {
@@ -950,6 +1011,26 @@ export function CompleteCadWorkbench({
         run: sketchOnSelectedFace,
       },
       {
+        disabled: !(featureProducedBodies.length >= 2),
+        group: "Workspace",
+        id: "boolean",
+        keywords: "boolean union subtract intersect combine bodies cut join",
+        label: "Combine bodies (boolean)",
+        run: () => {
+          openFeatureDialog("boolean");
+        },
+      },
+      {
+        disabled: !hasExtrudeBase,
+        group: "Workspace",
+        id: "move-body",
+        keywords: "move translate rotate body position transform",
+        label: "Move the last extrusion",
+        run: () => {
+          openFeatureDialog("moveBody");
+        },
+      },
+      {
         group: "Workspace",
         id: "create-datum",
         keywords: "datum plane axis point coordinate system reference create",
@@ -987,6 +1068,7 @@ export function CompleteCadWorkbench({
     applied,
     canAuthorSketchFeatures,
     clearSelection,
+    featureProducedBodies.length,
     handleHole,
     hasExtrudeBase,
     datumPlaneOptions.length,
@@ -1359,6 +1441,36 @@ export function CompleteCadWorkbench({
   const defaultModelTree =
     regenerationStates === null ? null : (
       <CadModelTree
+        bodyDisplay={(bodyId) => {
+          const body = workbenchDocument.bodies.find(
+            (candidate) => candidate.id === bodyId,
+          );
+          return body === undefined
+            ? undefined
+            : {
+                visible: body.visible !== false,
+                isolated: body.isolated === true,
+              };
+        }}
+        onBodyAction={(action) => {
+          if (action.type === "rename") {
+            setRenameBodyId(action.bodyId);
+            return;
+          }
+          if (action.type === "toggle-visibility") {
+            const body = workbenchDocument.bodies.find(
+              (candidate) => candidate.id === action.bodyId,
+            );
+            if (body === undefined) return;
+            handleBodyVisibility(action.bodyId, body.visible === false);
+            return;
+          }
+          const body = workbenchDocument.bodies.find(
+            (candidate) => candidate.id === action.bodyId,
+          );
+          if (body === undefined) return;
+          handleBodyIsolate(action.bodyId, body.isolated !== true);
+        }}
         regenerationStates={regenerationStates}
         className="w-full rounded-none border-0 bg-transparent"
       />
@@ -1921,6 +2033,42 @@ export function CompleteCadWorkbench({
         >
           Mirror
         </Button>
+        <Button
+          className="max-[1799px]:hidden"
+          data-testid="complete-boolean"
+          disabled={!(featureProducedBodies.length >= 2)}
+          onClick={() => {
+            openFeatureDialog("boolean");
+          }}
+          size="xs"
+          title={
+            featureProducedBodies.length >= 2
+              ? "Combine two bodies: union, subtract, or intersect, with a keep-tool toggle."
+              : "Extrude two profiles first; a boolean needs a target and a tool body."
+          }
+          type="button"
+          variant="outline"
+        >
+          Boolean
+        </Button>
+        <Button
+          className="max-[1799px]:hidden"
+          data-testid="complete-move-body"
+          disabled={!hasExtrudeBase}
+          onClick={() => {
+            openFeatureDialog("moveBody");
+          }}
+          size="xs"
+          title={
+            hasExtrudeBase
+              ? "Move the latest extrusion: translate it, optionally rotating about a world axis first."
+              : "Extrude a profile first; a move needs a body."
+          }
+          type="button"
+          variant="outline"
+        >
+          Move
+        </Button>
         {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
             the datum form needs nothing. Both stay in the command menu on
             narrow rows. Sketch-on-face is the row's widest contextual verb
@@ -2168,7 +2316,11 @@ export function CompleteCadWorkbench({
                                         ? CAD_FEATURE_FORM_LABELS.patternPathTitle
                                         : featureDialog === "mirror"
                                           ? CAD_FEATURE_FORM_LABELS.mirrorTitle
-                                          : DATUM_FORM_LABELS.title}
+                                          : featureDialog === "boolean"
+                                            ? CAD_FEATURE_FORM_LABELS.booleanTitle
+                                            : featureDialog === "moveBody"
+                                              ? CAD_FEATURE_FORM_LABELS.moveBodyTitle
+                                              : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -2196,7 +2348,11 @@ export function CompleteCadWorkbench({
                                     ? CAD_FEATURE_FORM_LABELS.patternPathHint
                                     : featureDialog === "mirror"
                                       ? CAD_FEATURE_FORM_LABELS.mirrorHint
-                                      : DATUM_FORM_LABELS.hint}
+                                      : featureDialog === "boolean"
+                                        ? CAD_FEATURE_FORM_LABELS.booleanHint
+                                        : featureDialog === "moveBody"
+                                          ? CAD_FEATURE_FORM_LABELS.moveBodyHint
+                                          : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "sweep" ? (
               <SweepFeatureForm
@@ -2248,6 +2404,13 @@ export function CompleteCadWorkbench({
                 datumPlanes={datumPlaneOptions}
                 onMirror={submitMirror}
               />
+            ) : featureDialog === "boolean" ? (
+              <BooleanFeatureForm
+                bodies={featureProducedBodies}
+                onBoolean={submitBoolean}
+              />
+            ) : featureDialog === "moveBody" ? (
+              <MoveBodyFeatureForm onMoveBody={submitMoveBody} />
             ) : (
               <DatumFeatureForm
                 onCreateDatum={(payload) => {
@@ -2257,6 +2420,50 @@ export function CompleteCadWorkbench({
                 }}
               />
             )}
+            {featureOutcome !== null && !featureOutcome.ok ? (
+              <div
+                className="text-destructive border-destructive/40 rounded-sm border px-2 py-1.5 text-xs leading-4"
+                data-testid="feature-form-error"
+                role="alert"
+              >
+                {`${featureOutcome.code}: ${featureOutcome.message}`}
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
+      ) : null}
+      {/* The Phase 44 body rename dialog: mount-if-open, the feature
+          dialog's SSR discipline verbatim. */}
+      {renameBody !== null ? (
+        <Dialog
+          onOpenChange={(open) => {
+            if (!open) {
+              setRenameBodyId(null);
+              setFeatureOutcome(null);
+            }
+          }}
+          open
+        >
+          <DialogContent
+            className="sm:max-w-sm"
+            data-testid="body-rename-dialog"
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {CAD_FEATURE_FORM_LABELS.renameBodyTitle}
+              </DialogTitle>
+            </DialogHeader>
+            <BodyRenameForm
+              currentName={renameBody.name}
+              onRename={(name) => {
+                const outcome = handleBodyRename(renameBody.id, name);
+                setFeatureOutcome(outcome);
+                if (outcome.ok) {
+                  setRenameBodyId(null);
+                  setFeatureOutcome(null);
+                }
+              }}
+            />
             {featureOutcome !== null && !featureOutcome.ok ? (
               <div
                 className="text-destructive border-destructive/40 rounded-sm border px-2 py-1.5 text-xs leading-4"

@@ -50,6 +50,8 @@ export type WorkbenchSceneKind =
   | "loft"
   | "helix"
   | "thread"
+  | "boolean"
+  | "moveBody"
   | "rib"
   | "scale"
   | "thicken"

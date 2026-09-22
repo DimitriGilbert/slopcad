@@ -16,15 +16,18 @@ import {
   type ChamferInput,
   type ConeInput,
   type CylinderInput,
+  type DeleteFaceInput,
   type FilletInput,
   type GeometryKernel,
   type KernelResult,
   type MirrorInput,
+  type MoveFaceInput,
   type ProfileExtrudeInput,
   type HelixSweepInput,
   type ProfileLoftInput,
   type ProfileRevolveInput,
   type ProfileSweepInput,
+  type ReplaceFaceInput,
   type ShellInput,
   type SphereInput,
   type ThickenInput,
@@ -78,6 +81,12 @@ export function withOperationLog(kernel: GeometryKernel): LoggedKernel {
     shell: (input: ShellInput) => log("shell", () => kernel.shell(input)),
     thicken: (input: ThickenInput) =>
       log("thicken", () => kernel.thicken(input)),
+    moveFace: (input: MoveFaceInput) =>
+      log("moveFace", () => kernel.moveFace(input)),
+    replaceFace: (input: ReplaceFaceInput) =>
+      log("replaceFace", () => kernel.replaceFace(input)),
+    deleteFace: (input: DeleteFaceInput) =>
+      log("deleteFace", () => kernel.deleteFace(input)),
     union: (operands: readonly KernelSolid[]) =>
       log("union", () => kernel.union(operands)),
     subtract: (target: KernelSolid, tools: readonly KernelSolid[]) =>

@@ -45,3 +45,34 @@ subtract(box, [r=4 cylinder at the box's min corner, h=10])
 against the caller's kernel; the suite pins the Manifold numbers above
 (plus the discretization band on the curved cut) and the `/docs` page
 shows them live.
+
+## The workbench command (Phase 44)
+
+The user-level surface rides the EXISTING feature kinds — `union`,
+`subtract`, `intersect` have been bridge vocabulary since Phase 8; Phase
+44 gives them the workbench's Boolean dialog (operation selector, target
+body, one tool checkbox per feature-produced body, and a KEEP-TOOL
+toggle) and the worker scene the session dispatches. The operands are
+never deleted (history keeps every feature); "keep tools" therefore
+rides the Phase 44 body VISIBILITY flags: ON (the default) leaves every
+operand rendering, OFF consumes the tools — each tool body's
+`body.update visible:false` lands in the same atomic transaction as the
+boolean, so undo restores the display state with the feature.
+
+```ts
+doc = addFeature(doc, {
+  id: F_CUT,
+  kind: "subtract",
+  inputs: [
+    { kind: "feature", id: F_PLATE }, // the target
+    { kind: "feature", id: F_TOOL }, // 1+ tools
+  ],
+  outputs: [B_PLATE_WITH_HOLE],
+}).value.document;
+```
+
+The scene guards the composed semantics' degenerate corners: a union
+that added nothing (coincident operands), a subtract that removed
+nothing (a disjoint tool), and an intersect of disjoint operands each
+reject the computation — the hole guard's discipline, never a silent
+no-op settle.

@@ -329,6 +329,20 @@ export interface KernelBoxFaceSuiteHint {
   readonly openFace: number;
 }
 
+/**
+ * The local face operation fixtures' per-kernel face ordinal (Phase 44):
+ * the same per-kernel-address discipline the shell hint set — face
+ * ordinals are the kernel's own snapshot-style addresses — so each
+ * local-face-capable kernel's registration supplies its own address of
+ * the fixture box's TOP z face (the z = 10 face of a fresh
+ * `box(30, 20, 10)`): the move's prism delta and the replace's parallel
+ * station both act on that face's 600 mm² area.
+ */
+export interface KernelLocalFaceSuiteHint {
+  /** Ordinal addressing the fixture box's TOP z face (z = 10). */
+  readonly topFace: number;
+}
+
 /** Per-kernel suite options. */
 export interface KernelContractSuiteOptions {
   /**
@@ -349,6 +363,12 @@ export interface KernelContractSuiteOptions {
    * otherwise.
    */
   readonly shell?: KernelBoxFaceSuiteHint;
+  /**
+   * REQUIRED when the kernel declares `localFaceOps: true` (the local
+   * face fixtures throw on its absence, exactly like the fillet hint
+   * above); ignored otherwise.
+   */
+  readonly localFace?: KernelLocalFaceSuiteHint;
 }
 
 /**
@@ -408,6 +428,7 @@ export function defineKernelContractSuite(
   const filletHint = options.fillet;
   const chamferHint = options.chamfer;
   const shellHint = options.shell;
+  const localFaceHint = options.localFace;
   describe(`kernel contract: ${label}`, () => {
     it("declares a backend id and fully-formed boolean capability flags", () => {
       const kernel = createKernel();
@@ -2928,6 +2949,143 @@ export function defineKernelContractSuite(
         kernel.thicken({ target, thickness: length(5) }),
         KERNEL_ERROR_CODES.thickenFailed,
         "too-thick thicken",
+      );
+    });
+
+    // Local face operations (Phase 44). The sweep/loft/shell discipline on
+    // the direct-manipulation family: a kernel declaring `localFaceOps:
+    // false` answers EVERY call with the structured unsupported code, and
+    // the fixtures' per-kernel face ordinal comes from the registration's
+    // hint (the shell precedent).
+    it("moves and replaces a box z face at the exact prism deltas, or answers unsupported honestly", () => {
+      const kernel = createKernel();
+      const target = box(kernel, 30, 20, 10);
+      if (!kernel.capabilities.localFaceOps) {
+        expectKernelFailure(
+          kernel.moveFace({
+            target,
+            face: 0,
+            direction: [0, 0, 1],
+            distance: length(2),
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "moveFace on a kernel without the localFaceOps capability",
+        );
+        expectKernelFailure(
+          kernel.replaceFace({
+            target,
+            face: 999,
+            plane: {
+              origin: { x: length(0), y: length(0), z: length(12) },
+              normal: [0, 0, 1],
+            },
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "replaceFace stays unsupported for malformed input too",
+        );
+        return;
+      }
+      if (localFaceHint === undefined) {
+        throw new Error(
+          "Suite misuse: a kernel declaring localFaceOps: true must register its local face hint.",
+        );
+      }
+      const moved = unwrapKernelResult(
+        kernel.moveFace({
+          target,
+          face: localFaceHint.topFace,
+          direction: [0, 0, 1],
+          distance: length(2),
+        }),
+        "moveFace out",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(moved), "moved volume"),
+        7200,
+        EXACT_VOLUME_TOLERANCE,
+      );
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(moved), "moved bounds"),
+        { min: [0, 0, 0], max: [30, 20, 12] },
+        EXACT_BOUNDS_TOLERANCE,
+      );
+      const shrunk = unwrapKernelResult(
+        kernel.moveFace({
+          target,
+          face: localFaceHint.topFace,
+          direction: [0, 0, 1],
+          distance: length(-2),
+        }),
+        "moveFace in",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(shrunk), "shrunk volume"),
+        4800,
+        EXACT_VOLUME_TOLERANCE,
+      );
+      const rereplace = unwrapKernelResult(
+        kernel.replaceFace({
+          target,
+          face: localFaceHint.topFace,
+          plane: {
+            origin: { x: length(0), y: length(0), z: length(8) },
+            normal: [0, 0, 1],
+          },
+        }),
+        "replaceFace parallel shrink",
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(rereplace), "replaced volume"),
+        4800,
+        EXACT_VOLUME_TOLERANCE,
+      );
+      // A displacement perpendicular to the face sweeps zero prism volume
+      // — the no-op refusal, never a silent pass-through.
+      expectKernelFailure(
+        kernel.moveFace({
+          target,
+          face: localFaceHint.topFace,
+          direction: [1, 0, 0],
+          distance: length(5),
+        }),
+        KERNEL_ERROR_CODES.faceOpFailed,
+        "perpendicular moveFace",
+      );
+      // The stale-reference signature and the malformed-ordinal refusal.
+      expectKernelFailure(
+        kernel.moveFace({
+          target,
+          face: 999,
+          direction: [0, 0, 1],
+          distance: length(2),
+        }),
+        KERNEL_ERROR_CODES.faceOpFaceUnknown,
+        "unknown face ordinal",
+      );
+      expectKernelFailure(
+        kernel.moveFace({
+          target,
+          face: -1,
+          direction: [0, 0, 1],
+          distance: length(2),
+        }),
+        KERNEL_ERROR_CODES.invalidOperands,
+        "negative face ordinal",
+      );
+    });
+
+    it("declines deleteFace with the structured unsupported code on every kernel (the probed-out op)", () => {
+      const kernel = createKernel();
+      const target = box(kernel, 30, 20, 10);
+      expectKernelFailure(
+        kernel.deleteFace({ target, face: 0, heal: false }),
+        KERNEL_ERROR_CODES.unsupportedOperation,
+        "deleteFace without heal",
+      );
+      expectKernelFailure(
+        kernel.deleteFace({ target, face: 0, heal: true }),
+        KERNEL_ERROR_CODES.unsupportedOperation,
+        "deleteFace with heal",
       );
     });
 

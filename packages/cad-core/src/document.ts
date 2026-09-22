@@ -88,16 +88,38 @@ import {
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
-/** A solid/body entry of the document, identified by its stable {@link BodyId}. */
+/**
+ * A solid/body entry of the document, identified by its stable {@link BodyId}.
+ *
+ * Phase 44 grows the record with two DISPLAY flags — `visible` and
+ * `isolated` — the body-management vocabulary: `visible: false` hides the
+ * body from rendering (the projection filter's keep rule), `isolated:
+ * true` marks it as one of the bodies that, whenever ANY body is
+ * isolated, are the ONLY ones rendering. Both are optional with
+ * visibility-on / isolation-off defaults, emitted on the wire exactly
+ * when non-default (`visible: false`, `isolated: true`) — the
+ * id-generator counter precedent — so documents that never touched the
+ * flags serialize byte-identically to their pre-flag form, and an old
+ * reader's tolerant body parse simply drops them (display state, never
+ * model data: the flags change no geometry, feature, or parameter).
+ */
 export interface Body {
   readonly id: BodyId;
   readonly name: string;
+  /** Present exactly when the body is hidden (`false`); default visible. */
+  readonly visible?: boolean;
+  /** Present exactly when the body is isolated (`true`); default not. */
+  readonly isolated?: boolean;
 }
 
 /** Input accepted by {@link addBody}; the id is generated when omitted. */
 export interface BodyInput {
   readonly id?: BodyId;
   readonly name: string;
+  /** Present exactly when the body is hidden (`false`); default visible. */
+  readonly visible?: boolean;
+  /** Present exactly when the body is isolated (`true`); default not. */
+  readonly isolated?: boolean;
 }
 
 /**
@@ -797,7 +819,12 @@ export function addBody(
     id = parsed.value;
     idGeneratorState = claimExplicitId(idGeneratorState, "body", parsed.value);
   }
-  const body = Object.freeze({ id, name: name.value });
+  const body = Object.freeze({
+    id,
+    name: name.value,
+    ...(input.visible === undefined ? {} : { visible: input.visible }),
+    ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
+  });
   return ok({
     document: Object.freeze({
       ...document,
@@ -806,6 +833,75 @@ export function addBody(
     }),
     body,
   });
+}
+
+/**
+ * Updates a body's mutable record fields (Phase 44): the display name and
+ * the two display flags. Only the fields the update CARRIES change — a
+ * rename keeps the flags, a visibility toggle keeps the name — so each
+ * concern rides its own `body.update` command and undo replays exactly
+ * what happened. The name (when carried) follows {@link addBody}'s
+ * validation; the flags (when carried) must be real booleans, never
+ * smuggled truthy values.
+ */
+export function updateBody(
+  document: CadDocument,
+  id: BodyId,
+  input: {
+    readonly name?: string;
+    readonly visible?: boolean;
+    readonly isolated?: boolean;
+  },
+): ParseResult<CadDocument, DocumentError> {
+  const body = getBody(document, id);
+  if (body === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No body with id "${id}" exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  if (
+    input.name === undefined &&
+    input.visible === undefined &&
+    input.isolated === undefined
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A body update must carry at least one of a name, a visible flag, or an isolated flag.",
+        input,
+      ),
+    );
+  }
+  let name = body.name;
+  if (input.name !== undefined) {
+    const validated = validateBodyName(input.name);
+    if (!validated.ok) return validated;
+    name = validated.value;
+  }
+  const visible = input.visible === undefined ? body.visible : input.visible;
+  const isolated =
+    input.isolated === undefined ? body.isolated : input.isolated;
+  return ok(
+    Object.freeze({
+      ...document,
+      bodies: Object.freeze(
+        document.bodies.map((candidate) =>
+          candidate.id === id
+            ? Object.freeze({
+                id,
+                name,
+                ...(visible === undefined ? {} : { visible }),
+                ...(isolated === undefined ? {} : { isolated }),
+              })
+            : candidate,
+        ),
+      ),
+    }),
+  );
 }
 
 /**
@@ -1691,10 +1787,14 @@ export function getDocumentDatum(
   return document.datums.find((datum) => datum.id === id);
 }
 
-/** Canonical JSON form of a body. */
+/** Canonical JSON form of a body (the Phase 44 display flags ride only when non-default). */
 export interface SerializedBody {
   readonly id: string;
   readonly name: string;
+  /** Present exactly when the body is hidden; absent = visible (additive). */
+  readonly visible?: false;
+  /** Present exactly when the body is isolated; absent = not (additive). */
+  readonly isolated?: true;
 }
 
 /** Canonical JSON form of a feature input reference. */
@@ -1777,7 +1877,19 @@ export function serializeCadDocument(
     id: document.id,
     idGenerator: serializeIdGeneratorState(document.idGeneratorState),
     parameters: serializeParameterCollection(document.parameters),
-    bodies: document.bodies.map((body) => ({ id: body.id, name: body.name })),
+    bodies: document.bodies.map((body) => ({
+      id: body.id,
+      name: body.name,
+      // The display flags ride only when non-default (Phase 44) — the
+      // id-generator counter precedent — so a flagless document
+      // serializes byte-identically to its pre-flag form.
+      ...(body.visible === undefined || body.visible
+        ? {}
+        : { visible: false as const }),
+      ...(body.isolated === undefined || !body.isolated
+        ? {}
+        : { isolated: true as const }),
+    })),
     features: document.features.map((feature) => ({
       id: feature.id,
       kind: feature.kind,
@@ -1880,7 +1992,34 @@ function parseSerializedBody(input: unknown): ParseResult<Body, DocumentError> {
   }
   const name = validateBodyName(input.name);
   if (!name.ok) return name;
-  return ok(Object.freeze({ id: parsedId.value, name: name.value }));
+  // The Phase 44 display flags: strictly boolean when present (never a
+  // smuggled truthy), absent meaning the default (visible, not isolated).
+  if (input.visible !== undefined && typeof input.visible !== "boolean") {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized body's visible flag must be a boolean when present.",
+        input.visible,
+      ),
+    );
+  }
+  if (input.isolated !== undefined && typeof input.isolated !== "boolean") {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized body's isolated flag must be a boolean when present.",
+        input.isolated,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      id: parsedId.value,
+      name: name.value,
+      ...(input.visible === undefined ? {} : { visible: input.visible }),
+      ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
+    }),
+  );
 }
 
 function parseSerializedSketch(input: unknown): ParseResult<
@@ -2159,7 +2298,12 @@ export function parseCadDocument(
     document = added.value.document;
   }
   for (const body of parsedBodies.value) {
-    const added = addBody(document, { id: body.id, name: body.name });
+    const added = addBody(document, {
+      id: body.id,
+      name: body.name,
+      ...(body.visible === undefined ? {} : { visible: body.visible }),
+      ...(body.isolated === undefined ? {} : { isolated: body.isolated }),
+    });
     if (!added.ok) return added;
     document = added.value.document;
   }

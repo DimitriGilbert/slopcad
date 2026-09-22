@@ -43,6 +43,8 @@ import type {
   PatternFeatureSceneRequest,
   PatternPathSceneRequest,
 } from "../cad-workbench/pattern";
+import type { BooleanSceneRequest } from "../cad-workbench/boolean";
+import type { MoveBodySceneRequest } from "../cad-workbench/move-body";
 
 import {
   computePlateRenderState,
@@ -68,6 +70,10 @@ import {
   computePatternFeatureScene,
   computePatternPathScene,
 } from "../worker-fixture/pattern-scene";
+import {
+  computeBooleanScene,
+  computeMoveBodyScene,
+} from "../worker-fixture/body-ops-scenes";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
  * authored for exactly this size (and the scene runs at dpr 1), which is
@@ -177,6 +183,22 @@ export interface RenderFixtureSession {
    * worker (one union more when the merge option asks for it).
    */
   dispatchMirror(request: MirrorSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 44 boolean computation: the REAL kernel executes
+   * the target and tool extrusions and one `solid.union`/`solid.subtract`/
+   * `solid.intersect` in the worker (the no-op guards ride the computation
+   * rejection), and the settled solid's measurement + projection become
+   * the visible scene.
+   */
+  dispatchBoolean(request: BooleanSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 44 move-body computation: the REAL kernel
+   * executes the base extrusion and one `solid.transform` carrying the
+   * authored translation (and optional world-axis rotation) in the worker.
+   * On a rotation-incapable kernel the structured refusal lands on the
+   * error surface.
+   */
+  dispatchMoveBody(request: MoveBodySceneRequest, bodyId: string): void;
   /**
    * Dispatches the Phase 26.10 hole computation: the REAL kernel composes
    * the base extrusion, one planned tool per hole, and the subtract in the
@@ -324,6 +346,8 @@ export type FeatureSceneKind =
   | "loft"
   | "helix"
   | "thread"
+  | "boolean"
+  | "moveBody"
   | "rib"
   | "scale"
   | "thicken"
@@ -774,6 +798,38 @@ export function bootRenderFixtureSession(
         .then(
           settleWithVerdict("mirror", bodyId),
           failWithVerdict("mirror", bodyId),
+        );
+    },
+    dispatchBoolean(request: BooleanSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computeBooleanScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(
+          settleWithVerdict("boolean", bodyId),
+          failWithVerdict("boolean", bodyId),
+        );
+    },
+    dispatchMoveBody(request: MoveBodySceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          extrudeRenderState(
+            await computeMoveBodyScene(context, request),
+            bodyId,
+          ),
+        )
+        .then(
+          settleWithVerdict("moveBody", bodyId),
+          failWithVerdict("moveBody", bodyId),
         );
     },
     dispose(): void {

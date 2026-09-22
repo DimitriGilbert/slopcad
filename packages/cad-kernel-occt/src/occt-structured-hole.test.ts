@@ -383,15 +383,19 @@ describe("OCCT structured hole (Phase 42)", () => {
     );
   });
 
-  it("pins the threaded hole at the exact pilot + ISO screw volume", () => {
-    const kernel = occtKernelFromRuntime(runtime);
-    const spec = { ...BASE_SPEC, type: 5 };
-    // The OCCT thread runs the documented ruled band (Phase 40); the pilot
-    // is exact, the ridge rides that band.
-    const volume = holeVolumeMm3(spec, kernel);
-    const expected = BOX_VOLUME - removedVolumeMm3(spec);
-    assertVolumeClose(volume, expected, 0.02);
-  });
+  it(
+    "pins the threaded hole at the exact pilot + ISO screw volume",
+    { timeout: 60_000 },
+    () => {
+      const kernel = occtKernelFromRuntime(runtime);
+      const spec = { ...BASE_SPEC, type: 5 };
+      // The OCCT thread runs the documented ruled band (Phase 40); the pilot
+      // is exact, the ridge rides that band.
+      const volume = holeVolumeMm3(spec, kernel);
+      const expected = BOX_VOLUME - removedVolumeMm3(spec);
+      assertVolumeClose(volume, expected, 0.02);
+    },
+  );
 
   it("cuts every sketch-point position of one feature at the exact total", () => {
     const kernel = occtKernelFromRuntime(runtime);

@@ -71,6 +71,7 @@ import {
   removeFeature,
   reorderFeature,
   type SerializedFeatureInputRef,
+  updateBody,
   updateFeature,
 } from "./document";
 import {
@@ -91,7 +92,7 @@ import { type ParameterError, updateParameterValue } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
-/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder + Phase 39 datums). */
+/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder + Phase 39 datums + Phase 44 body.update). */
 export const CAD_COMMAND_TYPES = [
   "parameter.set",
   "parameter.create",
@@ -100,6 +101,7 @@ export const CAD_COMMAND_TYPES = [
   "feature.delete",
   "feature.reorder",
   "body.create",
+  "body.update",
   "sketch.create",
   "reference.create",
   "datum.create",
@@ -143,6 +145,19 @@ export type CadCommand =
       readonly type: "body.create";
       readonly id?: BodyId;
       readonly name: string;
+    }
+  | {
+      /**
+       * The Phase 44 body record update: a PARTIAL update — only the
+       * carried fields change (a rename keeps the display flags, a
+       * visibility toggle keeps the name), so each concern rides its own
+       * command and undo replays exactly what happened.
+       */
+      readonly type: "body.update";
+      readonly id: BodyId;
+      readonly name?: string;
+      readonly visible?: boolean;
+      readonly isolated?: boolean;
     }
   | {
       readonly type: "sketch.create";
@@ -257,6 +272,17 @@ export function applyCommand(
       if (!added.ok) return added;
       return ok(added.value.document);
     }
+    case "body.update": {
+      const updated = updateBody(document, command.id, {
+        ...(command.name === undefined ? {} : { name: command.name }),
+        ...(command.visible === undefined ? {} : { visible: command.visible }),
+        ...(command.isolated === undefined
+          ? {}
+          : { isolated: command.isolated }),
+      });
+      if (!updated.ok) return updated;
+      return ok(updated.value);
+    }
     case "sketch.create": {
       const added = addDocumentSketch(document, {
         ...(command.id === undefined ? {} : { id: command.id }),
@@ -333,6 +359,14 @@ export type SerializedCadCommand =
       readonly type: "body.create";
       readonly id?: string;
       readonly name: string;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "body.update";
+      readonly id: string;
+      readonly name?: string;
+      readonly visible?: boolean;
+      readonly isolated?: boolean;
     }
   | {
       readonly formatVersion: number;
@@ -442,6 +476,17 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
             id: command.id,
             name: command.name,
           };
+    case "body.update":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+        ...(command.name === undefined ? {} : { name: command.name }),
+        ...(command.visible === undefined ? {} : { visible: command.visible }),
+        ...(command.isolated === undefined
+          ? {}
+          : { isolated: command.isolated }),
+      };
     case "sketch.create":
       return command.id === undefined
         ? {
@@ -748,6 +793,70 @@ export function parseCommand(
             ? { type, name: input.name }
             : { type, id, name: input.name },
         ),
+      );
+    }
+    case "body.update": {
+      const parsedId = parseBodyId(input.id);
+      if (!parsedId.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A body.update command needs a valid body id: ${parsedId.error.message}`,
+            input.id,
+          ),
+        );
+      }
+      if (
+        input.name === undefined &&
+        input.visible === undefined &&
+        input.isolated === undefined
+      ) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A body.update command needs at least one of a name, a visible flag, or an isolated flag.",
+            input,
+          ),
+        );
+      }
+      if (
+        input.name !== undefined &&
+        (typeof input.name !== "string" || input.name.length === 0)
+      ) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A body.update command needs a non-empty name string when it carries one.",
+            input.name,
+          ),
+        );
+      }
+      if (input.visible !== undefined && typeof input.visible !== "boolean") {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A body.update command's visible flag must be a boolean when present.",
+            input.visible,
+          ),
+        );
+      }
+      if (input.isolated !== undefined && typeof input.isolated !== "boolean") {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A body.update command's isolated flag must be a boolean when present.",
+            input.isolated,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze({
+          type,
+          id: parsedId.value,
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.visible === undefined ? {} : { visible: input.visible }),
+          ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
+        }),
       );
     }
     case "sketch.create": {

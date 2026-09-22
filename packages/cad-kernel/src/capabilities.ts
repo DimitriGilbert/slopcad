@@ -131,6 +131,24 @@
  *   declare `true`; Manifold and JSCAD have no 3D offset at all (the
  *   shell's probed verdict verbatim) and answer every call with the
  *   structured `kernel/unsupported-operation`.
+ * - `localFaceOps`: the contract's LOCAL FACE operations (Phase 44 —
+ *   `moveFace`, `replaceFace`, `deleteFace`, the direct-manipulation
+ *   family real CAD pair with persistent face selection) are implemented
+ *   honestly. Only OCCT declares `true`, and only for the two of three it
+ *   can build exactly: `moveFace` composes the probed face-sweep route
+ *   (`BRepPrimAPI_MakePrism` of the selected face along the displacement,
+ *   one `BRepAlgoAPI` fuse outward or cut inward — measured exact on
+ *   axial and oblique fixtures), and `replaceFace` re-closes the solid at
+ *   a datum plane station through the same machinery (parallel) or a
+ *   covering-box cut in the plane's frame (oblique, shrink-only).
+ *   `deleteFace` — both the raw open shell and the healed close — is
+ *   PROBED out on this binding (the sewn-minus-one shell is an invalid
+ *   solid, and `ShapeFix_Solid`'s close is invalid too), so OCCT declines
+ *   it per-op with the structured unsupported code naming the probe, the
+ *   fake kernel's documented subset discipline carried to a whole
+ *   operation. The fake, Manifold, and JSCAD kernels declare `false`:
+ *   their engines carry no face-addressed geometry at all, so every call
+ *   of every local face op answers `kernel/unsupported-operation`.
  */
 export interface KernelCapabilities {
   readonly booleans: boolean;
@@ -151,4 +169,5 @@ export interface KernelCapabilities {
   readonly extrudeTaper: boolean;
   readonly mirror: boolean;
   readonly surfaceArea: boolean;
+  readonly localFaceOps: boolean;
 }
