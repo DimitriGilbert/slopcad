@@ -18,6 +18,10 @@ const dxf = (entities: string, header = ""): Uint8Array =>
     `0\nSECTION\n2\nHEADER\n${header}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${entities}\n0\nENDSEC\n0\nEOF\n`,
   );
 
+/** The entity's CCW sweep: end − start wrapped into [0, 2π). */
+const canonicalSweep = (start: number, end: number): number =>
+  (((end - start) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
 describe("DXF import — golden fixtures", () => {
   test("imports a line, a circle, and an arc into the pinned vocabulary", () => {
     const result = importDxf(
@@ -113,6 +117,88 @@ describe("DXF import — golden fixtures", () => {
     expect(arc?.radius).toBe(20);
     expect(arc?.cx).toBeCloseTo(20, 9);
     expect(arc?.cy).toBeCloseTo(30, 9);
+  });
+
+  test("pins a sub-semicircle bulge off the semicircle coincidence (0.5 → 106.26°)", () => {
+    // Chord (0,0)→(1,0), bulge 0.5: θ = 4·atan(0.5) ≈ 106.2602°,
+    // r = 1/(2·sin(2·atan(0.5))) = 0.625, and the center sits LEFT of
+    // travel (+x → +y side) at (0.5, 0.375) — the pre-fix right-side
+    // center (0.5, −0.375) produced the complement 253.74° sweep. The CCW
+    // arc itself apexes at (0.5, −0.25), opposite the center (minor arc).
+    const result = importDxf(
+      dxf("0\nLWPOLYLINE\n5\n31\n90\n2\n10\n0\n20\n0\n42\n0.5\n10\n1\n20\n0"),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.entities).toHaveLength(1);
+    const arc = result.value.entities[0] as ArcEntity;
+    expect(arc.kind).toBe("arc");
+    expect(arc.cx).toBeCloseTo(0.5, 9);
+    expect(arc.cy).toBeCloseTo(0.375, 9);
+    expect(arc.radius).toBeCloseTo(0.625, 9);
+    const half = Math.atan2(0.375, 0.5); // atan(0.75) = 2·atan(0.5)
+    expect(arc.startAngle).toBeCloseTo(Math.PI + half, 9);
+    expect(arc.endAngle).toBeCloseTo(2 * Math.PI - half, 9);
+    // Canonical CCW sweep (end wraps past start): 4·atan(0.5) = 106.2602°.
+    expect(canonicalSweep(arc.startAngle, arc.endAngle)).toBeCloseTo(
+      4 * Math.atan(0.5),
+      9,
+    );
+    // The apex is on the arc, below the chord, at distance r from center.
+    expect(Math.hypot(0.5 - arc.cx, -0.25 - arc.cy)).toBeCloseTo(arc.radius, 9);
+  });
+
+  test("pins the near-full bulge-42 major-arc center below the chord", () => {
+    // Chord (0,0)→(254,0), bulge 42: θ = 4·atan(42) ≈ 354.56° (major arc),
+    // r = 127·(1+42²)/(2·42) = 224155/84 ≈ 2668.51. The signed apothem
+    // r·cos(θ/2) = −223901/84 ≈ −2665.49 flips the (left-normal) center to
+    // (127, −2665.49) — BELOW the chord; the pre-fix right-side formula
+    // landed it at +2665.49 above. The major arc crowns 3.02 ABOVE the
+    // chord at (127, +3.02) — opposite the center, as a major arc must.
+    const result = importDxf(
+      dxf("0\nLWPOLYLINE\n5\n32\n90\n2\n10\n0\n20\n0\n42\n42\n10\n254\n20\n0"),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.entities).toHaveLength(1);
+    const arc = result.value.entities[0] as ArcEntity;
+    expect(arc.kind).toBe("arc");
+    expect(arc.cx).toBeCloseTo(127, 9);
+    expect(arc.cy).toBeCloseTo(-2665.5, 1); // the pinned (127, −2665.5)
+    expect(arc.cy).toBeCloseTo(-223901 / 84, 9); // exact
+    expect(arc.radius).toBeCloseTo(224155 / 84, 9);
+    // Endpoint angles around the low center, then the major CCW sweep.
+    expect(arc.endAngle).toBeCloseTo(Math.atan(1763 / 84), 9);
+    expect(arc.startAngle).toBeCloseTo(Math.PI - Math.atan(1763 / 84), 9);
+    expect(canonicalSweep(arc.startAngle, arc.endAngle)).toBeCloseTo(
+      4 * Math.atan(42),
+      9,
+    );
+    // The crown sits above the chord on the circle centered below it.
+    const crownY = arc.cy + arc.radius;
+    expect(crownY).toBeGreaterThan(0);
+    expect(Math.hypot(127 - arc.cx, crownY - arc.cy)).toBeCloseTo(
+      arc.radius,
+      9,
+    );
+  });
+
+  test("imports a truncated file without recording EOF-decline noise", () => {
+    // Truncated tail: the ENTITIES section never closes, so the bare
+    // 0/EOF terminator dangles inside it. EOF is framing, not an entity —
+    // the complete line imports and `declined` carries no {kind:"EOF"}.
+    const bytes = new TextEncoder().encode(
+      "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n5\n2AF\n10\n0\n20\n0\n11\n30\n21\n40\n0\nEOF\n",
+    );
+    const result = importDxf(bytes);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.entities).toHaveLength(1);
+    expect(result.value.entities[0]).toMatchObject({
+      kind: "line",
+      id: "skent_2af",
+    });
+    expect(result.value.declined).toEqual([]);
   });
 
   test("imports an exact cubic Bézier-chain SPLINE into the control flavor", () => {

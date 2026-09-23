@@ -77,11 +77,14 @@ import {
   type SketchCommand,
   type SketchConstrainedness,
   type SketchDiagnostic,
+  type SketchEntity,
   type SerializedSketch,
   type SerializedSketchCommand,
   type Workplane,
 } from "@slopcad/cad-sketch";
 import type { ProfileExtrudeInput } from "@slopcad/cad-kernel";
+import { importDxf } from "@slopcad/cad-io/dxf-import";
+import { importSvg } from "@slopcad/cad-io/svg-import";
 import { Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
@@ -220,6 +223,15 @@ export interface SketchModeProps {
    * re-mounts SketchMode when the anchor changes.
    */
   readonly bootWorkplane?: Workplane;
+  /**
+   * The Phase 56 sketch-exchange control: the host exposes the DXF/SVG
+   * file-import entry in the sketch command row. Optional: a host that
+   * carries no exchange control omits it and the command row renders
+   * EXACTLY its pre-exchange children — the plain workbench's resting
+   * layout is frozen by the byte-stable canvas battery (the workspace
+   * scroll math moves with any row-width change).
+   */
+  readonly importSketchFiles?: boolean;
 }
 
 /** The default extrusion depth the action creates the parameter with (mm). */
@@ -239,6 +251,26 @@ export interface SketchRevolveOutcome {
   readonly message?: string;
 }
 
+/**
+ * The Phase 56 sketch-exchange import's machine surface: the outcome of one
+ * DXF/SVG file import into the active sketch — entities committed as one
+ * undoable transaction, out-of-subset declines recorded (never silently
+ * dropped), parse failures surfaced with their adapter's stable code.
+ */
+export interface SketchImportOutcome {
+  readonly status: "imported" | "declined" | "failed";
+  /** The adapter's structured failure/decline code, when one exists. */
+  readonly code?: string;
+  /** The human-readable summary (the status line's text). */
+  readonly message: string;
+  /** The exchange that produced this outcome. */
+  readonly source?: "dxf" | "svg";
+  /** How many entities the committed transaction added. */
+  readonly imported?: number;
+  /** How many file elements the pinned subset declined. */
+  readonly declined?: number;
+}
+
 /** The revolve axis the selector pins: a workplane axis (X or Y). */
 export type RevolveAxisId = "x" | "y";
 
@@ -252,6 +284,7 @@ export function SketchMode({
   topology,
   onSaveSketch,
   bootWorkplane,
+  importSketchFiles = false,
 }: SketchModeProps): ReactElement {
   const [session, setSession] = useState(() =>
     createSketchSession(createWorkbenchSketch(bootWorkplane)),
@@ -280,6 +313,11 @@ export function SketchMode({
     useState<SketchRevolveOutcome | null>(null);
   // The Phase 37 convert attempt's machine surface (the last outcome set).
   const [convertOutcome, setConvertOutcome] = useState<string | null>(null);
+  // The Phase 56 sketch-exchange import's machine surface: the last DXF/SVG
+  // file import into this session's sketch.
+  const [sketchImport, setSketchImport] = useState<SketchImportOutcome | null>(
+    null,
+  );
 
   // The displayed sketch: the authored sketch with the drag's provisional
   // geometry overlaid — the value the solve loop re-solves per move.
@@ -350,6 +388,138 @@ export function SketchMode({
       ]);
     },
     [editor, session],
+  );
+
+  /**
+   * Commits adapter-converted entities into this session's sketch as ONE
+   * `sketch.entity.create` transaction (atomic, one undo step). Imported
+   * ids re-mint deterministically when they would collide with entities the
+   * session already holds (importing the same file twice re-ids, never
+   * merges). A zero-entity parse declines instead of committing nothing.
+   */
+  const commitImportedEntities = useCallback(
+    (
+      entities: readonly SketchEntity[],
+      source: "dxf" | "svg",
+      fileName: string,
+      declinedCount: number,
+    ): void => {
+      const declinedNote =
+        declinedCount === 0 ? "" : `; ${String(declinedCount)} declined`;
+      if (entities.length === 0) {
+        setSketchImport({
+          code: "sketch-import/empty",
+          declined: declinedCount,
+          message: `${fileName}: nothing in the pinned subset to import${declinedNote}`,
+          source,
+          status: "declined",
+        });
+        return;
+      }
+      const taken = new Set(session.sketch.entities.map((e) => e.id));
+      const commands: SketchCommand[] = entities.map((entity) => {
+        let id = entity.id;
+        if (taken.has(id)) {
+          let suffix = 1;
+          let candidate = createSketchEntityId(
+            `${entity.id}-i${String(suffix)}`,
+          );
+          while (taken.has(candidate)) {
+            suffix += 1;
+            candidate = createSketchEntityId(`${entity.id}-i${String(suffix)}`);
+          }
+          id = candidate;
+        }
+        taken.add(id);
+        return { entity: { ...entity, id }, type: "sketch.entity.create" };
+      });
+      const applied = applySketchSessionTransaction(session, { commands });
+      if (!applied.ok) {
+        setSketchImport({
+          code: applied.error.code,
+          message: `${applied.error.code}: ${applied.error.message}`,
+          source,
+          status: "failed",
+        });
+        return;
+      }
+      setSession(applied.value);
+      setCommandLog((log) => [...log, ...commands.map(serializeSketchCommand)]);
+      setSketchImport({
+        declined: declinedCount,
+        imported: entities.length,
+        message: `${fileName}: imported ${String(entities.length)} entities${declinedNote}`,
+        source,
+        status: "imported",
+      });
+    },
+    [session],
+  );
+
+  // The Phase 56 sketch-exchange entry point: one DXF or SVG file imports
+  // into THIS session's sketch. The adapters' structured outcomes surface
+  // whole: a parse failure carries its stable `dxf-import/*` /
+  // `svg-import/*` code; out-of-subset declines are counted, never dropped.
+  const importSketchFile = useCallback(
+    (file: File): void => {
+      file
+        .arrayBuffer()
+        .then((buffer) => {
+          const bytes = new Uint8Array(buffer);
+          const name = file.name.toLowerCase();
+          if (name.endsWith(".dxf")) {
+            const result = importDxf(bytes);
+            if (!result.ok) {
+              setSketchImport({
+                code: result.error.code,
+                message: `${result.error.code}: ${result.error.message}`,
+                source: "dxf",
+                status: "failed",
+              });
+              return;
+            }
+            commitImportedEntities(
+              result.value.entities,
+              "dxf",
+              file.name,
+              result.value.declined.length,
+            );
+            return;
+          }
+          if (name.endsWith(".svg")) {
+            const result = importSvg(bytes);
+            if (!result.ok) {
+              setSketchImport({
+                code: result.error.code,
+                message: `${result.error.code}: ${result.error.message}`,
+                source: "svg",
+                status: "failed",
+              });
+              return;
+            }
+            commitImportedEntities(
+              result.value.entities,
+              "svg",
+              file.name,
+              result.value.declined.length,
+            );
+            return;
+          }
+          setSketchImport({
+            code: "sketch-import/unsupported-file",
+            message: `sketch import reads .dxf and .svg — got ${file.name}`,
+            status: "declined",
+          });
+        })
+        .catch((error: unknown) => {
+          setSketchImport({
+            code: "sketch-import/read-failed",
+            message: error instanceof Error ? error.message : String(error),
+            status: "failed",
+          });
+        });
+    },
+    [commitImportedEntities],
   );
 
   const undo = useCallback((): void => {
@@ -975,6 +1145,9 @@ export function SketchMode({
         revolveOutcome === null ? "" : JSON.stringify(revolveOutcome)
       }
       data-sketch-revolve-axis={revolveAxis}
+      data-sketch-import={
+        sketchImport === null ? "" : JSON.stringify(sketchImport)
+      }
       data-sketch-constraints={JSON.stringify(authoredSurface.constraints)}
       data-sketch-diagnostics={JSON.stringify(
         diagnostics.map((diagnostic) => ({
@@ -1111,6 +1284,27 @@ export function SketchMode({
             }
           }}
         />
+        {/* The Phase 56 sketch-exchange entry: a DXF/SVG file imports into
+            the ACTIVE sketch as entities (one undoable transaction). The
+            outcome surfaces on the status line below. Rendered only when the
+            host carries the exchange control — the plain workbench (the
+            byte-stable render battery's fixture) omits it, so its resting
+            command row keeps the exact pre-exchange layout the
+            scroll-sensitive deterministic canvas captures freeze. */}
+        {importSketchFiles ? (
+          <input
+            accept=".dxf,.svg"
+            aria-label="Import DXF or SVG into the active sketch"
+            className="border-input bg-background file:bg-background file:text-foreground h-7 w-48 rounded-none border px-1 text-xs"
+            data-testid="sketch-import-file"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file !== undefined) importSketchFile(file);
+              event.target.value = "";
+            }}
+            type="file"
+          />
+        ) : null}
         <div className="flex-1" />
         <div
           aria-label="Sketch history"
@@ -1247,6 +1441,16 @@ export function SketchMode({
         >
           {effectiveStatus.message}
         </span>
+        {sketchImport === null ? null : (
+          <span
+            className={
+              sketchImport.status === "failed" ? "text-destructive" : undefined
+            }
+            data-testid="sketch-import-outcome"
+          >
+            {sketchImport.message}
+          </span>
+        )}
         <span className="ml-auto">
           entities = {String(authoredSurface.entities.length)}
         </span>

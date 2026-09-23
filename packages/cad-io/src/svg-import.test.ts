@@ -115,9 +115,11 @@ describe("SVG import — golden fixtures", () => {
   });
 
   test("converts an unrotated circular A arc through the exact center form", () => {
-    // Semicircle from (0,0) to (20,0), radius 10, sweep=1 (y-down CW →
-    // sketch CCW through (10,-10)... the mirrored center sits at (10, 0),
-    // the drawn apex at (10, ±10) mirrored to ∓10).
+    // Semicircle from (0,0) to (20,0), radius 10, sweep=1. Ground truth
+    // (Chromium `isPointInStroke`): the drawn arc passes SVG (10,-10) —
+    // the screen-top — which mirrors to sketch (10,+10) at sketch angle
+    // π/2. Mirroring negates angles, so sweep=1 is a DECREASING sketch
+    // angle: the same arc read CCW runs [a2, a1] = [0, π].
     const result = importSvg(svg(`<path d="M 0 0 A 10 10 0 0 1 20 0"/>`));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -127,10 +129,47 @@ describe("SVG import — golden fixtures", () => {
     expect(arc.cx).toBeCloseTo(10, 9);
     expect(arc.cy).toBeCloseTo(0, 9);
     expect(arc.radius).toBeCloseTo(10, 9);
-    // Mirrored sweep: start angle at (0,0) is π; the arc passes through
-    // the mirrored apex (10, -10) at 3π/2 → CCW from π to 0.
-    expect(arc.startAngle).toBeCloseTo(Math.PI, 9);
-    expect(arc.endAngle).toBeCloseTo(0, 9);
+    expect(arc.startAngle).toBeCloseTo(0, 9);
+    expect(arc.endAngle).toBeCloseTo(Math.PI, 9);
+    // The mirrored apex (10,+10) is on the arc, and the sweep covers π/2;
+    // the pre-fix flag produced the mirrored-bottom arc [π, 2π) instead.
+    expect(Math.hypot(10 - arc.cx, 10 - arc.cy)).toBeCloseTo(arc.radius, 9);
+    expect(arc.startAngle <= Math.PI / 2 && Math.PI / 2 <= arc.endAngle).toBe(
+      true,
+    );
+  });
+
+  test("pins a quarter arc off the ±semicircle coincidence (F.6.5 scale)", () => {
+    // Non-semicircle: endpoints (0,0)→(10,10), r=10, chord/2 = √50. The
+    // F.6.5 center-offset factor is √((r²−d)/d) = 1 here, where the buggy
+    // √(r²−d)/r was 1/√2 — the pre-fix code placed the center at
+    // (1.4645, -8.536) mirrored, 8.66 from each endpoint despite r=10.
+    // F.6.5: SVG center (0,10) → sketch (0,−10); sweep=1 → sketch angles
+    // [0, π/2]; apex at sketch (10·cos(π/4), −10 + 10·sin(π/4)) —
+    // Chromium-verified against the real renderer.
+    const result = importSvg(svg(`<path d="M 0 0 A 10 10 0 0 1 10 10"/>`));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.entities).toHaveLength(1);
+    const arc = result.value.entities[0] as ArcEntity;
+    expect(arc.kind).toBe("arc");
+    expect(arc.cx).toBeCloseTo(0, 9);
+    expect(arc.cy).toBeCloseTo(-10, 9);
+    expect(arc.radius).toBeCloseTo(10, 9);
+    expect(arc.startAngle).toBeCloseTo(0, 9);
+    expect(arc.endAngle).toBeCloseTo(Math.PI / 2, 9);
+    const apexX = 10 * Math.cos(Math.PI / 4);
+    const apexY = -10 + 10 * Math.sin(Math.PI / 4);
+    expect(Math.hypot(apexX - arc.cx, apexY - arc.cy)).toBeCloseTo(
+      arc.radius,
+      9,
+    );
+    // The wrong-sign center candidate (10, 0) would pass through
+    // (10 − 10·cos(π/4), −10·sin(π/4)) instead — assert it does not.
+    expect(Math.hypot(10 - apexX - arc.cx, -apexY - arc.cy)).not.toBeCloseTo(
+      arc.radius,
+      6,
+    );
   });
 
   test("declines out-of-subset commands and elements without dropping the rest", () => {

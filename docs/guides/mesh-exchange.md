@@ -90,9 +90,12 @@ dxf.value.declined; // scope boundaries: out-of-subset kinds/splines, with handl
 Both are sketch importers, not mesh ones: they parse ASCII DXF
 (R12-class LINE/CIRCLE/ARC/LWPOLYLINE/POLYLINE/SPLINE subset, `$INSUNITS`
 scaling) and ASCII SVG (`line`/`circle`/`rect`/`ellipse` elements and a
-`path` subset — M/L/H/V/C/Q/A/Z, exact quadratic elevation and arc
-center parameterization) into the exact cad-sketch vocabulary, feeding
-the sketch editor. Scope boundaries decline per element with reasons;
+`path` subset — M/L/H/V/C/Q/A/Z, exact quadratic elevation and SVG spec
+F.6.5 arc centers: offset ±√((r²−d)/d) from the chord midpoint, sweep=1
+mirrored to a decreasing sketch angle) into the exact cad-sketch
+vocabulary, feeding the sketch editor. Scope boundaries decline per
+element — an out-of-subset path command declines its whole path element,
+not just that segment — with reasons;
 in-subset defects reject the whole file (`dxf-import/*`, `svg-import/*`
 codes). SVG's y-down axis mirrors to the sketch plane; a viewBox
 contributes its origin only. **DWG stays a documented decline**: the

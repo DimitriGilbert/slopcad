@@ -351,6 +351,14 @@ function liftEntities(pairs: readonly DxfPair[]): readonly RawEntity[] {
         foldingLegacy = false;
         continue;
       }
+      if (keyword === "EOF") {
+        // The file terminator. A truncated file can leave it dangling
+        // inside an open section — it is framing either way, never an
+        // entity record; skipping it keeps `declined` free of EOF noise.
+        flush();
+        foldingLegacy = false;
+        continue;
+      }
       if (section === "ENTITIES") {
         if (keyword === "SEQEND") {
           // Closes the legacy fold; carries no geometry itself.
@@ -655,8 +663,11 @@ function bulgeArc(
   const ux = dx / chord;
   const uy = dy / chord;
   const sign = theta > 0 ? 1 : -1;
-  const cx = midX + uy * apothem * sign;
-  const cy = midY - ux * apothem * sign;
+  // (−uy, ux) is LEFT of travel; the signed apothem (r·cos(θ/2) goes
+  // negative for |θ| > π) flips the side for major arcs, so both the
+  // minor CCW quarter and the near-full bulge-42 sweep land correctly.
+  const cx = midX - uy * apothem * sign;
+  const cy = midY + ux * apothem * sign;
   return {
     cx,
     cy,

@@ -21,18 +21,22 @@
  *   - `C/c` → `spline` (`control` flavor, 4 points) — the exact cubic.
  *   - `Q/q` → the exact degree-elevated cubic (quadratic → cubic is an
  *     identity: `c1 = (p0+2·p1)/3`, `c2 = (2·p1+p2)/3`), then as `C`.
- *   - `A/a` → `arc` via the SVG appendix's endpoint→center
- *     parameterization (exact algebra, including the out-of-range-radii
- *     scaling the spec defines), when the arc is circular (`rx === ry`)
- *     and unrotated (`x-axis-rotation` = 0). A zero radius per the spec
- *     degenerates to a line and is taken as such. `rx ≠ ry` or a nonzero
- *     rotation declines with `arc-out-of-subset` — cad-sketch's
- *     elliptical-arc entity takes parametric angles this importer does
- *     not translate (fabrication risk, declined).
+ *   - `A/a` → `arc` via the SVG appendix F.6.5 endpoint→center algebra —
+ *     center offset ±√((r²−d)/d)·(y1′, −x1′) from the chord midpoint
+ *     (including the out-of-range-radii scaling F.6.2 defines), then the
+ *     y-down→y-up mirror negates angles, so sweep=1 runs the sketch arc
+ *     from `end` back to `start` (entity angles `[a2, a1]`) — when the
+ *     arc is circular (`rx === ry`) and unrotated (`x-axis-rotation` =
+ *     0). A zero radius per the spec degenerates to a line and is taken
+ *     as such. `rx ≠ ry` or a nonzero rotation declines with
+ *     `arc-out-of-subset` — cad-sketch's elliptical-arc entity takes
+ *     parametric angles this importer does not translate (fabrication
+ *     risk, declined).
  *   - `S/s`/`T/t` (reflected-control shorthands) decline with
  *     `command-out-of-subset`; the reflection state they need is per-
- *     command bookkeeping this pinned subset does not carry. The rest of
- *     the path still imports.
+ *     command bookkeeping this pinned subset does not carry. The whole
+ *     path element declines — segments already converted are discarded
+ *     with it (per-element decline, like out-of-subset elements).
  *
  * Every other element (`<text>`, `<g>`, `<image>`, …) is recorded in
  * {@link ImportedSvgSketch.declined} with `element-out-of-subset`; an
@@ -325,16 +329,22 @@ function arcSegment(
       : radius;
   const root = r * r - chordSq;
   const sign = largeArc !== sweep ? 1 : -1;
-  const co = Math.sqrt(Math.max(root, 0)) * sign;
-  // Center in SVG coordinates (y-down), then mirrored through the frame.
-  const svgCx = co * (dy / r) + (start.x + end.x) / 2;
-  const svgCy = (-co * dx) / r + (start.y + end.y) / 2;
+  // F.6.5 step 2 (circular case): the center-offset factor is
+  // √((r²−d)/d), not √(r²−d)/r — the two agree only on ±semicircles
+  // (d = r²), where a wrong factor would cancel.
+  const co = Math.sqrt(Math.max(root, 0) / chordSq) * sign;
+  // Center in SVG coordinates (y-down): offset ±√((r²−d)/d)·(y1′, −x1′)
+  // from the chord midpoint, then mirrored through the frame.
+  const svgCx = co * dy + (start.x + end.x) / 2;
+  const svgCy = -co * dx + (start.y + end.y) / 2;
   const center = toSketch(frame, svgCx, svgCy);
   const a1 = Math.atan2(-(start.y - svgCy), start.x - svgCx);
   const a2 = Math.atan2(-(end.y - svgCy), end.x - svgCx);
-  // SVG sweep=1 is positive-angle in y-down = CCW after mirroring; sweep=0
-  // mirrors to CW, i.e. the same arc CCW from the other endpoint.
-  const [startAngle, endAngle] = sweep ? [a1, a2] : [a2, a1];
+  // Mirroring y negates angles, so SVG sweep=1 (positive-angle in y-down)
+  // is a DECREASING sketch angle: the same arc read CCW runs from the end
+  // point back to the start, i.e. entity angles [a2, a1]. sweep=0 mirrors
+  // to CCW in the sketch frame: [a1, a2].
+  const [startAngle, endAngle] = sweep ? [a2, a1] : [a1, a2];
   try {
     return createArcEntity(id, center, r, startAngle, endAngle);
   } catch {
