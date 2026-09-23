@@ -46,9 +46,22 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "Circle",
       tooltip: "Draw a circle: click the center, then the radius",
     },
+    point: {
+      label: "Point",
+      tooltip: "Place a point entity: one click (hole positions, picks)",
+    },
     rectangle: {
       label: "Rectangle",
       tooltip: "Draw a rectangle: click two opposite corners",
+    },
+    ellipse: {
+      label: "Ellipse",
+      tooltip:
+        "Draw an ellipse: click the center, the axis end, then the other extent",
+    },
+    slot: {
+      label: "Slot",
+      tooltip: "Draw a straight slot: click both cap centers, then the radius",
     },
     trim: {
       label: "Trim",
@@ -58,33 +71,116 @@ export const CAD_SKETCH_TOOLBAR_LABELS: CadSketchToolbarLabels = {
       label: "Construction",
       tooltip: "Toggle construction geometry on the selected entities",
     },
+    spline: {
+      label: "Spline",
+      tooltip:
+        "Draw a spline: click four control points (one cubic Bézier segment)",
+    },
+    polygon: {
+      label: "Polygon",
+      tooltip:
+        "Draw a hexagon: click the center, then the first vertex (sets size and rotation)",
+    },
+    offset: {
+      label: "Offset",
+      tooltip:
+        "Offset an entity or chain: click the source, then a point on the offset side",
+    },
+    mirror: {
+      label: "Mirror",
+      tooltip:
+        "Mirror about a line: click the axis line, then entities to mirror",
+    },
+    extend: {
+      label: "Extend",
+      tooltip:
+        "Extend a line: click near the end to grow it to the nearest boundary",
+    },
+    rectArray: {
+      label: "Rect Array",
+      tooltip:
+        "Rectangular array: select entities, set counts and spacings in the inspector, apply",
+    },
+    circArray: {
+      label: "Circ Array",
+      tooltip:
+        "Circular array: select entities, set count, step, and center in the inspector, apply",
+    },
+    convert: {
+      label: "Convert",
+      tooltip:
+        "Convert model geometry: pick vertices from the topology list in the inspector",
+    },
     coincident: { label: "Coincident", tooltip: "Make two points coincide" },
     horizontal: { label: "Horizontal", tooltip: "Make a line horizontal" },
     vertical: { label: "Vertical", tooltip: "Make a line vertical" },
-    parallel: { label: "Parallel", tooltip: "Make two lines parallel" },
+    pointOnEntity: {
+      label: "Point On",
+      tooltip:
+        "Pin a point onto a curve: click the point entity, then the curve (line, circle/arc, ellipse, spline, polygon, slot)",
+    },
+    pointOnTangent: {
+      label: "On Tangent",
+      tooltip:
+        "Pin a point onto a spline's end-tangent line: click the point, then the spline end",
+    },
+    collinear: {
+      label: "Collinear",
+      tooltip: "Make two lines lie on one infinite line",
+    },
+    horizontalPair: {
+      label: "H Align",
+      tooltip: "Make two points share their y",
+    },
+    verticalPair: {
+      label: "V Align",
+      tooltip: "Make two points share their x",
+    },
+    parallel: {
+      label: "Parallel",
+      tooltip:
+        "Make two lines parallel, or a line parallel to a spline's end tangent",
+    },
     perpendicular: {
       label: "Perpendicular",
-      tooltip: "Make two lines perpendicular",
+      tooltip:
+        "Make two lines perpendicular, or a line perpendicular to a spline's end tangent",
     },
-    equal: { label: "Equal", tooltip: "Equal lengths or equal radii" },
+    equal: {
+      label: "Equal",
+      tooltip: "Equal lengths, radii, or spline endpoint chords",
+    },
     midpoint: {
       label: "Midpoint",
       tooltip: "Pin a point to a line's midpoint",
     },
     tangent: {
       label: "Tangent",
-      tooltip: "Tangency between lines and circles/arcs",
+      tooltip:
+        "Tangency between lines and circles/arcs, a line and a spline, or a G1 joint between two splines",
     },
     distance: {
       label: "Distance",
       tooltip: "Dimension the distance between two points",
+    },
+    distanceX: {
+      label: "Dist X",
+      tooltip: "Dimension the signed x separation between two points",
+    },
+    distanceY: {
+      label: "Dist Y",
+      tooltip: "Dimension the signed y separation between two points",
     },
     radius: { label: "Radius", tooltip: "Dimension a circle or arc radius" },
     diameter: {
       label: "Diameter",
       tooltip: "Dimension a circle or arc diameter",
     },
-    angle: { label: "Angle", tooltip: "Dimension the angle between two lines" },
+    angle: {
+      label: "Angle",
+      tooltip:
+        "Dimension the angle between two lines, or a line and a spline's end tangent",
+    },
   },
 };
 
@@ -107,21 +203,42 @@ export interface CadSketchToolbarProps {
   readonly className?: string;
 }
 
-/** Digit shortcuts cover the first nine tools across all groups; beyond, none. */
-const SHORTCUT_DIGIT_COUNT = 9;
+/** Digit shortcuts cover the first ten tools; letters cover the next ten. */
+const SHORTCUT_KEYS = [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "0",
+  "q",
+  "w",
+  "e",
+  "r",
+  "t",
+  "y",
+  "u",
+  "i",
+  "o",
+  "p",
+] as const;
 
-/** The digit shortcut of the tool at `index`, or `null` beyond the ninth. */
+/** The key shortcut of the tool at `index`, or `null` beyond the table. */
 function shortcutForIndex(index: number): string | null {
-  return index < SHORTCUT_DIGIT_COUNT ? String(index + 1) : null;
+  return SHORTCUT_KEYS[index] ?? null;
 }
 
-/** The tool id a digit key activates, or `null` when the key maps to none. */
+/** The tool id a key activates, or `null` when the key maps to none. */
 function shortcutToolId(
   key: string,
   toolIds: readonly string[],
 ): string | null {
-  if (!/^[1-9]$/.test(key)) return null;
-  const index = Number(key) - 1;
+  const index = SHORTCUT_KEYS.indexOf(key as (typeof SHORTCUT_KEYS)[number]);
+  if (index < 0) return null;
   return toolIds[index] ?? null;
 }
 

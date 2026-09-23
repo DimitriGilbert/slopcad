@@ -115,7 +115,8 @@ pnpm exec shadcn add "@slopcad/plate-workbench" \
 pnpm exec shadcn add "@slopcad/bounds-inspection-tool" \
   "@slopcad/distance-inspection-tool" \
   "@slopcad/mass-properties-inspection-tool" \
-  "@slopcad/radius-inspection-tool" "@slopcad/extrude-tool" \
+  "@slopcad/radius-inspection-tool" "@slopcad/datum-tool" \
+  "@slopcad/extrude-tool" \
   "@slopcad/revolve-tool" "@slopcad/hole-tool" -y --overwrite
 
 step "5/7 Consumer gates: typecheck + build"

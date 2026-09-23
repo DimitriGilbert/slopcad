@@ -1,4 +1,5 @@
 import { length } from "@slopcad/cad-core";
+import type { KernelSolid } from "@slopcad/cad-kernel";
 import type {
   ComponentParameterValues,
   ResolvedComponentParameters,
@@ -265,81 +266,107 @@ export const nema17Mount: CadComponent = {
     const t = p.plateThicknessMm;
     const totalHeightMm = t + p.bossHeightMm;
 
-    const plate = await kernel.createBox({
-      depth: length(s),
-      height: length(t),
-      width: length(s),
-    });
-    if (!plate.ok) return plate;
-
-    let base = plate.value;
-    if (p.bossHeightMm > 0) {
-      const collar = await kernel.createCylinder({
-        height: length(p.bossHeightMm),
-        radius: length(p.bossDiameterMm / 2),
+    // Dispose discipline: every intermediate solid the build mints is
+    // released through the kernel that minted it — refusal paths included
+    // — and only the returned body's solid survives the build (`dispose`
+    // is the release path for WASM-backed kernels; disposing operands
+    // after a boolean is proven safe by the kernel's own contract suite).
+    const minted: KernelSolid[] = [];
+    let returned: KernelSolid | undefined;
+    try {
+      const plate = await kernel.createBox({
+        depth: length(s),
+        height: length(t),
+        width: length(s),
       });
-      if (!collar.ok) return collar;
-      const placed = await kernel.transform(collar.value, {
+      if (!plate.ok) return plate;
+      minted.push(plate.value);
+
+      let base = plate.value;
+      if (p.bossHeightMm > 0) {
+        const collar = await kernel.createCylinder({
+          height: length(p.bossHeightMm),
+          radius: length(p.bossDiameterMm / 2),
+        });
+        if (!collar.ok) return collar;
+        minted.push(collar.value);
+        const placed = await kernel.transform(collar.value, {
+          x: length(s / 2),
+          y: length(s / 2),
+          z: length(t),
+        });
+        if (!placed.ok) return placed;
+        minted.push(placed.value);
+        const united = await kernel.union([base, placed.value]);
+        if (!united.ok) return united;
+        minted.push(united.value);
+        base = united.value;
+      }
+
+      const bore = await kernel.createCylinder({
+        height: length(totalHeightMm),
+        radius: length(p.boreDiameterMm / 2),
+      });
+      if (!bore.ok) return bore;
+      minted.push(bore.value);
+      const borePlaced = await kernel.transform(bore.value, {
         x: length(s / 2),
         y: length(s / 2),
-        z: length(t),
-      });
-      if (!placed.ok) return placed;
-      const united = await kernel.union([base, placed.value]);
-      if (!united.ok) return united;
-      base = united.value;
-    }
-
-    const bore = await kernel.createCylinder({
-      height: length(totalHeightMm),
-      radius: length(p.boreDiameterMm / 2),
-    });
-    if (!bore.ok) return bore;
-    const borePlaced = await kernel.transform(bore.value, {
-      x: length(s / 2),
-      y: length(s / 2),
-      z: length(0),
-    });
-    if (!borePlaced.ok) return borePlaced;
-
-    const grid = p.holeSpacingMm / 2;
-    const centers: readonly [number, number][] = [
-      [s / 2 - grid, s / 2 - grid],
-      [s / 2 + grid, s / 2 - grid],
-      [s / 2 - grid, s / 2 + grid],
-      [s / 2 + grid, s / 2 + grid],
-    ];
-    const tools = [borePlaced.value];
-    for (const [x, y] of centers) {
-      const screw = await kernel.createCylinder({
-        height: length(t),
-        radius: length(p.screwHoleDiameterMm / 2),
-      });
-      if (!screw.ok) return screw;
-      const screwPlaced = await kernel.transform(screw.value, {
-        x: length(x),
-        y: length(y),
         z: length(0),
       });
-      if (!screwPlaced.ok) return screwPlaced;
-      tools.push(screwPlaced.value);
+      if (!borePlaced.ok) return borePlaced;
+      minted.push(borePlaced.value);
+
+      const grid = p.holeSpacingMm / 2;
+      const centers: readonly [number, number][] = [
+        [s / 2 - grid, s / 2 - grid],
+        [s / 2 + grid, s / 2 - grid],
+        [s / 2 - grid, s / 2 + grid],
+        [s / 2 + grid, s / 2 + grid],
+      ];
+      const tools = [borePlaced.value];
+      for (const [x, y] of centers) {
+        const screw = await kernel.createCylinder({
+          height: length(t),
+          radius: length(p.screwHoleDiameterMm / 2),
+        });
+        if (!screw.ok) return screw;
+        minted.push(screw.value);
+        const screwPlaced = await kernel.transform(screw.value, {
+          x: length(x),
+          y: length(y),
+          z: length(0),
+        });
+        if (!screwPlaced.ok) return screwPlaced;
+        minted.push(screwPlaced.value);
+        tools.push(screwPlaced.value);
+      }
+
+      const drilled = await kernel.subtract(base, tools);
+      if (!drilled.ok) return drilled;
+      minted.push(drilled.value);
+      returned = drilled.value;
+
+      return {
+        ok: true,
+        value: {
+          bodies: [
+            {
+              bodyId: NEMA17_MOUNT_DEFINITION.preview.bodyIds[0] ?? "",
+              name: "plate",
+              solid: drilled.value,
+            },
+          ],
+        },
+      };
+    } finally {
+      for (const solid of minted) {
+        if (solid === returned) {
+          continue;
+        }
+        await kernel.dispose(solid);
+      }
     }
-
-    const drilled = await kernel.subtract(base, tools);
-    if (!drilled.ok) return drilled;
-
-    return {
-      ok: true,
-      value: {
-        bodies: [
-          {
-            bodyId: NEMA17_MOUNT_DEFINITION.preview.bodyIds[0] ?? "",
-            name: "plate",
-            solid: drilled.value,
-          },
-        ],
-      },
-    };
   },
 
   ports(values: ComponentParameterValues): readonly ComponentPortInstance[] {

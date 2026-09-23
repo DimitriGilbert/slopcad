@@ -66,6 +66,12 @@ export interface CadSketchInspectorLabels {
   readonly apply: string;
   readonly diagnosticsHeading: string;
   readonly emptyDiagnostics: string;
+  readonly arrayHeading: string;
+  readonly arraySelectionLabel: (count: number) => string;
+  readonly arrayNoSelection: string;
+  readonly convertHeading: string;
+  readonly convertNoTopology: string;
+  readonly convertEmpty: string;
 }
 
 /** Documented label defaults; every component-authored string lives here. */
@@ -87,6 +93,15 @@ export const CAD_SKETCH_INSPECTOR_LABELS: CadSketchInspectorLabels = {
   apply: "Apply",
   diagnosticsHeading: "Diagnostics",
   emptyDiagnostics: "No diagnostics.",
+  arrayHeading: "Array",
+  arraySelectionLabel: (count: number): string =>
+    `${String(count)} selected ${count === 1 ? "entity" : "entities"}`,
+  arrayNoSelection:
+    "Select entities first: the array applies to the current selection.",
+  convertHeading: "Convert",
+  convertNoTopology:
+    "No topology view: model geometry cannot be converted in this host.",
+  convertEmpty: "No topology references to convert.",
 };
 
 /** Structured outcome of a dimension apply: the host's refusal, verbatim. */
@@ -96,6 +111,49 @@ export type CadSketchDimensionApplyOutcome =
       readonly ok: false;
       readonly error: { readonly code: string; readonly message: string };
     };
+
+/** The structured outcome every Phase 37 apply surface returns. */
+export type CadSketchSketchApplyOutcome = CadSketchDimensionApplyOutcome;
+
+/** Which array pattern the form edits (the active tool decides). */
+export type CadSketchArrayTool = "rectArray" | "circArray";
+
+/** The inspector's array-pattern form view model (Phase 37). */
+export interface CadSketchInspectorArray {
+  readonly tool: CadSketchArrayTool;
+  /** How many entities the array will copy (the live selection). */
+  readonly selectionCount: number;
+}
+
+/** The rectangular array form's submitted values. */
+export interface CadSketchRectArrayValues {
+  readonly countX: number;
+  readonly countY: number;
+  readonly spacingX: number;
+  readonly spacingY: number;
+}
+
+/** The circular array form's submitted values. */
+export interface CadSketchCircArrayValues {
+  readonly count: number;
+  readonly angleStepDeg: number;
+  readonly centerX: number;
+  readonly centerY: number;
+}
+
+/** One convertible (or declined) topology entry in the convert list. */
+export interface CadSketchInspectorConvertEntry {
+  /** The persistent reference id (the row's identity and callback key). */
+  readonly referenceId: string;
+  /** The row's display text, host-composed (e.g. `vertex 0 @ (10, 20, 4)`). */
+  readonly label: string;
+  /** The topology kind (`vertex` converts; edge/face decline honestly). */
+  readonly kind: string;
+  /** Whether the host can convert this entry (kind + descriptor honesty). */
+  readonly convertible: boolean;
+  /** Why not, when not convertible (host data, verbatim). */
+  readonly declineMessage?: string;
+}
 
 /** Props of {@link CadSketchInspector}. */
 export interface CadSketchInspectorProps {
@@ -119,6 +177,28 @@ export interface CadSketchInspectorProps {
   ) => CadSketchDimensionApplyOutcome;
   /** The structured diagnostics feed, most severe first. */
   readonly diagnostics: readonly CadSketchInspectorDiagnostic[];
+  /**
+   * The array-pattern form (Phase 37): rendered when the active tool is an
+   * array tool; the apply surface receives the form's numbers and the host
+   * commits the op against the live selection.
+   */
+  readonly array?: CadSketchInspectorArray | null;
+  readonly onApplyArray?: (
+    tool: CadSketchArrayTool,
+    values: CadSketchRectArrayValues | CadSketchCircArrayValues,
+  ) => CadSketchSketchApplyOutcome;
+  /**
+   * The convert list (Phase 37): the host's topology references to project
+   * as construction geometry. `null` renders the documented no-topology
+   * hint — the inspector never pretends a convert is available.
+   */
+  readonly convert?: {
+    readonly entries: readonly CadSketchInspectorConvertEntry[];
+    /** The hint under the heading (e.g. the projected-out offset note). */
+    readonly hint?: string;
+  } | null;
+  /** The convert apply surface; keyed by the entry's reference id. */
+  readonly onConvert?: (referenceId: string) => CadSketchSketchApplyOutcome;
   /** Label token overrides, merged over {@link CAD_SKETCH_INSPECTOR_LABELS}. */
   readonly labels?: Partial<CadSketchInspectorLabels>;
   /** Extends the container classes. */
@@ -156,12 +236,16 @@ type DimensionFormValues = Record<string, number | undefined>;
  * diagnostics feed — the sketch's numbers, in one docked palette.
  */
 export function CadSketchInspector({
+  array = null,
   className,
   constraints,
+  convert = null,
   diagnostics,
   dimension,
   dof,
   labels: labelOverrides,
+  onApplyArray,
+  onConvert,
   onEditDimension,
   onSelectConstraint,
   selectedConstraintId,
@@ -169,6 +253,12 @@ export function CadSketchInspector({
 }: CadSketchInspectorProps) {
   const labels = useMergedLabels(labelOverrides);
   const [applyFailure, setApplyFailure] = useState<string | undefined>(
+    undefined,
+  );
+  const [arrayFailure, setArrayFailure] = useState<string | undefined>(
+    undefined,
+  );
+  const [convertFailure, setConvertFailure] = useState<string | undefined>(
     undefined,
   );
 
@@ -225,6 +315,197 @@ export function CadSketchInspector({
       dimension !== null &&
       onEditDimension !== undefined &&
       formConfig.fields.length > 0,
+  });
+
+  // ----- The Phase 37 array-pattern form ------------------------------------
+  // One Formedible form per tool (the fields genuinely differ); each renders
+  // only while its tool is active, and applies against the live selection.
+
+  const ARRAY_FIELD_LABELS = {
+    countX: "Copies along x",
+    countY: "Copies along y",
+    spacingX: "Spacing x (mm)",
+    spacingY: "Spacing y (mm)",
+    count: "Copies",
+    angleStepDeg: "Step (deg)",
+    centerX: "Center x (mm)",
+    centerY: "Center y (mm)",
+  } as const;
+
+  type ArrayFormValues = Record<string, number | undefined>;
+
+  const requireInteger = (value: number): boolean =>
+    Number.isInteger(value) && value >= 1;
+  const requireFinite = (value: number): boolean => Number.isFinite(value);
+
+  const rectArrayFields: FormedibleFieldConfig<ArrayFormValues>[] = [
+    {
+      name: "countX",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.countX,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && requireInteger(value)
+          ? null
+          : "An integer of 1 or more.",
+    },
+    {
+      name: "countY",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.countY,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && requireInteger(value)
+          ? null
+          : "An integer of 1 or more.",
+    },
+    {
+      name: "spacingX",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.spacingX,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && requireFinite(value) && value !== 0
+          ? null
+          : "A non-zero number (mm).",
+    },
+    {
+      name: "spacingY",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.spacingY,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && requireFinite(value) && value !== 0
+          ? null
+          : "A non-zero number (mm).",
+    },
+  ];
+
+  const circArrayFields: FormedibleFieldConfig<ArrayFormValues>[] = [
+    {
+      name: "count",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.count,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isInteger(value) && value >= 2
+          ? null
+          : "An integer of 2 or more.",
+    },
+    {
+      name: "angleStepDeg",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.angleStepDeg,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && requireFinite(value) && value !== 0
+          ? null
+          : "A non-zero number of degrees.",
+    },
+    {
+      name: "centerX",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.centerX,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && requireFinite(value)
+          ? null
+          : "A number (mm).",
+    },
+    {
+      name: "centerY",
+      type: "number",
+      label: ARRAY_FIELD_LABELS.centerY,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && requireFinite(value)
+          ? null
+          : "A number (mm).",
+    },
+  ];
+
+  const applyArray = (values: ArrayFormValues): void => {
+    setArrayFailure(undefined);
+    if (array === null || array === undefined || onApplyArray === undefined) {
+      return;
+    }
+    const numberAt = (name: string): number | null => {
+      const value = values[name];
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    };
+    if (array.tool === "rectArray") {
+      const countX = numberAt("countX");
+      const countY = numberAt("countY");
+      const spacingX = numberAt("spacingX");
+      const spacingY = numberAt("spacingY");
+      if (
+        countX === null ||
+        countY === null ||
+        spacingX === null ||
+        spacingY === null
+      ) {
+        return;
+      }
+      const outcome = onApplyArray(array.tool, {
+        countX,
+        countY,
+        spacingX,
+        spacingY,
+      });
+      if (!outcome.ok) {
+        setArrayFailure(`${outcome.error.code}: ${outcome.error.message}`);
+      }
+      return;
+    }
+    const count = numberAt("count");
+    const angleStepDeg = numberAt("angleStepDeg");
+    const centerX = numberAt("centerX");
+    const centerY = numberAt("centerY");
+    if (
+      count === null ||
+      angleStepDeg === null ||
+      centerX === null ||
+      centerY === null
+    ) {
+      return;
+    }
+    const outcome = onApplyArray(array.tool, {
+      angleStepDeg,
+      centerX,
+      centerY,
+      count,
+    });
+    if (!outcome.ok) {
+      setArrayFailure(`${outcome.error.code}: ${outcome.error.message}`);
+    }
+  };
+
+  const rectArrayForm = useFormedible<ArrayFormValues>({
+    fields: rectArrayFields,
+    formOptions: {
+      defaultValues: { countX: 3, countY: 2, spacingX: 20, spacingY: 20 },
+      onSubmit: ({ value }: { readonly value: ArrayFormValues }) => {
+        applyArray(value);
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.apply,
+    submitButtonClassName: "w-full",
+    showSubmitButton: array?.tool === "rectArray",
+  });
+
+  const circArrayForm = useFormedible<ArrayFormValues>({
+    fields: circArrayFields,
+    formOptions: {
+      defaultValues: { count: 6, angleStepDeg: 60, centerX: 0, centerY: 0 },
+      onSubmit: ({ value }: { readonly value: ArrayFormValues }) => {
+        applyArray(value);
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.apply,
+    submitButtonClassName: "w-full",
+    showSubmitButton: array?.tool === "circArray",
   });
 
   return (
@@ -328,6 +609,117 @@ export function CadSketchInspector({
                 role="alert"
               >
                 {applyFailure}
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
+      {/* The Phase 37 array-pattern form: rendered while an array tool is
+          active; applies against the live selection. */}
+      {array !== null ? (
+        <section
+          aria-label={labels.arrayHeading}
+          className="border-border border-b px-2 py-2"
+          data-sketch-array-tool={array.tool}
+          data-sketch-array-selection={String(array.selectionCount)}
+        >
+          <div className="text-muted-foreground pb-1 text-[10px] font-medium tracking-wider uppercase">
+            {labels.arrayHeading}
+          </div>
+          {array.selectionCount === 0 ? (
+            <p className="text-muted-foreground text-xs leading-4">
+              {labels.arrayNoSelection}
+            </p>
+          ) : (
+            <>
+              <p
+                className="text-muted-foreground pb-1 font-mono text-xs"
+                data-testid="sketch-array-selection"
+              >
+                {labels.arraySelectionLabel(array.selectionCount)}
+              </p>
+              {array.tool === "rectArray" ? (
+                <rectArrayForm.Form className="space-y-2" />
+              ) : (
+                <circArrayForm.Form className="space-y-2" />
+              )}
+              {arrayFailure !== undefined ? (
+                <div
+                  className="text-destructive pt-1 text-xs leading-4"
+                  data-testid="sketch-array-error"
+                  role="alert"
+                >
+                  {arrayFailure}
+                </div>
+              ) : null}
+            </>
+          )}
+        </section>
+      ) : null}
+      {/* The Phase 37 convert list: the host's topology references; a host
+          without a topology view gets the honest hint, not dead rows. */}
+      <section
+        aria-label={labels.convertHeading}
+        className="border-border border-b px-2 py-2"
+        data-sketch-convert-section=""
+      >
+        <div className="text-muted-foreground pb-1 text-[10px] font-medium tracking-wider uppercase">
+          {labels.convertHeading}
+        </div>
+        {convert === null ? (
+          <p className="text-muted-foreground text-xs leading-4">
+            {labels.convertNoTopology}
+          </p>
+        ) : convert.entries.length === 0 ? (
+          <p className="text-muted-foreground text-xs leading-4">
+            {labels.convertEmpty}
+          </p>
+        ) : (
+          <>
+            {convert.hint !== undefined ? (
+              <p className="text-muted-foreground pb-1 text-xs leading-4">
+                {convert.hint}
+              </p>
+            ) : null}
+            <ul className="px-0 py-0.5">
+              {convert.entries.map((entry) => (
+                <li key={entry.referenceId}>
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center gap-2 px-1 py-0.5 text-left text-xs outline-none enabled:hover:bg-muted/60 disabled:cursor-default disabled:opacity-60 focus-visible:ring-1 focus-visible:ring-ring/50"
+                    data-sketch-convert-entry={entry.referenceId}
+                    data-sketch-convert-kind={entry.kind}
+                    data-sketch-convert-convertible={entry.convertible}
+                    disabled={!entry.convertible}
+                    title={
+                      entry.declineMessage ??
+                      `Convert ${entry.label} into the sketch`
+                    }
+                    onClick={() => {
+                      setConvertFailure(undefined);
+                      if (onConvert === undefined) return;
+                      const outcome = onConvert(entry.referenceId);
+                      if (!outcome.ok) {
+                        setConvertFailure(
+                          `${outcome.error.code}: ${outcome.error.message}`,
+                        );
+                      }
+                    }}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-mono">
+                      {entry.label}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {convertFailure !== undefined ? (
+              <div
+                className="text-destructive pt-1 text-xs leading-4"
+                data-testid="sketch-convert-error"
+                role="alert"
+              >
+                {convertFailure}
               </div>
             ) : null}
           </>

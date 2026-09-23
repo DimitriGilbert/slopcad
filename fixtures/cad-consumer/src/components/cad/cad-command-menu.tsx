@@ -1,10 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { ReactElement } from "react";
 import { cn } from "cn";
 
 import {
   Command,
   CommandDialog,
-  CommandEmpty,
   CommandGroup,
   CommandInput,
   CommandItem,
@@ -70,6 +70,46 @@ export interface CadCommandMenuProps {
 const HOTKEY_KEY = "k";
 
 /**
+ * The menu's deterministic search rank of one command for one query: an
+ * in-order, case-insensitive subsequence match over the command's search
+ * text (label + keywords) that rewards consecutive hits and a leading
+ * hit. 0 means "no match — do not render"; higher is better, with an
+ * exact prefix of the label ranking above scattered keyword grazes.
+ */
+export function commandRank(haystack: string, search: string): number {
+  const text = haystack.toLowerCase();
+  const query = search.trim().toLowerCase();
+  if (query === "") return 1;
+  let score = 0;
+  let cursor = 0;
+  let streak = 0;
+  for (const character of query) {
+    const found = text.indexOf(character, cursor);
+    if (found < 0) return 0;
+    streak = found === cursor ? streak + 1 : 1;
+    score += 1 + streak * 0.5 + (found === 0 ? 0.5 : 0);
+    cursor = found + 1;
+  }
+  return score;
+}
+
+/** A ranked group: the token plus its surviving commands, best first. */
+interface RankedGroup {
+  readonly token: string;
+  readonly commands: readonly {
+    readonly command: CadCommandDescriptor;
+    readonly score: number;
+  }[];
+}
+
+/** The command's search text: label plus keywords, one haystack. */
+function searchTextOf(command: CadCommandDescriptor): string {
+  return command.keywords === undefined
+    ? command.label
+    : `${command.label} ${command.keywords}`;
+}
+
+/**
  * The CAD command menu: the host's commands as one searchable, grouped,
  * keyboard-first palette, in one mountable component.
  */
@@ -80,11 +120,14 @@ export function CadCommandMenu({
   labels: labelOverrides,
   onOpenChange,
   open,
-}: CadCommandMenuProps) {
+}: CadCommandMenuProps): ReactElement | null {
   const labels: CadCommandMenuLabels = {
     ...CAD_COMMAND_MENU_LABELS,
     ...labelOverrides,
   };
+  // The live query, mirrored from the input (the menu ranks itself; cmdk's
+  // filtering stays disabled).
+  const [search, setSearch] = useState("");
 
   // The hotkey lives in an effect so server renders never touch `window`
   // and the listener exists only while the menu cannot handle it itself.
@@ -104,21 +147,63 @@ export function CadCommandMenu({
     };
   }, [hotkey, onOpenChange, open]);
 
-  if (!open) return null;
+  // A closed menu renders nothing (the SSR discipline) and drops its query,
+  // so reopening starts from the unfiltered IA.
+  useEffect(() => {
+    if (!open) setSearch("");
+  }, [open]);
 
-  // Group tokens in first-seen order — the host's array is the IA.
-  const groups: {
-    readonly token: string;
-    readonly commands: CadCommandDescriptor[];
-  }[] = [];
-  for (const command of commands) {
-    const existing = groups.find((group) => group.token === command.group);
-    if (existing === undefined) {
-      groups.push({ token: command.group, commands: [command] });
-    } else {
-      existing.commands.push(command);
+  const rankedGroups: readonly RankedGroup[] = useMemo(() => {
+    // Group tokens in first-seen order — the host's array is the IA.
+    const groups: { token: string; commands: CadCommandDescriptor[] }[] = [];
+    for (const command of commands) {
+      const existing = groups.find((group) => group.token === command.group);
+      if (existing === undefined) {
+        groups.push({ token: command.group, commands: [command] });
+      } else {
+        existing.commands.push(command);
+      }
     }
-  }
+    if (search.trim() === "") {
+      return groups.map((group) => ({
+        token: group.token,
+        commands: group.commands.map((command) => ({ command, score: 1 })),
+      }));
+    }
+    const ranked = groups.map((group) => ({
+      token: group.token,
+      commands: group.commands
+        .map((command) => ({
+          command,
+          score: commandRank(searchTextOf(command), search),
+        }))
+        .filter((entry) => entry.score > 0)
+        .sort(
+          (a, b) =>
+            b.score - a.score ||
+            commands.indexOf(a.command) - commands.indexOf(b.command),
+        ),
+    }));
+    // Groups order by their best surviving score (ties keep first-seen
+    // order); empty groups drop out.
+    return ranked
+      .filter((group) => group.commands.length > 0)
+      .map((group) => ({
+        token: group.token,
+        commands: group.commands,
+        best: Math.max(...group.commands.map((entry) => entry.score)),
+      }))
+      .sort((a, b) => b.best - a.best)
+      .map(({ token, commands: rankedCommands }) => ({
+        token,
+        commands: rankedCommands,
+      }));
+  }, [commands, search]);
+
+  const resultCount = rankedGroups.reduce(
+    (count, group) => count + group.commands.length,
+    0,
+  );
 
   return (
     <CommandDialog
@@ -128,45 +213,49 @@ export function CadCommandMenu({
       open={open}
       title={labels.title}
     >
-      <Command>
-        <CommandInput placeholder={labels.placeholder} />
+      <Command shouldFilter={false}>
+        <CommandInput
+          onValueChange={(value) => {
+            setSearch(value);
+          }}
+          placeholder={labels.placeholder}
+        />
         <CommandList data-cad-command-list="">
-          <CommandEmpty>{labels.empty}</CommandEmpty>
-          {groups.map((group) => (
-            <CommandGroup
-              data-cad-command-group={group.token}
-              heading={group.token}
-              key={group.token}
+          {resultCount === 0 ? (
+            <div
+              className="text-muted-foreground py-6 text-center text-sm"
+              data-cad-command-empty=""
             >
-              {group.commands.map((command) => (
-                <CommandItem
-                  data-cad-command-id={command.id}
-                  data-disabled={command.disabled === true || undefined}
-                  disabled={command.disabled === true}
-                  key={command.id}
-                  keywords={
-                    command.keywords === undefined
-                      ? undefined
-                      : [command.keywords]
-                  }
-                  onSelect={() => {
-                    onOpenChange(false);
-                    command.run();
-                  }}
-                  value={
-                    command.keywords === undefined
-                      ? command.label
-                      : `${command.label} ${command.keywords}`
-                  }
-                >
-                  <span>{command.label}</span>
-                  {command.shortcut !== undefined ? (
-                    <CommandShortcut>{command.shortcut}</CommandShortcut>
-                  ) : null}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          ))}
+              {labels.empty}
+            </div>
+          ) : (
+            rankedGroups.map((group) => (
+              <CommandGroup
+                data-cad-command-group={group.token}
+                heading={group.token}
+                key={group.token}
+              >
+                {group.commands.map(({ command }) => (
+                  <CommandItem
+                    data-cad-command-id={command.id}
+                    data-disabled={command.disabled === true || undefined}
+                    disabled={command.disabled === true}
+                    key={command.id}
+                    onSelect={() => {
+                      onOpenChange(false);
+                      command.run();
+                    }}
+                    value={command.label}
+                  >
+                    <span>{command.label}</span>
+                    {command.shortcut !== undefined ? (
+                      <CommandShortcut>{command.shortcut}</CommandShortcut>
+                    ) : null}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))
+          )}
         </CommandList>
       </Command>
     </CommandDialog>

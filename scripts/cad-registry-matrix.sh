@@ -100,7 +100,8 @@ pnpm install --filter .
 pnpm exec shadcn add "@slopcad/bounds-inspection-tool" \
   "@slopcad/distance-inspection-tool" \
   "@slopcad/mass-properties-inspection-tool" \
-  "@slopcad/radius-inspection-tool" "@slopcad/extrude-tool" \
+  "@slopcad/radius-inspection-tool" "@slopcad/datum-tool" \
+  "@slopcad/extrude-tool" \
   "@slopcad/revolve-tool" "@slopcad/hole-tool" -y --overwrite
 # …then the examples…
 pnpm exec shadcn add "@slopcad/plate-workbench" \

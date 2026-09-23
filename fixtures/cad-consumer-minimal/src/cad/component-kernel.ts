@@ -14,6 +14,8 @@ import type {
   ProfileLoftInput,
   ProfileRevolveInput,
   ProfileSweepInput,
+  SectionInput,
+  SectionResult,
   ShellInput,
   SphereInput,
   Tessellation,
@@ -84,6 +86,11 @@ export interface ComponentKernel {
   bounds(solid: KernelSolid): Promise<ComponentKernelResult<KernelBounds>>;
   volume(solid: KernelSolid): Promise<ComponentKernelResult<number>>;
   area(solid: KernelSolid): Promise<ComponentKernelResult<number>>;
+  /**
+   * The Phase 46 plane cut: the cut solid plus the cross-section face's
+   * measurements, the contract op's compound result verbatim.
+   */
+  section(input: SectionInput): Promise<ComponentKernelResult<SectionResult>>;
   tessellate(solid: KernelSolid): Promise<ComponentKernelResult<Tessellation>>;
   dispose(solid: KernelSolid): Promise<void>;
 }
@@ -98,6 +105,8 @@ export type {
   MirrorPlaneAxis,
   ProfileExtrudeInput,
   ProfileRevolveInput,
+  SectionInput,
+  SectionResult,
   ShellInput,
   SphereInput,
   TransformInput,
@@ -136,6 +145,7 @@ export function directComponentKernel(kernel: GeometryKernel): ComponentKernel {
     bounds: (solid) => Promise.resolve(kernel.bounds(solid)),
     volume: (solid) => Promise.resolve(kernel.volume(solid)),
     area: (solid) => Promise.resolve(kernel.area(solid)),
+    section: (input) => Promise.resolve(kernel.section(input)),
     tessellate: (solid) => Promise.resolve(kernel.tessellate(solid)),
     dispose: (solid) => {
       kernel.dispose(solid);

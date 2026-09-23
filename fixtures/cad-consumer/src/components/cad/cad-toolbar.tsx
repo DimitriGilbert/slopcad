@@ -124,7 +124,7 @@ export function CadToolbar({
     <div
       aria-label={labels.toolbarLabel}
       className={cn(
-        "border-border bg-background inline-flex items-center gap-1 border p-1",
+        "border-border bg-card/60 inline-flex items-center gap-0.5 rounded-md border p-0.5",
         className,
       )}
       data-slot="cad-toolbar"
@@ -153,15 +153,16 @@ export function CadToolbar({
                     activate(toolId);
                   }
             }
+            className="data-[active=true]:bg-accent data-[active=true]:text-accent-foreground data-[active=true]:shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_38%,transparent)] gap-1.5 px-2"
             size="sm"
             title={toolLabels.tooltip}
-            variant={active ? "default" : "outline"}
+            variant="ghost"
           >
             {toolLabels.label}
             {shortcut !== null ? (
               <kbd
                 aria-hidden="true"
-                className="ml-1 border-current/40 border px-1 font-mono text-[10px] font-normal leading-4"
+                className="border-border text-muted-foreground rounded-[2px] border bg-transparent px-1 font-mono text-[10px] leading-4 font-normal"
               >
                 {shortcut}
               </kbd>

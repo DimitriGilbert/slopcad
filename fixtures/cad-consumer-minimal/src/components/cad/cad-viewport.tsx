@@ -1,9 +1,20 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type {
+  ComponentProps,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from "react";
+/**
+ * The Phase 45 camera/display prop types, derived from `CadScene`'s own
+ * public component surface (the component this viewport composes): the
+ * ui boundary allowlist stops at the renderer package, and the props
+ * pass through untouched — the type follows the component edge, not a
+ * re-export chain around the boundary.
+ */
+type SceneUserCameraProp = ComponentProps<typeof CadScene>["userCamera"];
+type SceneOnUserCameraProp = ComponentProps<typeof CadScene>["onUserCamera"];
+type SceneDisplayModeProp = ComponentProps<typeof CadScene>["displayMode"];
 import {
   CadProviderError,
   useCadSelection,
@@ -14,15 +25,18 @@ import {
   type SelectionReference,
 } from "@slopcad/cad-react";
 import {
-  CAD_SCENE_BACKGROUND,
   CadScene,
   toolKeyEvent,
   toolModifiersFromNative,
   toolPointerEvent,
   type CadPick,
   type CadPickCategory,
+  type SceneCameraStateSnapshot,
 } from "@slopcad/cad-r3f";
+import type { SectionClipPlanes } from "@slopcad/cad-r3f";
 import { cn } from "cn";
+
+import { useCadStudioPalette } from "./cad-studio-palette";
 
 /** The user-facing strings of {@link CadViewport}. Overridable via props. */
 export interface CadViewportLabels {
@@ -61,6 +75,57 @@ export interface CadViewportProps {
   readonly labels?: Partial<CadViewportLabels>;
   /** Extends the container classes; sizes the viewport (default 320px tall). */
   readonly className?: string;
+  /**
+   * Section clipping planes (Phase 46): passed straight to the scene's
+   * body materials when non-empty — the render-level half of a section
+   * display record. Absent or empty is the unclipped raster.
+   */
+  readonly clippingPlanes?: SectionClipPlanes;
+  /**
+   * Opts the viewport into INTERACTIVE camera controls (left-drag orbit,
+   * wheel dolly, middle/shift-drag pan, arrow-key orbit when the viewport
+   * has focus). Default `false` — the deterministic spec camera the
+   * byte-pinned fixtures render with. With controls on, the boot camera is
+   * still the projection's spec camera: pixels change only after a real
+   * user gesture, and a camera state is published on the container as
+   * `data-camera-mode` / `data-camera-azimuth-deg` /
+   * `data-camera-elevation-deg` / `data-camera-distance-mm` ("spec" until
+   * the first gesture takes over). While a provider tool is ARMED,
+   * left-drag belongs to the tool; camera access rides wheel, pan, and
+   * keys until it is cancelled.
+   */
+  readonly cameraControls?: boolean;
+  /**
+   * Whether left-drag-orbit is currently available (camera controls only).
+   * The default `true` fits every host without provider tools; a host with
+   * an armed tool whose gesture vocabulary owns model drags (rotate,
+   * translate) passes `false` while that tool is live — the tool keeps its
+   * gesture, and wheel zoom, pan, and the arrow keys still move the
+   * camera. Click tools (select, measure) do NOT need this: orbiting and
+   * clicking coexist (the drag threshold separates them).
+   */
+  readonly cameraOrbitDragEnabled?: boolean;
+  /**
+   * The session-scoped USER camera overlay (Phase 45): when present it
+   * replaces the projection's spec for rendering only (see
+   * `docs/architecture/adr-user-camera-overlay.md`). Default `null` — the
+   * spec camera every pinned fixture renders with.
+   */
+  readonly userCamera?: SceneUserCameraProp;
+  /**
+   * Receives user-camera RECORDS committed by gestures (drag end, wheel
+   * notch, key step) — the host stores them session-scoped and feeds the
+   * value back through {@link userCamera}. Fires only from user input.
+   * Every commit advances the container's `data-camera-commit-count`
+   * (the gesture-commit ledger: one per drag, wheel notch, or key step —
+   * never per pointer move).
+   */
+  readonly onUserCamera?: SceneOnUserCameraProp;
+  /**
+   * The display mode (Phase 45): `shaded` (the default), `shaded-edges`,
+   * `wireframe`, or `hidden-line`.
+   */
+  readonly displayMode?: SceneDisplayModeProp;
   /** Fires once per projection change, on its first settled demand frame. */
   readonly onSettled?: () => void;
   /** Fires when new selection content reached a rendered frame. */
@@ -115,9 +180,14 @@ function insideOverlay(
  * (the fixture camera specs are authored for their exact viewport).
  */
 export function CadViewport({
+  cameraControls = false,
+  cameraOrbitDragEnabled = true,
   className,
+  clippingPlanes,
+  displayMode,
   labels: labelOverrides,
   onHover,
+  onUserCamera,
   onPick,
   onPickDown,
   onPickUp,
@@ -128,11 +198,16 @@ export function CadViewport({
   projection,
   regeneration: regenerationProp,
   selection: selectionProp,
+  userCamera = null,
 }: CadViewportProps) {
   const labels: CadViewportLabels = {
     ...CAD_VIEWPORT_LABELS,
     ...labelOverrides,
   };
+  // The studio ink follows the app's scheme + register (see
+  // cad-studio-palette); the selection highlight inside the scene stays
+  // deterministic amber.
+  const studioPalette = useCadStudioPalette();
   const selectionApi = useOptionalCadSelection();
   const toolsApi = useOptionalCadTools();
 
@@ -150,6 +225,65 @@ export function CadViewport({
   /** The latest pointer down resolved no pick (empty space). */
   const emptyDownRef = useRef(false);
   const overlayLayerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Publishes the camera state on the container's machine surface
+   * (`data-camera-*`), directly — a camera drag writes attributes, it
+   * never re-renders the viewport.
+   */
+  const handleCameraState = useCallback(
+    (snapshot: SceneCameraStateSnapshot): void => {
+      const container = containerRef.current;
+      if (container === null) return;
+      container.setAttribute("data-camera-mode", snapshot.mode);
+      container.setAttribute("data-camera-projection", snapshot.projection);
+      container.setAttribute(
+        "data-camera-azimuth-deg",
+        String(snapshot.azimuthDeg),
+      );
+      container.setAttribute(
+        "data-camera-elevation-deg",
+        String(snapshot.elevationDeg),
+      );
+      container.setAttribute(
+        "data-camera-distance-mm",
+        String(snapshot.distanceMm),
+      );
+    },
+    [],
+  );
+
+  /**
+   * The gesture-commit ledger: how many `onUserCamera` records this mount
+   * has committed. Written to the container as `data-camera-commit-count`
+   * beside the snapshot readouts — it makes the commit-once-per-gesture
+   * law (ADR: user-camera overlay) observable from outside the page, the
+   * same machine-surface discipline as `data-rendered-frames`.
+   */
+  const userCameraCommitsRef = useRef(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container === null) return;
+    container.setAttribute(
+      "data-camera-commit-count",
+      String(userCameraCommitsRef.current),
+    );
+  }, []);
+  const handleUserCamera = useCallback(
+    (camera: Parameters<NonNullable<SceneOnUserCameraProp>>[0]): void => {
+      userCameraCommitsRef.current += 1;
+      const container = containerRef.current;
+      if (container !== null) {
+        container.setAttribute(
+          "data-camera-commit-count",
+          String(userCameraCommitsRef.current),
+        );
+      }
+      onUserCamera?.(camera);
+    },
+    [onUserCamera],
+  );
 
   const toolActive = toolsApi !== null && toolsApi.phase === "active";
   const explicitInteraction =
@@ -268,11 +402,12 @@ export function CadViewport({
     <div
       aria-label={labels.viewportLabel}
       className={cn(
-        "relative h-80 w-full overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
+        "relative h-80 w-full overflow-hidden outline-none focus-visible:ring-1 focus-visible:ring-ring/80",
         className,
       )}
+      ref={containerRef}
       role="group"
-      style={{ backgroundColor: CAD_SCENE_BACKGROUND }}
+      style={{ backgroundColor: studioPalette.background }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
@@ -296,12 +431,26 @@ export function CadViewport({
         </div>
       ) : (
         <CadScene
+          cameraControls={cameraControls}
+          clippingPlanes={clippingPlanes}
+          cameraOrbitDragEnabled={cameraOrbitDragEnabled}
+          displayMode={displayMode}
+          onCameraState={handleCameraState}
           onSelectionRendered={onSelectionRendered}
           onSettled={onSettled}
+          // The wrapper counts commits for the machine surface; it must
+          // stay `undefined` without the prop (the scene treats a missing
+          // callback as "no overlay host" — a defined wrapper would flip
+          // that law).
+          onUserCamera={
+            onUserCamera === undefined ? undefined : handleUserCamera
+          }
+          palette={studioPalette}
           pickCategory={pickCategory}
           projection={projection}
           regeneration={regeneration}
           selection={selection}
+          userCamera={userCamera}
           {...sceneInteraction}
         />
       )}

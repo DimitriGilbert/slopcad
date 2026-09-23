@@ -204,6 +204,17 @@ const shared = {
   initial: undefined as Buffer | undefined,
 };
 
+/**
+ * Byte-stability sensitivity (recorded at the Phase 60 hardening sweep,
+ * closing the note disclosed with the Phase 56 toolbar gate): the canvas
+ * bytes below are NOT layout-independent. The sketch canvas is the flex
+ * remainder of the row its toolbar shares, so ANY toolbar/row-width
+ * change — a new command button, an icon swap, a padding tweak — resizes
+ * the canvas box, moves the workspace scroll math, and re-baselines every
+ * byte-stable fixture in this file and the render suite. Land such a
+ * change together with a re-record of these baselines, never silently.
+ */
+
 test("the empty sketch editor boots byte-stable across two full runs", async ({
   page,
 }) => {

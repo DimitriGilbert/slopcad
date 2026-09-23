@@ -87,3 +87,23 @@ Video semantics: validators verify artifact existence and duration; content revi
 | 7   | Renovate one-liner                                                                  | Not adopted (deviation 3)                                                                                           |
 | 8   | Quality-report script runnable locally, report-only                                 | Done — `pnpm quality`, `pnpm quality:knip`                                                                          |
 | 9   | Nothing satisfied by a fake pass                                                    | Done — no `passWithNoTests`, no `echo` runners, no tautologies                                                      |
+
+---
+
+## 6. Phase 60 epoch note (2026-09-23)
+
+The plan's structures are unchanged at the Phase 60 hardening epoch (tip
+`8e5de07`, everything through the importers); what moved is scale. The
+six-package vitest baseline of 14 tests became per-package suites across
+the whole CAD workspace (run `pnpm test` — turbo prints each package's
+tally; the phase floors to never shrink below: cad-core 1051, web 381,
+cad-io 192, occt 423, cad-sketch 297, ui 147, api 14), and the browser
+batteries grew from the two-test smoke harness to the full
+`pnpm test:fast` fleet (one production build, one booked shared port,
+eleven concurrent Playwright harnesses) whose `e2e-workbench` harness now
+also carries the Phase 60 command-surface audit
+(`apps/web/e2e-workbench/command-surface.spec.ts` + its generated
+checklist, kept closed against `ROADMAP-CAD-PARITY.md` by
+`pnpm audit:command-surface`). The D1–D7 decisions, the deviations, and
+the no-CI gate model all stand as written above; `pnpm verify` remains
+the single headless quality gate.
