@@ -61,10 +61,12 @@ import {
   type FeatureId,
   type IdGenerator,
   type IdGeneratorState,
+  type OccurrenceId,
   parseBodyId,
   parseDatumId,
   parseDocumentId,
   parseFeatureId,
+  parseOccurrenceId,
   parseParameterId,
   type ParameterId,
   parseReferenceId,
@@ -294,6 +296,14 @@ export interface CadDocument {
    */
   readonly sections: readonly DocumentSection[];
   /**
+   * The document's component occurrences, in add order (empty in older
+   * files; Phase 50-additive): every document IS an assembly root — the
+   * assembly-as-document decision (docs/architecture/
+   * adr-assemblies-structure.md). Sub-assemblies are other documents
+   * referenced as occurrence sources; nesting crosses document bounds.
+   */
+  readonly occurrences: readonly DocumentOccurrence[];
+  /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
    * generated ids unique across save/load.
@@ -324,6 +334,93 @@ export interface DocumentSection {
 
 /** How many section display records a document may carry (the clip budget). */
 export const DOCUMENT_SECTION_LIMIT = 3;
+
+/**
+ * What an occurrence places into the assembly (Phase 50). A `body` source
+ * addresses a body of the SAME document; a `document` source addresses
+ * another document by the persistence layer's document id (an opaque,
+ * project-stable string — cad-core never resolves it; the host does,
+ * through the `@slopcad/api` documents router); a `component` source
+ * addresses a registry component by its stable id (resolved by the host
+ * through `@slopcad/cad-components`). Both opaque ids are validated as
+ * non-empty strings of at most {@link OCCURRENCE_SOURCE_ID_MAX_LENGTH}
+ * characters and are otherwise deliberately uninterpreted.
+ */
+export type OccurrenceSource =
+  | { readonly kind: "body"; readonly bodyId: BodyId }
+  | { readonly kind: "document"; readonly documentId: string }
+  | { readonly kind: "component"; readonly componentId: string };
+
+/** Longest accepted persistence-document / registry-component id. */
+export const OCCURRENCE_SOURCE_ID_MAX_LENGTH = 128;
+
+/**
+ * The occurrence kinds a BOM table (Phase 53) distinguishes, declared per
+ * occurrence: `default` (the wire-absent value — the row ships),
+ * `phantom` (the row dissolves into its parent — sub-assembly headers),
+ * and `purchased` (the row ships, geometry may not exist yet). Data only:
+ * nothing in this phase consumes the flag beyond persistence and display.
+ */
+export const OCCURRENCE_BOM_FLAGS = [
+  "default",
+  "phantom",
+  "purchased",
+] as const;
+
+export type OccurrenceBomFlag = (typeof OCCURRENCE_BOM_FLAGS)[number];
+
+/**
+ * How an occurrence is placed (Phase 50), resolved against the document's
+ * datums by the executor: `identity` passes geometry through unmoved;
+ * `offset` translates it; `datum` anchors it to a document datum's frame
+ * (any datum kind resolves to a frame; a `cSys` is the canonical anchor)
+ * with an optional further translation applied IN the anchor's frame.
+ * Numeric today, parameter-driven transitively through the datum system —
+ * the assembly ADR's documented reading of "from datum/parameters".
+ */
+export type OccurrencePlacement =
+  | { readonly kind: "identity" }
+  | {
+      readonly kind: "offset";
+      readonly translation: readonly [number, number, number];
+    }
+  | {
+      readonly kind: "datum";
+      readonly datumId: DatumId;
+      readonly translation?: readonly [number, number, number];
+    };
+
+/**
+ * A component occurrence (Phase 50): one placed reference to a source —
+ * a body of this document, another document, or a registry component —
+ * in the document's assembly. The record is pure structure: resolution
+ * (source geometry, placement transforms, instance paths) lives in the
+ * assembly module and runs at the executor boundary, never re-executing
+ * the source's features.
+ */
+export interface DocumentOccurrence {
+  readonly id: OccurrenceId;
+  /** The occurrence's name (1-64 characters, the datum naming rule). */
+  readonly name: string;
+  readonly source: OccurrenceSource;
+  readonly placement: OccurrencePlacement;
+  /**
+   * The BOM structure flag (`phantom`/`purchased`) — present exactly when
+   * non-default, the id-generator counter precedent, so a flagless
+   * occurrence serializes byte-identically to its pre-flag form.
+   */
+  readonly bomFlag?: Exclude<OccurrenceBomFlag, "default">;
+}
+
+/** Input accepted by {@link addOccurrence}; the id is generated when omitted. */
+export interface DocumentOccurrenceInput {
+  readonly id?: OccurrenceId;
+  readonly name: string;
+  readonly source: OccurrenceSource;
+  readonly placement?: OccurrencePlacement;
+  /** Absent/`"default"` stores as the wire-absent default. */
+  readonly bomFlag?: OccurrenceBomFlag;
+}
 
 /** A kind-tagged view of any entity resolvable by id within a document. */
 export type DocumentEntity =
@@ -369,6 +466,12 @@ export interface DocumentDatumAddResult {
   readonly datum: DocumentDatum;
 }
 
+/** Result of {@link addOccurrence}: the next document plus the occurrence. */
+export interface OccurrenceAddResult {
+  readonly document: CadDocument;
+  readonly occurrence: DocumentOccurrence;
+}
+
 /** Stable failure codes produced when document input is rejected. */
 export const DOCUMENT_ERROR_CODES = {
   malformed: "document/malformed",
@@ -385,6 +488,11 @@ export const DOCUMENT_ERROR_CODES = {
   datumNameInvalid: "document/datum-name-invalid",
   sectionNameInvalid: "document/section-name-invalid",
   sectionLimitExceeded: "document/section-limit-exceeded",
+  occurrenceNameInvalid: "assembly/occurrence-name-invalid",
+  occurrenceSourceInvalid: "assembly/occurrence-source-invalid",
+  occurrenceSourceUnknown: "assembly/occurrence-source-unknown",
+  occurrencePlacementInvalid: "assembly/occurrence-placement-invalid",
+  occurrenceBomFlagInvalid: "assembly/occurrence-bom-flag-invalid",
   datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
@@ -679,6 +787,7 @@ function raiseGeneratorState(
     sketch: Math.max(base.sketch, floor.sketch),
     datum: Math.max(base.datum, floor.datum),
     section: Math.max(base.section, floor.section),
+    occurrence: Math.max(base.occurrence, floor.occurrence),
   };
   return Object.freeze(raised);
 }
@@ -725,7 +834,9 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
     document.features.some((feature) => feature.id === id) ||
     document.sketches.some((sketch) => sketch.id === id) ||
     document.references.some((reference) => reference.id === id) ||
-    document.datums.some((datum) => datum.id === id)
+    document.datums.some((datum) => datum.id === id) ||
+    document.sections.some((section) => section.id === id) ||
+    document.occurrences.some((occurrence) => occurrence.id === id)
   );
 }
 
@@ -768,6 +879,7 @@ export function createDocument(id: DocumentId): CadDocument {
     references: Object.freeze([]),
     datums: Object.freeze([]),
     sections: Object.freeze([]),
+    occurrences: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -1840,6 +1952,348 @@ export function getDocumentDatum(
   return document.datums.find((datum) => datum.id === id);
 }
 
+/**
+ * Validates an occurrence source against its document (Phase 50): a
+ * `body` source must address an existing body of the SAME document; the
+ * opaque `document`/`component` ids are validated as bounded non-empty
+ * strings and are otherwise resolved by the host, never here.
+ */
+function validateOccurrenceSource(
+  document: CadDocument,
+  source: OccurrenceSource,
+): DocumentError | undefined {
+  if (source.kind === "body") {
+    if (!document.bodies.some((body) => body.id === source.bodyId)) {
+      return docError(
+        DOCUMENT_ERROR_CODES.occurrenceSourceUnknown,
+        `The occurrence's body source ${String(source.bodyId)} does not exist in this document.`,
+        source,
+      );
+    }
+    return undefined;
+  }
+  const opaqueId =
+    source.kind === "document" ? source.documentId : source.componentId;
+  if (
+    typeof opaqueId !== "string" ||
+    opaqueId.length === 0 ||
+    opaqueId.length > OCCURRENCE_SOURCE_ID_MAX_LENGTH
+  ) {
+    return docError(
+      DOCUMENT_ERROR_CODES.occurrenceSourceInvalid,
+      `A ${source.kind} source id must be a string of 1-${OCCURRENCE_SOURCE_ID_MAX_LENGTH} characters.`,
+      source,
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Validates an occurrence placement structurally: finite translation
+ * triples and, for a `datum` anchor, an existing document datum. Frame
+ * RESOLUTION (the datum's geometry, topology-dependent definitions) runs
+ * at the executor boundary through the assembly module's resolver seam —
+ * the same split the datum feature inputs use.
+ */
+function validateOccurrencePlacement(
+  document: CadDocument,
+  placement: OccurrencePlacement,
+): DocumentError | undefined {
+  const translationInvalid = (
+    translation: readonly [number, number, number] | undefined,
+  ): boolean =>
+    translation !== undefined &&
+    (translation.length !== 3 ||
+      translation.some((component) => !Number.isFinite(component)));
+  if (placement.kind === "identity") return undefined;
+  if (placement.kind === "offset") {
+    if (translationInvalid(placement.translation)) {
+      return docError(
+        DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+        "An offset placement must carry a finite xyz translation triple.",
+        placement,
+      );
+    }
+    return undefined;
+  }
+  if (!document.datums.some((datum) => datum.id === placement.datumId)) {
+    return docError(
+      DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+      `The occurrence's datum anchor ${String(placement.datumId)} does not exist in this document.`,
+      placement,
+    );
+  }
+  if (translationInvalid(placement.translation)) {
+    return docError(
+      DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+      "A datum placement's optional translation must be a finite xyz triple.",
+      placement,
+    );
+  }
+  return undefined;
+}
+
+/** Normalizes authored placement input: absent becomes identity, triples detach. */
+function normalizeOccurrencePlacement(
+  placement: OccurrencePlacement | undefined,
+): OccurrencePlacement {
+  if (placement === undefined) return { kind: "identity" };
+  if (placement.kind === "offset") {
+    return {
+      kind: "offset",
+      translation: [
+        placement.translation[0],
+        placement.translation[1],
+        placement.translation[2],
+      ],
+    };
+  }
+  if (placement.kind === "datum") {
+    return placement.translation === undefined
+      ? { kind: "datum", datumId: placement.datumId }
+      : {
+          kind: "datum",
+          datumId: placement.datumId,
+          translation: [
+            placement.translation[0],
+            placement.translation[1],
+            placement.translation[2],
+          ],
+        };
+  }
+  return placement;
+}
+
+/**
+ * Adds one component occurrence (Phase 50) — the datum builders'
+ * discipline: an explicit id must be well formed and unclaimed (or the
+ * next generated id is minted), the name carries the datum naming rule,
+ * the source must address an existing body when it names one, the datum
+ * anchor must exist when the placement names one, and the BOM flag must
+ * be a declared value.
+ */
+export function addOccurrence(
+  document: CadDocument,
+  input: DocumentOccurrenceInput,
+): ParseResult<OccurrenceAddResult, DocumentError> {
+  const name =
+    typeof input.name === "string" &&
+    input.name.length >= 1 &&
+    input.name.length <= 64
+      ? input.name
+      : null;
+  if (name === null) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.occurrenceNameInvalid,
+        "An occurrence name must be a string of 1-64 characters.",
+        input.name,
+      ),
+    );
+  }
+  const sourceError = validateOccurrenceSource(document, input.source);
+  if (sourceError !== undefined) return fail(sourceError);
+  const placement = normalizeOccurrencePlacement(input.placement);
+  const placementError = validateOccurrencePlacement(document, placement);
+  if (placementError !== undefined) return fail(placementError);
+  if (
+    input.bomFlag !== undefined &&
+    !OCCURRENCE_BOM_FLAGS.includes(input.bomFlag)
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.occurrenceBomFlagInvalid,
+        `An occurrence BOM flag must be one of: ${OCCURRENCE_BOM_FLAGS.join(", ")}.`,
+        input.bomFlag,
+      ),
+    );
+  }
+  let id: OccurrenceId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextOccurrenceId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseOccurrenceId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `An occurrence id must be a valid occurrence id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("occurrence", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `The occurrence id ${String(parsed.value)} is already registered in this document.`,
+          parsed.value,
+        ),
+      );
+    }
+    id = parsed.value;
+  }
+  const bomFlag: DocumentOccurrence["bomFlag"] =
+    input.bomFlag === undefined || input.bomFlag === "default"
+      ? undefined
+      : input.bomFlag;
+  const occurrence: DocumentOccurrence = Object.freeze({
+    id,
+    name,
+    source: input.source,
+    placement,
+    ...(bomFlag === undefined ? {} : { bomFlag }),
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      occurrences: Object.freeze([...document.occurrences, occurrence]),
+      idGeneratorState,
+    }),
+    occurrence,
+  });
+}
+
+/**
+ * Removes one occurrence by id (structured not-found refusal otherwise).
+ * Nothing in the document references an occurrence — features consume
+ * bodies/sketches/datums, not placements — so removal needs no in-use
+ * sweep; sub-assembly EDGES cross documents and are the host's graph.
+ */
+export function removeOccurrence(
+  document: CadDocument,
+  id: OccurrenceId,
+): ParseResult<CadDocument, DocumentError> {
+  if (!document.occurrences.some((occurrence) => occurrence.id === id)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No occurrence ${String(id)} exists in this document.`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      occurrences: Object.freeze(
+        document.occurrences.filter((occurrence) => occurrence.id !== id),
+      ),
+    }),
+  );
+}
+
+/** Authored fields {@link updateOccurrence} may change; absent = unchanged. */
+export interface OccurrenceUpdate {
+  readonly name?: string;
+  readonly source?: OccurrenceSource;
+  readonly placement?: OccurrencePlacement;
+  /** `"default"` clears the flag back to the wire-absent default. */
+  readonly bomFlag?: OccurrenceBomFlag;
+}
+
+/**
+ * Updates one occurrence's authored fields (Phase 50) — name, source,
+ * placement, BOM flag — with every changed field re-validated exactly as
+ * {@link addOccurrence} validates it; an unknown id is the structured
+ * not-found refusal.
+ */
+export function updateOccurrence(
+  document: CadDocument,
+  id: OccurrenceId,
+  update: OccurrenceUpdate,
+): ParseResult<CadDocument, DocumentError> {
+  const existing = document.occurrences.find(
+    (occurrence) => occurrence.id === id,
+  );
+  if (existing === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No occurrence ${String(id)} exists in this document.`,
+        id,
+      ),
+    );
+  }
+  let name = existing.name;
+  if (update.name !== undefined) {
+    if (
+      typeof update.name !== "string" ||
+      update.name.length === 0 ||
+      update.name.length > 64
+    ) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.occurrenceNameInvalid,
+          "An occurrence name must be a string of 1-64 characters.",
+          update.name,
+        ),
+      );
+    }
+    name = update.name;
+  }
+  let source = existing.source;
+  if (update.source !== undefined) {
+    const sourceError = validateOccurrenceSource(document, update.source);
+    if (sourceError !== undefined) return fail(sourceError);
+    source = update.source;
+  }
+  let placement = existing.placement;
+  if (update.placement !== undefined) {
+    const next = normalizeOccurrencePlacement(update.placement);
+    const placementError = validateOccurrencePlacement(document, next);
+    if (placementError !== undefined) return fail(placementError);
+    placement = next;
+  }
+  let bomFlag = existing.bomFlag;
+  if (update.bomFlag !== undefined) {
+    if (!OCCURRENCE_BOM_FLAGS.includes(update.bomFlag)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.occurrenceBomFlagInvalid,
+          `An occurrence BOM flag must be one of: ${OCCURRENCE_BOM_FLAGS.join(", ")}.`,
+          update.bomFlag,
+        ),
+      );
+    }
+    bomFlag = update.bomFlag === "default" ? undefined : update.bomFlag;
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      occurrences: Object.freeze(
+        document.occurrences.map((occurrence) =>
+          occurrence.id === id
+            ? Object.freeze({
+                ...occurrence,
+                name,
+                source,
+                placement,
+                ...(bomFlag === undefined ? {} : { bomFlag }),
+              })
+            : occurrence,
+        ),
+      ),
+    }),
+  );
+}
+
+/** Reads one occurrence by id, or `undefined`. */
+export function getOccurrence(
+  document: CadDocument,
+  id: OccurrenceId,
+): DocumentOccurrence | undefined {
+  return document.occurrences.find((occurrence) => occurrence.id === id);
+}
+
 /** Input of {@link addDocumentSection}: the record's authored fields. */
 export interface DocumentSectionInput {
   /** An explicit id (`sec_…`), or absent to generate the next one. */
@@ -2045,11 +2499,12 @@ export interface SerializedFeatureRecord {
  */
 export type SerializedIdGeneratorState = Omit<
   IdGeneratorState,
-  "sketch" | "datum" | "section"
+  "sketch" | "datum" | "section" | "occurrence"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
   readonly section?: number;
+  readonly occurrence?: number;
 };
 
 function serializeIdGeneratorState(
@@ -2064,6 +2519,7 @@ function serializeIdGeneratorState(
     ...(state.sketch === 0 ? {} : { sketch: state.sketch }),
     ...(state.datum === 0 ? {} : { datum: state.datum }),
     ...(state.section === 0 ? {} : { section: state.section }),
+    ...(state.occurrence === 0 ? {} : { occurrence: state.occurrence }),
   };
 }
 
@@ -2101,6 +2557,14 @@ export interface SerializedCadDocument {
     readonly id: string;
     readonly name: string;
     readonly datum: Readonly<Record<string, unknown>>;
+  }[];
+  /** Present exactly when the document carries occurrences (additive). */
+  readonly occurrences?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly source: OccurrenceSource;
+    readonly placement: OccurrencePlacement;
+    readonly bomFlag?: Exclude<OccurrenceBomFlag, "default">;
   }[];
 }
 
@@ -2184,6 +2648,23 @@ export function serializeCadDocument(
             normal: [...section.normal],
             keepSide: section.keepSide,
             enabled: section.enabled,
+          })),
+        }),
+    // Additive (Phase 50): emitted only when occurrences exist, so
+    // documents from before assemblies serialize byte-identically to
+    // their old form. The BOM flag rides only when non-default (the
+    // id-generator counter precedent).
+    ...(document.occurrences.length === 0
+      ? {}
+      : {
+          occurrences: document.occurrences.map((occurrence) => ({
+            id: occurrence.id,
+            name: occurrence.name,
+            source: occurrence.source,
+            placement: occurrence.placement,
+            ...(occurrence.bomFlag === undefined
+              ? {}
+              : { bomFlag: occurrence.bomFlag }),
           })),
         }),
   };
@@ -2443,6 +2924,183 @@ function parseSerializedSection(
   );
 }
 
+/** Parses a serialized occurrence source or fails structured (Phase 50). */
+function parseSerializedOccurrenceSource(
+  input: unknown,
+): ParseResult<OccurrenceSource, DocumentError> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.occurrenceSourceInvalid,
+        "A serialized occurrence source must be a plain object with a kind field.",
+        input,
+      ),
+    );
+  }
+  if (input.kind === "body") {
+    const parsedId = parseBodyId(input.bodyId);
+    if (!parsedId.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.occurrenceSourceInvalid,
+          `A body source must carry a valid body id: ${parsedId.error.message}`,
+          input,
+        ),
+      );
+    }
+    return ok({ kind: "body", bodyId: parsedId.value });
+  }
+  if (input.kind === "document" || input.kind === "component") {
+    const raw =
+      input.kind === "document" ? input.documentId : input.componentId;
+    if (
+      typeof raw !== "string" ||
+      raw.length === 0 ||
+      raw.length > OCCURRENCE_SOURCE_ID_MAX_LENGTH
+    ) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.occurrenceSourceInvalid,
+          `A ${input.kind} source id must be a string of 1-${OCCURRENCE_SOURCE_ID_MAX_LENGTH} characters.`,
+          input,
+        ),
+      );
+    }
+    return ok(
+      input.kind === "document"
+        ? { kind: "document", documentId: raw }
+        : { kind: "component", componentId: raw },
+    );
+  }
+  return fail(
+    docError(
+      DOCUMENT_ERROR_CODES.occurrenceSourceInvalid,
+      "An occurrence source kind must be one of: body, document, component.",
+      input,
+    ),
+  );
+}
+
+/** Parses a serialized occurrence placement or fails structured (Phase 50). */
+function parseSerializedOccurrencePlacement(
+  input: unknown,
+): ParseResult<OccurrencePlacement, DocumentError> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+        "A serialized occurrence placement must be a plain object with a kind field.",
+        input,
+      ),
+    );
+  }
+  if (input.kind === "identity") return ok({ kind: "identity" });
+  const translation = parseSectionTriple(input.translation);
+  if (input.kind === "offset") {
+    if (!translation.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+          "An offset placement must carry a finite xyz translation triple.",
+          input,
+        ),
+      );
+    }
+    return ok({ kind: "offset", translation: translation.value });
+  }
+  if (input.kind === "datum") {
+    const parsedDatumId = parseDatumId(input.datumId);
+    if (!parsedDatumId.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+          `A datum placement must carry a valid datum id: ${parsedDatumId.error.message}`,
+          input,
+        ),
+      );
+    }
+    if (input.translation === undefined) {
+      return ok({ kind: "datum", datumId: parsedDatumId.value });
+    }
+    if (!translation.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+          "A datum placement's translation must be a finite xyz triple.",
+          input,
+        ),
+      );
+    }
+    return ok({
+      kind: "datum",
+      datumId: parsedDatumId.value,
+      translation: translation.value,
+    });
+  }
+  return fail(
+    docError(
+      DOCUMENT_ERROR_CODES.occurrencePlacementInvalid,
+      "An occurrence placement kind must be one of: identity, offset, datum.",
+      input,
+    ),
+  );
+}
+
+/** Parses a serialized occurrence record or fails structured (Phase 50). */
+function parseSerializedOccurrence(
+  input: unknown,
+): ParseResult<DocumentOccurrence, DocumentError> {
+  if (!isPlainRecord(input)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.malformed,
+        "A serialized occurrence must be a plain object with id, name, source, and placement fields.",
+        input,
+      ),
+    );
+  }
+  const parsedId = parseOccurrenceId(input.id);
+  if (!parsedId.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.idInvalid,
+        `An occurrence id must be a valid occurrence id: ${parsedId.error.message}`,
+        input.id,
+      ),
+    );
+  }
+  const name = validateDatumName(input.name);
+  if (!name.ok) return name;
+  const source = parseSerializedOccurrenceSource(input.source);
+  if (!source.ok) return source;
+  const placement = parseSerializedOccurrencePlacement(input.placement);
+  if (!placement.ok) return placement;
+  if (
+    input.bomFlag !== undefined &&
+    input.bomFlag !== "phantom" &&
+    input.bomFlag !== "purchased"
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.occurrenceBomFlagInvalid,
+        'A serialized occurrence BOM flag must be "phantom" or "purchased" when present.',
+        input.bomFlag,
+      ),
+    );
+  }
+  const bomFlag: { bomFlag?: Exclude<OccurrenceBomFlag, "default"> } =
+    input.bomFlag === undefined ? {} : { bomFlag: input.bomFlag };
+  return ok(
+    Object.freeze({
+      id: parsedId.value,
+      name: name.value,
+      source: source.value,
+      placement: placement.value,
+      ...bomFlag,
+    }),
+  );
+}
+
 /** Parses a finite [x, y, z] triple or fails structured. */
 function parseSectionTriple(
   input: unknown,
@@ -2678,6 +3336,12 @@ export function parseCadDocument(
     parseSerializedSection,
   );
   if (!parsedSections.ok) return parsedSections;
+  const parsedOccurrences = parseSerializedList(
+    input.occurrences ?? [],
+    "occurrences",
+    parseSerializedOccurrence,
+  );
+  if (!parsedOccurrences.ok) return parsedOccurrences;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -2718,6 +3382,22 @@ export function parseCadDocument(
       ...(body.kind === "sheet" ? { kind: "sheet" as const } : {}),
       ...(body.visible === undefined ? {} : { visible: body.visible }),
       ...(body.isolated === undefined ? {} : { isolated: body.isolated }),
+    });
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  // Occurrences parse after bodies: a `body` source validates against the
+  // document's bodies at the add boundary, so the referenced bodies must
+  // exist before their occurrences land.
+  for (const occurrence of parsedOccurrences.value) {
+    const added = addOccurrence(document, {
+      id: occurrence.id,
+      name: occurrence.name,
+      source: occurrence.source,
+      placement: occurrence.placement,
+      ...(occurrence.bomFlag === undefined
+        ? {}
+        : { bomFlag: occurrence.bomFlag }),
     });
     if (!added.ok) return added;
     document = added.value.document;

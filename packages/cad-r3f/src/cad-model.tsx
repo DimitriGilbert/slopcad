@@ -267,6 +267,45 @@ export function CadModel({
     return map;
   }, [projection]);
 
+  // Placed-instance transforms (Phase 50): the projection carries each
+  // instance's composed placement as DATA (rotation columns + translation,
+  // world = transform x local); it is applied here as the mesh's OWN matrix
+  // (`matrixAutoUpdate` off) so the shared soup uploads once and every
+  // instance of a body reuses it. Rotation is rigid, so the kernel normals
+  // stay valid without recomputation; instance bounds are already world,
+  // so camera fitting reads the projection untouched.
+  const instanceMatrices = useMemo(() => {
+    const map = new Map<RenderObjectId, THREE.Matrix4>();
+    for (const object of projection.objects) {
+      const transform = object.occurrenceTransform;
+      if (transform === undefined) continue;
+      const r = transform.rotation;
+      const t = transform.translation;
+      map.set(
+        object.id,
+        new THREE.Matrix4().set(
+          r[0],
+          r[1],
+          r[2],
+          t[0],
+          r[3],
+          r[4],
+          r[5],
+          t[1],
+          r[6],
+          r[7],
+          r[8],
+          t[2],
+          0,
+          0,
+          0,
+          1,
+        ),
+      );
+    }
+    return map;
+  }, [projection]);
+
   // Second-pass highlight geometries, rebuilt only when the drawn geometry
   // set, the selection, or the regeneration identity changes.
   const highlights = useMemo(() => {
@@ -398,8 +437,16 @@ export function CadModel({
               },
             }
           : {};
+        const instanceMatrix = instanceMatrices.get(id);
         return (
-          <mesh key={id} geometry={geometry} {...handlers}>
+          <mesh
+            key={id}
+            geometry={geometry}
+            {...(instanceMatrix !== undefined
+              ? { matrix: instanceMatrix, matrixAutoUpdate: false }
+              : {})}
+            {...handlers}
+          >
             <meshStandardMaterial
               clippingPlanes={effectiveClippingPlanes}
               colorWrite={passes.surfaces.colorWrite}
@@ -428,6 +475,12 @@ export function CadModel({
         <lineSegments
           key={`${id}-feature-edges`}
           geometry={geometry}
+          {...(instanceMatrices.has(id)
+            ? {
+                matrix: instanceMatrices.get(id),
+                matrixAutoUpdate: false,
+              }
+            : {})}
           raycast={NO_RAYCAST}
           renderOrder={1}
         >
@@ -450,6 +503,12 @@ export function CadModel({
         <mesh
           key={`${id}-face-highlight`}
           geometry={geometry}
+          {...(instanceMatrices.has(id)
+            ? {
+                matrix: instanceMatrices.get(id),
+                matrixAutoUpdate: false,
+              }
+            : {})}
           renderOrder={1}
           raycast={NO_RAYCAST}
         >

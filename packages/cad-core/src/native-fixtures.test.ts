@@ -18,6 +18,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
+  CAD_NATIVE_FORMAT_VERSION,
   canRedo,
   canUndo,
   createFeatureId,
@@ -81,7 +82,7 @@ for (const name of [
       const validation = validateNativeCadDocument(JSON.parse(text));
       expect(validation.valid).toBe(true);
       expect(validation.issues).toEqual([]);
-      expect(validation.formatVersion).toBe(3);
+      expect(validation.formatVersion).toBe(CAD_NATIVE_FORMAT_VERSION);
     });
 
     it("round-trips to byte-identical output", async () => {

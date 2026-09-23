@@ -95,6 +95,14 @@ export interface NativeFormatMigration {
  * documentation is the proof that nothing inside the document needed
  * rewriting (datum payloads carry their own stamp, added with the
  * vocabulary itself; v2 documents never contain one).
+ *
+ * The v3→v4 step (Phase 50) carries the occurrences' additive growth —
+ * the assembly-as-document decision (docs/architecture/
+ * adr-assemblies-structure.md). Like the datum step it is
+ * CONTENT-PRESERVING — v3 content is valid v4 content, the identity —
+ * because the growth is a standalone `occurrences` section plus the
+ * `occurrence` id counter, both of which an old reader's unknown-field
+ * tolerance would silently drop: the envelope stamp is the gate.
  */
 export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
   Object.freeze([
@@ -108,7 +116,32 @@ export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
       to: 3,
       migrate: migrateV2ToV3,
     },
+    {
+      from: 3,
+      to: 4,
+      migrate: migrateV3ToV4,
+    },
   ]);
+
+/**
+ * The v3→v4 content transform (the framework stamps `formatVersion`):
+ * the identity — the occurrence growth is additive, so v3 content is
+ * already valid v4 content and nothing inside the document is rewritten.
+ */
+function migrateV3ToV4(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v3→v4 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
 
 /**
  * The v2→v3 content transform (the framework stamps `formatVersion`):

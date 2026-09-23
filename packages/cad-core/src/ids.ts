@@ -24,7 +24,7 @@ type BrandedId<K extends CadIdKind> = string & {
   readonly [cadIdBrand]: K;
 };
 
-/** The seven domain object kinds that carry branded ids. */
+/** The domain object kinds that carry branded ids. */
 export const CAD_ID_KINDS = [
   "document",
   "parameter",
@@ -34,6 +34,7 @@ export const CAD_ID_KINDS = [
   "sketch",
   "datum",
   "section",
+  "occurrence",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -71,6 +72,15 @@ export type DatumId = BrandedId<"datum">;
  * artifact, the roadmap's document-record recommendation.
  */
 export type SectionId = BrandedId<"section">;
+/**
+ * Identifier of a component occurrence (e.g. `occ_bolt-1`): the
+ * document-resident record that places a source — a body of the same
+ * document, another document, or a registry component — into the
+ * document's assembly tree (Phase 50). An occurrence PATH (the chain of
+ * occurrence ids from the root document to a leaf) is the stable address
+ * every later assembly phase (mates, patterns, BOM tables) uses.
+ */
+export type OccurrenceId = BrandedId<"occurrence">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -81,6 +91,7 @@ type CadIdTable = {
   sketch: SketchDocumentId;
   datum: DatumId;
   section: SectionId;
+  occurrence: OccurrenceId;
 };
 
 /** The branded id type of a given id kind. */
@@ -102,6 +113,7 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   sketch: "skd",
   datum: "dtm",
   section: "sec",
+  occurrence: "occ",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -236,6 +248,13 @@ export function parseSectionId(
   input: unknown,
 ): ParseResult<SectionId, IdParseError> {
   return parseIdOfKind("section", input);
+}
+
+/** Parses untrusted input as an {@link OccurrenceId}. */
+export function parseOccurrenceId(
+  input: unknown,
+): ParseResult<OccurrenceId, IdParseError> {
+  return parseIdOfKind("occurrence", input);
 }
 
 /** Parses untrusted input as a {@link DatumId}. */
@@ -388,6 +407,14 @@ export function createSectionId(raw: string): SectionId {
 }
 
 /**
+ * Adopts an explicit user-provided occurrence id exactly as given (`occ_…`
+ * wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createOccurrenceId(raw: string): OccurrenceId {
+  return requireId("occurrence", raw);
+}
+
+/**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
  */
@@ -442,6 +469,7 @@ export interface IdGenerator {
   nextSketchDocumentId(): SketchDocumentId;
   nextDatumId(): DatumId;
   nextSectionId(): SectionId;
+  nextOccurrenceId(): OccurrenceId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -455,6 +483,7 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   sketch: 0,
   datum: 0,
   section: 0,
+  occurrence: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -511,6 +540,7 @@ export function createIdGenerator(
     nextSketchDocumentId: () => requireId("sketch", nextRawId("sketch")),
     nextDatumId: () => requireId("datum", nextRawId("datum")),
     nextSectionId: () => requireId("section", nextRawId("section")),
+    nextOccurrenceId: () => requireId("occurrence", nextRawId("occurrence")),
     state: () => Object.freeze({ ...counters }),
   };
 }
