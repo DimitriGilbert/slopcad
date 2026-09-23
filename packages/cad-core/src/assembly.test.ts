@@ -225,7 +225,7 @@ describe("assembly instance resolution", () => {
       toLeaf.value.occurrence.id,
     ]);
     // Level 1 (the root anchor): origin (100,0,0) with x->y, y->−x, z->z.
-    // Level 2 (the sub anchor): origin (0,10,0) with x->z, y->x, z->y, and
+    // Level 2 (the sub anchor): origin (0,10,0) with x->z, y->−y, z->x, and
     // the in-frame translation (0,0,7) the sub's rotated frame maps to
     // world (7,10,0) BEFORE level 1's rotation composes on top. World
     // origin: (100,0,0) + R1 · (7,10,0) = (100,0,0) + (−10, 7, 0)

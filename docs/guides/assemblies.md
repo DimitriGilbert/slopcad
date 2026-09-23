@@ -125,3 +125,7 @@ exact verdict). Joint-driven DRAG is declined
 until the mate solver's remaining-DOF propagation exists; the joint
 record's axis/limits vocabulary is deliberately the solver's shape, so the
 records compose when it lands.
+
+Phase 52 disclosure: its exploded-view offsets and joint-motion stations
+persist beside the document as their own records — session-scoped until
+the envelope grows to carry them, and that envelope growth is deferred.

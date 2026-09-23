@@ -29,6 +29,7 @@ import {
   parseAssemblyMate,
   parseCadDocument,
   type DocumentJoint,
+  removeJoint,
   removeMate,
   removeOccurrence,
   serializeCadDocument,
@@ -486,6 +487,39 @@ describe("mates and joints in the document", () => {
     const removed = removeOccurrence(
       withoutMate.value,
       fixture.firstOccurrence,
+    );
+    expect(removed.ok).toBe(true);
+  });
+
+  it("refuses removing an occurrence a joint still addresses", () => {
+    const fixture = assemblyDocument();
+    const withJoint = addJoint(fixture.document, {
+      name: "Hinge",
+      kind: "revolute",
+      baseOccurrenceId: fixture.firstOccurrence,
+      occurrenceId: fixture.secondOccurrence,
+      frame: { origin: [0, 0, 5], axis: [0, 0, 1] },
+    });
+    expect(withJoint.ok).toBe(true);
+    if (!withJoint.ok) return;
+    // The joint's MOVED side: the guard must hold for either address.
+    const refused = removeOccurrence(
+      withJoint.value.document,
+      fixture.secondOccurrence,
+    );
+    expect(refused).toMatchObject({
+      ok: false,
+      error: { code: "assembly/occurrence-in-use" },
+    });
+    const withoutJoint = removeJoint(
+      withJoint.value.document,
+      withJoint.value.joint.id,
+    );
+    expect(withoutJoint.ok).toBe(true);
+    if (!withoutJoint.ok) return;
+    const removed = removeOccurrence(
+      withoutJoint.value,
+      fixture.secondOccurrence,
     );
     expect(removed.ok).toBe(true);
   });
