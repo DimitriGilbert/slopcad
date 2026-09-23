@@ -68,6 +68,25 @@ const model = importIgesMeshes(engine, bytes); // default linearUnit: millimeter
 if (model.ok) model.value.meshes[0]?.tessellation; // + name + brepFaces count
 ```
 
+**IGES export is a documented decline (Phase 56 probe).** The fallback
+wasm is import-only (zero callable IGES writer classes — probed), and the
+primary binding ships none either; no IGES writer exists on any surface.
+Callers needing an interchange BREP export have STEP (deterministic,
+above); this page stays the source of truth until a binding grows the
+writer.
+
+## STEP names/colors/assembly structure (the Phase 56 block)
+
+Reading product NAME and COLOR needs the XCAF document layer, whose
+`STEPCAFControl_*` classes are not bound in this build (probed;
+`docs/architecture/occt-prespike-findings.md` §5) — the same probe gates
+writing them: export carries geometry only, no names beyond the
+renumbered translator literals and no colour/style entities at all. The
+decline is pinned in bytes by `occt-step-export.test.ts` (the Phase 56
+documented-decline test); no metadata is fabricated. The path to richness
+is an upstream binding request (replicad-opencascadejs is actively
+maintained; the `GTransform` fork precedent), not an in-repo writer.
+
 ## The runnable example
 
 `packages/docs-examples/src/kernel/occt.ts` runs the whole chain on a

@@ -11,6 +11,20 @@ test("create a sheet and place three base views on the drawing canvas", async ({
   await page.goto("/drawings");
 
   await expect(page.getByRole("heading", { name: "Drawings" })).toBeVisible();
+  // The settle discipline (why this journey waits before its first click):
+  // the page renders client-side, so a click racing the final mount —
+  // StrictMode's discard window on dev, a cold vite server's one-shot
+  // dependency-discovery full reload mid-boot — lands on a form generation
+  // that no longer exists, and a retrying status assertion cannot resurrect
+  // a click nobody received. The page publishes `data-drawing-boot="ready"`
+  // once its surviving mount's effects have run; one explicit reload pins
+  // the journey to the hot module graph (a no-op stability-wise on the
+  // built server), and the stamp gates every interaction that follows.
+  const boot = page.locator("main[data-drawing-boot]");
+  await expect(boot).toHaveAttribute("data-drawing-boot", "ready");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Drawings" })).toBeVisible();
+  await expect(boot).toHaveAttribute("data-drawing-boot", "ready");
 
   // Empty state: the canvas names its emptiness.
   const canvas = page.getByTestId("drawing-canvas");

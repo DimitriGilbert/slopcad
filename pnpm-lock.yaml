@@ -421,6 +421,9 @@ importers:
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel
+      '@slopcad/cad-sketch':
+        specifier: workspace:*
+        version: link:../cad-sketch
     devDependencies:
       '@slopcad/cad-kernel-manifold':
         specifier: workspace:*

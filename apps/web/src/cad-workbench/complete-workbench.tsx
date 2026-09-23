@@ -1268,7 +1268,7 @@ export function CompleteCadWorkbench({
         {
           group: "File",
           id: "import",
-          keywords: "stl 3mf step brep iges open upload",
+          keywords: "stl 3mf obj step brep iges dxf svg open upload",
           label: "Import model",
           run: () => {
             setImportDialogOpen(true);
@@ -2441,6 +2441,7 @@ export function CompleteCadWorkbench({
             setMode("model");
           }}
           onExtrude={handleExtrude}
+          importSketchFiles
           onRevolve={handleRevolve}
           onSaveSketch={handleSaveSketch}
         />

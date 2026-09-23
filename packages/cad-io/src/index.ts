@@ -1,6 +1,7 @@
 /**
- * Public entry of `@slopcad/cad-io`, the mesh import/export package
- * (Phase 18): the STL and 3MF adapters, joined by GLB export (Phase 19).
+ * Public entry of `@slopcad/cad-io`, the geometry exchange package: the
+ * mesh adapters (STL, 3MF, GLB export, and the Phase 56 OBJ pair) and the
+ * sketch importers (Phase 56: DXF and SVG into the cad-sketch vocabulary).
  * React-free and UI-free.
  *
  * ## Dependency direction
@@ -36,6 +37,21 @@
  */
 
 export {
+  DXF_IMPORT_ERROR_CODES,
+  DXF_UNIT_TO_MILLIMETER_FACTORS,
+  importDxf,
+} from "./dxf-import";
+export type {
+  DxfDeclinedEntity,
+  DxfImportError,
+  DxfImportErrorCode,
+  DxfImportOptions,
+  DxfImportResult,
+  DxfUnitName,
+  DxfUnitsSource,
+  ImportedDxfSketch,
+} from "./dxf-import";
+export {
   GLB_BASE_COLOR_SRGB,
   GLB_BIN_CHUNK_TYPE,
   GLB_CHUNK_HEADER_BYTES,
@@ -56,6 +72,25 @@ export type {
   GlbExportErrorCode,
   GlbExportResult,
 } from "./glb-export";
+export {
+  OBJ_EXPORT_HEADER_TEXT,
+  OBJ_EXPORT_ERROR_CODES,
+  OBJ_EXPORT_OBJECT_NAME,
+  exportObj,
+} from "./obj-export";
+export type {
+  ObjExportError,
+  ObjExportErrorCode,
+  ObjExportResult,
+} from "./obj-export";
+export { OBJ_IMPORT_ERROR_CODES, importObj } from "./obj-import";
+export type {
+  ImportedObjMesh,
+  ObjDeclinedKeyword,
+  ObjImportError,
+  ObjImportErrorCode,
+  ObjImportResult,
+} from "./obj-import";
 export {
   STL_BINARY_HEADER_TEXT,
   STL_COUNT_BYTES,
@@ -82,6 +117,14 @@ export type {
   StlImportFlavor,
   StlImportResult,
 } from "./stl-import";
+export { SVG_IMPORT_ERROR_CODES, importSvg } from "./svg-import";
+export type {
+  ImportedSvgSketch,
+  SvgDeclinedElement,
+  SvgImportError,
+  SvgImportErrorCode,
+  SvgImportResult,
+} from "./svg-import";
 export {
   THREE_MF_CONTENT_TYPES_NAMESPACE,
   THREE_MF_CONTENT_TYPES_PART_NAME,

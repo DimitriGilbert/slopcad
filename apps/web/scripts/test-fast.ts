@@ -152,12 +152,19 @@ async function main(): Promise<void> {
   );
   if (migrations.code !== 0) throw new Error("db:migrate failed");
 
-  const build = run(
+  // Build FIRST, server SECOND — the ordering is the contract. Booting
+  // `.output/server/index.mjs` while turbo is still writing `.output`
+  // serves whatever bytes happen to be on disk at boot (a stale cache
+  // replay or a half-written build) for the whole run: the recorded
+  // server-vs-rebuild race. Turbo resolves before the server exists now,
+  // so the boot reads only settled output.
+  const built = await run(
     "build",
     "pnpm",
     ["exec", "turbo", "run", "build", "--filter=web"],
     rootDir,
   );
+  if (built.code !== 0) throw new Error("build failed");
 
   const server = spawn(
     "node",
@@ -177,8 +184,6 @@ async function main(): Promise<void> {
   });
   liveChildren.add(server);
 
-  const built = await build;
-  if (built.code !== 0) throw new Error("build failed");
   if (!(await urlUp(SHARED_URL, 120_000))) {
     throw new Error(`server did not come up on ${SHARED_URL}\n${serverLog}`);
   }
@@ -200,12 +205,27 @@ async function main(): Promise<void> {
   // the machine's cores while they run, so the unit suites (node-only,
   // ~35 s cold, turbo-cached warm) launch only once the last browser
   // harness has exited — off the core fight, not inside it.
+  //
+  // SLOPCAD_E2E_HARNESS_CONCURRENCY tells each config how many browser
+  // harnesses share the machine: the recorded CPU-starvation flake class
+  // (curve-authoring smoke timeouts under the 10-way load) is wall-clock
+  // starvation, not a product defect, so the smoke config scales its
+  // wall-clock budget by the measured contention (assertions untouched —
+  // the same conditions must hold, with proportional time to schedule).
+  const concurrencyEnv = {
+    ...process.env,
+    SLOPCAD_E2E_SHARED_URL: SHARED_URL,
+    SLOPCAD_E2E_HARNESS_CONCURRENCY: String(HARNESS.length),
+  };
   const harnesses = await Promise.all(
     HARNESS.map(({ name, config }) =>
-      run(name, "pnpm", ["exec", "playwright", "test", "-c", config], webDir, {
-        ...process.env,
-        SLOPCAD_E2E_SHARED_URL: SHARED_URL,
-      }),
+      run(
+        name,
+        "pnpm",
+        ["exec", "playwright", "test", "-c", config],
+        webDir,
+        concurrencyEnv,
+      ),
     ),
   );
 
@@ -215,8 +235,6 @@ async function main(): Promise<void> {
 
   console.log("\n=== test:fast summary ===");
   const results = [perfResult, ...harnesses, units];
-
-  console.log("\n=== test:fast summary ===");
   for (const result of results) {
     console.log(
       `${result.code === 0 ? "PASS" : "FAIL"}  ${result.name.padEnd(12)} ${String(result.seconds)}s`,

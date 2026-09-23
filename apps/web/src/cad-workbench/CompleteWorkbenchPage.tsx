@@ -42,6 +42,8 @@ import type { ReactElement } from "react";
 import { exportGlb } from "@slopcad/cad-io/glb-export";
 import { exportThreeMf } from "@slopcad/cad-io/three-mf-export";
 import { exportStlBinary } from "@slopcad/cad-io/stl-export";
+import { importObj } from "@slopcad/cad-io/obj-import";
+import type { ImportedObjMesh } from "@slopcad/cad-io/obj-import";
 import { importStl } from "@slopcad/cad-io/stl-import";
 import type { ImportedStlMesh } from "@slopcad/cad-io/stl-import";
 import type { ImportedThreeMfMesh } from "@slopcad/cad-io/three-mf-import";
@@ -118,6 +120,13 @@ const IMPORT_FORMATS: readonly CadImportFormatOption[] = [
     description: "Parsed by the app server (the importer is Node-targeted).",
     extensions: [".3mf"],
     meta: "mesh / server",
+  },
+  {
+    id: "obj",
+    label: "OBJ",
+    description: "Mesh import fully in the browser.",
+    extensions: [".obj"],
+    meta: "mesh / browser",
   },
   {
     id: "step",
@@ -328,6 +337,28 @@ function CompleteWorkbenchBody({
     [adoptPreview],
   );
 
+  /** OBJ imports in the browser (the Phase 56 browser-safe adapter). */
+  const importObjBytes = useCallback(
+    (bytes: Uint8Array): void => {
+      const result = importObj(bytes);
+      if (!result.ok) {
+        setImportError(`${result.error.code}: ${result.error.message}`);
+        return;
+      }
+      const mesh: ImportedObjMesh = result.value;
+      adoptPreview(
+        "obj",
+        JSON.stringify({
+          declined: mesh.declined.length,
+          name: mesh.name,
+          units: mesh.units,
+        }),
+        buildImportedMeshState(mesh.tessellation),
+      );
+    },
+    [adoptPreview],
+  );
+
   /** The worker channel's error text: protocol code + kernel cause. */
   const workerErrorText = (error: unknown): string => {
     if (error instanceof WorkerRequestFailure) {
@@ -409,14 +440,27 @@ function CompleteWorkbenchBody({
       const isStep = name.endsWith(".step") || name.endsWith(".stp");
       const isBrep = name.endsWith(".brep");
       const isIges = name.endsWith(".igs") || name.endsWith(".iges");
+      // DXF/SVG are SKETCH exchange: they import into the ACTIVE sketch's
+      // session (the sketch workspace's own import control), never into the
+      // mesh pipeline. From this model-mode dialog there is no active
+      // sketch — the structured decline says so instead of guessing.
+      const isSketchExchange = name.endsWith(".dxf") || name.endsWith(".svg");
       if (
         !name.endsWith(".stl") &&
         !name.endsWith(".3mf") &&
+        !name.endsWith(".obj") &&
         !isStep &&
         !isBrep &&
-        !isIges
+        !isIges &&
+        !isSketchExchange
       ) {
         setImportError(`unsupported file type: ${file.name}`);
+        return;
+      }
+      if (isSketchExchange) {
+        setImportError(
+          "sketch-import/no-active-sketch: DXF and SVG import into the active sketch — enter sketch mode and use the sketch workspace's import control.",
+        );
         return;
       }
       file
@@ -425,6 +469,10 @@ function CompleteWorkbenchBody({
           const bytes = new Uint8Array(buffer);
           if (name.endsWith(".stl")) {
             importStlBytes(bytes);
+            return undefined;
+          }
+          if (name.endsWith(".obj")) {
+            importObjBytes(bytes);
             return undefined;
           }
           if (isStep) return importStepBytes(bytes);
@@ -442,6 +490,7 @@ function CompleteWorkbenchBody({
       import3MfBytes,
       importBrepBytes,
       importIgesFileBytes,
+      importObjBytes,
       importStlBytes,
       importStepBytes,
     ],

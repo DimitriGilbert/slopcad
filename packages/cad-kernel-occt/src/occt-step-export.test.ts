@@ -190,6 +190,27 @@ describe("STEP export is deterministic", () => {
     expect(text).toContain("PRODUCT('Open CASCADE STEP translator 8.0 1'");
   });
 
+  it("writes no names or colors the binding cannot read back (the Phase 56 documented decline)", () => {
+    // The XCAF document layer (STEPCAFControl_*) is not bound in this
+    // build (probed; docs/architecture/occt-prespike-findings.md §5), so
+    // export CANNOT write presentation/name data it could round-trip —
+    // and the no-fabrication law forbids writing any anyway. The decline
+    // is pinned in the bytes: the geometry-only writer emits no styled-
+    // item or colour entities, and the only product names are the
+    // renumbered translator literals.
+    const text = new TextDecoder().decode(exportBytes([buildPlate()]));
+    expect(text).not.toMatch(
+      /STYLED_ITEM|COLOUR|DRAUGHTING_PRE_DEFINED_COLOUR/,
+    );
+    const productNames = text.match(/PRODUCT\('([^']*)'/g) ?? [];
+    expect(productNames.length).toBeGreaterThan(0);
+    for (const name of productNames) {
+      expect(name.startsWith("PRODUCT('Open CASCADE STEP translator")).toBe(
+        true,
+      );
+    }
+  });
+
   it("leaks no virtual file on any path", () => {
     const leaked = (): string[] => {
       const entries: unknown = oc().FS.readdir("/");
