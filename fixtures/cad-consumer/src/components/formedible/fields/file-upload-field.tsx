@@ -128,7 +128,7 @@ export function FileUploadField<TFormValues extends FormedibleFormValues>({
               Click or drag and drop a file
             </span>
             {accept && (
-              <span className="mt-1 text-xs text-muted-foreground/80">
+              <span className="mt-1 text-xs text-muted-foreground">
                 Accepted types: {accept}
               </span>
             )}

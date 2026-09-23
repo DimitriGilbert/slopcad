@@ -49,13 +49,27 @@
       "name": "radius-inspection-tool",
       "type": "registry:lib",
       "title": "Radius Inspection Tool",
-      "description": "Headless measurement readout: the cylindrical face radius under the selection — a selected face that fits no cylinder reports nothing rather than a wrong number.",
+      "description": "Headless measurement readout: the cylindrical face radius under the selection \u2014 a selected face that fits no cylinder reports nothing rather than a wrong number.",
       "dependencies": ["@slopcad/cad-core"],
       "files": [
         {
           "path": "src/cad-workbench/radius-inspection.ts",
           "type": "registry:lib",
           "target": "src/cad/tools/radius-inspection.ts"
+        }
+      ]
+    },
+    {
+      "name": "datum-tool",
+      "type": "registry:lib",
+      "title": "Datum Tool",
+      "description": "Headless session datum resolution: resolves a document's datum records (planes, axes, points) to sketch workplanes and feature placements the feature executors consume.",
+      "dependencies": ["@slopcad/cad-core", "@slopcad/cad-sketch"],
+      "files": [
+        {
+          "path": "src/cad-workbench/datum.ts",
+          "type": "registry:lib",
+          "target": "src/cad/tools/datum.ts"
         }
       ]
     },
@@ -75,7 +89,8 @@
           "type": "registry:lib",
           "target": "src/cad/tools/extrude.ts"
         }
-      ]
+      ],
+      "registryDependencies": ["@slopcad/datum-tool"]
     },
     {
       "name": "revolve-tool",
@@ -101,7 +116,7 @@
       "type": "registry:lib",
       "title": "Hole Tool",
       "description": "Headless feature executor: turns a document's hole feature (diameter, depth, placement on the extruded base) into the boolean cut the solid build consumes.",
-      "registryDependencies": ["@slopcad/extrude-tool"],
+      "registryDependencies": ["@slopcad/datum-tool", "@slopcad/extrude-tool"],
       "dependencies": ["@slopcad/cad-core"],
       "files": [
         {

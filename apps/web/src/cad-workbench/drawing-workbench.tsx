@@ -346,29 +346,45 @@ export function DrawingWorkbenchPage(): ReactElement {
       const scale: DrawingScale =
         DRAWING_SCALES[Number(values.scaleIndex)] ?? DRAWING_SCALES[3];
       if (scale === undefined) return;
-      const id = createSheetId(`sht_sheet-${drawing.sheets.length + 1}`);
+      // Phase 60 hardening (the recorded Phase 53 nits): the id mints
+      // INSIDE the updater from the updater's own `previous`, so two
+      // submits racing before the next commit can never mint the same
+      // sheet id; and the updater is PURE — the furniture/template/status
+      // side effects run after it, from the pre-submit snapshot
+      // (`drawing.sheets`), so a Strict-Mode double invocation of the
+      // updater cannot double-fire them. Residual honesty: in a
+      // same-tick double submit the ephemeral status line may carry the
+      // earlier ordinal — the stored record's id is authoritative.
+      const first = drawing.sheets.length === 0;
+      const messageOrdinal = drawing.sheets.length + 1;
       setDrawing((previous) => {
         const sheet: DrawingSheet = {
-          id,
+          id: createSheetId(`sht_sheet-${previous.sheets.length + 1}`),
           size: values.size,
           orientation: values.orientation,
           scale,
           views: [],
         };
-        const first = previous.sheets.length === 0;
-        if (first) {
-          // The Phase 54 boot: the first sheet recovers the seed model's
-          // dimensions and annotations onto itself — never re-typed.
-          setFurniture(recoverFurniture(sheet));
-          setTemplateId(pinnedTemplateFor(sheetSetupOf(sheet))?.id ?? null);
-        }
-        setStatus(
-          `Sheet ${id} created (${values.size}, ${scale.numerator}:${scale.denominator}).${first ? " Model dimensions recovered onto the sheet." : ""}`,
-        );
         return { sheets: [...previous.sheets, sheet] };
       });
+      if (first) {
+        // The Phase 54 boot: the first sheet recovers the seed model's
+        // dimensions and annotations onto itself — never re-typed.
+        const recovered: DrawingSheet = {
+          id: createSheetId(`sht_sheet-${messageOrdinal}`),
+          size: values.size,
+          orientation: values.orientation,
+          scale,
+          views: [],
+        };
+        setFurniture(recoverFurniture(recovered));
+        setTemplateId(pinnedTemplateFor(sheetSetupOf(recovered))?.id ?? null);
+      }
+      setStatus(
+        `Sheet sht_sheet-${messageOrdinal} created (${values.size}, ${scale.numerator}:${scale.denominator}).${first ? " Model dimensions recovered onto the sheet." : ""}`,
+      );
     },
-    [drawing.sheets.length],
+    [drawing.sheets],
   );
 
   const sheetFields = useMemo<

@@ -174,3 +174,14 @@ Changes that DID ship, with their own before/after:
   the burst fixture's cancellation behavior — not batching — is the
   shipped answer to rapid updates, and its evidence lives in the worker
   e2e suite.
+
+## Phase 60 epoch check (2026-09-23)
+
+The hardening sweep's perf-epoch condition — "full `PERF_BASELINE=1`
+re-record if new metrics accumulated" — evaluates to NO-OP at this tip:
+a mechanical diff of `e2e-perf/budgets.json`'s 24 budget keys against
+this file's 24 metric rows closes exactly in both directions, so no
+metric accumulated since the recording epoch and there is nothing new to
+record. The old rows stand untouched, and `test:perf`'s enforcing gate
+remains the green evidence that the recorded budgets still hold on the
+current build.

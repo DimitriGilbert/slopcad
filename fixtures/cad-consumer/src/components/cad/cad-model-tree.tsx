@@ -8,7 +8,6 @@ import {
   type Body,
   type BodyId,
   type CadDocument,
-  type FeatureId,
   type FeatureRecord,
   type FeatureRegenerationState,
   type FeatureRegenerationStatus,
@@ -37,6 +36,30 @@ export interface CadModelTreeLabels {
   readonly collapse: string;
   /** Display labels keyed by feature kind; a missing kind falls back to it. */
   readonly featureKinds: Readonly<Record<string, string>>;
+  /** `title` of the body visibility toggle, shown body visible (Phase 44). */
+  readonly bodyHide: string;
+  /** `title` of the body visibility toggle, shown body hidden (Phase 44). */
+  readonly bodyShow: string;
+  /** `title` of the body isolation toggle, not isolated (Phase 44). */
+  readonly bodyIsolate: string;
+  /** `title` of the body isolation toggle, isolated (Phase 44). */
+  readonly bodyUnIsolate: string;
+  /** `title` of the body rename affordance (Phase 44). */
+  readonly bodyRename: string;
+  /** The assembly group header (Phase 50), rendered before the occurrences. */
+  readonly assemblyLabel: string;
+  /** The BOM chip for a `phantom` occurrence. */
+  readonly bomPhantom: string;
+  /** The BOM chip for a `purchased` occurrence. */
+  readonly bomPurchased: string;
+  /** The stale chip on an occurrence whose source moved ahead. */
+  readonly occurrenceStale: string;
+  /** `title` prefix describing a body-source occurrence. */
+  readonly sourceBody: string;
+  /** `title` prefix describing a document-source occurrence. */
+  readonly sourceDocument: string;
+  /** `title` prefix describing a component-source occurrence. */
+  readonly sourceComponent: string;
 }
 
 /** Documented label defaults; every render-output string lives here. */
@@ -50,7 +73,70 @@ export const CAD_MODEL_TREE_LABELS: CadModelTreeLabels = {
   expand: "Expand",
   collapse: "Collapse",
   featureKinds: {},
+  bodyHide: "Hide body",
+  bodyShow: "Show body",
+  bodyIsolate: "Isolate body",
+  bodyUnIsolate: "Un-isolate body",
+  bodyRename: "Rename body",
+  assemblyLabel: "Instances",
+  bomPhantom: "phantom",
+  bomPurchased: "purchased",
+  occurrenceStale: "stale",
+  sourceBody: "Body",
+  sourceDocument: "Document",
+  sourceComponent: "Component",
 };
+
+/**
+ * One body-management action the tree's body affordances emit (Phase 44):
+ * the visibility and isolation toggles and the rename request. The tree
+ * renders the affordances; the HOST owns the mutation (a `body.update`
+ * command through its transaction choreography) — the tree never mutates.
+ */
+export type CadBodyTreeAction =
+  | { readonly type: "toggle-visibility"; readonly bodyId: BodyId }
+  | { readonly type: "toggle-isolate"; readonly bodyId: BodyId }
+  | { readonly type: "rename"; readonly bodyId: BodyId };
+
+/**
+ * The per-body display state the tree's affordances render (Phase 44):
+ * the defaulted visibility/isolation flags of the document's body record.
+ */
+export interface CadBodyDisplayState {
+  readonly visible: boolean;
+  readonly isolated: boolean;
+}
+
+/**
+ * One node of the host-supplied ASSEMBLY tree (Phase 50): an occurrence
+ * (or a nested sub-assembly occurrence) rendered as its own tree section.
+ * The component displays ONLY what the host derives — the resolution of
+ * sources, placements, and staleness stays host-side (cad-core's assembly
+ * module) — so the tree remains a pure function of its props. Keys must
+ * be stable and unique (the occurrence path joined is the natural choice);
+ * they drive expansion state and the DOM ids, never persistence.
+ */
+export interface CadModelTreeAssemblyNode {
+  /** Stable, unique node id (the occurrence path joined). */
+  readonly key: string;
+  /** The row's display label (the occurrence name). */
+  readonly label: string;
+  /** What kind of source the occurrence places. */
+  readonly source: "body" | "document" | "component";
+  /** The source's display name (body name, document name, component id). */
+  readonly sourceName: string;
+  /** The occurrence's BOM structure flag (absent = default — no chip). */
+  readonly bomFlag?: "phantom" | "purchased";
+  /** Whether a transitive source document is newer (host-derived). */
+  readonly stale?: boolean;
+  /** Nested sub-assembly occurrences, rendered one level deeper. */
+  readonly children?: readonly CadModelTreeAssemblyNode[];
+}
+
+/** The host-derived assembly section of the tree. */
+export interface CadModelTreeAssembly {
+  readonly nodes: readonly CadModelTreeAssemblyNode[];
+}
 
 /** Props of {@link CadModelTree}. */
 export interface CadModelTreeProps {
@@ -68,6 +154,26 @@ export interface CadModelTreeProps {
    * rule in the module doc). `additive` mirrors the Shift modifier.
    */
   readonly onPick?: (reference: SelectionReference, additive: boolean) => void;
+  /**
+   * The body display states (Phase 44), prop-only: the host reads the
+   * document's body records. Without the map the affordances stay hidden —
+   * the tree displays only what it was given.
+   */
+  readonly bodyDisplay?: (bodyId: BodyId) => CadBodyDisplayState | undefined;
+  /**
+   * The body-management action surface (Phase 44): the visibility,
+   * isolation, and rename affordances emit here. Without it (and without
+   * `bodyDisplay`) the tree renders no body affordances.
+   */
+  readonly onBodyAction?: (action: CadBodyTreeAction) => void;
+  /**
+   * The host-derived assembly tree (Phase 50), rendered after the
+   * document's features and bodies. Occurrence rows are INERT — the
+   * selection domain has no occurrence references yet (Phase 51
+   * generalizes selection through instance paths) — so they never pick:
+   * the tree's documented inert discipline.
+   */
+  readonly assembly?: CadModelTreeAssembly;
   /** Label token overrides, merged over {@link CAD_MODEL_TREE_LABELS}. */
   readonly labels?: Partial<CadModelTreeLabels>;
   /** Extends the container classes; width defaults to the content. */
@@ -122,14 +228,21 @@ const STATUS_LABEL_KEYS: Readonly<
  */
 interface CadTreeRow {
   readonly key: string;
-  readonly reference: SelectionReference;
+  /** `null` on assembly rows — the selection domain has no occurrence
+   * references yet (Phase 51 generalizes selection through paths), so
+   * those rows are inert by construction. */
+  readonly reference: SelectionReference | null;
   readonly label: string;
   readonly depth: number;
   readonly parentKey: string | null;
   readonly childCount: number;
-  readonly groupId: FeatureId | undefined;
+  readonly groupId: string | undefined;
   readonly status: FeatureRegenerationStatus | undefined;
   readonly children: readonly CadTreeRow[];
+  /** The body the row IS (body rows only — the affordances' address). */
+  readonly bodyId: BodyId | undefined;
+  /** The occurrence payload (assembly rows only — the chips' data). */
+  readonly assembly: CadModelTreeAssemblyNode | undefined;
 }
 
 /**
@@ -143,6 +256,8 @@ interface CadTreeShape {
     readonly children: readonly CadTreeRow[];
   }[];
   readonly rootBodies: readonly CadTreeRow[];
+  /** The host-derived assembly section (empty when no assembly prop). */
+  readonly assemblyRows: readonly CadTreeRow[];
 }
 
 function featureRowOf(
@@ -161,6 +276,8 @@ function featureRowOf(
     groupId: feature.id,
     status,
     children,
+    bodyId: undefined,
+    assembly: undefined,
   };
 }
 
@@ -179,6 +296,32 @@ function bodyRowOf(
     groupId: undefined,
     status: undefined,
     children: [],
+    bodyId: body.id,
+    assembly: undefined,
+  };
+}
+
+/** Builds an assembly row (and its nested children) from a host node. */
+function assemblyRowOf(
+  node: CadModelTreeAssemblyNode,
+  depth: number,
+  parentKey: string | null,
+): CadTreeRow {
+  const children = (node.children ?? []).map((child) =>
+    assemblyRowOf(child, depth + 1, node.key),
+  );
+  return {
+    key: node.key,
+    reference: null,
+    label: node.label,
+    depth,
+    parentKey,
+    childCount: children.length,
+    groupId: node.key,
+    status: undefined,
+    children,
+    bodyId: undefined,
+    assembly: node,
   };
 }
 
@@ -191,6 +334,7 @@ function deriveCadTreeShape(
   document: CadDocument,
   featureLabel: (feature: FeatureRecord) => string,
   states: RegenerationStateMap | undefined,
+  assembly: readonly CadModelTreeAssemblyNode[],
 ): CadTreeShape {
   const bodiesById = new Map<BodyId, Body>(
     document.bodies.map((body) => [body.id, body]),
@@ -225,7 +369,8 @@ function deriveCadTreeShape(
   const rootBodies = document.bodies
     .filter((body) => !claimed.has(body.id))
     .map((body) => bodyRowOf(body, 0, null));
-  return { groups, rootBodies };
+  const assemblyRows = assembly.map((node) => assemblyRowOf(node, 0, null));
+  return { groups, rootBodies, assemblyRows };
 }
 
 /**
@@ -235,7 +380,7 @@ function deriveCadTreeShape(
  */
 function visibleCadTreeRows(
   shape: CadTreeShape,
-  collapsed: ReadonlySet<FeatureId>,
+  collapsed: ReadonlySet<string>,
 ): readonly CadTreeRow[] {
   const rows: CadTreeRow[] = [];
   for (const group of shape.groups) {
@@ -249,6 +394,16 @@ function visibleCadTreeRows(
     }
   }
   rows.push(...shape.rootBodies);
+  for (const assemblyRow of shape.assemblyRows) {
+    rows.push(assemblyRow);
+    if (
+      assemblyRow.childCount > 0 &&
+      assemblyRow.groupId !== undefined &&
+      !collapsed.has(assemblyRow.groupId)
+    ) {
+      rows.push(...assemblyRow.children);
+    }
+  }
   return rows;
 }
 
@@ -280,9 +435,9 @@ function domIdForKey(key: string): string {
 
 /** The collapsed set with `id` added (immutably). */
 function collapsedWith(
-  collapsed: ReadonlySet<FeatureId>,
-  id: FeatureId,
-): ReadonlySet<FeatureId> {
+  collapsed: ReadonlySet<string>,
+  id: string,
+): ReadonlySet<string> {
   const next = new Set(collapsed);
   next.add(id);
   return next;
@@ -290,12 +445,90 @@ function collapsedWith(
 
 /** The collapsed set without `id` (immutably). */
 function collapsedWithout(
-  collapsed: ReadonlySet<FeatureId>,
-  id: FeatureId,
-): ReadonlySet<FeatureId> {
+  collapsed: ReadonlySet<string>,
+  id: string,
+): ReadonlySet<string> {
   const next = new Set(collapsed);
   next.delete(id);
   return next;
+}
+
+/** The visibility eye (Phase 44): inline SVG, the ChevronIcon precedent. */
+function EyeIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  );
+}
+
+/** The hidden-body eye with its slash (Phase 44). */
+function EyeOffIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <path d="M3.5 4.7C2.2 5.8 1.5 8 1.5 8s2.5 4.5 6.5 4.5c1.2 0 2.2-.4 3.1-.9" />
+      <path d="M6.2 6.4a2 2 0 0 0 2.6 2.8" />
+      <path d="M13.9 10.1c.4-.8.6-1.4.6-2.1 0 0-2.5-4.5-6.5-4.5-.5 0-1 .1-1.5.2" />
+      <path d="M2 14 14 2" />
+    </svg>
+  );
+}
+
+/** The isolation crosshair (Phase 44). */
+function CrosshairIcon({ signal }: { readonly signal: boolean }): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className={cn("size-3", signal ? "text-signal" : "")}
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <circle cx="8" cy="8" r="4.5" />
+      <path d="M8 1v3M8 12v3M1 8h3M12 8h3" />
+    </svg>
+  );
+}
+
+/** The rename pencil (Phase 44). */
+function PencilIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 16 16"
+    >
+      <path d="M11 2.5 13.5 5 5.5 13 2.5 13.5 3 10.5Z" />
+      <path d="M9.5 4 12 6.5" />
+    </svg>
+  );
 }
 
 /** The expansion twisty: a pointer affordance; the keyboard uses the arrows. */
@@ -368,6 +601,53 @@ function StatusChip({
  * removing a provider above a mounted tree re-renders fewer hooks and
  * fails loudly in React, a programming error reported as one).
  */
+/**
+ * The assembly row's chips (Phase 50): the source kind, the BOM structure
+ * flag when non-default, and the host-derived staleness marker. All three
+ * are DATA the host resolved — the tree invents nothing.
+ */
+function AssemblyChips({
+  labels,
+  node,
+}: {
+  readonly labels: CadModelTreeLabels;
+  readonly node: CadModelTreeAssemblyNode;
+}): ReactElement {
+  const sourceLabel =
+    node.source === "body"
+      ? labels.sourceBody
+      : node.source === "document"
+        ? labels.sourceDocument
+        : labels.sourceComponent;
+  const sourceTitle = `${sourceLabel}: ${node.sourceName}`;
+  return (
+    <span aria-hidden="true" className="flex shrink-0 items-center gap-1">
+      <span
+        className="text-muted-foreground/70 hidden font-mono text-[9.5px] group-hover:inline"
+        title={sourceTitle}
+      >
+        {sourceLabel}
+      </span>
+      {node.bomFlag !== undefined ? (
+        <span
+          className="border-border bg-background/60 rounded-[3px] border px-1 font-mono text-[9.5px] leading-[15px]"
+          data-cad-tree-bom={node.bomFlag}
+        >
+          {node.bomFlag === "phantom" ? labels.bomPhantom : labels.bomPurchased}
+        </span>
+      ) : null}
+      {node.stale === true ? (
+        <span
+          className="rounded-[3px] bg-amber-500/15 px-1 font-mono text-[9.5px] leading-[15px] text-amber-600 dark:text-amber-400"
+          data-cad-tree-stale="true"
+        >
+          {labels.occurrenceStale}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function useOptionalCadDocument(): ReturnType<typeof useCadDocument> | null {
   try {
     return useCadDocument();
@@ -388,14 +668,92 @@ function useOptionalCadSelection(): ReturnType<typeof useCadSelection> | null {
 }
 
 /**
+ * The body-management affordances (Phase 44): the visibility eye, the
+ * isolation crosshair, and the rename pencil, rendered on BODY rows when
+ * the host supplies the display states and the action surface. Pure
+ * presentation — every mutation is the host's (`body.update` through its
+ * transaction choreography); the buttons stop propagation so activation
+ * (selection) never rides an affordance click.
+ */
+function bodyAffordances({
+  bodyId,
+  display,
+  labels,
+  onBodyAction,
+}: {
+  readonly bodyId: BodyId;
+  readonly display: CadBodyDisplayState | undefined;
+  readonly labels: CadModelTreeLabels;
+  readonly onBodyAction: (action: CadBodyTreeAction) => void;
+}): ReactElement {
+  const visible = display?.visible ?? true;
+  const isolated = display?.isolated ?? false;
+  const buttonClass = cn(
+    "text-muted-foreground hover:text-foreground",
+    "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center",
+  );
+  return (
+    <span
+      className="flex shrink-0 items-center gap-0.5"
+      data-cad-tree-body-actions=""
+    >
+      <button
+        aria-label={visible ? labels.bodyHide : labels.bodyShow}
+        aria-pressed={!visible}
+        className={buttonClass}
+        data-cad-tree-body-visibility={visible ? "visible" : "hidden"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onBodyAction({ type: "toggle-visibility", bodyId });
+        }}
+        title={visible ? labels.bodyHide : labels.bodyShow}
+        type="button"
+      >
+        {visible ? <EyeIcon /> : <EyeOffIcon />}
+      </button>
+      <button
+        aria-label={isolated ? labels.bodyUnIsolate : labels.bodyIsolate}
+        aria-pressed={isolated}
+        className={buttonClass}
+        data-cad-tree-body-isolate={isolated ? "isolated" : "normal"}
+        onClick={(event) => {
+          event.stopPropagation();
+          onBodyAction({ type: "toggle-isolate", bodyId });
+        }}
+        title={isolated ? labels.bodyUnIsolate : labels.bodyIsolate}
+        type="button"
+      >
+        <CrosshairIcon signal={isolated} />
+      </button>
+      <button
+        aria-label={labels.bodyRename}
+        className={buttonClass}
+        data-cad-tree-body-rename=""
+        onClick={(event) => {
+          event.stopPropagation();
+          onBodyAction({ type: "rename", bodyId });
+        }}
+        title={labels.bodyRename}
+        type="button"
+      >
+        <PencilIcon />
+      </button>
+    </span>
+  );
+}
+
+/**
  * The CAD model tree: the document's feature/body hierarchy with live
  * selection synchronization, regeneration statuses, and collapsible
  * groups, in one mountable component.
  */
 export function CadModelTree({
+  assembly,
+  bodyDisplay,
   className,
   document: documentProp,
   labels: labelOverrides,
+  onBodyAction,
   onPick,
   regenerationStates,
   selection: selectionProp,
@@ -419,7 +777,7 @@ export function CadModelTree({
 
   // Component-local UI state: the collapsed feature groups (default
   // expanded). Never document state; resets on unmount.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<FeatureId>>(
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
   // Roving tabindex: the row focus sits on (falls back to the first row).
@@ -431,7 +789,12 @@ export function CadModelTree({
   const shape =
     cadDocument === undefined
       ? null
-      : deriveCadTreeShape(cadDocument, featureLabel, regenerationStates);
+      : deriveCadTreeShape(
+          cadDocument,
+          featureLabel,
+          regenerationStates,
+          assembly?.nodes ?? [],
+        );
   const rows = shape === null ? [] : visibleCadTreeRows(shape, collapsed);
   const focusedKey =
     activeKey !== null && rows.some((row) => row.key === activeKey)
@@ -445,6 +808,7 @@ export function CadModelTree({
   };
 
   const activateRow = (row: CadTreeRow, additive: boolean): void => {
+    if (row.reference === null) return; // inert assembly row — no pick path
     pick?.(row.reference, additive);
   };
 
@@ -524,7 +888,8 @@ export function CadModelTree({
 
   const renderRow = (row: CadTreeRow): ReactElement => {
     const groupId = row.groupId;
-    const selected = selectionTargetsRow(selection, row.reference);
+    const selected =
+      row.reference !== null && selectionTargetsRow(selection, row.reference);
     const collapsible = groupId !== undefined && row.childCount > 0;
     const expanded =
       collapsible && groupId !== undefined && !collapsed.has(groupId);
@@ -537,21 +902,26 @@ export function CadModelTree({
     return (
       <div
         aria-describedby={failureId}
-        aria-disabled={pick === undefined || undefined}
         aria-expanded={collapsible ? expanded : undefined}
         aria-level={row.depth + 1}
         aria-selected={selected}
         className={cn(
-          "outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
-          "cursor-default rounded-none",
+          "outline-none focus-visible:ring-1 focus-visible:ring-ring/80",
+          "cursor-default rounded-[3px]",
           selected
-            ? "bg-accent text-accent-foreground"
+            ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
             : pick === undefined
               ? "opacity-80"
               : "hover:bg-muted",
         )}
+        aria-disabled={
+          pick === undefined || row.reference === null || undefined
+        }
         data-cad-tree-node=""
         data-node-key={row.key}
+        {...(row.assembly !== undefined
+          ? { "data-cad-tree-occurrence": row.assembly.source }
+          : {})}
         data-selected={selected ? "true" : "false"}
         data-status={row.status?.state}
         id={domIdForKey(row.key)}
@@ -592,17 +962,44 @@ export function CadModelTree({
             >
               <ChevronIcon expanded={expanded} />
             </span>
-          ) : null}
-          <span className="min-w-0 flex-1 truncate">{row.label}</span>
+          ) : (
+            <span
+              aria-hidden="true"
+              className="text-muted-foreground/40 inline-flex size-4 shrink-0 items-center justify-center font-mono text-[10px]"
+            >
+              {row.depth > 0 ? "·" : ""}
+            </span>
+          )}
+          {/* Hierarchy typography: feature rows carry the weight (the
+              document's structure); the bodies they produce read lighter
+              and indented under the depth guide. */}
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate",
+              row.depth === 0 ? "font-medium" : "text-muted-foreground",
+            )}
+          >
+            {row.label}
+          </span>
+          {row.bodyId !== undefined &&
+          bodyDisplay !== undefined &&
+          onBodyAction !== undefined
+            ? bodyAffordances({
+                bodyId: row.bodyId,
+                display: bodyDisplay(row.bodyId),
+                labels,
+                onBodyAction,
+              })
+            : null}
           {row.status !== undefined ? (
             <StatusChip labels={labels} status={row.status} />
           ) : null}
+          {row.assembly !== undefined ? (
+            <AssemblyChips labels={labels} node={row.assembly} />
+          ) : null}
         </div>
         {collapsible && expanded ? (
-          <div
-            className="border-border/60 ml-[11px] border-l pl-1"
-            role="group"
-          >
+          <div className="border-border ml-[11px] border-l pl-1" role="group">
             {row.children.map((child) => renderRow(child))}
           </div>
         ) : null}
@@ -621,16 +1018,16 @@ export function CadModelTree({
   return (
     <div
       className={cn(
-        "border-border bg-background w-56 border text-sm",
+        "border-border bg-card/60 w-56 overflow-hidden rounded-md border text-sm",
         className,
       )}
       data-slot="cad-model-tree"
     >
-      <div className="text-muted-foreground border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         {labels.treeLabel}
       </div>
       {rows.length === 0 ? (
-        <div className="text-muted-foreground px-2 py-2">
+        <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {labels.emptyDocument}
         </div>
       ) : (
@@ -642,6 +1039,7 @@ export function CadModelTree({
         >
           {shape?.groups.map((group) => renderRow(group.row))}
           {shape?.rootBodies.map((body) => renderRow(body))}
+          {shape?.assemblyRows.map((assemblyRow) => renderRow(assemblyRow))}
         </div>
       )}
     </div>

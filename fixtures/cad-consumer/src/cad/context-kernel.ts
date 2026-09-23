@@ -10,6 +10,7 @@ import type {
   MirrorInput,
   ProfileExtrudeInput,
   ProfileRevolveInput,
+  SectionInput,
   ShellInput,
   SphereInput,
   TransformInput,
@@ -34,12 +35,22 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   tightBooleanBounds: false,
   persistentTopology: false,
   sweep: false,
+  helix: false,
   loft: false,
   fillet: true,
   chamfer: true,
+  thicken: false,
+  extrudeTaper: false,
   shell: true,
   mirror: true,
   surfaceArea: true,
+  sheets: false,
+  surfaceOps: false,
+  localFaceOps: false,
+  section: true,
+  sweepWire: false,
+  intersectionCurve: false,
+  hiddenLineRemoval: false,
 });
 
 /**
@@ -221,6 +232,22 @@ export function createContextKernel(
           thickness: input.thickness,
         }),
       );
+    },
+
+    async section(input: SectionInput) {
+      const result = await request(async () => {
+        const response = await context.request("solid.section", {
+          target: workerSolidId(input.target),
+          origin: input.origin,
+          normal: input.normal,
+          keepSide: input.keepSide,
+        });
+        return {
+          solid: wrapWorkerSolid(response.solid),
+          section: response.section,
+        };
+      });
+      return result;
     },
 
     async mirror(solid: KernelSolid, input: MirrorInput) {

@@ -229,3 +229,56 @@ map), with family-level documentation (`CAD_SCENE_*`, `*_ERROR_CODES`,
 (14 tests) pins the docs app renders the runnable examples; the
 docs-examples suite executes every example the guides state outcomes for.
 Public API matches the documented surface.
+
+---
+
+## Phase 60 epoch re-run (2026-09-23)
+
+Re-run at the Phase 60 hardening sweep (tip `8e5de07`, everything through
+the importers), with the enumeration mechanized: the barrel counter at
+`scripts/api-audit-epoch.mjs` (TypeScript compiler API; named and aliased
+re-exports, inline barrel exports, and `export *` chains resolved —
+including the cross-package chain `cad-react` → `cad-core`) now reproduces
+the inventory deterministically, and `--check` fails when a barrel drifts
+from the recorded epoch without this document moving with it.
+
+| Package                        | Phase 35 epoch | Phase 60 epoch | Verdict                                   |
+| ------------------------------ | -------------- | -------------- | ----------------------------------------- |
+| `@slopcad/cad-core`            | 553            | 946            | grown by phases 36-56 records/commands    |
+| `@slopcad/cad-kernel`          | 257            | 382            | grown (surfaces, wires, sections, sheets) |
+| `@slopcad/cad-kernel-manifold` | 15             | 15             | unchanged                                 |
+| `@slopcad/cad-kernel-occt`     | 53             | 53             | unchanged                                 |
+| `@slopcad/cad-jscad`           | 10             | 10             | unchanged                                 |
+| `@slopcad/cad-r3f`             | 57             | 112            | grown (viz, sections, display modes)      |
+| `@slopcad/cad-react`           | 591 (=553+38)  | 984 (=946+38)  | identity preserved: core + 38 own         |
+| `@slopcad/cad-sketch`          | 177            | 286            | grown (entities, constraints, editing)    |
+| `@slopcad/cad-io`              | 59             | 91             | grown (DXF/SVG/OBJ, IGES import)          |
+| `@slopcad/cad-components`      | 60             | 60             | unchanged                                 |
+| `@slopcad/api`                 | 4              | 4              | unchanged                                 |
+| `@slopcad/auth`                | 2              | 2              | unchanged                                 |
+| `@slopcad/db`                  | 4              | 4              | unchanged                                 |
+
+Verdicts, at this epoch:
+
+- The growth is the phases 36-56 roadmap landing (sketch vocabulary and
+  editing, datums, helix/threads, feature richness, patterns, booleans and
+  body management, viz and sections, 3D curves, sheet bodies and surface
+  ops, assemblies with mates and motion, drawings, importers). Every
+  growth family is consumed the way the audit requires — app workbench
+  code, the e2e suites, the consumer fixture's installed tools, or the
+  guides — so the coherent-export standard still holds without a purge:
+  no accidental export surfaced this epoch, and the counter plus its
+  `--check` are the standing tripwire for the next one.
+- The Phase 35 stability conventions are unchanged: stable
+  `<domain>/<cause>` error-code tables, structured error classes, pinned
+  serialization, forward-only native-format migration. Native documents
+  moved v4 → v5 through the assemblies/drawings phases exactly along that
+  path (`native-migration.ts`'s registry gaining the recorded v4→v5
+  step).
+- The wildcard subpath judgment stands: the contract surface is the
+  barrel plus the documented subpaths; everything else may change without
+  notice. The registry surface (Phase 33 machinery) gained one tool item
+  this epoch — `datum-tool`, the session datum resolution the extrude and
+  hole tools already depended on — closing the consumer fixture's missing
+  `./datum` module; the matrix gate (`pnpm registry:matrix`) re-proved
+  both consumer scenarios green on the refreshed artifacts.

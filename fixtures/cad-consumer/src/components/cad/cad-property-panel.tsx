@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import {
   CadProviderError,
   removeFeatureTransaction,
+  selectionReferenceKey,
   useCadDocument,
   useCadSelection,
   useCadStore,
@@ -418,7 +419,7 @@ function PropertySection({
       data-cad-property-section=""
       data-reference-kind={reference.kind}
     >
-      <div className="flex flex-col gap-1.5 px-2 py-2 text-xs">
+      <div className="flex flex-col gap-1.5 px-2.5 py-2 text-xs">
         {rows}
         {failure !== undefined ? (
           <div
@@ -503,25 +504,25 @@ export function CadPropertyPanel({
   return (
     <div
       className={cn(
-        "border-border bg-background w-72 border text-sm",
+        "border-border bg-card/60 w-72 overflow-hidden rounded-md border text-sm",
         className,
       )}
       data-slot="cad-property-panel"
     >
-      <div className="text-muted-foreground border-border flex items-baseline justify-between border-b px-2 py-1.5 text-xs font-medium tracking-wider uppercase">
+      <div className="text-muted-foreground border-border bg-background/40 flex items-baseline justify-between border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
         <span>{labels.title}</span>
         {cadDocument !== undefined ? (
-          <span className="font-mono normal-case">
+          <span className="text-signal font-mono normal-case">
             {String(selection.length)}
           </span>
         ) : null}
       </div>
       {cadDocument === undefined ? (
-        <div className="text-muted-foreground px-2 py-2">
+        <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {labels.emptyDocument}
         </div>
       ) : selection.length === 0 ? (
-        <div className="text-muted-foreground px-2 py-2">
+        <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {labels.emptySelection}
         </div>
       ) : (
@@ -535,13 +536,10 @@ export function CadPropertyPanel({
                   : undefined
               }
               index={index}
-              key={
-                reference.kind === "feature"
-                  ? `feature:${String(reference.featureId)}`
-                  : reference.kind === "body" || reference.kind === "solid"
-                    ? `${reference.kind}:${String(reference.bodyId)}`
-                    : `${reference.kind}:${String(reference.bodyId)}:${String(reference.regeneration)}`
-              }
+              // The domain's canonical key (includes the topology index), so
+              // two same-kind synthetic references of one body at one
+              // regeneration stay distinct siblings — same rule as the tree.
+              key={selectionReferenceKey(reference)}
               labels={labels}
               onRemove={removeFeature}
               reference={reference}
@@ -554,7 +552,7 @@ export function CadPropertyPanel({
           ))}
           {removeFailure !== undefined ? (
             <div
-              className="text-destructive border-border border-t px-2 py-1.5 text-xs leading-4"
+              className="text-destructive border-border border-t px-2.5 py-1.5 text-xs leading-4"
               data-cad-property-error=""
               role="alert"
             >

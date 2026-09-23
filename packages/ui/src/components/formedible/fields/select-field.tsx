@@ -21,6 +21,14 @@ export function SelectField<TFormValues extends FormedibleFormValues>({
   const value = typeof field.value === "string" ? field.value : "";
   const options = resolveFieldOptions(fieldConfig, field.formValues);
 
+  // Radix's SelectValue derives the selected item's text from the mounted
+  // listbox, so a set value renders as its RAW value string until the
+  // first open. Resolving the label ourselves (and handing it to
+  // SelectValue as children) makes the closed trigger honest pre-open:
+  // the human label when the value matches an option, the placeholder
+  // otherwise.
+  const selected = options.find((option) => option.value === value);
+
   return (
     <FieldWrapper fieldConfig={fieldConfig} field={field}>
       <Select
@@ -36,7 +44,9 @@ export function SelectField<TFormValues extends FormedibleFormValues>({
           className={fieldConfig.inputClassName}
           onBlur={field.onBlur}
         >
-          <SelectValue placeholder={fieldConfig.placeholder} />
+          <SelectValue placeholder={fieldConfig.placeholder}>
+            {selected?.label}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
