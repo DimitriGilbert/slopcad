@@ -74,11 +74,27 @@ Re-exporting an unchanged sheet is byte-identical, and the workbench's
 machine surface (`#drawing-root` → `data-drawing-svg`) publishes the exact
 bytes for tests to assert against.
 
-## The workbench surface
+## The unified surface
 
-`/workbench-drawing` boots a deterministic seed document (rectangle
-sketch, 2 cm-deep extrude, 4 mm fillet, threaded M8 structured hole),
-recovers its dimensions, and authors reference dimensions, title block
-fields, and revision rows through Formedible dialogs (each mounts only
-when open — the route's SSR stays clean). No kernel session runs:
-recovery reads records, not geometry.
+`/drawings` is the ONE drawing route (Phase 55 round 2 unified the two
+surfaces). The first sheet's creation boots the deterministic seed
+document (rectangle sketch, 2 cm-deep extrude, 4 mm fillet, threaded M8
+structured hole) and recovers its dimensions onto the sheet; reference
+dimensions, title block fields, revision rows, and templates author
+through Formedible dialogs (each mounts only when open — the route's SSR
+stays clean). No kernel session runs: recovery reads records, not
+geometry.
+
+## One presentation, one route
+
+`presentDrawingSheet` (in `drawing-output.ts`) walks the drawing document
+once into sheet pictures — `DrawingPrimitive` groups in the same y-up
+sheet-millimetre vocabulary and flip discipline the Phase 54 presentation
+owns. The SVG/PDF exporters, the DXF writer, and the unified workbench
+canvas all consume that ONE walk: the canvas composes the Phase 54
+furniture groups over the document groups, so dimensions, title block,
+views, BOM tables, balloons, and print all read from a single picture.
+Phase 55 round 2 also fixed `polygonArea` to measure the AREA VECTOR's
+magnitude — a scalar sum of the projected cross products overstated
+oblique cuts by up to √3 (the cube's x+y+z=15 hexagon read 225, not
+75·sqrt(3) ≈ 129.9).

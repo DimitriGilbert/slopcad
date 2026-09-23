@@ -82,7 +82,7 @@ describe("serializeDrawingSvg", () => {
     expect(first).toBe(second);
     expect(first).toContain('role="img"');
     expect(first).toContain('class="dg-visible"');
-    expect(first).toContain("<path");
+    expect(first).toContain("<line");
   });
 
   it("labels the overlay fidelity honestly and renders empty views as frames", () => {
@@ -92,7 +92,7 @@ describe("serializeDrawingSvg", () => {
     const svg = serializeDrawingSvg(drawing, geometry);
     expect(svg).toContain("dg-visible");
     const empty = serializeDrawingSvg(drawing, new Map());
-    expect(empty).not.toContain("<path");
+    expect(empty).not.toContain('class="dg-visible"');
   });
 
   it("summarizes the drawing for assistive technology", () => {
@@ -128,7 +128,7 @@ describe("the drawing workbench page", () => {
     expect(populated.getAttribute("aria-label")).toBe(
       "Drawing: A3 landscape sheet, 3 views: front, top, right",
     );
-    expect(populated.querySelectorAll("path").length).toBeGreaterThan(0);
+    expect(populated.querySelectorAll("line").length).toBeGreaterThan(0);
     // The aligned top view sits above the front view with a registered x.
     const statusBefore = screen.getByRole("status").textContent ?? "";
     expect(statusBefore.length).toBeGreaterThan(0);

@@ -267,6 +267,24 @@ describe("section geometry fixtures", () => {
     expect(polygonArea(loop)).toBeCloseTo(100, 6);
   });
 
+  it("measures the OBLIQUE cut's true area (the area-vector magnitude)", () => {
+    // The plane x + y + z = 15 cuts the 10 mm cube in a regular hexagon of
+    // side 5·sqrt(2): area (3·sqrt(3)/2)·(5·sqrt(2))² = 75·sqrt(3) ≈
+    // 129.9038. A scalar sum of the projected cross products (the
+    // pre-Phase-55-round-2 formula) returns A·|n̂x+n̂y+n̂z| = 225 — the
+    // √3 oblique factor — so this pin fails against it.
+    const mesh = boxMesh();
+    const cut = meshPlaneCrossSection(mesh, {
+      origin: [5, 5, 5],
+      normal: [1, 1, 1],
+      keepSide: 1,
+    });
+    expect(cut.loops).toHaveLength(1);
+    const loop = cut.loops[0];
+    if (loop === undefined) return;
+    expect(polygonArea(loop)).toBeCloseTo(75 * Math.sqrt(3), 6);
+  });
+
   it("hatches the cut face with deterministic strokes inside the section", () => {
     const mesh = boxMesh();
     const loops = meshPlaneCrossSection(mesh, {
@@ -384,6 +402,20 @@ describe("SVG output (Phase 55 elements, byte-deterministic)", () => {
     );
   });
 
+  it("pins sheet coordinates through the root flip (the balloon's absolute y)", () => {
+    // The mirror-class pin: a balloon anchored at TOP-DOWN sheet
+    // (100, 200) presents y-UP — cy = 297 − 200 = 97, never 200 (an
+    // unflipped walk) and never 197 (a double flip). The frame rect's
+    // y-up origin (10 from the sheet's bottom edge) pins the same
+    // discipline on a stroked element.
+    const svg = serializeDrawingSvg(drawing, geometry);
+    expect(svg).toContain('viewBox="0 0 420 297"');
+    expect(svg).toContain(
+      '<rect class="dg-frame" x="10" y="10" width="400" height="277"',
+    );
+    expect(svg).toContain('<g transform="translate(0 297) scale(1 -1)">');
+  });
+
   it("carries hatch strokes and labels in the stable SVG classes", () => {
     const sectioned: DrawingDocument = {
       sheets: [
@@ -417,7 +449,7 @@ describe("SVG output (Phase 55 elements, byte-deterministic)", () => {
     expect(svg).toBe(serializeDrawingSvg(sectioned, sectionGeometry));
   });
 
-  it("renders balloons with resolved item numbers and BOM tables", () => {
+  it("resolves balloon item numbers at the association site", () => {
     const populated: DrawingDocument = {
       sheets: [
         {
@@ -462,8 +494,25 @@ describe("SVG output (Phase 55 elements, byte-deterministic)", () => {
     const svg = serializeDrawingSvg(populated, geometry);
     expect(svg).toContain('class="dg-balloon"');
     expect(svg).toContain('class="dg-bom"');
-    expect(svg).toContain(">1</text>"); // the resolved item number
     expect(svg).toContain("Plate");
+    // The association-site pin: the balloon GROUP whose data-occurrence-id
+    // matches the BOM row carries the item number INSIDE that group; the
+    // balloon with no matching row renders without a number.
+    const balloonGroups = svg.match(
+      /<g class="dg-balloon" data-occurrence-id="[^"]*"[\s\S]*?<\/g>/g,
+    );
+    expect(balloonGroups).toHaveLength(2);
+    const numbered = balloonGroups?.find((group) =>
+      group.includes('data-occurrence-id="occ_plate-1"'),
+    );
+    expect(numbered).toContain('class="dg-balloon-item"');
+    expect(numbered).toContain(">1</text>");
+    // Its circle sits at the y-up position of the top-down anchor.
+    expect(numbered).toContain('cx="100" cy="97"');
+    const unnumbered = balloonGroups?.find((group) =>
+      group.includes('data-occurrence-id="occ_unknown"'),
+    );
+    expect(unnumbered).not.toContain("dg-balloon-item");
     expect(drawingSummary(populated)).toBe(
       "Drawing: A3 landscape sheet, 1 view: front, BOM 1 table, 2 balloons",
     );
@@ -488,7 +537,50 @@ describe("PDF output (deterministic vector builder)", () => {
     // No clocks anywhere in the output (the PDF date convention).
     expect(pdf).not.toContain("(D:");
   });
+
+  it("lands text upright at its absolute y-up position (no text-matrix mirroring)", () => {
+    // The mirror-class pin: the view label's text operator must place the
+    // run at the y-UP conversion of its sheet position — baseline at
+    // top-down 150 on a 297 mm sheet → y-up 147 → 416.6929 pt — and the
+    // stream must carry no text matrix at all (a mirrored implementation
+    // reaches for a negative-scaled Tm, or pre-flips the Td y).
+    const sectioned: DrawingDocument = {
+      sheets: [
+        {
+          ...baseSheet,
+          views: [
+            {
+              ...frontView,
+              id: createDrawingViewId("dwv_sec"),
+              label: "SECTION A-A",
+            },
+          ],
+        },
+      ],
+    };
+    const pdf = serializeDrawingPdf(
+      sectioned,
+      new Map([["dwv_sec", edgesOverlayProjectionForKind(boxMesh(), "front")]]),
+    );
+    const streamMatch = pdf.match(/stream\n([\s\S]*?)\nendstream/);
+    expect(streamMatch).not.toBeNull();
+    const stream = streamMatch?.[1] ?? "";
+    expect(stream).not.toContain(" Tm");
+    const textOps = stream.match(/BT [\s\S]*? ET/g) ?? [];
+    const labelOp = textOps.find((op) => op.includes("(SECTION A-A)"));
+    expect(labelOp).toBeDefined();
+    // `BT /F1 SIZE Tf X Y Td (TEXT) Tj ET` — the Td's Y operand.
+    const tdY = labelOp?.match(/Tf ([\d.-]+) ([\d.-]+) Td/)?.[2];
+    expect(tdY).toBe(n2(147 * (72 / 25.4)));
+  });
 });
+
+/** The PDF writer's own number format (≤4 decimals, trimmed). */
+function n2(value: number): string {
+  const fixed = value.toFixed(4);
+  const trimmed = fixed.replace(/\.?0+$/, "");
+  return trimmed === "-0" ? "0" : trimmed;
+}
 
 describe("DXF output (deterministic writer + self round-trip)", () => {
   const drawing: DrawingDocument = { sheets: [baseSheet] };
@@ -517,6 +609,33 @@ describe("DXF output (deterministic writer + self round-trip)", () => {
       "TEXT",
       "BOM",
     ]);
+  });
+
+  it("writes the frame at ABSOLUTE y-up model coordinates", () => {
+    // The mirror-class pin: the sheet's top-left frame corner (top-down
+    // (10, 10)) must land at DXF y = 297 − 10 = 287 — the top FRAME edge
+    // reads y = 287, x spanning 10..410. A writer that flips twice (or
+    // not at all) puts that edge at y = 10.
+    const dxf = serializeDrawingDxf(drawing, geometry);
+    const parsed = parseDrawingDxf(dxf);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const frameEdges = parsed.value.entities.filter(
+      (e) => e.kind === "line" && e.layer === "FRAMES",
+    );
+    const topEdge = frameEdges.find(
+      (e) => e.kind === "line" && e.y1 === 287 && e.y2 === 287,
+    );
+    expect(topEdge).toBeDefined();
+    if (topEdge?.kind !== "line") return;
+    expect(Math.min(topEdge.x1, topEdge.x2)).toBe(10);
+    expect(Math.max(topEdge.x1, topEdge.x2)).toBe(410);
+    // And no FRAMES edge sits at y = 10 except the BOTTOM edge (whose x
+    // span is identical — the pin above distinguishes them by y).
+    const bottomEdges = frameEdges.filter(
+      (e) => e.kind === "line" && e.y1 === 10 && e.y2 === 10,
+    );
+    expect(bottomEdges).toHaveLength(1);
   });
 
   it("round-trips hatch, labels, balloons, and BOM tables through DXF", () => {
@@ -577,6 +696,16 @@ describe("DXF output (deterministic writer + self round-trip)", () => {
         (e) => e.kind === "text" && e.text === "SECTION A-A",
       ),
     ).toBe(true);
+    // The balloon's number lands on the BOM layer at the y-up anchor
+    // (association + absolute-coordinate pin in one).
+    const balloonItem = parsed.value.entities.find(
+      (e) => e.kind === "text" && e.text === "1" && e.layer === "BOM",
+    );
+    expect(balloonItem).toBeDefined();
+    if (balloonItem?.kind !== "text") return;
+    // Baseline sits 1.2 mm below the balloon centre in top-down sheet
+    // millimetres → y-up 297 − 201.2.
+    expect(balloonItem.y).toBeCloseTo(297 - 201.2, 6);
   });
 
   it("rejects entities outside the pinned subset", () => {

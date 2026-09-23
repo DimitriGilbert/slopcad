@@ -1,17 +1,26 @@
 /**
- * The drawing DXF output (Phase 55): a deterministic ASCII DXF (AC1009 /
- * R12 flavour) writer over the same picture model as the SVG/PDF
- * exporters, plus the parser that reads the SAME SUBSET back.
+ * The drawing DXF output (Phase 55, unified in Phase 55 round 2): a
+ * deterministic ASCII DXF (AC1009 / R12 flavour) writer over the SAME
+ * presentation pictures the SVG/PDF exporters consume — plus the parser
+ * that reads the SAME SUBSET back.
  *
  * ## The honestly pinned entity subset
  *
- * The drawing's geometry is polyline chains, so the writer emits exactly
- * `LINE`, `CIRCLE` (balloons), and `TEXT` (labels, BOM cells, balloon
- * numbers) — no ARC/SPLINE/DIMENSION entities are fabricated for geometry
- * that is not analytic in the picture model. Chains become one LINE per
- * segment (the lossless polyline encoding for the subset). Sheet
- * millimetres map to DXF model-space units 1:1 with the y axis flipped
- * (sheet y is top-down; DXF y grows upward).
+ * The picture is primitives, so the writer emits exactly `LINE`
+ * (segments, rect sides, arrowheads), `CIRCLE` (balloons), and `TEXT`
+ * (labels, BOM cells, balloon numbers) — no ARC/SPLINE/DIMENSION entities
+ * are fabricated for geometry that is not analytic in the picture model.
+ * Sheet millimetres map to DXF model-space units 1:1; the presentation is
+ * y-up and DXF's model space grows upward, so coordinates pass through
+ * unconverted (the one `height − y` flip already happened at presentation
+ * time).
+ *
+ * ## Layers
+ *
+ * The six pinned layers are the picture groups' medium mapping
+ * (`dg-frame`→FRAMES, `dg-visible`→VIEWS, `dg-hidden`→DHIDDEN,
+ * `dg-hatch`→HATCH, `dg-label`→TEXT, balloons/BOM→BOM) — the layout walk
+ * decides placement once, the layer table is all this medium adds.
  *
  * ## Round-trip
  *
@@ -22,20 +31,18 @@
  * files, which the fixtures pin byte-for-byte.
  */
 
+import { type DrawingDocument } from "./drawing";
 import {
-  type DrawingBalloon,
-  type DrawingBomTable,
-  type DrawingDocument,
-  type DrawingSheet,
-  type DrawingViewGeometry,
-  sheetDimensions,
-  scaleLength,
-  viewFrameFromGeometry,
-} from "./drawing";
-import { BOM_COLUMN_WIDTHS, BOM_ROW_HEIGHT } from "./drawing-output";
-
-/** The projected geometry per view id for a whole drawing. */
-export type DrawingGeometryByView = ReadonlyMap<string, DrawingViewGeometry>;
+  type DrawingGeometryByView,
+  presentDrawingDocument,
+} from "./drawing-output";
+import {
+  DRAWING_ARROW_LENGTH_MM,
+  DRAWING_ARROW_WIDTH_MM,
+  type DrawingPictureGroup,
+  type DrawingPrimitive,
+  type DrawingSheetPicture,
+} from "./drawing-presentation";
 
 /** The DXF layers the writer uses (fixed order — part of the byte format). */
 export const DRAWING_DXF_LAYERS = [
@@ -48,6 +55,26 @@ export const DRAWING_DXF_LAYERS = [
 ] as const;
 
 export type DrawingDxfLayer = (typeof DRAWING_DXF_LAYERS)[number];
+
+/** Picture group class → DXF layer (the medium's pinned table). */
+const LAYER_BY_GROUP: Readonly<Record<string, DrawingDxfLayer>> = {
+  "dg-frame": "FRAMES",
+  "dg-visible": "VIEWS",
+  "dg-hidden": "DHIDDEN",
+  "dg-hatch": "HATCH",
+  "dg-balloon": "BOM",
+  "dg-bom": "BOM",
+  "dg-view": "VIEWS",
+  "dg-furniture": "TEXT",
+};
+
+/** Element-classed primitives override the group layer (`dg-label`). */
+const LAYER_BY_ELEMENT_CLASS: Readonly<Record<string, DrawingDxfLayer>> = {
+  "dg-frame": "FRAMES",
+  "dg-label": "TEXT",
+  "dg-balloon-item": "BOM",
+  "dg-balloon-circle": "BOM",
+};
 
 /** One parsed DXF entity from the written subset. */
 export type DrawingDxfEntity =
@@ -125,115 +152,145 @@ export function buildDxfDocument(
   geometry: DrawingGeometryByView,
 ): DrawingDxfDocument {
   const entities: DrawingDxfEntity[] = [];
-  for (const sheet of drawing.sheets) {
-    const { width, height } = sheetDimensions(sheet);
-    const X = (x: number): number => x;
-    const Y = (y: number): number => height - y;
-    // Frame border.
-    const frame: readonly (readonly [number, number])[] = [
-      [10, 10],
-      [width - 10, 10],
-      [width - 10, height - 10],
-      [10, height - 10],
-      [10, 10],
-    ];
-    for (let i = 0; i + 1 < frame.length; i += 1) {
-      const a = frame[i];
-      const b = frame[i + 1];
-      if (a === undefined || b === undefined) continue;
-      entities.push({
-        kind: "line",
-        layer: "FRAMES",
-        x1: X(a[0]),
-        y1: Y(a[1]),
-        x2: X(b[0]),
-        y2: Y(b[1]),
-      });
-    }
-    for (const view of sheet.views) {
-      const geo = geometry.get(view.id) ?? null;
-      if (geo === null || geo.bounds === null) continue;
-      const scale = view.scale ?? sheet.scale;
-      const centreU = (geo.bounds.minU + geo.bounds.maxU) / 2;
-      const centreV = (geo.bounds.minV + geo.bounds.maxV) / 2;
-      const T = (
-        point: readonly [number, number],
-      ): readonly [number, number] => [
-        view.x + scaleLength(point[0] - centreU, scale),
-        Y(view.y - scaleLength(point[1] - centreV, scale)),
-      ];
-      const chains = (
-        chains: readonly (readonly (readonly [number, number])[])[],
-        layer: DrawingDxfLayer,
-      ): void => {
-        for (const chain of chains) {
-          const t = chain.map(T);
-          for (let i = 0; i + 1 < t.length; i += 1) {
-            const a = t[i];
-            const b = t[i + 1];
-            if (a === undefined || b === undefined) continue;
-            entities.push({
-              kind: "line",
-              layer,
-              x1: a[0],
-              y1: a[1],
-              x2: b[0],
-              y2: b[1],
-            });
-          }
-        }
-      };
-      chains(geo.visible, "VIEWS");
-      chains(geo.hidden, "DHIDDEN");
-      chains(geo.hatch ?? [], "HATCH");
-      let labelBaseline = view.y + 8;
-      const frameBox = viewFrameFromGeometry(view, sheet, geo.bounds);
-      if (frameBox !== null)
-        labelBaseline = frameBox.y + frameBox.height / 2 + 5;
-      if (view.label !== undefined) {
-        entities.push({
-          kind: "text",
-          layer: "TEXT",
-          x: view.x,
-          y: Y(labelBaseline),
-          height: 3.5,
-          text: view.label,
-        });
-      }
-    }
-    for (const balloon of sheet.balloons ?? []) {
-      entities.push({
-        kind: "line",
-        layer: "BOM",
-        x1: balloon.x,
-        y1: Y(balloon.y),
-        x2: balloon.leaderX,
-        y2: Y(balloon.leaderY),
-      });
-      entities.push({
-        kind: "circle",
-        layer: "BOM",
-        x: balloon.x,
-        y: Y(balloon.y),
-        radius: 4,
-      });
-      const item = balloonItem(sheet, balloon);
-      if (item !== null) {
-        entities.push({
-          kind: "text",
-          layer: "BOM",
-          x: balloon.x,
-          y: Y(balloon.y + 1.2),
-          height: 2.8,
-          text: String(item),
-        });
-      }
-    }
-    for (const table of sheet.bomTables ?? []) {
-      appendBomDxf(entities, table, Y);
-    }
+  for (const picture of presentDrawingDocument(drawing, geometry)) {
+    appendPicture(entities, picture);
   }
   return { layers: [...DRAWING_DXF_LAYERS], entities };
+}
+
+/** Appends one picture's entities (group walk, primitives → entities). */
+function appendPicture(
+  entities: DrawingDxfEntity[],
+  picture: DrawingSheetPicture,
+): void {
+  const walk = (
+    groups: readonly DrawingPictureGroup[],
+    inherited: DrawingDxfLayer | null,
+  ): void => {
+    for (const group of groups) {
+      const groupLayer = LAYER_BY_GROUP[group.class] ?? inherited;
+      walk(group.children ?? [], groupLayer);
+      for (const primitive of group.primitives) {
+        // Element class overrides the group ("dg-label" → TEXT).
+        const layer =
+          LAYER_BY_ELEMENT_CLASS[primitive.class ?? ""] ?? groupLayer;
+        appendPrimitive(entities, primitive, layer ?? null);
+      }
+    }
+  };
+  walk(picture.groups, null);
+}
+
+/** Expands one primitive into its DXF entities on the resolved layer. */
+function appendPrimitive(
+  entities: DrawingDxfEntity[],
+  primitive: DrawingPrimitive,
+  layer: DrawingDxfLayer | null,
+): void {
+  if (layer === null) return;
+  switch (primitive.kind) {
+    case "line":
+      entities.push({
+        kind: "line",
+        layer,
+        x1: primitive.x1,
+        y1: primitive.y1,
+        x2: primitive.x2,
+        y2: primitive.y2,
+      });
+      return;
+    case "rect": {
+      // A rect is four side strokes (y-up corners).
+      const { x, y, width, height } = primitive;
+      const corners: readonly (readonly [number, number])[] = [
+        [x, y],
+        [x + width, y],
+        [x + width, y + height],
+        [x, y + height],
+        [x, y],
+      ];
+      for (let i = 0; i + 1 < corners.length; i += 1) {
+        const a = corners[i];
+        const b = corners[i + 1];
+        if (a === undefined || b === undefined) continue;
+        entities.push({
+          kind: "line",
+          layer,
+          x1: a[0],
+          y1: a[1],
+          x2: b[0],
+          y2: b[1],
+        });
+      }
+      return;
+    }
+    case "circle":
+      entities.push({
+        kind: "circle",
+        layer,
+        x: primitive.cx,
+        y: primitive.cy,
+        radius: primitive.radius,
+      });
+      return;
+    case "arc": {
+      // Deterministic 16-segment sweep (the PDF writer's approximation).
+      const sweep = primitive.endRad - primitive.startRad;
+      const segments = 16;
+      for (let i = 0; i < segments; i += 1) {
+        const a0 = primitive.startRad + (sweep * i) / segments;
+        const a1 = primitive.startRad + (sweep * (i + 1)) / segments;
+        entities.push({
+          kind: "line",
+          layer,
+          x1: primitive.cx + primitive.radius * Math.cos(a0),
+          y1: primitive.cy + primitive.radius * Math.sin(a0),
+          x2: primitive.cx + primitive.radius * Math.cos(a1),
+          y2: primitive.cy + primitive.radius * Math.sin(a1),
+        });
+      }
+      return;
+    }
+    case "arrow": {
+      // The shared arrowhead triangle's three sides, from the same math
+      // the SVG polygon points use (base corners back along the arrow,
+      // ±half-width across it).
+      const cos = Math.cos(primitive.angleRad);
+      const sin = Math.sin(primitive.angleRad);
+      const bx = primitive.x - cos * DRAWING_ARROW_LENGTH_MM;
+      const by = primitive.y - sin * DRAWING_ARROW_LENGTH_MM;
+      const corners: readonly (readonly [number, number])[] = [
+        [primitive.x, primitive.y],
+        [bx - sin * DRAWING_ARROW_WIDTH_MM, by + cos * DRAWING_ARROW_WIDTH_MM],
+        [bx + sin * DRAWING_ARROW_WIDTH_MM, by - cos * DRAWING_ARROW_WIDTH_MM],
+        [primitive.x, primitive.y],
+      ];
+      for (let i = 0; i + 1 < corners.length; i += 1) {
+        const a = corners[i];
+        const b = corners[i + 1];
+        if (a === undefined || b === undefined) continue;
+        entities.push({
+          kind: "line",
+          layer,
+          x1: a[0],
+          y1: a[1],
+          x2: b[0],
+          y2: b[1],
+        });
+      }
+      return;
+    }
+    case "text":
+      entities.push({
+        kind: "text",
+        layer,
+        x: primitive.x,
+        y: primitive.y,
+        height: primitive.sizeMm,
+        text: primitive.text,
+      });
+      return;
+  }
 }
 
 /** Canonical emission of a parsed document (the byte format itself). */
@@ -291,128 +348,6 @@ export function serializeParsedDrawingDxf(doc: DrawingDxfDocument): string {
   pair(0, "ENDSEC");
   pair(0, "EOF");
   return `${out.join("\n")}\n`;
-}
-
-function appendBomDxf(
-  entities: DrawingDxfEntity[],
-  table: DrawingBomTable,
-  Y: (y: number) => number,
-): void {
-  const { item, quantity, description } = BOM_COLUMN_WIDTHS;
-  const totalWidth = item + quantity + description;
-  const rows = table.rows.length + 1 + (table.title === null ? 0 : 1);
-  const top = table.y + rows * BOM_ROW_HEIGHT;
-  const hline = (y: number): void => {
-    entities.push({
-      kind: "line",
-      layer: "BOM",
-      x1: table.x,
-      y1: Y(y),
-      x2: table.x + totalWidth,
-      y2: Y(y),
-    });
-  };
-  const vline = (x: number): void => {
-    entities.push({
-      kind: "line",
-      layer: "BOM",
-      x1: x,
-      y1: Y(table.y),
-      x2: x,
-      y2: Y(top),
-    });
-  };
-  hline(table.y);
-  hline(top);
-  vline(table.x);
-  vline(table.x + totalWidth);
-  let y = table.y;
-  if (table.title !== null) {
-    entities.push({
-      kind: "text",
-      layer: "BOM",
-      x: table.x + totalWidth / 2,
-      y: Y(y + BOM_ROW_HEIGHT - 2),
-      height: 3,
-      text: table.title,
-    });
-    y += BOM_ROW_HEIGHT;
-    hline(y);
-  }
-  entities.push({
-    kind: "text",
-    layer: "BOM",
-    x: table.x + item / 2,
-    y: Y(y + BOM_ROW_HEIGHT - 2),
-    height: 2.5,
-    text: "ITEM",
-  });
-  entities.push({
-    kind: "text",
-    layer: "BOM",
-    x: table.x + item + quantity / 2,
-    y: Y(y + BOM_ROW_HEIGHT - 2),
-    height: 2.5,
-    text: "QTY",
-  });
-  entities.push({
-    kind: "text",
-    layer: "BOM",
-    x: table.x + item + quantity + 2,
-    y: Y(y + BOM_ROW_HEIGHT - 2),
-    height: 2.5,
-    text: "DESCRIPTION",
-  });
-  y += BOM_ROW_HEIGHT;
-  hline(y);
-  for (const row of table.rows) {
-    const baseY = y + BOM_ROW_HEIGHT - 2;
-    entities.push({
-      kind: "text",
-      layer: "BOM",
-      x: table.x + item / 2,
-      y: Y(baseY),
-      height: 2.5,
-      text: String(row.item),
-    });
-    entities.push({
-      kind: "text",
-      layer: "BOM",
-      x: table.x + item + quantity / 2,
-      y: Y(baseY),
-      height: 2.5,
-      text: String(row.quantity),
-    });
-    entities.push({
-      kind: "text",
-      layer: "BOM",
-      x: table.x + item + quantity + 2,
-      y: Y(baseY),
-      height: 2.5,
-      text: bomRowText(row),
-    });
-    y += BOM_ROW_HEIGHT;
-    if (y < top) hline(y);
-  }
-  vline(table.x + item);
-  vline(table.x + item + quantity);
-}
-
-function bomRowText(row: DrawingBomTable["rows"][number]): string {
-  const flag = row.bomFlag === null ? "" : ` (${row.bomFlag})`;
-  return `${row.label}${flag}`;
-}
-
-function balloonItem(
-  sheet: DrawingSheet,
-  balloon: DrawingBalloon,
-): number | null {
-  for (const table of sheet.bomTables ?? []) {
-    for (const row of table.rows) {
-      if (row.occurrenceId === balloon.occurrenceId) return row.item;
-    }
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------

@@ -969,7 +969,11 @@ export {
   serializeDrawingSheetFurniture,
   sheetDimensionsMm,
 } from "./drawing-sheet";
-export type { DrawingPrimitive } from "./drawing-presentation";
+export type {
+  DrawingPictureGroup,
+  DrawingPrimitive,
+  DrawingSheetPicture,
+} from "./drawing-presentation";
 export {
   arrowHeadPolygonPoints,
   compareDrawingId,
@@ -997,7 +1001,12 @@ export {
   threadCalloutText,
   uprightTextTransform,
 } from "./drawing-presentation";
-export { formatSvgNumber, serializeDrawingSheetSvg } from "./drawing-svg";
+export {
+  drawingGroupMarkup,
+  formatSvgNumber,
+  serializeDrawingSheetSvg,
+  serializeSheetPictureSvg,
+} from "./drawing-svg";
 export type { DrawingDimensionRecoveryOptions } from "./drawing-dimension-source";
 export { recoverFeatureDimensions } from "./drawing-dimension-source";
 export type {
@@ -1080,11 +1089,17 @@ export {
   projectedViewBasisForKind,
   sectionOverlayProjection,
 } from "./drawing-section";
-export type { DrawingGeometryByView } from "./drawing-output";
+export type {
+  DrawingGeometryByView,
+  PresentDrawingSheetOptions,
+} from "./drawing-output";
 export {
   BOM_COLUMN_WIDTHS,
   BOM_ROW_HEIGHT,
+  DRAWING_PICTURE_STYLE,
   drawingSummary,
+  presentDrawingDocument,
+  presentDrawingSheet,
   serializeDrawingPdf,
   serializeDrawingSvg,
 } from "./drawing-output";

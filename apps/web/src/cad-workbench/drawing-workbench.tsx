@@ -1,25 +1,26 @@
 /**
- * The drawing workbench (Phase 53 — Drawings I; Phase 55 — Drawings III):
- * the sheet-and-view authoring page.
- *
- * Phase 55 extends the Phase 53 sheet/base-view workflow with the full
- * derived-view vocabulary — fold-line projected views (left/back/bottom of
- * a parent), an auxiliary view from the demo boss's inclined edge, a full
- * section through the demo plane (hatched), a detail crop at 2:1, and a
- * broken-out band — plus BOM tables derived from the demo assembly's
- * occurrence structure (phantom rows dissolve, purchased rows keep their
- * flag, quantities group by name) and balloons keyed to those items.
+ * The drawing workbench (Phases 53–55, UNIFIED in Phase 55 round 2): the
+ * ONE drawing surface. Every capability the previous two routes split —
+ * model-dimension recovery, dimensions and annotations, title block,
+ * revision table, template picker, sheet + view authoring, derived views,
+ * BOM tables, balloons, save/load, exports, print — hosts on this route,
+ * composed into ONE picture per sheet: Phase 54's furniture presentation
+ * (frame, title block, revisions, dimensions, annotations) layered over
+ * Phase 55's document presentation (views, BOM, balloons) from the same
+ * cad-core walk. What the canvas shows is what the SVG export emits,
+ * byte for byte.
  *
  * Every output path runs through cad-core's byte-deterministic exporters:
- * the canvas renders `serializeDrawingSvg`, and the download affordances
- * emit the same SVG plus the PDF and DXF writers' bytes — what is on
- * screen and what exports are one picture.
+ * the canvas renders `serializeSheetPictureSvg` over the composed
+ * picture, and the download affordances emit the same SVG plus the PDF
+ * and DXF writers' bytes for the document content.
  *
  * Persistence rides the native envelope's additive-optional `drawing`
- * field through the documents tRPC router (the Phase 53 deferred wiring):
- * Save serializes the drawing into a minimal native document and appends a
- * version; Load restores the drawing from the latest version. The work
- * is client-authored; the server re-validates with the same parser.
+ * field through the documents tRPC router: Save serializes the drawing
+ * into a minimal native document and appends a version; Load restores the
+ * drawing from the latest version. Create/save success invalidates the
+ * projects/documents list caches, so a rapid re-save cannot fork a
+ * duplicate project or document off stale cached empties.
  */
 
 import { useCallback, useMemo, useState, type ReactElement } from "react";
@@ -28,39 +29,53 @@ import {
   alignedViewPlacement,
   createBodyId,
   createDrawingViewId,
-  createDocumentId,
   createOccurrenceId,
   createSheetId,
+  type DrawingAnnotation,
   type DrawingBalloon,
   type DrawingDocument,
+  type DrawingDimension,
+  type DrawingPictureGroup,
   type DrawingProjectionAngle,
+  type DrawingRevisionRow,
   type DrawingScale,
   type DrawingSheet,
-  type DrawingSheetOrientation,
+  type DrawingSheetPicture,
+  type DrawingSheetSetup,
   type DrawingSheetSize,
+  type DrawingSheetOrientation,
+  type DrawingSheetTemplate,
+  type DrawingTitleBlock,
   type DrawingView,
   type DrawingViewGeometry,
   type DrawingViewKind,
+  DRAWING_FRAME_MARGIN_MM,
   DRAWING_SCALES,
   DRAWING_SHEET_SIZE_NAMES,
+  DRAWING_SHEET_TEMPLATES,
   DRAWING_VIEW_KINDS,
   type DrawingGeometryByView,
+  composeSheetPresentation,
+  drawingSheetTemplateById,
+  drawingSummary,
   edgesOverlayProjectionForKind,
-  createDocument,
-  createNativeCadDocument,
   numberBomItems,
-  parseNativeCadDocumentFromString,
+  presentDrawingSheet,
   serializeDrawingDxf,
   serializeDrawingPdf,
-  serializeDrawingSvg,
-  stringifyNativeCadDocument,
-  serializeNativeCadDocument,
-  drawingSummary,
+  serializeSheetPictureSvg,
   sheetDimensions,
+  sheetDimensionsMm,
   viewFitsSheet,
   viewFrameFromGeometry,
 } from "@slopcad/cad-core";
 import { Button } from "@slopcad/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@slopcad/ui/components/dialog";
 import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/lib/types";
 import { useFormedible } from "@slopcad/ui/components/formedible/hooks/use-formedible";
 
@@ -75,6 +90,24 @@ import {
   DEMO_ASSEMBLY_OCCURRENCES,
   DEMO_PLATE_MESH,
 } from "./drawing-demo-body";
+import {
+  parseDrawingSaveEnvelope,
+  serializeDrawingSaveEnvelope,
+} from "./drawing-persistence";
+import {
+  REFERENCE_DIMENSION_DEFAULTS,
+  TITLE_BLOCK_DEFAULTS,
+  referenceDimensionOf,
+  seedDrawingDocument,
+  validateReferenceDimensionSubmission,
+  validateRevisionSubmission,
+  validateTemplateSubmission,
+  type ReferenceDimensionSubmission,
+  type RevisionSubmission,
+  type TemplateSubmission,
+  type TitleBlockSubmission,
+} from "./drawing-sheet-authoring";
+import { recoverDrawingEntities } from "./drawing-sources";
 
 import { useTRPC } from "@/utils/trpc";
 
@@ -88,14 +121,18 @@ const SHEET_DEFAULTS: SheetFormValues = {
   size: "A3",
   orientation: "landscape",
   // Select option values are strings (Formedible serializes them) — the
-  // default must match or the trigger renders blank on load.
-  scaleIndex: "3",
+  // default must match or the trigger renders blank on load. 1:2 (the
+  // pinned `a3-landscape-1-2` template's scale) is the drawing default.
+  scaleIndex: "2",
 };
 
 /** Aligned-view gap between frames, sheet millimetres. */
 const VIEW_GAP_MM = 15;
 
 const DEMO_BODY_ID = createBodyId("body_drawing_plate");
+
+/** The template picker's pre-sheet default (the drawing starter). */
+const SHEET_DEFAULTS_TEMPLATE_ID = "a3-landscape-1-2";
 
 const viewFrameOf = (
   view: DrawingView,
@@ -106,6 +143,84 @@ const viewFrameOf = (
   const frame = viewFrameFromGeometry(view, sheet, geometry.bounds);
   return frame === null ? null : { width: frame.width, height: frame.height };
 };
+
+/** The document sheet's furniture setup (scale ratio → number). */
+function sheetSetupOf(sheet: DrawingSheet): DrawingSheetSetup {
+  return {
+    size: sheet.size,
+    orientation: sheet.orientation,
+    scale: sheet.scale.numerator / sheet.scale.denominator,
+  };
+}
+
+/** The pinned template matching a setup, when one exists. */
+function pinnedTemplateFor(
+  setup: DrawingSheetSetup,
+): DrawingSheetTemplate | null {
+  return (
+    DRAWING_SHEET_TEMPLATES.find(
+      (template) =>
+        template.setup.size === setup.size &&
+        template.setup.orientation === setup.orientation &&
+        Math.abs(template.setup.scale - setup.scale) < 1e-9,
+    ) ?? null
+  );
+}
+
+/** The DrawingScale whose ratio equals the template's scale number. */
+function scaleOfNumber(scale: number): DrawingScale | null {
+  return (
+    DRAWING_SCALES.find(
+      (candidate) => candidate.numerator / candidate.denominator === scale,
+    ) ?? null
+  );
+}
+
+/**
+ * The view frame the recovery lays out: a 120 x 80 model-mm region whose
+ * sheet placement derives from the sheet's own dimensions (left-centered,
+ * lower half), so a bigger sheet centers the view instead of pinning it
+ * to a corner.
+ */
+function viewFrameFor(setup: DrawingSheetSetup): {
+  readonly viewId: string;
+  readonly originXMm: number;
+  readonly originYMm: number;
+  readonly viewWidthMm: number;
+  readonly viewHeightMm: number;
+  readonly scale: number;
+} {
+  const { widthMm, heightMm } = sheetDimensionsMm(setup);
+  const scale = setup.scale;
+  return {
+    viewId: "view_front",
+    originXMm: Math.round(widthMm * 0.12),
+    originYMm: Math.round((heightMm - 80 * scale) / 2),
+    viewWidthMm: 120,
+    viewHeightMm: 80,
+    scale,
+  };
+}
+
+/** The dimension value texts in presentation order (the machine surface). */
+function dimensionValueTexts(
+  dimensions: readonly DrawingDimension[],
+): readonly string[] {
+  return [...dimensions]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((dimension) => {
+      switch (dimension.kind) {
+        case "linear":
+          return `${dimension.valueMm}`;
+        case "radial":
+          return `R${dimension.valueMm}`;
+        case "diameter":
+          return `\u2300${dimension.valueMm}`;
+        case "angular":
+          return `${dimension.valueDeg}\u00B0`;
+      }
+    });
+}
 
 /** Triggers a client download of a deterministic text artifact. */
 function download(name: string, text: string, mime: string): void {
@@ -120,14 +235,53 @@ function download(name: string, text: string, mime: string): void {
 /** Formats a sheet millimetre length for the @page rule: no exponent. */
 const formatMm = (value: number): string => value.toFixed(2);
 
+/** The furniture state recovered from the parametric seed (Phase 54). */
+interface FurnitureState {
+  readonly titleBlock: DrawingTitleBlock;
+  readonly revisions: readonly DrawingRevisionRow[];
+  readonly dimensions: readonly DrawingDimension[];
+  readonly annotations: readonly DrawingAnnotation[];
+  readonly referenceCount: number;
+}
+
+/** Runs the deterministic recovery for one sheet's frame. */
+function recoverFurniture(sheet: DrawingSheet): FurnitureState {
+  const setup = sheetSetupOf(sheet);
+  const frame = viewFrameFor(setup);
+  const recovered = recoverDrawingEntities(seedDrawingDocument(), {
+    viewId: frame.viewId,
+    originXMm: frame.originXMm,
+    originYMm: frame.originYMm,
+    viewWidthMm: frame.viewWidthMm,
+    viewHeightMm: frame.viewHeightMm,
+    scale: frame.scale,
+    sketchOriginYMm: frame.originYMm + frame.viewHeightMm * frame.scale,
+    stackStepMm: 22,
+  });
+  return {
+    titleBlock: { ...TITLE_BLOCK_DEFAULTS },
+    revisions: [],
+    dimensions: recovered.dimensions,
+    annotations: recovered.annotations,
+    referenceCount: 0,
+  };
+}
+
 export function DrawingWorkbenchPage(): ReactElement {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [drawing, setDrawing] = useState<DrawingDocument>({ sheets: [] });
+  const [furniture, setFurniture] = useState<FurnitureState | null>(null);
+  const [templateId, setTemplateId] = useState<string | null>(null);
   const [angle, setAngle] = useState<DrawingProjectionAngle>("third");
   const [documentId, setDocumentId] = useState<string | null>(null);
+  const [exportedSvg, setExportedSvg] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<
+    "template" | "titleBlock" | "reference" | "revision" | null
+  >(null);
+  const [authoringError, setAuthoringError] = useState<string | null>(null);
   const [status, setStatus] = useState(
-    "No sheets yet. Sheets, views, BOM tables, and balloons author here; Save persists the drawing into a document.",
+    "No sheets yet. Sheets, views, BOM tables, and balloons author here; the model's dimensions recover onto the first sheet; Save persists the drawing into a document.",
   );
 
   const geometryByView = useMemo<DrawingGeometryByView>(() => {
@@ -136,9 +290,38 @@ export function DrawingWorkbenchPage(): ReactElement {
     return deriveSheetGeometry(sheet, DEMO_PLATE_MESH);
   }, [drawing]);
 
+  /**
+   * The composed sheet picture (Phase 54 furniture over Phase 55 document
+   * content — ONE presentation, ONE frame, one flip discipline).
+   */
+  const picture = useMemo<DrawingSheetPicture | null>(() => {
+    const sheet = drawing.sheets[0];
+    if (sheet === undefined || furniture === null) return null;
+    const docPicture = presentDrawingSheet(sheet, geometryByView, {
+      includeFrame: false,
+    });
+    const furniturePrimitives = composeSheetPresentation(
+      sheetSetupOf(sheet),
+      furniture.titleBlock,
+      furniture.revisions,
+      furniture.dimensions,
+      furniture.annotations,
+      DRAWING_FRAME_MARGIN_MM,
+    );
+    const groups: readonly DrawingPictureGroup[] = [
+      { class: "dg-furniture", primitives: furniturePrimitives },
+      ...docPicture.groups,
+    ];
+    return {
+      widthMm: docPicture.widthMm,
+      heightMm: docPicture.heightMm,
+      groups,
+    };
+  }, [drawing, furniture, geometryByView]);
+
   const svg = useMemo(
-    () => serializeDrawingSvg(drawing, geometryByView),
-    [drawing, geometryByView],
+    () => (picture === null ? null : serializeSheetPictureSvg(picture)),
+    [picture],
   );
 
   const createSheet = useCallback(
@@ -147,21 +330,26 @@ export function DrawingWorkbenchPage(): ReactElement {
         DRAWING_SCALES[Number(values.scaleIndex)] ?? DRAWING_SCALES[3];
       if (scale === undefined) return;
       const id = createSheetId(`sht_sheet-${drawing.sheets.length + 1}`);
-      setDrawing((previous) => ({
-        sheets: [
-          ...previous.sheets,
-          {
-            id,
-            size: values.size,
-            orientation: values.orientation,
-            scale,
-            views: [],
-          },
-        ],
-      }));
-      setStatus(
-        `Sheet ${id} created (${values.size}, ${scale.numerator}:${scale.denominator}).`,
-      );
+      setDrawing((previous) => {
+        const sheet: DrawingSheet = {
+          id,
+          size: values.size,
+          orientation: values.orientation,
+          scale,
+          views: [],
+        };
+        const first = previous.sheets.length === 0;
+        if (first) {
+          // The Phase 54 boot: the first sheet recovers the seed model's
+          // dimensions and annotations onto itself — never re-typed.
+          setFurniture(recoverFurniture(sheet));
+          setTemplateId(pinnedTemplateFor(sheetSetupOf(sheet))?.id ?? null);
+        }
+        setStatus(
+          `Sheet ${id} created (${values.size}, ${scale.numerator}:${scale.denominator}).${first ? " Model dimensions recovered onto the sheet." : ""}`,
+        );
+        return { sheets: [...previous.sheets, sheet] };
+      });
     },
     [drawing.sheets.length],
   );
@@ -227,7 +415,10 @@ export function DrawingWorkbenchPage(): ReactElement {
       // each view counts against the views that are actually on the sheet.
       setDrawing((previous) => {
         const sheet = previous.sheets[0];
-        if (sheet === undefined) return previous;
+        if (sheet === undefined) {
+          setStatus("Create a sheet first.");
+          return previous;
+        }
         const id = createDrawingViewId(`dwv_${kind}`);
         const geometry = new Map<string, DrawingViewGeometry>([
           [id, edgesOverlayProjectionForKind(DEMO_PLATE_MESH, kind)],
@@ -432,7 +623,121 @@ export function DrawingWorkbenchPage(): ReactElement {
     });
   }, []);
 
-  // --- Persistence (the Phase 53 deferred per-document wiring) ----------
+  // --- Furniture authoring (the Phase 54 dialogs) ------------------------
+
+  const applyTemplate = useCallback(
+    (submission: TemplateSubmission) => {
+      const verdict = validateTemplateSubmission(submission);
+      if (!verdict.ok) {
+        setAuthoringError(verdict.message);
+        return;
+      }
+      const sheet = drawing.sheets[0];
+      if (sheet === undefined) {
+        setAuthoringError(
+          "Create a sheet first — the template sizes the sheet.",
+        );
+        return;
+      }
+      const template = drawingSheetTemplateById(submission.templateId);
+      if (template === undefined) return;
+      const scale = scaleOfNumber(template.setup.scale);
+      setAuthoringError(null);
+      setTemplateId(template.id);
+      setFurniture((previous) =>
+        previous === null
+          ? previous
+          : { ...previous, titleBlock: { ...template.titleBlock } },
+      );
+      setDrawing((previous) => ({
+        sheets: previous.sheets.map((s, index) =>
+          index === 0
+            ? {
+                ...s,
+                size: template.setup.size,
+                orientation: template.setup.orientation,
+                ...(scale === null ? {} : { scale }),
+              }
+            : s,
+        ),
+      }));
+    },
+    [drawing.sheets],
+  );
+
+  const applyTitleBlock = useCallback((submission: TitleBlockSubmission) => {
+    setAuthoringError(null);
+    setFurniture((previous) =>
+      previous === null
+        ? previous
+        : { ...previous, titleBlock: { ...submission } },
+    );
+  }, []);
+
+  const authorReference = useCallback(
+    (submission: ReferenceDimensionSubmission) => {
+      const verdict = validateReferenceDimensionSubmission(submission);
+      if (!verdict.ok) {
+        setAuthoringError(verdict.message);
+        return;
+      }
+      setFurniture((previous) => {
+        if (previous === null) return previous;
+        const dimension = referenceDimensionOf(
+          submission,
+          previous.referenceCount,
+        );
+        if (dimension === null) {
+          setAuthoringError("The reference dimension could not be authored.");
+          return previous;
+        }
+        setAuthoringError(null);
+        return {
+          ...previous,
+          referenceCount: previous.referenceCount + 1,
+          dimensions: [...previous.dimensions, dimension],
+        };
+      });
+    },
+    [],
+  );
+
+  const applyRevision = useCallback((submission: RevisionSubmission) => {
+    const verdict = validateRevisionSubmission(submission);
+    if (!verdict.ok) {
+      setAuthoringError(verdict.message);
+      return;
+    }
+    setAuthoringError(null);
+    setFurniture((previous) =>
+      previous === null
+        ? previous
+        : {
+            ...previous,
+            revisions: [
+              ...previous.revisions,
+              {
+                revision: submission.revision,
+                description: submission.description,
+                author: submission.author,
+                date: submission.date,
+              },
+            ],
+          },
+    );
+  }, []);
+
+  const recover = useCallback((): void => {
+    const sheet = drawing.sheets[0];
+    if (sheet === undefined) {
+      setStatus("Create a sheet first — recovery needs the sheet frame.");
+      return;
+    }
+    setFurniture(recoverFurniture(sheet));
+    setStatus("Model dimensions recovered from the parametric source.");
+  }, [drawing.sheets]);
+
+  // --- Persistence (the document wiring, cache-coherent) -----------------
 
   const { mutate: saveMutate } = useMutation(
     trpc.documents.save.mutationOptions({
@@ -442,6 +747,15 @@ export function DrawingWorkbenchPage(): ReactElement {
           queryKey: trpc.documents.get.queryOptions({
             documentId: result.documentId,
           }).queryKey,
+        });
+        // The list caches go stale on every successful save: a rapid
+        // re-save refetches instead of reading cached empties and
+        // forking a duplicate document.
+        void queryClient.invalidateQueries({
+          queryKey: trpc.documents.list.queryKey(),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.projects.list.queryKey(),
         });
       },
       onError: (error) => {
@@ -454,6 +768,12 @@ export function DrawingWorkbenchPage(): ReactElement {
     trpc.documents.create.mutationOptions({
       onSuccess: (row) => {
         setDocumentId(row.id);
+        void queryClient.invalidateQueries({
+          queryKey: trpc.documents.list.queryKey(),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: trpc.projects.list.queryKey(),
+        });
         saveNative(row.id);
       },
       onError: (error) => {
@@ -465,6 +785,9 @@ export function DrawingWorkbenchPage(): ReactElement {
   const createProjectMutation = useMutation(
     trpc.projects.create.mutationOptions({
       onSuccess: (project) => {
+        void queryClient.invalidateQueries({
+          queryKey: trpc.projects.list.queryKey(),
+        });
         createDocumentMutation.mutate({
           projectId: project.id,
           name: "Drawings",
@@ -480,21 +803,16 @@ export function DrawingWorkbenchPage(): ReactElement {
   // quiet between edits — `mutate` itself is stable, `drawing` is the payload.
   const saveNative = useCallback(
     (targetDocumentId: string): void => {
-      const created = createNativeCadDocument(
-        createDocument(createDocumentId("doc_drawings")),
-      );
-      if (!created.ok) {
-        setStatus(`Save refused: ${created.error.message}`);
+      const envelope = serializeDrawingSaveEnvelope(drawing);
+      if (!envelope.ok) {
+        setStatus(`Save refused: ${envelope.message}`);
         return;
       }
-      const native = { ...created.value, drawing };
       // `mutate` is TanStack Query's stable trigger — the only piece of the
       // mutation object the wiring needs.
       saveMutate({
         documentId: targetDocumentId,
-        nativeContent: stringifyNativeCadDocument(
-          serializeNativeCadDocument(native),
-        ),
+        nativeContent: envelope.nativeContent,
       });
     },
     [drawing, saveMutate],
@@ -566,20 +884,16 @@ export function DrawingWorkbenchPage(): ReactElement {
           setStatus("The document has no saved versions yet.");
           return;
         }
-        const parsed = parseNativeCadDocumentFromString(
-          data.latest.nativeContent,
-        );
+        const parsed = parseDrawingSaveEnvelope(data.latest.nativeContent);
         if (!parsed.ok) {
-          setStatus(
-            `The saved document failed to load: ${parsed.error.message}`,
-          );
+          setStatus(`The saved document failed to load: ${parsed.message}`);
           return;
         }
-        if (parsed.value.drawing === null) {
+        if (parsed.drawing === null) {
           setStatus("The saved document carries no drawing.");
           return;
         }
-        setDrawing(parsed.value.drawing);
+        setDrawing(parsed.drawing);
         setStatus(
           `Drawing loaded from version ${String(data.latest.version)}.`,
         );
@@ -596,27 +910,43 @@ export function DrawingWorkbenchPage(): ReactElement {
   // --- Deterministic downloads ------------------------------------------
 
   const exportSvg = useCallback((): void => {
+    if (svg === null) {
+      setStatus("Nothing to export — create a sheet first.");
+      return;
+    }
     download("drawing.svg", svg, "image/svg+xml");
-    setStatus("Drawing exported as SVG (deterministic bytes).");
+    setStatus(
+      "Sheet exported as SVG (furniture + drawing, deterministic bytes).",
+    );
   }, [svg]);
 
   const exportPdf = useCallback((): void => {
+    if (drawing.sheets.length === 0) {
+      setStatus("Nothing to export — create a sheet first.");
+      return;
+    }
     download(
       "drawing.pdf",
       serializeDrawingPdf(drawing, geometryByView),
       "application/pdf",
     );
-    setStatus("Drawing exported as PDF (deterministic vector bytes).");
+    setStatus(
+      "Drawing document exported as PDF (deterministic vector bytes — dimensions/title block not yet exported).",
+    );
   }, [drawing, geometryByView]);
 
   const exportDxf = useCallback((): void => {
+    if (drawing.sheets.length === 0) {
+      setStatus("Nothing to export — create a sheet first.");
+      return;
+    }
     download(
       "drawing.dxf",
       serializeDrawingDxf(drawing, geometryByView),
       "application/dxf",
     );
     setStatus(
-      "Drawing exported as DXF (LINE/CIRCLE/TEXT subset, round-trips).",
+      "Drawing document exported as DXF (LINE/CIRCLE/TEXT subset, round-trips — dimensions/title block not yet exported).",
     );
   }, [drawing, geometryByView]);
 
@@ -641,17 +971,31 @@ export function DrawingWorkbenchPage(): ReactElement {
     window.print();
   }, [drawing]);
 
+  const values = useMemo(
+    () => (furniture === null ? [] : dimensionValueTexts(furniture.dimensions)),
+    [furniture],
+  );
+
+  const sheet = drawing.sheets[0];
+  const { width, height } =
+    sheet === undefined ? { width: 0, height: 0 } : sheetDimensions(sheet);
+
   return (
-    <main className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 print:max-w-none print:px-0 print:py-0">
+    <main
+      id="drawing-root"
+      className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 print:max-w-none print:px-0 print:py-0"
+    >
       <style dangerouslySetInnerHTML={{ __html: printPageStyle }} />
       <header className="flex flex-col gap-1 print:hidden">
         <h1 className="text-2xl font-semibold tracking-tight">Drawings</h1>
         <p className="text-sm text-muted-foreground">
-          Sheets, derived views, and callouts. Views of the demo plate project
-          through the edges-overlay fallback — labelled as such, no hidden-line
-          removal; sections hatch their cut faces, details crop at 2:1, and the
-          BOM numbers itself deterministically from the demo assembly structure.
-          Exports (SVG/PDF/DXF) are byte-deterministic.
+          One drawing surface: dimensions recovered from the parametric source,
+          title block and revisions, derived views, BOM tables and balloons.
+          Views of the demo plate project through the edges-overlay fallback —
+          labelled as such, no hidden-line removal; sections hatch their cut
+          faces, details crop at 2:1, and the BOM numbers itself
+          deterministically from the demo assembly structure. Exports
+          (SVG/PDF/DXF) are byte-deterministic.
         </p>
       </header>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr] print:block">
@@ -668,6 +1012,67 @@ export function DrawingWorkbenchPage(): ReactElement {
               className="space-y-3"
               noValidate
             />
+          </section>
+          <section
+            aria-labelledby="dw-furniture-heading"
+            className="rounded-lg border p-4"
+          >
+            <h2
+              id="dw-furniture-heading"
+              className="mb-3 text-sm font-semibold"
+            >
+              Sheet furniture
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                data-testid="drawing-recover"
+                onClick={recover}
+                size="sm"
+                variant="outline"
+              >
+                Recover model dimensions
+              </Button>
+              <Button
+                data-testid="drawing-template-open"
+                onClick={() => setDialog("template")}
+                size="sm"
+                variant="outline"
+              >
+                Template
+              </Button>
+              <Button
+                data-testid="drawing-title-open"
+                onClick={() => setDialog("titleBlock")}
+                size="sm"
+                variant="outline"
+              >
+                Title block
+              </Button>
+              <Button
+                data-testid="drawing-reference-open"
+                onClick={() => setDialog("reference")}
+                size="sm"
+                variant="outline"
+              >
+                Reference dimension
+              </Button>
+              <Button
+                data-testid="drawing-revision-open"
+                onClick={() => setDialog("revision")}
+                size="sm"
+                variant="outline"
+              >
+                Revision row
+              </Button>
+              <Button
+                data-testid="drawing-export"
+                onClick={() => setExportedSvg(svg)}
+                size="sm"
+                variant="default"
+              >
+                Export SVG preview
+              </Button>
+            </div>
           </section>
           <section
             aria-labelledby="dw-view-heading"
@@ -953,6 +1358,15 @@ export function DrawingWorkbenchPage(): ReactElement {
               </Button>
             </div>
           </section>
+          {authoringError !== null ? (
+            <p
+              aria-label="Authoring error"
+              className="text-destructive font-mono text-xs"
+              data-testid="drawing-authoring-error"
+            >
+              {authoringError}
+            </p>
+          ) : null}
           <p role="status" className="min-h-5 text-xs text-muted-foreground">
             {status}
           </p>
@@ -961,10 +1375,13 @@ export function DrawingWorkbenchPage(): ReactElement {
           aria-labelledby="dw-canvas-heading"
           className="flex flex-col gap-3"
         >
-          <h2 id="dw-canvas-heading" className="text-sm font-semibold">
+          <h2
+            id="dw-canvas-heading"
+            className="text-sm font-semibold print:hidden"
+          >
             Canvas
           </h2>
-          {drawing.sheets.length === 0 ? (
+          {drawing.sheets.length === 0 || svg === null ? (
             <div
               role="img"
               aria-label="Drawing canvas: no sheets yet"
@@ -978,12 +1395,289 @@ export function DrawingWorkbenchPage(): ReactElement {
               role="img"
               aria-label={drawingSummary(drawing)}
               data-testid="drawing-canvas"
-              className="h-[560px] overflow-auto rounded-lg border bg-background text-foreground print:h-auto print:overflow-visible print:rounded-none print:border-0 [&_svg]:h-auto [&_svg]:w-full"
+              className="h-[560px] overflow-auto rounded-lg border bg-white text-black print:h-auto print:overflow-visible print:rounded-none print:border-0 [&_svg]:h-auto [&_svg]:w-full"
               dangerouslySetInnerHTML={{ __html: svg }}
             />
           )}
         </section>
       </div>
+      <div
+        className="text-muted-foreground flex flex-wrap gap-4 font-mono text-xs print:hidden"
+        data-testid="drawing-status"
+        data-template={templateId ?? ""}
+        data-dims-count={String(furniture?.dimensions.length ?? 0)}
+        data-annotations-count={String(furniture?.annotations.length ?? 0)}
+        data-drawing-values={JSON.stringify(values)}
+        data-revisions={String(furniture?.revisions.length ?? 0)}
+        data-titleblock={JSON.stringify(
+          furniture?.titleBlock ?? {
+            title: "",
+            author: "",
+            material: "",
+            mass: "",
+            scale: "",
+            date: "",
+          },
+        )}
+        data-drawing-svg={exportedSvg ?? ""}
+        data-svg-length={exportedSvg === null ? "" : String(exportedSvg.length)}
+        data-sheet={
+          sheet === undefined ? "" : `${String(width)}x${String(height)}`
+        }
+      >
+        <span>
+          {furniture === null
+            ? "no sheet furniture yet"
+            : (DRAWING_SHEET_TEMPLATES.find(
+                (template) => template.id === (templateId ?? ""),
+              )?.name ?? "custom sheet")}
+        </span>
+        <span>{`${String(furniture?.dimensions.length ?? 0)} dimensions`}</span>
+        <span>{`${String(furniture?.annotations.length ?? 0)} annotations`}</span>
+        {exportedSvg !== null ? (
+          <span data-testid="drawing-export-length">{`${String(exportedSvg.length)} bytes exported`}</span>
+        ) : null}
+      </div>
+      {dialog === "template" ? (
+        <TemplatePickerDialog
+          currentId={templateId ?? SHEET_DEFAULTS_TEMPLATE_ID}
+          onApply={applyTemplate}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {dialog === "titleBlock" && furniture !== null ? (
+        <TitleBlockDialog
+          titleBlock={furniture.titleBlock}
+          onApply={applyTitleBlock}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {dialog === "reference" ? (
+        <ReferenceDimensionDialog
+          onAuthor={authorReference}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
+      {dialog === "revision" ? (
+        <RevisionDialog
+          onApply={applyRevision}
+          onClose={() => setDialog(null)}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function TemplatePickerDialog({
+  currentId,
+  onApply,
+  onClose,
+}: {
+  readonly currentId: string;
+  readonly onApply: (submission: TemplateSubmission) => void;
+  readonly onClose: () => void;
+}): ReactElement {
+  type Values = { templateId: string } & Record<string, unknown>;
+  const fields: readonly FormedibleFieldConfig<Values>[] = [
+    {
+      name: "templateId",
+      type: "select",
+      label: "Template",
+      required: true,
+      defaultValue: currentId,
+      options: DRAWING_SHEET_TEMPLATES.map((template) => ({
+        value: template.id,
+        label: template.name,
+      })),
+    },
+  ];
+  const form = useFormedible<Values>({
+    fields,
+    formOptions: {
+      defaultValues: { templateId: currentId },
+      onSubmit: ({ value }) => {
+        onApply({ templateId: value.templateId });
+        onClose();
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Apply template",
+  });
+  return (
+    <Dialog onOpenChange={(open) => !open && onClose()} open>
+      <DialogContent
+        className="sm:max-w-sm"
+        data-testid="drawing-template-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle>Sheet template</DialogTitle>
+        </DialogHeader>
+        <form.Form aria-label="Sheet template picker" className="space-y-3" />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TitleBlockDialog({
+  titleBlock,
+  onApply,
+  onClose,
+}: {
+  readonly titleBlock: DrawingTitleBlock;
+  readonly onApply: (submission: TitleBlockSubmission) => void;
+  readonly onClose: () => void;
+}): ReactElement {
+  type Values = TitleBlockSubmission & Record<string, unknown>;
+  const field = (name: keyof TitleBlockSubmission, label: string) => ({
+    name,
+    type: "text" as const,
+    label,
+  });
+  const fields: readonly FormedibleFieldConfig<Values>[] = [
+    field("title", "Title"),
+    field("author", "Author"),
+    field("material", "Material"),
+    field("mass", "Mass"),
+    field("scale", "Scale"),
+    field("date", "Date"),
+  ];
+  const form = useFormedible<Values>({
+    fields,
+    formOptions: {
+      defaultValues: { ...titleBlock },
+      onSubmit: ({ value }) => {
+        onApply(value);
+        onClose();
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Save title block",
+  });
+  return (
+    <Dialog onOpenChange={(open) => !open && onClose()} open>
+      <DialogContent
+        className="sm:max-w-sm"
+        data-testid="drawing-titleblock-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle>Title block</DialogTitle>
+        </DialogHeader>
+        <form.Form aria-label="Title block form" className="space-y-3" />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReferenceDimensionDialog({
+  onAuthor,
+  onClose,
+}: {
+  readonly onAuthor: (submission: ReferenceDimensionSubmission) => void;
+  readonly onClose: () => void;
+}): ReactElement {
+  type Values = ReferenceDimensionSubmission & Record<string, unknown>;
+  const fields: readonly FormedibleFieldConfig<Values>[] = [
+    {
+      name: "kind",
+      type: "select",
+      label: "Kind",
+      options: [
+        { value: "linear", label: "Linear" },
+        { value: "radial", label: "Radial" },
+        { value: "diameter", label: "Diameter" },
+        { value: "angular", label: "Angular" },
+      ],
+      required: true,
+    },
+    {
+      name: "orientation",
+      type: "select",
+      label: "Linear orientation",
+      options: [
+        { value: "aligned", label: "Aligned" },
+        { value: "horizontal", label: "Horizontal" },
+        { value: "vertical", label: "Vertical" },
+      ],
+    },
+    {
+      name: "value",
+      type: "number",
+      label: "Value (mm or deg)",
+      required: true,
+    },
+  ];
+  const form = useFormedible<Values>({
+    fields,
+    formOptions: {
+      defaultValues: { ...REFERENCE_DIMENSION_DEFAULTS },
+      onSubmit: ({ value }) => {
+        onAuthor(value);
+        onClose();
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Place reference dimension",
+  });
+  return (
+    <Dialog onOpenChange={(open) => !open && onClose()} open>
+      <DialogContent
+        className="sm:max-w-sm"
+        data-testid="drawing-reference-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle>Reference dimension</DialogTitle>
+        </DialogHeader>
+        <form.Form
+          aria-label="Reference dimension form"
+          className="space-y-3"
+          noValidate
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RevisionDialog({
+  onApply,
+  onClose,
+}: {
+  readonly onApply: (submission: RevisionSubmission) => void;
+  readonly onClose: () => void;
+}): ReactElement {
+  type Values = RevisionSubmission & Record<string, unknown>;
+  const fields: readonly FormedibleFieldConfig<Values>[] = [
+    { name: "revision", type: "text", label: "Revision", required: true },
+    { name: "description", type: "text", label: "Description", required: true },
+    { name: "author", type: "text", label: "Author" },
+    { name: "date", type: "text", label: "Date" },
+  ];
+  const form = useFormedible<Values>({
+    fields,
+    formOptions: {
+      defaultValues: { revision: "B", description: "", author: "", date: "" },
+      onSubmit: ({ value }) => {
+        onApply(value);
+        onClose();
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Add revision row",
+  });
+  return (
+    <Dialog onOpenChange={(open) => !open && onClose()} open>
+      <DialogContent
+        className="sm:max-w-sm"
+        data-testid="drawing-revision-dialog"
+      >
+        <DialogHeader>
+          <DialogTitle>Revision table</DialogTitle>
+        </DialogHeader>
+        <form.Form
+          aria-label="Revision form"
+          className="space-y-3"
+          noValidate
+        />
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -26,6 +26,45 @@ beforeAll(async () => {
 });
 
 describe("the drawing section derivation vs the kernel section", () => {
+  it("matches the kernel-measured cut-face area on an OBLIQUE cut", () => {
+    // The oblique parity pin (Phase 55 round 2): the plane x+y+z=15 cuts
+    // the 10 mm cube in a regular hexagon of area 75·sqrt(3) ≈ 129.9.
+    // The kernel measures the face; the drawing derivation must agree —
+    // a scalar-sum polygonArea read 225 here (the |n̂x+n̂y+n̂z| factor).
+    const kernel = manifoldKernelFromRuntime(runtime);
+    const box = unwrapKernelResult(
+      kernel.createBox({
+        width: length(10),
+        depth: length(10),
+        height: length(10),
+      }),
+    );
+    const inverseRoot3 = 1 / Math.sqrt(3);
+    const plane = {
+      origin: [length(5), length(5), length(5)] as const,
+      normal: [inverseRoot3, inverseRoot3, inverseRoot3] as const,
+      keepSide: 1 as const,
+    };
+    const cut = unwrapKernelResult(kernel.section({ target: box, ...plane }));
+    expect(cut.section.areaMm2).toBeCloseTo(75 * Math.sqrt(3), 5);
+
+    // The drawing derivation over the SAME body's tessellation.
+    const tessellation = unwrapKernelResult(kernel.tessellate(box));
+    const loops = meshPlaneCrossSection(
+      {
+        positions: tessellation.positions,
+        indices: tessellation.indices,
+      },
+      { origin: [5, 5, 5], normal: [1, 1, 1], keepSide: 1 },
+    );
+    expect(loops.loops.length).toBeGreaterThan(0);
+    const derivedArea = loops.loops.reduce(
+      (sum, loop) => sum + polygonArea(loop),
+      0,
+    );
+    expect(derivedArea).toBeCloseTo(cut.section.areaMm2, 5);
+  });
+
   it("matches the kernel-measured cut-face area on a box mid-cut", () => {
     const kernel = manifoldKernelFromRuntime(runtime);
     const W = 30;

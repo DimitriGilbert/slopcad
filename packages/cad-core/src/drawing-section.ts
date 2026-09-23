@@ -241,27 +241,30 @@ export function meshPlaneCrossSection(
 }
 
 /**
- * The shoelace area of a polygon's projection onto its own plane. For
+ * The planar polygon's area from the magnitude of its AREA VECTOR: the
+ * edge-cross-product sum Σ p×q is a VECTOR — 2·A·n̂ for a planar loop of
+ * area A and unit normal n̂ — so the area is half that vector's magnitude.
+ * (A scalar sum of the three projected cross products would measure
+ * A·|n̂x+n̂y+n̂z| and overstate every oblique cut by up to √3 — the
+ * 10 mm cube's x+y+z=15 hexagon read 225 instead of 75·√3 ≈ 129.9.) For
  * cross-section loops (vertices on the cut plane) this is the cut-face
  * area in square millimetres — the quantity the Phase 46 kernel section
  * face measures for the same body and plane.
  */
 export function polygonArea(loop: CrossSectionLoop): number {
-  let twice = 0;
+  let wx = 0;
+  let wy = 0;
+  let wz = 0;
   const count = loop.length;
   for (let i = 0; i < count; i += 1) {
     const p = loop[i];
     const q = loop[(i + 1) % count];
     if (p === undefined || q === undefined) continue;
-    twice +=
-      p[0] * q[1] -
-      q[0] * p[1] +
-      p[1] * q[2] -
-      q[1] * p[2] +
-      p[2] * q[0] -
-      q[2] * p[0];
+    wx += p[1] * q[2] - p[2] * q[1];
+    wy += p[2] * q[0] - p[0] * q[2];
+    wz += p[0] * q[1] - p[1] * q[0];
   }
-  return Math.abs(twice) / 2;
+  return Math.sqrt(wx * wx + wy * wy + wz * wz) / 2;
 }
 
 /**

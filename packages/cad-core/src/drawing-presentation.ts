@@ -89,7 +89,12 @@ export const GDNT_SYMBOLS: Readonly<Record<string, string>> = {
   totalRunout: "\u21F7",
 };
 
-/** A presented sheet primitive: everything the canvas and exporter draw. */
+/**
+ * A presented sheet primitive: everything the canvas and exporter draw.
+ * Coordinates are sheet millimetres, y-UP (the single space the flip
+ * discipline renders); every consumer — workbench canvas, SVG exporter,
+ * the document exporters — draws THIS vocabulary and nothing else.
+ */
 export type DrawingPrimitive =
   | {
       readonly kind: "line";
@@ -98,6 +103,10 @@ export type DrawingPrimitive =
       readonly x2: number;
       readonly y2: number;
       readonly dashed?: boolean;
+      /** Stroke width in sheet millimetres (absent = the media default). */
+      readonly widthMm?: number;
+      /** The element's SVG class (absent = no class attribute). */
+      readonly class?: string;
     }
   | {
       readonly kind: "rect";
@@ -106,6 +115,22 @@ export type DrawingPrimitive =
       readonly width: number;
       readonly height: number;
       readonly dashed?: boolean;
+      /** Stroke width in sheet millimetres (absent = the media default). */
+      readonly widthMm?: number;
+      /** The element's SVG class (absent = no class attribute). */
+      readonly class?: string;
+    }
+  | {
+      /** A circle (balloons): centre, radius, sheet millimetres. */
+      readonly kind: "circle";
+      readonly cx: number;
+      readonly cy: number;
+      readonly radius: number;
+      readonly dashed?: boolean;
+      /** Stroke width in sheet millimetres (absent = the media default). */
+      readonly widthMm?: number;
+      /** The element's SVG class (absent = no class attribute). */
+      readonly class?: string;
     }
   | {
       /** A circular arc from startRad to endRad (sheet radians, y-up). */
@@ -115,6 +140,8 @@ export type DrawingPrimitive =
       readonly radius: number;
       readonly startRad: number;
       readonly endRad: number;
+      /** The element's SVG class (absent = no class attribute). */
+      readonly class?: string;
     }
   | {
       /** A filled arrowhead at (x, y) pointing along angleRad. */
@@ -122,6 +149,8 @@ export type DrawingPrimitive =
       readonly x: number;
       readonly y: number;
       readonly angleRad: number;
+      /** The element's SVG class (absent = no class attribute). */
+      readonly class?: string;
     }
   | {
       readonly kind: "text";
@@ -130,7 +159,34 @@ export type DrawingPrimitive =
       readonly text: string;
       readonly anchor: "start" | "middle" | "end";
       readonly sizeMm: number;
+      /** The element's SVG class (absent = no class attribute). */
+      readonly class?: string;
     };
+
+/**
+ * One named run of presented primitives — the SVG DOM's `<g class=…>`
+ * with its data attributes, and the exporters' style key. The class
+ * vocabulary (`dg-frame`, `dg-view`, `dg-visible`, `dg-hidden`,
+ * `dg-hatch`, `dg-label`, `dg-balloon`, `dg-balloon-circle`,
+ * `dg-balloon-item`, `dg-bom`, `dg-furniture`) is the stable contract
+ * between the presentation and every medium: the SVG groups, the PDF
+ * stroke table, and the DXF layer map all key on it.
+ */
+export interface DrawingPictureGroup {
+  readonly class: string;
+  /** Stable data attributes (view/balloon/table identity and placement). */
+  readonly data?: Readonly<Record<string, string>>;
+  readonly primitives: readonly DrawingPrimitive[];
+  /** Nested runs (a view's visible/hidden/hatch stroke sets). */
+  readonly children?: readonly DrawingPictureGroup[];
+}
+
+/** One presented sheet: its size and the ordered group run. */
+export interface DrawingSheetPicture {
+  readonly widthMm: number;
+  readonly heightMm: number;
+  readonly groups: readonly DrawingPictureGroup[];
+}
 
 /**
  * Formats a dimension value: millimetres trimmed to at most two decimals,
@@ -639,7 +695,14 @@ export function presentSheetFurniture(
   const frameW = widthMm - frameMarginMm * 2;
   const frameH = heightMm - frameMarginMm * 2;
   const primitives: DrawingPrimitive[] = [
-    { kind: "rect", x: frameX, y: frameY, width: frameW, height: frameH },
+    {
+      kind: "rect",
+      x: frameX,
+      y: frameY,
+      width: frameW,
+      height: frameH,
+      class: "dg-frame",
+    },
   ];
   // Title block: bottom-right, three stacked rows of fixed labels.
   const tbW = frameW * DRAWING_TITLE_BLOCK_WIDTH_FRACTION;
