@@ -53,8 +53,17 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * but the version moves because an old reader would silently drop the
  * standalone section and its counter — assembly structure is data the
  * old reader cannot carry, so the envelope stamp is the gate.
+ *
+ * v5 (Phase 51): the document substrate grew the assembly vocabulary —
+ * the additive `mates` and `joints` sections and their `mate`/`joint`
+ * id-generator counters. Content-additive exactly like its predecessors
+ * (v4 content is valid v5 content; the v4→v5 migration is the
+ * identity), but the version moves because an old reader would silently
+ * drop the standalone sections and counters — mate and joint records
+ * are data the old reader cannot carry, so the envelope stamp is the
+ * gate.
  */
-export const CAD_NATIVE_FORMAT_VERSION = 4;
+export const CAD_NATIVE_FORMAT_VERSION = 5;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

@@ -12,7 +12,11 @@ import { cleanup, render } from "@testing-library/react";
 import * as THREE from "three";
 import { Plane, MeshStandardMaterial } from "three";
 import { afterEach, describe, expect, it } from "vitest";
-import { createBodyId } from "@slopcad/cad-core";
+import {
+  createBodyId,
+  createOccurrenceId,
+  projectPlacedInstance,
+} from "@slopcad/cad-core";
 import type {
   RenderObject,
   RenderObjectId,
@@ -366,6 +370,58 @@ describe("CadModel display modes (Phase 45)", () => {
       <CadModel projection={BOTH_PROJECTION} displayMode="shaded" />,
     );
     expect(view.container.querySelectorAll("linesegments").length).toBe(0);
+    view.unmount();
+  });
+});
+
+describe("CadModel placed instances (Phase 51 carry-in)", () => {
+  // F2 from Phase 50's validation: the instance matrix must reach the
+  // SURFACE mesh and the FEATURE-EDGE overlay alike — an edge overlay left
+  // at the identity would draw the unplaced body's edges floating away
+  // from its placed surfaces. jsdom has no R3F reconciler (the drawn
+  // pixels are the browser render evidence), so the wiring is asserted
+  // through the host attributes: the `matrix` prop stringifies onto the
+  // unknown host element exactly when the component passes it, and
+  // boolean props are dropped (the documented React behavior this suite
+  // already relies on) — presence/absence of `matrix` is the observable.
+  it("applies the instance matrix to surfaces AND feature edges", () => {
+    const base = makeObject("plate", FOLDED_SHEET_SHARED);
+    const placed = projectPlacedInstance(base, [createOccurrenceId("occ_a")], {
+      rotation: [0, -1, 0, 1, 0, 0, 0, 0, 1],
+      translation: [100, 50, 7],
+    });
+    expect(placed.ok).toBe(true);
+    if (!placed.ok) return;
+    const view = render(
+      <CadModel
+        projection={makeProjection([placed.value])}
+        displayMode="shaded-edges"
+      />,
+    );
+    // One surface mesh plus its feature-edge overlay, both carrying the
+    // instance matrix (and only these — no unplaced stragglers).
+    expect(view.container.querySelectorAll("mesh").length).toBe(1);
+    expect(view.container.querySelectorAll("linesegments").length).toBe(1);
+    const mesh = view.container.querySelector("mesh");
+    const edges = view.container.querySelector("linesegments");
+    expect(mesh?.getAttribute("matrix")).not.toBeNull();
+    expect(edges?.getAttribute("matrix")).not.toBeNull();
+    view.unmount();
+  });
+
+  it("leaves direct (unplaced) objects at their own transforms", () => {
+    const view = render(
+      <CadModel
+        projection={makeProjection([makeObject("plate", FOLDED_SHEET_SHARED)])}
+        displayMode="shaded-edges"
+      />,
+    );
+    expect(
+      view.container.querySelector("mesh")?.getAttribute("matrix"),
+    ).toBeNull();
+    expect(
+      view.container.querySelector("linesegments")?.getAttribute("matrix"),
+    ).toBeNull();
     view.unmount();
   });
 });

@@ -39,6 +39,21 @@ describe("placed-instance projection", () => {
     expect(id).toBe("rend_000001.000002.plate");
   });
 
+  it("refuses dotted segments — the id-ambiguity guard (Phase 51)", () => {
+    // The id payload grammar admits ".", so `occ_a.b` and `body_c.d` are
+    // legal ids — but joined with the "." separator, distinct (path, body)
+    // pairs like [a.b] + c and [a] + "b.c" would both derive
+    // "rend_a.b.c". The join refuses any dotted segment instead of
+    // minting an ambiguous id.
+    const dotted = () =>
+      placementRenderObjectId(
+        [createOccurrenceId("occ_a.b")],
+        createBodyId("body_plate"),
+      );
+    expect(dotted).toThrow(RangeError);
+    expect(dotted).toThrow(/must not carry/);
+  });
+
   it("carries the transform, shares the soup, and computes world bounds", () => {
     const base = projectTessellation(createBodyId("body_plate"), TESS);
     if (!base.ok) throw new Error("expected base object");

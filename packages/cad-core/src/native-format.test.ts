@@ -536,7 +536,7 @@ describe("native document parsing is version-gated", () => {
       error: { code: "native-migration/version-unsupported" },
     });
     if (!result.ok) {
-      expect(result.error.message).toContain("4");
+      expect(result.error.message).toContain(String(CAD_NATIVE_FORMAT_VERSION));
     }
   });
 

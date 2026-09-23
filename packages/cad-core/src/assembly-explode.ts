@@ -27,10 +27,10 @@
  * {@link serializeExplodeState} emits the canonical JSON form (paths in
  * entry order, finite numbers); {@link parseExplodeState} validates it
  * back — the round-trip the Phase 52 validation names. The state persists
- * beside the document as its own record until the document substrate's next
- * additive growth carries it natively (the v4 envelope's occurrences landed
- * in Phase 50; a second growth in the same phase family buys nothing until
- * the Phase 51 joints join the same record).
+ * beside the document as its own record — SESSION-SCOPED until the envelope
+ * grows to carry it, and that envelope growth is deferred (Phase 51's v5
+ * grew for mates and joints; explode offsets and motion stations were not
+ * taken along natively).
  */
 
 import type { DatumVec3 } from "./datum";
