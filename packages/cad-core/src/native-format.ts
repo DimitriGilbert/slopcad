@@ -106,6 +106,12 @@
  */
 
 import { CAD_COMMAND_TYPES, isCadCommandType } from "./command";
+import {
+  type DrawingDocument,
+  parseDrawingDocument,
+  type SerializedDrawingDocument,
+  serializeDrawingDocument,
+} from "./drawing";
 import { parseSerializedCurve } from "./curve";
 import { parseDiagnostic } from "./diagnostics";
 import {
@@ -204,6 +210,15 @@ export interface NativeCadDocument {
    * (see module docs); parking is derived from it, never stored in states.
    */
   readonly rollback: FeatureRollbackPoint | null;
+  /**
+   * The document-resident drawing (Phase 53 — sheets and views), or `null`
+   * for none. Persisted as the optional envelope `drawing` field (emitted
+   * last, only when a drawing exists, the same additive-optional precedent
+   * `rollback` set): every pre-Phase 53 file keeps byte-identical
+   * serialization, and an old reader of a drawing-bearing file ignores the
+   * unknown field and loads the document.
+   */
+  readonly drawing: DrawingDocument | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +264,8 @@ export interface SerializedNativeCadDocument {
   readonly regeneration: SerializedRegenerationStateMap;
   /** The rollback marker; present exactly when one is set. */
   readonly rollback?: SerializedFeatureRollbackPoint;
+  /** The drawing (sheets and views); present exactly when one exists. */
+  readonly drawing?: SerializedDrawingDocument;
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +418,7 @@ export function createNativeCadDocument(
       regeneration: new Map(),
       metadata: parsedMetadata.value,
       rollback: null,
+      drawing: null,
     }),
   );
 }
@@ -481,6 +499,9 @@ export function serializeNativeCadDocument(
             afterFeatureId: rollback.afterFeatureId,
           },
         }),
+    ...(native.drawing === null
+      ? {}
+      : { drawing: serializeDrawingDocument(native.drawing) }),
   };
 }
 
@@ -646,6 +667,24 @@ function parseCurrentNativeCadDocument(
     rollback = shape.value;
   }
 
+  // The optional Phase 53 drawing field: absent means no drawing (every
+  // pre-Phase 53 file lands here); present, it must parse as a drawing
+  // document (sheets and views — the substrate parser's strictness).
+  let drawing: DrawingDocument | null = null;
+  if (input.drawing !== undefined && input.drawing !== null) {
+    const parsed = parseDrawingDocument(input.drawing);
+    if (!parsed.ok) {
+      return fail(
+        nativeError(
+          NATIVE_FORMAT_ERROR_CODES.malformed,
+          `The native document's drawing field is invalid: ${parsed.error.message}`,
+          input.drawing,
+        ),
+      );
+    }
+    drawing = parsed.value;
+  }
+
   return ok(
     Object.freeze({
       document: atCursor,
@@ -653,6 +692,7 @@ function parseCurrentNativeCadDocument(
       regeneration: regeneration.value,
       metadata: metadata.value,
       rollback,
+      drawing,
     }),
   );
 }

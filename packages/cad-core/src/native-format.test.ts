@@ -154,6 +154,7 @@ function buildNative(): NativeCadDocument {
     regeneration: run.states,
     metadata: { zeta: "last", alpha: "first" },
     rollback: null,
+    drawing: null,
   };
 }
 
@@ -480,6 +481,7 @@ describe("sweep and loft features persist natively", () => {
       regeneration: run.states,
       metadata: {},
       rollback: null,
+      drawing: null,
     };
   }
 
@@ -716,6 +718,7 @@ describe("regeneration state persists as loadable data", () => {
       regeneration: run.states,
       metadata: {},
       rollback: null,
+      drawing: null,
     };
   }
 
@@ -866,6 +869,7 @@ describe("validateNativeCadDocument checks structure without replay", () => {
         regeneration: new Map(),
         metadata: {},
         rollback: null,
+        drawing: null,
       }),
     );
     expect(validation.valid).toBe(true);
@@ -1512,6 +1516,7 @@ describe("the validator inspects the additive sketches and references sections",
       regeneration: new Map(),
       metadata: {},
       rollback: null,
+      drawing: null,
     });
     const validation = validateNativeCadDocument(input);
     expect(validation.issues).toEqual([]);

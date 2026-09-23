@@ -116,7 +116,13 @@
  */
 
 import type { Manifold, Mat4 } from "manifold-3d";
-import { type LengthValue, fail, ok, valueIn } from "@slopcad/cad-core";
+import {
+  type DrawingViewGeometry,
+  type LengthValue,
+  fail,
+  ok,
+  valueIn,
+} from "@slopcad/cad-core";
 import {
   type BoxInput,
   type ChamferInput,
@@ -160,6 +166,7 @@ import {
   type ThickenInput,
   type TransformInput,
   type IntersectionCurveInput,
+  type DrawingViewInput,
   type KernelWire,
   type ProfileSweepWireInput,
   type WireCurveInput,
@@ -282,6 +289,7 @@ export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   section: true,
   sweepWire: false,
   intersectionCurve: false,
+  hiddenLineRemoval: false,
 });
 
 /**
@@ -1049,6 +1057,20 @@ export function manifoldKernelFromRuntime(
         kernelError(
           KERNEL_ERROR_CODES.unsupportedOperation,
           "intersectionCurve is not implemented by the manifold kernel.",
+        ),
+      );
+    },
+
+    drawingView(input: DrawingViewInput): KernelResult<DrawingViewGeometry> {
+      void input;
+      // The capability-flag discipline (Phase 53): a mesh engine has no
+      // hidden-line-removal model — occlusion over a triangle soup would be
+      // a shading approximation. The cad-core edges-overlay projection is
+      // the documented fallback for callers that need a picture.
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "drawingView is not implemented by the manifold kernel: it carries no exact hidden-line-removal model (the edges-overlay projection is the documented fallback).",
         ),
       );
     },

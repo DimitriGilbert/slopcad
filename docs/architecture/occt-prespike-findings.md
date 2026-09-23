@@ -402,3 +402,36 @@ UVBounds`, `BRepExtrema_DistShapeShape`, and `GeomAPI_` projection are
 - `deleteFace`'s Phase 44 probe-out carries: the delete-face-keep-surface
   remainder therefore ships as the honest OPEN SHELL (a sheet body), not
   a healed solid.
+
+## Phase 53 — HLR drawing-view probes
+
+The binding carries the full `HLRBRep` family: `HLRBRep_Algo` (empty
+ctor; `Add(shape, nbIso)`, `Projector(HLRAlgo_Projector)`, and the
+inherited `Update()` + `Hide()`), `HLRAlgo_Projector(gp_Ax2)` (the
+axonometric form), and `HLRBRep_HLRToShape(algo)` with the full compound
+menu [probed against `dist/replicad_multi.d.ts` and measured on the real
+runtime]:
+
+- The projector's coordinate system is the CAMERA frame: main direction =
+  the EYE direction (from the body toward the viewer), x direction = the
+  sheet-right basis; the CS's Y = main × x is then the sheet-up basis, and
+  the extracted 2D edges' coordinates read directly as
+  `(p·right, p·up)` in model millimetres, in the z=0 extraction plane
+  [measured: the 30×20×10 box's front view spans u∈[0,30], v∈[0,10]].
+- The compound split for the box front view: `VCompound()` = 4 edges (the
+  projected rectangle — the front face's edges; the four side connectors
+  project onto those same segments), `HCompound()` = 4 (the back face),
+  every outline/smooth compound EMPTY [measured]. The smooth-silhouette
+  family is `OutLineVCompound` (2D) — the cylinder's front view carries
+  its two silhouette LINES there plus its two near rim arcs in
+  `VCompound`, with the rims' FAR arcs in `HCompound` (a convex solid
+  does occlude its own far rim halves) [measured: visible 4, hidden 2].
+- `OutLineVCompound3d` EXISTS but returns DUPLICATE silhouette geometry
+  the 2D compounds already carry (2 extra segments on the box view) — the
+  adapter walks `VCompound` + `OutLineVCompound` (visible) and
+  `HCompound` + `OutLineHCompound` (hidden) only [measured].
+- Edge geometry walks at the Phase 47 station rule (`BRepAdaptor_Curve`
+  at 16 uniform stations; no `GCPnts` sampler on this binding — the same
+  discipline `intersectionCurve` uses). Chain order is the adapter's
+  (sorted by first-point coordinates): HLR's traversal order is an
+  implementation detail, the serialized set is not.

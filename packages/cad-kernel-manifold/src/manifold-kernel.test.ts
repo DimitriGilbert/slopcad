@@ -119,6 +119,7 @@ describe("manifold kernel identity and capabilities", () => {
       localFaceOps: false,
       sweepWire: false,
       intersectionCurve: false,
+      hiddenLineRemoval: false,
     });
   });
 

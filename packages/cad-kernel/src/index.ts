@@ -44,6 +44,7 @@ export type {
   BoxInput,
   ChamferInput,
   ConeInput,
+  DrawingViewInput,
   CylinderInput,
   FilletInput,
   GeometryKernel,

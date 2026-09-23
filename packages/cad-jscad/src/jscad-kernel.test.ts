@@ -69,6 +69,7 @@ describe("createJscadKernel", () => {
       localFaceOps: false,
       sweepWire: false,
       intersectionCurve: false,
+      hiddenLineRemoval: false,
     });
   });
 

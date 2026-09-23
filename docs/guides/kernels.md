@@ -46,6 +46,7 @@ Read the flags from the kernels' own constants
 | section               | ✓        | ✓           | ✓     | ✓    |
 | sweepWire             | —        | ✓ *         | —     | ✓    |
 | intersectionCurve     | —        | ✓           | —     | —    |
+| hiddenLineRemoval     | —        | ✓           | —     | —    |
 
 Phase 47 adds three curve-entity operations. `wire` — a curve entity's
 deterministic polyline, length, and bounds
@@ -72,6 +73,18 @@ structurally (no exact section-edge geometry). The projected-curve
 family is declined outright this phase: the probe found `ProjLib`
 absent from the binding — the pinned vocabulary and probe note carry
 forward to the surface phases.
+
+Phase 53 adds the drawing-view operation. `drawingView` projects a
+solid onto a view plane with EXACT hidden-line removal: OCCT answers
+through `HLRBRep_Algo` + `HLRBRep_HLRToShape` (the probe record is the
+prespike findings' Phase 53 addendum — camera-frame projector, the
+2D-compound menu, the station-rule edge walk), while the fake, Manifold,
+and JSCAD kernels decline structurally (`hiddenLineRemoval: false` — no
+engine-side occlusion model). Callers needing a picture from a non-HLR
+kernel compose cad-core's `edgesOverlayProjection` from `tessellate`
+output; its geometry is fidelity-labelled `"edges-overlay"` (feature
+edges only, every chain visible, no occlusion), never passed off as the
+`"hlr-exact"` class the OCCT route produces.
 
 Every capability-gated decline answers the structured
 `kernel/unsupported-operation` — Manifold's `sweep`, its `fillet`,

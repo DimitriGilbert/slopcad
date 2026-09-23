@@ -36,6 +36,8 @@ export const CAD_ID_KINDS = [
   "section",
   "occurrence",
   "curve",
+  "sheet",
+  "drawingView",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -89,6 +91,18 @@ export type OccurrenceId = BrandedId<"occurrence">;
  * `curve` input kind.
  */
 export type CurveId = BrandedId<"curve">;
+/**
+ * Identifier of a drawing sheet (e.g. `sht_000001`): the document-resident
+ * record of one drawing sheet — a standard size, an orientation, and the
+ * views placed on it (Phase 53).
+ */
+export type SheetId = BrandedId<"sheet">;
+/**
+ * Identifier of a drawing view (e.g. `dwv_front`): one projected base view
+ * — front, top, right, or isometric — placed on a sheet at a scale, possibly
+ * aligned to a parent base view (Phase 53).
+ */
+export type DrawingViewId = BrandedId<"drawingView">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -101,6 +115,8 @@ type CadIdTable = {
   section: SectionId;
   occurrence: OccurrenceId;
   curve: CurveId;
+  sheet: SheetId;
+  drawingView: DrawingViewId;
 };
 
 /** The branded id type of a given id kind. */
@@ -124,6 +140,8 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   section: "sec",
   occurrence: "occ",
   curve: "crv",
+  sheet: "sht",
+  drawingView: "dwv",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -279,6 +297,20 @@ export function parseCurveId(
   input: unknown,
 ): ParseResult<CurveId, IdParseError> {
   return parseIdOfKind("curve", input);
+}
+
+/** Parses untrusted input as a {@link SheetId}. */
+export function parseSheetId(
+  input: unknown,
+): ParseResult<SheetId, IdParseError> {
+  return parseIdOfKind("sheet", input);
+}
+
+/** Parses untrusted input as a {@link DrawingViewId}. */
+export function parseDrawingViewId(
+  input: unknown,
+): ParseResult<DrawingViewId, IdParseError> {
+  return parseIdOfKind("drawingView", input);
 }
 
 /** An id of any kind together with the kind it was recognized as. */
@@ -439,6 +471,22 @@ export function createOccurrenceId(raw: string): OccurrenceId {
 }
 
 /**
+ * Adopts an explicit user-provided sheet id exactly as given (`sht_…` wire
+ * format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createSheetId(raw: string): SheetId {
+  return requireId("sheet", raw);
+}
+
+/**
+ * Adopts an explicit user-provided drawing view id exactly as given
+ * (`dwv_…` wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createDrawingViewId(raw: string): DrawingViewId {
+  return requireId("drawingView", raw);
+}
+
+/**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
  */
@@ -495,6 +543,8 @@ export interface IdGenerator {
   nextSectionId(): SectionId;
   nextOccurrenceId(): OccurrenceId;
   nextCurveId(): CurveId;
+  nextSheetId(): SheetId;
+  nextDrawingViewId(): DrawingViewId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -510,6 +560,8 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   section: 0,
   occurrence: 0,
   curve: 0,
+  sheet: 0,
+  drawingView: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -568,6 +620,8 @@ export function createIdGenerator(
     nextSectionId: () => requireId("section", nextRawId("section")),
     nextOccurrenceId: () => requireId("occurrence", nextRawId("occurrence")),
     nextCurveId: () => requireId("curve", nextRawId("curve")),
+    nextSheetId: () => requireId("sheet", nextRawId("sheet")),
+    nextDrawingViewId: () => requireId("drawingView", nextRawId("drawingView")),
     state: () => Object.freeze({ ...counters }),
   };
 }

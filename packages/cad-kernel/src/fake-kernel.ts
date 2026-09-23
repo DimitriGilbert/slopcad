@@ -67,6 +67,7 @@
 
 import {
   angle as angleValue,
+  type DrawingViewGeometry,
   type LengthValue,
   length as lengthValue,
   fail,
@@ -93,6 +94,7 @@ import {
   type MirrorInput,
   type MoveFaceInput,
   type DeleteFaceInput,
+  type DrawingViewInput,
   type ProfileExtrudeInput,
   type ProfileLoftInput,
   type ProfileRevolveInput,
@@ -251,6 +253,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   section: true,
   sweepWire: true,
   intersectionCurve: false,
+  hiddenLineRemoval: false,
 });
 
 /** The fake kernel's backend id. */
@@ -5154,6 +5157,21 @@ export function createFakeKernel(): GeometryKernel {
         kernelError(
           KERNEL_ERROR_CODES.unsupportedOperation,
           "intersectionCurve is not implemented by the fake kernel: its solids carry no exact section-edge geometry (the OpenCascade backend is the exact producer).",
+        ),
+      );
+    },
+
+    drawingView(input: DrawingViewInput): KernelResult<DrawingViewGeometry> {
+      void input;
+      // The capability-flag discipline (Phase 53): the fake kernel has no
+      // hidden-line model — an occlusion split of its analytic primitives
+      // would be exactly the tessellated guess the contract forbids. The
+      // cad-core edges-overlay projection is the documented fallback for
+      // callers that need a picture.
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "drawingView is not implemented by the fake kernel: it carries no exact hidden-line-removal model (the OpenCascade backend is the exact producer; the edges-overlay projection is the documented fallback).",
         ),
       );
     },

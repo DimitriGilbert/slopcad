@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteRouteImport } from './routes/_auth/route'
 import { Route as DocsRouteImport } from './routes/docs'
+import { Route as DrawingsRouteImport } from './routes/drawings'
 import { Route as IoRouteImport } from './routes/io'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PerfRouteImport } from './routes/perf'
@@ -48,6 +49,11 @@ const AuthRouteRoute = AuthRouteRouteImport.update({
 const DocsRoute = DocsRouteImport.update({
   id: '/docs',
   path: '/docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DrawingsRoute = DrawingsRouteImport.update({
+  id: '/drawings',
+  path: '/drawings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IoRoute = IoRouteImport.update({
@@ -169,6 +175,7 @@ const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/docs': typeof DocsRoute
+  '/drawings': typeof DrawingsRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
@@ -196,6 +203,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/docs': typeof DocsRoute
+  '/drawings': typeof DrawingsRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
@@ -225,6 +233,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteRouteWithChildren
   '/docs': typeof DocsRoute
+  '/drawings': typeof DrawingsRoute
   '/io': typeof IoRoute
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
@@ -254,6 +263,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/docs'
+    | '/drawings'
     | '/io'
     | '/login'
     | '/perf'
@@ -281,6 +291,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/docs'
+    | '/drawings'
     | '/io'
     | '/login'
     | '/perf'
@@ -309,6 +320,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_auth'
     | '/docs'
+    | '/drawings'
     | '/io'
     | '/login'
     | '/perf'
@@ -338,6 +350,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
   DocsRoute: typeof DocsRoute
+  DrawingsRoute: typeof DrawingsRoute
   IoRoute: typeof IoRoute
   LoginRoute: typeof LoginRoute
   PerfRoute: typeof PerfRoute
@@ -380,6 +393,13 @@ declare module '@tanstack/react-router' {
       path: '/docs'
       fullPath: '/docs'
       preLoaderRoute: typeof DocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/drawings': {
+      id: '/drawings'
+      path: '/drawings'
+      fullPath: '/drawings'
+      preLoaderRoute: typeof DrawingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/io': {
@@ -568,6 +588,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRouteRoute: AuthRouteRouteWithChildren,
   DocsRoute: DocsRoute,
+  DrawingsRoute: DrawingsRoute,
   IoRoute: IoRoute,
   LoginRoute: LoginRoute,
   PerfRoute: PerfRoute,

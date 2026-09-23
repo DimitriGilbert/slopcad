@@ -54,6 +54,7 @@
 
 import type {
   AngleValue,
+  DrawingViewGeometry,
   LengthValue,
   ParseFailure,
   ParseResult,
@@ -905,6 +906,41 @@ export type IntersectionCurveInput =
       /** The plane's unit normal (any non-zero vector; normalized). */
       readonly normal: readonly [number, number, number];
     };
+
+/**
+ * The base drawing view of `drawingView` (Phase 53): one orthographic
+ * projection of one solid onto the plane perpendicular to `eye`, with
+ * exact hidden-line removal.
+ *
+ * - `target` — the solid to project.
+ * - `eye` — the EYE direction: the unit vector from the body toward the
+ *   viewer (world axes; any non-zero vector, normalized). The base view
+ *   kinds' canonical eye directions come from cad-core's
+ *   `DRAWING_VIEW_EYE_DIRECTIONS` (front views the XZ plane from -Y, top
+ *   the XY plane from +Z, right the YZ plane from +X, isometric from the
+ *   (+, +, +) corner).
+ * - `up` — the sheet-up hint (world axes; never parallel to `eye`; purified
+ *   onto the view plane by one Gram-Schmidt step). The canonical hints come
+ *   from cad-core's `DRAWING_VIEW_UP_HINTS`.
+ *
+ * The result is a cad-core {@link DrawingViewGeometry} — visible and hidden
+ * edge chains in VIEW-PLANE model millimetres (u along the derived
+ * sheet-right basis, v along the derived sheet-up basis), bounds, and the
+ * `fidelity: "hlr-exact"` class. A kernel declaring `hiddenLineRemoval:
+ * false` answers every call with the structured
+ * `kernel/unsupported-operation`; the cad-core edges-overlay projection
+ * (`edgesOverlayProjection`) is the documented mesh-kernel fallback, which
+ * classifies its own fidelity as `"edges-overlay"` — a caller that needs a
+ * picture from a non-HLR kernel composes it from `tessellate` output, and
+ * the fidelity class on the geometry is what keeps the two honest.
+ */
+export interface DrawingViewInput {
+  readonly target: KernelSolid;
+  /** Eye direction — from the body toward the viewer (normalized). */
+  readonly eye: readonly [number, number, number];
+  /** Sheet-up hint (never parallel to `eye`). */
+  readonly up: readonly [number, number, number];
+}
 
 /**
  * The analytic helix spine of `helixSweep` (Phase 40): radius, pitch,
@@ -2444,6 +2480,22 @@ export interface GeometryKernel {
    * approximation.
    */
   section(input: SectionInput): KernelResult<SectionResult>;
+
+  /**
+   * Projects one solid onto a drawing view's plane with exact hidden-line
+   * removal (Phase 53): the visible and hidden edge chains in view-plane
+   * model millimetres. OCCT answers through `HLRBRep_Algo` +
+   * `HLRBRep_HLRToShape` (the sharp and outline compounds, walked at the
+   * same fixed uniform-parameter station rule `intersectionCurve` uses —
+   * the binding exposes no `GCPnts` deflection sampler). Requires the
+   * `hiddenLineRemoval` capability (Phase 53): a kernel without exact HLR
+   * answers every call with the structured
+   * `kernel/unsupported-operation`, and callers compose the documented
+   * edges-overlay fallback from `tessellate` output instead — see
+   * {@link DrawingViewInput} for the direction conventions and the
+   * fidelity-class honesty.
+   */
+  drawingView(input: DrawingViewInput): KernelResult<DrawingViewGeometry>;
 
   /**
    * The solid's axis-aligned bounding box in mm; fails with

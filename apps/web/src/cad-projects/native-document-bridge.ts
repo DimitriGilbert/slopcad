@@ -44,6 +44,7 @@ export function serializeSessionToNativeText(
     regeneration,
     metadata: {},
     rollback,
+    drawing: null,
   };
   return stringifyNativeCadDocument(serializeNativeCadDocument(native));
 }
