@@ -45,6 +45,16 @@
  */
 
 import {
+  buildDocumentConfiguration,
+  CONFIGURATION_ERROR_CODES,
+  type DocumentConfiguration,
+  type DocumentConfigurationInput,
+  getDocumentConfiguration,
+  parseDocumentConfiguration,
+  serializeDocumentConfiguration,
+  type SerializedDocumentConfiguration,
+} from "./configuration";
+import {
   type SerializedCurve,
   curveRecordProblems,
   parseSerializedCurve,
@@ -61,6 +71,7 @@ import {
   CadIdGeneratorExhaustedError,
   type CadIdKind,
   createIdGenerator,
+  type ConfigurationId,
   type DatumId,
   type CurveId,
   type DocumentId,
@@ -378,6 +389,16 @@ export interface CadDocument {
    */
   readonly joints: readonly DocumentJoint[];
   /**
+   * The document's configuration rows, in add order (empty in older files;
+   * Phase 57-additive): named parameter-set rows over the SAME document —
+   * parameter overrides, suppressed features, and hidden bodies — evaluated
+   * into effective document views without duplicating any record
+   * (docs/architecture/adr-configurations.md). Every id a row references
+   * names a record of this document; the add path and the parse boundary
+   * both enforce it.
+   */
+  readonly configurations: readonly DocumentConfiguration[];
+  /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
    * generated ids unique across save/load.
@@ -573,6 +594,11 @@ export const DOCUMENT_ERROR_CODES = {
   mateInvalid: "assembly/mate-invalid",
   jointInvalid: "assembly/joint-invalid",
   occurrenceInUse: "assembly/occurrence-in-use",
+  configurationInvalid: "document/configuration-invalid",
+  configurationUnknownParameter: "document/configuration-unknown-parameter",
+  configurationUnknownFeature: "document/configuration-unknown-feature",
+  configurationUnknownBody: "document/configuration-unknown-body",
+  configurationInUse: "document/configuration-in-use",
   datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
@@ -886,6 +912,7 @@ function raiseGeneratorState(
     drawingView: Math.max(base.drawingView, floor.drawingView),
     mate: Math.max(base.mate, floor.mate),
     joint: Math.max(base.joint, floor.joint),
+    configuration: Math.max(base.configuration, floor.configuration),
   };
   return Object.freeze(raised);
 }
@@ -937,7 +964,36 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
     document.occurrences.some((occurrence) => occurrence.id === id) ||
     document.curves.some((curve) => curve.id === id) ||
     document.mates.some((mate) => mate.id === id) ||
-    document.joints.some((joint) => joint.id === id)
+    document.joints.some((joint) => joint.id === id) ||
+    document.configurations.some((configuration) => configuration.id === id)
+  );
+}
+
+/**
+ * The structured in-use refusal when a CONFIGURATION references the entity:
+ * removing a parameter, feature, or body a configuration row names would
+ * silently dangle the row, so removal refuses until the row drops or is
+ * edited (the occurrence-in-use precedent — removal never cascades).
+ */
+function configurationInUseError(
+  document: CadDocument,
+  kind: "parameter" | "feature" | "body",
+  id: string,
+): DocumentError | undefined {
+  const holder = document.configurations.find((configuration) =>
+    kind === "parameter"
+      ? configuration.parameterOverrides.some(
+          (override) => override.parameterId === id,
+        )
+      : kind === "feature"
+        ? configuration.suppressedFeatures.some((featureId) => featureId === id)
+        : configuration.hiddenBodies.some((bodyId) => bodyId === id),
+  );
+  if (holder === undefined) return undefined;
+  return docError(
+    DOCUMENT_ERROR_CODES.configurationInUse,
+    `${kind === "parameter" ? "Parameter" : kind === "feature" ? "Feature" : "Body"} "${id}" is referenced by configuration "${holder.id}".`,
+    id,
   );
 }
 
@@ -987,6 +1043,7 @@ export function createDocument(id: DocumentId): CadDocument {
     curves: Object.freeze([]),
     mates: Object.freeze([]),
     joints: Object.freeze([]),
+    configurations: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -1209,6 +1266,8 @@ export function removeBody(
       ),
     );
   }
+  const configurationUse = configurationInUseError(document, "body", id);
+  if (configurationUse !== undefined) return fail(configurationUse);
   return ok(
     Object.freeze({
       ...document,
@@ -1339,6 +1398,8 @@ export function removeFeature(
       ),
     );
   }
+  const configurationUse = configurationInUseError(document, "feature", id);
+  if (configurationUse !== undefined) return fail(configurationUse);
   return ok(
     Object.freeze({
       ...document,
@@ -1577,6 +1638,8 @@ export function removeDocumentParameter(
       ),
     );
   }
+  const configurationUse = configurationInUseError(document, "parameter", id);
+  if (configurationUse !== undefined) return fail(configurationUse);
   const removed = removeParameter(document.parameters, id);
   if (!removed.ok) return removed;
   return ok(Object.freeze({ ...document, parameters: removed.value }));
@@ -2986,6 +3049,253 @@ export function removeJoint(
   );
 }
 
+/** Result of {@link addDocumentConfiguration}: the next document plus the record. */
+export interface DocumentConfigurationAddResult {
+  readonly document: CadDocument;
+  readonly configuration: DocumentConfiguration;
+}
+
+/**
+ * Cross-checks a configuration row against the document it rides on: every
+ * override must name a live parameter of a matching dimensional type, every
+ * suppressed id a live feature, every hidden id a live body. The add path
+ * and the parse boundary share this so a hand-written document can never
+ * carry a row the effective view would refuse.
+ */
+function configurationRecordProblems(
+  document: CadDocument,
+  configuration: DocumentConfiguration,
+): DocumentError | undefined {
+  for (const override of configuration.parameterOverrides) {
+    const parameter = getDocumentParameter(document, override.parameterId);
+    if (parameter === undefined) {
+      return docError(
+        DOCUMENT_ERROR_CODES.configurationUnknownParameter,
+        `Configuration "${configuration.name}" overrides parameter "${override.parameterId}", which does not exist in document "${document.id}".`,
+        override,
+      );
+    }
+    if (parameter.value.dimension !== override.value.dimension) {
+      return docError(
+        DOCUMENT_ERROR_CODES.configurationInvalid,
+        `Configuration "${configuration.name}" overrides parameter "${override.parameterId}" with a ${override.value.dimension} value, but the parameter is a ${parameter.value.dimension}.`,
+        override,
+      );
+    }
+  }
+  for (const featureId of configuration.suppressedFeatures) {
+    if (getFeature(document, featureId) === undefined) {
+      return docError(
+        DOCUMENT_ERROR_CODES.configurationUnknownFeature,
+        `Configuration "${configuration.name}" suppresses feature "${featureId}", which does not exist in document "${document.id}".`,
+        featureId,
+      );
+    }
+  }
+  for (const bodyId of configuration.hiddenBodies) {
+    if (getBody(document, bodyId) === undefined) {
+      return docError(
+        DOCUMENT_ERROR_CODES.configurationUnknownBody,
+        `Configuration "${configuration.name}" hides body "${bodyId}", which does not exist in document "${document.id}".`,
+        bodyId,
+      );
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Adds one configuration row (Phase 57): a named parameter-set over the SAME
+ * document — overrides, suppressed features, hidden bodies. Every
+ * referenced id must name a live record of this document and every
+ * overridden value must carry its parameter's dimensional type; ids and
+ * names are unique within the document (a generated `cfg_…` id when
+ * omitted). The row never mutates the base document state it lenses.
+ */
+/** A parseable synthetic id validating an id-absent configuration add. */
+const PLACEHOLDER_CONFIGURATION_ID = "cfg_000000";
+
+export function addDocumentConfiguration(
+  document: CadDocument,
+  input: DocumentConfigurationInput,
+): ParseResult<DocumentConfigurationAddResult, DocumentError> {
+  // The row is validated through the module's build boundary with a
+  // synthetic parseable id when one was not supplied (generation below
+  // replaces it), so the id-absent add path validates the same fields the
+  // explicit-id path does.
+  const built = buildDocumentConfiguration(
+    input.id === undefined ? PLACEHOLDER_CONFIGURATION_ID : input.id,
+    input.name,
+    input.parameterOverrides,
+    input.suppressedFeatures,
+    input.hiddenBodies,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(
+        input.id !== undefined &&
+          built.error.code === CONFIGURATION_ERROR_CODES.idInvalid
+          ? DOCUMENT_ERROR_CODES.idInvalid
+          : DOCUMENT_ERROR_CODES.configurationInvalid,
+        built.error.message,
+        input,
+      ),
+    );
+  }
+  if (
+    document.configurations.some(
+      (configuration) => configuration.name === built.value.name,
+    )
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.configurationInvalid,
+        `A configuration named "${built.value.name}" already exists in document "${document.id}".`,
+        input,
+      ),
+    );
+  }
+  let id: ConfigurationId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextConfigurationId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    id = built.value.id;
+    const unclaimable = unclaimablePayloadError("configuration", id);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, id)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${id}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    idGeneratorState = claimExplicitId(idGeneratorState, "configuration", id);
+  }
+  const problems = configurationRecordProblems(document, built.value);
+  if (problems !== undefined) return fail(problems);
+  // The generated id replaces the synthetic placeholder the build
+  // validated with; an explicit id already IS the built one.
+  const configuration =
+    id === built.value.id ? built.value : Object.freeze({ ...built.value, id });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      configurations: Object.freeze([
+        ...document.configurations,
+        configuration,
+      ]),
+      idGeneratorState,
+    }),
+    configuration,
+  });
+}
+
+/** Removes one configuration row by id (structured not-found refusal). */
+export function removeDocumentConfiguration(
+  document: CadDocument,
+  id: ConfigurationId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getDocumentConfiguration(document.configurations, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No configuration ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      configurations: Object.freeze(
+        document.configurations.filter(
+          (configuration) => configuration.id !== id,
+        ),
+      ),
+    }),
+  );
+}
+
+/** The mutable fields of a configuration row — everything but its identity. */
+export interface DocumentConfigurationUpdate {
+  readonly name: string;
+  readonly parameterOverrides?: DocumentConfigurationInput["parameterOverrides"];
+  readonly suppressedFeatures?: readonly FeatureId[];
+  readonly hiddenBodies?: readonly BodyId[];
+}
+
+/**
+ * Replaces a configuration row's mutable fields — name, overrides,
+ * suppressed features, hidden bodies — keeping its id and list position,
+ * validated exactly like {@link addDocumentConfiguration}.
+ */
+export function updateDocumentConfiguration(
+  document: CadDocument,
+  id: ConfigurationId,
+  update: DocumentConfigurationUpdate,
+): ParseResult<CadDocument, DocumentError> {
+  const existing = getDocumentConfiguration(document.configurations, id);
+  if (existing === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No configuration ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const built = buildDocumentConfiguration(
+    existing.id,
+    update.name,
+    update.parameterOverrides,
+    update.suppressedFeatures,
+    update.hiddenBodies,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.configurationInvalid,
+        built.error.message,
+        update,
+      ),
+    );
+  }
+  if (
+    document.configurations.some(
+      (configuration) =>
+        configuration.id !== id && configuration.name === built.value.name,
+    )
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.configurationInvalid,
+        `A configuration named "${built.value.name}" already exists in document "${document.id}".`,
+        update,
+      ),
+    );
+  }
+  const problems = configurationRecordProblems(document, built.value);
+  if (problems !== undefined) return fail(problems);
+  return ok(
+    Object.freeze({
+      ...document,
+      configurations: Object.freeze(
+        document.configurations.map((configuration) =>
+          configuration.id === id ? built.value : configuration,
+        ),
+      ),
+    }),
+  );
+}
+
 /** Input of {@link addDocumentSection}: the record's authored fields. */
 export interface DocumentSectionInput {
   /** An explicit id (`sec_…`), or absent to generate the next one. */
@@ -3202,6 +3512,7 @@ export type SerializedIdGeneratorState = Omit<
   | "drawingView"
   | "mate"
   | "joint"
+  | "configuration"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
@@ -3212,6 +3523,7 @@ export type SerializedIdGeneratorState = Omit<
   readonly drawingView?: number;
   readonly mate?: number;
   readonly joint?: number;
+  readonly configuration?: number;
 };
 
 function serializeIdGeneratorState(
@@ -3232,6 +3544,9 @@ function serializeIdGeneratorState(
     ...(state.drawingView === 0 ? {} : { drawingView: state.drawingView }),
     ...(state.mate === 0 ? {} : { mate: state.mate }),
     ...(state.joint === 0 ? {} : { joint: state.joint }),
+    ...(state.configuration === 0
+      ? {}
+      : { configuration: state.configuration }),
   };
 }
 
@@ -3305,6 +3620,8 @@ export interface SerializedCadDocument {
       readonly axis?: readonly [number, number, number];
     };
   }[];
+  /** Present exactly when the document carries configuration rows (additive). */
+  readonly configurations?: readonly SerializedDocumentConfiguration[];
 }
 
 /** Serializes a document to its canonical, deterministic JSON form. */
@@ -3453,6 +3770,16 @@ export function serializeCadDocument(
                   },
                 }),
           })),
+        }),
+    // Additive (Phase 57): emitted only when configuration rows exist, so
+    // documents from before configurations serialize byte-identically to
+    // their pre-configuration form.
+    ...(document.configurations.length === 0
+      ? {}
+      : {
+          configurations: document.configurations.map(
+            serializeDocumentConfiguration,
+          ),
         }),
   };
 }
@@ -3922,6 +4249,28 @@ function parseSerializedJoint(
   return ok(parsed.value);
 }
 
+/**
+ * Parses a serialized configuration row through the configuration module's
+ * parse boundary (`parseDocumentConfiguration` — the same validation the
+ * record's add door applies), re-wrapping its structured failure as a
+ * document error.
+ */
+function parseSerializedConfiguration(
+  input: unknown,
+): ParseResult<DocumentConfiguration, DocumentError> {
+  const parsed = parseDocumentConfiguration(input);
+  if (!parsed.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.configurationInvalid,
+        parsed.error.message,
+        input,
+      ),
+    );
+  }
+  return ok(parsed.value);
+}
+
 /** Parses a finite [x, y, z] triple or fails structured. */
 function parseSectionTriple(
   input: unknown,
@@ -4230,6 +4579,12 @@ export function parseCadDocument(
     parseSerializedJoint,
   );
   if (!parsedJoints.ok) return parsedJoints;
+  const parsedConfigurations = parseSerializedList(
+    input.configurations ?? [],
+    "configurations",
+    parseSerializedConfiguration,
+  );
+  if (!parsedConfigurations.ok) return parsedConfigurations;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -4327,6 +4682,20 @@ export function parseCadDocument(
       kind: feature.kind,
       inputs: feature.inputs,
       outputs: feature.outputs,
+    });
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  // Configurations parse LAST: their rows validate against parameters,
+  // features, and bodies at the add boundary, so every referenced record
+  // must exist before a row lensing it lands.
+  for (const configuration of parsedConfigurations.value) {
+    const added = addDocumentConfiguration(document, {
+      id: configuration.id,
+      name: configuration.name,
+      parameterOverrides: configuration.parameterOverrides,
+      suppressedFeatures: configuration.suppressedFeatures,
+      hiddenBodies: configuration.hiddenBodies,
     });
     if (!added.ok) return added;
     document = added.value.document;

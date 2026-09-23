@@ -146,6 +146,7 @@ describe("createDocument", () => {
       drawingView: 0,
       mate: 0,
       joint: 0,
+      configuration: 0,
     });
     expect(Object.isFrozen(document)).toBe(true);
     expect(Object.isFrozen(document.bodies)).toBe(true);
@@ -1263,6 +1264,7 @@ describe("parseCadDocument rejects malformed input", () => {
       drawingView: 0,
       mate: 0,
       joint: 0,
+      configuration: 0,
     });
   });
 });

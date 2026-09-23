@@ -126,7 +126,32 @@ export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
       to: 5,
       migrate: migrateV4ToV5,
     },
+    {
+      from: 5,
+      to: 6,
+      migrate: migrateV5ToV6,
+    },
   ]);
+
+/**
+ * The v5→v6 content transform (the framework stamps `formatVersion`):
+ * the identity — the configuration growth is additive, so v5 content is
+ * already valid v6 content and nothing inside the document is rewritten.
+ */
+function migrateV5ToV6(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v5→v6 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
 
 /**
  * The v4→v5 content transform (the framework stamps `formatVersion`):

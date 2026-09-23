@@ -73,6 +73,7 @@ describe("id wire format parsing", () => {
       drawingView: "dwv",
       mate: "mat",
       joint: "jnt",
+      configuration: "cfg",
     });
     expect(parseDatumId("dtm_a").ok).toBe(true);
     expect(parseOccurrenceId("occ_a").ok).toBe(true);
@@ -243,6 +244,7 @@ describe("createIdGenerator", () => {
       drawingView: 0,
       mate: 0,
       joint: 0,
+      configuration: 0,
     });
   });
 
@@ -263,6 +265,7 @@ describe("createIdGenerator", () => {
         drawingView: 0,
         mate: 0,
         joint: 0,
+        configuration: 0,
       }),
     ).toThrow(RangeError);
     expect(() =>
@@ -281,6 +284,7 @@ describe("createIdGenerator", () => {
         drawingView: 0,
         mate: 0,
         joint: 0,
+        configuration: 0,
       }),
     ).toThrow(RangeError);
   });
@@ -301,6 +305,7 @@ describe("createIdGenerator", () => {
       drawingView: 0,
       mate: 0,
       joint: 0,
+      configuration: 0,
     });
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);
     try {
@@ -334,6 +339,7 @@ describe("createIdGenerator", () => {
       drawingView: 0,
       mate: 0,
       joint: 0,
+      configuration: 0,
     });
     expect(generator.nextBodyId()).toBe("body_9007199254740991");
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);

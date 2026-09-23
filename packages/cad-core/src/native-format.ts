@@ -106,6 +106,7 @@
  */
 
 import { CAD_COMMAND_TYPES, isCadCommandType } from "./command";
+import { getDocumentConfiguration } from "./configuration";
 import {
   type DrawingDocument,
   parseDrawingDocument,
@@ -290,6 +291,8 @@ export const NATIVE_FORMAT_ERROR_CODES = {
   rollbackUnknownFeature: "native-format/rollback-unknown-feature",
   /** Document-level metadata was not a plain object of JSON-safe scalars. */
   metadataInvalid: "native-format/metadata-invalid",
+  /** A drawing view's configuration pin names a configuration the document does not have. */
+  configurationUnknownViewPin: "native-format/configuration-unknown-view-pin",
 } as const;
 
 export type NativeFormatErrorCode =
@@ -684,6 +687,29 @@ function parseCurrentNativeCadDocument(
       );
     }
     drawing = parsed.value;
+    // The Phase 57 configuration pins: a view pinned to a configuration
+    // names a row the SAME document must carry — the drawing parser cannot
+    // see the document, so the envelope cross-checks the membership (the
+    // regeneration-unknown-feature discipline).
+    if (drawing !== null) {
+      for (const sheet of drawing.sheets) {
+        for (const view of sheet.views) {
+          const pin = view.configurationId;
+          if (
+            pin !== undefined &&
+            getDocumentConfiguration(atCursor.configurations, pin) === undefined
+          ) {
+            return fail(
+              nativeError(
+                NATIVE_FORMAT_ERROR_CODES.configurationUnknownViewPin,
+                `The drawing view "${view.id}" pins configuration "${pin}", which the document does not have.`,
+                input.drawing,
+              ),
+            );
+          }
+        }
+      }
+    }
   }
 
   return ok(
