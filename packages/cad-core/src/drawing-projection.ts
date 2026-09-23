@@ -72,14 +72,31 @@ export function edgesOverlayProjectionForKind(
 }
 
 /**
+ * A WORLD-space clip plane applied before projection: a feature edge is
+ * clipped to the kept side {p : n·p - d ≥ 0} (edges crossing the plane are
+ * cut at it, removed-side portions drop). The section-view path uses this
+ * to clip in world coordinates — the only space where the test is defined
+ * (a view-plane point does not determine a world point's side).
+ */
+export interface OverlayClipPlane {
+  /** Unit-scaled normal of the kept half-space (normalized on use). */
+  readonly normal: readonly [number, number, number];
+  /** The plane offset: `normal·p = offset` is the cut plane. */
+  readonly offset: number;
+}
+
+/**
  * Projects a tessellated body onto an arbitrary (eye, up) basis — the
- * general form of {@link edgesOverlayProjectionForKind}.
+ * general form of {@link edgesOverlayProjectionForKind}, with an optional
+ * world-space clip plane (see {@link OverlayClipPlane}).
  */
 export function edgesOverlayProjection(
   mesh: OverlayMesh,
   eye: readonly [number, number, number],
   upHint: readonly [number, number, number],
+  clipPlane?: OverlayClipPlane,
 ): DrawingViewGeometry {
+  const plane = normalizeClipPlane(clipPlane);
   const basis = viewBasis(eye, upHint);
   const triangleCount = Math.floor(mesh.indices.length / 3);
   if (triangleCount === 0 || mesh.positions.length < 3) {
@@ -178,8 +195,20 @@ export function edgesOverlayProjection(
     const a = ends[0];
     const b = ends[1];
     if (a === undefined || b === undefined) continue;
-    const first = projectVertex(mesh, a, basis);
-    const second = projectVertex(mesh, b, basis);
+    let first3: readonly [number, number, number] | null = vertexPoint(mesh, a);
+    let second3: readonly [number, number, number] | null = vertexPoint(
+      mesh,
+      b,
+    );
+    if (first3 === null || second3 === null) continue;
+    if (plane !== null) {
+      const clipped = clipSegmentToPlane(first3, second3, plane);
+      if (clipped === null) continue;
+      first3 = clipped[0];
+      second3 = clipped[1];
+    }
+    const first = toPlane(first3, basis);
+    const second = toPlane(second3, basis);
     // An edge parallel to the view direction projects to a POINT — a
     // zero-length chain is nothing to draw (a drawing never renders a dot
     // for an edge seen end-on), so it is dropped here rather than emitted
@@ -200,19 +229,95 @@ export function edgesOverlayProjection(
   };
 }
 
-function projectVertex(
+function normalizeClipPlane(plane: OverlayClipPlane | undefined): {
+  readonly nx: number;
+  readonly ny: number;
+  readonly nz: number;
+  readonly d: number;
+} | null {
+  if (plane === undefined) return null;
+  const len = Math.sqrt(
+    plane.normal[0] * plane.normal[0] +
+      plane.normal[1] * plane.normal[1] +
+      plane.normal[2] * plane.normal[2],
+  );
+  if (len === 0) return null;
+  return {
+    nx: plane.normal[0] / len,
+    ny: plane.normal[1] / len,
+    nz: plane.normal[2] / len,
+    d: plane.offset,
+  };
+}
+
+function signedDistanceTo(
+  p: readonly [number, number, number],
+  plane: {
+    readonly nx: number;
+    readonly ny: number;
+    readonly nz: number;
+    readonly d: number;
+  },
+): number {
+  return plane.nx * p[0] + plane.ny * p[1] + plane.nz * p[2] - plane.d;
+}
+
+/**
+ * Clips a segment to the kept half-space, interpolating the crossing at
+ * the plane. Returns `null` when the whole segment falls on the removed
+ * side. An endpoint exactly on the plane counts as kept.
+ */
+function clipSegmentToPlane(
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+  plane: {
+    readonly nx: number;
+    readonly ny: number;
+    readonly nz: number;
+    readonly d: number;
+  },
+):
+  | readonly [
+      readonly [number, number, number],
+      readonly [number, number, number],
+    ]
+  | null {
+  const EPSILON = 1e-9;
+  const da = signedDistanceTo(a, plane);
+  const db = signedDistanceTo(b, plane);
+  const aKept = da >= -EPSILON;
+  const bKept = db >= -EPSILON;
+  if (aKept && bKept) return [a, b];
+  if (!aKept && !bKept) return null;
+  const t = da / (da - db);
+  const crossing: [number, number, number] = [
+    a[0] + t * (b[0] - a[0]),
+    a[1] + t * (b[1] - a[1]),
+    a[2] + t * (b[2] - a[2]),
+  ];
+  return aKept ? [a, crossing] : [crossing, b];
+}
+
+function vertexPoint(
   mesh: OverlayMesh,
   vertex: number,
+): [number, number, number] | null {
+  const x = mesh.positions[vertex * 3];
+  const y = mesh.positions[vertex * 3 + 1];
+  const z = mesh.positions[vertex * 3 + 2];
+  if (x === undefined || y === undefined || z === undefined) return null;
+  return [x, y, z];
+}
+
+function toPlane(
+  p: readonly [number, number, number],
   basis: {
     readonly right: readonly [number, number, number];
     readonly up: readonly [number, number, number];
   },
 ): [number, number] {
-  const x = mesh.positions[vertex * 3] ?? 0;
-  const y = mesh.positions[vertex * 3 + 1] ?? 0;
-  const z = mesh.positions[vertex * 3 + 2] ?? 0;
   return [
-    x * basis.right[0] + y * basis.right[1] + z * basis.right[2],
-    x * basis.up[0] + y * basis.up[1] + z * basis.up[2],
+    p[0] * basis.right[0] + p[1] * basis.right[1] + p[2] * basis.right[2],
+    p[0] * basis.up[0] + p[1] * basis.up[1] + p[2] * basis.up[2],
   ];
 }

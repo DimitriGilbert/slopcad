@@ -36,7 +36,7 @@ export default function Header() {
   ] as const;
 
   return (
-    <header className="border-border bg-card/60 h-11 shrink-0 border-b">
+    <header className="border-border bg-card/60 h-11 shrink-0 border-b print:hidden">
       <div className="flex h-full items-center gap-6 px-4">
         <Link
           className="group flex items-center gap-2.5"

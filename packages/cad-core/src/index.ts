@@ -969,7 +969,11 @@ export {
   serializeDrawingSheetFurniture,
   sheetDimensionsMm,
 } from "./drawing-sheet";
-export type { DrawingPrimitive } from "./drawing-presentation";
+export type {
+  DrawingPictureGroup,
+  DrawingPrimitive,
+  DrawingSheetPicture,
+} from "./drawing-presentation";
 export {
   arrowHeadPolygonPoints,
   compareDrawingId,
@@ -997,7 +1001,12 @@ export {
   threadCalloutText,
   uprightTextTransform,
 } from "./drawing-presentation";
-export { formatSvgNumber, serializeDrawingSheetSvg } from "./drawing-svg";
+export {
+  drawingGroupMarkup,
+  formatSvgNumber,
+  serializeDrawingSheetSvg,
+  serializeSheetPictureSvg,
+} from "./drawing-svg";
 export type { DrawingDimensionRecoveryOptions } from "./drawing-dimension-source";
 export { recoverFeatureDimensions } from "./drawing-dimension-source";
 export type {
@@ -1061,3 +1070,67 @@ export {
   rotationVectorToMatrix,
   solveAssemblyMates,
 } from "./mate-solver";
+export type { OverlayClipPlane } from "./drawing-projection";
+export type {
+  CrossSectionLoop,
+  SectionPlane,
+  WorldChain,
+} from "./drawing-section";
+export {
+  auxiliaryViewBasis,
+  brokenOutOverlayProjection,
+  DEFAULT_HATCH_ANGLE_RAD,
+  DEFAULT_HATCH_SPACING_MM,
+  detailCropGeometry,
+  hatchLoops,
+  meshPlaneCrossSection,
+  polygonArea,
+  projectedViewBasis,
+  projectedViewBasisForKind,
+  sectionOverlayProjection,
+} from "./drawing-section";
+export type {
+  DrawingGeometryByView,
+  PresentDrawingSheetOptions,
+} from "./drawing-output";
+export {
+  BOM_COLUMN_WIDTHS,
+  BOM_ROW_HEIGHT,
+  DRAWING_PICTURE_STYLE,
+  drawingSummary,
+  presentDrawingDocument,
+  presentDrawingSheet,
+  serializeDrawingPdf,
+  serializeDrawingSvg,
+} from "./drawing-output";
+export type {
+  DrawingDxfDocument,
+  DrawingDxfEntity,
+  DrawingDxfError,
+  DrawingDxfErrorCode,
+  DrawingDxfLayer,
+} from "./drawing-dxf";
+export {
+  buildDxfDocument,
+  DRAWING_DXF_ERROR_CODES,
+  DRAWING_DXF_LAYERS,
+  parseDrawingDxf,
+  serializeDrawingDxf,
+  serializeParsedDrawingDxf,
+} from "./drawing-dxf";
+export type {
+  DrawingBalloon,
+  DrawingBomRow,
+  DrawingBomTable,
+  DrawingProjectedDirection,
+  DrawingProjectionMethod,
+  DrawingViewProjection,
+  SerializedDrawingBalloon,
+  SerializedDrawingBomRow,
+  SerializedDrawingBomTable,
+} from "./drawing";
+export {
+  DRAWING_PROJECTED_DIRECTIONS,
+  DRAWING_PROJECTION_METHODS,
+  numberBomItems,
+} from "./drawing";
