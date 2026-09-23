@@ -907,3 +907,86 @@ export {
   edgesOverlayProjectionForKind,
   FEATURE_EDGE_DIHEDRAL_THRESHOLD_RAD,
 } from "./drawing-projection";
+
+export type {
+  DrawingAnnotation,
+  DrawingAnnotationId,
+  DrawingAnnotationsErrorCode,
+  DrawingAnnotationsParseError,
+  DrawingDimension,
+  DrawingDimensionId,
+  DrawingDimensionOrigin,
+  DrawingIdErrorCode,
+  DrawingIdParseError,
+  DrawingLinearOrientation,
+  DrawingPoint,
+  GdntCharacteristic,
+  SerializedDrawingAnnotation,
+  SerializedDrawingDimension,
+  SerializedDrawingDimensionOrigin,
+} from "./drawing-annotations";
+export {
+  DRAWING_ANNOTATIONS_ERROR_CODES,
+  DRAWING_ID_ERROR_CODES,
+  DRAWING_ID_PREFIXES,
+  DRAWING_LINEAR_ORIENTATIONS,
+  GDNT_CHARACTERISTICS,
+  parseDrawingAnnotation,
+  parseDrawingAnnotationId,
+  parseDrawingDimension,
+  parseDrawingDimensionId,
+  serializeDrawingAnnotation,
+  serializeDrawingDimension,
+} from "./drawing-annotations";
+export type {
+  DrawingRevisionRow,
+  DrawingSheetErrorCode,
+  DrawingSheetParseError,
+  DrawingSheetSetup,
+  DrawingSheetTemplate,
+  DrawingTitleBlock,
+  SerializedDrawingSheetFurniture,
+} from "./drawing-sheet";
+export {
+  DRAWING_SHEET_ERROR_CODES,
+  DRAWING_SHEET_ORIENTATIONS,
+  DRAWING_SHEET_SIZE_MM,
+  DRAWING_SHEET_TEMPLATES,
+  drawingSheetTemplateById,
+  parseDrawingRevisionRow,
+  parseDrawingSheetSetup,
+  parseDrawingTitleBlock,
+  serializeDrawingSheetFurniture,
+  sheetDimensionsMm,
+} from "./drawing-sheet";
+export type { DrawingPrimitive } from "./drawing-presentation";
+export {
+  arrowHeadPolygonPoints,
+  compareDrawingId,
+  composeSheetPresentation,
+  DRAWING_ARROW_LENGTH_MM,
+  DRAWING_ARROW_WIDTH_MM,
+  DRAWING_DIMENSION_OFFSET_MM,
+  DRAWING_EXTENSION_GAP_MM,
+  DRAWING_EXTENSION_OVERSHOOT_MM,
+  DRAWING_FRAME_MARGIN_MM,
+  DRAWING_REVISION_ROW_HEIGHT_MM,
+  DRAWING_REVISION_TABLE_WIDTH_FRACTION,
+  DRAWING_SMALL_TEXT_HEIGHT_MM,
+  DRAWING_TEXT_HEIGHT_MM,
+  DRAWING_TITLE_BLOCK_HEIGHT_MM,
+  DRAWING_TITLE_BLOCK_WIDTH_FRACTION,
+  formatDimensionValue,
+  GDNT_SYMBOLS,
+  holeCalloutText,
+  presentDrawingAnnotation,
+  presentDrawingDimension,
+  presentSheetFurniture,
+  sheetArcGeometry,
+  type SheetArcGeometry,
+  threadCalloutText,
+  uprightTextTransform,
+} from "./drawing-presentation";
+export { formatSvgNumber, serializeDrawingSheetSvg } from "./drawing-svg";
+export type { DrawingDimensionRecoveryOptions } from "./drawing-dimension-source";
+export { recoverFeatureDimensions } from "./drawing-dimension-source";
