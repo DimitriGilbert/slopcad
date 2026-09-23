@@ -10,6 +10,12 @@
  * sheet, which the module's test pins exactly).
  */
 
+import {
+  createOccurrenceId,
+  type OccurrenceBomFlag,
+  type OccurrenceId,
+} from "@slopcad/cad-core";
+
 export interface DemoMesh {
   readonly positions: readonly number[];
   readonly indices: readonly number[];
@@ -125,3 +131,28 @@ export const DEMO_PLATE_MESH: DemoMesh = {
     15,
   ],
 };
+
+/**
+ * The demo assembly structure the BOM table derives from (Phase 55): three
+ * item groups over the plate fixture — a default part row, a sub-assembly
+ * header marked `phantom` (never ships a row and consumes no item number),
+ * and a `purchased` fastener appearing twice — exercising every
+ * `numberBomItems` rule in one deterministic table (items 1..2, quantities
+ * 1/2, flag disclosure).
+ */
+export interface DemoOccurrence {
+  readonly id: OccurrenceId;
+  readonly name: string;
+  readonly bomFlag?: OccurrenceBomFlag;
+}
+
+export const DEMO_ASSEMBLY_OCCURRENCES: readonly DemoOccurrence[] = [
+  { id: createOccurrenceId("occ_plate"), name: "Mounting plate" },
+  { id: createOccurrenceId("occ_frame"), name: "Frame", bomFlag: "phantom" },
+  { id: createOccurrenceId("occ_bolt"), name: "M5 bolt", bomFlag: "purchased" },
+  {
+    id: createOccurrenceId("occ_bolt-2"),
+    name: "M5 bolt",
+    bomFlag: "purchased",
+  },
+];

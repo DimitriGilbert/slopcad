@@ -12,19 +12,43 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import type { AppRouter } from "@slopcad/api/routers/index";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type DrawingDocument,
-  type DrawingViewGeometry,
+  type DrawingGeometryByView,
   createBodyId,
   createDrawingViewId,
   createSheetId,
+  drawingSummary,
   edgesOverlayProjectionForKind,
+  serializeDrawingSvg,
 } from "@slopcad/cad-core";
 
 import { DEMO_PLATE_MESH } from "./drawing-demo-body";
-import { drawingSummary, serializeDrawingSvg } from "./drawing-svg";
 import { DrawingWorkbenchPage } from "./drawing-workbench";
+
+import { TRPCProvider } from "@/utils/trpc";
+
+// The page hosts the document persistence bar, so it renders inside the
+// same provider composition the router applies. No query runs during the
+// authoring tests (tRPC fires only on Save/Load), so the batch link never
+// fetches.
+function renderPage(): void {
+  const queryClient = new QueryClient();
+  const trpcClient = createTRPCClient<AppRouter>({
+    links: [httpBatchLink({ url: "/api/trpc" })],
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+        <DrawingWorkbenchPage />
+      </TRPCProvider>
+    </QueryClientProvider>,
+  );
+}
 
 const bodyId = createBodyId("body_drawing_plate");
 
@@ -50,7 +74,7 @@ const drawing: DrawingDocument = { sheets: [sheet] };
 
 describe("serializeDrawingSvg", () => {
   it("is byte-deterministic for the same drawing and geometry", () => {
-    const geometry = new Map<string, DrawingViewGeometry>([
+    const geometry: DrawingGeometryByView = new Map([
       ["dwv_front", edgesOverlayProjectionForKind(DEMO_PLATE_MESH, "front")],
     ]);
     const first = serializeDrawingSvg(drawing, geometry);
@@ -62,7 +86,7 @@ describe("serializeDrawingSvg", () => {
   });
 
   it("labels the overlay fidelity honestly and renders empty views as frames", () => {
-    const geometry = new Map<string, DrawingViewGeometry>([
+    const geometry: DrawingGeometryByView = new Map([
       ["dwv_front", edgesOverlayProjectionForKind(DEMO_PLATE_MESH, "front")],
     ]);
     const svg = serializeDrawingSvg(drawing, geometry);
@@ -83,7 +107,7 @@ describe("the drawing workbench page", () => {
   afterEach(cleanup);
 
   it("exposes the empty-state canvas and creates a sheet + 3 views by keyboard", async () => {
-    render(<DrawingWorkbenchPage />);
+    renderPage();
     const canvas = screen.getByTestId("drawing-canvas");
     expect(canvas.getAttribute("role")).toBe("img");
     expect(canvas.getAttribute("aria-label")).toBe(
@@ -112,7 +136,7 @@ describe("the drawing workbench page", () => {
   });
 
   it("keeps the angle toggle keyboard-operable with pressed state", () => {
-    render(<DrawingWorkbenchPage />);
+    renderPage();
     const first = screen.getByRole("button", { name: "First angle" });
     expect(first.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(first);

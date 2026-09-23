@@ -1061,3 +1061,61 @@ export {
   rotationVectorToMatrix,
   solveAssemblyMates,
 } from "./mate-solver";
+export type { OverlayClipPlane } from "./drawing-projection";
+export type {
+  CrossSectionLoop,
+  SectionPlane,
+  WorldChain,
+} from "./drawing-section";
+export {
+  auxiliaryViewBasis,
+  brokenOutOverlayProjection,
+  DEFAULT_HATCH_ANGLE_RAD,
+  DEFAULT_HATCH_SPACING_MM,
+  detailCropGeometry,
+  hatchLoops,
+  meshPlaneCrossSection,
+  polygonArea,
+  projectedViewBasis,
+  projectedViewBasisForKind,
+  sectionOverlayProjection,
+} from "./drawing-section";
+export type { DrawingGeometryByView } from "./drawing-output";
+export {
+  BOM_COLUMN_WIDTHS,
+  BOM_ROW_HEIGHT,
+  drawingSummary,
+  serializeDrawingPdf,
+  serializeDrawingSvg,
+} from "./drawing-output";
+export type {
+  DrawingDxfDocument,
+  DrawingDxfEntity,
+  DrawingDxfError,
+  DrawingDxfErrorCode,
+  DrawingDxfLayer,
+} from "./drawing-dxf";
+export {
+  buildDxfDocument,
+  DRAWING_DXF_ERROR_CODES,
+  DRAWING_DXF_LAYERS,
+  parseDrawingDxf,
+  serializeDrawingDxf,
+  serializeParsedDrawingDxf,
+} from "./drawing-dxf";
+export type {
+  DrawingBalloon,
+  DrawingBomRow,
+  DrawingBomTable,
+  DrawingProjectedDirection,
+  DrawingProjectionMethod,
+  DrawingViewProjection,
+  SerializedDrawingBalloon,
+  SerializedDrawingBomRow,
+  SerializedDrawingBomTable,
+} from "./drawing";
+export {
+  DRAWING_PROJECTED_DIRECTIONS,
+  DRAWING_PROJECTION_METHODS,
+  numberBomItems,
+} from "./drawing";
