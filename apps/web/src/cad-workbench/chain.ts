@@ -56,7 +56,12 @@ import type {
 } from "../worker-fixture/chain-scene";
 
 import { extrudeSceneRequestOfFeature } from "./extrude";
-import { holeBaseFeatureOf, holeCutInputOfFeature } from "./hole";
+import {
+  holeBaseFeatureOf,
+  holeCutInputOfFeature,
+  isStructuredHoleFeature,
+  structuredHoleCutInputOfFeature,
+} from "./hole";
 
 /** The radius a fillet action creates its radius parameter with (mm). */
 export const CHAIN_FILLET_DEFAULT_RADIUS_MM = 3;
@@ -160,6 +165,16 @@ export function documentChainSceneRequest(
   for (const holeFeature of document.features) {
     if (holeFeature.kind !== "hole") continue;
     if (solidTargetIdOf(holeFeature) !== base.id) return null;
+    // Phase 52 chain composition: a hole feature whose FIRST parameter is
+    // the dimensionless type selector rides the structured form (the hole
+    // scene's dispatch rule); the flat five-parameter form stays
+    // byte-compatible. Both compose into the ONE chain request.
+    if (isStructuredHoleFeature(document, holeFeature)) {
+      const structured = structuredHoleCutInputOfFeature(document, holeFeature);
+      if (structured === null) return null;
+      holes.push({ featureId: holeFeature.id, ...structured });
+      continue;
+    }
     const hole = holeCutInputOfFeature(document, holeFeature);
     if (hole === null) return null;
     holes.push({ featureId: holeFeature.id, ...hole });

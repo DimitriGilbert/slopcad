@@ -779,6 +779,7 @@ export {
 } from "./radius";
 export type { PlacementRotation, PlacementTransform } from "./placement";
 export {
+  axisRotationTransform,
   composePlacementPath,
   composePlacementTransforms,
   IDENTITY_PLACEMENT_TRANSFORM,
@@ -807,3 +808,50 @@ export {
   resolveOccurrencePlacement,
   resolveOccurrencePlacementFromFrames,
 } from "./assembly";
+export type {
+  AssemblyExplodeError,
+  AssemblyExplodeErrorCode,
+  AssemblyExplodeInstance,
+  AssemblyExplodeOffset,
+  AssemblyExplodeState,
+} from "./assembly-explode";
+export {
+  applyExplodeState,
+  ASSEMBLY_EXPLODE_ERROR_CODES,
+  ASSEMBLY_EXPLODE_PATH_DEPTH_LIMIT,
+  parseExplodeState,
+  radialExplodeOffsets,
+  serializeExplodeState,
+} from "./assembly-explode";
+export type {
+  AssemblyMotionError,
+  AssemblyMotionErrorCode,
+  AssemblyMotionJoint,
+  AssemblyMotionJointKind,
+  MotionClearanceSample,
+  MotionProbeBounds,
+} from "./assembly-motion";
+export {
+  applyMotionJoint,
+  ASSEMBLY_MOTION_CAPABILITIES,
+  ASSEMBLY_MOTION_ERROR_CODES,
+  jointStationParameters,
+  motionDragDecline,
+  parseAssemblyMotionJoint,
+  probeMotionClearance,
+} from "./assembly-motion";
+export type {
+  AssemblyPatternError,
+  AssemblyPatternErrorCode,
+  PathOccurrencePatternInput,
+} from "./assembly-pattern";
+export {
+  ASSEMBLY_PATTERN_CAPABILITIES,
+  ASSEMBLY_PATTERN_ERROR_CODES,
+  OCCURRENCE_PATTERN_INSTANCE_LIMIT,
+  mirrorGeometryDecline,
+  resolveCircularOccurrencePattern,
+  resolveLinearOccurrencePattern,
+  resolveMirroredOccurrencePlacement,
+  resolvePathOccurrencePattern,
+} from "./assembly-pattern";

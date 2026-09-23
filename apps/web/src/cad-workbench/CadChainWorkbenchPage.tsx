@@ -98,14 +98,18 @@ import {
   valueIn,
 } from "@slopcad/cad-react";
 import {
+  angle,
   createBodyId,
+  createDatumId,
   createFeatureId,
   createParameterId,
   createSketchDocumentId,
   dimensionless,
   formatBoundsExtents,
   length,
+  parseDatumPayload,
 } from "@slopcad/cad-core";
+import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
 import { Redo2, Undo2 } from "lucide-react";
 import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
 import { Button } from "@slopcad/ui/components/button";
@@ -113,6 +117,12 @@ import { CadModelTree } from "@slopcad/ui/components/cad/cad-model-tree";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@slopcad/ui/components/dialog";
 import type { ChainScene } from "../worker-fixture/chain-scene";
 import type { ChainStageFailure } from "../worker-fixture/chain-scene";
 
@@ -128,6 +138,7 @@ import {
   type ChainFixtureSession,
 } from "../render-fixture/chain-fixture-session";
 import { extrudeSceneRequestOfFeature } from "./extrude";
+import { resolveSessionDatumAxis } from "./datum";
 import {
   defaultHolePosition,
   holeBaseFeatureOf,
@@ -136,7 +147,20 @@ import {
   HOLE_DEFAULT_DEPTH_MM,
   HOLE_DEFAULT_DIAMETER_MM,
   isStructuredHoleFeature,
+  sketchPointsResolverOf,
+  structuredHoleCutInputOfFeature,
 } from "./hole";
+import {
+  CAD_FEATURE_FORM_LABELS,
+  HoleFeatureForm,
+  type CadFeatureDatumOption,
+  type CadFeatureSketchOption,
+} from "./feature-forms";
+import {
+  STRUCTURED_HOLE_DEFAULTS,
+  validateStructuredHoleSubmission,
+  type StructuredHoleSubmission,
+} from "./hole-dialog";
 import {
   chainFilletInputOf,
   CHAIN_FILLET_DEFAULT_RADIUS_MM,
@@ -225,13 +249,19 @@ function structuralOutcome(
   }
   if (feature.kind === "hole") {
     if (holeCutInputOfFeature(document, feature) !== null) return { ok: true };
-    // The STRUCTURED hole (Phase 42's type-directed layout) never reads as
-    // five parameters, so the flat form's decline would misname it — it
-    // defers to the Phase 52 chain composition instead.
+    // The STRUCTURED hole (Phase 42's type-directed layout) composes into
+    // the chain since Phase 52: the same structured reader the hole scene
+    // uses decides resolvability, and the flat form's decline would
+    // misname a structured hole whose layout is intact.
+    if (isStructuredHoleFeature(document, feature)) {
+      return structuredHoleCutInputOfFeature(document, feature) !== null
+        ? { ok: true }
+        : unresolvable(
+            "the structured hole's spec, positions, or axis no longer resolves",
+          );
+    }
     return unresolvable(
-      isStructuredHoleFeature(document, feature)
-        ? "the structured hole defers to the Phase 52 chain composition (this page executes the flat five-parameter form)"
-        : "the target or one of the five hole parameters is gone",
+      "the target or one of the five hole parameters is gone",
     );
   }
   if (feature.kind === "fillet") {
@@ -659,6 +689,199 @@ function CadChainWorkbenchBody({
     setSelectedEdge(null);
   }, [applied, documentApi, holeBase, holeCount]);
 
+  // -- The structured hole dialog (Phase 52 chain composition): the hole
+  // scene's dispatch rule made TWO-WAY — a chain document can carry
+  // structured hole features (the type-directed layout, positions sketch,
+  // datum axis) authored here through the SAME Formedible form and the
+  // SAME role-commit transaction the workbench engine commits, so the
+  // chain composes straight, counterbore, countersink, taper, and
+  // threaded holes in one dispatch.
+  const [structuredHoleDialogOpen, setStructuredHoleDialogOpen] =
+    useState(false);
+  const [structuredHoleCount, setStructuredHoleCount] = useState(0);
+  const [structuredHoleOutcome, setStructuredHoleOutcome] = useState<
+    | { readonly ok: true }
+    | { readonly ok: false; readonly code: string; readonly message: string }
+    | null
+  >(null);
+
+  const chainSketchOptions: readonly CadFeatureSketchOption[] =
+    workbenchDocument.sketches.map((sketch) => ({
+      id: sketch.id,
+      name: sketch.name,
+    }));
+  const chainDatumAxisOptions: readonly CadFeatureDatumOption[] =
+    workbenchDocument.datums.flatMap((datum) => {
+      const payload = parseDatumPayload(datum.datum);
+      return payload.ok && payload.value.datumType === "axis"
+        ? [{ id: datum.id, name: datum.name }]
+        : [];
+    });
+
+  const handleChainStructuredHole = (
+    submission: StructuredHoleSubmission,
+  ): void => {
+    if (holeBase === undefined) return;
+    const validation = validateStructuredHoleSubmission(submission);
+    if (!validation.ok) {
+      setStructuredHoleOutcome(validation);
+      return;
+    }
+    const type = structuredHoleTypeOf(submission.spec.type);
+    if (type === null) {
+      setStructuredHoleOutcome({
+        ok: false,
+        code: "kernel/parameter-invalid",
+        message: "The hole type selector must be 1–5.",
+      });
+      return;
+    }
+    // The picked positions sketch must exist and carry at least one point —
+    // the resolver failure verbatim, before any commit.
+    if (submission.positionsSketchId !== null) {
+      const resolved = sketchPointsResolverOf(workbenchDocument)(
+        submission.positionsSketchId,
+      );
+      if (!resolved.ok) {
+        setStructuredHoleOutcome(resolved);
+        return;
+      }
+      if (resolved.points.length === 0) {
+        setStructuredHoleOutcome({
+          ok: false,
+          code: "kernel/feature-input-invalid",
+          message:
+            "The positions sketch carries no point entities; draw the hole centres as points (one feature, many holes) or use the parameter position.",
+        });
+        return;
+      }
+    }
+    // The picked datum axis must resolve in-session (never a silent
+    // world-axis fallback).
+    if (submission.datumAxisId !== null) {
+      const resolved = resolveSessionDatumAxis(
+        workbenchDocument,
+        submission.datumAxisId,
+      );
+      if (!resolved.ok) {
+        setStructuredHoleOutcome({
+          ok: false,
+          code: resolved.error.code,
+          message: resolved.error.message,
+        });
+        return;
+      }
+    }
+    const roles = structuredHoleRoles(type, {
+      sketchPositions: submission.positionsSketchId !== null,
+      datumAxis: submission.datumAxisId !== null,
+    });
+    const spec = { ...STRUCTURED_HOLE_DEFAULTS.spec, ...submission.spec };
+    const roleValueOf = (
+      role: string,
+    ):
+      | ReturnType<typeof length>
+      | ReturnType<typeof angle>
+      | ReturnType<typeof dimensionless> => {
+      switch (role) {
+        case "type":
+          return dimensionless(spec.type);
+        case "diameter":
+          return length(spec.diameterMm);
+        case "depth":
+          return length(spec.depthMm);
+        case "tipAngle":
+          return angle((spec.tipAngleDeg * Math.PI) / 180);
+        case "cboreDiameter":
+          return length(spec.cboreDiameterMm);
+        case "cboreDepth":
+          return length(spec.cboreDepthMm);
+        case "csinkDiameter":
+          return length(spec.csinkDiameterMm);
+        case "csinkAngle":
+          return angle((spec.csinkAngleDeg * Math.PI) / 180);
+        case "taperAngle":
+          return angle((spec.taperAngleDeg * Math.PI) / 180);
+        case "threadMajor":
+          return length(spec.threadMajorMm);
+        case "threadPitch":
+          return length(spec.threadPitchMm);
+        case "positionX":
+          return length(submission.positionXMm);
+        case "positionY":
+          return length(submission.positionYMm);
+        case "axis":
+          return dimensionless(submission.axis);
+        default:
+          throw new Error(`unknown structured hole role ${role}`);
+      }
+    };
+    const n = structuredHoleCount + 1;
+    const suffix = String(n);
+    const roleIds = roles.map((role) =>
+      createParameterId(`param_chain_shole_${role.name}${suffix}`),
+    );
+    const bodyId = createBodyId(`body_chain_shole${suffix}`);
+    const featureId = createFeatureId(`feat_chain_shole${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        ...roles.map((role, index) => {
+          const id = roleIds[index];
+          if (id === undefined) throw new Error("the role id list");
+          return {
+            type: "parameter.create" as const,
+            id,
+            name: `hole${role.name.charAt(0).toUpperCase()}${role.name.slice(1)}${suffix}`,
+            value: roleValueOf(role.name),
+          };
+        }),
+        {
+          type: "body.create" as const,
+          id: bodyId,
+          name: `holed ${String(n)}`,
+        },
+        {
+          type: "feature.create" as const,
+          id: featureId,
+          kind: "hole",
+          inputs: [
+            { kind: "feature", id: holeBase.id },
+            ...roleIds.map((id) => ({ kind: "parameter" as const, id })),
+            ...(submission.positionsSketchId !== null
+              ? [
+                  {
+                    kind: "sketch" as const,
+                    id: createSketchDocumentId(submission.positionsSketchId),
+                  },
+                ]
+              : []),
+            ...(submission.datumAxisId !== null
+              ? [
+                  {
+                    kind: "datum" as const,
+                    id: createDatumId(submission.datumAxisId),
+                  },
+                ]
+              : []),
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      setStructuredHoleOutcome({
+        ok: false,
+        code: "document/transaction-refused",
+        message: "The document refused the structured hole transaction.",
+      });
+      return;
+    }
+    setStructuredHoleCount(n);
+    setStructuredHoleOutcome(null);
+    setStructuredHoleDialogOpen(false);
+    setSelectedEdge(null);
+  };
+
   // The fillet action: commits the radius parameter, the picked snapshot
   // ordinal (a dimensionless parameter — the hole axis selector's
   // precedent), the body, and the fillet feature targeting the newest
@@ -960,6 +1183,26 @@ function CadChainWorkbenchBody({
           Hole
         </Button>
         <Button
+          data-testid="chain-hole-spec"
+          title={
+            holeBase === undefined
+              ? "Sketch and extrude a profile first — a hole cuts an existing solid."
+              : holeGuarded
+                ? "The chain rounds the newest solid stage — undo the fillet before cutting another hole."
+                : "Open the structured hole dialog: type, dimensions, thread spec, and positions — the chain composes it in the same dispatch."
+          }
+          disabled={holeBase === undefined || holeGuarded}
+          onClick={() => {
+            setStructuredHoleOutcome(null);
+            setStructuredHoleDialogOpen(true);
+          }}
+          size="xs"
+          type="button"
+          variant="outline"
+        >
+          Hole spec…
+        </Button>
+        <Button
           data-testid="chain-fillet"
           title={
             filletBase === undefined
@@ -1097,6 +1340,45 @@ function CadChainWorkbenchBody({
           <span id="chain-error" />
         </span>
       </div>
+      {/* The Phase 52 structured hole dialog: mounts ONLY WHEN OPEN — the
+          closed Base UI dialog renders nothing, so the route's SSR stays
+          clean (the feature dialog's discipline verbatim). */}
+      {structuredHoleDialogOpen ? (
+        <Dialog
+          onOpenChange={(open) => {
+            if (!open) {
+              setStructuredHoleDialogOpen(false);
+              setStructuredHoleOutcome(null);
+            }
+          }}
+          open
+        >
+          <DialogContent
+            className="sm:max-w-md"
+            data-testid="chain-hole-form-dialog"
+          >
+            <DialogHeader>
+              <DialogTitle>{CAD_FEATURE_FORM_LABELS.holeTitle}</DialogTitle>
+            </DialogHeader>
+            <p className="text-muted-foreground text-xs leading-snug">
+              {CAD_FEATURE_FORM_LABELS.holeHint}
+            </p>
+            {structuredHoleOutcome !== null && !structuredHoleOutcome.ok ? (
+              <p
+                className="text-destructive font-mono text-xs"
+                data-testid="chain-hole-form-error"
+              >
+                {structuredHoleOutcome.message}
+              </p>
+            ) : null}
+            <HoleFeatureForm
+              datumAxes={chainDatumAxisOptions}
+              onHole={handleChainStructuredHole}
+              sketches={chainSketchOptions}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
