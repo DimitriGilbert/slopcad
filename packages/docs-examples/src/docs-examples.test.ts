@@ -85,7 +85,7 @@ describe("guide example: history (transactions, undo, redo)", () => {
 describe("guide example: native format", () => {
   it("saves, reopens through the replaying parser, and resaves identically", () => {
     const summary = runNativeFormatExample();
-    expect(summary.formatVersion).toBe(3);
+    expect(summary.formatVersion).toBe(4);
     expect(summary.reopenedHoleMm).toBe(12);
     expect(summary.reopenedTransactionCount).toBe(3);
     expect(summary.validatorIssues).toBe(0);
