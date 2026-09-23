@@ -25,6 +25,7 @@ import { Route as WorkbenchAssemblyMotionRouteImport } from './routes/workbench-
 import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
 import { Route as WorkbenchCompleteRouteImport } from './routes/workbench-complete'
 import { Route as WorkbenchCompleteOcctRouteImport } from './routes/workbench-complete-occt'
+import { Route as WorkbenchDrawingRouteImport } from './routes/workbench-drawing'
 import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
@@ -116,6 +117,11 @@ const WorkbenchCompleteOcctRoute = WorkbenchCompleteOcctRouteImport.update({
   path: '/workbench-complete-occt',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkbenchDrawingRoute = WorkbenchDrawingRouteImport.update({
+  id: '/workbench-drawing',
+  path: '/workbench-drawing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkerRoute = WorkerRouteImport.update({
   id: '/worker',
   path: '/worker',
@@ -188,6 +194,7 @@ export interface FileRoutesByFullPath {
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
+  '/workbench-drawing': typeof WorkbenchDrawingRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -216,6 +223,7 @@ export interface FileRoutesByTo {
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
+  '/workbench-drawing': typeof WorkbenchDrawingRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -246,6 +254,7 @@ export interface FileRoutesById {
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
+  '/workbench-drawing': typeof WorkbenchDrawingRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
@@ -276,6 +285,7 @@ export interface FileRouteTypes {
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
+    | '/workbench-drawing'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -304,6 +314,7 @@ export interface FileRouteTypes {
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
+    | '/workbench-drawing'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -333,6 +344,7 @@ export interface FileRouteTypes {
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
+    | '/workbench-drawing'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
@@ -363,6 +375,7 @@ export interface RootRouteChildren {
   WorkbenchChainRoute: typeof WorkbenchChainRoute
   WorkbenchCompleteRoute: typeof WorkbenchCompleteRoute
   WorkbenchCompleteOcctRoute: typeof WorkbenchCompleteOcctRoute
+  WorkbenchDrawingRoute: typeof WorkbenchDrawingRoute
   WorkerRoute: typeof WorkerRoute
   WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
@@ -486,6 +499,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkbenchCompleteOcctRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workbench-drawing': {
+      id: '/workbench-drawing'
+      path: '/workbench-drawing'
+      fullPath: '/workbench-drawing'
+      preLoaderRoute: typeof WorkbenchDrawingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/worker': {
       id: '/worker'
       path: '/worker'
@@ -601,6 +621,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkbenchChainRoute: WorkbenchChainRoute,
   WorkbenchCompleteRoute: WorkbenchCompleteRoute,
   WorkbenchCompleteOcctRoute: WorkbenchCompleteOcctRoute,
+  WorkbenchDrawingRoute: WorkbenchDrawingRoute,
   WorkerRoute: WorkerRoute,
   WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,

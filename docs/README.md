@@ -26,6 +26,7 @@ This directory is the documentation home. Two rules govern it:
 | Rendering & interaction | [R3F](guides/r3f.md) · [selection](guides/selection.md) · [tools](guides/tools.md) · [UI components](guides/ui.md)                                                             |
 | Data exchange           | [native files](guides/native-files.md) · [STL/3MF/GLB](guides/mesh-exchange.md) · [STEP/IGES](guides/step-iges.md)                                                             |
 | Sketching               | [sketches](guides/sketches.md) · [constraints](guides/constraints.md)                                                                                                          |
+| Drawings                | [drawings](guides/drawings.md)                                                                                                                                                 |
 | Distribution            | [registry](guides/registry.md) · [reusable components](guides/components.md) · [custom tools](guides/custom-tools.md) · [custom kernel adapters](guides/custom-kernels.md)     |
 | Engineering             | [testing](guides/testing.md) · [package boundaries](guides/package-boundaries.md)                                                                                              |
 

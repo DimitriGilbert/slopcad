@@ -1,0 +1,84 @@
+# Drawings
+
+Phase 54 lays the drawings family' annotation layer: dimension and
+annotation entities, the parametric-source dimension recovery, sheet
+furniture (title block, revision table, templates), and a
+byte-deterministic SVG export preview. The drawing document model itself —
+sheet records, projected views, HLR — is the neighboring drawings phase;
+every entity here addresses its host view by `viewId`, so it merges into
+that host additively.
+
+## Dimension and annotation entities
+
+`@slopcad/cad-core`'s `drawing-annotations` module carries the data model:
+
+- **Dimensions** — `linear` (aligned/horizontal/vertical), `radial`,
+  `diameter`, and `angular`, each with sheet-space geometry (millimetres,
+  radians) and a `DrawingDimensionOrigin`: either a MODEL origin naming the
+  feature parameter or sketch constraint the value came from, or the
+  `reference` origin for dimensions authored on-view (presented in
+  parentheses).
+- **Annotations** — `note`, `leader`, `holeCallout` (diameter + depth),
+  `threadCallout` (ISO designation + depth), and `featureControlFrame`
+  (the pinned ISO 1101 characteristic subset — 14 characteristics, symbol
+  map in `GDNT_SYMBOLS`).
+
+Parse/serialize round-trips exactly (`parseDrawingDimension` /
+`serializeDrawingDimension` and the annotation pair, stable
+`drawing-annotations/*` failure codes, fixed key order — identical
+drawings serialize byte-identically). Entity ids are branded
+`drdim_<payload>` / `drann_<payload>` strings.
+
+## Parametric-source recovery
+
+Dimensions are RECOVERED, never re-typed:
+
+- `cad-core`'s `recoverFeatureDimensions` reads the documented parameter
+  layouts — an `extrude` feature's first length parameter is the depth, a
+  `fillet`'s is the radius — and derives each dimension's value from that
+  parameter through `valueIn(value, "mm")`. A depth authored as `2 cm`
+  recovers as a 20 mm dimension: the value is unit-converted from the same
+  parameter the geometry regenerates from.
+- `cad-sketch`'s `recoverSketchDimensions` parses each document sketch's
+  embedded payload and turns the Phase 36 dimensional constraints
+  (`distance`, `distanceX`, `distanceY`, `radius`, `diameter`, `angle`)
+  into drawing dimensions, one row per constraint, stacked above the view
+  frame.
+- The workbench's `drawing-sources.ts` composes both plus hole/thread
+  callouts read through the hole scene's own structured reader and the
+  thread layout, with designations from the kernel's pinned ISO metric
+  table (`M8`, `M8x0.75`, ...).
+
+Recovery is total and additive: a feature whose layout does not resolve is
+skipped — never fabricated.
+
+## Sheet furniture and templates
+
+`drawing-sheet.ts` pins the ISO 216 A-series table (A4–A0, portrait
+millimetres), the sheet setup (size, orientation, scale), the six-field
+title block, revision rows, and three pinned templates
+(`DRAWING_SHEET_TEMPLATES` — the template picker persists the id, never a
+copied record).
+
+`drawing-presentation.ts` presents everything as pure primitives (lines,
+rects, arcs, arrowheads, text) with fixed constants — the same
+`composeSheetPresentation` output feeds the live canvas and the exporter,
+so what the author sees is byte-for-byte what exports.
+
+## The export preview
+
+`drawing-svg.ts` serializes primitives to SVG deterministically: no clock,
+no randomness, no locale-sensitive formatting, fixed attribute order,
+numbers through `formatSvgNumber` (four decimals, trailing zeros trimmed).
+Re-exporting an unchanged sheet is byte-identical, and the workbench's
+machine surface (`#drawing-root` → `data-drawing-svg`) publishes the exact
+bytes for tests to assert against.
+
+## The workbench surface
+
+`/workbench-drawing` boots a deterministic seed document (rectangle
+sketch, 2 cm-deep extrude, 4 mm fillet, threaded M8 structured hole),
+recovers its dimensions, and authors reference dimensions, title block
+fields, and revision rows through Formedible dialogs (each mounts only
+when open — the route's SSR stays clean). No kernel session runs:
+recovery reads records, not geometry.

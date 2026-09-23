@@ -363,3 +363,9 @@ export type {
   WorkplanePlacement,
   WorkplanePlacementRotation,
 } from "./workplane-placement";
+
+export type { SketchDimensionRecoveryOptions } from "./drawing-dimension-source";
+export {
+  dimensionalConstraintIdsOf,
+  recoverSketchDimensions,
+} from "./drawing-dimension-source";
