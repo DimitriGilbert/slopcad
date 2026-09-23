@@ -201,6 +201,51 @@ export function placementTransformFromFrame(frame: {
 }
 
 /**
+ * The rigid transform of a rotation by `angleRad` (right-hand rule) about
+ * the axis line through `origin` along the UNIT `direction` — the pure
+ * algebra the circular component pattern, the mirror placement, and the
+ * motion joints share (one source; the callers resolve unit-ness). Pure
+ * arithmetic (Rodrigues' formula folded into the 3x3), bitwise-deterministic
+ * for identical inputs.
+ */
+export function axisRotationTransform(
+  origin: DatumVec3,
+  direction: DatumVec3,
+  angleRad: number,
+): PlacementTransform {
+  const [ux, uy, uz] = direction;
+  const c = Math.cos(angleRad);
+  const s = Math.sin(angleRad);
+  const t = 1 - c;
+  // R = I·c + (u×)·s + uuᵀ·t, row-major.
+  const rotation: PlacementRotation = [
+    c + ux * ux * t,
+    ux * uy * t - uz * s,
+    ux * uz * t + uy * s,
+    uy * ux * t + uz * s,
+    c + uy * uy * t,
+    uy * uz * t - ux * s,
+    uz * ux * t - uy * s,
+    uz * uy * t + ux * s,
+    c + uz * uz * t,
+  ];
+  const aboutOrigin: PlacementTransform = { rotation, translation: [0, 0, 0] };
+  const toOrigin: PlacementTransform = {
+    rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    translation: [-origin[0], -origin[1], -origin[2]],
+  };
+  const fromOrigin: PlacementTransform = {
+    rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+    translation: [origin[0], origin[1], origin[2]],
+  };
+  // T(origin) ∘ R ∘ T(−origin) — rotate about the LINE, not the origin point.
+  return composePlacementTransforms(
+    fromOrigin,
+    composePlacementTransforms(aboutOrigin, toOrigin),
+  );
+}
+
+/**
  * Validates untrusted input as a placement transform (the projection and
  * native-parse boundaries): nine finite rotation entries whose columns are
  * unit and whose determinant is +1 within {@link PLACEMENT_ORTHONORMAL_TOLERANCE},

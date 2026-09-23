@@ -81,3 +81,47 @@ the v3→v4 migration is the identity (content-additive — the datum
 precedent). BOM tables are Phase 53; mates and interference are Phase 51;
 patterns and exploded views are Phase 52 — all three address geometry
 through occurrence paths, the vocabulary this phase pins.
+
+## Patterns, mirror components, explode, motion (Phase 52)
+
+**Component patterns** resolve a seed placement into generated placements:
+`resolveLinearOccurrencePattern` (unit direction, count, spacing) and
+`resolveCircularOccurrencePattern` (datum axis line, count, angle step,
+right-hand rule) are pure arithmetic — the caller stamps the results as
+ordinary occurrences through `addOccurrence`, so the tree, resolution, and
+format never grow. A count ceiling (`OCCURRENCE_PATTERN_INSTANCE_LIMIT`,
+mirroring the hole position limit) keeps a stray count out of the renderer.
+**Path-driven patterns are declined** (`assembly/pattern-path-unsupported`,
+capability `ASSEMBLY_PATTERN_CAPABILITIES.pathDriven = false`): a resolved
+path-curve source along occurrences does not exist yet.
+
+**Mirror components** mirror the PLACEMENT only:
+`resolveMirroredOccurrencePlacement` reflects the seed's position across the
+datum plane and composes the orientation with the reflection through a local
+z-flip that keeps the transform rigid (det +1) — the instance sits at the
+mirrored spot with its handedness PRESERVED. Mirrored GEOMETRY (the
+enantiomorph a kernel mirror op would produce) is a structured decline
+(`assembly/mirror-geometry-unsupported`, capability
+`mirroredGeometry = false`) until a kernel binding is probed.
+
+**Exploded views** store an `AssemblyExplodeState`: explicit per-path
+offsets (unit direction + mm) plus an optional radial auto-explode rule;
+explicit entries win. `serializeExplodeState`/`parseExplodeState` is the
+deterministic round-trip (byte-identical canonical JSON). Playback is the
+scrub: `applyExplodeState` maps factor t ∈ [0, 1] (clamped, linear) to each
+instance's exploded transform — identical (state, t) frames are
+bitwise-identical, so the animation is parameter-driven by construction.
+
+**Motion basics** stage WITHOUT the Phase 51 mate solver. An
+`AssemblyMotionJoint` pins one occurrence to an axis (revolute degrees /
+slider millimetres) with hard limits; `applyMotionJoint` maps the parameter
+to the occurrence's local transform, clamping into the limits — the limit
+fixtures' subject. `probeMotionClearance` samples stations across the
+limits and measures the bounding-box distance between two occurrences — a
+CONSERVATIVE floor (positive proves clearance; non-positive flags the
+station for Phase 51's exact boolean interference check, which owns the
+exact verdict). Joint-driven DRAG is declined
+(`assembly/motion-drag-pending-mates`, capability `dragDriven = false`)
+until the mate solver's remaining-DOF propagation exists; the joint
+record's axis/limits vocabulary is deliberately the solver's shape, so the
+records compose when it lands.

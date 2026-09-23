@@ -20,6 +20,7 @@ import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkbenchAssemblyRouteImport } from './routes/workbench-assembly'
+import { Route as WorkbenchAssemblyMotionRouteImport } from './routes/workbench-assembly-motion'
 import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
 import { Route as WorkbenchCompleteRouteImport } from './routes/workbench-complete'
 import { Route as WorkbenchCompleteOcctRouteImport } from './routes/workbench-complete-occt'
@@ -87,6 +88,11 @@ const WorkbenchRoute = WorkbenchRouteImport.update({
 const WorkbenchAssemblyRoute = WorkbenchAssemblyRouteImport.update({
   id: '/workbench-assembly',
   path: '/workbench-assembly',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkbenchAssemblyMotionRoute = WorkbenchAssemblyMotionRouteImport.update({
+  id: '/workbench-assembly-motion',
+  path: '/workbench-assembly-motion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkbenchChainRoute = WorkbenchChainRouteImport.update({
@@ -171,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
+  '/workbench-assembly-motion': typeof WorkbenchAssemblyMotionRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
@@ -197,6 +204,7 @@ export interface FileRoutesByTo {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
+  '/workbench-assembly-motion': typeof WorkbenchAssemblyMotionRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
@@ -225,6 +233,7 @@ export interface FileRoutesById {
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
+  '/workbench-assembly-motion': typeof WorkbenchAssemblyMotionRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
@@ -253,6 +262,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/workbench-assembly'
+    | '/workbench-assembly-motion'
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
@@ -279,6 +289,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/workbench-assembly'
+    | '/workbench-assembly-motion'
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
@@ -306,6 +317,7 @@ export interface FileRouteTypes {
     | '/ui-viewport'
     | '/workbench'
     | '/workbench-assembly'
+    | '/workbench-assembly-motion'
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
@@ -334,6 +346,7 @@ export interface RootRouteChildren {
   UiViewportRoute: typeof UiViewportRoute
   WorkbenchRoute: typeof WorkbenchRoute
   WorkbenchAssemblyRoute: typeof WorkbenchAssemblyRoute
+  WorkbenchAssemblyMotionRoute: typeof WorkbenchAssemblyMotionRoute
   WorkbenchChainRoute: typeof WorkbenchChainRoute
   WorkbenchCompleteRoute: typeof WorkbenchCompleteRoute
   WorkbenchCompleteOcctRoute: typeof WorkbenchCompleteOcctRoute
@@ -423,6 +436,13 @@ declare module '@tanstack/react-router' {
       path: '/workbench-assembly'
       fullPath: '/workbench-assembly'
       preLoaderRoute: typeof WorkbenchAssemblyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workbench-assembly-motion': {
+      id: '/workbench-assembly-motion'
+      path: '/workbench-assembly-motion'
+      fullPath: '/workbench-assembly-motion'
+      preLoaderRoute: typeof WorkbenchAssemblyMotionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workbench-chain': {
@@ -556,6 +576,7 @@ const rootRouteChildren: RootRouteChildren = {
   UiViewportRoute: UiViewportRoute,
   WorkbenchRoute: WorkbenchRoute,
   WorkbenchAssemblyRoute: WorkbenchAssemblyRoute,
+  WorkbenchAssemblyMotionRoute: WorkbenchAssemblyMotionRoute,
   WorkbenchChainRoute: WorkbenchChainRoute,
   WorkbenchCompleteRoute: WorkbenchCompleteRoute,
   WorkbenchCompleteOcctRoute: WorkbenchCompleteOcctRoute,

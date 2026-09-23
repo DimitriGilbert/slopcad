@@ -54,20 +54,31 @@ import type { FeatureId, TopologySnapshot } from "@slopcad/cad-core";
 import {
   KERNEL_ERROR_CODES,
   planHoleCut,
+  planStructuredHoleCut,
+  structuredHoleDatumInPlaneAxes,
+  structuredHoleWorldInPlaneAxes,
   WorkerRequestFailure,
 } from "@slopcad/cad-kernel";
 import type { ComputationContext, WorkerSolidId } from "@slopcad/cad-kernel";
+import type { HoleSceneEntry } from "../cad-workbench/hole";
 import type { PlateMeasurement } from "./plate-scene";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
 
-/** One hole's five numbers plus the feature id failures attribute to. */
-export interface ChainHoleRequest {
+/**
+ * One hole plus the feature id failures attribute to (Phase 52 chain
+ * composition): the flat five-parameter form or the structured type-directed
+ * entry — the same {@link HoleSceneEntry} vocabulary the hole scene carries,
+ * so both forms compose into ONE chain dispatch.
+ */
+export type ChainHoleRequest = {
   readonly featureId: FeatureId;
-  readonly diameterMm: number;
-  readonly depthMm: number;
-  readonly positionXMm: number;
-  readonly positionYMm: number;
-  readonly axis: 1 | 2 | 3;
+} & HoleSceneEntry;
+
+/** The no-op miss message's description of one hole entry. */
+function chainHoleDescription(hole: ChainHoleRequest): string {
+  return "kind" in hole
+    ? `a type-${String(hole.spec.type)} hole at ${String(hole.positions.length)} position(s)`
+    : `Ø${String(hole.diameterMm)} × ${String(hole.depthMm)} mm at in-plane (${String(hole.positionXMm)}, ${String(hole.positionYMm)})`;
 }
 
 /** One fillet's edge address, radius, and feature id (failure attribution). */
@@ -243,6 +254,58 @@ export async function computeChainScene(
       });
       const tools: { readonly solid: WorkerSolidId }[] = [];
       for (const hole of request.holes) {
+        if ("kind" in hole) {
+          // The structured form (Phase 52 chain composition): the shared
+          // planner's revolved meridian per position (+ the threaded type's
+          // ridge sweep), the hole scene's own axis/basis resolution — the
+          // identical cut document regeneration composes.
+          const axisDirection: readonly [number, number, number] =
+            hole.datumAxis?.direction ??
+            (hole.axis === 1
+              ? ([1, 0, 0] as const)
+              : hole.axis === 2
+                ? ([0, 1, 0] as const)
+                : ([0, 0, 1] as const));
+          const basis = hole.datumAxis
+            ? structuredHoleDatumInPlaneAxes(axisDirection)
+            : structuredHoleWorldInPlaneAxes(
+                hole.axis === 1 ? 1 : hole.axis === 2 ? 2 : 3,
+              );
+          const planned = planStructuredHoleCut({
+            spec: hole.spec,
+            positions: hole.positions.map((position) => ({
+              u: position.x,
+              v: position.y,
+            })),
+            axisDirection,
+            inPlaneU: basis.u,
+            inPlaneV: basis.v,
+            bounds: measured.bounds,
+          });
+          if (!planned.ok) {
+            throw new Error(
+              `hole/specification-invalid: ${planned.problem.message}`,
+            );
+          }
+          for (const position of planned.plan.positions) {
+            const tool = await context.request("solid.revolve", {
+              loop: position.revolveTool.loop,
+              axis: position.revolveTool.axis,
+              angle: position.revolveTool.angle,
+              placement: position.revolveTool.placement,
+            });
+            tools.push(tool);
+            if (position.threadTool !== undefined) {
+              const thread = await context.request("solid.helixSweep", {
+                loop: position.threadTool.loop,
+                spine: position.threadTool.spine,
+                placement: position.threadTool.placement,
+              });
+              tools.push(thread);
+            }
+          }
+          continue;
+        }
         const plan = planHoleCut({
           diameterMm: hole.diameterMm,
           depthMm: hole.depthMm,
@@ -282,7 +345,7 @@ export async function computeChainScene(
       );
       if (cutVolume.volume >= baseVolume.volume - epsilon) {
         throw new Error(
-          `The hole removed no material: Ø${String(lastHole.diameterMm)} × ${String(lastHole.depthMm)} mm at in-plane (${String(lastHole.positionXMm)}, ${String(lastHole.positionYMm)}) misses the solid (bounds [${measured.bounds.min.join(", ")}] → [${measured.bounds.max.join(", ")}]). Move holeX/holeY onto the solid or grow the diameter — the subtract would otherwise silently return it unchanged.`,
+          `The hole removed no material: ${chainHoleDescription(lastHole)} misses the solid (bounds [${measured.bounds.min.join(", ")}] → [${measured.bounds.max.join(", ")}]). Move holeX/holeY onto the solid or grow the diameter — the subtract would otherwise silently return it unchanged.`,
         );
       }
       holed = await measure(context, cut.solid);

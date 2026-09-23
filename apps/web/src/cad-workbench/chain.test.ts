@@ -504,6 +504,105 @@ describe("documentChainSceneRequest", () => {
     expect(derived?.request.fillets).toEqual([]);
   });
 
+  it("composes a STRUCTURED hole beside the flat one (the Phase 52 chain composition)", () => {
+    // The structured straight hole: type selector first (the dispatch
+    // rule), the straight type's roles in declared order — a flat-tip
+    // (180°) Ø8×4 blind hole at the same position, so the analytic delta
+    // matches the flat fixture's.
+    const sType = createParameterId("param_shole_type");
+    const sDiameter = createParameterId("param_shole_diameter");
+    const sDepth = createParameterId("param_shole_depth");
+    const sTip = createParameterId("param_shole_tipAngle");
+    const sX = createParameterId("param_shole_positionX");
+    const sY = createParameterId("param_shole_positionY");
+    const sAxis = createParameterId("param_shole_axis");
+    const sBody = createBodyId("body_sholed");
+    const sFeature = createFeatureId("feat_shole");
+    // The pre-fillet document: the structured hole becomes the newest
+    // solid stage, so a fillet targeting the flat hole would refuse the
+    // chain (the retarget guard), which is not this test's subject.
+    let document = buildDocument(null);
+    const structuredParameters: readonly (readonly [
+      ParameterIdLike,
+      string,
+      AnyDimensionalValue,
+    ])[] = [
+      [sType, "holeType", dimensionless(1)],
+      [sDiameter, "holeDiameter2", length(HOLE_DEFAULT_DIAMETER_MM)],
+      [sDepth, "holeDepth2", length(HOLE_DEFAULT_DEPTH_MM)],
+      [sTip, "holeTipAngle", angle(Math.PI)],
+      [sX, "holeX2", length(20)],
+      [sY, "holeY2", length(17.5)],
+      [sAxis, "holeAxis2", dimensionless(3)],
+    ];
+    for (const [id, name, value] of structuredParameters) {
+      const parameter = addDocumentParameter(document, { id, name, value });
+      if (!parameter.ok) throw new Error(parameter.error.message);
+      document = parameter.value.document;
+    }
+    const addedBody = addBody(document, { id: sBody, name: "sholed" });
+    if (!addedBody.ok) throw new Error(addedBody.error.message);
+    document = addedBody.value.document;
+    const addedFeature = addFeature(document, {
+      id: sFeature,
+      kind: "hole",
+      inputs: [
+        { kind: "feature", id: EXTRUDE },
+        { kind: "parameter", id: sType },
+        { kind: "parameter", id: sDiameter },
+        { kind: "parameter", id: sDepth },
+        { kind: "parameter", id: sTip },
+        { kind: "parameter", id: sX },
+        { kind: "parameter", id: sY },
+        { kind: "parameter", id: sAxis },
+      ],
+      outputs: [sBody],
+    });
+    if (!addedFeature.ok) throw new Error(addedFeature.error.message);
+    document = addedFeature.value.document;
+
+    const derived = documentChainSceneRequest(document);
+    expect(derived).not.toBeNull();
+    expect(derived?.bodyId).toBe(sBody);
+    expect(derived?.request.holes).toHaveLength(2);
+    const structured = derived?.request.holes[1];
+    expect("kind" in (structured ?? {})).toBe(true);
+    if (structured === undefined || !("kind" in structured)) return;
+    expect(structured.featureId).toBe(sFeature);
+    expect(structured.spec.type).toBe(1);
+    expect(structured.spec.diameterMm).toBe(HOLE_DEFAULT_DIAMETER_MM);
+    expect(structured.spec.depthMm).toBe(HOLE_DEFAULT_DEPTH_MM);
+    expect(structured.spec.tipAngleDeg).toBe(180);
+    expect(structured.positions).toEqual([{ x: 20, y: 17.5 }]);
+    expect(structured.axis).toBe(3);
+  });
+
+  it("declines the chain when a structured hole's layout is malformed", () => {
+    // A hole whose first parameter is dimensionless (structured dispatch)
+    // but whose role count does not match any type's schema.
+    const badType = createParameterId("param_badhole_type");
+    let document = buildDocument(null);
+    const parameter = addDocumentParameter(document, {
+      id: badType,
+      name: "holeTypeBad",
+      value: dimensionless(1),
+    });
+    if (!parameter.ok) throw new Error(parameter.error.message);
+    document = parameter.value.document;
+    const featured = addFeature(document, {
+      id: createFeatureId("feat_badhole"),
+      kind: "hole",
+      inputs: [
+        { kind: "feature", id: EXTRUDE },
+        { kind: "parameter", id: badType },
+      ],
+      outputs: [HOLE_BODY],
+    });
+    if (!featured.ok) throw new Error(featured.error.message);
+    document = featured.value.document;
+    expect(documentChainSceneRequest(document)).toBeNull();
+  });
+
   it("carries an extrude depth parameter.set into the request (the cascade)", () => {
     const document = buildDocument();
     const set = applyCommand(document, {
@@ -796,5 +895,41 @@ describe("computeChainScene against the real OpenCascade kernel", () => {
       featureId: FILLET,
       kernelCode: "kernel/fillet-failed",
     });
+  }, 180_000);
+
+  it("cuts a STRUCTURED hole in the same chain dispatch at the analytic volume", async () => {
+    // A flat-tip (180°) straight Ø8×4 structured hole at the flat fixture's
+    // position: the analytic removed volume is IDENTICAL to the flat
+    // form's — the two forms compose the same cut.
+    const structuredRequest: ChainSceneRequest = {
+      ...preFilletRequest,
+      holes: [
+        {
+          featureId: HOLE,
+          kind: "structured",
+          spec: {
+            type: 1,
+            diameterMm: HOLE_DEFAULT_DIAMETER_MM,
+            depthMm: HOLE_DEFAULT_DEPTH_MM,
+            tipAngleDeg: 180,
+            cboreDiameterMm: 0,
+            cboreDepthMm: 0,
+            csinkDiameterMm: 0,
+            csinkAngleDeg: 0,
+            taperAngleDeg: 0,
+            threadMajorMm: 0,
+            threadPitchMm: 0,
+          },
+          positions: [{ x: 20, y: 17.5 }],
+          axis: 3,
+        },
+      ],
+    };
+    const scene = await runChain(structuredRequest);
+    expect(scene.holed).not.toBeNull();
+    const holed = scene.holed?.volume ?? 0;
+    expect(Math.abs(holed - HOLED_VOLUME) / HOLED_VOLUME).toBeLessThan(
+      EXACT_BAND,
+    );
   }, 180_000);
 });
