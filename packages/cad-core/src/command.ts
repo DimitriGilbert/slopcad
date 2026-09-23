@@ -98,6 +98,11 @@ import {
 } from "./ids";
 import { type SerializedCurve, parseSerializedCurve } from "./curve";
 import { type ParameterError, updateParameterValue } from "./parameter";
+import {
+  type Appearance,
+  type FaceAppearanceOverride,
+  parseAppearance,
+} from "./appearance";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
@@ -173,6 +178,10 @@ export type CadCommand =
       readonly name?: string;
       readonly visible?: boolean;
       readonly isolated?: boolean;
+      /** Phase 59: assign an appearance record; `null` clears it. */
+      readonly appearance?: Appearance | null;
+      /** Phase 59: replace the face overrides; `null` clears them. */
+      readonly faceAppearances?: readonly FaceAppearanceOverride[] | null;
     }
   | {
       readonly type: "sketch.create";
@@ -338,6 +347,12 @@ export function applyCommand(
         ...(command.isolated === undefined
           ? {}
           : { isolated: command.isolated }),
+        ...(command.appearance === undefined
+          ? {}
+          : { appearance: command.appearance }),
+        ...(command.faceAppearances === undefined
+          ? {}
+          : { faceAppearances: command.faceAppearances }),
       });
       if (!updated.ok) return updated;
       return ok(updated.value);
@@ -472,6 +487,10 @@ export type SerializedCadCommand =
       readonly name?: string;
       readonly visible?: boolean;
       readonly isolated?: boolean;
+      /** Phase 59: assign an appearance record; `null` clears it. */
+      readonly appearance?: Appearance | null;
+      /** Phase 59: replace the face overrides; `null` clears them. */
+      readonly faceAppearances?: readonly FaceAppearanceOverride[] | null;
     }
   | {
       readonly formatVersion: number;
@@ -629,6 +648,12 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
         ...(command.isolated === undefined
           ? {}
           : { isolated: command.isolated }),
+        ...(command.appearance === undefined
+          ? {}
+          : { appearance: command.appearance }),
+        ...(command.faceAppearances === undefined
+          ? {}
+          : { faceAppearances: command.faceAppearances }),
       };
     case "sketch.create":
       return command.id === undefined
@@ -1050,12 +1075,14 @@ export function parseCommand(
       if (
         input.name === undefined &&
         input.visible === undefined &&
-        input.isolated === undefined
+        input.isolated === undefined &&
+        input.appearance === undefined &&
+        input.faceAppearances === undefined
       ) {
         return fail(
           commandError(
             COMMAND_ERROR_CODES.malformed,
-            "A body.update command needs at least one of a name, a visible flag, or an isolated flag.",
+            "A body.update command needs at least one of a name, a visible flag, an isolated flag, an appearance record, or face appearance overrides.",
             input,
           ),
         );
@@ -1090,6 +1117,79 @@ export function parseCommand(
           ),
         );
       }
+      // The appearance fields (Phase 59): an appearance record or an
+      // explicit `null` (clear), validated through the appearance module's
+      // gate; the executor re-validates through the document boundary.
+      let appearance: Appearance | null | undefined;
+      if (input.appearance !== undefined) {
+        if (input.appearance === null) {
+          appearance = null;
+        } else {
+          const parsed = parseAppearance(input.appearance);
+          if (!parsed.ok) {
+            return fail(
+              commandError(
+                COMMAND_ERROR_CODES.malformed,
+                `A body.update command's appearance record is invalid: ${parsed.error.message}`,
+                input.appearance,
+              ),
+            );
+          }
+          appearance = parsed.value;
+        }
+      }
+      let faceAppearances: readonly FaceAppearanceOverride[] | null | undefined;
+      if (input.faceAppearances !== undefined) {
+        if (input.faceAppearances === null) {
+          faceAppearances = null;
+        } else {
+          if (!Array.isArray(input.faceAppearances)) {
+            return fail(
+              commandError(
+                COMMAND_ERROR_CODES.malformed,
+                "A body.update command's faceAppearances must be an array or null when present.",
+                input.faceAppearances,
+              ),
+            );
+          }
+          const overrides: FaceAppearanceOverride[] = [];
+          for (const entry of input.faceAppearances) {
+            if (
+              typeof entry !== "object" ||
+              entry === null ||
+              typeof (entry as Record<string, unknown>).face !== "number" ||
+              !Number.isInteger((entry as Record<string, unknown>).face)
+            ) {
+              return fail(
+                commandError(
+                  COMMAND_ERROR_CODES.malformed,
+                  "A face appearance override must carry an integer face index and an appearance.",
+                  entry,
+                ),
+              );
+            }
+            const parsed = parseAppearance(
+              (entry as Record<string, unknown>).appearance,
+            );
+            if (!parsed.ok) {
+              return fail(
+                commandError(
+                  COMMAND_ERROR_CODES.malformed,
+                  `A face appearance override's appearance is invalid: ${parsed.error.message}`,
+                  entry,
+                ),
+              );
+            }
+            overrides.push(
+              Object.freeze({
+                face: (entry as Record<string, unknown>).face as number,
+                appearance: parsed.value,
+              }),
+            );
+          }
+          faceAppearances = Object.freeze(overrides);
+        }
+      }
       return ok(
         Object.freeze({
           type,
@@ -1097,6 +1197,8 @@ export function parseCommand(
           ...(input.name === undefined ? {} : { name: input.name }),
           ...(input.visible === undefined ? {} : { visible: input.visible }),
           ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
+          ...(appearance === undefined ? {} : { appearance }),
+          ...(faceAppearances === undefined ? {} : { faceAppearances }),
         }),
       );
     }

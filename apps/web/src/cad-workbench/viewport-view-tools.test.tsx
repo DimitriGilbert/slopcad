@@ -61,6 +61,8 @@ function Harness(
     currentCamera: SPEC_CAMERA,
     onConvention: vi.fn(),
     onDisplayMode: vi.fn(),
+    onLightRig: vi.fn(),
+    onRenderQuality: vi.fn(),
     onUserCamera: vi.fn(),
     projection: PROJECTION,
     selection: [],

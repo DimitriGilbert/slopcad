@@ -23,6 +23,7 @@ import {
   type SettleLedger,
   SettleProbe,
 } from "./cad-scene";
+import { CAD_QUALITY_SHADOW_GROUND_OPACITY } from "./render-quality";
 import {
   FOLDED_SHEET_SHARED,
   makeObject,
@@ -37,9 +38,11 @@ const fiber = vi.hoisted(() => {
     invalidate: (): void => {},
   };
   const frames: Array<() => void> = [];
+  const framePriorities: number[] = [];
   return {
     state,
     frames,
+    framePriorities,
     runFrames: (): void => {
       for (const frame of [...frames]) {
         frame();
@@ -52,8 +55,9 @@ vi.mock("@react-three/fiber", () => ({
   Canvas: (props: { children?: ReactNode }) => (
     <div data-testid="canvas-stub">{props.children}</div>
   ),
-  useFrame: (callback: () => void): void => {
+  useFrame: (callback: () => void, priority?: number): void => {
     fiber.frames.push(callback);
+    fiber.framePriorities.push(priority ?? 0);
   },
   useThree: <T,>(selector: (state: typeof fiber.state) => T): T =>
     selector(fiber.state),
@@ -244,5 +248,54 @@ describe("CadScene settle wiring", () => {
     );
     fiber.runFrames();
     expect(onSettled).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("CadScene quality-mode render gate (Phase 59)", () => {
+  // The quality post-processor is mounted ONLY behind the renderQuality
+  // gate. A priority-1 useFrame takes the frame away from R3F's auto-render
+  // even when its body is a no-op — an ALWAYS-mounted processor would blank
+  // every standard-mode canvas (the pinned baselines' bytes). The mocked
+  // fiber records each subscription's priority, so the gate class is
+  // asserted at the unit level: standard mode registers no priority-1
+  // subscriber and mounts no quality-only scene nodes; only quality mode
+  // does (the shadow-catcher plane is the DOM-observable quality node —
+  // boolean props like castShadow do not surface on these host elements).
+  it("standard mode: no priority-1 frame subscriber and no quality-only nodes", () => {
+    const view = render(<CadScene projection={PROJECTION} />);
+    expect(
+      fiber.framePriorities.filter((priority) => priority === 1),
+    ).toHaveLength(0);
+    expect(view.container.querySelector("shadowmaterial")).toBeNull();
+    view.unmount();
+  });
+
+  it("quality mode: the processor mounts (priority-1) with the shadow catcher", () => {
+    const view = render(
+      <CadScene projection={PROJECTION} renderQuality="quality" />,
+    );
+    expect(
+      fiber.framePriorities.filter((priority) => priority === 1).length,
+    ).toBeGreaterThanOrEqual(1);
+    const catcher = view.container.querySelector("shadowmaterial");
+    expect(catcher).not.toBeNull();
+    expect(catcher?.getAttribute("opacity")).toBe(
+      String(CAD_QUALITY_SHADOW_GROUND_OPACITY),
+    );
+    view.unmount();
+  });
+
+  it("toggling quality off unmounts the gate's nodes and registers no new priority-1 frame", () => {
+    const view = render(
+      <CadScene projection={PROJECTION} renderQuality="quality" />,
+    );
+    expect(view.container.querySelector("shadowmaterial")).not.toBeNull();
+    const before = fiber.framePriorities.length;
+    view.rerender(<CadScene projection={PROJECTION} />);
+    // The mocked useFrame re-registers on every render of a live subscriber,
+    // so a permanently-mounted processor would re-register priority 1 here.
+    expect(fiber.framePriorities.slice(before).includes(1)).toBe(false);
+    expect(view.container.querySelector("shadowmaterial")).toBeNull();
+    view.unmount();
   });
 });

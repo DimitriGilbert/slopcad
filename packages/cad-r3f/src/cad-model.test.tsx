@@ -13,11 +13,14 @@ import * as THREE from "three";
 import { Plane, MeshStandardMaterial } from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  APPEARANCE_LIBRARY,
   createBodyId,
   createOccurrenceId,
   projectPlacedInstance,
+  withBodyAppearances,
 } from "@slopcad/cad-core";
 import type {
+  FaceAppearanceOverride,
   RenderObject,
   RenderObjectId,
   RenderProjection,
@@ -495,5 +498,92 @@ describe("CadModel section clipping material law (Phase 46)", () => {
     // path would introduce — that divergence goes red here).
     expect(serializable(emptyDefined)).toEqual(serializable(absent));
     expect(emptyDefined.version).toBe(absent.version);
+  });
+});
+
+describe("CadModel face-appearance overrides (Phase 59)", () => {
+  // The face index of an override is SNAPSHOT-SCOPED: it addresses one
+  // synthetic face of the body's CURRENT topology snapshot. An index that
+  // falls outside the snapshot (stale after a regeneration that removed or
+  // reordered faces) must render NOTHING — never remap onto an arbitrary
+  // neighbor. The observable in jsdom (no R3F reconciler; drawn pixels are
+  // the browser evidence) is the second-pass overlay mesh: renderOrder 1,
+  // its own meshStandardMaterial carrying the override's color.
+  const BRASS = APPEARANCE_LIBRARY[1]?.appearance;
+  if (BRASS === undefined) throw new Error("the library is never empty");
+
+  const override = (face: number): readonly FaceAppearanceOverride[] => [
+    { face, appearance: { ...BRASS } },
+  ];
+
+  function projectionWithFaceOverrides(
+    faceAppearances: readonly FaceAppearanceOverride[],
+    object: RenderObject = PLATE,
+  ): RenderProjection {
+    return withBodyAppearances(makeProjection([object, BLOCK]), [
+      { id: createBodyId("body_plate"), name: "plate", faceAppearances },
+    ]);
+  }
+
+  function faceOverlayOf(container: HTMLElement): Element | null {
+    return (
+      [...container.querySelectorAll('mesh[renderorder="1"]')].find(
+        (mesh) => mesh.querySelector("meshstandardmaterial") !== null,
+      ) ?? null
+    );
+  }
+
+  it("renders a second-pass overlay for an in-range face override", () => {
+    const view = render(
+      <CadModel projection={projectionWithFaceOverrides(override(0))} />,
+    );
+    // Two base meshes plus the face-0 overlay.
+    expect(view.container.querySelectorAll("mesh").length).toBe(3);
+    const overlay = faceOverlayOf(view.container);
+    expect(overlay).not.toBeNull();
+    const material = overlay?.querySelector("meshstandardmaterial");
+    expect(material?.getAttribute("color")).toBe(BRASS.baseColor);
+    // The base plate mesh keeps the body-level default (no record).
+    const baseMaterials = [
+      ...view.container.querySelectorAll("meshstandardmaterial"),
+    ].filter(
+      (material) =>
+        material.closest("mesh")?.getAttribute("renderorder") === null,
+    );
+    const defaults = baseMaterials.filter(
+      (material) => material.getAttribute("color") === "#aabdd6",
+    );
+    expect(defaults.length).toBe(2);
+  });
+
+  it("renders NOTHING for an out-of-range stale face index (99)", () => {
+    const view = render(
+      <CadModel projection={projectionWithFaceOverrides(override(99))} />,
+    );
+    // Only the two base meshes — no overlay of any kind.
+    expect(view.container.querySelectorAll("mesh").length).toBe(2);
+    expect(faceOverlayOf(view.container)).toBeNull();
+    expect(view.container.querySelector('mesh[renderorder="1"]')).toBeNull();
+  });
+
+  it("renders nothing after an edit removes the overridden face", () => {
+    // Face 1 exists in the two-face fold; the same body re-tessellated to a
+    // single triangle has one synthetic face, so the carried override goes
+    // stale and the overlay must disappear on the update commit.
+    const singleTriangle = makeObject("plate", {
+      positions: [0, 0, 0, 1, 0, 0, 1, 1, 0],
+      indices: [0, 1, 2],
+    });
+    const view = render(
+      <CadModel projection={projectionWithFaceOverrides(override(1))} />,
+    );
+    expect(faceOverlayOf(view.container)).not.toBeNull();
+    view.rerender(
+      <CadModel
+        projection={projectionWithFaceOverrides(override(1), singleTriangle)}
+      />,
+    );
+    expect(view.container.querySelectorAll("mesh").length).toBe(2);
+    expect(faceOverlayOf(view.container)).toBeNull();
   });
 });

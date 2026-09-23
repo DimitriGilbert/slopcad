@@ -65,7 +65,9 @@ import {
   createConfigurationId,
   formatBoundsExtents,
   parseDatumPayload,
+  withBodyAppearances,
 } from "@slopcad/cad-core";
+import { lightRigById } from "@slopcad/cad-r3f";
 import {
   Command,
   Download,
@@ -105,7 +107,11 @@ import { CadPropertyPanel } from "@slopcad/ui/components/cad/cad-property-panel"
 import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
-import type { DatumId, RenderProjection } from "@slopcad/cad-core";
+import type {
+  DatumId,
+  RenderCamera,
+  RenderProjection,
+} from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CurveAuthoring } from "./curves";
 import type { LoftSectionChoice } from "./loft";
@@ -151,9 +157,19 @@ import {
   createViewportViewSession,
   sessionWithConvention,
   sessionWithDisplayMode,
+  sessionWithLightRig,
+  sessionWithRenderQuality,
   sessionWithUserCamera,
   type ViewportViewSession,
 } from "./viewport-view";
+import {
+  captureViewportPng,
+  downloadBlob,
+  isometricSeriesCameras,
+  SERIES_DOWNLOAD_SPACING_MS,
+  turntableCameras,
+  waitForRenderedFrame,
+} from "./snapshot-export";
 import { CadViewportViewTools } from "./viewport-view-tools";
 import {
   FeatureTimelineChips,
@@ -360,6 +376,7 @@ export function CompleteCadWorkbench({
     handleSplit,
     handleBoolean,
     handleMoveBody,
+    handleBodyAppearance,
     handleBodyRename,
     handleBodyVisibility,
     handleBodyIsolate,
@@ -471,6 +488,15 @@ export function CompleteCadWorkbench({
     },
     [],
   );
+  const handleViewLightRig = useCallback((rigId: string) => {
+    setViewSession((session) => sessionWithLightRig(session, rigId));
+  }, []);
+  const handleViewRenderQuality = useCallback(
+    (quality: ViewportViewSession["renderQuality"]) => {
+      setViewSession((session) => sessionWithRenderQuality(session, quality));
+    },
+    [],
+  );
   // A scrimmed overlay answers Escape: an open drawer closes on the key at
   // window level — unless a tool is live, because the viewport's documented
   // Escape surface (cancel the armed tool) owns the key first.
@@ -526,8 +552,94 @@ export function CompleteCadWorkbench({
   );
 
   const showingPreview = ioSurface.preview !== null;
+  // The Phase 59 appearance resolution: the document's body records ride
+  // their display data onto the applied projection at the host seam —
+  // pure data, identity fast path when no record exists (the boot state's
+  // bytes and memoization stay untouched).
+  const appearedProjection = useMemo(
+    () =>
+      applied === null
+        ? null
+        : withBodyAppearances(
+            applied.state.projection,
+            engine.documentApi.document.bodies,
+          ),
+    [applied, engine],
+  );
   const documentVolumeText =
     applied === null ? null : applied.state.measurement.volume.toFixed(3);
+  // The Phase 59 snapshot exports: the PNG snapshot captures the settled
+  // canvas directly; the series drive each camera through the session
+  // overlay (a user command's writes, restored afterwards), capture one
+  // frame-verified shot per step, and restore the previous overlay.
+  const viewportCanvas = useCallback(
+    (): HTMLCanvasElement | null =>
+      document.querySelector<HTMLCanvasElement>(
+        "#workbench-complete-viewport canvas",
+      ),
+    [],
+  );
+  const exportSnapshotPng = useCallback(async (): Promise<void> => {
+    const canvas = viewportCanvas();
+    if (canvas === null) return;
+    const blob = await captureViewportPng(canvas);
+    if (blob !== null) downloadBlob(blob, "slopcad-snapshot.png");
+  }, [viewportCanvas]);
+  const exportCameraSeries = useCallback(
+    async (cameras: readonly RenderCamera[], prefix: string): Promise<void> => {
+      const framesAtStart = engine.renderedFrames;
+      const previous = viewSession.userCamera;
+      const shots: { readonly blob: Blob; readonly name: string }[] = [];
+      for (const [index, camera] of cameras.entries()) {
+        handleViewUserCamera(camera);
+        await waitForRenderedFrame(rootId, framesAtStart + index + 1);
+        const canvas = viewportCanvas();
+        if (canvas === null) continue;
+        const blob = await captureViewportPng(canvas);
+        if (blob !== null) {
+          shots.push({ blob, name: `${prefix}-${String(index)}.png` });
+        }
+      }
+      handleViewUserCamera(previous);
+      for (const shot of shots) {
+        downloadBlob(shot.blob, shot.name);
+        // Paced, not batched: a browser starts programmatic anchor
+        // downloads asynchronously, and a synchronous loop of clicks can
+        // collapse them onto the first download's entry (name and bytes).
+        // A short gap lets each file start under its own name.
+        await new Promise((resolve) => {
+          setTimeout(resolve, SERIES_DOWNLOAD_SPACING_MS);
+        });
+      }
+    },
+    [
+      engine,
+      handleViewUserCamera,
+      rootId,
+      viewportCanvas,
+      viewSession.userCamera,
+    ],
+  );
+  const exportTurntableSeries = useCallback(
+    async (base: RenderCamera): Promise<void> => {
+      await exportCameraSeries(
+        turntableCameras(base, 8, 45),
+        "slopcad-turntable",
+      );
+    },
+    [exportCameraSeries],
+  );
+  const exportIsometricSeries = useCallback(async (): Promise<void> => {
+    const bounds =
+      applied === null || showingPreview
+        ? null
+        : applied.state.measurement.bounds;
+    if (bounds === null) return;
+    await exportCameraSeries(
+      isometricSeriesCameras(bounds, viewSession.convention),
+      "slopcad-iso",
+    );
+  }, [applied, exportCameraSeries, showingPreview, viewSession.convention]);
   // Settled = the last settled frame rendered THIS document (and no
   // import preview is on the stage — a preview's pixels are never the
   // document's).
@@ -1281,11 +1393,51 @@ export function CompleteCadWorkbench({
         },
       );
     }
+    list.push(
+      {
+        disabled: applied === null,
+        group: "File",
+        id: "export-snapshot-png",
+        keywords: "snapshot png image capture viewport screenshot export",
+        label: "Export viewport snapshot (PNG)",
+        run: () => {
+          void exportSnapshotPng();
+        },
+      },
+      {
+        disabled: applied === null,
+        group: "File",
+        id: "export-turntable",
+        keywords: "turntable series rotate frames png snapshot export",
+        label: "Export turntable series (8 frames)",
+        run: () => {
+          const camera =
+            viewSession.userCamera ??
+            (showingPreview
+              ? (ioSurface.preview?.projection.camera ?? null)
+              : (applied?.state.projection.camera ?? null));
+          if (camera !== null) void exportTurntableSeries(camera);
+        },
+      },
+      {
+        disabled: applied === null,
+        group: "File",
+        id: "export-isometric",
+        keywords: "isometric series front top right views png snapshot export",
+        label: "Export isometric series (4 views)",
+        run: () => {
+          void exportIsometricSeries();
+        },
+      },
+    );
     return list;
   }, [
     applied,
     canAuthorSketchFeatures,
     clearSelection,
+    exportIsometricSeries,
+    exportSnapshotPng,
+    exportTurntableSeries,
     featureProducedBodies.length,
     handleHole,
     hasExtrudeBase,
@@ -1295,13 +1447,16 @@ export function CompleteCadWorkbench({
     historyApi,
     holeBase,
     io,
+    ioSurface.preview?.projection.camera,
     openFeatureDialog,
     rollback,
     selectionApi.selected.length,
     setMode,
     setRollback,
+    showingPreview,
     sketchOnSelectedFace,
     toolsApi,
+    viewSession.userCamera,
   ]);
 
   // -- Default pieces (each exactly what its slot replaces) -----------------
@@ -1421,13 +1576,15 @@ export function CompleteCadWorkbench({
           }
           className={VIEWPORT_CLASS}
           displayMode={viewSession.displayMode}
+          lightRig={lightRigById(viewSession.lightRig)}
+          renderQuality={viewSession.renderQuality}
           onUserCamera={handleViewUserCamera}
           projection={
             showingPreview
               ? (ioSurface.preview?.projection ?? null)
               : applied === null
                 ? null
-                : applied.state.projection
+                : appearedProjection
           }
           userCamera={viewSession.userCamera}
           onSettled={() => {
@@ -1549,13 +1706,15 @@ export function CompleteCadWorkbench({
                 }
                 onConvention={handleViewConvention}
                 onDisplayMode={handleViewDisplayMode}
+                onLightRig={handleViewLightRig}
+                onRenderQuality={handleViewRenderQuality}
                 onUserCamera={handleViewUserCamera}
                 projection={
                   showingPreview
                     ? (ioSurface.preview?.projection ?? null)
                     : applied === null
                       ? null
-                      : applied.state.projection
+                      : appearedProjection
                 }
                 selection={selectionApi.selected}
                 session={viewSession}
@@ -1730,6 +1889,7 @@ export function CompleteCadWorkbench({
             : {
                 visible: body.visible !== false,
                 isolated: body.isolated === true,
+                appearance: body.appearance,
               };
         }}
         onBodyAction={(action) => {
@@ -1743,6 +1903,10 @@ export function CompleteCadWorkbench({
             );
             if (body === undefined) return;
             handleBodyVisibility(action.bodyId, body.visible === false);
+            return;
+          }
+          if (action.type === "appearance") {
+            handleBodyAppearance(action.bodyId, action.presetId);
             return;
           }
           const body = workbenchDocument.bodies.find(

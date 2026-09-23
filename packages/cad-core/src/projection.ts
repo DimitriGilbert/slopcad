@@ -89,6 +89,11 @@
 import type { Body } from "./document";
 
 import {
+  type Appearance,
+  type FaceAppearanceOverride,
+  parseAppearance,
+} from "./appearance";
+import {
   CAD_ID_MAX_PAYLOAD_LENGTH,
   CAD_ID_PREFIXES,
   type BodyId,
@@ -493,6 +498,20 @@ export interface RenderObject {
    * scene-node matrix; rotation is rigid so the local normals stay valid.
    */
   readonly occurrenceTransform?: PlacementTransform;
+  /**
+   * The object's appearance record (Phase 59), present exactly when the
+   * host resolved one from the owning body's document record — display
+   * state riding the additive optional fields (the openShell precedent);
+   * absent = the renderer's documented default material.
+   */
+  readonly appearance?: Appearance;
+  /**
+   * Face-level appearance overrides (Phase 59), present exactly when the
+   * host resolved any from the owning body's document record. Indices are
+   * snapshot-scoped: a consumer skips any index outside the object's
+   * current synthetic face grouping.
+   */
+  readonly faceAppearances?: readonly FaceAppearanceOverride[];
 }
 
 /** The validated, copied buffer triple shared by the conversion and parse paths. */
@@ -975,6 +994,58 @@ export function filterProjectionByBodyDisplay(
   });
 }
 
+/**
+ * Resolves the document's body appearance records ONTO a projection
+ * (Phase 59): every render object whose body record carries an appearance
+ * or face-level overrides gains them as DATA on the object itself — the
+ * renderer reads the object, never the document, keeping the kernel →
+ * renderer boundary one-way. Identity fast path: a document without any
+ * appearance record returns the SAME projection instance, so the boot
+ * state's bytes, memoization, and settle churn are untouched (the Phase
+ * 44 display-filter precedent). Placed instances resolve through their
+ * source body (`bodyId`), so every instance of an appearance-carrying
+ * body shades alike.
+ */
+export function withBodyAppearances(
+  projection: RenderProjection,
+  bodies: readonly Body[],
+): RenderProjection {
+  const records = new Map<BodyId, Body>();
+  let any = false;
+  for (const body of bodies) {
+    if (body.appearance !== undefined || body.faceAppearances !== undefined) {
+      records.set(body.id, body);
+      any = true;
+    }
+  }
+  if (!any) return projection;
+  const objects = projection.objects.map((object) => {
+    const bodyId = object.bodyId ?? renderObjectIdBodyId(object.id);
+    if (bodyId === null) return object;
+    const record = records.get(bodyId);
+    if (record === undefined) return object;
+    if (
+      record.appearance === object.appearance &&
+      record.faceAppearances === object.faceAppearances
+    ) {
+      return object;
+    }
+    return Object.freeze({
+      ...object,
+      ...(record.appearance === undefined
+        ? {}
+        : { appearance: record.appearance }),
+      ...(record.faceAppearances === undefined
+        ? {}
+        : { faceAppearances: record.faceAppearances }),
+    });
+  });
+  return Object.freeze({
+    objects: Object.freeze(objects),
+    camera: projection.camera,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Serialization
 // ---------------------------------------------------------------------------
@@ -1014,6 +1085,10 @@ export interface SerializedRenderObject {
   readonly occurrencePath?: readonly string[];
   /** Present exactly when the object is a placed instance (its transform). */
   readonly occurrenceTransform?: PlacementTransform;
+  /** Present exactly when the object carries an appearance record (Phase 59). */
+  readonly appearance?: Appearance;
+  /** Present exactly when the object carries face appearance overrides. */
+  readonly faceAppearances?: readonly FaceAppearanceOverride[];
 }
 
 /**
@@ -1063,6 +1138,8 @@ function serializeRenderObject(object: RenderObject): SerializedRenderObject {
     openShell?: true;
     occurrencePath?: readonly string[];
     occurrenceTransform?: PlacementTransform;
+    appearance?: Appearance;
+    faceAppearances?: readonly FaceAppearanceOverride[];
   } = {
     formatVersion: CAD_PROJECTION_FORMAT_VERSION,
     id: object.id,
@@ -1090,7 +1167,31 @@ function serializeRenderObject(object: RenderObject): SerializedRenderObject {
       translation: [...object.occurrenceTransform.translation],
     };
   }
+  // The appearance records (Phase 59) ride only when present — the
+  // placed-instance pair's additive precedent — so appearanceless
+  // projections serialize byte-identically to their pre-appearance form.
+  if (object.appearance !== undefined) {
+    serialized.appearance = serializeAppearanceFields(object.appearance);
+  }
+  if (object.faceAppearances !== undefined) {
+    serialized.faceAppearances = object.faceAppearances.map((override) => ({
+      face: override.face,
+      appearance: serializeAppearanceFields(override.appearance),
+    }));
+  }
   return serialized;
+}
+
+/** Canonical fixed-key-order form of an appearance record. */
+function serializeAppearanceFields(appearance: Appearance): Appearance {
+  return {
+    baseColor: appearance.baseColor,
+    metalness: appearance.metalness,
+    roughness: appearance.roughness,
+    ...(appearance.texture === undefined
+      ? {}
+      : { texture: appearance.texture }),
+  };
 }
 
 /**
@@ -1291,6 +1392,72 @@ function parseSerializedRenderObject(
     }
     featureId = parsed.value;
   }
+  // The appearance records (Phase 59): validated through the appearance
+  // module's gate when present, so a tampered wire record fails the parse
+  // instead of reaching a renderer.
+  let appearance: Appearance | undefined;
+  if (input.appearance !== undefined) {
+    const parsed = parseAppearance(input.appearance);
+    if (!parsed.ok) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          `A serialized render object appearance is invalid: ${parsed.error.message}`,
+          input.appearance,
+        ),
+      );
+    }
+    appearance = parsed.value;
+  }
+  let faceAppearances: readonly FaceAppearanceOverride[] | undefined;
+  if (input.faceAppearances !== undefined) {
+    if (!isUnknownArray(input.faceAppearances)) {
+      return fail(
+        projectionError(
+          PROJECTION_ERROR_CODES.malformed,
+          "A serialized render object faceAppearances must be an array when present.",
+          input.faceAppearances,
+        ),
+      );
+    }
+    const overrides: FaceAppearanceOverride[] = [];
+    for (const entry of input.faceAppearances) {
+      if (
+        typeof entry !== "object" ||
+        entry === null ||
+        typeof (entry as Record<string, unknown>).face !== "number" ||
+        !Number.isInteger((entry as Record<string, unknown>).face) ||
+        ((entry as Record<string, unknown>).face as number) < 0
+      ) {
+        return fail(
+          projectionError(
+            PROJECTION_ERROR_CODES.malformed,
+            "A face appearance override must carry a non-negative integer face index and an appearance.",
+            entry,
+          ),
+        );
+      }
+      const parsed = parseAppearance(
+        (entry as Record<string, unknown>).appearance,
+      );
+      if (!parsed.ok) {
+        return fail(
+          projectionError(
+            PROJECTION_ERROR_CODES.malformed,
+            `A face appearance override's appearance is invalid: ${parsed.error.message}`,
+            entry,
+          ),
+        );
+      }
+      overrides.push(
+        Object.freeze({
+          face: (entry as Record<string, unknown>).face as number,
+          appearance: parsed.value,
+        }),
+      );
+    }
+    faceAppearances = Object.freeze(overrides);
+  }
   const record: {
     id: RenderObjectId;
     positions: readonly number[];
@@ -1302,6 +1469,8 @@ function parseSerializedRenderObject(
     openShell?: true;
     occurrencePath?: readonly OccurrenceId[];
     occurrenceTransform?: PlacementTransform;
+    appearance?: Appearance;
+    faceAppearances?: readonly FaceAppearanceOverride[];
   } = { id: id.value, positions, indices, bounds: bounds.value };
   if (normals !== undefined) record.normals = normals;
   if (bodyId !== undefined) record.bodyId = bodyId;
@@ -1314,6 +1483,8 @@ function parseSerializedRenderObject(
   if (occurrenceTransform !== undefined) {
     record.occurrenceTransform = occurrenceTransform;
   }
+  if (appearance !== undefined) record.appearance = appearance;
+  if (faceAppearances !== undefined) record.faceAppearances = faceAppearances;
   return ok(Object.freeze(record));
 }
 

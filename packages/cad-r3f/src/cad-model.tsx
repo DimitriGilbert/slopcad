@@ -58,6 +58,7 @@ import type { ThreeElements, ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import type { ReactElement } from "react";
 import type {
+  Appearance as RenderAppearance,
   RenderObject,
   RenderObjectId,
   RenderProjection,
@@ -141,6 +142,43 @@ function zebraShaderPatch(
 
 /** Shared empty selection so the inert path never allocates. */
 const NO_SELECTION: readonly SelectionReference[] = [];
+
+/**
+ * Deterministic procedural textures (Phase 59): the named patterns an
+ * appearance record may reference, generated from code alone — fixed
+ * dimensions, fixed texel values, nearest filtering — so a textured
+ * appearance rasterizes byte-identically under the fixed-viewport/DPR
+ * discipline. No image assets, no IO, no clock. Instances are cached and
+ * shared per name (the data is immutable once built).
+ */
+const proceduralTextureCache = new Map<string, THREE.DataTexture>();
+
+export function proceduralTexture(name: string): THREE.DataTexture {
+  const cached = proceduralTextureCache.get(name);
+  if (cached !== undefined) return cached;
+  // The checker: an 8x8 black/white field — multiplied by the material
+  // color it reads as the classic two-tone machinist checker.
+  const size = 8;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const value = ((x + y) % 2 === 0 ? 255 : 0) as number;
+      const offset = (y * size + x) * 4;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  proceduralTextureCache.set(name, texture);
+  return texture;
+}
 
 /**
  * The stable "no clipping" value (Phase 46): the material host prop is
@@ -247,6 +285,12 @@ export interface CadModelProps {
    * see `NO_CLIPPING_PLANES` for why removal is forbidden).
    */
   readonly clippingPlanes?: THREE.Plane[];
+  /**
+   * Quality mode's shadow participation (Phase 59): surface meshes cast
+   * and receive. Default `false` — the boot raster has no shadow maps at
+   * all; only the opt-in quality scene passes `true`.
+   */
+  readonly shadows?: boolean;
 }
 
 export function CadModel({
@@ -261,6 +305,7 @@ export function CadModel({
   projection,
   regeneration,
   selection,
+  shadows = false,
   clippingPlanes,
 }: CadModelProps): ReactElement {
   const geometries = useRenderGeometry(projection, onSync);
@@ -298,6 +343,71 @@ export function CadModel({
     }
     return map;
   }, [projection]);
+
+  // Face-appearance overrides (Phase 59): per object, the overridden face
+  // indices whose appearance differs from the object's own (body-level)
+  // appearance — the per-face materials to mount as second-pass overlays.
+  // Snapshot-scoped by construction: an override whose face index falls
+  // outside the CURRENT synthetic grouping is skipped (rendered as nothing)
+  // — never remapped onto an arbitrary neighbor.
+  const faceOverrides = useMemo(() => {
+    const map = new Map<
+      RenderObjectId,
+      readonly {
+        readonly face: number;
+        readonly appearance: RenderAppearance;
+      }[]
+    >();
+    for (const [id, data] of renderData) {
+      const overrides = data.object.faceAppearances;
+      if (overrides === undefined) continue;
+      const applicable = overrides.filter(
+        (override) =>
+          override.face < data.grouping.faces.length &&
+          override.appearance !== data.object.appearance,
+      );
+      if (applicable.length === 0) continue;
+      map.set(id, applicable);
+    }
+    return map;
+  }, [renderData]);
+
+  // Second-pass face-appearance geometries, the highlight lifecycle: built
+  // only when the drawn geometry set or the overrides change, disposed with
+  // the memo.
+  const faceOverrideGeometries = useMemo(() => {
+    const map = new Map<
+      RenderObjectId,
+      readonly {
+        readonly face: number;
+        readonly geometry: THREE.BufferGeometry;
+      }[]
+    >();
+    for (const [id, overrides] of faceOverrides) {
+      const base = geometries.get(id);
+      const data = renderData.get(id);
+      if (base === undefined || data === undefined) continue;
+      if (
+        !baseCoversSelectedFaces(
+          base,
+          data.grouping,
+          overrides.map((override) => override.face),
+        )
+      ) {
+        continue;
+      }
+      map.set(
+        id,
+        overrides.map((override) => ({
+          face: override.face,
+          geometry: buildFaceHighlightGeometry(base, data.grouping, [
+            override.face,
+          ]),
+        })),
+      );
+    }
+    return map;
+  }, [faceOverrides, geometries, renderData]);
 
   // Placed-instance transforms (Phase 50): the projection carries each
   // instance's composed placement as DATA (rotation columns + translation,
@@ -387,6 +497,16 @@ export function CadModel({
     };
   }, [edges]);
 
+  useEffect(() => {
+    return () => {
+      for (const entries of faceOverrideGeometries.values()) {
+        for (const entry of entries) {
+          entry.geometry.dispose();
+        }
+      }
+    };
+  }, [faceOverrideGeometries]);
+
   // Latest-ref pattern: callers may pass inline closures without rebinding
   // the (already registered) R3F event handlers on every render.
   const onPickRef = useRef(onPick);
@@ -470,6 +590,22 @@ export function CadModel({
             }
           : {};
         const instanceMatrix = instanceMatrices.get(id);
+        // Per-object appearance (Phase 59): the projection's record rides
+        // OVER the host default material; the selection highlight still
+        // wins (it spreads last below). Values are scene-space data —
+        // metalness/roughness straight through, the sRGB hex as the color.
+        const objectMaterial: CadModelMaterialProps &
+          Partial<Pick<ThreeElements["meshStandardMaterial"], "map">> =
+          data.object.appearance === undefined
+            ? materialProps
+            : {
+                color: data.object.appearance.baseColor,
+                metalness: data.object.appearance.metalness,
+                roughness: data.object.appearance.roughness,
+                ...(data.object.appearance.texture === undefined
+                  ? {}
+                  : { map: proceduralTexture(data.object.appearance.texture) }),
+              };
         return (
           <mesh
             key={id}
@@ -477,6 +613,7 @@ export function CadModel({
             {...(instanceMatrix !== undefined
               ? { matrix: instanceMatrix, matrixAutoUpdate: false }
               : {})}
+            {...(shadows ? { castShadow: true, receiveShadow: true } : {})}
             {...handlers}
           >
             <meshStandardMaterial
@@ -504,7 +641,7 @@ export function CadModel({
                   ? THREE.DoubleSide
                   : THREE.FrontSide
               }
-              {...materialProps}
+              {...objectMaterial}
               {...(selected
                 ? {
                     color: CAD_SELECTION_HIGHLIGHT_COLOR,
@@ -566,6 +703,43 @@ export function CadModel({
           />
         </mesh>
       ))}
+      {[...faceOverrideGeometries].flatMap(([id, entries]) =>
+        entries.map((entry) => {
+          const override = faceOverrides
+            .get(id)
+            ?.find((candidate) => candidate.face === entry.face);
+          return (
+            <mesh
+              key={`${id}-face-appearance-${String(entry.face)}`}
+              geometry={entry.geometry}
+              {...(instanceMatrices.has(id)
+                ? {
+                    matrix: instanceMatrices.get(id),
+                    matrixAutoUpdate: false,
+                  }
+                : {})}
+              renderOrder={1}
+              raycast={NO_RAYCAST}
+              {...(shadows ? { castShadow: true, receiveShadow: true } : {})}
+            >
+              <meshStandardMaterial
+                clippingPlanes={effectiveClippingPlanes}
+                color={override?.appearance.baseColor}
+                metalness={override?.appearance.metalness}
+                roughness={override?.appearance.roughness}
+                {...(override?.appearance.texture === undefined
+                  ? {}
+                  : {
+                      map: proceduralTexture(override.appearance.texture),
+                    })}
+                polygonOffset
+                polygonOffsetFactor={CAD_FACE_HIGHLIGHT_POLYGON_OFFSET}
+                polygonOffsetUnits={CAD_FACE_HIGHLIGHT_POLYGON_OFFSET}
+              />
+            </mesh>
+          );
+        }),
+      )}
     </>
   );
 }

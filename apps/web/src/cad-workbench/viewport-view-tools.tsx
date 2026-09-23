@@ -64,6 +64,12 @@ export interface CadViewportViewToolsProps {
   readonly onUserCamera: (camera: RenderCamera | null) => void;
   /** Writes the display mode. */
   readonly onDisplayMode: (mode: ViewportViewSession["displayMode"]) => void;
+  /** Writes the light rig (Phase 59). */
+  readonly onLightRig: (rigId: string) => void;
+  /** Writes the render quality (Phase 59). */
+  readonly onRenderQuality: (
+    quality: ViewportViewSession["renderQuality"],
+  ) => void;
   /** Writes the angle convention. */
   readonly onConvention: (
     convention: ViewportViewSession["convention"],
@@ -99,6 +105,13 @@ const DISPLAY_MODES: readonly {
   { id: "shaded-edges", label: "+Edges" },
   { id: "wireframe", label: "Wire" },
   { id: "hidden-line", label: "Hidden" },
+];
+
+/** The light-rig buttons (Phase 59), in selector order. */
+const LIGHT_RIGS: readonly { readonly id: string; readonly label: string }[] = [
+  { id: "studio", label: "Studio" },
+  { id: "north-window", label: "North" },
+  { id: "inspection", label: "Inspect" },
 ];
 
 /** The view-cube face letters (the short labels drawn on the cube). */
@@ -164,6 +177,8 @@ export function CadViewportViewTools({
   currentCamera,
   onConvention,
   onDisplayMode,
+  onLightRig,
+  onRenderQuality,
   onUserCamera,
   projection,
   selection,
@@ -501,6 +516,28 @@ export function CadViewportViewTools({
             </Button>
           ))}
         </div>
+        <div
+          className="grid grid-cols-3 gap-1"
+          role="group"
+          aria-label="Light rig"
+        >
+          {LIGHT_RIGS.map((rig) => (
+            <Button
+              aria-pressed={session.lightRig === rig.id}
+              data-testid={`light-rig-${rig.id}`}
+              key={rig.id}
+              onClick={() => {
+                onLightRig(rig.id);
+              }}
+              size="xs"
+              title={`${rig.label} light rig`}
+              type="button"
+              variant={session.lightRig === rig.id ? "default" : "outline"}
+            >
+              {rig.label}
+            </Button>
+          ))}
+        </div>
         <div className="grid grid-cols-2 gap-1">
           <Button
             aria-label="Toggle first/third-angle convention"
@@ -536,6 +573,42 @@ export function CadViewportViewTools({
             variant="outline"
           >
             <RotateCcw aria-hidden="true" className="size-3.5" />
+          </Button>
+        </div>
+        <div
+          className="grid grid-cols-2 gap-1"
+          role="group"
+          aria-label="Render quality"
+        >
+          <Button
+            aria-pressed={session.renderQuality === "standard"}
+            data-testid="render-quality-standard"
+            onClick={() => {
+              onRenderQuality("standard");
+            }}
+            size="xs"
+            title="Standard render (the deterministic boot path)"
+            type="button"
+            variant={
+              session.renderQuality === "standard" ? "default" : "outline"
+            }
+          >
+            Standard
+          </Button>
+          <Button
+            aria-pressed={session.renderQuality === "quality"}
+            data-testid="render-quality-quality"
+            onClick={() => {
+              onRenderQuality("quality");
+            }}
+            size="xs"
+            title="Quality render: soft shadows, ambient occlusion (opt-in)"
+            type="button"
+            variant={
+              session.renderQuality === "quality" ? "default" : "outline"
+            }
+          >
+            Quality
           </Button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 {
   "$comment": "Phase 60 command-surface audit \u2014 the capability -> surface map. Curated data; two mechanical checks keep it honest: scripts/command-surface-audit.mjs proves every ROADMAP-CAD-PARITY.md requirements bullet of phases 36-56 is claimed by an entry here, and command-surface.spec.ts proves on the production build that the mapped surfaces actually mount and that the complete workbench's command-menu row set matches the command entries EXACTLY (both directions \u2014 no undocumented command, no dead checklist row). Kinds: command = a row with this id in the route's command menu; command-panel = the row, run, mounts the named panel targets; panel = the named panel/controls exist on the route. Declines record capabilities that are kernel-reachable but deliberately have no workbench verb at this epoch, with their evidence.",
-  "epoch": "phase-60 @ 8e5de07 (everything through importers; phases 57-59 land via sibling worktrees and extend this checklist as data)",
+  "epoch": "phase-59 @ wt-phase-59 tip (visualization II; base audit phase-60 @ 8e5de07; phases 57 and later couriers extend this checklist as data)",
   "source": "ROADMAP-CAD-PARITY.md section 4, phases 36-56",
   "entries": [
     {
@@ -1506,6 +1506,59 @@
         "vocabulary",
         "arc",
         "bulge"
+      ]
+    },
+    {
+      "id": "visualization-snapshot-png",
+      "phase": 59,
+      "capability": "Viewport snapshot export: capture the settled deterministic viewport as a PNG (user-command output; document and baselines untouched)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "export-snapshot-png",
+      "keywords": [
+        "snapshot",
+        "png",
+        "image",
+        "capture",
+        "viewport",
+        "screenshot",
+        "export"
+      ]
+    },
+    {
+      "id": "visualization-snapshot-turntable",
+      "phase": 59,
+      "capability": "Viewport snapshot export: the deterministic 8-frame turntable camera series rendered and saved as PNGs",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "export-turntable",
+      "keywords": [
+        "turntable",
+        "series",
+        "rotate",
+        "frames",
+        "png",
+        "snapshot",
+        "export"
+      ]
+    },
+    {
+      "id": "visualization-snapshot-isometric",
+      "phase": 59,
+      "capability": "Viewport snapshot export: the deterministic 4-view isometric camera series (front/top/right + iso) rendered and saved as PNGs",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "export-isometric",
+      "keywords": [
+        "isometric",
+        "series",
+        "front",
+        "top",
+        "right",
+        "views",
+        "png",
+        "snapshot",
+        "export"
       ]
     }
   ],

@@ -23,6 +23,7 @@ import {
 import {
   addBody,
   addFeature,
+  APPEARANCE_LIBRARY,
   CadProvider,
   createBodyId,
   createCadStore,
@@ -33,6 +34,7 @@ import {
   DIAGNOSTIC_CODES,
   initialRegenerationStates,
   regenerate,
+  type Appearance,
   type CadDocument,
   type CadStore,
   type Diagnostic,
@@ -746,5 +748,96 @@ describe("CadModelTree assembly section (Phase 50)", () => {
     expect(
       document.querySelectorAll("[data-cad-tree-occurrence]"),
     ).toHaveLength(0);
+  });
+});
+
+describe("CadModelTree appearance picker state (Phase 59)", () => {
+  // The picker's pressed state is PER-ROW equality against the body's
+  // current record: exactly the library entry whose VALUES the record
+  // carries reads pressed, and a record matching no entry leaves every
+  // row unpressed (a "record exists" heuristic would lie). The trigger
+  // restates the active color as its chip.
+  function pickerState(appearance?: Appearance): {
+    pressed: string[];
+    chipColor: string | null;
+  } {
+    renderInProvider(
+      createCadStore({ session: createSession(buildTreeDocument()) }),
+      {
+        bodyDisplay: () => ({
+          visible: true,
+          isolated: false,
+          ...(appearance === undefined ? {} : { appearance }),
+        }),
+        onBodyAction: () => {},
+      },
+    );
+    const trigger = document.querySelector<HTMLElement>(
+      '[data-cad-tree-body-appearance=""]',
+    );
+    expect(trigger).not.toBeNull();
+    if (trigger === null) throw new Error("unreachable: trigger checked");
+    act(() => {
+      trigger.click();
+    });
+    expect(
+      document.querySelector("[data-cad-tree-appearance-menu]"),
+      "the picker menu opens",
+    ).not.toBeNull();
+    const pressed = [
+      ...document.querySelectorAll<HTMLElement>(
+        "[data-testid^='appearance-preset-']",
+      ),
+    ]
+      .filter((row) => row.getAttribute("aria-pressed") === "true")
+      .map((row) => row.getAttribute("data-testid"))
+      .filter((id): id is string => id !== null);
+    const chip = document.querySelector<HTMLElement>(
+      "[data-cad-tree-appearance-active]",
+    );
+    return {
+      pressed,
+      chipColor: chip?.getAttribute("data-cad-tree-appearance-active") ?? null,
+    };
+  }
+
+  const BRASS_ENTRY = APPEARANCE_LIBRARY[1];
+  if (BRASS_ENTRY === undefined) throw new Error("the library is never empty");
+  const STEEL_ENTRY = APPEARANCE_LIBRARY[0];
+  if (STEEL_ENTRY === undefined) throw new Error("the library is never empty");
+
+  it("marks no preset pressed and shows no chip without a record", () => {
+    const { pressed, chipColor } = pickerState(undefined);
+    expect(pressed).toEqual([]);
+    expect(chipColor).toBeNull();
+    // Without a record every LIBRARY row REPORTS unpressed (never an
+    // absent state); the "None" entry is a clear action, not a state.
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>(
+        "[data-testid^='appearance-preset-']",
+      ),
+    ].filter(
+      (row) => row.getAttribute("data-testid") !== "appearance-preset-none",
+    );
+    expect(rows.length).toBe(APPEARANCE_LIBRARY.length);
+    for (const row of rows) {
+      expect(row.getAttribute("aria-pressed")).toBe("false");
+    }
+  });
+
+  it("marks exactly the carried preset pressed and chips its color on the trigger", () => {
+    const { pressed, chipColor } = pickerState({ ...BRASS_ENTRY.appearance });
+    expect(pressed).toEqual([`appearance-preset-${String(BRASS_ENTRY.id)}`]);
+    expect(chipColor).toBe(BRASS_ENTRY.appearance.baseColor);
+  });
+
+  it("leaves every row unpressed for a record matching no library entry, still chipping its color", () => {
+    const custom = {
+      ...STEEL_ENTRY.appearance,
+      baseColor: "#123456",
+    };
+    const { pressed, chipColor } = pickerState(custom);
+    expect(pressed).toEqual([]);
+    expect(chipColor).toBe("#123456");
   });
 });
