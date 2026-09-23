@@ -166,6 +166,7 @@ import {
   captureViewportPng,
   downloadBlob,
   isometricSeriesCameras,
+  SERIES_DOWNLOAD_SPACING_MS,
   turntableCameras,
   waitForRenderedFrame,
 } from "./snapshot-export";
@@ -602,6 +603,13 @@ export function CompleteCadWorkbench({
       handleViewUserCamera(previous);
       for (const shot of shots) {
         downloadBlob(shot.blob, shot.name);
+        // Paced, not batched: a browser starts programmatic anchor
+        // downloads asynchronously, and a synchronous loop of clicks can
+        // collapse them onto the first download's entry (name and bytes).
+        // A short gap lets each file start under its own name.
+        await new Promise((resolve) => {
+          setTimeout(resolve, SERIES_DOWNLOAD_SPACING_MS);
+        });
       }
     },
     [

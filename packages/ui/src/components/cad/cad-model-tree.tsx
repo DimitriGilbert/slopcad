@@ -114,7 +114,11 @@ import {
   type SelectionReference,
 } from "@slopcad/cad-react";
 import { cn } from "cn";
-import { APPEARANCE_LIBRARY, type Appearance } from "@slopcad/cad-react";
+import {
+  APPEARANCE_LIBRARY,
+  appearancesEqual,
+  type Appearance,
+} from "@slopcad/cad-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "../popover";
 
@@ -903,7 +907,7 @@ function AppearancePicker({
         render={
           <button
             aria-label="Body appearance"
-            className={buttonClass}
+            className={cn(buttonClass, "relative")}
             data-cad-tree-body-appearance=""
             onClick={(event) => {
               event.stopPropagation();
@@ -914,6 +918,16 @@ function AppearancePicker({
         }
       >
         <PaletteIcon />
+        {current === undefined ? null : (
+          // The active-color chip: the trigger restates the body's current
+          // record's base color at a glance (the menu rows' chips, mini).
+          <span
+            aria-hidden="true"
+            className="border-background -right-0.5 -bottom-0.5 absolute size-1.5 rounded-full border"
+            data-cad-tree-appearance-active={current.baseColor}
+            style={{ backgroundColor: current.baseColor }}
+          />
+        )}
       </PopoverTrigger>
       <PopoverContent align="end" className="w-48 p-1">
         <div
@@ -923,7 +937,7 @@ function AppearancePicker({
         >
           {APPEARANCE_LIBRARY.map((entry) => (
             <button
-              aria-pressed={current === undefined ? false : undefined}
+              aria-pressed={appearancesEqual(current, entry.appearance)}
               className={cn(
                 "hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs",
               )}

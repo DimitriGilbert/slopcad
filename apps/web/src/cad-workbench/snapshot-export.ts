@@ -29,6 +29,23 @@ import {
   type ViewAngleConvention,
 } from "@slopcad/cad-r3f";
 
+/**
+ * How long a series download's object URL is kept alive: the browser
+ * consumes an anchor's blob URL ASYNCHRONOUSLY after the click, so a
+ * synchronous revoke aborts the download mid-start (Chromium then
+ * re-attempts the SAME entry — one file, repeatedly named like the
+ * first). A bounded lifetime releases the blob without racing the start.
+ */
+const DOWNLOAD_URL_LIFETIME_MS = 10_000;
+
+/**
+ * The minimum gap between two programmatic downloads of a series: a
+ * browser starts anchor downloads asynchronously, and clicks issued in
+ * one synchronous task can collapse onto the first download's entry —
+ * same name, same bytes. Pacing the loop keeps every file its own.
+ */
+export const SERIES_DOWNLOAD_SPACING_MS = 250;
+
 /** Triggers a browser download of `blob` under `filename`. */
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -36,7 +53,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  URL.revokeObjectURL(url);
+  // Not synchronous: an immediate revoke races the download's own async
+  // start (see DOWNLOAD_URL_LIFETIME_MS).
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, DOWNLOAD_URL_LIFETIME_MS);
 }
 
 /**
