@@ -150,6 +150,97 @@ export function compareDrawingId(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/**
+ * ## The y-flip rendering discipline (one space, two surfaces)
+ *
+ * Both SVG surfaces — the workbench's live canvas and the deterministic
+ * exporter — draw these primitives inside ONE root group
+ * `translate(0 heightMm) scale(1 -1)`, so local coordinates ARE sheet
+ * coordinates (y-up). That single group flip mirrors glyph runs and
+ * reverses sweep directions, so the three corrections below live HERE,
+ * beside the primitive vocabulary, and BOTH surfaces consume them: the
+ * canvas and the export cannot drift apart again (the Phase 54
+ * validation root cause was exactly that drift — the exporter skipped
+ * the text counter-flip the canvas applied, and each surface carried
+ * its own pre-flipped arrow and arc math).
+ */
+
+/**
+ * The arrowhead triangle's polygon points in RAW sheet coordinates: the
+ * tip at (x, y), the base corners `DRAWING_ARROW_LENGTH_MM` back along
+ * the arrow and ±`DRAWING_ARROW_WIDTH_MM` across it. The root group's
+ * single y-flip renders the triangle pointing along `angleRad` — no
+ * per-surface pre-flip (a pre-flip mirrors oblique arrowheads).
+ */
+export function arrowHeadPolygonPoints(
+  x: number,
+  y: number,
+  angleRad: number,
+  format: (value: number) => string,
+): string {
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  const backX = cos * DRAWING_ARROW_LENGTH_MM;
+  const backY = sin * DRAWING_ARROW_LENGTH_MM;
+  const acrossX = sin * DRAWING_ARROW_WIDTH_MM;
+  const acrossY = cos * DRAWING_ARROW_WIDTH_MM;
+  return [
+    `${format(x)},${format(y)}`,
+    `${format(x - backX + acrossX)},${format(y - backY - acrossY)}`,
+    `${format(x - backX - acrossX)},${format(y - backY + acrossY)}`,
+  ].join(" ");
+}
+
+/** An arc primitive's rendered geometry under the y-flip root group. */
+export interface SheetArcGeometry {
+  readonly startX: number;
+  readonly startY: number;
+  readonly endX: number;
+  readonly endY: number;
+  /** SVG large-arc flag (the arc sweeps more than π). */
+  readonly largeArc: boolean;
+  /** SVG sweep flag AFTER the root group's y-flip. */
+  readonly sweepFlag: boolean;
+}
+
+/**
+ * The arc's endpoints in RAW sheet coordinates plus the large-arc and
+ * sweep flags correct for rendering inside the y-flip group: the group's
+ * reflection reverses the sweep direction, so a counter-clockwise sheet
+ * sweep (`endRad > startRad`) renders with sweep flag 1.
+ */
+export function sheetArcGeometry(arc: {
+  readonly cx: number;
+  readonly cy: number;
+  readonly radius: number;
+  readonly startRad: number;
+  readonly endRad: number;
+}): SheetArcGeometry {
+  const sweep = arc.endRad - arc.startRad;
+  return {
+    startX: arc.cx + Math.cos(arc.startRad) * arc.radius,
+    startY: arc.cy + Math.sin(arc.startRad) * arc.radius,
+    endX: arc.cx + Math.cos(arc.endRad) * arc.radius,
+    endY: arc.cy + Math.sin(arc.endRad) * arc.radius,
+    largeArc: Math.abs(sweep) > Math.PI,
+    sweepFlag: sweep > 0,
+  };
+}
+
+/**
+ * The per-text counter-flip that keeps a glyph run upright inside the
+ * y-flip root group: reflecting the text about its own baseline y puts
+ * the run back upright AT the same sheet position. Both the canvas and
+ * the exporter must apply this or their glyphs mirror — the Phase 54
+ * blocker.
+ */
+export function uprightTextTransform(
+  yMm: number,
+  format: (value: number) => string,
+): string {
+  return `translate(0 ${format(yMm * 2)}) scale(1 -1)`;
+}
+
 function dimensionText(dimension: DrawingDimension): string {
   const reference = dimension.origin.source === "reference";
   switch (dimension.kind) {
@@ -179,6 +270,43 @@ function wrap(text: string, reference: boolean): string {
 
 function arrowAt(x: number, y: number, angleRad: number): DrawingPrimitive {
   return { kind: "arrow", x, y, angleRad };
+}
+
+/**
+ * The linear dimension's value text, anchored at the dim line's midpoint:
+ * above it for horizontal and aligned spans (the baseline clears the
+ * line by half the text height), and BESIDE it for vertical spans — a
+ * vertical dim line would strike through middle-anchored glyphs and
+ * crowd the arrowheads, so the text offsets along the same normal that
+ * placed the dim line, clear of line and arrows alike.
+ */
+function dimensionValueText(
+  dimension: DrawingDimension & { readonly kind: "linear" },
+  from: { readonly x: number; readonly y: number },
+  to: { readonly x: number; readonly y: number },
+  normalX: number,
+): DrawingPrimitive {
+  const midX = (from.x + to.x) / 2;
+  const midY = (from.y + to.y) / 2;
+  if (dimension.orientation === "vertical") {
+    const side = normalX >= 0 ? 1 : -1;
+    return {
+      kind: "text",
+      x: midX + side * DRAWING_TEXT_HEIGHT_MM * 1.5,
+      y: midY - DRAWING_TEXT_HEIGHT_MM / 2,
+      text: dimensionText(dimension),
+      anchor: "middle",
+      sizeMm: DRAWING_TEXT_HEIGHT_MM,
+    };
+  }
+  return {
+    kind: "text",
+    x: midX,
+    y: midY + DRAWING_TEXT_HEIGHT_MM / 2,
+    text: dimensionText(dimension),
+    anchor: "middle",
+    sizeMm: DRAWING_TEXT_HEIGHT_MM,
+  };
 }
 
 /**
@@ -242,14 +370,7 @@ export function presentDrawingDimension(
         { kind: "line", x1: from.x, y1: from.y, x2: to.x, y2: to.y },
         arrowAt(from.x, from.y, angle),
         arrowAt(to.x, to.y, angle + Math.PI),
-        {
-          kind: "text",
-          x: (from.x + to.x) / 2,
-          y: (from.y + to.y) / 2 + DRAWING_TEXT_HEIGHT_MM / 2,
-          text: dimensionText(dimension),
-          anchor: "middle",
-          sizeMm: DRAWING_TEXT_HEIGHT_MM,
-        },
+        dimensionValueText(dimension, from, to, nx),
       ];
     }
     case "radial": {

@@ -228,6 +228,49 @@ describe("drawing SVG export preview (Phase 54)", () => {
     expect(a).toContain(">20</text>");
   });
 
+  it("counter-flips exported text so glyphs render upright", () => {
+    const svg = serializeDrawingSheetSvg(100, 100, [
+      {
+        kind: "text",
+        x: 10,
+        y: 30.5,
+        text: "20",
+        anchor: "middle",
+        sizeMm: 3.5,
+      },
+    ]);
+    // The root group's y-flip mirrors glyph runs; the per-text
+    // counter-flip (the same transform the canvas applies) restores them.
+    expect(svg).toContain('y="30.5"');
+    expect(svg).toContain('transform="translate(0 61) scale(1 -1)"');
+  });
+
+  it("exports oblique arrowheads in raw sheet coordinates", () => {
+    const svg = serializeDrawingSheetSvg(100, 100, [
+      { kind: "arrow", x: 10, y: 10, angleRad: Math.PI / 4 },
+    ]);
+    // Tip at (10, 10) pointing up-right at 45 degrees: the base corners
+    // sit back along the arrow — pre-flipped corners would mirror it.
+    expect(svg).toContain('points="10,10 8.6565,7.1009 7.1009,8.6565"');
+  });
+
+  it("exports arcs with raw sheet endpoints and y-flip-corrected sweep", () => {
+    const svg = serializeDrawingSheetSvg(100, 100, [
+      {
+        kind: "arc",
+        cx: 0,
+        cy: 0,
+        radius: 10,
+        startRad: 0,
+        endRad: Math.PI / 2,
+      },
+    ]);
+    // A counter-clockwise quarter arc from (10, 0) to (0, 10): raw
+    // endpoints with sweep flag 1 (pre-flipped endpoints mirrored the
+    // arc about its center).
+    expect(svg).toContain('d="M 10 0 A 10 10 0 0 1 0 10"');
+  });
+
   it("formats numbers deterministically", () => {
     expect(formatSvgNumber(20)).toBe("20");
     expect(formatSvgNumber(0.5)).toBe("0.5");

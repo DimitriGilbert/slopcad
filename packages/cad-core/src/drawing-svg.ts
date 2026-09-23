@@ -14,7 +14,12 @@
  * byte-identical, and the workbench's export-preview asserts exactly that.
  */
 
-import type { DrawingPrimitive } from "./drawing-presentation";
+import {
+  arrowHeadPolygonPoints,
+  sheetArcGeometry,
+  uprightTextTransform,
+  type DrawingPrimitive,
+} from "./drawing-presentation";
 
 /** Formats a number deterministically: 4 decimals, trailing zeros trimmed. */
 export function formatSvgNumber(value: number): string {
@@ -39,34 +44,19 @@ function primitiveToSvg(primitive: DrawingPrimitive): string {
     case "rect":
       return `<rect x="${formatSvgNumber(primitive.x)}" y="${formatSvgNumber(primitive.y)}" width="${formatSvgNumber(primitive.width)}" height="${formatSvgNumber(primitive.height)}" fill="none" stroke="black" stroke-width="0.5"${primitive.dashed ? ' stroke-dasharray="2 1.5"' : ""}/>`;
     case "arc": {
-      // Sheet space is y-up; SVG is y-down — flip the arc's y and sweep.
-      const startX =
-        primitive.cx + Math.cos(primitive.startRad) * primitive.radius;
-      const startY =
-        primitive.cy - Math.sin(primitive.startRad) * primitive.radius;
-      const endX = primitive.cx + Math.cos(primitive.endRad) * primitive.radius;
-      const endY = primitive.cy - Math.sin(primitive.endRad) * primitive.radius;
-      const sweep = primitive.endRad - primitive.startRad;
-      const largeArc = Math.abs(sweep) > Math.PI ? 1 : 0;
-      const sweepFlag = sweep > 0 ? 0 : 1;
-      return `<path d="M ${formatSvgNumber(startX)} ${formatSvgNumber(startY)} A ${formatSvgNumber(primitive.radius)} ${formatSvgNumber(primitive.radius)} 0 ${String(largeArc)} ${String(sweepFlag)} ${formatSvgNumber(endX)} ${formatSvgNumber(endY)}" fill="none" stroke="black" stroke-width="0.35"/>`;
+      // Raw sheet coordinates and the y-flip-corrected flags come from
+      // the shared discipline — the canvas draws the same geometry.
+      const geometry = sheetArcGeometry(primitive);
+      return `<path d="M ${formatSvgNumber(geometry.startX)} ${formatSvgNumber(geometry.startY)} A ${formatSvgNumber(primitive.radius)} ${formatSvgNumber(primitive.radius)} 0 ${geometry.largeArc ? "1" : "0"} ${geometry.sweepFlag ? "1" : "0"} ${formatSvgNumber(geometry.endX)} ${formatSvgNumber(geometry.endY)}" fill="none" stroke="black" stroke-width="0.35"/>`;
     }
     case "arrow": {
-      // A filled isoceles triangle pointing along angleRad (sheet y-up).
-      const length = 3;
-      const halfWidth = 1.1;
-      const cos = Math.cos(primitive.angleRad);
-      const sin = Math.sin(primitive.angleRad);
-      // In sheet space the base corners sit at (-length, ±halfWidth);
-      // flipping to SVG y-down mirrors the corner y signs.
-      const base1X = primitive.x + cos * -length - sin * -halfWidth;
-      const base1Y = primitive.y - sin * -length - cos * -halfWidth;
-      const base2X = primitive.x + cos * -length - sin * halfWidth;
-      const base2Y = primitive.y - sin * -length - cos * halfWidth;
-      return `<polygon points="${formatSvgNumber(primitive.x)},${formatSvgNumber(primitive.y)} ${formatSvgNumber(base1X)},${formatSvgNumber(base1Y)} ${formatSvgNumber(base2X)},${formatSvgNumber(base2Y)}" fill="black"/>`;
+      // The shared arrowhead triangle, raw sheet coordinates.
+      return `<polygon points="${arrowHeadPolygonPoints(primitive.x, primitive.y, primitive.angleRad, formatSvgNumber)}" fill="black"/>`;
     }
     case "text":
-      return `<text x="${formatSvgNumber(primitive.x)}" y="${formatSvgNumber(primitive.y)}" font-size="${formatSvgNumber(primitive.sizeMm)}" text-anchor="${primitive.anchor}" font-family="monospace" fill="black">${esc(primitive.text)}</text>`;
+      // The per-text counter-flip the canvas applies too: without it the
+      // root group's y-flip mirrors every glyph run in the export.
+      return `<text x="${formatSvgNumber(primitive.x)}" y="${formatSvgNumber(primitive.y)}" font-size="${formatSvgNumber(primitive.sizeMm)}" text-anchor="${primitive.anchor}" font-family="monospace" fill="black" transform="${uprightTextTransform(primitive.y, formatSvgNumber)}">${esc(primitive.text)}</text>`;
   }
 }
 

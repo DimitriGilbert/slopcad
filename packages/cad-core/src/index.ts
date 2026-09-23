@@ -961,6 +961,7 @@ export {
 } from "./drawing-sheet";
 export type { DrawingPrimitive } from "./drawing-presentation";
 export {
+  arrowHeadPolygonPoints,
   compareDrawingId,
   composeSheetPresentation,
   DRAWING_ARROW_LENGTH_MM,
@@ -981,7 +982,10 @@ export {
   presentDrawingAnnotation,
   presentDrawingDimension,
   presentSheetFurniture,
+  sheetArcGeometry,
+  type SheetArcGeometry,
   threadCalloutText,
+  uprightTextTransform,
 } from "./drawing-presentation";
 export { formatSvgNumber, serializeDrawingSheetSvg } from "./drawing-svg";
 export type { DrawingDimensionRecoveryOptions } from "./drawing-dimension-source";

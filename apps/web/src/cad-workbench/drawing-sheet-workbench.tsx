@@ -35,10 +35,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactElement } from "react";
 import {
+  arrowHeadPolygonPoints,
   composeSheetPresentation,
   drawingSheetTemplateById,
   serializeDrawingSheetSvg,
+  sheetArcGeometry,
   sheetDimensionsMm,
+  uprightTextTransform,
   type DrawingAnnotation,
   type DrawingDimension,
   type DrawingPrimitive,
@@ -423,7 +426,13 @@ function RevisionDialog({
   );
 }
 
-/** Renders presented primitives as the live SVG canvas (y-up mirrored). */
+/**
+ * Renders presented primitives as the live SVG canvas: one root y-flip
+ * group turns sheet y-up coordinates into screen space, and the shared
+ * y-flip discipline (arrowheads, arc flags, the text counter-flip) is
+ * the same math the exporter serializes — canvas and export cannot
+ * drift apart.
+ */
 function SheetCanvas({ state }: { readonly state: SheetState }): ReactElement {
   const { widthMm, heightMm } = sheetDimensionsMm(state.template.setup);
   const primitives = useMemo(() => sheetPrimitives(state), [state]);
@@ -467,39 +476,32 @@ function SheetCanvas({ state }: { readonly state: SheetState }): ReactElement {
                 />
               );
             case "arc": {
-              const startX =
-                primitive.cx + Math.cos(primitive.startRad) * primitive.radius;
-              const startY =
-                primitive.cy - Math.sin(primitive.startRad) * primitive.radius;
-              const endX =
-                primitive.cx + Math.cos(primitive.endRad) * primitive.radius;
-              const endY =
-                primitive.cy - Math.sin(primitive.endRad) * primitive.radius;
-              const sweep = primitive.endRad - primitive.startRad;
-              const largeArc = Math.abs(sweep) > Math.PI ? 1 : 0;
-              const sweepFlag = sweep > 0 ? 0 : 1;
+              // The shared y-flip discipline: raw sheet coordinates and
+              // the corrected flags — the same geometry the export emits.
+              const geometry = sheetArcGeometry(primitive);
               return (
                 <path
                   key={key}
-                  d={`M ${String(startX)} ${String(startY)} A ${String(primitive.radius)} ${String(primitive.radius)} 0 ${String(largeArc)} ${String(sweepFlag)} ${String(endX)} ${String(endY)}`}
+                  d={`M ${String(geometry.startX)} ${String(geometry.startY)} A ${String(primitive.radius)} ${String(primitive.radius)} 0 ${geometry.largeArc ? "1" : "0"} ${geometry.sweepFlag ? "1" : "0"} ${String(geometry.endX)} ${String(geometry.endY)}`}
                   fill="none"
                   stroke="black"
                   strokeWidth={0.35}
                 />
               );
             }
-            case "arrow": {
-              const length = 3;
-              const halfWidth = 1.1;
-              const cos = Math.cos(primitive.angleRad);
-              const sin = Math.sin(primitive.angleRad);
-              const points = [
-                `${String(primitive.x)},${String(primitive.y)}`,
-                `${String(primitive.x + cos * -length - sin * -halfWidth)},${String(primitive.y - sin * -length - cos * -halfWidth)}`,
-                `${String(primitive.x + cos * -length - sin * halfWidth)},${String(primitive.y - sin * -length - cos * halfWidth)}`,
-              ].join(" ");
-              return <polygon key={key} points={points} fill="black" />;
-            }
+            case "arrow":
+              return (
+                <polygon
+                  key={key}
+                  points={arrowHeadPolygonPoints(
+                    primitive.x,
+                    primitive.y,
+                    primitive.angleRad,
+                    String,
+                  )}
+                  fill="black"
+                />
+              );
             case "text":
               return (
                 <text
@@ -510,7 +512,7 @@ function SheetCanvas({ state }: { readonly state: SheetState }): ReactElement {
                   textAnchor={primitive.anchor}
                   fontFamily="monospace"
                   fill="black"
-                  transform={`translate(0 ${String(2 * primitive.y)}) scale(1 -1)`}
+                  transform={uprightTextTransform(primitive.y, String)}
                 >
                   {primitive.text}
                 </text>
