@@ -107,6 +107,38 @@ const DEFAULT_MATERIAL: CadModelMaterialProps = {
   roughness: 0.55,
 };
 
+/**
+ * The zebra mode's fixed stripe frequency (Phase 58): how many
+ * normal-facing bands span the facing range. A constant, not a prop —
+ * the stripes are a deterministic function of scene state, and the fixed
+ * frequency is part of the mode's documented look.
+ */
+export const ZEBRA_STRIPE_COUNT = 12;
+
+/**
+ * The zebra shader patch (Phase 58): rewrites the standard material's
+ * outgoing light just before the opaque pass — the band is a pure
+ * function of the view-space surface normal against the view vector at
+ * the fixed stripe frequency, so the same scene state always yields the
+ * same stripes. Module-level and stable: the function identity is part of
+ * three's program cache key, so a stable reference avoids recompiles.
+ */
+function zebraShaderPatch(
+  shader: THREE.WebGLProgramParametersWithUniforms,
+): void {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <opaque_fragment>",
+    [
+      "float zebraFacing = abs(dot(normalize(normal), normalize(vViewPosition)));",
+      `float zebraBand = step(0.5, fract(zebraFacing * ${String(
+        ZEBRA_STRIPE_COUNT,
+      )}.0));`,
+      "outgoingLight = mix(vec3(0.03, 0.035, 0.045), vec3(0.88, 0.9, 0.94), zebraBand);",
+      "#include <opaque_fragment>",
+    ].join("\n"),
+  );
+}
+
 /** Shared empty selection so the inert path never allocates. */
 const NO_SELECTION: readonly SelectionReference[] = [];
 
@@ -448,9 +480,22 @@ export function CadModel({
             {...handlers}
           >
             <meshStandardMaterial
+              // The key remounts the material when the stripe class
+              // changes: three only consults `onBeforeCompile` when a
+              // program is first acquired, so patching an
+              // already-compiled material without a remount would render
+              // the old program (the R3F property write never sets
+              // `needsUpdate`).
+              key={passes.surfaces.stripes === true ? "zebra" : "shaded"}
               clippingPlanes={effectiveClippingPlanes}
               colorWrite={passes.surfaces.colorWrite}
               depthWrite={passes.surfaces.depthWrite}
+              // Phase 58 zebra: only the zebra pass attaches the shader
+              // patch; every other mode's material is untouched, so the
+              // boot raster and the render baselines stay their bytes.
+              {...(passes.surfaces.stripes === true
+                ? { onBeforeCompile: zebraShaderPatch }
+                : {})}
               // Phase 48: an open sheet's soup renders BOTH sides — a
               // front-face-only material would eat every triangle viewed
               // from behind the sheet, and picking counts backface hits.

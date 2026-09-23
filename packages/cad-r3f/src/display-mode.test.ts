@@ -41,11 +41,32 @@ describe("displayModePasses", () => {
     expect(passes.edges.visible).toBe(true);
   });
 
+  it("zebra: lit occluding surfaces with the stripe patch flag, no edges", () => {
+    const passes = displayModePasses("zebra");
+    expect(passes.surfaces).toEqual({
+      colorWrite: true,
+      depthWrite: true,
+      stripes: true,
+    });
+    expect(passes.edges.visible).toBe(false);
+  });
+
+  it("the established modes carry no stripe flag (zebra is the only patch)", () => {
+    for (const mode of [
+      "shaded",
+      "shaded-edges",
+      "wireframe",
+      "hidden-line",
+    ] as const) {
+      expect(displayModePasses(mode).surfaces.stripes).toBeUndefined();
+    }
+  });
+
   it("every accepted mode has a table entry (exhaustive modes list)", () => {
     for (const mode of CAD_DISPLAY_MODES) {
       expect(displayModePasses(mode)).toBeDefined();
     }
-    expect(CAD_DISPLAY_MODES).toHaveLength(4);
+    expect(CAD_DISPLAY_MODES).toHaveLength(5);
   });
 });
 
@@ -74,6 +95,6 @@ describe("buildFeatureEdgeGeometry", () => {
   });
 });
 
-/** Type-level sanity: the mode union has exactly the four modes. */
+/** Type-level sanity: the mode union matches the exhaustive list. */
 const MODES: readonly CadDisplayMode[] = CAD_DISPLAY_MODES;
 void MODES;

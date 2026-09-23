@@ -1025,6 +1025,81 @@ export {
   INTERFERENCE_ERROR_CODES,
 } from "./assembly-interference";
 export type {
+  AssemblyClearance,
+  AssemblyClearanceError,
+  AssemblyClearanceErrorCode,
+  ClearanceCheckInput,
+  ClearanceInstance,
+  ClearanceMesh,
+  ClearanceReport,
+} from "./assembly-clearance";
+export {
+  ASSEMBLY_CLEARANCE_ERROR_CODES,
+  checkAssemblyClearances,
+  CLEARANCE_PRECISION,
+} from "./assembly-clearance";
+export type {
+  InterferenceSnapshot,
+  InterferenceSnapshotInput,
+} from "./interference-report-export";
+export {
+  buildInterferenceSnapshot,
+  formatSnapshotNumber,
+  interferenceSnapshotDigest,
+  INTERFERENCE_SNAPSHOT_KIND,
+  INTERFERENCE_SNAPSHOT_VERSION,
+  serializeInterferenceSnapshotHtml,
+  serializeInterferenceSnapshotJson,
+} from "./interference-report-export";
+export type {
+  DraftAnalysisError,
+  DraftAnalysisErrorCode,
+  DraftAnalysisInput,
+  DraftAnalysisMesh,
+  DraftAnalysisReport,
+  DraftFace,
+  DraftFaceClassification,
+} from "./draft-analysis";
+export {
+  analyzeDraft,
+  DRAFT_ANALYSIS_ERROR_CODES,
+  DRAFT_BAND_COLORS,
+  DRAFT_BAND_LIMIT_DEG,
+} from "./draft-analysis";
+export type {
+  CurvatureComb,
+  CurvatureCombInput,
+  CurvatureCombSpike,
+  CurvatureError,
+  CurvatureErrorCode,
+  PlanarPath,
+  SurfaceCurvatureBand,
+  SurfaceCurvatureBandCensus,
+  SurfaceCurvatureBandsInput,
+  SurfaceCurvatureBandsReport,
+} from "./curvature";
+export {
+  CURVATURE_ERROR_CODES,
+  sketchCurvatureComb,
+  SURFACE_CURVATURE_BAND_COLORS,
+  SURFACE_CURVATURE_BAND_LIMITS,
+  surfaceCurvatureBands,
+} from "./curvature";
+export type {
+  DocumentMassError,
+  DocumentMassErrorCode,
+  DocumentMassPropertiesInput,
+  DocumentMassPropertiesReport,
+  DocumentMaterialRecord,
+  MassContribution,
+  MaterialId,
+} from "./document-mass";
+export {
+  documentMassProperties,
+  DOCUMENT_MASS_ERROR_CODES,
+  parseMaterialId,
+} from "./document-mass";
+export type {
   AssemblyMateError,
   AssemblyMateErrorCode,
   DocumentJoint,

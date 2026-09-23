@@ -20,7 +20,9 @@ import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
+import { Route as WorkbenchAnalysisRouteImport } from './routes/workbench-analysis'
 import { Route as WorkbenchAssemblyRouteImport } from './routes/workbench-assembly'
+import { Route as WorkbenchAssemblyInterferenceRouteImport } from './routes/workbench-assembly-interference'
 import { Route as WorkbenchAssemblyMotionRouteImport } from './routes/workbench-assembly-motion'
 import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
 import { Route as WorkbenchCompleteRouteImport } from './routes/workbench-complete'
@@ -91,11 +93,22 @@ const WorkbenchRoute = WorkbenchRouteImport.update({
   path: '/workbench',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkbenchAnalysisRoute = WorkbenchAnalysisRouteImport.update({
+  id: '/workbench-analysis',
+  path: '/workbench-analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkbenchAssemblyRoute = WorkbenchAssemblyRouteImport.update({
   id: '/workbench-assembly',
   path: '/workbench-assembly',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkbenchAssemblyInterferenceRoute =
+  WorkbenchAssemblyInterferenceRouteImport.update({
+    id: '/workbench-assembly-interference',
+    path: '/workbench-assembly-interference',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const WorkbenchAssemblyMotionRoute = WorkbenchAssemblyMotionRouteImport.update({
   id: '/workbench-assembly-motion',
   path: '/workbench-assembly-motion',
@@ -183,7 +196,9 @@ export interface FileRoutesByFullPath {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
+  '/workbench-assembly-interference': typeof WorkbenchAssemblyInterferenceRoute
   '/workbench-assembly-motion': typeof WorkbenchAssemblyMotionRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
@@ -211,7 +226,9 @@ export interface FileRoutesByTo {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
+  '/workbench-assembly-interference': typeof WorkbenchAssemblyInterferenceRoute
   '/workbench-assembly-motion': typeof WorkbenchAssemblyMotionRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
@@ -241,7 +258,9 @@ export interface FileRoutesById {
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/workbench': typeof WorkbenchRoute
+  '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
+  '/workbench-assembly-interference': typeof WorkbenchAssemblyInterferenceRoute
   '/workbench-assembly-motion': typeof WorkbenchAssemblyMotionRoute
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
@@ -271,7 +290,9 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-analysis'
     | '/workbench-assembly'
+    | '/workbench-assembly-interference'
     | '/workbench-assembly-motion'
     | '/workbench-chain'
     | '/workbench-complete'
@@ -299,7 +320,9 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-analysis'
     | '/workbench-assembly'
+    | '/workbench-assembly-interference'
     | '/workbench-assembly-motion'
     | '/workbench-chain'
     | '/workbench-complete'
@@ -328,7 +351,9 @@ export interface FileRouteTypes {
     | '/spike'
     | '/ui-viewport'
     | '/workbench'
+    | '/workbench-analysis'
     | '/workbench-assembly'
+    | '/workbench-assembly-interference'
     | '/workbench-assembly-motion'
     | '/workbench-chain'
     | '/workbench-complete'
@@ -358,7 +383,9 @@ export interface RootRouteChildren {
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
   WorkbenchRoute: typeof WorkbenchRoute
+  WorkbenchAnalysisRoute: typeof WorkbenchAnalysisRoute
   WorkbenchAssemblyRoute: typeof WorkbenchAssemblyRoute
+  WorkbenchAssemblyInterferenceRoute: typeof WorkbenchAssemblyInterferenceRoute
   WorkbenchAssemblyMotionRoute: typeof WorkbenchAssemblyMotionRoute
   WorkbenchChainRoute: typeof WorkbenchChainRoute
   WorkbenchCompleteRoute: typeof WorkbenchCompleteRoute
@@ -451,11 +478,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkbenchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workbench-analysis': {
+      id: '/workbench-analysis'
+      path: '/workbench-analysis'
+      fullPath: '/workbench-analysis'
+      preLoaderRoute: typeof WorkbenchAnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/workbench-assembly': {
       id: '/workbench-assembly'
       path: '/workbench-assembly'
       fullPath: '/workbench-assembly'
       preLoaderRoute: typeof WorkbenchAssemblyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workbench-assembly-interference': {
+      id: '/workbench-assembly-interference'
+      path: '/workbench-assembly-interference'
+      fullPath: '/workbench-assembly-interference'
+      preLoaderRoute: typeof WorkbenchAssemblyInterferenceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workbench-assembly-motion': {
@@ -596,7 +637,9 @@ const rootRouteChildren: RootRouteChildren = {
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
   WorkbenchRoute: WorkbenchRoute,
+  WorkbenchAnalysisRoute: WorkbenchAnalysisRoute,
   WorkbenchAssemblyRoute: WorkbenchAssemblyRoute,
+  WorkbenchAssemblyInterferenceRoute: WorkbenchAssemblyInterferenceRoute,
   WorkbenchAssemblyMotionRoute: WorkbenchAssemblyMotionRoute,
   WorkbenchChainRoute: WorkbenchChainRoute,
   WorkbenchCompleteRoute: WorkbenchCompleteRoute,

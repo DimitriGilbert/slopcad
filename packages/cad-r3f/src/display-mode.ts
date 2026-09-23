@@ -18,6 +18,13 @@
  *   drawings, dimmed hidden edges, silhouettes) belongs to the drawings
  *   phase; what this mode gives is depth-buffer occlusion of the same
  *   feature edges `shaded-edges` draws.
+ * - `zebra` (Phase 58): lit-surface write masks with the material's
+ *   shader patched to draw reflection stripes — the environment-zebra
+ *   surface-quality view. The stripes are a deterministic function of the
+ *   surface normal and the view vector at a fixed stripe frequency (see
+ *   `ZEBRA_STRIPE_COUNT` in `cad-model.tsx`), so the same scene state
+ *   always yields the same bands; the mode is opt-in and the default
+ *   boot raster is untouched.
  *
  * Feature edges come from three.js `EdgesGeometry` at a documented
  * threshold angle: an edge appears where adjacent triangles meet at more
@@ -32,7 +39,7 @@ import type { BufferGeometry } from "three";
 
 /** The renderer pass states {@link CadModel} cycles through. */
 export type CadDisplayMode =
-  "shaded" | "shaded-edges" | "wireframe" | "hidden-line";
+  "shaded" | "shaded-edges" | "wireframe" | "hidden-line" | "zebra";
 
 /** Every display mode the component accepts (exhaustive list constant). */
 export const CAD_DISPLAY_MODES: readonly CadDisplayMode[] = [
@@ -40,6 +47,7 @@ export const CAD_DISPLAY_MODES: readonly CadDisplayMode[] = [
   "shaded-edges",
   "wireframe",
   "hidden-line",
+  "zebra",
 ];
 
 /**
@@ -62,6 +70,13 @@ export interface SurfacePassState {
   readonly colorWrite: boolean;
   /** Whether surfaces occupy the depth buffer (occluding). */
   readonly depthWrite: boolean;
+  /**
+   * True exactly under the zebra mode (Phase 58): the surface material
+   * patches its shader to draw the reflection stripes. Absent everywhere
+   * else, so the established modes' pass records — and every raster pin
+   * taken under them — are identical to their pre-zebra form.
+   */
+  readonly stripes?: true;
 }
 
 /** How the feature-edge pass renders under one mode. */
@@ -93,6 +108,10 @@ const PASSES: Readonly<Record<CadDisplayMode, DisplayModePasses>> =
     wireframe: {
       edges: { visible: true },
       surfaces: { colorWrite: false, depthWrite: false },
+    },
+    zebra: {
+      edges: { visible: false },
+      surfaces: { colorWrite: true, depthWrite: true, stripes: true },
     },
   } satisfies Record<CadDisplayMode, DisplayModePasses>);
 
