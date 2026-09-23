@@ -67,12 +67,16 @@ import {
   type FeatureId,
   type IdGenerator,
   type IdGeneratorState,
+  type JointId,
+  type MateId,
   type OccurrenceId,
   parseBodyId,
   parseDatumId,
   parseCurveId,
   parseDocumentId,
   parseFeatureId,
+  parseJointId,
+  parseMateId,
   parseOccurrenceId,
   parseParameterId,
   type ParameterId,
@@ -83,6 +87,19 @@ import {
   parseSketchDocumentId,
   type SketchDocumentId,
 } from "./ids";
+import {
+  JOINT_KINDS,
+  MATE_KINDS,
+  MATE_VALUE_UNITS,
+  parseAssemblyJoint,
+  parseAssemblyMate,
+  type DocumentJoint,
+  type DocumentMate,
+  type JointFrame,
+  type JointKind,
+  type MateEndpoint,
+  type MateKind,
+} from "./mates";
 import {
   addParameter,
   EMPTY_PARAMETER_COLLECTION,
@@ -349,6 +366,18 @@ export interface CadDocument {
    */
   readonly curves: readonly DocumentCurve[];
   /**
+   * The document's assembly mate records, in add order (empty in older
+   * files; Phase 51-additive): constraints between two occurrences'
+   * mated topology through persistent references.
+   */
+  readonly mates: readonly DocumentMate[];
+  /**
+   * The document's assembly joint records, in add order (empty in older
+   * files; Phase 51-additive): the motion vocabulary between two
+   * occurrences.
+   */
+  readonly joints: readonly DocumentJoint[];
+  /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
    * generated ids unique across save/load.
@@ -541,6 +570,9 @@ export const DOCUMENT_ERROR_CODES = {
   occurrenceBomFlagInvalid: "assembly/occurrence-bom-flag-invalid",
   curveNameInvalid: "document/curve-name-invalid",
   curvePayloadInvalid: "document/curve-payload-invalid",
+  mateInvalid: "assembly/mate-invalid",
+  jointInvalid: "assembly/joint-invalid",
+  occurrenceInUse: "assembly/occurrence-in-use",
   datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
@@ -852,6 +884,8 @@ function raiseGeneratorState(
     curve: Math.max(base.curve, floor.curve),
     sheet: Math.max(base.sheet, floor.sheet),
     drawingView: Math.max(base.drawingView, floor.drawingView),
+    mate: Math.max(base.mate, floor.mate),
+    joint: Math.max(base.joint, floor.joint),
   };
   return Object.freeze(raised);
 }
@@ -901,7 +935,9 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
     document.datums.some((datum) => datum.id === id) ||
     document.sections.some((section) => section.id === id) ||
     document.occurrences.some((occurrence) => occurrence.id === id) ||
-    document.curves.some((curve) => curve.id === id)
+    document.curves.some((curve) => curve.id === id) ||
+    document.mates.some((mate) => mate.id === id) ||
+    document.joints.some((joint) => joint.id === id)
   );
 }
 
@@ -949,6 +985,8 @@ export function createDocument(id: DocumentId): CadDocument {
     sections: Object.freeze([]),
     occurrences: Object.freeze([]),
     curves: Object.freeze([]),
+    mates: Object.freeze([]),
+    joints: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -2236,8 +2274,12 @@ export function addOccurrence(
 /**
  * Removes one occurrence by id (structured not-found refusal otherwise).
  * Nothing in the document references an occurrence — features consume
- * bodies/sketches/datums, not placements — so removal needs no in-use
- * sweep; sub-assembly EDGES cross documents and are the host's graph.
+ * bodies/sketches/datums, not placements — EXCEPT the Phase 51 mates and
+ * joints, which address occurrences directly: removal is refused with
+ * `assembly/occurrence-in-use` while any survives, the document model's
+ * `document/in-use` discipline applied to the assembly vocabulary (drop
+ * the mates/joints first). Sub-assembly EDGES cross documents and are
+ * the host's graph.
  */
 export function removeOccurrence(
   document: CadDocument,
@@ -2248,6 +2290,33 @@ export function removeOccurrence(
       docError(
         DOCUMENT_ERROR_CODES.notFound,
         `No occurrence ${String(id)} exists in this document.`,
+        id,
+      ),
+    );
+  }
+  const mate = document.mates.find(
+    (candidate) =>
+      candidate.first.occurrenceId === id ||
+      candidate.second.occurrenceId === id,
+  );
+  if (mate !== undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.occurrenceInUse,
+        `The occurrence ${String(id)} is addressed by mate ${mate.id}; remove the mate first.`,
+        id,
+      ),
+    );
+  }
+  const joint = document.joints.find(
+    (candidate) =>
+      candidate.baseOccurrenceId === id || candidate.occurrenceId === id,
+  );
+  if (joint !== undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.occurrenceInUse,
+        `The occurrence ${String(id)} is addressed by joint ${joint.id}; remove the joint first.`,
         id,
       ),
     );
@@ -2523,6 +2592,400 @@ export function getDocumentCurve(
   return document.curves.find((curve) => curve.id === id);
 }
 
+// ---------------------------------------------------------------------------
+// Assembly mates and joints (Phase 51)
+// ---------------------------------------------------------------------------
+
+/** Input of {@link addMate}: the record's authored fields. */
+export interface DocumentMateInput {
+  /** An explicit id (`mat_…`), or absent to generate the next one. */
+  readonly id?: MateId;
+  readonly name: string;
+  readonly kind: MateKind;
+  readonly first: MateEndpoint;
+  readonly second: MateEndpoint;
+  /** The kind's parameter (mm for `distance`, degrees for `angle`). */
+  readonly value?: number;
+}
+
+/** Result of {@link addMate}: the next document plus the record. */
+export interface DocumentMateAddResult {
+  readonly document: CadDocument;
+  readonly mate: DocumentMate;
+}
+
+/**
+ * Adds one assembly mate (Phase 51): two endpoints — each an occurrence
+ * of this document plus a persistent reference id resolving against that
+ * occurrence's source topology — constrained by one mate kind. Every
+ * address must resolve at add time (the feature inputs' discipline): an
+ * unknown occurrence or reference is a structured refusal, never a
+ * dangling record.
+ */
+export function addMate(
+  document: CadDocument,
+  input: DocumentMateInput,
+): ParseResult<DocumentMateAddResult, DocumentError> {
+  const name =
+    typeof input.name === "string" &&
+    input.name.length >= 1 &&
+    input.name.length <= 64
+      ? input.name
+      : null;
+  if (name === null) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.mateInvalid,
+        "A mate name must be a string of 1-64 characters.",
+        input.name,
+      ),
+    );
+  }
+  if (!MATE_KINDS.includes(input.kind)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.mateInvalid,
+        `A mate kind must be one of: ${MATE_KINDS.join(", ")}.`,
+        input.kind,
+      ),
+    );
+  }
+  const endpoints = [input.first, input.second];
+  for (const endpoint of endpoints) {
+    if (
+      !document.occurrences.some(
+        (occurrence) => occurrence.id === endpoint.occurrenceId,
+      )
+    ) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.mateInvalid,
+          `A mate endpoint addresses occurrence ${String(endpoint.occurrenceId)}, which does not exist in this document.`,
+          endpoint,
+        ),
+      );
+    }
+    if (
+      !document.references.some(
+        (reference) => reference.id === endpoint.referenceId,
+      )
+    ) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.mateInvalid,
+          `A mate endpoint's reference ${String(endpoint.referenceId)} does not exist in this document; mint the persistent reference first.`,
+          endpoint,
+        ),
+      );
+    }
+  }
+  if (input.first.occurrenceId === input.second.occurrenceId) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.mateInvalid,
+        "A mate's two endpoints must address different occurrences: an occurrence cannot be constrained to itself.",
+        input,
+      ),
+    );
+  }
+  const unit = MATE_VALUE_UNITS[input.kind];
+  if (unit === undefined) {
+    if (input.value !== undefined) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.mateInvalid,
+          `A ${input.kind} mate takes no value; only distance (mm) and angle (deg) mates carry one.`,
+          input.value,
+        ),
+      );
+    }
+  } else if (
+    typeof input.value !== "number" ||
+    !Number.isFinite(input.value) ||
+    input.value < 0
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.mateInvalid,
+        `A ${input.kind} mate's value must be a finite non-negative ${unit} number.`,
+        input.value,
+      ),
+    );
+  }
+  let id: MateId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextMateId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseMateId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A mate id must be a valid mate id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("mate", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `The mate id ${String(parsed.value)} is already registered in this document.`,
+          parsed.value,
+        ),
+      );
+    }
+    id = parsed.value;
+  }
+  const mate: DocumentMate = Object.freeze({
+    id,
+    name,
+    kind: input.kind,
+    first: input.first,
+    second: input.second,
+    ...(input.value === undefined ? {} : { value: input.value }),
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      mates: Object.freeze([...document.mates, mate]),
+      idGeneratorState,
+    }),
+    mate,
+  });
+}
+
+/** Removes one mate by id (structured not-found refusal otherwise). */
+export function removeMate(
+  document: CadDocument,
+  id: MateId,
+): ParseResult<CadDocument, DocumentError> {
+  if (!document.mates.some((mate) => mate.id === id)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No mate ${String(id)} exists in this document.`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      mates: Object.freeze(document.mates.filter((mate) => mate.id !== id)),
+    }),
+  );
+}
+
+/** Input of {@link addJoint}: the record's authored fields. */
+export interface DocumentJointInput {
+  /** An explicit id (`jnt_…`), or absent to generate the next one. */
+  readonly id?: JointId;
+  readonly name: string;
+  readonly kind: JointKind;
+  readonly baseOccurrenceId: OccurrenceId;
+  readonly occurrenceId: OccurrenceId;
+  /** Required for every kind except `rigid` (see the joint frame rules). */
+  readonly frame?: JointFrame;
+}
+
+/** Result of {@link addJoint}: the next document plus the record. */
+export interface DocumentJointAddResult {
+  readonly document: CadDocument;
+  readonly joint: DocumentJoint;
+}
+
+/**
+ * Adds one assembly joint (Phase 51): the motion vocabulary between a
+ * base occurrence and a mobilized one, about the joint frame in the
+ * base's local coordinates. The frame rules match the parse boundary:
+ * axis-bearing kinds require a finite origin and a non-zero finite axis,
+ * `ball` requires the origin and rejects an axis, `rigid` rejects a
+ * frame.
+ */
+export function addJoint(
+  document: CadDocument,
+  input: DocumentJointInput,
+): ParseResult<DocumentJointAddResult, DocumentError> {
+  const name =
+    typeof input.name === "string" &&
+    input.name.length >= 1 &&
+    input.name.length <= 64
+      ? input.name
+      : null;
+  if (name === null) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.jointInvalid,
+        "A joint name must be a string of 1-64 characters.",
+        input.name,
+      ),
+    );
+  }
+  if (!JOINT_KINDS.includes(input.kind)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.jointInvalid,
+        `A joint kind must be one of: ${JOINT_KINDS.join(", ")}.`,
+        input.kind,
+      ),
+    );
+  }
+  for (const id of [input.baseOccurrenceId, input.occurrenceId]) {
+    if (!document.occurrences.some((occurrence) => occurrence.id === id)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.jointInvalid,
+          `A joint addresses occurrence ${String(id)}, which does not exist in this document.`,
+          id,
+        ),
+      );
+    }
+  }
+  if (input.baseOccurrenceId === input.occurrenceId) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.jointInvalid,
+        "A joint's two occurrences must differ: a joint of an occurrence with itself constrains nothing and mobilizes nothing.",
+        input,
+      ),
+    );
+  }
+  let frame: JointFrame | undefined;
+  if (input.kind === "rigid") {
+    if (input.frame !== undefined) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.jointInvalid,
+          "A rigid joint carries no frame: it removes every relative degree of freedom, so it has no axis or origin to state.",
+          input.frame,
+        ),
+      );
+    }
+  } else {
+    const candidate = input.frame;
+    if (
+      candidate === undefined ||
+      !candidate.origin.every((component) => Number.isFinite(component))
+    ) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.jointInvalid,
+          `A ${input.kind} joint's frame must carry a finite origin triple.`,
+          input.frame,
+        ),
+      );
+    }
+    if (input.kind === "ball") {
+      if (candidate.axis !== undefined) {
+        return fail(
+          docError(
+            DOCUMENT_ERROR_CODES.jointInvalid,
+            "A ball joint's frame carries only its centre: rotation is free about every axis through it.",
+            candidate.axis,
+          ),
+        );
+      }
+      frame = { origin: [...candidate.origin] };
+    } else {
+      const axis = candidate.axis;
+      if (
+        axis === undefined ||
+        !axis.every((component) => Number.isFinite(component)) ||
+        (axis[0] === 0 && axis[1] === 0 && axis[2] === 0)
+      ) {
+        return fail(
+          docError(
+            DOCUMENT_ERROR_CODES.jointInvalid,
+            `A ${input.kind} joint's frame must carry a non-zero finite axis triple.`,
+            candidate.axis,
+          ),
+        );
+      }
+      frame = { origin: [...candidate.origin], axis: [...axis] };
+    }
+  }
+  let id: JointId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextJointId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseJointId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A joint id must be a valid joint id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    const unclaimable = unclaimablePayloadError("joint", parsed.value);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, parsed.value)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `The joint id ${String(parsed.value)} is already registered in this document.`,
+          parsed.value,
+        ),
+      );
+    }
+    id = parsed.value;
+  }
+  const joint: DocumentJoint = Object.freeze({
+    id,
+    name,
+    kind: input.kind,
+    baseOccurrenceId: input.baseOccurrenceId,
+    occurrenceId: input.occurrenceId,
+    ...(frame === undefined ? {} : { frame }),
+  });
+  return ok({
+    document: Object.freeze({
+      ...document,
+      joints: Object.freeze([...document.joints, joint]),
+      idGeneratorState,
+    }),
+    joint,
+  });
+}
+
+/** Removes one joint by id (structured not-found refusal otherwise). */
+export function removeJoint(
+  document: CadDocument,
+  id: JointId,
+): ParseResult<CadDocument, DocumentError> {
+  if (!document.joints.some((joint) => joint.id === id)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No joint ${String(id)} exists in this document.`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      joints: Object.freeze(document.joints.filter((joint) => joint.id !== id)),
+    }),
+  );
+}
+
 /** Input of {@link addDocumentSection}: the record's authored fields. */
 export interface DocumentSectionInput {
   /** An explicit id (`sec_…`), or absent to generate the next one. */
@@ -2737,6 +3200,8 @@ export type SerializedIdGeneratorState = Omit<
   | "curve"
   | "sheet"
   | "drawingView"
+  | "mate"
+  | "joint"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
@@ -2745,6 +3210,8 @@ export type SerializedIdGeneratorState = Omit<
   readonly curve?: number;
   readonly sheet?: number;
   readonly drawingView?: number;
+  readonly mate?: number;
+  readonly joint?: number;
 };
 
 function serializeIdGeneratorState(
@@ -2763,6 +3230,8 @@ function serializeIdGeneratorState(
     ...(state.curve === 0 ? {} : { curve: state.curve }),
     ...(state.sheet === 0 ? {} : { sheet: state.sheet }),
     ...(state.drawingView === 0 ? {} : { drawingView: state.drawingView }),
+    ...(state.mate === 0 ? {} : { mate: state.mate }),
+    ...(state.joint === 0 ? {} : { joint: state.joint }),
   };
 }
 
@@ -2814,6 +3283,27 @@ export interface SerializedCadDocument {
     readonly id: string;
     readonly name: string;
     readonly curve: SerializedCurve;
+  }[];
+  /** Present exactly when the document carries mate records (additive). */
+  readonly mates?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly kind: MateKind;
+    readonly first: MateEndpoint;
+    readonly second: MateEndpoint;
+    readonly value?: number;
+  }[];
+  /** Present exactly when the document carries joint records (additive). */
+  readonly joints?: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly kind: JointKind;
+    readonly baseOccurrenceId: string;
+    readonly occurrenceId: string;
+    readonly frame?: {
+      readonly origin: readonly [number, number, number];
+      readonly axis?: readonly [number, number, number];
+    };
   }[];
 }
 
@@ -2926,6 +3416,42 @@ export function serializeCadDocument(
             id: curve.id,
             name: curve.name,
             curve: curve.curve,
+          })),
+        }),
+    // Additive (Phase 51): emitted only when mate/joint records exist,
+    // so documents from before the assembly vocabulary serialize
+    // byte-identically to their pre-mate form.
+    ...(document.mates.length === 0
+      ? {}
+      : {
+          mates: document.mates.map((mate) => ({
+            id: mate.id,
+            name: mate.name,
+            kind: mate.kind,
+            first: mate.first,
+            second: mate.second,
+            ...(mate.value === undefined ? {} : { value: mate.value }),
+          })),
+        }),
+    ...(document.joints.length === 0
+      ? {}
+      : {
+          joints: document.joints.map((joint) => ({
+            id: joint.id,
+            name: joint.name,
+            kind: joint.kind,
+            baseOccurrenceId: joint.baseOccurrenceId,
+            occurrenceId: joint.occurrenceId,
+            ...(joint.frame === undefined
+              ? {}
+              : {
+                  frame: {
+                    origin: [...joint.frame.origin],
+                    ...(joint.frame.axis === undefined
+                      ? {}
+                      : { axis: [...joint.frame.axis] }),
+                  },
+                }),
           })),
         }),
   };
@@ -3362,6 +3888,40 @@ function parseSerializedOccurrence(
   );
 }
 
+/**
+ * Parses a serialized mate through the vocabulary module's parse boundary
+ * (`parseAssemblyMate` — the same validation the record's add door
+ * applies), re-wrapping its structured failure as a document error.
+ */
+function parseSerializedMate(
+  input: unknown,
+): ParseResult<DocumentMate, DocumentError> {
+  const parsed = parseAssemblyMate(input);
+  if (!parsed.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.mateInvalid, parsed.error.message, input),
+    );
+  }
+  return ok(parsed.value);
+}
+
+/**
+ * Parses a serialized joint through the vocabulary module's parse
+ * boundary (`parseAssemblyJoint`), re-wrapping its structured failure as
+ * a document error.
+ */
+function parseSerializedJoint(
+  input: unknown,
+): ParseResult<DocumentJoint, DocumentError> {
+  const parsed = parseAssemblyJoint(input);
+  if (!parsed.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.jointInvalid, parsed.error.message, input),
+    );
+  }
+  return ok(parsed.value);
+}
+
 /** Parses a finite [x, y, z] triple or fails structured. */
 function parseSectionTriple(
   input: unknown,
@@ -3658,6 +4218,18 @@ export function parseCadDocument(
     parseSerializedCurveRecord,
   );
   if (!parsedCurves.ok) return parsedCurves;
+  const parsedMates = parseSerializedList(
+    input.mates ?? [],
+    "mates",
+    parseSerializedMate,
+  );
+  if (!parsedMates.ok) return parsedMates;
+  const parsedJoints = parseSerializedList(
+    input.joints ?? [],
+    "joints",
+    parseSerializedJoint,
+  );
+  if (!parsedJoints.ok) return parsedJoints;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -3719,6 +4291,32 @@ export function parseCadDocument(
       ...(occurrence.bomFlag === undefined
         ? {}
         : { bomFlag: occurrence.bomFlag }),
+    });
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  // Mates and joints parse after occurrences AND references: their
+  // endpoints validate against both collections at the add boundary.
+  for (const mate of parsedMates.value) {
+    const added = addMate(document, {
+      id: mate.id,
+      name: mate.name,
+      kind: mate.kind,
+      first: mate.first,
+      second: mate.second,
+      ...(mate.value === undefined ? {} : { value: mate.value }),
+    });
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  for (const joint of parsedJoints.value) {
+    const added = addJoint(document, {
+      id: joint.id,
+      name: joint.name,
+      kind: joint.kind,
+      baseOccurrenceId: joint.baseOccurrenceId,
+      occurrenceId: joint.occurrenceId,
+      ...(joint.frame === undefined ? {} : { frame: joint.frame }),
     });
     if (!added.ok) return added;
     document = added.value.document;

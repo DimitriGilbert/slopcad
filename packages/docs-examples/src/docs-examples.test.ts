@@ -7,6 +7,7 @@
 
 import { threadId } from "node:worker_threads";
 import { beforeAll, describe, expect, it } from "vitest";
+import { CAD_NATIVE_FORMAT_VERSION } from "@slopcad/cad-core";
 import { createFakeKernel } from "@slopcad/cad-kernel";
 import {
   createManifoldRuntime,
@@ -85,7 +86,7 @@ describe("guide example: history (transactions, undo, redo)", () => {
 describe("guide example: native format", () => {
   it("saves, reopens through the replaying parser, and resaves identically", () => {
     const summary = runNativeFormatExample();
-    expect(summary.formatVersion).toBe(4);
+    expect(summary.formatVersion).toBe(CAD_NATIVE_FORMAT_VERSION);
     expect(summary.reopenedHoleMm).toBe(12);
     expect(summary.reopenedTransactionCount).toBe(3);
     expect(summary.validatorIssues).toBe(0);

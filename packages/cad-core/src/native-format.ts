@@ -139,6 +139,7 @@ import {
   type HistoryEntry,
   currentDocument,
 } from "./history";
+import { parseAssemblyJoint, parseAssemblyMate } from "./mates";
 import {
   CAD_ID_KINDS,
   parseBodyId,
@@ -1440,6 +1441,73 @@ function validateSerializedCadDocumentShape(
     issues,
   );
   validateSerializedCurveListShape(input.curves, `${path}.curves`, issues);
+  validateSerializedMateListShape(input.mates, `${path}.mates`, issues);
+  validateSerializedJointListShape(input.joints, `${path}.joints`, issues);
+}
+
+/**
+ * Inspects a PRESENT serialized mate list through the vocabulary module's
+ * parse boundary (Phase 51): one structured issue per malformed record.
+ * Absent means empty — the additive discipline.
+ */
+function validateSerializedMateListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized mates must be an array of mate records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseAssemblyMate(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
+}
+
+/**
+ * Inspects a PRESENT serialized joint list through the vocabulary
+ * module's parse boundary (Phase 51). Absent means empty.
+ */
+function validateSerializedJointListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized joints must be an array of joint records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseAssemblyJoint(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
 }
 
 /**

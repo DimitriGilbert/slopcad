@@ -215,11 +215,13 @@ export function renderObjectIdBodyId(id: RenderObjectId): BodyId {
  * with the body id's payload by `.` — e.g. path `[occ_0001, occ_0003]`
  * over `body_0002` gives `rend_0001.0003.0002`. Unique per (path, body),
  * deterministic, and distinct from every direct-body id. Throws a
- * `RangeError` when the joined payload would exceed the wire bound —
- * occurrence paths past roughly nine hops overflow a bound the
- * assembly walk's own depth limit (16) can reach with long payloads;
- * resolution surfaces that as a structured failure before render data
- * is ever built.
+ * `RangeError` when a segment carries `.` — the id payload grammar admits
+ * dots, but here one would make `a` + `b.c` and `a.b` + `c` collide into
+ * the same joined id (the id-ambiguity guard) — or when the joined payload
+ * would exceed the wire bound — occurrence paths past roughly nine hops
+ * overflow a bound the assembly walk's own depth limit (16) can reach with
+ * long payloads; resolution surfaces that as a structured failure before
+ * render data is ever built.
  */
 export function placementRenderObjectId(
   path: readonly OccurrenceId[],
@@ -229,6 +231,12 @@ export function placementRenderObjectId(
     ...path.map((id) => id.slice(CAD_ID_PREFIXES.occurrence.length + 1)),
     bodyId.slice(CAD_ID_PREFIXES.body.length + 1),
   ];
+  const dotted = segments.find((segment) => segment.includes("."));
+  if (dotted !== undefined) {
+    throw new RangeError(
+      `A placed-instance render id segment must not carry ".": "${dotted}" would make the joined id ambiguous between distinct (path, body) pairs.`,
+    );
+  }
   const payload = segments.join(".");
   if (!RENDER_ID_PAYLOAD_PATTERN.test(payload)) {
     throw new RangeError(

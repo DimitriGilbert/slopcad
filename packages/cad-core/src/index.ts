@@ -19,6 +19,8 @@ export type {
   IdGeneratorErrorCode,
   IdGeneratorState,
   IdParseError,
+  JointId,
+  MateId,
   OccurrenceId,
   ParameterId,
   ParsedCadId,
@@ -60,6 +62,8 @@ export {
   createDrawingViewId,
   createFeatureId,
   createIdGenerator,
+  createJointId,
+  createMateId,
   createOccurrenceId,
   createParameterId,
   createReferenceId,
@@ -72,6 +76,8 @@ export {
   parseCurveId,
   parseDatumId,
   parseDrawingViewId,
+  parseJointId,
+  parseMateId,
   parseOccurrenceId,
   parseSectionId,
   parseDocumentId,
@@ -388,6 +394,10 @@ export {
   updateOccurrence,
   removeOccurrence,
   getOccurrence,
+  addJoint,
+  addMate,
+  removeJoint,
+  removeMate,
   createDocument,
   DOCUMENT_ERROR_CODES,
   FEATURE_INPUT_KINDS,
@@ -990,3 +1000,64 @@ export {
 export { formatSvgNumber, serializeDrawingSheetSvg } from "./drawing-svg";
 export type { DrawingDimensionRecoveryOptions } from "./drawing-dimension-source";
 export { recoverFeatureDimensions } from "./drawing-dimension-source";
+export type {
+  InterferenceCheckInput,
+  InterferenceErrorCode,
+  InterferenceError,
+  InterferenceInstance,
+  InterferencePair,
+  InterferenceReport,
+  InterferenceVolumeFn,
+  SkippedInterferencePair,
+} from "./assembly-interference";
+export {
+  checkAssemblyInterference,
+  checkResolvedAssemblyInterference,
+  INTERFERENCE_ERROR_CODES,
+} from "./assembly-interference";
+export type {
+  AssemblyMateError,
+  AssemblyMateErrorCode,
+  DocumentJoint,
+  DocumentMate,
+  JointFrame,
+  JointKind,
+  MateEndpoint,
+  MateKind,
+} from "./mates";
+export {
+  JOINT_KINDS,
+  JOINT_REMAINING_DOF,
+  jointMotionTransform,
+  MATE_KINDS,
+  MATE_VALUE_UNITS,
+  normalizeJointAxis,
+  parseAssemblyJoint,
+  parseAssemblyMate,
+} from "./mates";
+export type {
+  DocumentJointAddResult,
+  DocumentJointInput,
+  DocumentMateAddResult,
+  DocumentMateInput,
+} from "./document";
+export type {
+  AssemblySolveDiagnostic,
+  AssemblySolveDiagnosticCode,
+  AssemblySolveInput,
+  AssemblySolveResult,
+  AssemblySolveStatus,
+  MateAnchor,
+  MateAnchorTable,
+} from "./mate-solver";
+export {
+  ASSEMBLY_SOLVE_DIAGNOSTIC_CODES,
+  ASSEMBLY_SOLVE_STATUSES,
+  jointDofSummary,
+  MATE_DOF_RANK_TOLERANCE,
+  MATE_MAX_ITERATIONS,
+  MATE_RESIDUAL_TOLERANCE,
+  referenceSolveCoincident,
+  rotationVectorToMatrix,
+  solveAssemblyMates,
+} from "./mate-solver";

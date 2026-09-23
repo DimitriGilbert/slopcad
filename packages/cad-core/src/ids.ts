@@ -38,6 +38,8 @@ export const CAD_ID_KINDS = [
   "curve",
   "sheet",
   "drawingView",
+  "mate",
+  "joint",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -103,6 +105,17 @@ export type SheetId = BrandedId<"sheet">;
  * aligned to a parent base view (Phase 53).
  */
 export type DrawingViewId = BrandedId<"drawingView">;
+/**
+ * Identifier of an assembly mate (e.g. `mat_face-flush`): the
+ * document-resident record constraining two occurrences' mated topology
+ * through persistent references (Phase 51).
+ */
+export type MateId = BrandedId<"mate">;
+/**
+ * Identifier of an assembly joint (e.g. `jnt_hinge`): the document-resident
+ * record granting a motion vocabulary between two occurrences (Phase 51).
+ */
+export type JointId = BrandedId<"joint">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -117,6 +130,8 @@ type CadIdTable = {
   curve: CurveId;
   sheet: SheetId;
   drawingView: DrawingViewId;
+  mate: MateId;
+  joint: JointId;
 };
 
 /** The branded id type of a given id kind. */
@@ -142,6 +157,8 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   curve: "crv",
   sheet: "sht",
   drawingView: "dwv",
+  mate: "mat",
+  joint: "jnt",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -283,6 +300,18 @@ export function parseOccurrenceId(
   input: unknown,
 ): ParseResult<OccurrenceId, IdParseError> {
   return parseIdOfKind("occurrence", input);
+}
+
+/** Parses untrusted input as a {@link MateId}. */
+export function parseMateId(input: unknown): ParseResult<MateId, IdParseError> {
+  return parseIdOfKind("mate", input);
+}
+
+/** Parses untrusted input as a {@link JointId}. */
+export function parseJointId(
+  input: unknown,
+): ParseResult<JointId, IdParseError> {
+  return parseIdOfKind("joint", input);
 }
 
 /** Parses untrusted input as a {@link DatumId}. */
@@ -487,6 +516,22 @@ export function createDrawingViewId(raw: string): DrawingViewId {
 }
 
 /**
+ * Adopts an explicit user-provided mate id exactly as given (`mat_…` wire
+ * format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createMateId(raw: string): MateId {
+  return requireId("mate", raw);
+}
+
+/**
+ * Adopts an explicit user-provided joint id exactly as given (`jnt_…` wire
+ * format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createJointId(raw: string): JointId {
+  return requireId("joint", raw);
+}
+
+/**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
  */
@@ -545,6 +590,8 @@ export interface IdGenerator {
   nextCurveId(): CurveId;
   nextSheetId(): SheetId;
   nextDrawingViewId(): DrawingViewId;
+  nextMateId(): MateId;
+  nextJointId(): JointId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -562,6 +609,8 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   curve: 0,
   sheet: 0,
   drawingView: 0,
+  mate: 0,
+  joint: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -622,6 +671,8 @@ export function createIdGenerator(
     nextCurveId: () => requireId("curve", nextRawId("curve")),
     nextSheetId: () => requireId("sheet", nextRawId("sheet")),
     nextDrawingViewId: () => requireId("drawingView", nextRawId("drawingView")),
+    nextMateId: () => requireId("mate", nextRawId("mate")),
+    nextJointId: () => requireId("joint", nextRawId("joint")),
     state: () => Object.freeze({ ...counters }),
   };
 }

@@ -155,6 +155,101 @@ describe("assembly instance resolution", () => {
     ]);
   });
 
+  it("nests two levels through ROTATED datum anchors composing in path order", () => {
+    // The Phase 50 carry-in: the nesting test above only walks commuting
+    // x-translations, which compose identically in either order. This
+    // fixture anchors BOTH levels to cSys datums that rotate, so the
+    // composed world transform proves the fixed outermost-first order:
+    // world = M(level 1) ∘ M(level 2).
+    let root = partDocument("doc_two_level_root");
+    const withRootDatum = addDocumentDatum(root, {
+      name: "Root anchor",
+      datum: CSYS_PAYLOAD,
+    });
+    if (!withRootDatum.ok) throw new Error("expected root datum add");
+    root = withRootDatum.value.document;
+
+    const leaf = partDocument("doc_two_level_leaf");
+    let sub = partDocument("doc_two_level_sub");
+    const withSubDatum = addDocumentDatum(sub, {
+      name: "Sub anchor",
+      datum: {
+        formatVersion: 1,
+        datumType: "cSys" as const,
+        origin: [0, 10, 0] as const,
+        xAxis: [0, 0, 1] as const,
+        normal: [1, 0, 0] as const,
+      },
+    });
+    if (!withSubDatum.ok) throw new Error("expected sub datum add");
+    sub = withSubDatum.value.document;
+    const toLeaf = addOccurrence(sub, {
+      name: "Leaf",
+      source: { kind: "document", documentId: "doc-two-level-leaf" },
+      placement: {
+        kind: "datum",
+        datumId: firstDatumId(sub),
+        translation: [0, 0, 7],
+      },
+    });
+    if (!toLeaf.ok) throw new Error("expected occurrence add");
+    sub = toLeaf.value.document;
+    const toSub = addOccurrence(root, {
+      name: "Sub",
+      source: { kind: "document", documentId: "doc-two-level-sub" },
+      placement: { kind: "datum", datumId: firstDatumId(root) },
+    });
+    if (!toSub.ok) throw new Error("expected occurrence add");
+    root = toSub.value.document;
+
+    const resolution = resolveAssemblyInstances(root, {
+      document: (id) =>
+        id === "doc-two-level-sub"
+          ? sub
+          : id === "doc-two-level-leaf"
+            ? leaf
+            : undefined,
+    });
+    expect(resolution.ok).toBe(true);
+    if (!resolution.ok) return;
+    // The sub's direct body (placed at the root anchor) plus the leaf's
+    // body (placed at the composed two-level transform).
+    expect(resolution.instances).toHaveLength(2);
+    const leafInstance = resolution.instances.find(
+      (candidate) => candidate.path.length === 2,
+    );
+    expect(leafInstance).toBeDefined();
+    if (leafInstance === undefined) return;
+    expect(leafInstance.path).toEqual([
+      toSub.value.occurrence.id,
+      toLeaf.value.occurrence.id,
+    ]);
+    // Level 1 (the root anchor): origin (100,0,0) with x->y, y->−x, z->z.
+    // Level 2 (the sub anchor): origin (0,10,0) with x->z, y->x, z->y, and
+    // the in-frame translation (0,0,7) the sub's rotated frame maps to
+    // world (7,10,0) BEFORE level 1's rotation composes on top. World
+    // origin: (100,0,0) + R1 · (7,10,0) = (100,0,0) + (−10, 7, 0)
+    // = (90, 7, 0).
+    expect(transformPlacementPoint(leafInstance.transform, [0, 0, 0])).toEqual([
+      90, 7, 0,
+    ]);
+    // A rotated direction distinguishes the composition order: the leaf's
+    // local x maps under R2 to world z, then R1 keeps z as z; the reverse
+    // composition order would send it along world y instead.
+    expect(transformPlacementPoint(leafInstance.transform, [1, 0, 0])).toEqual([
+      90, 7, 1,
+    ]);
+    // The sub's direct body sits at the level-1 transform alone.
+    const subDirect = resolution.instances.find(
+      (candidate) => candidate.path.length === 1,
+    );
+    expect(subDirect).toBeDefined();
+    if (subDirect === undefined) return;
+    expect(transformPlacementPoint(subDirect.transform, [1, 0, 0])).toEqual([
+      100, 1, 0,
+    ]);
+  });
+
   it("carries BOM flags along the path, absent = default", () => {
     const sub = partDocument("doc_kit");
     const inSub = addOccurrence(sub, {

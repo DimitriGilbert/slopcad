@@ -350,7 +350,7 @@ describe("the native format with datum records", () => {
       datums: [{ id: "not-a-datum-id", name: "", datum: 42 }],
     };
     const validation = validateNativeCadDocument({
-      formatVersion: 4,
+      formatVersion: 5,
       document: broken,
       history: { base: broken, transactions: [], cursor: 0 },
       regeneration: { features: [] },
