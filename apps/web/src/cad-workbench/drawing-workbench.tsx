@@ -23,7 +23,13 @@
  * duplicate project or document off stale cached empties.
  */
 
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+} from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   alignedViewPlacement,
@@ -283,6 +289,17 @@ export function DrawingWorkbenchPage(): ReactElement {
   const [status, setStatus] = useState(
     "No sheets yet. Sheets, views, BOM tables, and balloons author here; the model's dimensions recover onto the first sheet; Save persists the drawing into a document.",
   );
+  // The settle stamp (the fixture-session boot discipline, one attribute
+  // wide): "ready" flips only after the surviving mount's effects have run,
+  // so an automation click that arrives before it is not answered by a form
+  // that is mid-mount. The drawing-sheet e2e gates interaction on it —
+  // a click racing the (dev-only) first-transform full reload or StrictMode's
+  // discard window is lost forever, and a retrying assertion cannot
+  // resurrect a click nobody received.
+  const [booted, setBooted] = useState(false);
+  useEffect(() => {
+    setBooted(true);
+  }, []);
 
   const geometryByView = useMemo<DrawingGeometryByView>(() => {
     const sheet = drawing.sheets[0];
@@ -984,6 +1001,7 @@ export function DrawingWorkbenchPage(): ReactElement {
     <main
       id="drawing-root"
       className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-8 print:max-w-none print:px-0 print:py-0"
+      data-drawing-boot={booted ? "ready" : "booting"}
     >
       <style dangerouslySetInnerHTML={{ __html: printPageStyle }} />
       <header className="flex flex-col gap-1 print:hidden">

@@ -58,6 +58,48 @@ POSITION/NORMAL accessors (POSITION with its spec-required min/max),
 uint16/uint32 indices by vertex count (`GLB_UINT16_VERTEX_LIMIT`), and
 the documented CadScene pbrMetallicRoughness material.
 
+## OBJ (Phase 56)
+
+```ts
+import { exportObj, importObj } from "@slopcad/cad-io";
+
+const exported = exportObj(tessellation); // deterministic ASCII, 6-decimal text
+const imported = importObj(exported.value);
+imported.value.name; // the first o/g name, null when the file names none
+imported.value.declined; // every out-of-subset keyword, recorded
+```
+
+Wavefront OBJ rides the same family discipline as STL: one tessellation
+per file, byte-deterministic fixed-format text, unitless coordinates in
+canonical millimetres (the importer reads them 1:1 — the documented
+convention, not a detection). Faces with 3+ vertices fan-triangulate;
+negative indices resolve per the spec. Everything the pinned subset does
+not consume (`vn`, `vt`, materials, line elements, second objects) is
+recorded in `declined` — never silently dropped.
+
+## DXF and SVG sketches (Phase 56)
+
+```ts
+import { importDxf, importSvg } from "@slopcad/cad-io";
+
+const dxf = importDxf(bytes, { layers: ["outline"] }); // cad-sketch entities, mm
+const svg = importSvg(bytes); // same vocabulary, y mirrored to the sketch plane
+dxf.value.declined; // scope boundaries: out-of-subset kinds/splines, with handles
+```
+
+Both are sketch importers, not mesh ones: they parse ASCII DXF
+(R12-class LINE/CIRCLE/ARC/LWPOLYLINE/POLYLINE/SPLINE subset, `$INSUNITS`
+scaling) and ASCII SVG (`line`/`circle`/`rect`/`ellipse` elements and a
+`path` subset — M/L/H/V/C/Q/A/Z, exact quadratic elevation and arc
+center parameterization) into the exact cad-sketch vocabulary, feeding
+the sketch editor. Scope boundaries decline per element with reasons;
+in-subset defects reject the whole file (`dxf-import/*`, `svg-import/*`
+codes). SVG's y-down axis mirrors to the sketch plane; a viewBox
+contributes its origin only. **DWG stays a documented decline**: the
+closed binary AutoCAD format has no in-repo parser (and no sanctioned
+spec to write one from) — DXF is the interchange answer, and that is the
+whole of the DWG surface.
+
 ## The runnable example
 
 `packages/docs-examples/src/io/mesh.ts` round-trips all three over one

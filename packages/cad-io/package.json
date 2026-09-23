@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@slopcad/cad-core": "workspace:*",
-    "@slopcad/cad-kernel": "workspace:*"
+    "@slopcad/cad-kernel": "workspace:*",
+    "@slopcad/cad-sketch": "workspace:*"
   },
   "devDependencies": {
     "@slopcad/cad-kernel-manifold": "workspace:*",
