@@ -130,6 +130,28 @@ export {
   CAD_SCENE_KEY_LIGHT_POSITION,
   CadSceneLights,
 } from "./scene-lights";
+export type { CadLightRig, CadRigLight } from "./lighting";
+export {
+  CAD_LIGHT_RIGS,
+  CAD_LIGHT_RIG_IDS,
+  CAD_LIGHT_RIG_INSPECTION,
+  CAD_LIGHT_RIG_NORTH_WINDOW,
+  CAD_LIGHT_RIG_STUDIO,
+  lightRigById,
+} from "./lighting";
+export type { CadRenderQuality } from "./render-quality";
+export {
+  CAD_QUALITY_SHADOW_BIAS,
+  CAD_QUALITY_SHADOW_CAMERA_EXTENT_MM,
+  CAD_QUALITY_SHADOW_GROUND_OPACITY,
+  CAD_QUALITY_SHADOW_MAP_SIZE,
+  CAD_QUALITY_SHADOW_NORMAL_BIAS,
+  CAD_QUALITY_SSAO_KERNEL_RADIUS_MM,
+  CAD_QUALITY_SSAO_MAX_DISTANCE_MM,
+  CAD_QUALITY_SSAO_MIN_DISTANCE_MM,
+  CAD_RENDER_QUALITIES,
+  renderQualityById,
+} from "./render-quality";
 export {
   CAD_SCENE_AXIS_CLEARANCE_MM,
   CAD_SCENE_AXIS_LENGTH_MM,

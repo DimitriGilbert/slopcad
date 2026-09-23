@@ -11,7 +11,11 @@
  */
 
 import type { RenderCamera } from "@slopcad/cad-core";
-import type { CadDisplayMode, ViewAngleConvention } from "@slopcad/cad-r3f";
+import type {
+  CadDisplayMode,
+  CadRenderQuality,
+  ViewAngleConvention,
+} from "@slopcad/cad-r3f";
 
 /** The session record: camera overlay + display preferences. */
 export interface ViewportViewSession {
@@ -25,6 +29,16 @@ export interface ViewportViewSession {
   readonly displayMode: CadDisplayMode;
   /** The projection-arrangement convention (third angle is the default). */
   readonly convention: ViewAngleConvention;
+  /**
+   * The light rig id (Phase 59); `"studio"` — the pinned constants — is
+   * the boot default and the only state the pinned baselines render.
+   */
+  readonly lightRig: string;
+  /**
+   * The render quality (Phase 59); `"standard"` is the boot path the
+   * baselines pin, `"quality"` is opt-in and never serialized.
+   */
+  readonly renderQuality: CadRenderQuality;
 }
 
 /** The session every viewport boots with: spec law, shaded, third angle. */
@@ -32,6 +46,8 @@ export function createViewportViewSession(): ViewportViewSession {
   return {
     convention: "third-angle",
     displayMode: "shaded",
+    lightRig: "studio",
+    renderQuality: "standard",
     userCamera: null,
   };
 }
@@ -62,4 +78,20 @@ export function sessionWithConvention(
   convention: ViewAngleConvention,
 ): ViewportViewSession {
   return { ...session, convention };
+}
+
+/** Sets the light rig (a user display choice; never serialized). */
+export function sessionWithLightRig(
+  session: ViewportViewSession,
+  lightRig: string,
+): ViewportViewSession {
+  return { ...session, lightRig };
+}
+
+/** Sets the render quality (a user display choice; never serialized). */
+export function sessionWithRenderQuality(
+  session: ViewportViewSession,
+  renderQuality: CadRenderQuality,
+): ViewportViewSession {
+  return { ...session, renderQuality };
 }

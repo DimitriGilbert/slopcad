@@ -72,6 +72,8 @@ import type {
 type SceneUserCameraProp = ComponentProps<typeof CadScene>["userCamera"];
 type SceneOnUserCameraProp = ComponentProps<typeof CadScene>["onUserCamera"];
 type SceneDisplayModeProp = ComponentProps<typeof CadScene>["displayMode"];
+type SceneLightRigProp = ComponentProps<typeof CadScene>["lightRig"];
+type SceneRenderQualityProp = ComponentProps<typeof CadScene>["renderQuality"];
 import {
   CadProviderError,
   useCadSelection,
@@ -183,6 +185,16 @@ export interface CadViewportProps {
    * `wireframe`, or `hidden-line`.
    */
   readonly displayMode?: SceneDisplayModeProp;
+  /**
+   * The light rig (Phase 59): a `lighting.ts` preset; the studio rig (the
+   * pinned constants) is the default.
+   */
+  readonly lightRig?: SceneLightRigProp;
+  /**
+   * The render quality (Phase 59): `"standard"` (the default boot path)
+   * or the opt-in `"quality"` mode.
+   */
+  readonly renderQuality?: SceneRenderQualityProp;
   /** Fires once per projection change, on its first settled demand frame. */
   readonly onSettled?: () => void;
   /** Fires when new selection content reached a rendered frame. */
@@ -243,6 +255,8 @@ export function CadViewport({
   clippingPlanes,
   displayMode,
   labels: labelOverrides,
+  lightRig,
+  renderQuality,
   onHover,
   onUserCamera,
   onPick,
@@ -492,6 +506,8 @@ export function CadViewport({
           clippingPlanes={clippingPlanes}
           cameraOrbitDragEnabled={cameraOrbitDragEnabled}
           displayMode={displayMode}
+          lightRig={lightRig}
+          renderQuality={renderQuality}
           onCameraState={handleCameraState}
           onSelectionRendered={onSelectionRendered}
           onSettled={onSettled}

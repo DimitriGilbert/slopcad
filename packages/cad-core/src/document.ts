@@ -45,6 +45,13 @@
  */
 
 import {
+  type Appearance,
+  BODY_FACE_APPEARANCE_LIMIT,
+  type FaceAppearanceOverride,
+  parseAppearance,
+  serializeAppearance,
+} from "./appearance";
+import {
   buildDocumentConfiguration,
   CONFIGURATION_ERROR_CODES,
   type DocumentConfiguration,
@@ -161,6 +168,21 @@ export interface Body {
   readonly visible?: boolean;
   /** Present exactly when the body is isolated (`true`); default not. */
   readonly isolated?: boolean;
+  /**
+   * The body's appearance record (Phase 59), absent = the scene's
+   * documented default material — the display-flags additive precedent:
+   * display state, never model data, so an old reader's tolerant body
+   * parse drops it and documents without one serialize byte-identically
+   * to their pre-appearance form.
+   */
+  readonly appearance?: Appearance;
+  /**
+   * Face-level appearance overrides (Phase 59), scoped to the body's
+   * CURRENT topology snapshot's synthetic faces; absent = the body
+   * appearance (or the scene default) applies whole. Same display-state
+   * class as {@link Body.appearance}.
+   */
+  readonly faceAppearances?: readonly FaceAppearanceOverride[];
 }
 
 /** Input accepted by {@link addBody}; the id is generated when omitted. */
@@ -173,6 +195,10 @@ export interface BodyInput {
   readonly visible?: boolean;
   /** Present exactly when the body is isolated (`true`); default not. */
   readonly isolated?: boolean;
+  /** The body's appearance record; absent = the scene default. */
+  readonly appearance?: Appearance;
+  /** Face-level appearance overrides; absent = none. */
+  readonly faceAppearances?: readonly FaceAppearanceOverride[];
 }
 
 /**
@@ -577,6 +603,7 @@ export const DOCUMENT_ERROR_CODES = {
   idInvalid: "document/id-invalid",
   idConflict: "document/id-conflict",
   bodyNameInvalid: "document/body-name-invalid",
+  bodyAppearanceInvalid: "document/body-appearance-invalid",
   sketchNameInvalid: "document/sketch-name-invalid",
   sketchPayloadInvalid: "document/sketch-payload-invalid",
   referenceNameInvalid: "document/reference-name-invalid",
@@ -647,6 +674,78 @@ function validateBodyName(name: unknown): ParseResult<string, DocumentError> {
     );
   }
   return ok(name);
+}
+
+/**
+ * Validates a body-record appearance payload (Phase 59): the record's
+ * appearance through {@link parseAppearance} and its face overrides
+ * against the snapshot-scoping rules (integer face indices, the
+ * {@link BODY_FACE_APPEARANCE_LIMIT} budget, each override's appearance
+ * parsed through the same gate). The document's own structured failure
+ * (`document/body-appearance-invalid`) wraps every rejection so the
+ * command layer reports one code regardless of which field refused.
+ */
+function validateBodyAppearance(
+  appearance: Appearance | undefined,
+  faceAppearances: readonly FaceAppearanceOverride[] | undefined,
+): ParseResult<
+  {
+    readonly appearance?: Appearance;
+    readonly faceAppearances?: readonly FaceAppearanceOverride[];
+  },
+  DocumentError
+> {
+  const docFailure = (
+    message: string,
+    input: unknown,
+  ): ParseResult<
+    {
+      readonly appearance?: Appearance;
+      readonly faceAppearances?: readonly FaceAppearanceOverride[];
+    },
+    DocumentError
+  > =>
+    fail(docError(DOCUMENT_ERROR_CODES.bodyAppearanceInvalid, message, input));
+  if (appearance !== undefined) {
+    const parsed = parseAppearance(appearance);
+    if (!parsed.ok) {
+      return docFailure(
+        `The body's appearance record is invalid: ${parsed.error.message}`,
+        appearance,
+      );
+    }
+  }
+  if (faceAppearances !== undefined) {
+    if (faceAppearances.length > BODY_FACE_APPEARANCE_LIMIT) {
+      return docFailure(
+        `A body carries at most ${String(BODY_FACE_APPEARANCE_LIMIT)} face appearance overrides.`,
+        faceAppearances.length,
+      );
+    }
+    for (const override of faceAppearances) {
+      if (
+        typeof override.face !== "number" ||
+        !Number.isInteger(override.face) ||
+        override.face < 0
+      ) {
+        return docFailure(
+          "A face appearance override's face must be a non-negative integer (a synthetic face index of the body's topology snapshot).",
+          override,
+        );
+      }
+      const parsed = parseAppearance(override.appearance);
+      if (!parsed.ok) {
+        return docFailure(
+          `A face appearance override's appearance is invalid: ${parsed.error.message}`,
+          override,
+        );
+      }
+    }
+  }
+  return ok({
+    ...(appearance === undefined ? {} : { appearance }),
+    ...(faceAppearances === undefined ? {} : { faceAppearances }),
+  });
 }
 
 const FEATURE_KIND_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
@@ -1149,12 +1248,18 @@ export function addBody(
     id = parsed.value;
     idGeneratorState = claimExplicitId(idGeneratorState, "body", parsed.value);
   }
+  const appearanceCheck = validateBodyAppearance(
+    input.appearance,
+    input.faceAppearances,
+  );
+  if (!appearanceCheck.ok) return appearanceCheck;
   const body = Object.freeze({
     id,
     name: name.value,
     ...(input.kind === "sheet" ? { kind: "sheet" as const } : {}),
     ...(input.visible === undefined ? {} : { visible: input.visible }),
     ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
+    ...appearanceCheck.value,
   });
   return ok({
     document: Object.freeze({
@@ -1167,13 +1272,15 @@ export function addBody(
 }
 
 /**
- * Updates a body's mutable record fields (Phase 44): the display name and
- * the two display flags. Only the fields the update CARRIES change — a
- * rename keeps the flags, a visibility toggle keeps the name — so each
- * concern rides its own `body.update` command and undo replays exactly
- * what happened. The name (when carried) follows {@link addBody}'s
- * validation; the flags (when carried) must be real booleans, never
- * smuggled truthy values.
+ * Updates a body's mutable record fields (Phase 44): the display name, the
+ * two display flags, and — Phase 59 — the appearance record and its
+ * face-level overrides. Only the fields the update CARRIES change — a
+ * rename keeps the flags and the appearance, a visibility toggle keeps the
+ * name — so each concern rides its own `body.update` command and undo
+ * replays exactly what happened. `appearance: null` / `faceAppearances:
+ * null` CLEAR the record (back to the scene default), the wire-absent
+ * state; the name (when carried) follows {@link addBody}'s validation; the
+ * flags (when carried) must be real booleans, never smuggled truthy values.
  */
 export function updateBody(
   document: CadDocument,
@@ -1182,6 +1289,8 @@ export function updateBody(
     readonly name?: string;
     readonly visible?: boolean;
     readonly isolated?: boolean;
+    readonly appearance?: Appearance | null;
+    readonly faceAppearances?: readonly FaceAppearanceOverride[] | null;
   },
 ): ParseResult<CadDocument, DocumentError> {
   const body = getBody(document, id);
@@ -1197,12 +1306,14 @@ export function updateBody(
   if (
     input.name === undefined &&
     input.visible === undefined &&
-    input.isolated === undefined
+    input.isolated === undefined &&
+    input.appearance === undefined &&
+    input.faceAppearances === undefined
   ) {
     return fail(
       docError(
         DOCUMENT_ERROR_CODES.malformed,
-        "A body update must carry at least one of a name, a visible flag, or an isolated flag.",
+        "A body update must carry at least one of a name, a visible flag, an isolated flag, an appearance record, or face appearance overrides.",
         input,
       ),
     );
@@ -1216,6 +1327,17 @@ export function updateBody(
   const visible = input.visible === undefined ? body.visible : input.visible;
   const isolated =
     input.isolated === undefined ? body.isolated : input.isolated;
+  const appearance =
+    input.appearance === undefined ? body.appearance : input.appearance;
+  const faceAppearances =
+    input.faceAppearances === undefined
+      ? body.faceAppearances
+      : input.faceAppearances;
+  const appearanceCheck = validateBodyAppearance(
+    appearance ?? undefined,
+    faceAppearances ?? undefined,
+  );
+  if (!appearanceCheck.ok) return appearanceCheck;
   return ok(
     Object.freeze({
       ...document,
@@ -1225,8 +1347,18 @@ export function updateBody(
             ? Object.freeze({
                 id,
                 name,
+                // The sheet kind (Phase 48) is record identity, not an
+                // update field: the rebuild must carry it through.
+                ...(body.kind === "sheet" ? { kind: "sheet" as const } : {}),
                 ...(visible === undefined ? {} : { visible }),
                 ...(isolated === undefined ? {} : { isolated }),
+                // null clears the record back to the wire-absent default.
+                ...(appearance === null || appearance === undefined
+                  ? {}
+                  : { appearance }),
+                ...(faceAppearances === null || faceAppearances === undefined
+                  ? {}
+                  : { faceAppearances }),
               })
             : candidate,
         ),
@@ -3475,6 +3607,16 @@ export interface SerializedBody {
   readonly visible?: false;
   /** Present exactly when the body is isolated; absent = not (additive). */
   readonly isolated?: true;
+  /**
+   * Present exactly when the body carries an appearance record (Phase 59,
+   * additive display state); absent = the scene default.
+   */
+  readonly appearance?: Appearance;
+  /**
+   * Present exactly when the body carries face appearance overrides
+   * (Phase 59, additive display state).
+   */
+  readonly faceAppearances?: readonly FaceAppearanceOverride[];
 }
 
 /** Canonical JSON form of a feature input reference. */
@@ -3649,6 +3791,20 @@ export function serializeCadDocument(
       ...(body.isolated === undefined || !body.isolated
         ? {}
         : { isolated: true as const }),
+      // The appearance records (Phase 59) ride only when present — the
+      // display-flags additive precedent — so an appearanceless document
+      // serializes byte-identically to its pre-appearance form.
+      ...(body.appearance === undefined
+        ? {}
+        : { appearance: serializeAppearance(body.appearance) }),
+      ...(body.faceAppearances === undefined
+        ? {}
+        : {
+            faceAppearances: body.faceAppearances.map((override) => ({
+              face: override.face,
+              appearance: serializeAppearance(override.appearance),
+            })),
+          }),
     })),
     features: document.features.map((feature) => ({
       id: feature.id,
@@ -3877,6 +4033,81 @@ function parseSerializedBody(input: unknown): ParseResult<Body, DocumentError> {
       ),
     );
   }
+  // The appearance records (Phase 59): display state, validated through
+  // the same gate the document boundary uses, so a tampered record fails
+  // the parse with the document's structured code instead of reaching a
+  // renderer.
+  let appearance: Appearance | undefined;
+  if (input.appearance !== undefined) {
+    const parsedAppearance = parseAppearance(input.appearance);
+    if (!parsedAppearance.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.bodyAppearanceInvalid,
+          `A serialized body's appearance record is invalid: ${parsedAppearance.error.message}`,
+          input.appearance,
+        ),
+      );
+    }
+    appearance = parsedAppearance.value;
+  }
+  let faceAppearances: readonly FaceAppearanceOverride[] | undefined;
+  if (input.faceAppearances !== undefined) {
+    if (!Array.isArray(input.faceAppearances)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.bodyAppearanceInvalid,
+          "A serialized body's faceAppearances must be an array when present.",
+          input.faceAppearances,
+        ),
+      );
+    }
+    const parsedOverrides: FaceAppearanceOverride[] = [];
+    for (const entry of input.faceAppearances) {
+      if (typeof entry !== "object" || entry === null) {
+        return fail(
+          docError(
+            DOCUMENT_ERROR_CODES.bodyAppearanceInvalid,
+            "A face appearance override must be a record with face and appearance.",
+            entry,
+          ),
+        );
+      }
+      const overrideRecord = entry as Record<string, unknown>;
+      if (
+        typeof overrideRecord.face !== "number" ||
+        !Number.isInteger(overrideRecord.face) ||
+        overrideRecord.face < 0
+      ) {
+        return fail(
+          docError(
+            DOCUMENT_ERROR_CODES.bodyAppearanceInvalid,
+            "A face appearance override's face must be a non-negative integer.",
+            entry,
+          ),
+        );
+      }
+      const parsedOverride = parseAppearance(overrideRecord.appearance);
+      if (!parsedOverride.ok) {
+        return fail(
+          docError(
+            DOCUMENT_ERROR_CODES.bodyAppearanceInvalid,
+            `A face appearance override's appearance is invalid: ${parsedOverride.error.message}`,
+            entry,
+          ),
+        );
+      }
+      parsedOverrides.push(
+        Object.freeze({
+          face: overrideRecord.face,
+          appearance: parsedOverride.value,
+        }),
+      );
+    }
+    const limitCheck = validateBodyAppearance(undefined, parsedOverrides);
+    if (!limitCheck.ok) return limitCheck;
+    faceAppearances = Object.freeze(parsedOverrides);
+  }
   return ok(
     Object.freeze({
       id: parsedId.value,
@@ -3884,6 +4115,8 @@ function parseSerializedBody(input: unknown): ParseResult<Body, DocumentError> {
       ...(input.kind === "sheet" ? { kind: "sheet" as const } : {}),
       ...(input.visible === undefined ? {} : { visible: input.visible }),
       ...(input.isolated === undefined ? {} : { isolated: input.isolated }),
+      ...(appearance === undefined ? {} : { appearance }),
+      ...(faceAppearances === undefined ? {} : { faceAppearances }),
     }),
   );
 }
@@ -4630,6 +4863,10 @@ export function parseCadDocument(
       ...(body.kind === "sheet" ? { kind: "sheet" as const } : {}),
       ...(body.visible === undefined ? {} : { visible: body.visible }),
       ...(body.isolated === undefined ? {} : { isolated: body.isolated }),
+      ...(body.appearance === undefined ? {} : { appearance: body.appearance }),
+      ...(body.faceAppearances === undefined
+        ? {}
+        : { faceAppearances: body.faceAppearances }),
     });
     if (!added.ok) return added;
     document = added.value.document;

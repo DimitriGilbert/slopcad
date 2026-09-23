@@ -29,6 +29,24 @@ export type {
   SheetId,
   SketchDocumentId,
 } from "./ids";
+export type {
+  Appearance,
+  AppearanceErrorCode,
+  AppearanceLibraryEntry,
+  AppearanceTextureName,
+  FaceAppearanceOverride,
+} from "./appearance";
+export {
+  APPEARANCE_ERROR_CODES,
+  APPEARANCE_LIBRARY,
+  APPEARANCE_TEXTURES,
+  appearanceLibraryEntry,
+  appearancesEqual,
+  BODY_FACE_APPEARANCE_LIMIT,
+  faceOverrideInSnapshot,
+  parseAppearance,
+  serializeAppearance,
+} from "./appearance";
 export {
   type CurvePoint3,
   CURVE_ERROR_CODES,
@@ -550,6 +568,7 @@ export {
   parseRenderCamera,
   parseRenderObjectId,
   parseRenderProjection,
+  withBodyAppearances,
   placementRenderObjectId,
   PROJECTION_ERROR_CODES,
   projectPlacedInstance,

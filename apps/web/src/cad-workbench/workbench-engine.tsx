@@ -85,6 +85,7 @@ import {
   type CadCommand,
   type ConfigurationId,
   type DatumId,
+  appearanceLibraryEntry,
 } from "@slopcad/cad-core";
 import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
 import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
@@ -679,6 +680,10 @@ export interface WorkbenchEngine {
   readonly handleBodyRename: (
     bodyId: string,
     name: string,
+  ) => FeatureFormOutcome;
+  readonly handleBodyAppearance: (
+    bodyId: string,
+    presetId: string | null,
   ) => FeatureFormOutcome;
   readonly handleBodyVisibility: (
     bodyId: string,
@@ -2916,6 +2921,61 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The Phase 59 appearance action: the preset's VALUES are copied into
+  // the body record (the library is an authoring aid, never a reference);
+  // `presetId: null` clears the record back to the scene default. One
+  // `body.update` command per activation, the Phase 44 concern-per-command
+  // discipline.
+  const handleBodyAppearance = (
+    bodyId: string,
+    presetId: string | null,
+  ): FeatureFormOutcome => {
+    if (presetId === null) {
+      const cleared = documentApi.applyTransaction({
+        commands: [
+          {
+            type: "body.update",
+            id: createBodyId(bodyId),
+            appearance: null,
+          },
+        ],
+      });
+      if (!cleared.ok) {
+        return {
+          ok: false,
+          code: cleared.error.code,
+          message: cleared.error.message,
+        };
+      }
+      return { ok: true };
+    }
+    const preset = appearanceLibraryEntry(presetId);
+    if (preset === undefined) {
+      return {
+        ok: false,
+        code: "appearance/malformed",
+        message: `No appearance preset "${presetId}" exists in the library.`,
+      };
+    }
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "body.update",
+          id: createBodyId(bodyId),
+          appearance: { ...preset.appearance },
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    return { ok: true };
+  };
+
   const handleBodyIsolate = (
     bodyId: string,
     isolated: boolean,
@@ -3768,6 +3828,7 @@ export function useWorkbenchEngine(
     handleBoolean,
     handleMoveBody,
     handleBodyRename,
+    handleBodyAppearance,
     handleBodyVisibility,
     handleBodyIsolate,
     handleSketchOnFace,

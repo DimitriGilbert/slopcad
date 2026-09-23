@@ -114,6 +114,9 @@ import {
   type SelectionReference,
 } from "@slopcad/cad-react";
 import { cn } from "cn";
+import { APPEARANCE_LIBRARY, type Appearance } from "@slopcad/cad-react";
+
+import { Popover, PopoverContent, PopoverTrigger } from "../popover";
 
 /** The user-facing strings of {@link CadModelTree}. Overridable via props. */
 export interface CadModelTreeLabels {
@@ -195,7 +198,13 @@ export const CAD_MODEL_TREE_LABELS: CadModelTreeLabels = {
 export type CadBodyTreeAction =
   | { readonly type: "toggle-visibility"; readonly bodyId: BodyId }
   | { readonly type: "toggle-isolate"; readonly bodyId: BodyId }
-  | { readonly type: "rename"; readonly bodyId: BodyId };
+  | { readonly type: "rename"; readonly bodyId: BodyId }
+  | {
+      /** Phase 59: assign an appearance-library preset, or clear with `null`. */
+      readonly type: "appearance";
+      readonly bodyId: BodyId;
+      readonly presetId: string | null;
+    };
 
 /**
  * The per-body display state the tree's affordances render (Phase 44):
@@ -204,6 +213,8 @@ export type CadBodyTreeAction =
 export interface CadBodyDisplayState {
   readonly visible: boolean;
   readonly isolated: boolean;
+  /** The body's appearance record (Phase 59); absent = the scene default. */
+  readonly appearance?: Appearance;
 }
 
 /**
@@ -553,6 +564,12 @@ function collapsedWithout(
 }
 
 /** The visibility eye (Phase 44): inline SVG, the ChevronIcon precedent. */
+/** The shared affordance-button classes of the body rows. */
+const buttonClass = cn(
+  "text-muted-foreground hover:text-foreground",
+  "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center",
+);
+
 function EyeIcon(): ReactElement {
   return (
     <svg
@@ -626,6 +643,28 @@ function PencilIcon(): ReactElement {
     >
       <path d="M11 2.5 13.5 5 5.5 13 2.5 13.5 3 10.5Z" />
       <path d="M9.5 4 12 6.5" />
+    </svg>
+  );
+}
+
+function PaletteIcon(): ReactElement {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="14"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 24 24"
+      width="14"
+    >
+      <circle cx="13.5" cy="6.5" r=".5" />
+      <circle cx="17.5" cy="10.5" r=".5" />
+      <circle cx="8.5" cy="7.5" r=".5" />
+      <circle cx="6.5" cy="12.5" r=".5" />
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
     </svg>
   );
 }
@@ -787,10 +826,6 @@ function bodyAffordances({
 }): ReactElement {
   const visible = display?.visible ?? true;
   const isolated = display?.isolated ?? false;
-  const buttonClass = cn(
-    "text-muted-foreground hover:text-foreground",
-    "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center",
-  );
   return (
     <span
       className="flex shrink-0 items-center gap-0.5"
@@ -837,7 +872,97 @@ function bodyAffordances({
       >
         <PencilIcon />
       </button>
+      <AppearancePicker
+        bodyId={bodyId}
+        current={display?.appearance}
+        onBodyAction={onBodyAction}
+      />
     </span>
+  );
+}
+
+/**
+ * The appearance picker (Phase 59): a palette affordance opening the
+ * appearance library's presets as pure presentation — activation emits the
+ * action; the HOST owns the `body.update` mutation. `display` carries the
+ * body's current record so the picker marks the active preset and offers
+ * clearing.
+ */
+function AppearancePicker({
+  bodyId,
+  current,
+  onBodyAction,
+}: {
+  readonly bodyId: BodyId;
+  readonly current: Appearance | undefined;
+  readonly onBodyAction: (action: CadBodyTreeAction) => void;
+}): ReactElement {
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={
+          <button
+            aria-label="Body appearance"
+            className={buttonClass}
+            data-cad-tree-body-appearance=""
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+            title="Appearance"
+            type="button"
+          />
+        }
+      >
+        <PaletteIcon />
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-48 p-1">
+        <div
+          aria-label="Appearance presets"
+          data-cad-tree-appearance-menu={bodyId}
+          role="menu"
+        >
+          {APPEARANCE_LIBRARY.map((entry) => (
+            <button
+              aria-pressed={current === undefined ? false : undefined}
+              className={cn(
+                "hover:bg-accent flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs",
+              )}
+              data-testid={`appearance-preset-${entry.id}`}
+              key={entry.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                onBodyAction({
+                  type: "appearance",
+                  bodyId,
+                  presetId: entry.id,
+                });
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <span
+                aria-hidden="true"
+                className="border-border inline-block size-3 shrink-0 rounded-full border"
+                style={{ backgroundColor: entry.appearance.baseColor }}
+              />
+              {entry.label}
+            </button>
+          ))}
+          <button
+            className="hover:bg-accent text-muted-foreground flex w-full items-center rounded-sm px-2 py-1.5 text-left text-xs"
+            data-testid="appearance-preset-none"
+            onClick={(event) => {
+              event.stopPropagation();
+              onBodyAction({ type: "appearance", bodyId, presetId: null });
+            }}
+            role="menuitem"
+            type="button"
+          >
+            None (scene default)
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

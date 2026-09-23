@@ -21,6 +21,12 @@ import { describe, expect, it } from "vitest";
 /** Modules cad-r3f may import: the projection contract, its React re-export, and the declared render/test peers. */
 const ALLOWED_IMPORT_SOURCES: ReadonlySet<string> = new Set([
   "three",
+  // The quality mode's post chain (Phase 59): three's own post-processing
+  // passes — still the `three` package, still no kernel/worker surface.
+  "three/examples/jsm/postprocessing/EffectComposer.js",
+  "three/examples/jsm/postprocessing/OutputPass.js",
+  "three/examples/jsm/postprocessing/RenderPass.js",
+  "three/examples/jsm/postprocessing/SSAOPass.js",
   "react",
   "react-dom",
   "@react-three/fiber",

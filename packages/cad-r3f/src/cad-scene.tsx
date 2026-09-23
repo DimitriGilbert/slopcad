@@ -52,6 +52,10 @@
  */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
 import {
   useCallback,
   useEffect,
@@ -60,7 +64,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type * as THREE from "three";
+import * as THREE from "three";
 import type { ReactElement } from "react";
 import {
   selectionReferenceKey,
@@ -92,6 +96,15 @@ import {
   CAD_SCENE_ORIGIN_MARKER_COLOR,
 } from "./scene-ground";
 import { CadSceneLights } from "./scene-lights";
+import { CAD_LIGHT_RIG_STUDIO, type CadLightRig } from "./lighting";
+import {
+  CAD_QUALITY_SHADOW_GROUND_OPACITY,
+  CAD_QUALITY_SSAO_KERNEL_RADIUS_MM,
+  CAD_QUALITY_SSAO_MAX_DISTANCE_MM,
+  CAD_QUALITY_SSAO_MIN_DISTANCE_MM,
+  type CadRenderQuality,
+} from "./render-quality";
+import { CAD_SCENE_GRID_DROP_MM } from "./scene-ground";
 
 // The camera-spec value comparison stays public from here (its original
 // home) — the canonical definition lives beside the camera mapping.
@@ -261,6 +274,18 @@ export interface CadSceneProps {
    * `display-mode.ts` for each mode's honest scope).
    */
   readonly displayMode?: CadDisplayMode;
+  /**
+   * The light rig (Phase 59): a `lighting.ts` preset. Default `"studio"`
+   * (the pinned Phase 11.3 constants verbatim), so the boot bytes are the
+   * pre-rig scene's bytes.
+   */
+  readonly lightRig?: CadLightRig;
+  /**
+   * The render quality (Phase 59): `"standard"` (the default — the pinned
+   * boot path) or `"quality"` (soft shadows + SSAO + the fixed post
+   * chain, opt-in and unpinned — see `render-quality.ts`).
+   */
+  readonly renderQuality?: CadRenderQuality;
 }
 
 /**
@@ -320,12 +345,15 @@ function SceneModel({
   regeneration,
   selection,
   settle,
+  shadows,
   clippingPlanes,
 }: {
   displayMode?: CadDisplayMode;
   material?: { readonly color: string };
   /** Section clipping (Phase 46): absent/empty = the unclipped raster. */
   clippingPlanes?: THREE.Plane[];
+  /** Quality mode's shadow participation (Phase 59); default off. */
+  shadows?: boolean;
   onPick?: (pick: CadPick) => void;
   onPickDown?: (pick: CadPick) => void;
   onPickUp?: (pick: CadPick) => void;
@@ -355,6 +383,7 @@ function SceneModel({
     pickCategory,
     regeneration,
     selection,
+    shadows,
   ]);
   return (
     <CadModel
@@ -376,8 +405,58 @@ function SceneModel({
       projection={projection}
       regeneration={regeneration}
       selection={selection}
+      shadows={shadows}
     />
   );
+}
+
+/**
+ * The quality mode's renderer state (Phase 59): shadow maps on, and the
+ * fixed render → SSAO → output post chain taking over the frame through a
+ * priority-1 `useFrame` (R3F skips its auto-render once any callback has
+ * priority > 0, so the composer IS the frame while quality mode is on).
+ * Everything is fixed constants — same state, same bytes, run over run —
+ * and the default path never mounts this component, so the pinned
+ * boot raster is untouched (the opt-in/unpinned discipline).
+ */
+function QualityPostProcessor(): null {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+  const camera = useThree((state) => state.camera);
+  const size = useThree((state) => state.size);
+  const invalidate = useThree((state) => state.invalidate);
+  useEffect(() => {
+    // The hook only ever runs inside a Canvas, but a mocked-three host
+    // (the jsdom suites) mounts the scene without a renderer: guard
+    // instead of crashing the whole scene tree.
+    if (gl === undefined) return;
+    gl.shadowMap.enabled = true;
+    gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    invalidate();
+    return () => {
+      gl.shadowMap.enabled = false;
+      invalidate();
+    };
+  }, [gl, invalidate]);
+  const composer = useMemo(() => {
+    if (gl === undefined) return null;
+    const chain = new EffectComposer(gl);
+    chain.addPass(new RenderPass(scene, camera));
+    const ssao = new SSAOPass(scene, camera, size.width, size.height);
+    ssao.kernelRadius = CAD_QUALITY_SSAO_KERNEL_RADIUS_MM;
+    ssao.minDistance = CAD_QUALITY_SSAO_MIN_DISTANCE_MM;
+    ssao.maxDistance = CAD_QUALITY_SSAO_MAX_DISTANCE_MM;
+    chain.addPass(ssao);
+    chain.addPass(new OutputPass());
+    return chain;
+  }, [camera, gl, scene, size.height, size.width]);
+  useEffect(() => {
+    composer?.setSize(size.width, size.height);
+  }, [composer, size.height, size.width]);
+  useFrame(() => {
+    composer?.render();
+  }, 1);
+  return null;
 }
 
 /**
@@ -466,6 +545,7 @@ export function CadScene({
   clippingPlanes,
   cameraOrbitDragEnabled = true,
   displayMode,
+  lightRig = CAD_LIGHT_RIG_STUDIO,
   onCameraState,
   onHover,
   onPick,
@@ -478,10 +558,12 @@ export function CadScene({
   pickCategory,
   projection,
   regeneration,
+  renderQuality = "standard",
   selection,
   showGround = true,
   userCamera = null,
 }: CadSceneProps): ReactElement {
+  const quality = renderQuality === "quality";
   // The Phase 45 effective camera: the user overlay when present, the
   // projection's spec otherwise (spec law, byte-identical, when absent).
   const effectiveCamera: RenderCamera = userCamera ?? projection.camera;
@@ -545,14 +627,38 @@ export function CadScene({
           spec={effectiveCamera}
         />
       ) : null}
-      <CadSceneLights />
+      <CadSceneLights rig={lightRig} shadowKey={quality} />
       {showGround ? (
         <CadSceneGround colors={groundColors} target={effectiveCamera.target} />
+      ) : null}
+      {quality && showGround ? (
+        // The shadow catcher (quality mode only): draws ONLY the soft
+        // shadows the key light casts, on the grid's own plane — the
+        // studio's boot scene has no shadow-casting light at all.
+        <mesh
+          position={[
+            effectiveCamera.target[0],
+            effectiveCamera.target[1],
+            -CAD_SCENE_GRID_DROP_MM,
+          ]}
+          receiveShadow
+          rotation-x={Math.PI / 2}
+        >
+          <planeGeometry args={[1000, 1000]} />
+          <shadowMaterial opacity={CAD_QUALITY_SHADOW_GROUND_OPACITY} />
+        </mesh>
+      ) : null}
+      {quality ? (
+        // Mounted ONLY in quality mode: a priority-1 useFrame takes the
+        // render loop away from R3F even when its body is a no-op, so a
+        // permanently-mounted processor would blank the standard scene.
+        <QualityPostProcessor />
       ) : null}
       <SceneModel
         clippingPlanes={clippingPlanes}
         displayMode={displayMode}
         material={material}
+        shadows={quality}
         onHover={onHover}
         onPick={onPick}
         onPickDown={onPickDown}

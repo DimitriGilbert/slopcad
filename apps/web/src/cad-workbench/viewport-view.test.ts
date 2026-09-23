@@ -25,10 +25,12 @@ const FRONT: RenderCamera = {
 };
 
 describe("createViewportViewSession", () => {
-  it("boots at spec law: no overlay, shaded, third angle", () => {
+  it("boots at spec law: no overlay, shaded, third angle, studio, standard", () => {
     expect(createViewportViewSession()).toEqual({
       convention: "third-angle",
       displayMode: "shaded",
+      lightRig: "studio",
+      renderQuality: "standard",
       userCamera: null,
     });
   });
