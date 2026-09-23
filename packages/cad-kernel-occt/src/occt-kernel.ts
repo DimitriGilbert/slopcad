@@ -224,7 +224,13 @@ import type {
   TopologyReferenceKind,
   TopologySnapshot,
 } from "@slopcad/cad-core";
-import { fail, ok, valueIn } from "@slopcad/cad-core";
+import {
+  fail,
+  ok,
+  valueIn,
+  type DrawingViewGeometry,
+  viewBasis,
+} from "@slopcad/cad-core";
 import type {
   BRepBuilderAPI_MakeEdge,
   gp_Pnt,
@@ -293,6 +299,7 @@ import {
 } from "@slopcad/cad-kernel";
 import {
   axisAngleMatrix,
+  type DrawingViewInput,
   helixProfilePolygon,
   helixStations,
   helixSweepProblem,
@@ -473,6 +480,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   localFaceOps: true,
   sweepWire: true,
   intersectionCurve: true,
+  hiddenLineRemoval: true,
 });
 
 /**
@@ -3071,6 +3079,182 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             length,
             bounds: { min, max },
           });
+        },
+      );
+    },
+
+    drawingView(input: DrawingViewInput): KernelResult<DrawingViewGeometry> {
+      return run<DrawingViewGeometry>(
+        "drawingView",
+        KERNEL_ERROR_CODES.invalidOperands,
+        () => {
+          // Direction validation BEFORE any OCCT object exists (the
+          // silent-mirror rule): a zero eye or an up hint parallel to it has
+          // no view plane.
+          const eyeLength = Math.sqrt(
+            input.eye[0] ** 2 + input.eye[1] ** 2 + input.eye[2] ** 2,
+          );
+          if (!(eyeLength > 0)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                "drawingView rejected a zero-length eye direction.",
+              ),
+            );
+          }
+          const eyeUnit: readonly [number, number, number] = [
+            input.eye[0] / eyeLength,
+            input.eye[1] / eyeLength,
+            input.eye[2] / eyeLength,
+          ];
+          const upLength = Math.sqrt(
+            input.up[0] ** 2 + input.up[1] ** 2 + input.up[2] ** 2,
+          );
+          if (!(upLength > 0)) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                "drawingView rejected a zero-length up hint.",
+              ),
+            );
+          }
+          const eyeDotUp =
+            eyeUnit[0] * input.up[0] +
+            eyeUnit[1] * input.up[1] +
+            eyeUnit[2] * input.up[2];
+          if (Math.abs(eyeDotUp) / upLength > 1 - 1e-9) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                "drawingView rejected an up hint parallel to the eye direction (no view plane).",
+              ),
+            );
+          }
+          const basis = viewBasis(eyeUnit, input.up);
+          const target = shapeOf(input.target, "drawingView");
+          if (!target.ok) return fail(target.error);
+          // The Phase 53 probe discipline (see the pre-spike findings
+          // addendum): HLRBRep_Algo.Add(shape, nbIso=0) loads the exact BREP,
+          // the projector's coordinate system is the (right, up, eye) camera
+          // frame — main direction = the EYE direction, x direction = the
+          // sheet-right basis — so the extracted 2D edges' coordinates are
+          // (p · right, p · up) in model millimetres directly, and
+          // Update() + Hide() compute the visible/hidden split.
+          const algo = new oc.HLRBRep_Algo();
+          const projectorObjects: { delete(): void }[] = [];
+          let extractor: InstanceType<typeof oc.HLRBRep_HLRToShape> | null =
+            null;
+          try {
+            algo.Add(target.value, 0);
+            const origin = new oc.gp_Pnt(0, 0, 0);
+            const mainDir = new oc.gp_Dir(eyeUnit[0], eyeUnit[1], eyeUnit[2]);
+            const xDir = new oc.gp_Dir(
+              basis.right[0],
+              basis.right[1],
+              basis.right[2],
+            );
+            const ax2 = new oc.gp_Ax2(origin, mainDir, xDir);
+            const projector = new oc.HLRAlgo_Projector(ax2);
+            projectorObjects.push(origin, mainDir, xDir, ax2, projector);
+            algo.Projector(projector);
+            algo.Update();
+            algo.Hide();
+            extractor = new oc.HLRBRep_HLRToShape(algo);
+            type ViewChain = readonly [number, number];
+            type ViewChains = readonly ViewChain[];
+            const walkCompound = (
+              compound: TopoDS_Shape | undefined,
+            ): readonly ViewChains[] => {
+              if (compound === undefined || compound === null) return [];
+              if (typeof compound.IsNull === "function" && compound.IsNull()) {
+                return [];
+              }
+              const chains: ViewChains[] = [];
+              const explorer = new oc.TopExp_Explorer(
+                compound,
+                oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+              );
+              while (explorer.More()) {
+                const edge = oc.TopoDS.Edge(explorer.Value());
+                const adaptor = new oc.BRepAdaptor_Curve(edge);
+                const first = adaptor.FirstParameter();
+                const last = adaptor.LastParameter();
+                const stations = 16;
+                const points: [number, number][] = [];
+                for (let index = 0; index <= stations; index += 1) {
+                  const parameter = first + ((last - first) * index) / stations;
+                  const point = adaptor.Value(parameter);
+                  points.push([point.X(), point.Y()]);
+                  point.delete();
+                }
+                adaptor.delete();
+                chains.push(points);
+                explorer.Next();
+              }
+              explorer.delete();
+              return chains;
+            };
+            const visibleSharp = walkCompound(extractor.VCompound());
+            const visibleOutline = walkCompound(extractor.OutLineVCompound());
+            const hiddenSharp = walkCompound(extractor.HCompound());
+            const hiddenOutline = walkCompound(extractor.OutLineHCompound());
+            // Deterministic chain order: HLR's internal traversal order is an
+            // implementation detail — sort by first-point coordinates, then
+            // chain length, so the same solid and view always serialize to
+            // identical bytes.
+            const byFirstPoint = (a: ViewChains, b: ViewChains): number => {
+              const pa = a[0];
+              const pb = b[0];
+              if (pa === undefined || pb === undefined) return 0;
+              const du = pa[0] - pb[0];
+              if (du !== 0) return du;
+              const dv = pa[1] - pb[1];
+              if (dv !== 0) return dv;
+              return a.length - b.length;
+            };
+            const visible = [...visibleSharp, ...visibleOutline].sort(
+              byFirstPoint,
+            );
+            const hidden = [...hiddenSharp, ...hiddenOutline].sort(
+              byFirstPoint,
+            );
+            let minU = Infinity;
+            let maxU = -Infinity;
+            let minV = Infinity;
+            let maxV = -Infinity;
+            for (const chain of [...visible, ...hidden]) {
+              for (const point of chain) {
+                if (point[0] < minU) minU = point[0];
+                if (point[0] > maxU) maxU = point[0];
+                if (point[1] < minV) minV = point[1];
+                if (point[1] > maxV) maxV = point[1];
+              }
+            }
+            if (visible.length + hidden.length === 0) {
+              return ok({
+                fidelity: "hlr-exact",
+                visible: [],
+                hidden: [],
+                bounds: null,
+              });
+            }
+            return ok({
+              fidelity: "hlr-exact",
+              visible,
+              hidden,
+              bounds: { minU, maxU, minV, maxV },
+            });
+          } finally {
+            if (extractor !== null) extractor.delete();
+            for (
+              let index = projectorObjects.length - 1;
+              index >= 0;
+              index -= 1
+            ) {
+              projectorObjects[index]?.delete();
+            }
+            algo.delete();
+          }
         },
       );
     },

@@ -83,6 +83,7 @@ export function runNativeFormatExample(): NativeFormatExampleSummary {
     regeneration: new Map(),
     metadata: { title: "The native-format guide example" },
     rollback: null,
+    drawing: null,
   };
 
   // The canonical text form: two-space-indented JSON with a trailing

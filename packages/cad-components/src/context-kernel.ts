@@ -80,6 +80,7 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   section: true,
   sweepWire: false,
   intersectionCurve: false,
+  hiddenLineRemoval: false,
 });
 
 /**

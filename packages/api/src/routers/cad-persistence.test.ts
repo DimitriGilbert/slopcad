@@ -198,6 +198,7 @@ function serializeSession(session: CadSession): string {
     regeneration: new Map(),
     metadata: {},
     rollback: null,
+    drawing: null,
   };
   return stringifyNativeCadDocument(serializeNativeCadDocument(native));
 }

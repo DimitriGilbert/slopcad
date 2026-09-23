@@ -57,6 +57,7 @@ const BASE_CAPABILITIES: KernelCapabilities = {
   localFaceOps: false,
   sweepWire: false,
   intersectionCurve: false,
+  hiddenLineRemoval: false,
 };
 
 function capabilities(

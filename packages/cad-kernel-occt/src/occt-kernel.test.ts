@@ -178,6 +178,7 @@ describe("occt kernel identity and capabilities", () => {
       localFaceOps: true,
       sweepWire: true,
       intersectionCurve: true,
+      hiddenLineRemoval: true,
     });
   });
 

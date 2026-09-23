@@ -850,6 +850,8 @@ function raiseGeneratorState(
     section: Math.max(base.section, floor.section),
     occurrence: Math.max(base.occurrence, floor.occurrence),
     curve: Math.max(base.curve, floor.curve),
+    sheet: Math.max(base.sheet, floor.sheet),
+    drawingView: Math.max(base.drawingView, floor.drawingView),
   };
   return Object.freeze(raised);
 }
@@ -2728,13 +2730,21 @@ export interface SerializedFeatureRecord {
  */
 export type SerializedIdGeneratorState = Omit<
   IdGeneratorState,
-  "sketch" | "datum" | "section" | "occurrence" | "curve"
+  | "sketch"
+  | "datum"
+  | "section"
+  | "occurrence"
+  | "curve"
+  | "sheet"
+  | "drawingView"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
   readonly section?: number;
   readonly occurrence?: number;
   readonly curve?: number;
+  readonly sheet?: number;
+  readonly drawingView?: number;
 };
 
 function serializeIdGeneratorState(
@@ -2751,6 +2761,8 @@ function serializeIdGeneratorState(
     ...(state.section === 0 ? {} : { section: state.section }),
     ...(state.occurrence === 0 ? {} : { occurrence: state.occurrence }),
     ...(state.curve === 0 ? {} : { curve: state.curve }),
+    ...(state.sheet === 0 ? {} : { sheet: state.sheet }),
+    ...(state.drawingView === 0 ? {} : { drawingView: state.drawingView }),
   };
 }
 

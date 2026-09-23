@@ -218,4 +218,19 @@ export interface KernelCapabilities {
   readonly localFaceOps: boolean;
   readonly sweepWire: boolean;
   readonly intersectionCurve: boolean;
+  /**
+   * The contract's exact hidden-line-removal projection (Phase 53 — the
+   * `drawingView` operation) is implemented honestly. Only OCCT declares
+   * `true`: its `HLRBRep_Algo` + `HLRBRep_HLRToShape` binding computes the
+   * exact visible/hidden edge split (probed — see the OCCT pre-spike
+   * findings, Phase 53 addendum). The fake kernel's solids are analytic
+   * primitives without a hidden-line model, and Manifold/JSCAD are mesh
+   * engines whose occlusion would be a shading approximation — all three
+   * declare `false` and answer every `drawingView` call with the
+   * structured `kernel/unsupported-operation`. Callers needing a picture
+   * from a non-HLR kernel compose cad-core's `edgesOverlayProjection` from
+   * `tessellate` output; the geometry's fidelity class
+   * (`"hlr-exact"` vs `"edges-overlay"`) is the honesty boundary.
+   */
+  readonly hiddenLineRemoval: boolean;
 }

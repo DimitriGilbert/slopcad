@@ -26,6 +26,7 @@ import {
   type MirrorInput,
   type MoveFaceInput,
   type SectionInput,
+  type DrawingViewInput,
   type ProfileExtrudeInput,
   type HelixSweepInput,
   type ProfileLoftInput,
@@ -140,6 +141,8 @@ export function withOperationLog(kernel: GeometryKernel): LoggedKernel {
       log("mirror", () => kernel.mirror(solid, input)),
     section: (input: SectionInput) =>
       log("section", () => kernel.section(input)),
+    drawingView: (input: DrawingViewInput) =>
+      log("drawingView", () => kernel.drawingView(input)),
     bounds: (solid: KernelSolid) => log("bounds", () => kernel.bounds(solid)),
     volume: (solid: KernelSolid) => log("volume", () => kernel.volume(solid)),
     area: (solid: KernelSolid) => log("area", () => kernel.area(solid)),
