@@ -189,4 +189,81 @@ describe("intersectionCurve (Phase 47)", () => {
     expect(section.chains.length).toBeGreaterThanOrEqual(1);
     expect(section.polyline.length).toBeGreaterThan(3);
   });
+
+  it("walks a CURVED section (the cylinder×plane ellipse) at the pinned 16-station rule", () => {
+    // The intersection station rule is byte-load-bearing only on CURVED
+    // sections — a box's straight edges give the same chord sum at any
+    // station count. A cylinder of radius r cut by the plane tilted 45°
+    // about y (normal (1, 0, 1)/√2 through the origin) answers the
+    // ellipse parametrized (r cos u, r sin u, r tanα·cos u) with
+    // semi-axes a = r/cosα = r√2 and b = r — uniform in u, the same
+    // parameter the edge adaptor walks, so the chord sums at 16 and 8
+    // stations are computable exactly and DIFFER (a coarser walk chords
+    // the ellipse deeper). The pin: the section's chord perimeter equals
+    // the 16-station value, not the 8-station one.
+    const r = 5;
+    const cylinder = unwrapKernelResult(
+      kernel.createCylinder({ radius: length(r), height: length(20) }),
+      "createCylinder",
+    );
+    const translated = unwrapKernelResult(
+      kernel.transform(cylinder, {
+        x: length(0),
+        y: length(0),
+        z: length(-10),
+      }),
+      "transform cylinder",
+    );
+    const section = unwrapKernelResult(
+      kernel.intersectionCurve({
+        kind: "solid-plane",
+        target: translated,
+        origin: [0, 0, 0],
+        normal: [1, 0, 1],
+      }),
+      "intersectionCurve",
+    );
+    // The exact ellipse: centre at the origin, semi-axes r√2 (in-plane
+    // along the tilt direction) and r (along y), lying in the 45° plane.
+    const ellipsePoint = (u: number): readonly [number, number, number] => [
+      r * Math.cos(u),
+      r * Math.sin(u),
+      r * Math.cos(u),
+    ];
+    const chordSum = (stations: number): number => {
+      let total = 0;
+      for (let index = 1; index <= stations; index += 1) {
+        const previous = ellipsePoint((2 * Math.PI * (index - 1)) / stations);
+        const current = ellipsePoint((2 * Math.PI * index) / stations);
+        total += Math.sqrt(
+          (current[0] - previous[0]) ** 2 +
+            (current[1] - previous[1]) ** 2 +
+            (current[2] - previous[2]) ** 2,
+        );
+      }
+      return total;
+    };
+    const at16 = chordSum(16);
+    const at8 = chordSum(8);
+    // The two station rules genuinely differ on this curved section.
+    expect(at8).toBeLessThan(at16);
+    // The pinned rule: 16 stations per section edge (17 walked points),
+    // chord perimeter inside a tight band of the analytic 16-station
+    // value — and clear of the 8-station one.
+    expect(section.chains.length).toBeGreaterThanOrEqual(1);
+    for (const chain of section.chains) {
+      expect(chain.length).toBe(17);
+    }
+    expect(Math.abs(section.length - at16)).toBeLessThan(1e-6);
+    expect(section.length - at8).toBeGreaterThan(1e-3);
+    // Bounds: the world extents reach ±r on x, y, AND z (the r√2
+    // semi-axis lies IN the 45° plane along (1,0,1)/√2 — its endpoint
+    // (r, 0, r) has world components r).
+    expect(section.bounds.min[0]).toBeCloseTo(-r, 6);
+    expect(section.bounds.max[0]).toBeCloseTo(r, 6);
+    expect(section.bounds.min[1]).toBeCloseTo(-r, 6);
+    expect(section.bounds.max[1]).toBeCloseTo(r, 6);
+    expect(section.bounds.min[2]).toBeCloseTo(-r, 6);
+    expect(section.bounds.max[2]).toBeCloseTo(r, 6);
+  });
 });

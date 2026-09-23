@@ -20,6 +20,7 @@ import type { StructuredHoleSubmission } from "./hole-dialog";
 import type { ThreadCutInput } from "./thread";
 
 import {
+  CurveFeatureForm,
   HoleFeatureForm,
   MirrorFeatureForm,
   PatternFeatureForm,
@@ -343,5 +344,51 @@ describe("MirrorFeatureForm: the plane picker and merge option", () => {
       datumPlaneId: "dtm_plane",
       merge: 1,
     });
+  });
+});
+
+describe("CurveFeatureForm: the curve module's field list (Phase 47)", () => {
+  /** Reads a text field's current input value. */
+  function textFieldValue(label: RegExp): string {
+    const field = screen.getByLabelText(label);
+    if (!(field instanceof HTMLInputElement)) {
+      throw new Error(`the field ${String(label)} is not a text input`);
+    }
+    return field.value;
+  }
+
+  it("renders every CURVE_FORM_FIELDS field with the module's defaults", () => {
+    const onCreateCurve = vi.fn<(authoring: unknown) => void>();
+    render(<CurveFeatureForm onCreateCurve={onCreateCurve} />);
+    // The field list is the curve module's single source of truth: the
+    // name, the kind select, the points textarea, the helix numbers, the
+    // handedness select, and the equation fields all render.
+    expect(textFieldValue(/^Name/)).toBe("curve");
+    expect(textFieldValue(/^Helix radius/)).toBe("6");
+    expect(textFieldValue(/^t min$/)).toBe("0");
+    expect(textFieldValue(/^x\(t\)$/)).toBe("10mm * t");
+    const points = screen.getByLabelText(/Points \(x, y, z per line\)/);
+    expect(points).toBeDefined();
+    expect((points as HTMLTextAreaElement).value.startsWith("0, 0, 0")).toBe(
+      true,
+    );
+  });
+
+  it("submits the authoring verbatim — the engine re-validates through the curve module", async () => {
+    const onCreateCurve = vi.fn<(authoring: unknown) => void>();
+    render(<CurveFeatureForm onCreateCurve={onCreateCurve} />);
+    fireEvent.change(screen.getByLabelText(/^Name/), {
+      target: { value: "spine guide" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create curve" }));
+    await waitFor(() => expect(onCreateCurve).toHaveBeenCalledTimes(1));
+    const submitted = onCreateCurve.mock.calls[0]?.[0] as {
+      readonly name: string;
+      readonly kind: string;
+      readonly pointsText: string;
+    };
+    expect(submitted.name).toBe("spine guide");
+    expect(submitted.kind).toBe("interpolated-spline");
+    expect(submitted.pointsText).toContain("20, 0, 20");
   });
 });

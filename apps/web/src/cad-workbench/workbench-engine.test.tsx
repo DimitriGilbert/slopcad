@@ -71,8 +71,12 @@ vi.mock("../render-fixture/fixture-session", () => ({
 }));
 
 import { useWorkbenchEngine, WorkbenchStoreProvider } from "./workbench-engine";
+import { CURVE_DEFAULTS } from "./curves";
 
 afterEach(cleanup);
+
+/** The last malformed-curve refusal the bad-curve button captured. */
+let lastRefusal: string | null = null;
 
 const PROBE_FEATURE = createFeatureId("feat_probe");
 const PROBE_BODY = createBodyId("body_probe");
@@ -90,6 +94,8 @@ function EngineHarness(): ReactElement {
     <div>
       <div
         data-testid="engine-surface"
+        data-curves={engine.curvesJson}
+        data-scene={engine.activeScene}
         data-datums={engine.datumsJson}
         data-rollback={
           engine.rollback === null
@@ -156,6 +162,18 @@ function EngineHarness(): ReactElement {
       </button>
       <button
         type="button"
+        data-testid="redo"
+        onClick={() => {
+          const redone = engine.historyApi.redo();
+          if (!redone.ok) {
+            throw new Error("the redo was refused");
+          }
+        }}
+      >
+        redo
+      </button>
+      <button
+        type="button"
         data-testid="add-datums"
         onClick={() => {
           const applied = engine.documentApi.applyTransaction({
@@ -193,6 +211,37 @@ function EngineHarness(): ReactElement {
         }}
       >
         add datums
+      </button>
+      <button
+        type="button"
+        data-testid="create-curve"
+        onClick={() => {
+          const outcome = engine.handleCreateCurve({
+            ...CURVE_DEFAULTS,
+            name: "spine guide",
+          });
+          if (!outcome.ok) {
+            throw new Error(`the curve commit was refused: ${outcome.code}`);
+          }
+        }}
+      >
+        create curve
+      </button>
+      <button
+        type="button"
+        data-testid="create-bad-curve"
+        onClick={() => {
+          const outcome = engine.handleCreateCurve({
+            ...CURVE_DEFAULTS,
+            pointsText: "0, 0, 0\nnope, 1, 2",
+          });
+          if (outcome.ok) {
+            throw new Error("the malformed curve authoring must refuse");
+          }
+          lastRefusal = `${outcome.code}: ${outcome.message}`;
+        }}
+      >
+        create bad curve
       </button>
     </div>
   );
@@ -345,5 +394,75 @@ describe("the datums machine surface's per-kind semantics", () => {
     expect(axis).toBeDefined();
     expect(axis?.resolved).toBeNull();
     expect(axis?.code).toBeUndefined();
+  });
+});
+
+describe("the curve creation action (Phase 47)", () => {
+  it("commits a curve record, renders it on the curves scene, and persists through undo/redo", async () => {
+    lastRefusal = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    const surface = (): HTMLElement => screen.getByTestId("engine-surface");
+    expect(surface().getAttribute("data-curves")).toBe("[]");
+
+    // The form's defaults (an interpolated spline) commit through the
+    // engine's creation action and switch the scene to the curves surface.
+    fireEvent.click(screen.getByTestId("create-curve"));
+    type CurveEntry = {
+      readonly id?: string;
+      readonly kind?: string;
+      readonly name?: string;
+      readonly segments?: number;
+    };
+    const entry = await waitFor(() => {
+      const parsed = JSON.parse(
+        surface().getAttribute("data-curves") ?? "[]",
+      ) as CurveEntry[];
+      expect(parsed).toHaveLength(1);
+      return parsed[0] as CurveEntry;
+    });
+    expect(entry.kind).toBe("interpolated-spline");
+    expect(entry.name).toBe("spine guide");
+    expect(entry.segments).toBeGreaterThan(2);
+    expect(surface().getAttribute("data-scene")).toBe("curves");
+
+    // Undo removes the record (the transaction rides the history) and the
+    // curves scene falls back; redo restores it — the persistence journey
+    // the e2e drives.
+    fireEvent.click(screen.getByTestId("undo"));
+    await waitFor(() => {
+      expect(surface().getAttribute("data-curves")).toBe("[]");
+    });
+    const restored = await waitFor(() => {
+      fireEvent.click(screen.getByTestId("redo"));
+      const parsed = JSON.parse(
+        surface().getAttribute("data-curves") ?? "[]",
+      ) as CurveEntry[];
+      expect(parsed).toHaveLength(1);
+      return parsed[0] as CurveEntry;
+    });
+    expect(restored.id).toBe(entry.id);
+  });
+
+  it("refuses malformed authoring structurally and commits nothing", async () => {
+    lastRefusal = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    const surface = (): HTMLElement => screen.getByTestId("engine-surface");
+    expect(surface().getAttribute("data-curves")).toBe("[]");
+
+    fireEvent.click(screen.getByTestId("create-bad-curve"));
+    await waitFor(() => {
+      expect(lastRefusal).not.toBeNull();
+    });
+    expect(lastRefusal).toContain("workbench/curve-invalid");
+    // Nothing committed: the machine surface stays empty.
+    expect(surface().getAttribute("data-curves")).toBe("[]");
   });
 });

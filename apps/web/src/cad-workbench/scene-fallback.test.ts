@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addBody,
+  addDocumentCurve,
   addDocumentParameter,
   addDocumentSketch,
   addFeature,
@@ -343,5 +344,34 @@ describe("honestSceneFallback", () => {
 
   it("re-points the extrude scene at the plate after the extrude is undone", () => {
     expect(honestSceneFallback(createDocument(DOC), "extrude")).toBe("plate");
+  });
+
+  it("keeps the curves scene while a curve record remains, over the solids beneath", () => {
+    // A curve record alone (no solid features) still resolves the curves
+    // scene — the curve overlay renders over the plate dispatch.
+    const curved = addDocumentCurve(createDocument(DOC), {
+      name: "spine",
+      curve: {
+        kind: "interpolated-spline",
+        points: [
+          [0, 0, 0],
+          [20, 0, 20],
+        ],
+      },
+    });
+    if (!curved.ok) {
+      throw new Error("the curve fixture must commit");
+    }
+    expect(honestSceneFallback(curved.value.document, "curves")).toBeNull();
+    // The curve record never perturbs the SOLID precedence: the highest
+    // resolvable solid scene stays what the solid features name.
+    expect(highestResolvableScene(curved.value.document)).toBe("plate");
+  });
+
+  it("re-points the curves scene at the highest solid scene after the last curve is undone", () => {
+    expect(honestSceneFallback(buildSolidDocument("extrude"), "curves")).toBe(
+      "extrude",
+    );
+    expect(honestSceneFallback(createDocument(DOC), "curves")).toBe("plate");
   });
 });

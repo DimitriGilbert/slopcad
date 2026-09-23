@@ -310,10 +310,26 @@ function uniformBsplineWeights(
 /**
  * The curve's station parameters: the deterministic sample set of
  * {@link canonicalizeCurve}'s kind rules, in increasing order.
+ *
+ * The station rule and the evaluator's domain must AGREE: a control
+ * spline's uniform cubic B-spline domain is poles−3 spans
+ * (`curvePointAt` clamps there), so the station walk covers exactly that
+ * domain — walking poles−1 spans would clamp every station past the
+ * domain end onto the same terminal point (duplicate tail stations,
+ * zero-length chords, and a G1 battery that false-flags a smooth spine).
  */
 export function curveStations(curve: CanonicalCurve): readonly number[] {
   if (curve.kind === "interpolated-spline" || curve.kind === "control-spline") {
-    const spans = curve.points.length - 1;
+    // The interpolated spline walks its knot spans (points−1); the control
+    // spline walks its B-spline domain (poles−3, floored at one span so a
+    // degenerate 2–3 pole payload still yields a walkable station set —
+    // the evaluator clamps those to the single degenerate domain either
+    // way, and the shared semantic battery governs what may enter a
+    // document at all).
+    const spans =
+      curve.kind === "control-spline"
+        ? Math.max(curve.points.length - 3, 1)
+        : curve.points.length - 1;
     const stations: number[] = [];
     for (let span = 0; span < spans; span += 1) {
       for (let step = 0; step < CURVE_STATIONS_PER_SPAN; step += 1) {
@@ -568,8 +584,10 @@ export function wireG1FailureIndex(
  * One parallel-transport frame station: the transported orthonormal
  * (normal, binormal) pair carried alongside the tangent. Deterministic
  * double-reflection transport (no branch on magnitude): the planar-path
- * special case keeps the frame CONSTANT (the fixed-binormal equivalence
- * with the Phase 26.3 sweep).
+ * special case keeps the frame's NORMAL constant — the initial-frame rule
+ * seats it on the path plane's normal, the same world direction the
+ * planar sweep fixes as its binormal (the fixed-frame equivalence with
+ * the Phase 26.3 sweep).
  */
 export interface TransportFrame {
   readonly point: WireVec3;
@@ -582,6 +600,15 @@ export interface TransportFrame {
  * The parallel-transport frames along a polyline spine: the initial normal
  * is the deterministic least-aligned-world-axis rejection of the first
  * tangent (the helix frame rule), then double-reflection per step.
+ *
+ * The reflections ride the TANGENT BISECTOR (t̂ᵢ₋₁ + t̂ᵢ) and the new
+ * tangent t̂ᵢ — the translation-invariant form of Wang et al.'s double
+ * reflection. Reflecting about absolute POINT sums (pᵢ₋₁ + pᵢ) ties the
+ * frame to the coordinate origin: a helix translated by +1000 mm flipped
+ * its transported normals toward anti-alignment and a straight path
+ * offset from the origin rotated its normal every step. The bisector
+ * form depends only on the path's SHAPE: translating the whole path
+ * transports the identical frames.
  */
 export function parallelTransportFrames(
   polyline: readonly WireVec3[],
@@ -607,19 +634,19 @@ export function parallelTransportFrames(
       current[1] - previous[1],
       current[2] - previous[2],
     ]);
-    // Double reflection (Wang et al.): rotate `normal` by the reflection
-    // pair v1 = previous + current, v2 = current - previous.
+    // Double reflection (Wang et al., translation-invariant form): the
+    // composition of the reflection about the tangent bisector
+    // v1 = t̂ᵢ₋₁ + t̂ᵢ (swaps the tangents) with the reflection about
+    // v2 = t̂ᵢ (fixes the new tangent) is the minimal rotation carrying
+    // t̂ᵢ₋₁ onto t̂ᵢ — applied to the normal it transports the frame.
+    const previousTangent: WireVec3 =
+      frames[frames.length - 1]?.tangent ?? firstTangent;
     const v1: WireVec3 = [
-      previous[0] + current[0],
-      previous[1] + current[1],
-      previous[2] + current[2],
+      previousTangent[0] + tangent[0],
+      previousTangent[1] + tangent[1],
+      previousTangent[2] + tangent[2],
     ];
-    const v2: WireVec3 = [
-      current[0] - previous[0],
-      current[1] - previous[1],
-      current[2] - previous[2],
-    ];
-    normal = reflectReflect(normal, v1, v2);
+    normal = reflectReflect(normal, v1, tangent);
     // Re-orthogonalize against numerical drift (deterministic Gram-Schmidt).
     const dot =
       normal[0] * tangent[0] + normal[1] * tangent[1] + normal[2] * tangent[2];

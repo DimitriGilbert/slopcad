@@ -804,41 +804,46 @@ export interface KernelWire {
 /**
  * Input of `sweepWire` (Phase 47): one closed profile loop in the local
  * XY plane carried along a 3D WIRE spine — the generalized path input of
- * the sweep family (the planar-XZ `sweep` stays the compatible subset:
- * a planar chain embedded as a wire sweeps the identical solid, the
- * fixed-binormal equivalence). The planar-XZ `sweep` remains the compatible subset:
- * a planar XZ chain embedded as a 3D wire sweeps the IDENTICAL solid,
- * because the parallel-transport frame of a planar path keeps the frame's
- * binormal constant (the fixed-binormal equivalence, pinned by fixture).
+ * the sweep family. The planar-XZ `sweep` is the compatible subset: a
+ * planar XZ chain whose first tangent is +z, embedded as a 3D wire,
+ * sweeps the IDENTICAL solid, because the transport of a planar path
+ * keeps the path-plane normal fixed — seated on `binormal` for the +z
+ * start (the same world direction the planar sweep fixes as its
+ * fixed-binormal frame), on `normal` for any other in-plane start (the
+ * fixed-frame equivalence, pinned by fixture: identical volume and
+ * bounds against the planar `sweep`).
  *
  * ## Semantics — the perpendicular transport
  *
  * The profile lies perpendicular to the spine's start tangent (the
  * perpendicular-attachment rule carried to 3D; there is no +z rule — the
  * frame IS the transport) and is carried along the spine by PARALLEL
- * TRANSPORT (double-reflection; the discrete form of OCCT's
- * corrected-Frenet pipe, which the fixtures probe). The spine must be
- * G1: at every station joint the chord directions agree within the
- * documented tolerance (`kernel/invalid-path` — the planar sweep's
- * tangent-continuity rule, generalized), and the spine must not
- * self-intersect on its chord polyline (`kernel/path-self-intersecting`,
- * the planar battery reused). The swept volume of a rigid planar profile
- * transported perpendicular along a non-self-intersecting C1 spine is
- * Cavalieri-exact: `V = A·L`.
+ * TRANSPORT (double-reflection about the tangent bisector, the
+ * translation-invariant form: the frames depend only on the path's
+ * shape). The spine must be G1: at every station joint the chord
+ * directions agree within the documented tolerance
+ * (`kernel/invalid-path` — the planar sweep's tangent-continuity rule,
+ * generalized), and the spine must not self-intersect on its chord
+ * polyline (`kernel/path-self-intersecting`, the planar battery reused).
+ * The swept volume of a rigid planar profile transported perpendicular
+ * along a non-self-intersecting C1 spine is Cavalieri-exact: `V = A·L`.
  *
- * ## Per-kernel fidelity
+ * ## Per-kernel fidelity (the probed scope, stated honestly)
  *
- * - OCCT: the spine as an exact wire (interpolated splines through
- *   `GeomAPI_Interpolate`, control splines as B-spline poles, helices and
- *   equations chorded at the shared station rule) piped through
- *   `BRepOffsetAPI_MakePipeShell` in corrected-Frenet mode — probed
- *   against `A·L` and banded by fixture. `sweepWire: true`.
  * - Fake: `V = A·L` exactly (the analytic Cavalieri reference), bounds
  *   from the station frames, tessellation the station loft at the shared
  *   deflection. `sweepWire: true`.
- * - JSCAD: the profile chord polygon lofted between transported stations
- *   (`extrudeFromSlices`) — straight spines exact, curved spines inside
- *   the documented station band (its `sweep` discipline verbatim).
+ * - OCCT: `sweepWire: true` within the probed scope — COLLINEAR spines
+ *   pipe exact through `BRepOffsetAPI_MakePipeShell` (pinned at the
+ *   Cavalieri prism volume), CURVED spines DECLINE with
+ *   `kernel/unsupported-operation`: the binding's pipe over the G0
+ *   chordal station spine yields inverted solids (negative volume
+ *   against the reference; the prespike probe) — the exact interpolated
+ *   spine waits on the binding's `GeomAPI_Interpolate` point-array
+ *   setter, and a decline is never a silently wrong solid.
+ * - JSCAD: `sweepWire: false` — every call declines with
+ *   `kernel/unsupported-operation` (no native sweep primitive over 3D
+ *   wire spines; the adapter does not hand-roll one).
  * - Manifold: `sweepWire: false` — the engine has no sweep or loft
  *   primitive (the probed `sweep` verdict verbatim); every call answers
  *   `kernel/unsupported-operation`.

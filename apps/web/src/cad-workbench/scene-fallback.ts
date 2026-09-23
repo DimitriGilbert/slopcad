@@ -40,7 +40,10 @@ import {
  * The workbench scene kinds the engine's dispatch can follow (the same
  * vocabulary the engine's `activeScene` state and the native-document
  * bridge's reopen derivation use). Phase 38 adds the sweep and loft
- * scenes.
+ * scenes. Phase 47 adds the `curves` scene (the curve-record authoring
+ * surface — it resolves while the document carries at least one curve
+ * record and renders them as the curve overlay over the highest solid
+ * scene).
  */
 export type WorkbenchSceneKind =
   | "plate"
@@ -59,7 +62,8 @@ export type WorkbenchSceneKind =
   | "patternFeature"
   | "patternPath"
   | "mirror"
-  | "hole";
+  | "hole"
+  | "curves";
 
 /**
  * The highest scene the document still resolves, in the create actions'
@@ -104,6 +108,12 @@ export function honestSceneFallback(
   activeScene: WorkbenchSceneKind,
 ): WorkbenchSceneKind | null {
   if (activeScene === "plate") return null;
+  // The curves scene resolves while the document carries at least one
+  // curve record — an undo that removes the last curve falls back to the
+  // highest solid scene (never stale curve pixels).
+  if (activeScene === "curves") {
+    return document.curves.length > 0 ? null : highestResolvableScene(document);
+  }
   const resolved =
     activeScene === "hole"
       ? documentHoleSceneRequest(document) !== null

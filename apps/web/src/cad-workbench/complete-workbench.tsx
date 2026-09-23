@@ -42,7 +42,7 @@
  * The engine-derived attributes (`data-selection`, `data-selection-key`,
  * `data-tool-*`, `data-history`, `data-command-log`,
  * `data-feature-timeline`, `data-rendered-frames`, `data-scene-*`,
- * `data-hole-diameter`, `data-sketch-mode`), the dialog state
+ * `data-hole-diameter`, `data-sketch-mode`, `data-curves`), the dialog state
  * (`data-command-menu-open`, `data-export-dialog-open`,
  * `data-import-dialog-open`, `data-export-held`, `data-export-error`),
  * and the import surface (`data-import-source`, `data-import-triangles`,
@@ -100,6 +100,7 @@ import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 import type { RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
+import type { CurveAuthoring } from "./curves";
 import type { LoftSectionChoice } from "./loft";
 import type { ThreadCutInput } from "./thread";
 import { clippingPlanesOf } from "@slopcad/cad-r3f";
@@ -107,6 +108,8 @@ import { clippingPlanesOf } from "@slopcad/cad-r3f";
 import { completionJson } from "../render-fixture/fixture-session";
 import {
   CAD_FEATURE_FORM_LABELS,
+  CURVE_FORM_LABELS,
+  CurveFeatureForm,
   DATUM_FORM_LABELS,
   DatumFeatureForm,
   DraftFeatureForm,
@@ -129,6 +132,7 @@ import {
   type CadFeatureSketchOption,
   type HoleFormValues,
 } from "./feature-forms";
+import { CadCurveOverlay } from "./curve-overlay";
 import { CadDatumOverlay } from "./datum-overlay";
 import { CadHolePreviewGhost } from "./hole-ghost";
 import {
@@ -348,6 +352,8 @@ export function CompleteCadWorkbench({
     sketchBootWorkplane,
     datumsJson,
     handleCreateDatum,
+    curvesJson,
+    handleCreateCurve,
   } = engine;
 
   // Dialog + palette state: composition-owned UI state (replaced entirely
@@ -373,6 +379,7 @@ export function CompleteCadWorkbench({
     | "patternPath"
     | "mirror"
     | "datum"
+    | "curve"
     | "boolean"
     | "moveBody"
     | null
@@ -765,6 +772,16 @@ export function CompleteCadWorkbench({
   };
 
   /**
+   * Runs the curve submission (Phase 47), surfacing the refusal and
+   * closing on success — the datum creation seam verbatim.
+   */
+  const submitCurve = (authoring: CurveAuthoring): void => {
+    const outcome = handleCreateCurve(authoring);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /**
    * Opens one feature dialog with its outcome region reset. The hole dialog
    * additionally resets the preview ghost's live values (a fresh form mount
    * re-seeds them through its change hook).
@@ -786,6 +803,7 @@ export function CompleteCadWorkbench({
         | "patternPath"
         | "mirror"
         | "datum"
+        | "curve"
         | "boolean"
         | "moveBody",
     ): void => {
@@ -1074,6 +1092,16 @@ export function CompleteCadWorkbench({
           openFeatureDialog("datum");
         },
       },
+      {
+        group: "Workspace",
+        id: "create-curve",
+        keywords:
+          "curve spline helix equation spine wire path interpolated control create",
+        label: "Create a 3D curve",
+        run: () => {
+          openFeatureDialog("curve");
+        },
+      },
     );
     if (io !== undefined) {
       list.push(
@@ -1305,6 +1333,18 @@ export function CompleteCadWorkbench({
               applied !== null &&
               workbenchDocument.datums.length > 0 ? (
                 <CadDatumOverlay
+                  document={workbenchDocument}
+                  projection={applied.state.projection}
+                />
+              ) : null}
+              {/* The Phase 47 curve overlay: the document's 3D curve
+                  records as camera-projected station polylines over the
+                  settled scene — the datum overlay's discipline (a pure
+                  function of document and projection, never serialized). */}
+              {!showingPreview &&
+              applied !== null &&
+              workbenchDocument.curves.length > 0 ? (
+                <CadCurveOverlay
                   document={workbenchDocument}
                   projection={applied.state.projection}
                 />
@@ -1650,6 +1690,8 @@ export function CompleteCadWorkbench({
       data-export-dialog-open={String(exportDialogOpen)}
       data-export-error={ioSurface.exportError}
       data-export-held={heldExportsJson}
+      data-curve-count={String(workbenchDocument.curves.length)}
+      data-curves={curvesJson}
       data-datum-count={String(
         (datumsJson === "[]" ? [] : (JSON.parse(datumsJson) as unknown[]))
           .length,
@@ -2414,7 +2456,9 @@ export function CompleteCadWorkbench({
                                             ? CAD_FEATURE_FORM_LABELS.booleanTitle
                                             : featureDialog === "moveBody"
                                               ? CAD_FEATURE_FORM_LABELS.moveBodyTitle
-                                              : DATUM_FORM_LABELS.title}
+                                              : featureDialog === "curve"
+                                                ? CURVE_FORM_LABELS.title
+                                                : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -2446,7 +2490,9 @@ export function CompleteCadWorkbench({
                                         ? CAD_FEATURE_FORM_LABELS.booleanHint
                                         : featureDialog === "moveBody"
                                           ? CAD_FEATURE_FORM_LABELS.moveBodyHint
-                                          : DATUM_FORM_LABELS.hint}
+                                          : featureDialog === "curve"
+                                            ? CURVE_FORM_LABELS.hint
+                                            : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "sweep" ? (
               <SweepFeatureForm
@@ -2505,6 +2551,8 @@ export function CompleteCadWorkbench({
               />
             ) : featureDialog === "moveBody" ? (
               <MoveBodyFeatureForm onMoveBody={submitMoveBody} />
+            ) : featureDialog === "curve" ? (
+              <CurveFeatureForm onCreateCurve={submitCurve} />
             ) : (
               <DatumFeatureForm
                 onCreateDatum={(payload) => {

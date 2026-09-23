@@ -7,7 +7,7 @@ import {
   helixCurvePayload,
   parseSerializedCurve,
 } from "./curve";
-import { createDocumentId } from "./ids";
+import { createCurveId, createDocumentId } from "./ids";
 import {
   addDocumentCurve,
   addFeature,
@@ -17,6 +17,8 @@ import {
   serializeCadDocument,
 } from "./document";
 import { parseCadDocument } from "./document";
+import { applyCommand, parseCommand, serializeCommand } from "./command";
+import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
 const spline: SerializedCurve = {
   kind: "interpolated-spline",
@@ -233,6 +235,45 @@ describe("document curve records", () => {
     expect(added.ok).toBe(false);
     if (!added.ok) {
       expect(added.error.code).toBe("document/curve-payload-invalid");
+    }
+  });
+});
+
+describe("the curve.create command", () => {
+  it("applies, serializes, and parses like every command (the datum.create seam)", () => {
+    const command = {
+      type: "curve.create",
+      id: createCurveId("crv_spine-guide"),
+      name: "spine guide",
+      curve: spline,
+    } as const;
+    const applied = applyCommand(
+      createDocument(createDocumentId("doc_cmd")),
+      command,
+    );
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.value.curves).toHaveLength(1);
+    expect(applied.value.curves[0]?.name).toBe("spine guide");
+
+    const serialized = serializeCommand(command);
+    expect(serialized.type).toBe("curve.create");
+    const parsed = parseCommand(serialized);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value).toEqual(command);
+  });
+
+  it("rejects an unparsable curve payload at the parse boundary", () => {
+    const parsed = parseCommand({
+      formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+      type: "curve.create",
+      name: "bad",
+      curve: { kind: "helix" },
+    });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error.code).toBe("command/malformed");
     }
   });
 });

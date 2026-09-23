@@ -43,7 +43,7 @@ Read the flags from the kernels' own constants
 | sheets                | —        | ✓           | —     | —    |
 | localFaceOps          | —        | ✓           | —     | —    |
 | section               | ✓        | ✓           | ✓     | ✓    |
-| sweepWire             | ✓        | ✓ *         | —     | ✓    |
+| sweepWire             | —        | ✓ *         | —     | ✓    |
 | intersectionCurve     | —        | ✓           | —     | —    |
 
 Phase 47 adds three curve-entity operations. `wire` — a curve entity's

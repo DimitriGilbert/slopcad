@@ -67,6 +67,7 @@ import {
 import {
   angle,
   createBodyId,
+  createCurveId,
   createDatumId,
   createFeatureId,
   createParameterId,
@@ -191,6 +192,12 @@ import {
 } from "./move-body";
 import { validateBodyRenameSubmission } from "./body-management";
 import {
+  curvePayloadOf,
+  curveSceneSegments,
+  type CurveAuthoring,
+} from "./curves";
+import { highestResolvableScene } from "./scene-fallback";
+import {
   sessionBackendOf,
   type FixtureSessionBackendId,
 } from "../render-fixture/session-backend";
@@ -272,7 +279,10 @@ export function useWorkbenchStore() {
  * The scene kinds the dispatch effect follows — the plate computation until
  * the first solid action commits, then the worker-executed composition the
  * document names (Phase 38 adds the sweep and loft scenes; Phase 43 adds
- * the pattern and mirror scenes).
+ * the pattern and mirror scenes). Phase 47 adds the `curves` scene: a
+ * curve-record authoring surface whose dispatch re-drives the highest
+ * solid scene the document still resolves beneath the curve overlay (the
+ * plate when there is none) — creating a curve never blanks the solids.
  */
 export type WorkbenchSceneKind =
   | "plate"
@@ -291,7 +301,8 @@ export type WorkbenchSceneKind =
   | "patternFeature"
   | "patternPath"
   | "mirror"
-  | "hole";
+  | "hole"
+  | "curves";
 
 /**
  * The structured outcome of a feature-form submission: the domain's refusal
@@ -649,6 +660,19 @@ export interface WorkbenchEngine {
    * canonical JSON for the machine surface (empty array when none).
    */
   readonly datumsJson: string;
+  /**
+   * The Phase 47 curve creation action (the Formedible form's submission
+   * seam): builds the payload through the curve module's authoring
+   * validators, then commits the curve.create command and switches the
+   * scene to the curves surface. A refusal commits nothing.
+   */
+  readonly handleCreateCurve: (authoring: CurveAuthoring) => FeatureFormOutcome;
+  /**
+   * The document's curve records with their kind and deterministic scene
+   * segment count, as canonical JSON for the machine surface (empty array
+   * when none).
+   */
+  readonly curvesJson: string;
 }
 
 /**
@@ -744,6 +768,9 @@ export function useWorkbenchEngine(
     readonly workplane: Workplane;
   } | null>(null);
   const [datumCount, setDatumCount] = useState(0);
+  // The Phase 47 curve record creations: the id-minting counter (the datum
+  // count's discipline — the n-th curve commits as `crv_curve{n}`).
+  const [curveCount, setCurveCount] = useState(0);
 
   // The active scene feature's worker refusal (Phase 38 capability
   // honesty): the session reports every feature-backed dispatch's verdict,
@@ -2670,7 +2697,16 @@ export function useWorkbenchEngine(
   // dispatch fires, and later action re-triggers (extrudeCount, revolveCount,
   // holeCount) re-dispatch the current scene.
   useEffect(() => {
-    if (activeScene === "extrude") {
+    // The `curves` scene (Phase 47) rides ABOVE the document's solids: its
+    // dispatch re-drives the highest solid scene the document still
+    // resolves (the plate when there is none), so authoring a curve never
+    // blanks existing bodies — the curve records render through the curve
+    // overlay, a pure function of (document, projection).
+    const dispatchScene =
+      activeScene === "curves"
+        ? highestResolvableScene(workbenchDocument)
+        : activeScene;
+    if (dispatchScene === "extrude") {
       const padRequest = documentPadSceneRequest(workbenchDocument);
       if (padRequest !== null) {
         sessionRef.current?.dispatchPad(padRequest, padRequest.bodyId);
@@ -2683,7 +2719,7 @@ export function useWorkbenchEngine(
       }
       return;
     }
-    if (activeScene === "revolve") {
+    if (dispatchScene === "revolve") {
       const request: RevolveSceneRequest | null =
         documentRevolveRequest(workbenchDocument);
       if (request !== null) {
@@ -2691,7 +2727,7 @@ export function useWorkbenchEngine(
       }
       return;
     }
-    if (activeScene === "sweep") {
+    if (dispatchScene === "sweep") {
       const request: SweepSceneRequest | null =
         documentSweepRequest(workbenchDocument);
       if (request !== null) {
@@ -2699,7 +2735,7 @@ export function useWorkbenchEngine(
       }
       return;
     }
-    if (activeScene === "loft") {
+    if (dispatchScene === "loft") {
       const request: LoftSceneRequest | null =
         documentLoftRequest(workbenchDocument);
       if (request !== null) {
@@ -2707,84 +2743,84 @@ export function useWorkbenchEngine(
       }
       return;
     }
-    if (activeScene === "helix") {
+    if (dispatchScene === "helix") {
       const request = documentHelixRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchHelix(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "thread") {
+    if (dispatchScene === "thread") {
       const request = documentThreadSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchThread(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "rib") {
+    if (dispatchScene === "rib") {
       const request = documentRibSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchRib(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "scale") {
+    if (dispatchScene === "scale") {
       const request = documentScaleSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchScale(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "thicken") {
+    if (dispatchScene === "thicken") {
       const request = documentThickenSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchThicken(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "split") {
+    if (dispatchScene === "split") {
       const request = documentSplitSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchSplit(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "patternFeature") {
+    if (dispatchScene === "patternFeature") {
       const request = documentPatternFeatureSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchPatternFeature(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "patternPath") {
+    if (dispatchScene === "patternPath") {
       const request = documentPatternPathSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchPatternPath(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "mirror") {
+    if (dispatchScene === "mirror") {
       const request = documentMirrorSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchMirror(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "boolean") {
+    if (dispatchScene === "boolean") {
       const request = documentBooleanSceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchBoolean(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "moveBody") {
+    if (dispatchScene === "moveBody") {
       const request = documentMoveBodySceneRequest(workbenchDocument);
       if (request !== null) {
         sessionRef.current?.dispatchMoveBody(request, request.bodyId);
       }
       return;
     }
-    if (activeScene === "hole") {
+    if (dispatchScene === "hole") {
       const derived = documentHoleSceneRequest(workbenchDocument);
       if (derived !== null) {
         sessionRef.current?.dispatchHole(derived.request, derived.bodyId);
@@ -2816,6 +2852,7 @@ export function useWorkbenchEngine(
     moveBodyCount,
     holeCount,
     structuredHoleCount,
+    curveCount,
   ]);
 
   // The host pushes the CURRENT projection into the store — the projection
@@ -2996,6 +3033,66 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The Phase 47 curve creation action (the Formedible form's submission
+  // seam): builds the payload through the curve module's own authoring
+  // validators and payload builders (see ./curves — the validators and the
+  // shared semantic battery run BEFORE anything commits), then commits the
+  // curve.create command in one atomic transaction and switches the scene
+  // to the curves surface (the dispatch re-drives the solids beneath). A
+  // refusal commits nothing and hands the structured outcome back to the
+  // form — the datum creation seam verbatim.
+  const handleCreateCurve = (authoring: CurveAuthoring): FeatureFormOutcome => {
+    const built = curvePayloadOf(authoring);
+    if (built.problems.length > 0 || built.payload === undefined) {
+      return {
+        ok: false,
+        code: "workbench/curve-invalid",
+        message: built.problems.map((problem) => problem.message).join(" "),
+      };
+    }
+    const n = curveCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const name = authoring.name.trim();
+    const commit = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "curve.create",
+          id: createCurveId(`crv_curve${suffix}`),
+          name,
+          curve: built.payload,
+        },
+      ],
+    });
+    if (!commit.ok) {
+      return {
+        ok: false,
+        code: commit.error.code,
+        message: commit.error.message,
+      };
+    }
+    setCurveCount(n);
+    setActiveScene("curves");
+    return { ok: true };
+  };
+
+  // The curves machine surface: every curve record with its kind and its
+  // deterministic scene segment count (the same shared evaluation the
+  // viewport overlay draws), canonical JSON — the e2e battery asserts
+  // presence and identity without reading pixels (the datums surface's
+  // discipline).
+  const curvesJson = useMemo(
+    () =>
+      JSON.stringify(
+        workbenchDocument.curves.map((curve) => ({
+          id: curve.id,
+          kind: curve.curve.kind,
+          name: curve.name,
+          segments: curveSceneSegments(curve.curve).length,
+        })),
+      ),
+    [workbenchDocument],
+  );
+
   // The datums machine surface: every datum record with its kind and, for
   // PLANE datums, the session-resolved plane (or the structured failure),
   // canonical JSON. A plane datum whose resolution fails surfaces its
@@ -3105,6 +3202,8 @@ export function useWorkbenchEngine(
     sketchBootWorkplane: sketchAnchor === null ? null : sketchAnchor.workplane,
     datumsJson,
     handleCreateDatum,
+    handleCreateCurve,
+    curvesJson,
   };
 }
 

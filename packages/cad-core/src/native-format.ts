@@ -1700,6 +1700,24 @@ function validateCommandShape(
     );
     return;
   }
+  if (type === "curve.create") {
+    if (input.id !== undefined && !parseCurveId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A curve.create command's optional id must be a valid curve id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "curve.create", issues);
+    validateRecordShape(
+      input.curve,
+      `${path}.curve`,
+      "A curve.create command's curve payload must be a plain object (the curve module's canonical serialized form).",
+      issues,
+    );
+    return;
+  }
   if (type === "feature.delete") {
     if (!parseFeatureId(input.id).ok) {
       issue(
