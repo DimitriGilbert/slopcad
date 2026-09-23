@@ -254,12 +254,14 @@ structured unsupported before any geometry):
   (a boundary-consistent knit closes into a solid).
 - `offset-surface` — sheet, signed distance LENGTH.
 
-The workbench's surface tab authors the family (toolbar verbs on the
-wide tier, the command menu everywhere), and the sheet scene executes
-the document's LAST surface feature through the worker matrix
-(`solid.createSheet` + `sheet.trim`/`sheet.thicken`/`sheet.knit`/
-`sheet.offset`) — an open sheet settles at volume 0 with its area in
-the measurement, the thicken solid at its analytic volume.
+The workbench's surface tab authors the family through the COMMAND MENU
+only — the sheet verbs are the row's widest contextual group and every
+harness width is already spent, so no toolbar tier shows them without
+overflowing the engraved row budget (the e2e drives the menu path) — and
+the sheet scene executes the document's LAST surface feature through the
+worker matrix (`solid.createSheet` + `sheet.trim`/`sheet.thicken`/
+`sheet.knit`/`sheet.offset`) — an open sheet settles at volume 0 with its
+area in the measurement, the thicken solid at its analytic volume.
 
 ## Body management (Phase 44)
 

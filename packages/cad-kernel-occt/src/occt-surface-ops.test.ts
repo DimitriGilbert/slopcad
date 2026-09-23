@@ -162,6 +162,37 @@ describe("occt trimSheet (Phase 49)", () => {
     );
   });
 
+  it("keeps the ASYMMETRIC sphere zones apart on the two keep sides (the classification pin)", () => {
+    // The quarter-height cut: the cap zone (h = 3r/4) and the skirt zone
+    // (h = r/4) have DIFFERENT areas, unlike the symmetric mid-height
+    // fixture above (both sides π r² there). Only the splitter route's
+    // normal-side classification distinguishes them, so an inverted side
+    // test — or a flipped keepInside anywhere on the route — answers the
+    // WRONG ZONE'S NUMBER and this fixture goes red.
+    const r = 10;
+    const sheet = spherePatch(r, 0, Math.PI / 2, 2 * Math.PI);
+    const tool = planeSheetHandle(-100, 100, -100, 100, r / 4);
+    const cap = unwrapKernelResult(
+      kernel.trimSheet({ sheet, tool, keepInside: true }),
+      "cap zone",
+    );
+    // Above the cut: z from r/4 to r — the 3r/4-tall zone.
+    expect(unwrapKernelResult(kernel.area(cap), "cap area")).toBeCloseTo(
+      (2 * Math.PI * r * (3 * r)) / 4,
+      6,
+    );
+    const skirt = unwrapKernelResult(
+      kernel.trimSheet({ sheet, tool, keepInside: false }),
+      "skirt zone",
+    );
+    // Below the cut: z from 0 to r/4 — the r/4-tall zone (≈ 1/3 of the
+    // cap's area; the two numbers are never confusable).
+    expect(unwrapKernelResult(kernel.area(skirt), "skirt area")).toBeCloseTo(
+      2 * Math.PI * r * (r / 4),
+      6,
+    );
+  });
+
   it("declares the empty overlap with the structured surface-trim-empty", () => {
     const sheet = planeSheetHandle(0, 10, 0, 10, 0);
     const tool = planeSheetHandle(0, 10, 0, 10, 5);

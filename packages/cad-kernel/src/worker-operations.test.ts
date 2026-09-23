@@ -313,6 +313,42 @@ describe("operation input round-trips", () => {
     });
   });
 
+  it("round-trips the four Phase 49 sheet-family inputs (trim, thicken, knit, offset)", () => {
+    expectInputRoundTrip("sheet.trim", {
+      sheet: solidA,
+      tool: solidB,
+      keepInside: true,
+    });
+    expectInputRoundTrip("sheet.trim", {
+      sheet: solidB,
+      tool: solidA,
+      keepInside: false,
+    });
+    expectInputRoundTrip("sheet.thicken", {
+      sheet: solidA,
+      thickness: mm(2),
+      side: 1,
+    });
+    expectInputRoundTrip("sheet.thicken", {
+      sheet: solidA,
+      thickness: mm(2),
+      side: -1,
+    });
+    expectInputRoundTrip("sheet.knit", {
+      bodies: [solidA, solidB, solidC],
+      tolerance: mm(0.001),
+    });
+    expectInputRoundTrip("sheet.offset", {
+      sheet: solidA,
+      distance: mm(3),
+    });
+    // A signed inward offset survives the sign verbatim.
+    expectInputRoundTrip("sheet.offset", {
+      sheet: solidA,
+      distance: mm(-2),
+    });
+  });
+
   it("round-trips the section result with its cut solid and face measures", () => {
     const serialized = serializeWorkerOperationResult("solid.section", {
       solid: solidA,
@@ -967,6 +1003,11 @@ describe("operation result round-trips", () => {
       "solid.subtract",
       "solid.intersect",
       "solid.transform",
+      // The Phase 49 sheet family mints one solid per call, like the rest.
+      "sheet.trim",
+      "sheet.thicken",
+      "sheet.knit",
+      "sheet.offset",
     ] as const;
     for (const operation of solidOperations) {
       const wire = serializeWorkerOperationResult(operation, { solid: solidB });

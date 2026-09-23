@@ -19,8 +19,12 @@
  * The from-behind journey (Phase 48's carried render gate): the settled
  * sheet viewed from BELOW — a front-face-only material would cull every
  * triangle and leave the canvas empty; the `openShell` DoubleSide
- * discipline renders BOTH sides. The assertion is raster: the captured
- * canvas must carry a healthy population of non-background pixels.
+ * discipline renders BOTH sides. The assertion is raster and SHEET-LOCAL:
+ * the captured canvas must carry a healthy population of pixels in the
+ * shaded-surface color band (Phase 46's amber-family counter discipline).
+ * Counting everything that differs from the background does NOT
+ * discriminate — the grid, axes, and datum overlay alone clear thousands
+ * of non-background pixels under a fully culled sheet.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -41,7 +45,7 @@ const VOLUME_REL_TOLERANCE = 0.002;
 const TRIMMED_AREA = 10 * 20;
 const THICKENED_VOLUME = TRIMMED_AREA * 2;
 
-/** The raster bar the from-behind capture must clear (pixels). */
+/** The raster bar the from-behind capture must clear (sheet-band pixels). */
 const MIN_SHEET_PIXELS = 5_000;
 
 /** Saves an artifact under the workbench artifacts directory. */
@@ -96,12 +100,21 @@ async function pickDialogOption(
 }
 
 /**
- * Counts the canvas pixels that differ from the capture's own corner
- * background color (decoded in-page — the same browser renderer that
- * produced the PNG reads it back, so no spec-side decoder exists).
- * A culled sheet leaves a uniform capture; a rendered one thousands.
+ * Counts the canvas's SHEET-SURFACE pixels IN THE PAGE (the same browser
+ * renderer that produced the PNG reads it back — Phase 46's amber-family
+ * counter discipline, so no spec-side decoder exists). The default body
+ * material is the machinist-steel blue-gray (`#aabdd6`), which the studio
+ * lights render around rgb(130, 145, 163) from below: mid-brightness with
+ * a blue dominance (b − r ≈ 33, r < g < b). Everything else on the canvas
+ * falls OUTSIDE that band: the graphite backdrop and gray grid are
+ * achromatic, the grid/datum overlay family sits at r < 80 (measured on
+ * the settled capture: the sheet family spans r 128–143, the overlay
+ * family r 48–79 — an empty gap between), the bright feature edges
+ * (`#d8e2f2`) sit at r > 200, and the pure-hue axes carry no blue-gray
+ * dominance. A culled sheet (FrontSide) removes the surface fill — the
+ * count IS the sheet's screen presence, grid or no grid.
  */
-async function countNonBackgroundPixels(
+async function countSheetSurfacePixels(
   page: Page,
   png: Buffer,
 ): Promise<number> {
@@ -126,39 +139,24 @@ async function countNonBackgroundPixels(
       return context.getImageData(0, 0, bitmap.width, bitmap.height);
     };
     return decode().then((image) => {
-      const channel = (offset: number): number => image.data[offset] ?? 0;
-      const corner = (
-        x: number,
-        y: number,
-      ): readonly [number, number, number] => {
-        const offset = (y * image.width + x) * 4;
-        return [channel(offset), channel(offset + 1), channel(offset + 2)];
-      };
-      // The background is sampled from the four corners; a pixel differs
-      // when any channel drifts past the AA tolerance.
-      const backgrounds = [
-        corner(0, 0),
-        corner(image.width - 1, 0),
-        corner(0, image.height - 1),
-        corner(image.width - 1, image.height - 1),
-      ];
-      let differing = 0;
+      let sheet = 0;
       for (let index = 0; index < image.width * image.height; index += 1) {
         const offset = index * 4;
-        const [r, g, b] = [
-          channel(offset),
-          channel(offset + 1),
-          channel(offset + 2),
-        ];
-        const isBackground = backgrounds.some(
-          (background) =>
-            Math.abs(r - background[0]) <= 8 &&
-            Math.abs(g - background[1]) <= 8 &&
-            Math.abs(b - background[2]) <= 8,
-        );
-        if (!isBackground) differing += 1;
+        const r = image.data[offset] ?? 0;
+        const g = image.data[offset + 1] ?? 0;
+        const b = image.data[offset + 2] ?? 0;
+        if (
+          r >= 100 &&
+          r <= 200 &&
+          r < g &&
+          g < b &&
+          b - r >= 15 &&
+          b - r <= 70
+        ) {
+          sheet += 1;
+        }
       }
-      return differing;
+      return sheet;
     });
   }, png.toString("base64"));
 }
@@ -249,10 +247,10 @@ test("surface: base sheet → trim → thicken lands on the analytic 400 mm³, a
   await page.waitForTimeout(500);
   const png = await page.locator(CANVAS).screenshot();
   await saveArtifact("surface-sheet-from-behind.png", png);
-  const sheetPixels = await countNonBackgroundPixels(page, png);
+  const sheetPixels = await countSheetSurfacePixels(page, png);
   expect(
     sheetPixels,
-    `from behind, ${String(sheetPixels)} non-background pixels cleared the bar — a culled backface leaves a uniform canvas`,
+    `from behind, ${String(sheetPixels)} sheet-band pixels cleared the bar — a culled backface leaves none`,
   ).toBeGreaterThanOrEqual(MIN_SHEET_PIXELS);
 
   // The thicken: the trimmed sheet × 2 mm → exactly 400 mm³.
