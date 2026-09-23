@@ -58,7 +58,10 @@ test("focus order runs row-to-docks and skips disabled controls", async ({
   const canUndo =
     (JSON.parse(historyRaw ?? "{}") as { canUndo?: boolean }).canUndo === true;
 
-  const stops = await collectTabStops(page, 80);
+  // The walk budget grew with the Phase 57 configuration surface: the
+  // switcher, the create form, and the CSV row are real, named controls
+  // between the parameter fields and the feature band's timeline.
+  const stops = await collectTabStops(page, 120);
   const keys = stops.map(tabStopKey);
   const indexOf = (predicate: (key: string) => boolean): number =>
     keys.findIndex(predicate);

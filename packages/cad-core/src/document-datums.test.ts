@@ -42,6 +42,7 @@ import {
   stringifyNativeCadDocument,
   parseNativeCadDocumentFromString,
   validateNativeCadDocument,
+  CAD_NATIVE_FORMAT_VERSION,
   type DatumTopologyResolver,
 } from "./index";
 
@@ -350,7 +351,7 @@ describe("the native format with datum records", () => {
       datums: [{ id: "not-a-datum-id", name: "", datum: 42 }],
     };
     const validation = validateNativeCadDocument({
-      formatVersion: 5,
+      formatVersion: CAD_NATIVE_FORMAT_VERSION,
       document: broken,
       history: { base: broken, transactions: [], cursor: 0 },
       regeneration: { features: [] },

@@ -40,6 +40,7 @@ export const CAD_ID_KINDS = [
   "drawingView",
   "mate",
   "joint",
+  "configuration",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -116,6 +117,12 @@ export type MateId = BrandedId<"mate">;
  * record granting a motion vocabulary between two occurrences (Phase 51).
  */
 export type JointId = BrandedId<"joint">;
+/**
+ * Identifier of a document configuration (e.g. `cfg_small`): the
+ * document-resident named row of parameter overrides, suppressed features,
+ * and hidden bodies that evaluates to an effective document view (Phase 57).
+ */
+export type ConfigurationId = BrandedId<"configuration">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -132,6 +139,7 @@ type CadIdTable = {
   drawingView: DrawingViewId;
   mate: MateId;
   joint: JointId;
+  configuration: ConfigurationId;
 };
 
 /** The branded id type of a given id kind. */
@@ -159,6 +167,7 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   drawingView: "dwv",
   mate: "mat",
   joint: "jnt",
+  configuration: "cfg",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -531,6 +540,21 @@ export function createJointId(raw: string): JointId {
   return requireId("joint", raw);
 }
 
+/** Parses untrusted input as a {@link ConfigurationId}. */
+export function parseConfigurationId(
+  input: unknown,
+): ParseResult<ConfigurationId, IdParseError> {
+  return parseIdOfKind("configuration", input);
+}
+
+/**
+ * Adopts an explicit user-provided configuration id exactly as given
+ * (`cfg_…` wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createConfigurationId(raw: string): ConfigurationId {
+  return requireId("configuration", raw);
+}
+
 /**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
@@ -592,6 +616,7 @@ export interface IdGenerator {
   nextDrawingViewId(): DrawingViewId;
   nextMateId(): MateId;
   nextJointId(): JointId;
+  nextConfigurationId(): ConfigurationId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -611,6 +636,7 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   drawingView: 0,
   mate: 0,
   joint: 0,
+  configuration: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -673,6 +699,8 @@ export function createIdGenerator(
     nextDrawingViewId: () => requireId("drawingView", nextRawId("drawingView")),
     nextMateId: () => requireId("mate", nextRawId("mate")),
     nextJointId: () => requireId("joint", nextRawId("joint")),
+    nextConfigurationId: () =>
+      requireId("configuration", nextRawId("configuration")),
     state: () => Object.freeze({ ...counters }),
   };
 }

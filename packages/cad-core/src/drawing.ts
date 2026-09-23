@@ -51,10 +51,12 @@
 import { CAD_ID_MAX_PAYLOAD_LENGTH } from "./ids";
 import {
   type BodyId,
+  type ConfigurationId,
   type DrawingViewId,
   type OccurrenceId,
   type SheetId,
   parseBodyId,
+  parseConfigurationId,
   parseDrawingViewId,
   parseOccurrenceId,
   parseSheetId,
@@ -232,6 +234,17 @@ export interface DrawingView {
    * geometry is still derived, never persisted (module docs).
    */
   readonly projection?: DrawingViewProjection;
+  /**
+   * The configuration the view is pinned to (Phase 57-additive): the view's
+   * projection resolves its model state through that configuration's
+   * effective parameter view instead of the document's base values. Absent
+   * = the view projects the base document (every pre-Phase-57 view), so
+   * unpinned views serialize byte-identically to their earlier form and an
+   * old reader's tolerant parse drops the field. Wire shape is validated at
+   * the drawing boundary; the pin naming a configuration the document
+   * actually has is the native envelope's cross-check.
+   */
+  readonly configurationId?: ConfigurationId;
 }
 
 /**
@@ -320,6 +333,8 @@ export interface SerializedDrawingView {
   readonly label?: string;
   /** Present exactly when the view has a Phase 55 projection derivation. */
   readonly projection?: Record<string, unknown>;
+  /** Present exactly when the view pins a configuration (additive). */
+  readonly configurationId?: string;
 }
 
 export interface SerializedDrawingBomRow {
@@ -383,6 +398,7 @@ export const DRAWING_ERROR_CODES = {
   invalidOccurrenceId: "drawing/invalid-occurrence-id",
   bomTableInvalid: "drawing/bom-table-invalid",
   balloonInvalid: "drawing/balloon-invalid",
+  invalidConfigurationPin: "drawing/invalid-configuration-pin",
 } as const;
 
 export type DrawingErrorCode =
@@ -903,6 +919,17 @@ function parseView(
     if (!projectionResult.ok) return projectionResult;
     projection = projectionResult.value;
   }
+  let configurationId: ConfigurationId | undefined;
+  if (input.configurationId !== undefined && input.configurationId !== null) {
+    const pinResult = parseConfigurationId(input.configurationId);
+    if (!pinResult.ok) {
+      return drawingError(
+        DRAWING_ERROR_CODES.invalidConfigurationPin,
+        "A view's configurationId pin must be a valid `cfg_` id.",
+      );
+    }
+    configurationId = pinResult.value;
+  }
   return ok({
     id: idResult.value,
     kind: kind as DrawingViewKind,
@@ -913,6 +940,7 @@ function parseView(
     alignedTo,
     ...(label === undefined ? {} : { label }),
     ...(projection === undefined ? {} : { projection }),
+    ...(configurationId === undefined ? {} : { configurationId }),
   });
 }
 
@@ -1237,8 +1265,9 @@ export function parseDrawingDocument(
  * Fields are emitted in declaration order — `formatVersion`, `sheets`, and
  * per sheet `id`, `size`, `orientation`, `scale`, `views` (`bomTables` and
  * `balloons` last, only when non-empty), per view `id`, `kind`, `bodyId`,
- * `x`, `y`, `scale`, `alignedTo` (`label` and `projection` last, only when
- * present) — so the same document always serializes to identical bytes.
+ * `x`, `y`, `scale`, `alignedTo` (`label`, `projection`, and
+ * `configurationId` last, only when present) — so the same document always
+ * serializes to identical bytes.
  */
 export function serializeDrawingDocument(
   drawing: DrawingDocument,
@@ -1262,6 +1291,9 @@ export function serializeDrawingDocument(
         ...(view.projection === undefined
           ? {}
           : { projection: serializeProjection(view.projection) }),
+        ...(view.configurationId === undefined
+          ? {}
+          : { configurationId: view.configurationId }),
       })),
       ...(sheet.bomTables === undefined || sheet.bomTables.length === 0
         ? {}

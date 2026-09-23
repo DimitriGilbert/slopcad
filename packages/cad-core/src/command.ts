@@ -62,6 +62,7 @@ import {
   addDocumentSketch,
   addDocumentDatum,
   addDocumentCurve,
+  addDocumentConfiguration,
   addDocumentParameter,
   addFeature,
   type CadDocument,
@@ -69,20 +70,24 @@ import {
   type FeatureInputRef,
   parseFeatureInputRef,
   parseFeatureKind,
+  removeDocumentConfiguration,
   removeFeature,
   reorderFeature,
   type SerializedFeatureInputRef,
   updateBody,
+  updateDocumentConfiguration,
   updateFeature,
 } from "./document";
 import {
   type BodyId,
+  type ConfigurationId,
   type CurveId,
   type DatumId,
   type FeatureId,
   type ParameterId,
   type SketchDocumentId,
   parseBodyId,
+  parseConfigurationId,
   parseCurveId,
   parseDatumId,
   parseFeatureId,
@@ -110,6 +115,9 @@ export const CAD_COMMAND_TYPES = [
   "reference.create",
   "datum.create",
   "curve.create",
+  "configuration.create",
+  "configuration.update",
+  "configuration.delete",
 ] as const;
 
 export type CadCommandType = (typeof CAD_COMMAND_TYPES)[number];
@@ -217,6 +225,39 @@ export type CadCommand =
       readonly id: FeatureId;
       /** The feature to sit after; `null` moves the feature to the front. */
       readonly afterFeatureId: FeatureId | null;
+    }
+  | {
+      /**
+       * The Phase 57 configuration row creation: the row's authored deltas —
+       * parameter overrides (untrusted values re-validated dimensionally at
+       * the substrate), suppressed features, and hidden bodies. Overrides
+       * ride exactly the shape the configuration module parses.
+       */
+      readonly type: "configuration.create";
+      readonly id?: ConfigurationId;
+      readonly name: string;
+      readonly parameterOverrides?: readonly {
+        readonly parameterId: ParameterId;
+        readonly value: AnyDimensionalValue;
+      }[];
+      readonly suppressedFeatures?: readonly FeatureId[];
+      readonly hiddenBodies?: readonly BodyId[];
+    }
+  | {
+      /** Replaces a configuration row's mutable fields, keeping its identity. */
+      readonly type: "configuration.update";
+      readonly id: ConfigurationId;
+      readonly name: string;
+      readonly parameterOverrides?: readonly {
+        readonly parameterId: ParameterId;
+        readonly value: AnyDimensionalValue;
+      }[];
+      readonly suppressedFeatures?: readonly FeatureId[];
+      readonly hiddenBodies?: readonly BodyId[];
+    }
+  | {
+      readonly type: "configuration.delete";
+      readonly id: ConfigurationId;
     };
 
 /** Stable failure codes produced when command input is rejected. */
@@ -355,6 +396,41 @@ export function applyCommand(
       return removeFeature(document, command.id);
     case "feature.reorder":
       return reorderFeature(document, command.id, command.afterFeatureId);
+    case "configuration.create": {
+      const added = addDocumentConfiguration(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+        ...(command.parameterOverrides === undefined
+          ? {}
+          : { parameterOverrides: command.parameterOverrides }),
+        ...(command.suppressedFeatures === undefined
+          ? {}
+          : { suppressedFeatures: command.suppressedFeatures }),
+        ...(command.hiddenBodies === undefined
+          ? {}
+          : { hiddenBodies: command.hiddenBodies }),
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
+    case "configuration.update": {
+      const updated = updateDocumentConfiguration(document, command.id, {
+        name: command.name,
+        ...(command.parameterOverrides === undefined
+          ? {}
+          : { parameterOverrides: command.parameterOverrides }),
+        ...(command.suppressedFeatures === undefined
+          ? {}
+          : { suppressedFeatures: command.suppressedFeatures }),
+        ...(command.hiddenBodies === undefined
+          ? {}
+          : { hiddenBodies: command.hiddenBodies }),
+      });
+      if (!updated.ok) return updated;
+      return ok(updated.value);
+    }
+    case "configuration.delete":
+      return removeDocumentConfiguration(document, command.id);
     default:
       return fail(
         commandError(
@@ -451,6 +527,35 @@ export type SerializedCadCommand =
       readonly type: "feature.reorder";
       readonly id: string;
       readonly afterFeatureId: string | null;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "configuration.create";
+      readonly id?: string;
+      readonly name: string;
+      readonly parameterOverrides?: readonly {
+        readonly parameterId: string;
+        readonly value: SerializedDimensionalValue;
+      }[];
+      readonly suppressedFeatures?: readonly string[];
+      readonly hiddenBodies?: readonly string[];
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "configuration.update";
+      readonly id: string;
+      readonly name: string;
+      readonly parameterOverrides?: readonly {
+        readonly parameterId: string;
+        readonly value: SerializedDimensionalValue;
+      }[];
+      readonly suppressedFeatures?: readonly string[];
+      readonly hiddenBodies?: readonly string[];
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "configuration.delete";
+      readonly id: string;
     };
 
 function serializeInputRef(ref: FeatureInputRef): SerializedFeatureInputRef {
@@ -607,6 +712,58 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
         id: command.id,
         afterFeatureId: command.afterFeatureId,
       };
+    case "configuration.create":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+        ...(command.parameterOverrides === undefined
+          ? {}
+          : {
+              parameterOverrides: command.parameterOverrides.map(
+                (override) => ({
+                  parameterId: override.parameterId,
+                  value: serializeDimensionalValue(override.value),
+                }),
+              ),
+            }),
+        ...(command.suppressedFeatures === undefined
+          ? {}
+          : { suppressedFeatures: [...command.suppressedFeatures] }),
+        ...(command.hiddenBodies === undefined
+          ? {}
+          : { hiddenBodies: [...command.hiddenBodies] }),
+      };
+    case "configuration.update":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+        name: command.name,
+        ...(command.parameterOverrides === undefined
+          ? {}
+          : {
+              parameterOverrides: command.parameterOverrides.map(
+                (override) => ({
+                  parameterId: override.parameterId,
+                  value: serializeDimensionalValue(override.value),
+                }),
+              ),
+            }),
+        ...(command.suppressedFeatures === undefined
+          ? {}
+          : { suppressedFeatures: [...command.suppressedFeatures] }),
+        ...(command.hiddenBodies === undefined
+          ? {}
+          : { hiddenBodies: [...command.hiddenBodies] }),
+      };
+    case "configuration.delete":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+      };
     default:
       throw new Error(
         "Invariant violation: a serialized command must carry a known command type.",
@@ -616,6 +773,31 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+/**
+ * Parses an optional wire array of ids through one id parser; `undefined`
+ * rides through as `undefined` (the command carries no such list).
+ */
+function parseIdArray<K extends string>(
+  input: unknown,
+  parse: (value: unknown) => ParseResult<K, ParseFailure>,
+): ParseResult<readonly K[] | undefined, ParseFailure> {
+  if (input === undefined) return ok(undefined);
+  if (!Array.isArray(input)) {
+    return fail({
+      code: "id/not-an-array",
+      message: "must be an array",
+      input,
+    });
+  }
+  const ids: K[] = [];
+  for (const entry of input) {
+    const parsed = parse(entry);
+    if (!parsed.ok) return parsed;
+    ids.push(parsed.value);
+  }
+  return ok(ids);
 }
 
 function parseCommandInputs(
@@ -1164,6 +1346,159 @@ export function parseCommand(
           afterFeatureId: parsedAnchor.value,
         }),
       );
+    }
+    case "configuration.create":
+    case "configuration.update": {
+      const isUpdate = type === "configuration.update";
+      let id: ConfigurationId | undefined;
+      if (isUpdate || input.id !== undefined) {
+        const parsedId = parseConfigurationId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A ${type} command needs a valid configuration id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A ${type} command needs a non-empty name string.`,
+            input.name,
+          ),
+        );
+      }
+      let overrides:
+        | readonly { parameterId: ParameterId; value: AnyDimensionalValue }[]
+        | undefined;
+      if (input.parameterOverrides !== undefined) {
+        if (!Array.isArray(input.parameterOverrides)) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A ${type} command's parameterOverrides must be an array.`,
+              input.parameterOverrides,
+            ),
+          );
+        }
+        const rows: {
+          parameterId: ParameterId;
+          value: AnyDimensionalValue;
+        }[] = [];
+        for (const entry of input.parameterOverrides) {
+          if (!isPlainRecord(entry)) {
+            return fail(
+              commandError(
+                COMMAND_ERROR_CODES.malformed,
+                `A ${type} command's overrides must be objects with parameterId and value.`,
+                entry,
+              ),
+            );
+          }
+          const parsedParameter = parseParameterId(entry.parameterId);
+          if (!parsedParameter.ok) {
+            return fail(
+              commandError(
+                COMMAND_ERROR_CODES.malformed,
+                `A ${type} command's override needs a valid parameter id: ${parsedParameter.error.message}`,
+                entry,
+              ),
+            );
+          }
+          const parsedValue = parseDimensionalValue(entry.value);
+          if (!parsedValue.ok) {
+            return fail(
+              commandError(
+                COMMAND_ERROR_CODES.malformed,
+                `A ${type} command's override needs a valid dimensional value: ${parsedValue.error.message}`,
+                entry,
+              ),
+            );
+          }
+          rows.push({
+            parameterId: parsedParameter.value,
+            value: parsedValue.value,
+          });
+        }
+        overrides = rows;
+      }
+      const suppressed = parseIdArray(input.suppressedFeatures, parseFeatureId);
+      if (!suppressed.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A ${type} command's suppressedFeatures must be valid feature ids: ${suppressed.error.message}`,
+            input.suppressedFeatures,
+          ),
+        );
+      }
+      const hidden = parseIdArray(input.hiddenBodies, parseBodyId);
+      if (!hidden.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A ${type} command's hiddenBodies must be valid body ids: ${hidden.error.message}`,
+            input.hiddenBodies,
+          ),
+        );
+      }
+      if (!isUpdate) {
+        return ok(
+          Object.freeze({
+            type,
+            ...(id === undefined ? {} : { id }),
+            name: input.name,
+            ...(overrides === undefined
+              ? {}
+              : { parameterOverrides: overrides }),
+            ...(suppressed.value === undefined
+              ? {}
+              : { suppressedFeatures: suppressed.value }),
+            ...(hidden.value === undefined
+              ? {}
+              : { hiddenBodies: hidden.value }),
+          }),
+        );
+      }
+      if (id === undefined) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A configuration.update command needs a valid configuration id.",
+            input.id,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze({
+          type,
+          id,
+          name: input.name,
+          ...(overrides === undefined ? {} : { parameterOverrides: overrides }),
+          ...(suppressed.value === undefined
+            ? {}
+            : { suppressedFeatures: suppressed.value }),
+          ...(hidden.value === undefined ? {} : { hiddenBodies: hidden.value }),
+        }),
+      );
+    }
+    case "configuration.delete": {
+      const parsedId = parseConfigurationId(input.id);
+      if (!parsedId.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A configuration.delete command needs a valid configuration id: ${parsedId.error.message}`,
+            input.id,
+          ),
+        );
+      }
+      return ok(Object.freeze({ type, id: parsedId.value }));
     }
     default: {
       const parsedId = parseFeatureId(input.id);

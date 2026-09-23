@@ -67,6 +67,7 @@ import {
 } from "@slopcad/cad-react";
 import {
   angle,
+  applyDocumentConfiguration,
   createBodyId,
   createCurveId,
   createDatumId,
@@ -74,8 +75,15 @@ import {
   createParameterId,
   createSketchDocumentId,
   dimensionless,
+  equalQuantity,
   length,
+  overridesFromCsvRows,
   parseDatumPayload,
+  parseParameterTableCsv,
+  serializeParameterTableCsv,
+  type AnyDimensionalValue,
+  type CadCommand,
+  type ConfigurationId,
   type DatumId,
 } from "@slopcad/cad-core";
 import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
@@ -428,6 +436,24 @@ export interface WorkbenchEngine {
   readonly sectionState: ReturnType<typeof sectionInspectionReadout>;
   /** The machine timeline JSON (rollback, entries, executed). */
   readonly timelineJson: string;
+  /** The configurations machine surface (rows, deltas, active id), canonical JSON. */
+  readonly configurationsJson: string;
+  /** The active configuration row's id, or `null` for the base document. */
+  readonly activeConfigurationId: ConfigurationId | null;
+  /** The last configuration action's structured refusal, surfaced verbatim. */
+  readonly configurationNotice: string | null;
+  /** Applies a configuration row (`null` returns to the base document). */
+  readonly applyConfiguration: (
+    configurationId: ConfigurationId | null,
+  ) => void;
+  /** Creates a row capturing the current parameter values as overrides. */
+  readonly createConfiguration: (name: string) => void;
+  /** Deletes a configuration row by id. */
+  readonly deleteConfiguration: (configurationId: ConfigurationId) => void;
+  /** The deterministic parameter-table CSV of the current document. */
+  readonly exportParameterTableCsv: () => string;
+  /** Imports CSV text as parameter-table edits (one transaction). */
+  readonly importParameterTableCsv: (text: string) => void;
   /** The extrude create action (the sketch → solid UX bridge). */
   readonly handleExtrude: (submission: SketchExtrudeSubmission) => void;
   /** The revolve create action (the sketch → solid UX bridge). */
@@ -3464,6 +3490,208 @@ export function useWorkbenchEngine(
     return JSON.stringify(resolved);
   }, [workbenchDocument]);
 
+  // -- The Phase 57 configuration switch ------------------------------------
+  // The ACTIVE configuration is session state (ADR: derived data, never
+  // persisted): applying a row commits the effective values as ordinary
+  // transactions, so the diff/stale machinery re-derives the affected set
+  // with no new invalidation path. The BASE values a row's overrides
+  // displaced (and the bodies a row hid) are tracked so switching back — or
+  // to another row — restores them; the rows themselves stay the only
+  // persisted deltas.
+  const [activeConfigurationId, setActiveConfigurationId] =
+    useState<ConfigurationId | null>(null);
+  const [configurationNotice, setConfigurationNotice] = useState<string | null>(
+    null,
+  );
+  const baseValuesRef = useRef<ReadonlyMap<string, AnyDimensionalValue>>(
+    new Map(),
+  );
+  const configHiddenBodiesRef = useRef<ReadonlySet<BodyId>>(new Set());
+
+  const applyConfiguration = useCallback(
+    (id: ConfigurationId | null): void => {
+      const document = documentApi.document;
+      const evaluated =
+        id === null
+          ? null
+          : applyDocumentConfiguration(document, document.configurations, id);
+      if (id !== null && !evaluated?.ok) {
+        setConfigurationNotice(
+          evaluated && !evaluated.ok
+            ? `${evaluated.error.code}: ${evaluated.error.message}`
+            : `No configuration ${String(id)} exists.`,
+        );
+        return;
+      }
+      const effective = evaluated?.ok === true ? evaluated.value : null;
+      const overrides = new Map(
+        (effective === null
+          ? []
+          : (document.configurations.find(
+              (configuration) => configuration.id === id,
+            )?.parameterOverrides ?? [])
+        ).map((override) => [override.parameterId, override.value]),
+      );
+      const previousBase = baseValuesRef.current;
+      const nextBase = new Map(previousBase);
+      const commands: CadCommand[] = [];
+      for (const parameter of document.parameters.parameters) {
+        const overrideValue = overrides.get(parameter.id);
+        const baseValue = previousBase.get(parameter.id) ?? parameter.value;
+        const desiredValue = overrideValue ?? baseValue;
+        if (!equalQuantity(desiredValue, parameter.value)) {
+          commands.push({
+            type: "parameter.set",
+            id: parameter.id,
+            value: desiredValue,
+          });
+        }
+        if (overrideValue !== undefined && !previousBase.has(parameter.id)) {
+          nextBase.set(parameter.id, parameter.value);
+        }
+      }
+      const previousHidden = configHiddenBodiesRef.current;
+      const nextHidden: ReadonlySet<BodyId> = new Set(
+        effective?.hiddenBodies ?? [],
+      );
+      for (const bodyId of previousHidden) {
+        if (!nextHidden.has(bodyId)) {
+          commands.push({ type: "body.update", id: bodyId, visible: true });
+        }
+      }
+      for (const bodyId of nextHidden) {
+        if (!previousHidden.has(bodyId)) {
+          commands.push({ type: "body.update", id: bodyId, visible: false });
+        }
+      }
+      if (commands.length > 0) {
+        const commit = documentApi.applyTransaction({ commands });
+        if (!commit.ok) {
+          setConfigurationNotice(
+            `${commit.error.code}: ${commit.error.message}`,
+          );
+          return;
+        }
+      }
+      baseValuesRef.current = nextBase;
+      configHiddenBodiesRef.current = nextHidden;
+      setSuppressed(new Set(effective?.suppressedFeatures ?? []));
+      setActiveConfigurationId(id);
+      setConfigurationNotice(null);
+    },
+    [documentApi, setSuppressed],
+  );
+
+  // Creating a row captures the CURRENT parameter values as its overrides —
+  // the authored-now state becomes the named row; suppression and hidden
+  // bodies start empty and stay empty until a later edit carries them.
+  const createConfiguration = useCallback(
+    (name: string): void => {
+      const document = documentApi.document;
+      const committed = documentApi.applyTransaction({
+        commands: [
+          {
+            type: "configuration.create",
+            name,
+            parameterOverrides: document.parameters.parameters.map(
+              (parameter) => ({
+                parameterId: parameter.id,
+                value: parameter.value,
+              }),
+            ),
+          },
+        ],
+      });
+      if (!committed.ok) {
+        setConfigurationNotice(
+          `${committed.error.code}: ${committed.error.message}`,
+        );
+        return;
+      }
+      setConfigurationNotice(null);
+    },
+    [documentApi],
+  );
+
+  const deleteConfiguration = useCallback(
+    (id: ConfigurationId): void => {
+      const committed = documentApi.applyTransaction({
+        commands: [{ type: "configuration.delete", id }],
+      });
+      if (!committed.ok) {
+        setConfigurationNotice(
+          `${committed.error.code}: ${committed.error.message}`,
+        );
+        return;
+      }
+      if (activeConfigurationId === id) {
+        baseValuesRef.current = new Map();
+        configHiddenBodiesRef.current = new Set();
+        setSuppressed(new Set());
+        setActiveConfigurationId(null);
+      }
+      setConfigurationNotice(null);
+    },
+    [documentApi, activeConfigurationId, setSuppressed],
+  );
+
+  // The CSV parameter table: export is the domain's deterministic bytes;
+  // import parses rows, matches them by name, and commits each matched
+  // parameter as an ordinary parameter.set (one transaction).
+  const exportParameterTableCsv = useCallback((): string => {
+    const csv = serializeParameterTableCsv(documentApi.document);
+    return csv;
+  }, [documentApi]);
+
+  const importParameterTableCsv = useCallback(
+    (text: string): void => {
+      const document = documentApi.document;
+      const rows = parseParameterTableCsv(text);
+      if (!rows.ok) {
+        setConfigurationNotice(`${rows.error.code}: ${rows.error.message}`);
+        return;
+      }
+      const overrides = overridesFromCsvRows(document.parameters, rows.value);
+      if (!overrides.ok) {
+        setConfigurationNotice(
+          `${overrides.error.code}: ${overrides.error.message}`,
+        );
+        return;
+      }
+      const commit = documentApi.applyTransaction({
+        commands: overrides.value.map((override): CadCommand => ({
+          type: "parameter.set",
+          id: override.parameterId,
+          value: override.value,
+        })),
+      });
+      if (!commit.ok) {
+        setConfigurationNotice(`${commit.error.code}: ${commit.error.message}`);
+        return;
+      }
+      setConfigurationNotice(null);
+    },
+    [documentApi],
+  );
+
+  // The configurations machine surface: every row with its delta counts and
+  // the active id, canonical JSON — additive; the e2e battery asserts
+  // presence and identity without reading pixels (the datums discipline).
+  const configurationsJson = useMemo(
+    () =>
+      JSON.stringify({
+        active: activeConfigurationId,
+        rows: documentApi.document.configurations.map((configuration) => ({
+          id: configuration.id,
+          name: configuration.name,
+          overrides: configuration.parameterOverrides.length,
+          suppressed: configuration.suppressedFeatures.length,
+          hidden: configuration.hiddenBodies.length,
+        })),
+      }),
+    [documentApi.document, activeConfigurationId],
+  );
+
   // Exiting to the model workspace drops the sketch anchor: an anchor
   // without a sketch session behind it would silently attach the NEXT
   // sketch's extrude to a face the user picked minutes ago.
@@ -3507,6 +3735,14 @@ export function useWorkbenchEngine(
     toggleSectionViewMode,
     sectionState,
     timelineJson,
+    configurationsJson,
+    activeConfigurationId,
+    configurationNotice,
+    applyConfiguration,
+    createConfiguration,
+    deleteConfiguration,
+    exportParameterTableCsv,
+    importParameterTableCsv,
     handleExtrude,
     handleRevolve,
     handleHole,

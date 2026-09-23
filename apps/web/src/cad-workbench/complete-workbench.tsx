@@ -62,6 +62,7 @@ import {
 } from "@slopcad/cad-react";
 import {
   createBodyId,
+  createConfigurationId,
   formatBoundsExtents,
   parseDatumPayload,
 } from "@slopcad/cad-core";
@@ -98,6 +99,8 @@ import {
 } from "@slopcad/ui/components/cad/cad-io-dialog";
 import { CadModelTree } from "@slopcad/ui/components/cad/cad-model-tree";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
+import { CadConfigurationPanel } from "@slopcad/ui/components/cad/cad-configuration-panel";
+import type { CadConfigurationRow } from "@slopcad/ui/components/cad/cad-configuration-panel";
 import { CadPropertyPanel } from "@slopcad/ui/components/cad/cad-property-panel";
 import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
@@ -236,6 +239,8 @@ export interface CadWorkbenchSlots {
   readonly propertyPanel?: CadWorkbenchSlot;
   /** The right dock's parameter panel. */
   readonly parameterPanel?: CadWorkbenchSlot;
+  /** The Phase 57 configuration surface (switcher, table, create, CSV). */
+  readonly configurationPanel?: CadWorkbenchSlot;
   /** The bottom status bar. */
   readonly statusBar?: CadWorkbenchSlot;
   /** The import/export dialogs (portal-mounted). */
@@ -1762,6 +1767,46 @@ export function CompleteCadWorkbench({
     <CadParameterPanel className="w-full min-h-0 flex-1 rounded-none border-0 bg-transparent" />
   );
 
+  // The Phase 57 configuration surface: the switcher, the row table, the
+  // Formedible create form, and the CSV row, wired to the engine's
+  // configuration actions. Export writes the deterministic CSV through the
+  // browser's download path; import reads the chosen file's text.
+  const configurationRows: readonly CadConfigurationRow[] =
+    workbenchDocument.configurations.map((configuration) => ({
+      id: configuration.id,
+      name: configuration.name,
+      overrides: configuration.parameterOverrides.length,
+      suppressed: configuration.suppressedFeatures.length,
+      hidden: configuration.hiddenBodies.length,
+    }));
+  const defaultConfigurationPanel = (
+    <CadConfigurationPanel
+      configurations={configurationRows}
+      activeConfigurationId={engine.activeConfigurationId}
+      notice={engine.configurationNotice}
+      onSwitch={(id) =>
+        engine.applyConfiguration(
+          id === null ? null : createConfigurationId(id),
+        )
+      }
+      onCreate={(name) => engine.createConfiguration(name)}
+      onDelete={(id) => engine.deleteConfiguration(createConfigurationId(id))}
+      onExportCsv={() => {
+        const csv = engine.exportParameterTableCsv();
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "parameters.csv";
+        anchor.click();
+        URL.revokeObjectURL(url);
+        return csv;
+      }}
+      onImportCsv={(text) => engine.importParameterTableCsv(text)}
+      className="w-full shrink-0 border-t border-border"
+    />
+  );
+
   const defaultStatusBar = (
     <CadStatusBar
       surfaceIds={{
@@ -1810,6 +1855,8 @@ export function CompleteCadWorkbench({
   const propertyPanel = slots.propertyPanel?.(context) ?? defaultPropertyPanel;
   const parameterPanel =
     slots.parameterPanel?.(context) ?? defaultParameterPanel;
+  const configurationPanel =
+    slots.configurationPanel?.(context) ?? defaultConfigurationPanel;
   const statusBar = slots.statusBar?.(context) ?? defaultStatusBar;
   const ioDialogs = slots.ioDialogs?.(context) ?? defaultIoDialogs;
 
@@ -1843,6 +1890,7 @@ export function CompleteCadWorkbench({
       data-export-held={heldExportsJson}
       data-curve-count={String(workbenchDocument.curves.length)}
       data-curves={curvesJson}
+      data-configurations={engine.configurationsJson}
       data-datum-count={String(
         (datumsJson === "[]" ? [] : (JSON.parse(datumsJson) as unknown[]))
           .length,
@@ -2518,6 +2566,9 @@ export function CompleteCadWorkbench({
               the pinned Apply footer stays on screen at any height. */}
           <div className="flex min-h-0 flex-1 flex-col border-t border-border">
             {parameterPanel}
+          </div>
+          <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-border">
+            {configurationPanel}
           </div>
         </div>
       </div>

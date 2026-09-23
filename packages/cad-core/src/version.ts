@@ -62,8 +62,19 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * drop the standalone sections and counters — mate and joint records
  * are data the old reader cannot carry, so the envelope stamp is the
  * gate.
+ *
+ * v6 (Phase 57): the document substrate grew configurations — the
+ * additive `configurations` section and the `configuration`
+ * id-generator counter: named parameter-set rows over the document,
+ * evaluated into effective document views
+ * (docs/architecture/adr-configurations.md). Content-additive exactly
+ * like its predecessors (v5 content is valid v6 content; the v5→v6
+ * migration is the identity), but the version moves because an old
+ * reader would silently drop the standalone section and counter —
+ * configuration rows are data the old reader cannot carry, so the
+ * envelope stamp is the gate.
  */
-export const CAD_NATIVE_FORMAT_VERSION = 5;
+export const CAD_NATIVE_FORMAT_VERSION = 6;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)
