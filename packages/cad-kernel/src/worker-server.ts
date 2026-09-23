@@ -118,7 +118,11 @@ type SolidProducingOperation =
   | "solid.moveFace"
   | "solid.replaceFace"
   | "solid.deleteFace"
-  | "solid.section";
+  | "solid.section"
+  | "sheet.trim"
+  | "sheet.thicken"
+  | "sheet.knit"
+  | "sheet.offset";
 
 /** What executing a request produced, before the ledger decides delivery. */
 type ExecutionOutcome =
@@ -888,6 +892,100 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             : {
                 status: "failed",
                 error: kernelFailure("solid.section", result.error),
+              };
+        }
+        case "sheet.trim": {
+          // The Phase 49 surface family over the wire: both operands
+          // resolve against the session map (sheet or solid — the
+          // kernel's own sheet gate answers the structured codes), the
+          // result mints one session body.
+          const trimSheet = ownedSolid("sheet.trim", request.input.sheet);
+          if (trimSheet.status === "failed") {
+            return { status: "failed", error: trimSheet.error };
+          }
+          const trimTool = ownedSolid("sheet.trim", request.input.tool);
+          if (trimTool.status === "failed") {
+            return { status: "failed", error: trimTool.error };
+          }
+          const trimResult = kernel.trimSheet({
+            sheet: trimSheet.handle,
+            tool: trimTool.handle,
+            keepInside: request.input.keepInside,
+          });
+          return trimResult.ok
+            ? {
+                status: "solid",
+                operation: "sheet.trim",
+                handle: trimResult.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("sheet.trim", trimResult.error),
+              };
+        }
+        case "sheet.thicken": {
+          const thickenSheet = ownedSolid("sheet.thicken", request.input.sheet);
+          if (thickenSheet.status === "failed") {
+            return { status: "failed", error: thickenSheet.error };
+          }
+          const thickenResult = kernel.thickenSheet({
+            sheet: thickenSheet.handle,
+            thickness: request.input.thickness,
+            side: request.input.side,
+          });
+          return thickenResult.ok
+            ? {
+                status: "solid",
+                operation: "sheet.thicken",
+                handle: thickenResult.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("sheet.thicken", thickenResult.error),
+              };
+        }
+        case "sheet.knit": {
+          const knitBodies: KernelSolid[] = [];
+          for (const body of request.input.bodies) {
+            const resolved = ownedSolid("sheet.knit", body);
+            if (resolved.status === "failed") {
+              return { status: "failed", error: resolved.error };
+            }
+            knitBodies.push(resolved.handle);
+          }
+          const knitResult = kernel.knit({
+            bodies: knitBodies,
+            tolerance: request.input.tolerance,
+          });
+          return knitResult.ok
+            ? {
+                status: "solid",
+                operation: "sheet.knit",
+                handle: knitResult.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("sheet.knit", knitResult.error),
+              };
+        }
+        case "sheet.offset": {
+          const offsetSheet = ownedSolid("sheet.offset", request.input.sheet);
+          if (offsetSheet.status === "failed") {
+            return { status: "failed", error: offsetSheet.error };
+          }
+          const offsetResult = kernel.offsetSheet({
+            sheet: offsetSheet.handle,
+            distance: request.input.distance,
+          });
+          return offsetResult.ok
+            ? {
+                status: "solid",
+                operation: "sheet.offset",
+                handle: offsetResult.value,
+              }
+            : {
+                status: "failed",
+                error: kernelFailure("sheet.offset", offsetResult.error),
               };
         }
         case "solid.topology": {

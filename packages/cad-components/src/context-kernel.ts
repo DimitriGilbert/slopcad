@@ -75,6 +75,7 @@ const CONTEXT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   sheets: false,
+  surfaceOps: false,
   localFaceOps: false,
   section: true,
   sweepWire: false,

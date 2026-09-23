@@ -240,6 +240,8 @@ import {
   type ConeInput,
   type CylinderInput,
   type DeleteFaceInput,
+  type DeleteFaceKeepInput,
+  type DeleteFaceKeepResult,
   type FilletInput,
   type GeometryKernel,
   type HelixSweepInput,
@@ -262,7 +264,16 @@ import {
   type ProfileSweepInput,
   type ReplaceFaceInput,
   type ShellInput,
+  type SheetExtendInput,
+  type SheetFillPatchInput,
+  type SheetKnitInput,
+  type SheetOffsetInput,
+  type SheetReplaceFaceInput,
+  type SheetThickenInput,
+  type SheetTrimInput,
   type SheetSurfaceInput,
+  type SheetUnstitchInput,
+  type SheetUntrimInput,
   type SphereInput,
   type SweepPathSegmentInput,
   type Tessellation,
@@ -458,6 +469,7 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   sheets: true,
+  surfaceOps: true,
   localFaceOps: true,
   sweepWire: true,
   intersectionCurve: true,
@@ -750,6 +762,36 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         kernelError(
           KERNEL_ERROR_CODES.unsupportedOperation,
           `${operation} declined a sheet body: the operation consumes closed solids, and an open shell bounds no material (trim/knit/thicken a sheet into a solid first — Phase 48 builds sheets; the surface-mending operations are Phase 49).`,
+        ),
+      );
+    }
+    return ok(payload.shape);
+  };
+
+  /**
+   * The Phase 49 sheet gate: resolves a handle that must be an OPEN SHEET
+   * — the surface family's operand discipline, the mirror of
+   * `closedSolidOf`. A closed-solid operand declines structurally (the
+   * trim/knit family consumes sheets; solids go to the solid family).
+   */
+  const sheetOf = (
+    solid: KernelSolid,
+    operation: string,
+  ): KernelResult<TopoDS_Shape> => {
+    const payload = tag.unwrap(solid);
+    if (payload === undefined || payload.shape === null) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.solidNotOwned,
+          `${operation} rejected a solid handle that this kernel instance did not create (or has already disposed).`,
+        ),
+      );
+    }
+    if (!payload.sheet) {
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          `${operation} declined a closed-solid body: the surface operation family consumes sheet bodies (open shells) — a solid bounds material and belongs to the solid operation family.`,
         ),
       );
     }
@@ -1786,6 +1828,51 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     } finally {
       props.delete();
     }
+  };
+
+  /**
+   * Walks a shape's faces (`TopExp_Explorer`, the section cap-face route).
+   * The returned wrappers reference the input shape's topology — the
+   * caller never deletes them while the source shape lives.
+   */
+  const facesOfShape = (shape: TopoDS_Shape): TopoDS_Face[] => {
+    const explorer = new oc.TopExp_Explorer(
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    );
+    const faces: TopoDS_Face[] = [];
+    while (explorer.More()) {
+      faces.push(oc.TopoDS.Face(explorer.Value()));
+      explorer.Next();
+    }
+    explorer.delete();
+    return faces;
+  };
+
+  /**
+   * Sewing pass (Phase 49's knit family): the faces of every operand
+   * share edges at the sewing tolerance; the sewed shape is the kernel
+   * answer, classified by `wrapSolid` (a boundary-consistent sew of a
+   * closed volume arrives as a solid, an open one as a sheet).
+   */
+  const sewFaces = (
+    faces: readonly TopoDS_Face[],
+    tolerance: number,
+    operation: string,
+  ): TopoDS_Shape => {
+    void operation;
+    const sew = new oc.BRepBuilderAPI_Sewing(
+      tolerance,
+      true,
+      true,
+      true,
+      false,
+    );
+    for (const face of faces) sew.Add(face);
+    sew.Perform();
+    const sewed = sew.SewedShape();
+    sew.delete();
+    return sewed;
   };
 
   // --- local face operation helpers (Phase 44 — the probed composition)
@@ -3950,6 +4037,940 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           ),
         );
       });
+    },
+
+    trimSheet(input: SheetTrimInput): KernelResult<KernelSolid> {
+      return run("trimSheet", KERNEL_ERROR_CODES.surfaceTrimEmpty, () => {
+        const sheet = sheetOf(input.sheet, "trimSheet");
+        if (!sheet.ok) return fail(sheet.error);
+        const tool = sheetOf(input.tool, "trimSheet");
+        if (!tool.ok) return fail(tool.error);
+        // Two tool classes, two probed routes:
+        // - PLANAR tool (one planar face): the covering-slab composition —
+        //   the section op's covering-box discipline carried to sheets.
+        //   The tool face sweeps both ways along its own normal across the
+        //   operands' full extent, and the slab drives a half-space-wise
+        //   Common/Cut. (The direct shell-shell Common of two sheets on
+        //   DIFFERENT surfaces answers empty on this engine build — probed —
+        //   so the crossing trim of a loft or sphere wall by a plane rides
+        //   the slab, exactly like the solid section's plane cut.)
+        // - Same-dimension tool (a sheet trimming a sheet it shares a
+        //   surface with): the direct Common/Cut on the open shells.
+        const toolFaces = facesOfShape(tool.value);
+        const toolAdaptor =
+          toolFaces.length === 1
+            ? new oc.BRepAdaptor_Surface(toolFaces[0] as TopoDS_Face)
+            : undefined;
+        const planarTool =
+          toolAdaptor !== undefined &&
+          toolAdaptor.GetType() === oc.GeomAbs_SurfaceType.GeomAbs_Plane;
+        const toolPlanePoint: readonly [number, number, number] | undefined =
+          planarTool && toolFaces[0] !== undefined
+            ? faceNormalAndCenter(toolFaces[0]).center
+            : undefined;
+        const toolPlaneNormal: readonly [number, number, number] | undefined =
+          planarTool && toolFaces[0] !== undefined
+            ? faceNormalAndCenter(toolFaces[0]).normal
+            : undefined;
+        toolAdaptor?.delete();
+        // Same-plane detection: EVERY sheet face lies IN the tool's plane
+        // (parallel normal, zero offset). A sheet merely TOUCHING or
+        // crossing the plane measures a zero shape distance — the surface
+        // comparison, not the distance, separates the in-plane region trim
+        // (the band trim, a direct same-surface boolean) from the crossing
+        // split below.
+        const sheetFaces = facesOfShape(sheet.value);
+        let sheetInToolPlane =
+          planarTool &&
+          toolPlanePoint !== undefined &&
+          toolPlaneNormal !== undefined &&
+          sheetFaces.length > 0;
+        if (
+          sheetInToolPlane &&
+          toolPlanePoint !== undefined &&
+          toolPlaneNormal !== undefined
+        ) {
+          for (const sheetFace of sheetFaces) {
+            const adaptor = new oc.BRepAdaptor_Surface(sheetFace);
+            const isPlane =
+              adaptor.GetType() === oc.GeomAbs_SurfaceType.GeomAbs_Plane;
+            if (!isPlane) {
+              adaptor.delete();
+              sheetInToolPlane = false;
+              break;
+            }
+            const plane = adaptor.Plane();
+            adaptor.delete();
+            const direction = plane.Axis().Direction();
+            const location = plane.Location();
+            const parallel =
+              Math.abs(
+                direction.X() * toolPlaneNormal[0] +
+                  direction.Y() * toolPlaneNormal[1] +
+                  direction.Z() * toolPlaneNormal[2],
+              ) - 1;
+            const offset =
+              (location.X() - toolPlanePoint[0]) * toolPlaneNormal[0] +
+              (location.Y() - toolPlanePoint[1]) * toolPlaneNormal[1] +
+              (location.Z() - toolPlanePoint[2]) * toolPlaneNormal[2];
+            if (!(Math.abs(parallel) < 1e-9 && Math.abs(offset) < 1e-7)) {
+              sheetInToolPlane = false;
+              break;
+            }
+          }
+        }
+        const crossingPlanarTool = planarTool && !sheetInToolPlane;
+        let kept: TopoDS_Shape;
+        if (planarTool && toolFaces[0] !== undefined && crossingPlanarTool) {
+          // Half-space route: the tool face sweeps ONE way — along its own
+          // normal, across the operands' full extent — and keepInside keeps
+          // the sheet's part on that normal side. This is the section op's
+          // covering-box discipline carried to sheets: crossing trims of
+          // loft or sphere walls by a plane ride it (the direct shell-shell
+          // Common of sheets on different surfaces answers empty on this
+          // engine build — probed).
+          const { normal, center } = faceNormalAndCenter(toolFaces[0]);
+          // The splitter route: the tool FACE splits the sheet into its
+          // two side pieces (BRepAlgoAPI_Splitter — cross-dimension
+          // splitting, probed), and keepInside picks the pieces whose
+          // bounds centre sits on the tool normal's side. The direct
+          // shell-solid Common answers empty on curved sheets in this
+          // engine build (probed), so the splitter is the honest route.
+          const args = new oc.NCollection_List_TopoDS_Shape();
+          const tools = new oc.NCollection_List_TopoDS_Shape();
+          args.Append(sheet.value);
+          tools.Append(toolFaces[0]);
+          const splitter = new oc.BRepAlgoAPI_Splitter();
+          splitter.SetArguments(args);
+          splitter.SetTools(tools);
+          splitter.Build();
+          args.delete();
+          tools.delete();
+          if (!splitter.IsDone()) {
+            splitter.delete();
+            throw new Error("the splitter pass did not complete.");
+          }
+          const split = buildShape(splitter);
+          // Face-level classification: the splitter may keep connected
+          // split walls in ONE shell whose bounds span the tool plane, so
+          // the side test runs per FACE (each face's own bounds centre —
+          // a face the plane splits has been cut in two by the splitter).
+          const splitFaces = facesOfShape(split);
+          const keptFaces: TopoDS_Face[] = [];
+          for (const splitFace of splitFaces) {
+            const faceBounds = tightBoundsOfShape(splitFace);
+            const side =
+              ((faceBounds.min[0] + faceBounds.max[0]) / 2 - center[0]) *
+                normal[0] +
+              ((faceBounds.min[1] + faceBounds.max[1]) / 2 - center[1]) *
+                normal[1] +
+              ((faceBounds.min[2] + faceBounds.max[2]) / 2 - center[2]) *
+                normal[2];
+            if (side >= 0 === input.keepInside) {
+              keptFaces.push(splitFace);
+            }
+          }
+          if (keptFaces.length === 0) {
+            split.delete();
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.surfaceTrimEmpty,
+                "trimSheet kept no region: the tool plane keeps no piece of the sheet on the requested side.",
+              ),
+            );
+          }
+          // The kept faces re-sew into a boundary-consistent sheet (the
+          // splitter's raw output is a bare compound; the sew restores the
+          // shared-edge shell the sheet kind carries).
+          kept = sewFaces(keptFaces, 1e-6, "trimSheet");
+          split.delete();
+        } else {
+          kept = foldBoolean(
+            [sheet.value, tool.value],
+            input.keepInside ? oc.BRepAlgoAPI_Common : oc.BRepAlgoAPI_Cut,
+            "trimSheet",
+          );
+        }
+        if (facesOfShape(kept).length === 0) {
+          kept.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceTrimEmpty,
+              "trimSheet kept no region: the tool's region and the sheet do not overlap (or the cut removed every face).",
+            ),
+          );
+        }
+        return ok(wrapSolid(kept));
+      });
+    },
+
+    untrimSheet(input: SheetUntrimInput): KernelResult<KernelSolid> {
+      return run(
+        "untrimSheet",
+        KERNEL_ERROR_CODES.surfaceUntrimUnsupported,
+        () => {
+          const sheet = sheetOf(input.sheet, "untrimSheet");
+          if (!sheet.ok) return fail(sheet.error);
+          // Natural bounds are FINITE only for the closed parametric
+          // sphere on this binding: the plane, cylinder, and cone are
+          // open-ended (their natural ranges are unbounded — an infinite
+          // face measures nothing), and the toroidal surface class is
+          // absent from the single-thread binding (the Phase 48 probe).
+          // The honest subset is therefore the sphere; everything else
+          // declines rather than fabricating "natural" bounds.
+          const faces = facesOfShape(sheet.value);
+          if (faces.length === 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.surfaceUntrimUnsupported,
+                "untrimSheet rejected a shape that carries no faces.",
+              ),
+            );
+          }
+          const rebuilt: TopoDS_Face[] = [];
+          for (const face of faces) {
+            const adaptor = new oc.BRepAdaptor_Surface(face);
+            const type = adaptor.GetType();
+            if (type !== oc.GeomAbs_SurfaceType.GeomAbs_Sphere) {
+              adaptor.delete();
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.surfaceUntrimUnsupported,
+                  "untrimSheet declined a face whose underlying surface has no finite natural bounds on this binding (the sphere is the supported class; the plane, cylinder, and cone are open-ended and the toroidal surface class is absent from the engine build — extend or trim carries explicit bounds instead).",
+                ),
+              );
+            }
+            const sphere = adaptor.Sphere();
+            adaptor.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              sphere,
+              0,
+              2 * Math.PI,
+              -Math.PI / 2,
+              Math.PI / 2,
+            );
+            sphere.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the natural-bounds sphere did not rebuild.");
+            }
+            rebuilt.push(mkFace.Face());
+            mkFace.delete();
+          }
+          return ok(wrapSolid(sewFaces(rebuilt, 1e-6, "untrimSheet")));
+        },
+      );
+    },
+
+    extendSheet(input: SheetExtendInput): KernelResult<KernelSolid> {
+      return run("extendSheet", KERNEL_ERROR_CODES.surfaceExtendInvalid, () => {
+        const sheet = sheetOf(input.sheet, "extendSheet");
+        if (!sheet.ok) return fail(sheet.error);
+        const u = positiveLength(input.uDelta, "uDelta", "extendSheet");
+        if (!u.ok) return fail(u.error);
+        const v = positiveLength(input.vDelta, "vDelta", "extendSheet");
+        if (!v.ok) return fail(v.error);
+        const faces = facesOfShape(sheet.value);
+        if (faces.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceExtendInvalid,
+              "extendSheet rejected a shape that carries no faces.",
+            ),
+          );
+        }
+        const rebuilt: TopoDS_Face[] = [];
+        for (const face of faces) {
+          const bounds = oc.BRepTools.UVBounds(face);
+          const adaptor = new oc.BRepAdaptor_Surface(face);
+          const type = adaptor.GetType();
+          // The extension walks the underlying surface's own parametrization
+          // outward by the deltas. Closed-direction caps: an azimuth range
+          // (u on the cylinder/cone/sphere) may not exceed a full turn, the
+          // sphere's polar range stays inside [-π/2, π/2]; the plane's
+          // ranges are unbounded and grow freely. A delta that would leave
+          // the surface's parametric domain is the structured
+          // surface-extend-invalid refusal — never a double-covered patch.
+          if (type === oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+            const plane = adaptor.Plane();
+            adaptor.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              plane,
+              bounds.UMin - u.value,
+              bounds.UMax + u.value,
+              bounds.VMin - v.value,
+              bounds.VMax + v.value,
+            );
+            plane.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the extended plane did not rebuild.");
+            }
+            rebuilt.push(mkFace.Face());
+            mkFace.delete();
+            continue;
+          }
+          if (type === oc.GeomAbs_SurfaceType.GeomAbs_Cylinder) {
+            const u1 = bounds.UMin - u.value;
+            const u2 = bounds.UMax + u.value;
+            if (u2 - u1 > 2 * Math.PI + 1e-9) {
+              adaptor.delete();
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.surfaceExtendInvalid,
+                  `extendSheet rejected u delta ${String(u.value)} rad: the cylinder's azimuth range may not exceed a full turn.`,
+                ),
+              );
+            }
+            const cylinder = adaptor.Cylinder();
+            adaptor.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              cylinder,
+              u1,
+              u2,
+              bounds.VMin - v.value,
+              bounds.VMax + v.value,
+            );
+            cylinder.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the extended cylinder did not rebuild.");
+            }
+            rebuilt.push(mkFace.Face());
+            mkFace.delete();
+            continue;
+          }
+          if (type === oc.GeomAbs_SurfaceType.GeomAbs_Sphere) {
+            const u1 = bounds.UMin - u.value;
+            const u2 = bounds.UMax + u.value;
+            const v1 = bounds.VMin - v.value;
+            const v2 = bounds.VMax + v.value;
+            if (
+              u2 - u1 > 2 * Math.PI + 1e-9 ||
+              v1 < -Math.PI / 2 - 1e-9 ||
+              v2 > Math.PI / 2 + 1e-9
+            ) {
+              adaptor.delete();
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.surfaceExtendInvalid,
+                  `extendSheet rejected the delta (u ${String(u.value)} rad, v ${String(v.value)} rad): the sphere's azimuth may not exceed a full turn and its polar range stays inside [-π/2, π/2].`,
+                ),
+              );
+            }
+            const sphere = adaptor.Sphere();
+            adaptor.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              sphere,
+              u1,
+              u2,
+              v1,
+              v2,
+            );
+            sphere.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the extended sphere did not rebuild.");
+            }
+            rebuilt.push(mkFace.Face());
+            mkFace.delete();
+            continue;
+          }
+          adaptor.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceExtendUnsupported,
+              "extendSheet declined a face whose underlying surface is not one of the analytic classes this binding can rebuild (plane, cylinder, sphere) — the cone and B-spline classes are untyped on this binding and the revolved classes have no parametric-growth route (the binding carries no Geom_ToroidalSurface, probed in Phase 48).",
+            ),
+          );
+        }
+        return ok(wrapSolid(sewFaces(rebuilt, 1e-6, "extendSheet")));
+      });
+    },
+
+    knit(input: SheetKnitInput): KernelResult<KernelSolid> {
+      return run("knit", KERNEL_ERROR_CODES.surfaceKnitFailed, () => {
+        if (input.bodies.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidOperands,
+              "knit rejected an empty operand list: at least one sheet (or solid) is required.",
+            ),
+          );
+        }
+        const tolerance = positiveLength(input.tolerance, "tolerance", "knit");
+        if (!tolerance.ok) return fail(tolerance.error);
+        const shapes: TopoDS_Shape[] = [];
+        for (const body of input.bodies) {
+          const shape = shapeOf(body, "knit");
+          if (!shape.ok) return fail(shape.error);
+          shapes.push(shape.value);
+        }
+        // Every face of every operand enters one seam pass — the sew
+        // sheet+solid case is the same route (a solid contributes its
+        // boundary faces; the seam may close the combined shell).
+        const faces: TopoDS_Face[] = [];
+        for (const shape of shapes) faces.push(...facesOfShape(shape));
+        if (faces.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceKnitFailed,
+              "knit rejected operands that carry no faces.",
+            ),
+          );
+        }
+        const sewed = sewFaces(faces, tolerance.value, "knit");
+        // Closure test: when the sewed shell bounds a measurable volume it
+        // IS a solid — the knit-closure fixture's volume-becomes-measurable
+        // claim. Otherwise the open sewed shell ships as a sheet body.
+        if (sewed.ShapeType() === oc.TopAbs_ShapeEnum.TopAbs_SHELL) {
+          const shell = oc.TopoDS.Shell(sewed);
+          const mkSolid = new oc.BRepBuilderAPI_MakeSolid(shell);
+          shell.delete();
+          if (mkSolid.IsDone()) {
+            const solid = buildShape(mkSolid);
+            const volume = volumeOfShape(solid);
+            if (volume > 1e-7) {
+              return ok(wrapSolid(solid));
+            }
+            solid.delete();
+          } else {
+            mkSolid.delete();
+          }
+        }
+        return ok(wrapSolid(sewed));
+      });
+    },
+
+    unstitch(input: SheetUnstitchInput): KernelResult<KernelSolid> {
+      return run("unstitch", KERNEL_ERROR_CODES.surfaceKnitFailed, () => {
+        const body = shapeOf(input.body, "unstitch");
+        if (!body.ok) return fail(body.error);
+        const faces = facesOfShape(body.value);
+        if (faces.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceKnitFailed,
+              "unstitch rejected a shape that carries no faces.",
+            ),
+          );
+        }
+        const compound = new oc.TopoDS_Compound();
+        const builder = new oc.TopoDS_Builder();
+        builder.MakeCompound(compound);
+        for (const face of faces) builder.Add(compound, face);
+        builder.delete();
+        return ok(wrapSolid(compound));
+      });
+    },
+
+    fillPatch(input: SheetFillPatchInput): KernelResult<KernelSolid> {
+      return run("fillPatch", KERNEL_ERROR_CODES.surfacePatchFailed, () => {
+        // Placement validation first (the shared createSheet order).
+        const angle = angleIn(input.placement.rotation.angle, "fillPatch");
+        if (!angle.ok) return fail(angle.error);
+        const axis = axisIn(input.placement.rotation.axis, "fillPatch");
+        if (!axis.ok) return fail(axis.error);
+        const tx = lengthIn(
+          input.placement.translation.x,
+          "translation.x",
+          "fillPatch",
+        );
+        if (!tx.ok) return fail(tx.error);
+        const ty = lengthIn(
+          input.placement.translation.y,
+          "translation.y",
+          "fillPatch",
+        );
+        if (!ty.ok) return fail(ty.error);
+        const tz = lengthIn(
+          input.placement.translation.z,
+          "translation.z",
+          "fillPatch",
+        );
+        if (!tz.ok) return fail(tz.error);
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfacePatchFailed,
+              `fillPatch rejected the boundary loop: ${problem}.`,
+            ),
+          );
+        }
+        // The N-sided fill: every boundary edge is a C0 constraint of one
+        // B-spline patch (BRepOffsetAPI_MakeFilling) — the loop need not be
+        // planar, that is the patch's point.
+        const wire = profileWire(input.loop);
+        const edgeExplorer = new oc.TopExp_Explorer(
+          wire,
+          oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        );
+        const filler = new oc.BRepOffsetAPI_MakeFilling();
+        let edges = 0;
+        while (edgeExplorer.More()) {
+          const edge = oc.TopoDS.Edge(edgeExplorer.Value());
+          filler.Add(edge, oc.GeomAbs_Shape.GeomAbs_C0, true);
+          edges += 1;
+          edgeExplorer.Next();
+        }
+        edgeExplorer.delete();
+        if (edges === 0) {
+          filler.delete();
+          wire.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfacePatchFailed,
+              "fillPatch rejected a boundary loop that carries no edges.",
+            ),
+          );
+        }
+        filler.Build();
+        if (!filler.IsDone()) {
+          filler.delete();
+          wire.delete();
+          throw new Error("the B-spline fill patch did not build.");
+        }
+        const patch = buildShape(filler);
+        wire.delete();
+        if (!(areaOfShape(patch) > 1e-9)) {
+          patch.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfacePatchFailed,
+              "fillPatch built a degenerate patch (zero measured area).",
+            ),
+          );
+        }
+        // Placement: rotation about the world origin first, translation
+        // second — the profile ops' composition.
+        const rot = axisAngleMatrix(axis.value, angle.value);
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          tx.value,
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          ty.value,
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          tz.value,
+        );
+        const placed = buildShape(
+          new oc.BRepBuilderAPI_Transform(patch, trsf, false, true),
+        );
+        trsf.delete();
+        patch.delete();
+        return ok(wrapSolid(placed));
+      });
+    },
+
+    offsetSheet(input: SheetOffsetInput): KernelResult<KernelSolid> {
+      return run("offsetSheet", KERNEL_ERROR_CODES.surfaceOffsetFailed, () => {
+        const sheet = sheetOf(input.sheet, "offsetSheet");
+        if (!sheet.ok) return fail(sheet.error);
+        const distance = lengthIn(input.distance, "distance", "offsetSheet");
+        if (!distance.ok) return fail(distance.error);
+        if (distance.value === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceOffsetFailed,
+              "offsetSheet rejected a zero distance: an offset that moves the surface nowhere is a no-op.",
+            ),
+          );
+        }
+        const faces = facesOfShape(sheet.value);
+        if (faces.length === 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceOffsetFailed,
+              "offsetSheet rejected a shape that carries no faces.",
+            ),
+          );
+        }
+        const d = distance.value;
+        const rebuilt: TopoDS_Face[] = [];
+        for (const face of faces) {
+          const bounds = oc.BRepTools.UVBounds(face);
+          const adaptor = new oc.BRepAdaptor_Surface(face);
+          const type = adaptor.GetType();
+          // The analytic offset: each supported class moves to its exact
+          // offset surface (a plane shifts along its normal, a cylinder or
+          // sphere gains the distance on its radius, a cone keeps its
+          // half-angle and gains d/cos α on its reference radius with the
+          // slant range shifted by d·tan α). A distance that inverts the
+          // surface (a non-positive driven radius) is the structured
+          // surface-offset-failed refusal.
+          if (type === oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+            const plane = adaptor.Plane();
+            adaptor.delete();
+            const dir = plane.Axis().Direction();
+            const loc = plane.Location();
+            const moved = new oc.gp_Pln(
+              new oc.gp_Pnt(
+                loc.X() + d * dir.X(),
+                loc.Y() + d * dir.Y(),
+                loc.Z() + d * dir.Z(),
+              ),
+              new oc.gp_Dir(dir.X(), dir.Y(), dir.Z()),
+            );
+            plane.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              moved,
+              bounds.UMin,
+              bounds.UMax,
+              bounds.VMin,
+              bounds.VMax,
+            );
+            moved.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the offset plane did not rebuild.");
+            }
+            rebuilt.push(mkFace.Face());
+            mkFace.delete();
+            continue;
+          }
+          if (type === oc.GeomAbs_SurfaceType.GeomAbs_Cylinder) {
+            const cylinder = adaptor.Cylinder();
+            adaptor.delete();
+            const radius = cylinder.Radius() + d;
+            if (radius <= 0) {
+              cylinder.delete();
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.surfaceOffsetFailed,
+                  `offsetSheet rejected the distance ${String(d)} mm: it drives the cylinder's radius to ${String(radius)} mm.`,
+                ),
+              );
+            }
+            const moved = new oc.gp_Cylinder(cylinder.Position(), radius);
+            cylinder.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              moved,
+              bounds.UMin,
+              bounds.UMax,
+              bounds.VMin,
+              bounds.VMax,
+            );
+            moved.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the offset cylinder did not rebuild.");
+            }
+            rebuilt.push(mkFace.Face());
+            mkFace.delete();
+            continue;
+          }
+          if (type === oc.GeomAbs_SurfaceType.GeomAbs_Sphere) {
+            const sphere = adaptor.Sphere();
+            adaptor.delete();
+            const radius = sphere.Radius() + d;
+            if (radius <= 0) {
+              sphere.delete();
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.surfaceOffsetFailed,
+                  `offsetSheet rejected the distance ${String(d)} mm: it drives the sphere's radius to ${String(radius)} mm.`,
+                ),
+              );
+            }
+            const moved = new oc.gp_Sphere(sphere.Position(), radius);
+            sphere.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              moved,
+              bounds.UMin,
+              bounds.UMax,
+              bounds.VMin,
+              bounds.VMax,
+            );
+            moved.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the offset sphere did not rebuild.");
+            }
+            rebuilt.push(mkFace.Face());
+            mkFace.delete();
+            continue;
+          }
+          adaptor.delete();
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.surfaceOffsetUnsupported,
+              "offsetSheet declined a face whose underlying surface is not one of the analytic classes this binding can rebuild (plane, cylinder, sphere) — the cone class is untyped on this binding and the general offset-surface route (Geom_OffsetSurface) is absent from the engine build (the Phase 49 probe).",
+            ),
+          );
+        }
+        return ok(wrapSolid(sewFaces(rebuilt, 1e-6, "offsetSheet")));
+      });
+    },
+
+    thickenSheet(input: SheetThickenInput): KernelResult<KernelSolid> {
+      return run(
+        "thickenSheet",
+        KERNEL_ERROR_CODES.surfaceThickenFailed,
+        () => {
+          const sheet = sheetOf(input.sheet, "thickenSheet");
+          if (!sheet.ok) return fail(sheet.error);
+          const thickness = positiveLength(
+            input.thickness,
+            "thickness",
+            "thickenSheet",
+          );
+          if (!thickness.ok) return fail(thickness.error);
+          // The simple thickening route: this engine build's
+          // `MakeThickSolidBySimple` takes exactly an OPEN shell or face and
+          // its offset (the probed Phase 49 route — no closing-face list, no
+          // intersection pass). The sign follows the faces' carried normals;
+          // `side` mirrors the section keep-side convention.
+          const mk = new oc.BRepOffsetAPI_MakeThickSolid();
+          mk.MakeThickSolidBySimple(sheet.value, input.side * thickness.value);
+          if (!mk.IsDone()) {
+            mk.delete();
+            throw new Error(
+              "the thickening pass did not build (the offset may self-intersect at this thickness).",
+            );
+          }
+          let solid = buildShape(mk);
+          // The probed sign/orientation discipline: BySimple answers with the
+          // wall on the side its own normal convention picks, and measures a
+          // NEGATIVE volume exactly when the solid's orientation points
+          // inward — `Reversed()` re-orients it, never the geometry.
+          const volume = volumeOfShape(solid);
+          if (volume < 0) {
+            const flipped = solid.Reversed();
+            solid.delete();
+            solid = flipped;
+          }
+          const oriented = volumeOfShape(solid);
+          if (!(oriented > 1e-7)) {
+            solid.delete();
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.surfaceThickenFailed,
+                `thickenSheet answered a degenerate solid (measured volume ${String(oriented)} mm³) at thickness ${String(thickness.value)} mm: reduce the thickness.`,
+              ),
+            );
+          }
+          return ok(wrapSolid(solid));
+        },
+      );
+    },
+
+    replaceFaceWithSheet(
+      input: SheetReplaceFaceInput,
+    ): KernelResult<KernelSolid> {
+      return run(
+        "replaceFaceWithSheet",
+        KERNEL_ERROR_CODES.surfaceReplaceFailed,
+        () => {
+          const target = closedSolidOf(input.target, "replaceFaceWithSheet");
+          if (!target.ok) return fail(target.error);
+          if (!Number.isInteger(input.face) || input.face < 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `replaceFaceWithSheet rejected face ordinal ${String(input.face)}: ordinals are non-negative integers (snapshot face addresses).`,
+              ),
+            );
+          }
+          const resolved = occtFacesAtOrdinals(oc, target.value, [input.face]);
+          if (resolved.missing.length > 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.faceOpFaceUnknown,
+                `replaceFaceWithSheet rejected face ordinal ${String(input.face)}: it addresses no face of the target's current topology snapshot.`,
+              ),
+            );
+          }
+          const sheet = sheetOf(input.sheet, "replaceFaceWithSheet");
+          if (!sheet.ok) return fail(sheet.error);
+          const face = resolved.faces[0];
+          if (face === undefined) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.faceOpFaceUnknown,
+                "replaceFaceWithSheet resolved an empty face list.",
+              ),
+            );
+          }
+          // The addressed face's planar signature: the honest subset on
+          // this composition — the old face must be planar, so the
+          // post-condition ("the sheet's cut REMOVED the addressed face")
+          // is decidable by comparing every surviving planar face's plane.
+          const oldAdaptor = new oc.BRepAdaptor_Surface(face);
+          if (oldAdaptor.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+            oldAdaptor.delete();
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.surfaceReplaceFailed,
+                "replaceFaceWithSheet declined a non-planar addressed face: the decidable replaced-face post-condition on this composition is the planar subset (the cut removes the old face; any surviving face lying in the old face's plane is the honest refusal signature).",
+              ),
+            );
+          }
+          const oldPlane = oldAdaptor.Plane();
+          oldAdaptor.delete();
+          const oldNormal = oldPlane.Axis().Direction();
+          const oldLocation = oldPlane.Location();
+          const survivedOldPlane = (shape: TopoDS_Shape): boolean => {
+            for (const resultFace of facesOfShape(shape)) {
+              const adaptor = new oc.BRepAdaptor_Surface(resultFace);
+              const isPlane =
+                adaptor.GetType() === oc.GeomAbs_SurfaceType.GeomAbs_Plane;
+              if (!isPlane) {
+                adaptor.delete();
+                continue;
+              }
+              const plane = adaptor.Plane();
+              adaptor.delete();
+              const direction = plane.Axis().Direction();
+              const location = plane.Location();
+              const parallel =
+                Math.abs(
+                  direction.X() * oldNormal.X() +
+                    direction.Y() * oldNormal.Y() +
+                    direction.Z() * oldNormal.Z(),
+                ) - 1;
+              const offset =
+                (location.X() - oldLocation.X()) * oldNormal.X() +
+                (location.Y() - oldLocation.Y()) * oldNormal.Y() +
+                (location.Z() - oldLocation.Z()) * oldNormal.Z();
+              if (Math.abs(parallel) < 1e-9 && Math.abs(offset) < 1e-7) {
+                return true;
+              }
+            }
+            return false;
+          };
+          // The removal tool: the sheet thickened INTO the material past
+          // the old face, to the target's bounding diagonal — deeper than
+          // any interior point. The engine's normal convention decides the
+          // side, so the cut is attempted on both signs: the attempt that
+          // removes material while keeping a solid is the answer; neither
+          // means the sheet never met the target.
+          const bounds = tightBoundsOfShape(target.value);
+          const extent =
+            Math.hypot(
+              bounds.max[0] - bounds.min[0],
+              bounds.max[1] - bounds.min[1],
+              bounds.max[2] - bounds.min[2],
+            ) + 1;
+          const before = volumeOfShape(target.value);
+          const attempt = (sign: number): TopoDS_Shape | null => {
+            const mk = new oc.BRepOffsetAPI_MakeThickSolid();
+            mk.MakeThickSolidBySimple(sheet.value, sign * extent);
+            if (!mk.IsDone()) {
+              mk.delete();
+              return null;
+            }
+            let tool = buildShape(mk);
+            // BySimple may answer an inward-oriented solid (a negative
+            // measured volume — the probed signature); the boolean cut
+            // consumes an OUTWARD tool, so re-orient first.
+            const toolVolume = volumeOfShape(tool);
+            if (toolVolume < 0) {
+              const flippedTool = tool.Reversed();
+              tool.delete();
+              tool = flippedTool;
+            }
+            const cut = foldBoolean(
+              [target.value, tool],
+              oc.BRepAlgoAPI_Cut,
+              "replaceFaceWithSheet",
+            );
+            tool.delete();
+            const volume = volumeOfShape(cut);
+            if (volume < before - before * 1e-9 && volume > 1e-7) {
+              // The replaced-face post-condition: the old plane must no
+              // longer bound the result — a cut that kept any face lying
+              // in the addressed face's plane changed nothing honest.
+              if (!survivedOldPlane(cut)) {
+                return cut;
+              }
+            }
+            cut.delete();
+            return null;
+          };
+          const replaced = attempt(1) ?? attempt(-1);
+          if (replaced === null) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.surfaceReplaceFailed,
+                "replaceFaceWithSheet refused: the thickened sheet's cut never met the target's material on either side (the sheet does not bound this solid's face).",
+              ),
+            );
+          }
+          return ok(wrapSolid(replaced));
+        },
+      );
+    },
+
+    deleteFaceKeepSurface(
+      input: DeleteFaceKeepInput,
+    ): KernelResult<DeleteFaceKeepResult> {
+      return run(
+        "deleteFaceKeepSurface",
+        KERNEL_ERROR_CODES.faceOpFailed,
+        () => {
+          const target = closedSolidOf(input.target, "deleteFaceKeepSurface");
+          if (!target.ok) return fail(target.error);
+          if (!Number.isInteger(input.face) || input.face < 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                `deleteFaceKeepSurface rejected face ordinal ${String(input.face)}: ordinals are non-negative integers (snapshot face addresses).`,
+              ),
+            );
+          }
+          const resolved = occtFacesAtOrdinals(oc, target.value, [input.face]);
+          if (resolved.missing.length > 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.faceOpFaceUnknown,
+                `deleteFaceKeepSurface rejected face ordinal ${String(input.face)}: it addresses no face of the target's current topology snapshot.`,
+              ),
+            );
+          }
+          const extracted = resolved.faces[0];
+          if (extracted === undefined) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.faceOpFaceUnknown,
+                "deleteFaceKeepSurface resolved an empty face list.",
+              ),
+            );
+          }
+          // The remainder: every face except the extracted one, sewed back
+          // into an open shell — a SHEET body (the heal route is probed out
+          // on this binding, `deleteFace`'s honesty note; the open remainder
+          // is the honest answer, not a fake close). The extracted face
+          // itself ships as a standalone sheet body. Both wrappers share the
+          // target's topology — neither deletes it.
+          const remainderFaces = facesOfShape(target.value).filter(
+            (face) => !face.IsSame(extracted),
+          );
+          if (remainderFaces.length === 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.faceOpFailed,
+                "deleteFaceKeepSurface refused: the target carries no faces beyond the addressed one.",
+              ),
+            );
+          }
+          const remainder = sewFaces(
+            remainderFaces,
+            1e-6,
+            "deleteFaceKeepSurface",
+          );
+          return ok({
+            remainder: wrapSolid(remainder),
+            face: wrapSolid(extracted),
+          });
+        },
+      );
     },
 
     union(operands: readonly KernelSolid[]): KernelResult<KernelSolid> {

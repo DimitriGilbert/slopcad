@@ -42,6 +42,7 @@ Read the flags from the kernels' own constants
 | surfaceArea           | ✓        | ✓           | ✓     | ✓    |
 | sheets                | —        | ✓           | —     | —    |
 | localFaceOps          | —        | ✓           | —     | —    |
+| surfaceOps            | —        | ✓           | —     | —    |
 | section               | ✓        | ✓           | ✓     | ✓    |
 | sweepWire             | —        | ✓ *         | —     | ✓    |
 | intersectionCurve     | —        | ✓           | —     | —    |

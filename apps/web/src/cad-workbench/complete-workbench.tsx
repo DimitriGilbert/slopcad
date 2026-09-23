@@ -60,7 +60,11 @@ import {
   ROTATE_TOOL_ID,
   SELECT_TOOL_ID,
 } from "@slopcad/cad-react";
-import { formatBoundsExtents, parseDatumPayload } from "@slopcad/cad-core";
+import {
+  createBodyId,
+  formatBoundsExtents,
+  parseDatumPayload,
+} from "@slopcad/cad-core";
 import {
   Command,
   Download,
@@ -98,7 +102,7 @@ import { CadPropertyPanel } from "@slopcad/ui/components/cad/cad-property-panel"
 import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
-import type { RenderProjection } from "@slopcad/cad-core";
+import type { DatumId, RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CurveAuthoring } from "./curves";
 import type { LoftSectionChoice } from "./loft";
@@ -127,7 +131,12 @@ import {
   type CadFeatureBodyOption,
   ThreadFeatureForm,
   ThickenFeatureForm,
+  CreateSheetForm,
+  KnitSurfaceForm,
+  OffsetSurfaceForm,
   LoftFeatureForm,
+  ThickenSurfaceForm,
+  TrimSurfaceForm,
   SweepFeatureForm,
   type CadFeatureSketchOption,
   type HoleFormValues,
@@ -332,6 +341,11 @@ export function CompleteCadWorkbench({
     handleSaveSketch,
     handleSweep,
     handleLoft,
+    handleCreateSheet,
+    handleTrimSurface,
+    handleThickenSurface,
+    handleKnitSurface,
+    handleOffsetSurface,
     handleHelix,
     handleThread,
     handleDraft,
@@ -365,6 +379,11 @@ export function CompleteCadWorkbench({
   // kind-switched; the last submission's structured refusal rides here (the
   // parameter panel's apply-failure precedent) and clears on the next open.
   const [featureDialog, setFeatureDialog] = useState<
+    | "surface-create"
+    | "surface-trim"
+    | "surface-thicken"
+    | "surface-knit"
+    | "surface-offset"
     | "sweep"
     | "loft"
     | "helix"
@@ -593,6 +612,14 @@ export function CompleteCadWorkbench({
       ? [{ id: datum.id, name: datum.name }]
       : [];
   });
+  // The sheet-body pool the surface forms pick from (Phase 49): the
+  // document's SHEET bodies, name verbatim.
+  const sheetOptions: readonly {
+    readonly id: string;
+    readonly name: string;
+  }[] = workbenchDocument.bodies
+    .filter((body) => body.kind === "sheet")
+    .map((body) => ({ id: body.id, name: body.name }));
   // The body pool the boolean form picks from (Phase 44): the bodies an
   // EXTRUDE outputs — the boolean scene's operand contract
   // (`documentBooleanSceneRequest` pairs every operand with its own
@@ -625,6 +652,74 @@ export function CompleteCadWorkbench({
   /** Runs the loft submission, surfacing the refusal and closing on success. */
   const submitLoft = (sections: readonly LoftSectionChoice[]): void => {
     const outcome = handleLoft(sections);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the create-sheet submission, surfacing the refusal and closing on success. */
+  const submitCreateSheet = (submission: {
+    readonly datumId: DatumId;
+    readonly uMinMm: number;
+    readonly uMaxMm: number;
+    readonly vMinMm: number;
+    readonly vMaxMm: number;
+  }): void => {
+    const outcome = handleCreateSheet(submission);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the trim-surface submission, surfacing the refusal and closing on success. */
+  const submitTrimSurface = (submission: {
+    readonly sheetId: string;
+    readonly toolId: string;
+    readonly keepInside: 0 | 1;
+  }): void => {
+    const outcome = handleTrimSurface({
+      ...submission,
+      sheetId: createBodyId(submission.sheetId),
+      toolId: createBodyId(submission.toolId),
+    });
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the thicken-surface submission, surfacing the refusal and closing on success. */
+  const submitThickenSurface = (submission: {
+    readonly sheetId: string;
+    readonly thicknessMm: number;
+    readonly side: 1 | -1;
+  }): void => {
+    const outcome = handleThickenSurface({
+      ...submission,
+      sheetId: createBodyId(submission.sheetId),
+    });
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the knit-surface submission, surfacing the refusal and closing on success. */
+  const submitKnitSurface = (submission: {
+    readonly sheetIds: readonly string[];
+    readonly toleranceMm: number;
+  }): void => {
+    const outcome = handleKnitSurface({
+      ...submission,
+      sheetIds: submission.sheetIds.map((sheetId) => createBodyId(sheetId)),
+    });
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the offset-surface submission, surfacing the refusal and closing on success. */
+  const submitOffsetSurface = (submission: {
+    readonly sheetId: string;
+    readonly distanceMm: number;
+  }): void => {
+    const outcome = handleOffsetSurface({
+      ...submission,
+      sheetId: createBodyId(submission.sheetId),
+    });
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
@@ -789,6 +884,11 @@ export function CompleteCadWorkbench({
   const openFeatureDialog = useCallback(
     (
       kind:
+        | "surface-create"
+        | "surface-trim"
+        | "surface-thicken"
+        | "surface-knit"
+        | "surface-offset"
         | "sweep"
         | "loft"
         | "helix"
@@ -912,6 +1012,56 @@ export function CompleteCadWorkbench({
         label: "Sketch workspace",
         run: () => {
           setMode("sketch");
+        },
+      },
+      {
+        disabled: datumPlaneOptions.length === 0,
+        group: "Workspace",
+        id: "surface-create",
+        keywords: "surface sheet plane patch datum create base untrimmed",
+        label: "Create a base sheet on a datum plane",
+        run: () => {
+          openFeatureDialog("surface-create");
+        },
+      },
+      {
+        disabled: sheetOptions.length < 2,
+        group: "Workspace",
+        id: "surface-trim",
+        keywords: "surface trim sheet tool region keep cut",
+        label: "Trim one sheet by another",
+        run: () => {
+          openFeatureDialog("surface-trim");
+        },
+      },
+      {
+        disabled: sheetOptions.length === 0,
+        group: "Workspace",
+        id: "surface-thicken",
+        keywords: "surface thicken sheet solid wall thickness",
+        label: "Thicken a sheet into a solid",
+        run: () => {
+          openFeatureDialog("surface-thicken");
+        },
+      },
+      {
+        disabled: sheetOptions.length < 2,
+        group: "Workspace",
+        id: "surface-knit",
+        keywords: "surface knit sew sheets shell tolerance stitch",
+        label: "Knit sheets into a shell",
+        run: () => {
+          openFeatureDialog("surface-knit");
+        },
+      },
+      {
+        disabled: sheetOptions.length === 0,
+        group: "Workspace",
+        id: "surface-offset",
+        keywords: "surface offset sheet move distance normals",
+        label: "Offset a sheet",
+        run: () => {
+          openFeatureDialog("surface-offset");
         },
       },
       {
@@ -1135,6 +1285,7 @@ export function CompleteCadWorkbench({
     handleHole,
     hasExtrudeBase,
     datumPlaneOptions.length,
+    sheetOptions.length,
     hasFaceSelection,
     historyApi,
     holeBase,
@@ -2200,6 +2351,14 @@ export function CompleteCadWorkbench({
         >
           Move
         </Button>
+        {/* The Phase 49 surface verbs: the sheet family — base sheet,
+            trim, thicken, knit, offset — lives in the COMMAND MENU only.
+            The family is the row's widest contextual group (~314 px
+            together) and every harness width is already spent (the full
+            verb row measures ~1745 px at 1800 px), so no tier shows the
+            family without overflowing the engraved row budget; the menu
+            keeps each verb reachable everywhere (the hole-spec
+            discipline; the e2e drives that path). */}{" "}
         {/* The Phase 39 datum verbs: sketch-on-face needs a selected face;
             the datum form needs nothing. Both stay in the command menu on
             narrow rows. Sketch-on-face is the row's widest contextual verb
@@ -2426,75 +2585,124 @@ export function CompleteCadWorkbench({
           >
             <DialogHeader>
               <DialogTitle>
-                {featureDialog === "sweep"
-                  ? CAD_FEATURE_FORM_LABELS.sweepTitle
-                  : featureDialog === "loft"
-                    ? CAD_FEATURE_FORM_LABELS.loftTitle
-                    : featureDialog === "helix"
-                      ? CAD_FEATURE_FORM_LABELS.helixTitle
-                      : featureDialog === "thread"
-                        ? CAD_FEATURE_FORM_LABELS.threadTitle
-                        : featureDialog === "draft"
-                          ? CAD_FEATURE_FORM_LABELS.draftTitle
-                          : featureDialog === "rib"
-                            ? CAD_FEATURE_FORM_LABELS.ribTitle
-                            : featureDialog === "scale"
-                              ? CAD_FEATURE_FORM_LABELS.scaleTitle
-                              : featureDialog === "thicken"
-                                ? CAD_FEATURE_FORM_LABELS.thickenTitle
-                                : featureDialog === "split"
-                                  ? CAD_FEATURE_FORM_LABELS.splitTitle
-                                  : featureDialog === "hole"
-                                    ? CAD_FEATURE_FORM_LABELS.holeTitle
-                                    : featureDialog === "pattern"
-                                      ? CAD_FEATURE_FORM_LABELS.patternTitle
-                                      : featureDialog === "patternPath"
-                                        ? CAD_FEATURE_FORM_LABELS.patternPathTitle
-                                        : featureDialog === "mirror"
-                                          ? CAD_FEATURE_FORM_LABELS.mirrorTitle
-                                          : featureDialog === "boolean"
-                                            ? CAD_FEATURE_FORM_LABELS.booleanTitle
-                                            : featureDialog === "moveBody"
-                                              ? CAD_FEATURE_FORM_LABELS.moveBodyTitle
-                                              : featureDialog === "curve"
-                                                ? CURVE_FORM_LABELS.title
-                                                : DATUM_FORM_LABELS.title}
+                {featureDialog === "surface-create"
+                  ? "Create base sheet"
+                  : featureDialog === "surface-trim"
+                    ? "Trim sheet"
+                    : featureDialog === "surface-thicken"
+                      ? "Thicken sheet"
+                      : featureDialog === "surface-knit"
+                        ? "Knit sheets"
+                        : featureDialog === "surface-offset"
+                          ? "Offset sheet"
+                          : featureDialog === "sweep"
+                            ? CAD_FEATURE_FORM_LABELS.sweepTitle
+                            : featureDialog === "loft"
+                              ? CAD_FEATURE_FORM_LABELS.loftTitle
+                              : featureDialog === "helix"
+                                ? CAD_FEATURE_FORM_LABELS.helixTitle
+                                : featureDialog === "thread"
+                                  ? CAD_FEATURE_FORM_LABELS.threadTitle
+                                  : featureDialog === "draft"
+                                    ? CAD_FEATURE_FORM_LABELS.draftTitle
+                                    : featureDialog === "rib"
+                                      ? CAD_FEATURE_FORM_LABELS.ribTitle
+                                      : featureDialog === "scale"
+                                        ? CAD_FEATURE_FORM_LABELS.scaleTitle
+                                        : featureDialog === "thicken"
+                                          ? CAD_FEATURE_FORM_LABELS.thickenTitle
+                                          : featureDialog === "split"
+                                            ? CAD_FEATURE_FORM_LABELS.splitTitle
+                                            : featureDialog === "hole"
+                                              ? CAD_FEATURE_FORM_LABELS.holeTitle
+                                              : featureDialog === "pattern"
+                                                ? CAD_FEATURE_FORM_LABELS.patternTitle
+                                                : featureDialog ===
+                                                    "patternPath"
+                                                  ? CAD_FEATURE_FORM_LABELS.patternPathTitle
+                                                  : featureDialog === "mirror"
+                                                    ? CAD_FEATURE_FORM_LABELS.mirrorTitle
+                                                    : featureDialog ===
+                                                        "boolean"
+                                                      ? CAD_FEATURE_FORM_LABELS.booleanTitle
+                                                      : featureDialog ===
+                                                          "moveBody"
+                                                        ? CAD_FEATURE_FORM_LABELS.moveBodyTitle
+                                                        : featureDialog ===
+                                                            "curve"
+                                                          ? CURVE_FORM_LABELS.title
+                                                          : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
-              {featureDialog === "sweep"
-                ? CAD_FEATURE_FORM_LABELS.sweepHint
-                : featureDialog === "loft"
-                  ? CAD_FEATURE_FORM_LABELS.loftHint
-                  : featureDialog === "helix"
-                    ? CAD_FEATURE_FORM_LABELS.helixHint
-                    : featureDialog === "thread"
-                      ? CAD_FEATURE_FORM_LABELS.threadHint
-                      : featureDialog === "rib"
-                        ? CAD_FEATURE_FORM_LABELS.ribHint
-                        : featureDialog === "scale"
-                          ? CAD_FEATURE_FORM_LABELS.scaleHint
-                          : featureDialog === "thicken"
-                            ? CAD_FEATURE_FORM_LABELS.thickenHint
-                            : featureDialog === "split"
-                              ? CAD_FEATURE_FORM_LABELS.splitHint
-                              : featureDialog === "hole"
-                                ? CAD_FEATURE_FORM_LABELS.holeHint
-                                : featureDialog === "pattern"
-                                  ? CAD_FEATURE_FORM_LABELS.patternHint
-                                  : featureDialog === "patternPath"
-                                    ? CAD_FEATURE_FORM_LABELS.patternPathHint
-                                    : featureDialog === "mirror"
-                                      ? CAD_FEATURE_FORM_LABELS.mirrorHint
-                                      : featureDialog === "boolean"
-                                        ? CAD_FEATURE_FORM_LABELS.booleanHint
-                                        : featureDialog === "moveBody"
-                                          ? CAD_FEATURE_FORM_LABELS.moveBodyHint
-                                          : featureDialog === "curve"
-                                            ? CURVE_FORM_LABELS.hint
-                                            : DATUM_FORM_LABELS.hint}
+              {featureDialog === "surface-create"
+                ? "Bind an untrimmed plane patch to a datum plane: the base sheet the surface operations reshape."
+                : featureDialog === "surface-trim"
+                  ? "Trim one sheet by another: keep or cut the tool's region (the surfaceOps family)."
+                  : featureDialog === "surface-thicken"
+                    ? "Thicken a sheet into a solid: a wall on the picked side of the surface."
+                    : featureDialog === "surface-knit"
+                      ? "Sew two or more sheets along their shared edges; a boundary-consistent knit closes into a solid."
+                      : featureDialog === "surface-offset"
+                        ? "Move the sheet's surface along its normals by a signed distance, keeping it open."
+                        : featureDialog === "sweep"
+                          ? CAD_FEATURE_FORM_LABELS.sweepHint
+                          : featureDialog === "loft"
+                            ? CAD_FEATURE_FORM_LABELS.loftHint
+                            : featureDialog === "helix"
+                              ? CAD_FEATURE_FORM_LABELS.helixHint
+                              : featureDialog === "thread"
+                                ? CAD_FEATURE_FORM_LABELS.threadHint
+                                : featureDialog === "rib"
+                                  ? CAD_FEATURE_FORM_LABELS.ribHint
+                                  : featureDialog === "scale"
+                                    ? CAD_FEATURE_FORM_LABELS.scaleHint
+                                    : featureDialog === "thicken"
+                                      ? CAD_FEATURE_FORM_LABELS.thickenHint
+                                      : featureDialog === "split"
+                                        ? CAD_FEATURE_FORM_LABELS.splitHint
+                                        : featureDialog === "hole"
+                                          ? CAD_FEATURE_FORM_LABELS.holeHint
+                                          : featureDialog === "pattern"
+                                            ? CAD_FEATURE_FORM_LABELS.patternHint
+                                            : featureDialog === "patternPath"
+                                              ? CAD_FEATURE_FORM_LABELS.patternPathHint
+                                              : featureDialog === "mirror"
+                                                ? CAD_FEATURE_FORM_LABELS.mirrorHint
+                                                : featureDialog === "boolean"
+                                                  ? CAD_FEATURE_FORM_LABELS.booleanHint
+                                                  : featureDialog === "moveBody"
+                                                    ? CAD_FEATURE_FORM_LABELS.moveBodyHint
+                                                    : featureDialog === "curve"
+                                                      ? CURVE_FORM_LABELS.hint
+                                                      : DATUM_FORM_LABELS.hint}
             </p>
-            {featureDialog === "sweep" ? (
+            {featureDialog === "surface-create" ? (
+              <CreateSheetForm
+                datums={datumPlaneOptions}
+                onCreateSheet={submitCreateSheet}
+              />
+            ) : featureDialog === "surface-trim" ? (
+              <TrimSurfaceForm
+                sheets={sheetOptions}
+                onTrim={submitTrimSurface}
+              />
+            ) : featureDialog === "surface-thicken" ? (
+              <ThickenSurfaceForm
+                sheets={sheetOptions}
+                onThickenSurface={submitThickenSurface}
+              />
+            ) : featureDialog === "surface-knit" ? (
+              <KnitSurfaceForm
+                sheets={sheetOptions}
+                onKnit={submitKnitSurface}
+              />
+            ) : featureDialog === "surface-offset" ? (
+              <OffsetSurfaceForm
+                sheets={sheetOptions}
+                onOffset={submitOffsetSurface}
+              />
+            ) : featureDialog === "sweep" ? (
               <SweepFeatureForm
                 onSweep={submitSweep}
                 sketches={sketchOptions}

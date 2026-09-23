@@ -431,6 +431,9 @@ import {
 import {
   type GeometryKernel,
   type HelixSweepInput,
+  type KernelResult,
+  type ProfilePlacementInput,
+  type SheetSurfaceInput,
   type KernelBounds,
   type MirrorPlaneAxis,
   type ProfileExtrudeInput,
@@ -439,6 +442,7 @@ import {
   type ProfileRevolveInput,
   type ProfileSegmentInput,
   type ProfileSweepInput,
+  SHEET_SURFACE_KINDS,
   type KernelSolid,
   type SweepPathSegmentInput,
 } from "./contract";
@@ -489,6 +493,11 @@ export const BRIDGE_FEATURE_KINDS = [
   "replaceFace",
   "deleteFace",
   "extrude-surface",
+  "create-sheet",
+  "trim-surface",
+  "thicken-surface",
+  "knit-surface",
+  "offset-surface",
 ] as const;
 
 /** A feature kind the bridge knows how to execute. */
@@ -1507,6 +1516,50 @@ type SolidOutcome =
 type OperationOutcome = SolidOutcome;
 
 /**
+ * The datum-plane-to-patch-placement composition (Phase 49): the datum
+ * plane's origin becomes the patch's translation and the rotation aligns
+ * the patch's local +z to the datum normal (`rotationFromTo`, the hole
+ * axis's seam) — the `create-sheet` feature's placement half.
+ */
+function datumSheetPlacement(plane: ResolvedDatumPlane): ProfilePlacementInput {
+  const turn = rotationFromTo([0, 0, 1], plane.normal, [1, 0, 0]);
+  return {
+    rotation: { axis: turn.axis, angle: angleValue(turn.angle) },
+    translation: {
+      x: lengthValue(plane.origin[0]),
+      y: lengthValue(plane.origin[1]),
+      z: lengthValue(plane.origin[2]),
+    },
+  };
+}
+
+/**
+ * The surface-operation family's executor tail (Phase 49): the sheets
+ * capability gate answered per call and the kernel result mapped to the
+ * bridge outcome — the extrude-surface tail generalized over the family.
+ */
+function runSurfaceKindOperation(
+  feature: FeatureRecord,
+  kernel: GeometryKernel,
+  run: () => KernelResult<KernelSolid>,
+): OperationOutcome {
+  if (!kernel.capabilities.sheets || !kernel.capabilities.surfaceOps) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "${feature.kind}" builds or consumes sheet bodies, but this kernel ("${kernel.id}") does not declare the sheets/surfaceOps capabilities — its engine is closed-solid, so the feature refuses before the kernel can answer (the extrude-surface capability gate convention).`,
+      ),
+    };
+  }
+  const result = run();
+  return result.ok
+    ? { ok: true, solid: result.value }
+    : operationFailure(feature, result.error.code, result.error.message);
+}
+
+/**
  * Creates a feature executor that interprets the bridge's feature kinds as
  * kernel operations through the given kernel instance. The kernel instance
  * owns every handle it mints, so use one kernel per bridge (and per run).
@@ -1620,6 +1673,79 @@ export function createKernelFeatureExecutor(
       };
     }
     return { ok: true, value: valueIn(value, "1") };
+  };
+
+  /**
+   * The Phase 49 sheet operand gate: the mirror of `solidInput` — resolves a
+   * body ref that must be a SHEET body, declining solid/sketch/parameter
+   * refs with the structured per-op answer. Sheet-consuming surface
+   * features (trim/thicken/knit/offset) resolve every body operand through
+   * it.
+   */
+  const sheetInput = (
+    feature: FeatureRecord,
+    ref: FeatureInputRef,
+  ): SolidOutcome => {
+    if (ref.kind === "parameter") {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "${feature.kind}" needs a body input where parameter "${ref.id}" was declared.`,
+          [ref],
+        ),
+      };
+    }
+    if (ref.kind === "sketch") {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "${feature.kind}" needs a body input where sketch "${ref.id}" was declared; sketches are profile sources, not sheets.`,
+          [ref],
+        ),
+      };
+    }
+    if (ref.kind === "datum") {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "${feature.kind}" needs a body input where datum "${ref.id}" was declared.`,
+          [ref],
+        ),
+      };
+    }
+    const isSheet = context.document.bodies.some(
+      (body) => body.id === ref.id && body.kind === "sheet",
+    );
+    if (!isSheet) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "${feature.kind}" consumes SHEET bodies, but body "${ref.id}" is a solid (a closed body bounds material; the surface family reshapes open shells).`,
+          [ref],
+        ),
+      };
+    }
+    const solid = solids.get(ref.id as BodyId);
+    if (solid === undefined) {
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "${feature.kind}" references body "${ref.id}", which has no sheet (none was produced this run and none was supplied).`,
+          [ref],
+        ),
+      };
+    }
+    return { ok: true, solid };
   };
 
   const solidInput = (
@@ -1746,6 +1872,7 @@ export function createKernelFeatureExecutor(
         dimensionlessParameter(feature, ref, name),
       parameterValue: (ref) => parameters.get(ref.id),
       solidInput: (ref) => solidInput(feature, ref),
+      sheetInput: (ref) => sheetInput(feature, ref),
       resolveProfile: (ref) => context.profiles(ref.id),
       resolvePath: (ref) =>
         context.paths === undefined
@@ -1812,6 +1939,11 @@ interface InputReaders {
     ref: FeatureInputRef,
   ) => AnyDimensionalValue | undefined;
   readonly solidInput: (ref: FeatureInputRef) => SolidOutcome;
+  /**
+   * The Phase 49 sheet operand reader: resolves a body ref that must name a
+   * SHEET body (the surface family's operand discipline).
+   */
+  readonly sheetInput: (ref: FeatureInputRef) => SolidOutcome;
   readonly resolveProfile: (
     ref: FeatureInputRef & { readonly kind: "sketch" },
   ) => KernelProfileResolution;
@@ -6991,6 +7123,471 @@ function runKernelOperation(
             sheetResult.error.code,
             sheetResult.error.message,
           );
+    }
+    case "create-sheet": {
+      // Input layout (Phase 49): one DATUM input (the base sheet's plane —
+      // the datum plane's origin is the patch's translation and its normal
+      // the local +z placement axis), one dimensionless parameter (the
+      // surface kind, indexing SHEET_SURFACE_KINDS), then the kind's own
+      // parameters in a fixed order:
+      //   plane (0):    uMin, uMax, vMin, vMax                       (lengths)
+      //   cylinder (1): radius, height                               (lengths), uSweep (angle)
+      //   cone (2):     bottomRadius, topRadius, height              (lengths), uSweep (angle)
+      //   sphere (3):   radius (length), vMin, vMax, uSweep          (angles)
+      //   torus (4):    majorRadius, minorRadius                     (lengths), uSweep, vSweep (angles)
+      if (inputs.length < 3) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "create-sheet" needs a datum input, a kind parameter, and the kind's own parameters.`,
+          ),
+        };
+      }
+      const csDatumRef = inputs[0];
+      const csKindRef = inputs[1];
+      if (
+        csDatumRef === undefined ||
+        csKindRef === undefined ||
+        csDatumRef.kind !== "datum"
+      ) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "create-sheet" needs a datum input as its base plane.`,
+          ),
+        };
+      }
+      if (csKindRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "create-sheet" needs a parameter input as its kind selector.`,
+          ),
+        };
+      }
+      const csKind = readers.dimensionlessParameter(csKindRef, "kind");
+      if (!csKind.ok) {
+        return { ok: false, diagnostic: csKind.diagnostic };
+      }
+      const csIndex = Math.round(csKind.value);
+      const csName = SHEET_SURFACE_KINDS[csIndex];
+      if (csName === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "create-sheet" names kind index ${String(csKind.value)}, which indexes no entry of SHEET_SURFACE_KINDS.`,
+            [csKindRef],
+          ),
+        };
+      }
+      const csDatum = resolveDatumInput(
+        feature,
+        csDatumRef,
+        readers.document,
+        readers.datumTopology,
+        "the base sheet's datum plane",
+      );
+      if (!csDatum.ok) return { ok: false, diagnostic: csDatum.diagnostic };
+      if (csDatum.datumType !== "plane" || csDatum.plane === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "create-sheet" needs a datum PLANE as its base; the referenced datum defines ${csDatum.datumType}.`,
+            [csDatumRef],
+          ),
+        };
+      }
+      const csPlacement = datumSheetPlacement(csDatum.plane);
+      const csLen = (
+        index: number,
+        name: string,
+      ): { ok: true; mm: number } | { ok: false; diagnostic: Diagnostic } => {
+        const ref = inputs[index];
+        if (ref === undefined || ref.kind !== "parameter") {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "create-sheet" needs parameter ${String(index)} (${name}) for the ${csName} kind.`,
+            ),
+          };
+        }
+        const value = readers.lengthParameter(ref, name);
+        if (!value.ok) return value;
+        return { ok: true, mm: value.mm };
+      };
+      const csAngle = (
+        index: number,
+        name: string,
+      ): { ok: true; rad: number } | { ok: false; diagnostic: Diagnostic } => {
+        const ref = inputs[index];
+        if (ref === undefined || ref.kind !== "parameter") {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "create-sheet" needs parameter ${String(index)} (${name}) for the ${csName} kind.`,
+            ),
+          };
+        }
+        const value = readers.angleParameter(ref, name);
+        if (!value.ok) return value;
+        return { ok: true, rad: value.rad };
+      };
+      const csSheetInput = (kind: SheetSurfaceInput): OperationOutcome =>
+        runSurfaceKindOperation(feature, kernel, () =>
+          kernel.createSheet(kind),
+        );
+      if (csName === "plane") {
+        const uMin = csLen(2, "uMin");
+        if (!uMin.ok) return { ok: false, diagnostic: uMin.diagnostic };
+        const uMax = csLen(3, "uMax");
+        if (!uMax.ok) return { ok: false, diagnostic: uMax.diagnostic };
+        const vMin = csLen(4, "vMin");
+        if (!vMin.ok) return { ok: false, diagnostic: vMin.diagnostic };
+        const vMax = csLen(5, "vMax");
+        if (!vMax.ok) return { ok: false, diagnostic: vMax.diagnostic };
+        return csSheetInput({
+          kind: "plane",
+          placement: csPlacement,
+          uMin: lengthValue(uMin.mm),
+          uMax: lengthValue(uMax.mm),
+          vMin: lengthValue(vMin.mm),
+          vMax: lengthValue(vMax.mm),
+        });
+      }
+      if (csName === "cylinder") {
+        const radius = csLen(2, "radius");
+        if (!radius.ok) return { ok: false, diagnostic: radius.diagnostic };
+        const height = csLen(3, "height");
+        if (!height.ok) return { ok: false, diagnostic: height.diagnostic };
+        const uSweep = csAngle(4, "uSweep");
+        if (!uSweep.ok) return { ok: false, diagnostic: uSweep.diagnostic };
+        return csSheetInput({
+          kind: "cylinder",
+          placement: csPlacement,
+          radius: lengthValue(radius.mm),
+          height: lengthValue(height.mm),
+          uSweep: angleValue(uSweep.rad),
+        });
+      }
+      if (csName === "cone") {
+        const bottomRadius = csLen(2, "bottomRadius");
+        if (!bottomRadius.ok) {
+          return { ok: false, diagnostic: bottomRadius.diagnostic };
+        }
+        const topRadius = csLen(3, "topRadius");
+        if (!topRadius.ok)
+          return { ok: false, diagnostic: topRadius.diagnostic };
+        const height = csLen(4, "height");
+        if (!height.ok) return { ok: false, diagnostic: height.diagnostic };
+        const uSweep = csAngle(5, "uSweep");
+        if (!uSweep.ok) return { ok: false, diagnostic: uSweep.diagnostic };
+        return csSheetInput({
+          kind: "cone",
+          placement: csPlacement,
+          bottomRadius: lengthValue(bottomRadius.mm),
+          topRadius: lengthValue(topRadius.mm),
+          height: lengthValue(height.mm),
+          uSweep: angleValue(uSweep.rad),
+        });
+      }
+      if (csName === "sphere") {
+        const radius = csLen(2, "radius");
+        if (!radius.ok) return { ok: false, diagnostic: radius.diagnostic };
+        const vMin = csAngle(3, "vMin");
+        if (!vMin.ok) return { ok: false, diagnostic: vMin.diagnostic };
+        const vMax = csAngle(4, "vMax");
+        if (!vMax.ok) return { ok: false, diagnostic: vMax.diagnostic };
+        const uSweep = csAngle(5, "uSweep");
+        if (!uSweep.ok) return { ok: false, diagnostic: uSweep.diagnostic };
+        return csSheetInput({
+          kind: "sphere",
+          placement: csPlacement,
+          radius: lengthValue(radius.mm),
+          vMin: angleValue(vMin.rad),
+          vMax: angleValue(vMax.rad),
+          uSweep: angleValue(uSweep.rad),
+        });
+      }
+      const majorRadius = csLen(2, "majorRadius");
+      if (!majorRadius.ok)
+        return { ok: false, diagnostic: majorRadius.diagnostic };
+      const minorRadius = csLen(3, "minorRadius");
+      if (!minorRadius.ok)
+        return { ok: false, diagnostic: minorRadius.diagnostic };
+      const uSweep = csAngle(4, "uSweep");
+      if (!uSweep.ok) return { ok: false, diagnostic: uSweep.diagnostic };
+      const vSweep = csAngle(5, "vSweep");
+      if (!vSweep.ok) return { ok: false, diagnostic: vSweep.diagnostic };
+      return csSheetInput({
+        kind: "torus",
+        placement: csPlacement,
+        majorRadius: lengthValue(majorRadius.mm),
+        minorRadius: lengthValue(minorRadius.mm),
+        uSweep: angleValue(uSweep.rad),
+        vSweep: angleValue(vSweep.rad),
+      });
+    }
+    case "trim-surface": {
+      // Input layout (Phase 49): two body inputs (the target SHEET, the
+      // trimming tool SHEET) and one dimensionless parameter (keepInside:
+      // 1 keeps the region inside the tool's region, 0 cuts it away).
+      if (inputs.length !== 3) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "trim-surface" needs three inputs: the target sheet body, the tool sheet body, and the keepInside parameter.`,
+          ),
+        };
+      }
+      const tsTarget = readers.sheetInput(inputs[0] as FeatureInputRef);
+      if (!tsTarget.ok) return { ok: false, diagnostic: tsTarget.diagnostic };
+      const tsToolRef = inputs[1];
+      if (tsToolRef === undefined) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "trim-surface" has a malformed tool input.`,
+          ),
+        };
+      }
+      const tsTool = readers.sheetInput(tsToolRef);
+      if (!tsTool.ok) return { ok: false, diagnostic: tsTool.diagnostic };
+      const tsKeepRef = inputs[2];
+      if (tsKeepRef === undefined || tsKeepRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "trim-surface" needs a parameter input as its keepInside selector.`,
+          ),
+        };
+      }
+      const tsKeep = readers.dimensionlessParameter(tsKeepRef, "keepInside");
+      if (!tsKeep.ok) return { ok: false, diagnostic: tsKeep.diagnostic };
+      if (tsKeep.value !== 0 && tsKeep.value !== 1) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "trim-surface" needs keepInside to be 1 (keep the tool's region) or 0 (cut it away); ${String(tsKeep.value)} was given.`,
+            [tsKeepRef],
+          ),
+        };
+      }
+      return runSurfaceKindOperation(feature, kernel, () =>
+        kernel.trimSheet({
+          sheet: tsTarget.solid,
+          tool: tsTool.solid,
+          keepInside: tsKeep.value === 1,
+        }),
+      );
+    }
+    case "thicken-surface": {
+      // Input layout (Phase 49): one body input (the target SHEET), one
+      // length parameter (the wall thickness), one dimensionless parameter
+      // (the side: 1 along the faces' carried normals, -1 against them).
+      if (inputs.length !== 3) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "thicken-surface" needs three inputs: the target sheet body, the thickness parameter, and the side parameter.`,
+          ),
+        };
+      }
+      const thTarget = readers.sheetInput(inputs[0] as FeatureInputRef);
+      if (!thTarget.ok) return { ok: false, diagnostic: thTarget.diagnostic };
+      const thThickRef = inputs[1];
+      if (thThickRef === undefined || thThickRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "thicken-surface" needs a parameter input as its thickness.`,
+          ),
+        };
+      }
+      const thThick = readers.lengthParameter(thThickRef, "thickness");
+      if (!thThick.ok) return { ok: false, diagnostic: thThick.diagnostic };
+      if (thThick.mm <= 0) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "thicken-surface" needs a positive thickness (${String(thThick.mm)} mm was given).`,
+            [thThickRef],
+          ),
+        };
+      }
+      const thSideRef = inputs[2];
+      if (thSideRef === undefined || thSideRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "thicken-surface" needs a parameter input as its side selector.`,
+          ),
+        };
+      }
+      const thSide = readers.dimensionlessParameter(thSideRef, "side");
+      if (!thSide.ok) return { ok: false, diagnostic: thSide.diagnostic };
+      if (thSide.value !== 1 && thSide.value !== -1) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "thicken-surface" needs side to be 1 or -1; ${String(thSide.value)} was given.`,
+            [thSideRef],
+          ),
+        };
+      }
+      return runSurfaceKindOperation(feature, kernel, () =>
+        kernel.thickenSheet({
+          sheet: thTarget.solid,
+          thickness: lengthValue(thThick.mm),
+          side: thSide.value === 1 ? 1 : -1,
+        }),
+      );
+    }
+    case "knit-surface": {
+      // Input layout (Phase 49): one or more body inputs (the sheets — and
+      // solids — sewn together; the sheet+solid case is the kernel's own)
+      // and one length parameter (the sewing tolerance). The LAST input is
+      // the tolerance parameter.
+      if (inputs.length < 3) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "knit-surface" needs at least two body inputs and one tolerance parameter.`,
+          ),
+        };
+      }
+      const knBodies: KernelSolid[] = [];
+      for (let index = 0; index < inputs.length - 1; index += 1) {
+        const ref = inputs[index];
+        if (ref === undefined) {
+          return {
+            ok: false,
+            diagnostic: diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "knit-surface" has a malformed operand list.`,
+            ),
+          };
+        }
+        const isSheetBody =
+          ref.kind === "body" &&
+          readers.document.bodies.some(
+            (body) => body.id === ref.id && body.kind === "sheet",
+          );
+        const operand = isSheetBody
+          ? readers.sheetInput(ref)
+          : readers.solidInput(ref);
+        if (!operand.ok) return { ok: false, diagnostic: operand.diagnostic };
+        knBodies.push(operand.solid);
+      }
+      const knTolRef = inputs[inputs.length - 1];
+      if (knTolRef === undefined || knTolRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "knit-surface" needs a parameter input as its sewing tolerance.`,
+          ),
+        };
+      }
+      const knTol = readers.lengthParameter(knTolRef, "tolerance");
+      if (!knTol.ok) return { ok: false, diagnostic: knTol.diagnostic };
+      if (knTol.mm <= 0) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "knit-surface" needs a positive sewing tolerance (${String(knTol.mm)} mm was given).`,
+            [knTolRef],
+          ),
+        };
+      }
+      return runSurfaceKindOperation(feature, kernel, () =>
+        kernel.knit({ bodies: knBodies, tolerance: lengthValue(knTol.mm) }),
+      );
+    }
+    case "offset-surface": {
+      // Input layout (Phase 49): one body input (the target SHEET) and one
+      // SIGNED length parameter (the offset distance; the sign follows the
+      // faces' carried normals).
+      if (inputs.length !== 2) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "offset-surface" needs two inputs: the target sheet body and the distance parameter.`,
+          ),
+        };
+      }
+      const osTarget = readers.sheetInput(inputs[0] as FeatureInputRef);
+      if (!osTarget.ok) return { ok: false, diagnostic: osTarget.diagnostic };
+      const osDistanceRef = inputs[1];
+      if (osDistanceRef === undefined || osDistanceRef.kind !== "parameter") {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "offset-surface" needs a parameter input as its distance.`,
+          ),
+        };
+      }
+      const osDistance = readers.lengthParameter(osDistanceRef, "distance");
+      if (!osDistance.ok)
+        return { ok: false, diagnostic: osDistance.diagnostic };
+      if (osDistance.mm === 0) {
+        return {
+          ok: false,
+          diagnostic: diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelParameterInvalid,
+            `Feature "${feature.id}" of kind "offset-surface" needs a non-zero distance (0 mm moves the surface nowhere).`,
+            [osDistanceRef],
+          ),
+        };
+      }
+      return runSurfaceKindOperation(feature, kernel, () =>
+        kernel.offsetSheet({
+          sheet: osTarget.solid,
+          distance: lengthValue(osDistance.mm),
+        }),
+      );
     }
     case "extrude": {
       // Input layout: one sketch input (the profile source), one signed

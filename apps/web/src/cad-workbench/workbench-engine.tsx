@@ -40,6 +40,7 @@ import type { ReactElement } from "react";
 import {
   CadProvider,
   createCadStore,
+  type BodyId,
   DIAGNOSTIC_CODES,
   documentChangeInvalidations,
   type CadDocument,
@@ -170,6 +171,7 @@ import {
   validateThickenSubmission,
 } from "./scale-thicken";
 import { documentSplitSceneRequest } from "./split";
+import { documentSheetSceneRequest } from "./surface-scene";
 import {
   documentMirrorSceneRequest,
   documentPatternFeatureSceneRequest,
@@ -302,7 +304,8 @@ export type WorkbenchSceneKind =
   | "patternPath"
   | "mirror"
   | "hole"
-  | "curves";
+  | "curves"
+  | "sheet";
 
 /**
  * The structured outcome of a feature-form submission: the domain's refusal
@@ -467,6 +470,37 @@ export interface WorkbenchEngine {
   readonly handleLoft: (
     sections: readonly LoftSectionChoice[],
   ) => FeatureFormOutcome;
+  /**
+   * The Phase 49 surface tab's authoring actions: each commits its
+   * parameters, the output body, and the bridge surface feature kind in
+   * one atomic transaction (the loft action's pattern). A refusal commits
+   * nothing and returns the structured outcome for the form.
+   */
+  readonly handleCreateSheet: (submission: {
+    readonly datumId: DatumId;
+    readonly uMinMm: number;
+    readonly uMaxMm: number;
+    readonly vMinMm: number;
+    readonly vMaxMm: number;
+  }) => FeatureFormOutcome;
+  readonly handleTrimSurface: (submission: {
+    readonly sheetId: BodyId;
+    readonly toolId: BodyId;
+    readonly keepInside: 0 | 1;
+  }) => FeatureFormOutcome;
+  readonly handleThickenSurface: (submission: {
+    readonly sheetId: BodyId;
+    readonly thicknessMm: number;
+    readonly side: 1 | -1;
+  }) => FeatureFormOutcome;
+  readonly handleKnitSurface: (submission: {
+    readonly sheetIds: readonly BodyId[];
+    readonly toleranceMm: number;
+  }) => FeatureFormOutcome;
+  readonly handleOffsetSurface: (submission: {
+    readonly sheetId: BodyId;
+    readonly distanceMm: number;
+  }) => FeatureFormOutcome;
   /**
    * The Phase 40 helix create action: validates the picked meridian sketch
    * and spine numbers through the action-time battery, then commits the
@@ -749,6 +783,7 @@ export function useWorkbenchEngine(
   const [sketchCount, setSketchCount] = useState(0);
   const [sweepCount, setSweepCount] = useState(0);
   const [loftCount, setLoftCount] = useState(0);
+  const [surfaceCount, setSurfaceCount] = useState(0);
   const [helixCount, setHelixCount] = useState(0);
   const [threadCount, setThreadCount] = useState(0);
   const [ribCount, setRibCount] = useState(0);
@@ -1491,6 +1526,294 @@ export function useWorkbenchEngine(
     }
     setLoftCount(n);
     setActiveScene("loft");
+    return { ok: true };
+  };
+
+  // The Phase 49 surface actions: the surface tab's authoring tier. Each
+  // commits its parameters, the SHEET output body (the `body.create`
+  // command's kind marker), and the bridge feature kind in ONE atomic
+  // transaction — the loft action's pattern. Kernel execution rides the
+  // `create-sheet` / `trim-surface` / `thicken-surface` bridge kinds.
+  const handleCreateSheet = (submission: {
+    readonly datumId: DatumId;
+    readonly uMinMm: number;
+    readonly uMaxMm: number;
+    readonly vMinMm: number;
+    readonly vMaxMm: number;
+  }): FeatureFormOutcome => {
+    const n = surfaceCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_surface${suffix}`);
+    const featureId = createFeatureId(`feat_surface${suffix}`);
+    const kindParam = createParameterId(`param_surface_kind${suffix}`);
+    const boundParams = [
+      {
+        id: createParameterId(`param_surface_umin${suffix}`),
+        name: `surfaceUMin${suffix}`,
+        mm: submission.uMinMm,
+      },
+      {
+        id: createParameterId(`param_surface_umax${suffix}`),
+        name: `surfaceUMax${suffix}`,
+        mm: submission.uMaxMm,
+      },
+      {
+        id: createParameterId(`param_surface_vmin${suffix}`),
+        name: `surfaceVMin${suffix}`,
+        mm: submission.vMinMm,
+      },
+      {
+        id: createParameterId(`param_surface_vmax${suffix}`),
+        name: `surfaceVMax${suffix}`,
+        mm: submission.vMaxMm,
+      },
+    ];
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create" as const,
+          id: kindParam,
+          name: `surfaceKind${suffix}`,
+          value: dimensionless(0),
+        },
+        ...boundParams.map((parameter) => ({
+          type: "parameter.create" as const,
+          id: parameter.id,
+          name: parameter.name,
+          value: length(parameter.mm),
+        })),
+        {
+          type: "body.create" as const,
+          id: bodyId,
+          name: `surface ${String(n)}`,
+          kind: "sheet" as const,
+        },
+        {
+          type: "feature.create" as const,
+          id: featureId,
+          kind: "create-sheet",
+          inputs: [
+            { kind: "datum" as const, id: submission.datumId },
+            { kind: "parameter" as const, id: kindParam },
+            ...boundParams.map((parameter) => ({
+              kind: "parameter" as const,
+              id: parameter.id,
+            })),
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setSurfaceCount(n);
+    setActiveScene("sheet");
+    return { ok: true };
+  };
+
+  const handleTrimSurface = (submission: {
+    readonly sheetId: BodyId;
+    readonly toolId: BodyId;
+    readonly keepInside: 0 | 1;
+  }): FeatureFormOutcome => {
+    const n = surfaceCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_surface${suffix}`);
+    const featureId = createFeatureId(`feat_surface_trim${suffix}`);
+    const keepParam = createParameterId(`param_surface_keep${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create" as const,
+          id: keepParam,
+          name: `surfaceKeep${suffix}`,
+          value: dimensionless(submission.keepInside),
+        },
+        {
+          type: "body.create" as const,
+          id: bodyId,
+          name: `trimmed ${String(n)}`,
+          kind: "sheet" as const,
+        },
+        {
+          type: "feature.create" as const,
+          id: featureId,
+          kind: "trim-surface",
+          inputs: [
+            { kind: "body" as const, id: submission.sheetId },
+            { kind: "body" as const, id: submission.toolId },
+            { kind: "parameter" as const, id: keepParam },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setSurfaceCount(n);
+    setActiveScene("sheet");
+    return { ok: true };
+  };
+
+  const handleThickenSurface = (submission: {
+    readonly sheetId: BodyId;
+    readonly thicknessMm: number;
+    readonly side: 1 | -1;
+  }): FeatureFormOutcome => {
+    const n = surfaceCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_surface_solid${suffix}`);
+    const featureId = createFeatureId(`feat_surface_thicken${suffix}`);
+    const thicknessParam = createParameterId(`param_surface_t${suffix}`);
+    const sideParam = createParameterId(`param_surface_side${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create" as const,
+          id: thicknessParam,
+          name: `surfaceThickness${suffix}`,
+          value: length(submission.thicknessMm),
+        },
+        {
+          type: "parameter.create" as const,
+          id: sideParam,
+          name: `surfaceSide${suffix}`,
+          value: dimensionless(submission.side),
+        },
+        {
+          type: "body.create" as const,
+          id: bodyId,
+          name: `thickened ${String(n)}`,
+        },
+        {
+          type: "feature.create" as const,
+          id: featureId,
+          kind: "thicken-surface",
+          inputs: [
+            { kind: "body" as const, id: submission.sheetId },
+            { kind: "parameter" as const, id: thicknessParam },
+            { kind: "parameter" as const, id: sideParam },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setSurfaceCount(n);
+    setActiveScene("sheet");
+    return { ok: true };
+  };
+
+  const handleKnitSurface = (submission: {
+    readonly sheetIds: readonly BodyId[];
+    readonly toleranceMm: number;
+  }): FeatureFormOutcome => {
+    const n = surfaceCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_surface_knit${suffix}`);
+    const featureId = createFeatureId(`feat_surface_knit${suffix}`);
+    const toleranceParam = createParameterId(`param_surface_tol${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create" as const,
+          id: toleranceParam,
+          name: `surfaceTolerance${suffix}`,
+          value: length(submission.toleranceMm),
+        },
+        {
+          type: "body.create" as const,
+          id: bodyId,
+          name: `knit ${String(n)}`,
+          kind: "sheet" as const,
+        },
+        {
+          type: "feature.create" as const,
+          id: featureId,
+          kind: "knit-surface",
+          inputs: [
+            ...submission.sheetIds.map((sheetId) => ({
+              kind: "body" as const,
+              id: sheetId,
+            })),
+            { kind: "parameter" as const, id: toleranceParam },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setSurfaceCount(n);
+    setActiveScene("sheet");
+    return { ok: true };
+  };
+
+  const handleOffsetSurface = (submission: {
+    readonly sheetId: BodyId;
+    readonly distanceMm: number;
+  }): FeatureFormOutcome => {
+    const n = surfaceCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    const bodyId = createBodyId(`body_surface_offset${suffix}`);
+    const featureId = createFeatureId(`feat_surface_offset${suffix}`);
+    const distanceParam = createParameterId(`param_surface_dist${suffix}`);
+    const committed = documentApi.applyTransaction({
+      commands: [
+        {
+          type: "parameter.create" as const,
+          id: distanceParam,
+          name: `surfaceDistance${suffix}`,
+          value: length(submission.distanceMm),
+        },
+        {
+          type: "body.create" as const,
+          id: bodyId,
+          name: `offset ${String(n)}`,
+          kind: "sheet" as const,
+        },
+        {
+          type: "feature.create" as const,
+          id: featureId,
+          kind: "offset-surface",
+          inputs: [
+            { kind: "body" as const, id: submission.sheetId },
+            { kind: "parameter" as const, id: distanceParam },
+          ],
+          outputs: [bodyId],
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setSurfaceCount(n);
+    setActiveScene("sheet");
     return { ok: true };
   };
 
@@ -2778,6 +3101,13 @@ export function useWorkbenchEngine(
       }
       return;
     }
+    if (dispatchScene === "sheet") {
+      const request = documentSheetSceneRequest(workbenchDocument);
+      if (request !== null) {
+        sessionRef.current?.dispatchSheet(request, request.bodyId);
+      }
+      return;
+    }
     if (dispatchScene === "split") {
       const request = documentSplitSceneRequest(workbenchDocument);
       if (request !== null) {
@@ -2853,6 +3183,7 @@ export function useWorkbenchEngine(
     holeCount,
     structuredHoleCount,
     curveCount,
+    surfaceCount,
   ]);
 
   // The host pushes the CURRENT projection into the store — the projection
@@ -3182,6 +3513,11 @@ export function useWorkbenchEngine(
     handleStructuredHole,
     handleSaveSketch,
     handleSweep,
+    handleCreateSheet,
+    handleTrimSurface,
+    handleThickenSurface,
+    handleKnitSurface,
+    handleOffsetSurface,
     handleLoft,
     handleHelix,
     handleThread,

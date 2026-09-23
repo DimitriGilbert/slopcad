@@ -562,6 +562,11 @@ describe("bridge feature kinds", () => {
       "replaceFace",
       "deleteFace",
       "extrude-surface",
+      "create-sheet",
+      "trim-surface",
+      "thicken-surface",
+      "knit-surface",
+      "offset-surface",
     ]);
   });
 });

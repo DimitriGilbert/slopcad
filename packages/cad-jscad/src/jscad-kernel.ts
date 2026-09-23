@@ -177,7 +177,18 @@ import {
   type ReplaceFaceInput,
   type SectionInput,
   type SectionResult,
+  type DeleteFaceKeepResult,
   type SheetSurfaceInput,
+  type DeleteFaceKeepInput,
+  type SheetReplaceFaceInput,
+  type SheetThickenInput,
+  type SheetOffsetInput,
+  type SheetFillPatchInput,
+  type SheetUnstitchInput,
+  type SheetKnitInput,
+  type SheetExtendInput,
+  type SheetUntrimInput,
+  type SheetTrimInput,
   type ShellInput,
   type SphereInput,
   type Tessellation,
@@ -366,6 +377,7 @@ export const JSCAD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   sheets: false,
+  surfaceOps: false,
   localFaceOps: false,
   section: true,
   sweepWire: false,
@@ -660,6 +672,100 @@ export function createJscadKernel(): GeometryKernel {
         kernelError(
           KERNEL_ERROR_CODES.unsupportedOperation,
           "JSCAD's engine declined createSheet: the engine is closed-solid — its currency carries a volume and an inside, and an open sheet has neither (the sheets capability is false; the Phase 48 probe).",
+        ),
+      );
+    },
+    trimSheet(input: SheetTrimInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined trimSheet: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    untrimSheet(input: SheetUntrimInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined untrimSheet: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    extendSheet(input: SheetExtendInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined extendSheet: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    knit(input: SheetKnitInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined knit: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    unstitch(input: SheetUnstitchInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined unstitch: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    fillPatch(input: SheetFillPatchInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined fillPatch: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    offsetSheet(input: SheetOffsetInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined offsetSheet: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    thickenSheet(input: SheetThickenInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined thickenSheet: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    replaceFaceWithSheet(
+      input: SheetReplaceFaceInput,
+    ): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined replaceFaceWithSheet: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
+        ),
+      );
+    },
+    deleteFaceKeepSurface(
+      input: DeleteFaceKeepInput,
+    ): KernelResult<DeleteFaceKeepResult> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the jscad kernel declined deleteFaceKeepSurface: the engine is a closed-solid CSG kernel — an open sheet has no representation (the surfaceOps capability is false; the Phase 49 scope).",
         ),
       );
     },

@@ -150,6 +150,8 @@ export type CadCommand =
       readonly type: "body.create";
       readonly id?: BodyId;
       readonly name: string;
+      /** Present exactly when the created body is a SHEET body (Phase 49). */
+      readonly kind?: "sheet";
     }
   | {
       /**
@@ -283,6 +285,7 @@ export function applyCommand(
       const added = addBody(document, {
         ...(command.id === undefined ? {} : { id: command.id }),
         name: command.name,
+        ...(command.kind === "sheet" ? { kind: "sheet" as const } : {}),
       });
       if (!added.ok) return added;
       return ok(added.value.document);
@@ -383,6 +386,8 @@ export type SerializedCadCommand =
       readonly type: "body.create";
       readonly id?: string;
       readonly name: string;
+      /** Present exactly when the created body is a SHEET body (Phase 49). */
+      readonly kind?: "sheet";
     }
   | {
       readonly formatVersion: number;
@@ -495,18 +500,20 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
             value: serializeDimensionalValue(command.value),
           };
     case "body.create":
-      return command.id === undefined
-        ? {
-            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
-            type: command.type,
-            name: command.name,
-          }
-        : {
-            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
-            type: command.type,
-            id: command.id,
-            name: command.name,
-          };
+      if (command.id === undefined && command.kind === undefined) {
+        return {
+          formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+          type: command.type,
+          name: command.name,
+        };
+      }
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        ...(command.id === undefined ? {} : { id: command.id }),
+        ...(command.kind === undefined ? {} : { kind: command.kind }),
+        name: command.name,
+      };
     case "body.update":
       return {
         formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
@@ -833,11 +840,17 @@ export function parseCommand(
           ),
         );
       }
+      const kind = input.kind === "sheet" ? ("sheet" as const) : undefined;
       return ok(
         Object.freeze(
-          id === undefined
+          id === undefined && kind === undefined
             ? { type, name: input.name }
-            : { type, id, name: input.name },
+            : {
+                type,
+                ...(id === undefined ? {} : { id }),
+                ...(kind === undefined ? {} : { kind }),
+                name: input.name,
+              },
         ),
       );
     }
