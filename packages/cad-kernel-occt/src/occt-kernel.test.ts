@@ -174,6 +174,7 @@ describe("occt kernel identity and capabilities", () => {
       section: true,
       surfaceArea: true,
       sheets: true,
+      surfaceOps: true,
       localFaceOps: true,
       sweepWire: true,
       intersectionCurve: true,

@@ -214,6 +214,10 @@ export const WORKER_OPERATION_IDS = [
   "solid.replaceFace",
   "solid.deleteFace",
   "solid.section",
+  "sheet.trim",
+  "sheet.thicken",
+  "sheet.knit",
+  "sheet.offset",
   "solid.topology",
   "step.import",
   "step.export",
@@ -657,6 +661,35 @@ export interface WorkerSectionInput {
 }
 
 /**
+ * Input of `sheet.trim` (Phase 49): the sheet, the trimming tool sheet,
+ * and the keep side — the contract's `SheetTrimInput` across the wire.
+ */
+export interface WorkerSheetTrimInput {
+  readonly sheet: WorkerSolidId;
+  readonly tool: WorkerSolidId;
+  readonly keepInside: boolean;
+}
+
+/** Input of `sheet.thicken` (Phase 49): the sheet-to-solid route. */
+export interface WorkerSheetThickenInput {
+  readonly sheet: WorkerSolidId;
+  readonly thickness: LengthValue;
+  readonly side: 1 | -1;
+}
+
+/** Input of `sheet.knit` (Phase 49): the operands and the sewing tolerance. */
+export interface WorkerSheetKnitInput {
+  readonly bodies: readonly WorkerSolidId[];
+  readonly tolerance: LengthValue;
+}
+
+/** Input of `sheet.offset` (Phase 49): the signed surface offset. */
+export interface WorkerSheetOffsetInput {
+  readonly sheet: WorkerSolidId;
+  readonly distance: LengthValue;
+}
+
+/**
  * Input of `solid.topology` (Phase 26.5): the solid to report plus the
  * labeling context the kernel-neutral snapshot carries — the document body
  * the solid stands for and the regeneration the snapshot stands at. Both
@@ -939,6 +972,14 @@ export interface WorkerSectionResult {
 }
 
 /**
+ * Result of every Phase 49 surface operation the worker carries: the
+ * minted body's id (a sheet for trim/knit/offset, a solid for thicken).
+ */
+export interface WorkerSheetOpResult {
+  readonly solid: WorkerSolidId;
+}
+
+/**
  * Result of `solid.area` (Phase 27.4): the whole-solid surface area in
  * mm² (0 for an empty solid), measured with the booted kernel's own
  * semantics (see the contract's `area` documentation).
@@ -987,6 +1028,10 @@ export interface WorkerOperationInputs {
   readonly "solid.replaceFace": WorkerReplaceFaceInput;
   readonly "solid.deleteFace": WorkerDeleteFaceInput;
   readonly "solid.section": WorkerSectionInput;
+  readonly "sheet.trim": WorkerSheetTrimInput;
+  readonly "sheet.thicken": WorkerSheetThickenInput;
+  readonly "sheet.knit": WorkerSheetKnitInput;
+  readonly "sheet.offset": WorkerSheetOffsetInput;
   readonly "solid.topology": WorkerTopologyInput;
   readonly "step.import": WorkerStepImportInput;
   readonly "step.export": WorkerStepExportInput;
@@ -1031,6 +1076,10 @@ export interface WorkerOperationResults {
   readonly "solid.replaceFace": WorkerSolidResult;
   readonly "solid.deleteFace": WorkerSolidResult;
   readonly "solid.section": WorkerSectionResult;
+  readonly "sheet.trim": WorkerSheetOpResult;
+  readonly "sheet.thicken": WorkerSheetOpResult;
+  readonly "sheet.knit": WorkerSheetOpResult;
+  readonly "sheet.offset": WorkerSheetOpResult;
   readonly "solid.topology": WorkerTopologyResult;
   readonly "step.import": WorkerStepImportResult;
   readonly "step.export": WorkerStepExportResult;
@@ -1282,6 +1331,24 @@ export interface SerializedWorkerOperationInputs {
     readonly normal: readonly [number, number, number];
     readonly keepSide: 1 | -1;
   };
+  readonly "sheet.trim": {
+    readonly sheet: string;
+    readonly tool: string;
+    readonly keepInside: boolean;
+  };
+  readonly "sheet.thicken": {
+    readonly sheet: string;
+    readonly thickness: SerializedWorkerLength;
+    readonly side: 1 | -1;
+  };
+  readonly "sheet.knit": {
+    readonly bodies: readonly string[];
+    readonly tolerance: SerializedWorkerLength;
+  };
+  readonly "sheet.offset": {
+    readonly sheet: string;
+    readonly distance: SerializedWorkerLength;
+  };
   readonly "solid.topology": {
     readonly solid: string;
     readonly bodyId: string;
@@ -1421,6 +1488,10 @@ export interface SerializedWorkerOperationResults {
       readonly centroidMm: readonly [number, number, number];
     };
   };
+  readonly "sheet.trim": { readonly solid: string };
+  readonly "sheet.thicken": { readonly solid: string };
+  readonly "sheet.knit": { readonly solid: string };
+  readonly "sheet.offset": { readonly solid: string };
   /**
    * The snapshot is already plain kernel-neutral data (the Phase 22
    * protocol's serializable evidence), so its wire form is the type itself:
@@ -4149,6 +4220,140 @@ function parseTopologyResult(
  * registry is the operation vocabulary as data — adding an operation without
  * registering its codecs fails to compile.
  */
+function serializeSheetTrimInput(
+  input: WorkerSheetTrimInput,
+): SerializedWorkerOperationInput<"sheet.trim"> {
+  return {
+    sheet: input.sheet,
+    tool: input.tool,
+    keepInside: input.keepInside,
+  };
+}
+
+function parseSheetTrimInput(
+  payload: unknown,
+): ParseResult<WorkerSheetTrimInput, WorkerParseError> {
+  const record = requirePayloadRecord("sheet.trim", payload);
+  if (!record.ok) return record;
+  const sheet = requireSolidIdField("sheet.trim", "sheet", record.value.sheet);
+  if (!sheet.ok) return sheet;
+  const tool = requireSolidIdField("sheet.trim", "tool", record.value.tool);
+  if (!tool.ok) return tool;
+  if (typeof record.value.keepInside !== "boolean") {
+    return payloadError(
+      'The "sheet.trim" field "keepInside" must be a boolean.',
+      record.value.keepInside,
+    );
+  }
+  return ok({
+    sheet: sheet.value,
+    tool: tool.value,
+    keepInside: record.value.keepInside,
+  });
+}
+
+function serializeSheetThickenInput(
+  input: WorkerSheetThickenInput,
+): SerializedWorkerOperationInput<"sheet.thicken"> {
+  return {
+    sheet: input.sheet,
+    thickness: serializeDimensionalValue(input.thickness),
+    side: input.side,
+  };
+}
+
+function parseSheetThickenInput(
+  payload: unknown,
+): ParseResult<WorkerSheetThickenInput, WorkerParseError> {
+  const record = requirePayloadRecord("sheet.thicken", payload);
+  if (!record.ok) return record;
+  const sheet = requireSolidIdField(
+    "sheet.thicken",
+    "sheet",
+    record.value.sheet,
+  );
+  if (!sheet.ok) return sheet;
+  const thickness = requireLengthField(
+    "sheet.thicken",
+    "thickness",
+    record.value.thickness,
+  );
+  if (!thickness.ok) return thickness;
+  const side = record.value.side;
+  if (side !== 1 && side !== -1) {
+    return payloadError(
+      'The "sheet.thicken" field "side" must be 1 or -1.',
+      side,
+    );
+  }
+  return ok({ sheet: sheet.value, thickness: thickness.value, side });
+}
+
+function serializeSheetKnitInput(
+  input: WorkerSheetKnitInput,
+): SerializedWorkerOperationInput<"sheet.knit"> {
+  return {
+    bodies: [...input.bodies],
+    tolerance: serializeDimensionalValue(input.tolerance),
+  };
+}
+
+function parseSheetKnitInput(
+  payload: unknown,
+): ParseResult<WorkerSheetKnitInput, WorkerParseError> {
+  const record = requirePayloadRecord("sheet.knit", payload);
+  if (!record.ok) return record;
+  const bodiesInput = record.value.bodies;
+  if (!Array.isArray(bodiesInput) || bodiesInput.length === 0) {
+    return payloadError(
+      'The "sheet.knit" field "bodies" must be a non-empty array of solid ids.',
+      bodiesInput,
+    );
+  }
+  const bodies: WorkerSolidId[] = [];
+  for (const body of bodiesInput) {
+    const parsed = requireSolidIdField("sheet.knit", "bodies", body);
+    if (!parsed.ok) return parsed;
+    bodies.push(parsed.value);
+  }
+  const tolerance = requireLengthField(
+    "sheet.knit",
+    "tolerance",
+    record.value.tolerance,
+  );
+  if (!tolerance.ok) return tolerance;
+  return ok({ bodies, tolerance: tolerance.value });
+}
+
+function serializeSheetOffsetInput(
+  input: WorkerSheetOffsetInput,
+): SerializedWorkerOperationInput<"sheet.offset"> {
+  return {
+    sheet: input.sheet,
+    distance: serializeDimensionalValue(input.distance),
+  };
+}
+
+function parseSheetOffsetInput(
+  payload: unknown,
+): ParseResult<WorkerSheetOffsetInput, WorkerParseError> {
+  const record = requirePayloadRecord("sheet.offset", payload);
+  if (!record.ok) return record;
+  const sheet = requireSolidIdField(
+    "sheet.offset",
+    "sheet",
+    record.value.sheet,
+  );
+  if (!sheet.ok) return sheet;
+  const distance = requireLengthField(
+    "sheet.offset",
+    "distance",
+    record.value.distance,
+  );
+  if (!distance.ok) return distance;
+  return ok({ sheet: sheet.value, distance: distance.value });
+}
+
 const INPUT_SERIALIZERS: {
   readonly [O in WorkerOperationId]: (
     input: WorkerOperationInput<O>,
@@ -4184,6 +4389,10 @@ const INPUT_SERIALIZERS: {
   "solid.replaceFace": serializeReplaceFaceInput,
   "solid.deleteFace": serializeDeleteFaceInput,
   "solid.section": serializeSectionInput,
+  "sheet.trim": serializeSheetTrimInput,
+  "sheet.thicken": serializeSheetThickenInput,
+  "sheet.knit": serializeSheetKnitInput,
+  "sheet.offset": serializeSheetOffsetInput,
   "solid.topology": serializeTopologyInput,
   "step.import": serializeStepImportInput,
   "step.export": serializeStepExportInput,
@@ -4228,6 +4437,10 @@ const INPUT_PARSERS: {
   "solid.replaceFace": parseReplaceFaceInput,
   "solid.deleteFace": parseDeleteFaceInput,
   "solid.section": parseSectionInput,
+  "sheet.trim": parseSheetTrimInput,
+  "sheet.thicken": parseSheetThickenInput,
+  "sheet.knit": parseSheetKnitInput,
+  "sheet.offset": parseSheetOffsetInput,
   "solid.topology": parseTopologyInput,
   "step.import": parseStepImportInput,
   "step.export": parseStepExportInput,
@@ -4612,6 +4825,10 @@ const RESULT_SERIALIZERS: {
   "solid.replaceFace": serializeSolidResult,
   "solid.deleteFace": serializeSolidResult,
   "solid.section": serializeSectionResult,
+  "sheet.trim": serializeSolidResult,
+  "sheet.thicken": serializeSolidResult,
+  "sheet.knit": serializeSolidResult,
+  "sheet.offset": serializeSolidResult,
   "solid.topology": serializeTopologyResult,
   "step.import": serializeStepImportResult,
   "step.export": serializeStepExportResult,
@@ -4661,6 +4878,10 @@ const RESULT_PARSERS: {
   "solid.deleteFace": (payload) =>
     parseSolidResult("solid.deleteFace", payload),
   "solid.section": parseSectionResult,
+  "sheet.trim": (payload) => parseSolidResult("sheet.trim", payload),
+  "sheet.thicken": (payload) => parseSolidResult("sheet.thicken", payload),
+  "sheet.knit": (payload) => parseSolidResult("sheet.knit", payload),
+  "sheet.offset": (payload) => parseSolidResult("sheet.offset", payload),
   "solid.topology": parseTopologyResult,
   "step.import": parseStepImportResult,
   "step.export": parseStepExportResult,
@@ -4736,6 +4957,10 @@ const RESULT_MINTS: {
   "solid.replaceFace": (result) => [result.solid],
   "solid.deleteFace": (result) => [result.solid],
   "solid.section": (result) => [result.solid],
+  "sheet.trim": (result) => [result.solid],
+  "sheet.thicken": (result) => [result.solid],
+  "sheet.knit": (result) => [result.solid],
+  "sheet.offset": (result) => [result.solid],
   "solid.topology": () => [],
   "step.import": (result) => result.solids.map((ref) => ref.solid),
   "step.export": () => [],

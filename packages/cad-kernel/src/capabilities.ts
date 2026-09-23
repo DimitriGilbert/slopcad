@@ -205,6 +205,16 @@ export interface KernelCapabilities {
   readonly mirror: boolean;
   readonly surfaceArea: boolean;
   readonly sheets: boolean;
+  /**
+   * The Phase 49 surface-operation family (`trimSheet`, `untrimSheet`,
+   * `extendSheet`, `knit`, `unstitch`, `fillPatch`, `offsetSheet`,
+   * `thickenSheet`, `replaceFaceWithSheet`, `deleteFaceKeepSurface`) is
+   * implemented. A kernel declaring `false` answers every call in the
+   * family with the structured `kernel/unsupported-operation`; per-op
+   * sub-scopes (the analytic-surface classes extend/offset support) are
+   * answered with the family's own finer codes on capable kernels.
+   */
+  readonly surfaceOps: boolean;
   readonly localFaceOps: boolean;
   readonly sweepWire: boolean;
   readonly intersectionCurve: boolean;

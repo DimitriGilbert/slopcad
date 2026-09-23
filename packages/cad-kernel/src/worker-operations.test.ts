@@ -82,6 +82,10 @@ describe("operation vocabulary", () => {
       "solid.replaceFace",
       "solid.deleteFace",
       "solid.section",
+      "sheet.trim",
+      "sheet.thicken",
+      "sheet.knit",
+      "sheet.offset",
       "solid.topology",
       "step.import",
       "step.export",
@@ -306,6 +310,42 @@ describe("operation input round-trips", () => {
       origin: [mm(1), mm(-2), mm(3)],
       normal: [0, 0, 1],
       keepSide: -1,
+    });
+  });
+
+  it("round-trips the four Phase 49 sheet-family inputs (trim, thicken, knit, offset)", () => {
+    expectInputRoundTrip("sheet.trim", {
+      sheet: solidA,
+      tool: solidB,
+      keepInside: true,
+    });
+    expectInputRoundTrip("sheet.trim", {
+      sheet: solidB,
+      tool: solidA,
+      keepInside: false,
+    });
+    expectInputRoundTrip("sheet.thicken", {
+      sheet: solidA,
+      thickness: mm(2),
+      side: 1,
+    });
+    expectInputRoundTrip("sheet.thicken", {
+      sheet: solidA,
+      thickness: mm(2),
+      side: -1,
+    });
+    expectInputRoundTrip("sheet.knit", {
+      bodies: [solidA, solidB, solidC],
+      tolerance: mm(0.001),
+    });
+    expectInputRoundTrip("sheet.offset", {
+      sheet: solidA,
+      distance: mm(3),
+    });
+    // A signed inward offset survives the sign verbatim.
+    expectInputRoundTrip("sheet.offset", {
+      sheet: solidA,
+      distance: mm(-2),
     });
   });
 
@@ -907,6 +947,10 @@ describe("operation input validation", () => {
       "solid.replaceFace": { target: solidA, face: 0.5, plane: "flat" },
       "solid.deleteFace": { target: solidA, face: 0, heal: "yes" },
       "solid.section": { target: solidA, origin: "at-origin", keepSide: 0 },
+      "sheet.trim": { sheet: "sheet_a", tool: null, keepInside: true },
+      "sheet.thicken": { sheet: "sheet_a", thickness: null, side: 1 },
+      "sheet.knit": { bodies: [], tolerance: null },
+      "sheet.offset": { sheet: "sheet_a", distance: null },
       "solid.topology": {
         solid: solidA,
         bodyId: "not-a-body",
@@ -959,6 +1003,11 @@ describe("operation result round-trips", () => {
       "solid.subtract",
       "solid.intersect",
       "solid.transform",
+      // The Phase 49 sheet family mints one solid per call, like the rest.
+      "sheet.trim",
+      "sheet.thicken",
+      "sheet.knit",
+      "sheet.offset",
     ] as const;
     for (const operation of solidOperations) {
       const wire = serializeWorkerOperationResult(operation, { solid: solidB });

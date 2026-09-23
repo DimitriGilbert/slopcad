@@ -19,6 +19,7 @@
  */
 
 import { useFormedible } from "@slopcad/ui/components/formedible/hooks/use-formedible";
+import { createDatumId, type DatumId } from "@slopcad/cad-core";
 import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/lib/types";
 import { useRef, type ReactElement } from "react";
 import { DATUM_FORMAT_VERSION } from "@slopcad/cad-core";
@@ -1119,6 +1120,413 @@ export interface ScaleFormValues extends Record<string, unknown> {
 }
 
 /** The scale form: one uniform factor against the latest extrusion. */
+/** Form values of the create-sheet form (Phase 49 surface tab). */
+export interface CreateSheetFormValues extends Record<string, unknown> {
+  readonly datumId: string;
+  readonly uMinMm: number;
+  readonly uMaxMm: number;
+  readonly vMinMm: number;
+  readonly vMaxMm: number;
+}
+
+/** A datum-plane option the surface forms pick from. */
+export interface SurfaceDatumOption {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** A sheet-body option the surface forms pick from. */
+export interface SurfaceSheetOption {
+  readonly id: string;
+  readonly name: string;
+}
+
+const numberField = (label: string, hint: string) => ({
+  required: true,
+  type: "number" as const,
+  label,
+  inputClassName: "font-mono",
+  validation: (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? null : hint,
+});
+
+/**
+ * The surface tab's create-sheet form (Phase 49): a datum plane base and
+ * the plane patch's u/v bounds — the datum-bound base sheet.
+ */
+export function CreateSheetForm({
+  datums,
+  onCreateSheet,
+}: {
+  readonly datums: readonly SurfaceDatumOption[];
+  readonly onCreateSheet: (submission: {
+    readonly datumId: DatumId;
+    readonly uMinMm: number;
+    readonly uMaxMm: number;
+    readonly vMinMm: number;
+    readonly vMaxMm: number;
+  }) => void;
+}): ReactElement {
+  const fields: readonly FormedibleFieldConfig<CreateSheetFormValues>[] = [
+    {
+      name: "datumId",
+      required: true,
+      type: "select",
+      label: "Base datum plane",
+      placeholder: "Pick a datum plane",
+      options: datums.map((datum) => ({ value: datum.id, label: datum.name })),
+      validation: (value) =>
+        typeof value === "string" && value.length > 0
+          ? null
+          : "Pick the datum plane the patch binds to.",
+    },
+    {
+      name: "uMinMm",
+      ...numberField("u min (mm)", "Enter a finite u minimum."),
+    },
+    {
+      name: "uMaxMm",
+      ...numberField("u max (mm)", "Enter a finite u maximum."),
+    },
+    {
+      name: "vMinMm",
+      ...numberField("v min (mm)", "Enter a finite v minimum."),
+    },
+    {
+      name: "vMaxMm",
+      ...numberField("v max (mm)", "Enter a finite v maximum."),
+    },
+  ];
+  const form = useFormedible<CreateSheetFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        datumId: datums[0]?.id ?? "",
+        uMinMm: 0,
+        uMaxMm: 30,
+        vMinMm: 0,
+        vMaxMm: 20,
+      },
+      onSubmit: ({ value }) => {
+        if (value.datumId.length === 0) return;
+        onCreateSheet({
+          datumId: createDatumId(value.datumId),
+          uMinMm: value.uMinMm,
+          uMaxMm: value.uMaxMm,
+          vMinMm: value.vMinMm,
+          vMaxMm: value.vMaxMm,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Create base sheet",
+  });
+  return (
+    <form.Form
+      aria-label="Create base sheet"
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the trim-surface form (Phase 49 surface tab). */
+export interface TrimSurfaceFormValues extends Record<string, unknown> {
+  readonly sheetId: string;
+  readonly toolId: string;
+  readonly keepInside: "1" | "0";
+}
+
+/** The surface tab's trim form: a target sheet, a tool sheet, a keep side. */
+export function TrimSurfaceForm({
+  sheets,
+  onTrim,
+}: {
+  readonly sheets: readonly SurfaceSheetOption[];
+  readonly onTrim: (submission: {
+    readonly sheetId: string;
+    readonly toolId: string;
+    readonly keepInside: 0 | 1;
+  }) => void;
+}): ReactElement {
+  const fields: readonly FormedibleFieldConfig<TrimSurfaceFormValues>[] = [
+    {
+      name: "sheetId",
+      required: true,
+      type: "select",
+      label: "Target sheet",
+      placeholder: "Pick the sheet to trim",
+      options: sheets.map((sheet) => ({ value: sheet.id, label: sheet.name })),
+      validation: (value) =>
+        typeof value === "string" && value.length > 0
+          ? null
+          : "Pick the sheet body to trim.",
+    },
+    {
+      name: "toolId",
+      required: true,
+      type: "select",
+      label: "Trimming tool sheet",
+      placeholder: "Pick the tool sheet",
+      options: sheets.map((sheet) => ({ value: sheet.id, label: sheet.name })),
+      validation: (value) =>
+        typeof value === "string" && value.length > 0
+          ? null
+          : "Pick the sheet body that trims.",
+    },
+    {
+      name: "keepInside",
+      required: true,
+      type: "select",
+      label: "Keep",
+      options: [
+        { value: "1", label: "Keep the tool's region (inside)" },
+        { value: "0", label: "Cut the tool's region away" },
+      ],
+      validation: (value) =>
+        value === "1" || value === "0" ? null : "Pick the keep side.",
+    },
+  ];
+  const form = useFormedible<TrimSurfaceFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        sheetId: sheets[0]?.id ?? "",
+        toolId: sheets[1]?.id ?? sheets[0]?.id ?? "",
+        keepInside: "1",
+      },
+      onSubmit: ({ value }) => {
+        if (value.sheetId.length === 0 || value.toolId.length === 0) return;
+        onTrim({
+          sheetId: value.sheetId,
+          toolId: value.toolId,
+          keepInside: value.keepInside === "1" ? 1 : 0,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Trim sheet",
+  });
+  return <form.Form aria-label="Trim sheet" className="space-y-3" noValidate />;
+}
+
+/** Form values of the thicken-surface form (Phase 49 surface tab). */
+export interface ThickenSurfaceFormValues extends Record<string, unknown> {
+  readonly sheetId: string;
+  readonly thicknessMm: number;
+  readonly side: "1" | "-1";
+}
+
+/** The surface tab's thicken form: a sheet, a wall thickness, a side. */
+export function ThickenSurfaceForm({
+  sheets,
+  onThickenSurface,
+}: {
+  readonly sheets: readonly SurfaceSheetOption[];
+  readonly onThickenSurface: (submission: {
+    readonly sheetId: string;
+    readonly thicknessMm: number;
+    readonly side: 1 | -1;
+  }) => void;
+}): ReactElement {
+  const fields: readonly FormedibleFieldConfig<ThickenSurfaceFormValues>[] = [
+    {
+      name: "sheetId",
+      required: true,
+      type: "select",
+      label: "Target sheet",
+      placeholder: "Pick the sheet to thicken",
+      options: sheets.map((sheet) => ({ value: sheet.id, label: sheet.name })),
+      validation: (value) =>
+        typeof value === "string" && value.length > 0
+          ? null
+          : "Pick the sheet body to thicken.",
+    },
+    {
+      name: "thicknessMm",
+      ...numberField("Thickness (mm)", "Enter a finite wall thickness."),
+    },
+    {
+      name: "side",
+      required: true,
+      type: "select",
+      label: "Side",
+      options: [
+        { value: "1", label: "Along the sheet's normals" },
+        { value: "-1", label: "Against the sheet's normals" },
+      ],
+      validation: (value) =>
+        value === "1" || value === "-1" ? null : "Pick the side.",
+    },
+  ];
+  const form = useFormedible<ThickenSurfaceFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        sheetId: sheets[0]?.id ?? "",
+        thicknessMm: 2,
+        side: "1",
+      },
+      onSubmit: ({ value }) => {
+        if (value.sheetId.length === 0) return;
+        onThickenSurface({
+          sheetId: value.sheetId,
+          thicknessMm: value.thicknessMm,
+          side: value.side === "1" ? 1 : -1,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Thicken sheet",
+  });
+  return (
+    <form.Form aria-label="Thicken sheet" className="space-y-3" noValidate />
+  );
+}
+
+/** Form values of the knit-surface form (Phase 49 surface tab). */
+export interface KnitSurfaceFormValues extends Record<string, unknown> {
+  readonly sheets: readonly { readonly sheetId: string }[];
+  readonly toleranceMm: number;
+}
+
+/** The surface tab's knit form: two or more sheets sewn at a tolerance. */
+export function KnitSurfaceForm({
+  sheets,
+  onKnit,
+}: {
+  readonly sheets: readonly SurfaceSheetOption[];
+  readonly onKnit: (submission: {
+    readonly sheetIds: readonly string[];
+    readonly toleranceMm: number;
+  }) => void;
+}): ReactElement {
+  const fields: readonly FormedibleFieldConfig<KnitSurfaceFormValues>[] = [
+    {
+      arrayConfig: {
+        addButtonLabel: "Add sheet",
+        defaultValue: { sheetId: sheets[0]?.id ?? "" },
+        itemLabel: "Sheet",
+        minItems: 2,
+        objectConfig: {
+          fields: [
+            {
+              name: "sheetId",
+              options: sheets.map((sheet) => ({
+                value: sheet.id,
+                label: sheet.name,
+              })),
+              placeholder: "Pick a sheet to sew",
+              required: true,
+              type: "select",
+              label: "Sheet",
+              validation: (value) =>
+                typeof value === "string" && value.length > 0
+                  ? null
+                  : "Pick the sheet body to sew.",
+            },
+          ],
+        },
+        sortable: true,
+      },
+      name: "sheets",
+      type: "array",
+      label: "Sheets to sew (in order)",
+    },
+    {
+      name: "toleranceMm",
+      ...numberField(
+        "Sewing tolerance (mm)",
+        "Enter a finite sewing tolerance.",
+      ),
+    },
+  ];
+  const first = sheets[0]?.id ?? "";
+  const second = sheets[1]?.id ?? sheets[0]?.id ?? "";
+  const form = useFormedible<KnitSurfaceFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        sheets: [{ sheetId: first }, { sheetId: second }],
+        toleranceMm: 0.001,
+      },
+      onSubmit: ({ value }) => {
+        if (value.sheets.some((sheet) => sheet.sheetId.length === 0)) return;
+        onKnit({
+          sheetIds: value.sheets.map((sheet) => sheet.sheetId),
+          toleranceMm: value.toleranceMm,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Knit sheets",
+  });
+  return (
+    <form.Form aria-label="Knit sheets" className="space-y-3" noValidate />
+  );
+}
+
+/** Form values of the offset-surface form (Phase 49 surface tab). */
+export interface OffsetSurfaceFormValues extends Record<string, unknown> {
+  readonly sheetId: string;
+  readonly distanceMm: number;
+}
+
+/** The surface tab's offset form: a sheet and a signed offset distance. */
+export function OffsetSurfaceForm({
+  sheets,
+  onOffset,
+}: {
+  readonly sheets: readonly SurfaceSheetOption[];
+  readonly onOffset: (submission: {
+    readonly sheetId: string;
+    readonly distanceMm: number;
+  }) => void;
+}): ReactElement {
+  const fields: readonly FormedibleFieldConfig<OffsetSurfaceFormValues>[] = [
+    {
+      name: "sheetId",
+      required: true,
+      type: "select",
+      label: "Target sheet",
+      placeholder: "Pick the sheet to offset",
+      options: sheets.map((sheet) => ({ value: sheet.id, label: sheet.name })),
+      validation: (value) =>
+        typeof value === "string" && value.length > 0
+          ? null
+          : "Pick the sheet body to offset.",
+    },
+    {
+      name: "distanceMm",
+      ...numberField(
+        "Offset distance (mm, signed)",
+        "Enter a finite, non-zero offset distance.",
+      ),
+    },
+  ];
+  const form = useFormedible<OffsetSurfaceFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        sheetId: sheets[0]?.id ?? "",
+        distanceMm: 5,
+      },
+      onSubmit: ({ value }) => {
+        if (value.sheetId.length === 0 || value.distanceMm === 0) return;
+        onOffset({
+          sheetId: value.sheetId,
+          distanceMm: value.distanceMm,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: "Offset sheet",
+  });
+  return (
+    <form.Form aria-label="Offset sheet" className="space-y-3" noValidate />
+  );
+}
+
 export function ScaleFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
   onScale,

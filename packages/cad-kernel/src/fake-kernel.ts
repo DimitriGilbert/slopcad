@@ -101,10 +101,21 @@ import {
   type IntersectionCurveInput,
   type ReplaceFaceInput,
   type SheetSurfaceInput,
+  type DeleteFaceKeepInput,
+  type SheetReplaceFaceInput,
+  type SheetThickenInput,
+  type SheetOffsetInput,
+  type SheetFillPatchInput,
+  type SheetUnstitchInput,
+  type SheetKnitInput,
+  type SheetExtendInput,
+  type SheetUntrimInput,
+  type SheetTrimInput,
   type ShellInput,
   type SectionFaceMeasure,
   type SectionInput,
   type SectionResult,
+  type DeleteFaceKeepResult,
   type SphereInput,
   type Tessellation,
   type ThickenInput,
@@ -235,6 +246,7 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   mirror: true,
   surfaceArea: true,
   sheets: false,
+  surfaceOps: false,
   localFaceOps: false,
   section: true,
   sweepWire: true,
@@ -4421,6 +4433,100 @@ export function createFakeKernel(): GeometryKernel {
         kernelError(
           KERNEL_ERROR_CODES.unsupportedOperation,
           "the fake kernel declined createSheet: the engine is closed-solid — its currency carries a volume and an inside, and an open sheet has neither (the sheets capability is false; the Phase 48 probe).",
+        ),
+      );
+    },
+    trimSheet(input: SheetTrimInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined trimSheet: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    untrimSheet(input: SheetUntrimInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined untrimSheet: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    extendSheet(input: SheetExtendInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined extendSheet: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    knit(input: SheetKnitInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined knit: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    unstitch(input: SheetUnstitchInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined unstitch: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    fillPatch(input: SheetFillPatchInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined fillPatch: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    offsetSheet(input: SheetOffsetInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined offsetSheet: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    thickenSheet(input: SheetThickenInput): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined thickenSheet: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    replaceFaceWithSheet(
+      input: SheetReplaceFaceInput,
+    ): KernelResult<KernelSolid> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined replaceFaceWithSheet: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
+        ),
+      );
+    },
+    deleteFaceKeepSurface(
+      input: DeleteFaceKeepInput,
+    ): KernelResult<DeleteFaceKeepResult> {
+      void input;
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "the fake kernel declined deleteFaceKeepSurface: the surface-operation family is OCCT-only on this stack — the engine's currency is closed solids and the Phase 49 surface scope ships no fake-model sheet route (the surfaceOps capability is false).",
         ),
       );
     },

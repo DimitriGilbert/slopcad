@@ -65,6 +65,7 @@ describe("createJscadKernel", () => {
       section: true,
       surfaceArea: true,
       sheets: false,
+      surfaceOps: false,
       localFaceOps: false,
       sweepWire: false,
       intersectionCurve: false,

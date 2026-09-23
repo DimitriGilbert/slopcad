@@ -30,6 +30,7 @@ import {
   documentThickenSceneRequest,
 } from "./scale-thicken";
 import { documentSplitSceneRequest } from "./split";
+import { documentSheetSceneRequest } from "./surface-scene";
 import {
   documentMirrorSceneRequest,
   documentPatternFeatureSceneRequest,
@@ -63,7 +64,8 @@ export type WorkbenchSceneKind =
   | "patternPath"
   | "mirror"
   | "hole"
-  | "curves";
+  | "curves"
+  | "sheet";
 
 /**
  * The highest scene the document still resolves, in the create actions'
@@ -74,6 +76,7 @@ export type WorkbenchSceneKind =
 export function highestResolvableScene(
   document: CadDocument,
 ): WorkbenchSceneKind {
+  if (documentSheetSceneRequest(document) !== null) return "sheet";
   if (documentHoleSceneRequest(document) !== null) return "hole";
   if (documentThreadSceneRequest(document) !== null) return "thread";
   if (documentMirrorSceneRequest(document) !== null) return "mirror";
@@ -115,32 +118,34 @@ export function honestSceneFallback(
     return document.curves.length > 0 ? null : highestResolvableScene(document);
   }
   const resolved =
-    activeScene === "hole"
-      ? documentHoleSceneRequest(document) !== null
-      : activeScene === "thread"
-        ? documentThreadSceneRequest(document) !== null
-        : activeScene === "mirror"
-          ? documentMirrorSceneRequest(document) !== null
-          : activeScene === "patternPath"
-            ? documentPatternPathSceneRequest(document) !== null
-            : activeScene === "patternFeature"
-              ? documentPatternFeatureSceneRequest(document) !== null
-              : activeScene === "split"
-                ? documentSplitSceneRequest(document) !== null
-                : activeScene === "thicken"
-                  ? documentThickenSceneRequest(document) !== null
-                  : activeScene === "scale"
-                    ? documentScaleSceneRequest(document) !== null
-                    : activeScene === "rib"
-                      ? documentRibSceneRequest(document) !== null
-                      : activeScene === "helix"
-                        ? documentHelixRequest(document) !== null
-                        : activeScene === "loft"
-                          ? documentLoftRequest(document) !== null
-                          : activeScene === "sweep"
-                            ? documentSweepRequest(document) !== null
-                            : activeScene === "revolve"
-                              ? documentRevolveRequest(document) !== null
-                              : documentExtrudeRequest(document) !== null;
+    activeScene === "sheet"
+      ? documentSheetSceneRequest(document) !== null
+      : activeScene === "hole"
+        ? documentHoleSceneRequest(document) !== null
+        : activeScene === "thread"
+          ? documentThreadSceneRequest(document) !== null
+          : activeScene === "mirror"
+            ? documentMirrorSceneRequest(document) !== null
+            : activeScene === "patternPath"
+              ? documentPatternPathSceneRequest(document) !== null
+              : activeScene === "patternFeature"
+                ? documentPatternFeatureSceneRequest(document) !== null
+                : activeScene === "split"
+                  ? documentSplitSceneRequest(document) !== null
+                  : activeScene === "thicken"
+                    ? documentThickenSceneRequest(document) !== null
+                    : activeScene === "scale"
+                      ? documentScaleSceneRequest(document) !== null
+                      : activeScene === "rib"
+                        ? documentRibSceneRequest(document) !== null
+                        : activeScene === "helix"
+                          ? documentHelixRequest(document) !== null
+                          : activeScene === "loft"
+                            ? documentLoftRequest(document) !== null
+                            : activeScene === "sweep"
+                              ? documentSweepRequest(document) !== null
+                              : activeScene === "revolve"
+                                ? documentRevolveRequest(document) !== null
+                                : documentExtrudeRequest(document) !== null;
   return resolved ? null : highestResolvableScene(document);
 }

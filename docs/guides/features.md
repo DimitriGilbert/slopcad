@@ -231,6 +231,38 @@ the contract `transform`'s own rotation, applied about the world-origin
 axis before the translation, gated on `transformRotation`. Absent pair
 = the plain translation, unchanged.
 
+## The surface features (Phases 48–49)
+
+Sheet bodies (the `body.create` command's `kind: "sheet"` marker) are
+OPEN shells — they measure area and bounds, tessellate, and render BOTH
+sides (`openShell` → DoubleSide), and every solid-consuming operation
+declines them structurally. The bridge interprets one sheet-building
+profile kind and the Phase 49 surface family (all OCCT-only, gated on
+the `sheets` + `surfaceOps` capability pair; other kernels answer the
+structured unsupported before any geometry):
+
+- `extrude-surface` (Phase 48) — a sketch profile swept into an open
+  wall set (one sketch input, one signed distance parameter).
+- `create-sheet` — a DATUM plane input, one DIMENSIONALLESS kind index
+  into `SHEET_SURFACE_KINDS` (plane 0, cylinder 1, cone 2, sphere 3,
+  torus 4), and the kind's own parameters (the plane kind: u/v bounds).
+- `trim-surface` — target SHEET, tool SHEET, keepInside (1 keeps the
+  tool's region, 0 cuts it away).
+- `thicken-surface` — sheet, thickness LENGTH, side (`+1`/`−1` along
+  the faces' carried normals); the product is a CLOSED solid.
+- `knit-surface` — two or more body operands, sewing tolerance LENGTH
+  (a boundary-consistent knit closes into a solid).
+- `offset-surface` — sheet, signed distance LENGTH.
+
+The workbench's surface tab authors the family through the COMMAND MENU
+only — the sheet verbs are the row's widest contextual group and every
+harness width is already spent, so no toolbar tier shows them without
+overflowing the engraved row budget (the e2e drives the menu path) — and
+the sheet scene executes the document's LAST surface feature through the
+worker matrix (`solid.createSheet` + `sheet.trim`/`sheet.thicken`/
+`sheet.knit`/`sheet.offset`) — an open sheet settles at volume 0 with its
+area in the measurement, the thicken solid at its analytic volume.
+
 ## Body management (Phase 44)
 
 Body records carry two display flags — `visible` (default true) and

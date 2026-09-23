@@ -32,7 +32,17 @@ import {
   type ProfileRevolveInput,
   type ProfileSweepInput,
   type ReplaceFaceInput,
+  type DeleteFaceKeepInput,
+  type SheetExtendInput,
+  type SheetFillPatchInput,
+  type SheetKnitInput,
+  type SheetOffsetInput,
+  type SheetReplaceFaceInput,
+  type SheetThickenInput,
+  type SheetTrimInput,
   type SheetSurfaceInput,
+  type SheetUnstitchInput,
+  type SheetUntrimInput,
   type ShellInput,
   type SphereInput,
   type ThickenInput,
@@ -73,6 +83,25 @@ export function withOperationLog(kernel: GeometryKernel): LoggedKernel {
       log("createCone", () => kernel.createCone(input)),
     createSheet: (input: SheetSurfaceInput) =>
       log("createSheet", () => kernel.createSheet(input)),
+    trimSheet: (input: SheetTrimInput) =>
+      log("trimSheet", () => kernel.trimSheet(input)),
+    untrimSheet: (input: SheetUntrimInput) =>
+      log("untrimSheet", () => kernel.untrimSheet(input)),
+    extendSheet: (input: SheetExtendInput) =>
+      log("extendSheet", () => kernel.extendSheet(input)),
+    knit: (input: SheetKnitInput) => log("knit", () => kernel.knit(input)),
+    unstitch: (input: SheetUnstitchInput) =>
+      log("unstitch", () => kernel.unstitch(input)),
+    fillPatch: (input: SheetFillPatchInput) =>
+      log("fillPatch", () => kernel.fillPatch(input)),
+    offsetSheet: (input: SheetOffsetInput) =>
+      log("offsetSheet", () => kernel.offsetSheet(input)),
+    thickenSheet: (input: SheetThickenInput) =>
+      log("thickenSheet", () => kernel.thickenSheet(input)),
+    replaceFaceWithSheet: (input: SheetReplaceFaceInput) =>
+      log("replaceFaceWithSheet", () => kernel.replaceFaceWithSheet(input)),
+    deleteFaceKeepSurface: (input: DeleteFaceKeepInput) =>
+      log("deleteFaceKeepSurface", () => kernel.deleteFaceKeepSurface(input)),
     extrude: (input: ProfileExtrudeInput) =>
       log("extrude", () => kernel.extrude(input)),
     revolve: (input: ProfileRevolveInput) =>

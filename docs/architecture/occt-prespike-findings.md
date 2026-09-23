@@ -364,3 +364,41 @@ the same 30×20×10 box's top face (ordinal 5 of the explorer order):
   the deferred route for curved sweepWire spines.
 - `ProjLib` is ABSENT outright — the projected-curve family is declined
   with this probe (the contract's pinned vocabulary carries forward).
+
+## Surfaces addendum (Phase 49 — probed before the surface-op scoping)
+
+The Phase 49 surface family rode the same probe-first discipline. The
+binding (`replicad-opencascadejs` 1.1.0, OCCT 8.0, single-thread build)
+findings, each exercised against the booted runtime:
+
+- `BRepBuilderAPI_MakeThickSolid.MakeThickSolidBySimple(S, offset)` is
+  bound and takes exactly an OPEN shell or face — the sheet-to-solid
+  thicken route. It answers a NEGATIVE measured volume when the result
+  orientation points inward (`Reversed()` re-orients; the geometry is
+  unchanged), and the wall side follows the offset's sign against the
+  faces' carried normals.
+- `BRepAlgoAPI_Common`/`Cut` on two open shells answer only when both
+  share a surface (the same-plane band trim). A shell Common against a
+  SOLID slab, or against another sheet on a DIFFERENT surface, answers
+  EMPTY on curved inputs — so the crossing trim rides
+  `BRepAlgoAPI_Splitter` (bound, cross-dimension: the tool FACE splits
+  the sheet; the kept side classifies per split face, then re-sews).
+- `BRepOffset_MakeOffset` is EXCLUDED from the binding (the
+  `BRepOffsetAPI_MakeOffsetShape` constructor drops it), so the general
+  offset/thicken-of-offset route is unavailable; `offsetSheet` rebuilds
+  each face over its own analytic surface instead (plane translated
+  along its normal, cylinder/sphere radius shifted, each exact — cone
+  and B-spline classes decline with the structured
+  `kernel/surface-offset-unsupported`; the cone's `BRepAdaptor_Surface.
+Cone()` accessor is untyped `unknown` on this binding).
+- `Geom_OffsetSurface`, `Geom_Plane`, `Geom_ToroidalSurface`, and
+  `BRepFeat_SplitShape` are absent; the five analytic patches build from
+  the `gp_*` primitives exactly as `createSheet` does (the Phase 48
+  probe, reused).
+- `BRepBuilderAPI_Sewing`, `BRepBuilderAPI_MakeSolid`,
+  `BRepOffsetAPI_MakeFilling` (the N-sided B-spline fill), `BRepTools.
+UVBounds`, `BRepExtrema_DistShapeShape`, and `GeomAPI_` projection are
+  bound and answered the knit/unstitch/fill/replace routes.
+- `deleteFace`'s Phase 44 probe-out carries: the delete-face-keep-surface
+  remainder therefore ships as the honest OPEN SHELL (a sheet body), not
+  a healed solid.

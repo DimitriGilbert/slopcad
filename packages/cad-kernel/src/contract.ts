@@ -287,6 +287,30 @@ export const KERNEL_ERROR_CODES = {
    * face with a fabricated centroid.
    */
   sectionEmpty: "kernel/section-empty",
+  /**
+   * A Phase 49 surface operation refused or failed on the `kernel/surface-*`
+   * family's own codes: the trim kept no region (`surface-trim-empty`), the
+   * extend/offset met an underlying surface class the operation honestly
+   * does not support (`surface-extend-unsupported`,
+   * `surface-offset-unsupported`), an extend delta or offset distance was
+   * degenerate (`surface-extend-invalid`, `surface-offset-failed`), sewing
+   * produced nothing usable (`surface-knit-failed`), the N-sided fill could
+   * not build its B-spline patch (`surface-patch-failed`), the sheet-to-
+   * solid thickening degenerated (`surface-thicken-failed`), or the
+   * replace-face covering precondition failed (`surface-replace-failed`).
+   * One family, one discipline: never a raw engine throw, never a silently
+   * wrong sheet.
+   */
+  surfaceUntrimUnsupported: "kernel/surface-untrim-unsupported",
+  surfaceTrimEmpty: "kernel/surface-trim-empty",
+  surfaceExtendUnsupported: "kernel/surface-extend-unsupported",
+  surfaceExtendInvalid: "kernel/surface-extend-invalid",
+  surfaceKnitFailed: "kernel/surface-knit-failed",
+  surfacePatchFailed: "kernel/surface-patch-failed",
+  surfaceOffsetUnsupported: "kernel/surface-offset-unsupported",
+  surfaceOffsetFailed: "kernel/surface-offset-failed",
+  surfaceThickenFailed: "kernel/surface-thicken-failed",
+  surfaceReplaceFailed: "kernel/surface-replace-failed",
   /** A handle was not minted by this kernel instance (foreign or forged). */
   solidNotOwned: "kernel/solid-not-owned",
   /** Bounds were requested of an empty solid, which has no bounding box. */
@@ -1961,6 +1985,131 @@ export const SHEET_SURFACE_KINDS = [
 
 export type SheetSurfaceKind = (typeof SHEET_SURFACE_KINDS)[number];
 
+/** The input of `trimSheet` (Phase 49): a sheet and the trimming tool. */
+export interface SheetTrimInput {
+  /** The sheet body the trim reshapes. */
+  readonly sheet: KernelSolid;
+  /**
+   * The trimming tool: a second SHEET (or a planar patch — `createSheet`'s
+   * `plane` kind is a sheet like any other). The tool's region bounds what
+   * the trim keeps or removes.
+   */
+  readonly tool: KernelSolid;
+  /**
+   * `true` keeps the sheet's region INSIDE the tool's region (the common
+   * composition); `false` cuts the tool's region away.
+   */
+  readonly keepInside: boolean;
+}
+
+/** The input of `untrimSheet` (Phase 49): restore natural bounds. */
+export interface SheetUntrimInput {
+  /** The sheet body whose trims are discarded. */
+  readonly sheet: KernelSolid;
+}
+
+/** The input of `extendSheet` (Phase 49): grow the patch outward. */
+export interface SheetExtendInput {
+  /** The sheet body to extend. */
+  readonly sheet: KernelSolid;
+  /** Outward growth in millimetres on each u side (strictly positive). */
+  readonly uDelta: LengthValue;
+  /** Outward growth in millimetres on each v side (strictly positive). */
+  readonly vDelta: LengthValue;
+}
+
+/** The input of `knit` (Phase 49): sew sheets (and solids) together. */
+export interface SheetKnitInput {
+  /**
+   * The operands: at least one, each a sheet or a solid — the sheet+solid
+   * sew case feeds every face of every operand into one seam pass.
+   */
+  readonly bodies: readonly KernelSolid[];
+  /** The sewing tolerance in millimetres (strictly positive). */
+  readonly tolerance: LengthValue;
+}
+
+/** The input of `unstitch` (Phase 49): explode to free faces. */
+export interface SheetUnstitchInput {
+  /** The sheet (or solid) body exploded into its faces. */
+  readonly body: KernelSolid;
+}
+
+/** The input of `fillPatch` (Phase 49): one N-sided B-spline patch. */
+export interface SheetFillPatchInput {
+  /**
+   * The closed boundary loop, in the profile loop vocabulary (the same
+   * segment set `extrude` profiles on), placed by the same
+   * rotation-then-translation composition.
+   */
+  readonly loop: ProfileExtrudeInput["loop"];
+  /** The boundary wire's local frame. */
+  readonly placement: ProfilePlacementInput;
+}
+
+/** The input of `offsetSheet` (Phase 49): move the surface, keep it open. */
+export interface SheetOffsetInput {
+  /** The sheet body offset. */
+  readonly sheet: KernelSolid;
+  /**
+   * The signed offset distance in millimetres: positive along the faces'
+   * normals, negative against them. A distance that inverts the surface
+   * (a cylinder's radius driven non-positive, a torus's tube collapsing)
+   * is the structured `surface-offset-failed` refusal.
+   */
+  readonly distance: LengthValue;
+}
+
+/** The input of `thickenSheet` (Phase 49): sheet to solid. */
+export interface SheetThickenInput {
+  /** The sheet body thickened into a solid. */
+  readonly sheet: KernelSolid;
+  /** The wall thickness in millimetres (strictly positive). */
+  readonly thickness: LengthValue;
+  /**
+   * Which side of the sheet gains the wall: `+1` along the faces'
+   * carried normals, `−1` against them (the `section` keep-side
+   * convention).
+   */
+  readonly side: 1 | -1;
+}
+
+/** The input of `replaceFaceWithSheet` (Phase 49). */
+export interface SheetReplaceFaceInput {
+  /** The solid whose face is replaced. */
+  readonly target: KernelSolid;
+  /** The topology-snapshot face ordinal the sheet replaces. */
+  readonly face: number;
+  /**
+   * The sheet that becomes the new face. It must COVER the addressed
+   * face's region: every vertex and the face's centroid must project onto
+   * the sheet within tolerance — otherwise the structured
+   * `surface-replace-failed` refusal.
+   */
+  readonly sheet: KernelSolid;
+}
+
+/** The input of `deleteFaceKeepSurface` (Phase 49). */
+export interface DeleteFaceKeepInput {
+  /** The solid whose face is extracted. */
+  readonly target: KernelSolid;
+  /** The topology-snapshot face ordinal to extract. */
+  readonly face: number;
+}
+
+/**
+ * The result of `deleteFaceKeepSurface`: the target MINUS the face
+ * (an open shell — the contract's sheet kind: the heal route is probed
+ * out on this binding, see `deleteFace`'s own honesty note) plus the
+ * extracted face as a standalone sheet body.
+ */
+export interface DeleteFaceKeepResult {
+  /** The remainder shell as a sheet body. */
+  readonly remainder: KernelSolid;
+  /** The extracted face as a sheet body. */
+  readonly face: KernelSolid;
+}
+
 /**
  * An axis-aligned bounding box in canonical millimetres. Tight for
  * primitives, and for boolean results a *container* whose tightness is
@@ -2039,6 +2188,41 @@ export interface GeometryKernel {
    * structurally (an open shell bounds no material).
    */
   createSheet(input: SheetSurfaceInput): KernelResult<KernelSolid>;
+
+  /** Trims a sheet by a tool sheet's region — see {@link SheetTrimInput}. */
+  trimSheet(input: SheetTrimInput): KernelResult<KernelSolid>;
+
+  /**
+   * Restores a sheet's faces to their underlying surfaces' natural bounds
+   * — see {@link SheetUntrimInput}.
+   */
+  untrimSheet(input: SheetUntrimInput): KernelResult<KernelSolid>;
+
+  /** Extends a sheet outward by u/v deltas — see {@link SheetExtendInput}. */
+  extendSheet(input: SheetExtendInput): KernelResult<KernelSolid>;
+
+  /** Sew sheets (and solids) into one body — see {@link SheetKnitInput}. */
+  knit(input: SheetKnitInput): KernelResult<KernelSolid>;
+
+  /** Explodes a body into its free faces — see {@link SheetUnstitchInput}. */
+  unstitch(input: SheetUnstitchInput): KernelResult<KernelSolid>;
+
+  /** Fills one closed loop with a B-spline patch — see {@link SheetFillPatchInput}. */
+  fillPatch(input: SheetFillPatchInput): KernelResult<KernelSolid>;
+
+  /** Offsets a sheet's surface, keeping it open — see {@link SheetOffsetInput}. */
+  offsetSheet(input: SheetOffsetInput): KernelResult<KernelSolid>;
+
+  /** Thickens a sheet into a solid — see {@link SheetThickenInput}. */
+  thickenSheet(input: SheetThickenInput): KernelResult<KernelSolid>;
+
+  /** Replaces a solid face with a sheet — see {@link SheetReplaceFaceInput}. */
+  replaceFaceWithSheet(input: SheetReplaceFaceInput): KernelResult<KernelSolid>;
+
+  /** Extracts a solid's face as a sheet — see {@link DeleteFaceKeepInput}. */
+  deleteFaceKeepSurface(
+    input: DeleteFaceKeepInput,
+  ): KernelResult<DeleteFaceKeepResult>;
 
   /**
    * Extrudes one closed profile loop into a prismatic solid (Phase 26.1):

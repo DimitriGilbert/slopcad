@@ -36,6 +36,7 @@ import { describe, expect, it } from "vitest";
 import { angle, length } from "@slopcad/cad-core";
 import type { AngleValue, LengthValue } from "@slopcad/cad-core";
 import type { KernelCapabilities } from "./capabilities";
+import type { KernelSolid } from "./contract";
 
 import {
   type GeometryKernel,
@@ -3182,6 +3183,286 @@ export function defineKernelContractSuite(
           KERNEL_ERROR_CODES.unsupportedOperation,
           "sheet union operand",
         );
+      }
+    });
+
+    it("gates the Phase 49 surface family per kernel: declines on surfaceOps:false, answers the analytic fixtures on the surface kernel", () => {
+      // The Phase 49 cross-kernel discipline: fake, Manifold, and JSCAD
+      // answer every surface-family entry with the structured
+      // unsupported code (their engines carry closed solids; sheets are
+      // already declined upstream). The spec feeds a FOREIGN handle —
+      // the declining kernels refuse before any handle resolution, so
+      // the structured code is observable without a sheet currency. On
+      // the surface kernel the same entries answer analytic fixtures.
+      const kernel = createKernel();
+      const foreign = createKernel();
+      const handle = unwrapKernelResult(
+        foreign.createBox({
+          width: length(5),
+          depth: length(5),
+          height: length(5),
+        }),
+        "foreign box",
+      );
+      if (!kernel.capabilities.surfaceOps) {
+        expectKernelFailure(
+          kernel.trimSheet({ sheet: handle, tool: handle, keepInside: true }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "trimSheet",
+        );
+        expectKernelFailure(
+          kernel.untrimSheet({ sheet: handle }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "untrimSheet",
+        );
+        expectKernelFailure(
+          kernel.extendSheet({
+            sheet: handle,
+            uDelta: length(1),
+            vDelta: length(1),
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "extendSheet",
+        );
+        expectKernelFailure(
+          kernel.knit({ bodies: [handle], tolerance: length(0.001) }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "knit",
+        );
+        expectKernelFailure(
+          kernel.unstitch({ body: handle }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "unstitch",
+        );
+        expectKernelFailure(
+          kernel.fillPatch({
+            loop: [
+              { kind: "line", start: [0, 0], end: [10, 0] },
+              { kind: "line", start: [10, 0], end: [10, 10] },
+              { kind: "line", start: [10, 10], end: [0, 10] },
+              { kind: "line", start: [0, 10], end: [0, 0] },
+            ],
+            placement: {
+              rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+              translation: { x: length(0), y: length(0), z: length(0) },
+            },
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "fillPatch",
+        );
+        expectKernelFailure(
+          kernel.offsetSheet({ sheet: handle, distance: length(2) }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "offsetSheet",
+        );
+        expectKernelFailure(
+          kernel.thickenSheet({ sheet: handle, thickness: length(2), side: 1 }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "thickenSheet",
+        );
+        expectKernelFailure(
+          kernel.replaceFaceWithSheet({
+            target: handle,
+            face: 0,
+            sheet: handle,
+          }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "replaceFaceWithSheet",
+        );
+        expectKernelFailure(
+          kernel.deleteFaceKeepSurface({ target: handle, face: 0 }),
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "deleteFaceKeepSurface",
+        );
+        return;
+      }
+      // The surface kernel: analytic fixtures at the exact band. The
+      // base sheet is a 10 x 10 plane patch on z = 0 (faces carry +z
+      // normals, the createSheet convention).
+      const zeroPlacement = {
+        rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+        translation: { x: length(0), y: length(0), z: length(0) },
+      };
+      const planeSheet = (): KernelSolid =>
+        unwrapKernelResult(
+          kernel.createSheet({
+            kind: "plane",
+            placement: zeroPlacement,
+            uMin: length(0),
+            uMax: length(10),
+            vMin: length(0),
+            vMax: length(10),
+          }),
+          "base plane sheet",
+        );
+      // trim: the kept region's area is exact (Common with a half-plane
+      // tool over the same frame keeps u in [0, 5] — 50 mm²).
+      const trimTool = unwrapKernelResult(
+        kernel.createSheet({
+          kind: "plane",
+          placement: zeroPlacement,
+          uMin: length(0),
+          uMax: length(5),
+          vMin: length(-100),
+          vMax: length(100),
+        }),
+        "trim tool",
+      );
+      const trimmed = unwrapKernelResult(
+        kernel.trimSheet({
+          sheet: planeSheet(),
+          tool: trimTool,
+          keepInside: true,
+        }),
+        "trim",
+      );
+      expect(unwrapKernelResult(kernel.area(trimmed), "trim area")).toBeCloseTo(
+        50,
+        9,
+      );
+      // extend: 10 x 10 grown by 5 on each u side — 20 x 10 = 200 mm².
+      const extended = unwrapKernelResult(
+        kernel.extendSheet({
+          sheet: planeSheet(),
+          uDelta: length(5),
+          vDelta: length(1),
+        }),
+        "extend",
+      );
+      expect(
+        unwrapKernelResult(kernel.area(extended), "extend area"),
+      ).toBeCloseTo(240, 9);
+      // unstitch: the face soup preserves total area and stays a sheet
+      // (volume declines structurally).
+      const box10 = box(kernel, 10, 10, 10);
+      const faces = unwrapKernelResult(
+        kernel.unstitch({ body: box10 }),
+        "unstitch",
+      );
+      expect(
+        unwrapKernelResult(kernel.area(faces), "unstitch area"),
+      ).toBeCloseTo(600, 9);
+      expectKernelFailure(
+        kernel.volume(faces),
+        KERNEL_ERROR_CODES.unsupportedOperation,
+        "unstitched soup volume",
+      );
+      // knit: sewing a solid's own face soup re-closes the volume — the
+      // knit-closure fixture (volume becomes measurable again).
+      const knit = unwrapKernelResult(
+        kernel.knit({ bodies: [faces], tolerance: length(0.001) }),
+        "knit closure",
+      );
+      expect(
+        unwrapKernelResult(kernel.volume(knit), "knit volume"),
+      ).toBeCloseTo(1000, 9);
+      // offset: the plane patch moves to z = 3, same area.
+      const offset = unwrapKernelResult(
+        kernel.offsetSheet({ sheet: planeSheet(), distance: length(3) }),
+        "offset",
+      );
+      const offsetBounds = unwrapKernelResult(
+        kernel.bounds(offset),
+        "offset bounds",
+      );
+      expect(offsetBounds.min[2]).toBeCloseTo(3, 9);
+      expect(offsetBounds.max[2]).toBeCloseTo(3, 9);
+      expect(
+        unwrapKernelResult(kernel.area(offset), "offset area"),
+      ).toBeCloseTo(100, 9);
+      // thicken: 100 mm² x 2 mm walls = 200 mm³, measurable (a solid now).
+      const thickened = unwrapKernelResult(
+        kernel.thickenSheet({
+          sheet: planeSheet(),
+          thickness: length(2),
+          side: 1,
+        }),
+        "thicken",
+      );
+      expect(
+        unwrapKernelResult(kernel.volume(thickened), "thicken volume"),
+      ).toBeCloseTo(200, 9);
+      // fillPatch: the B-spline patch over a 10 x 10 boundary loop lands
+      // on the planar area at the documented approximation band (the
+      // patch's surface is a B-spline, not the exact plane — the honest
+      // band, not the exact band).
+      const patch = unwrapKernelResult(
+        kernel.fillPatch({
+          loop: [
+            { kind: "line", start: [0, 0], end: [10, 0] },
+            { kind: "line", start: [10, 0], end: [10, 10] },
+            { kind: "line", start: [10, 10], end: [0, 10] },
+            { kind: "line", start: [0, 10], end: [0, 0] },
+          ],
+          placement: zeroPlacement,
+        }),
+        "fill patch",
+      );
+      const patchArea = unwrapKernelResult(kernel.area(patch), "patch area");
+      expect(patchArea).toBeGreaterThan(99);
+      expect(patchArea).toBeLessThan(101);
+      // untrim: the finite-natural-bounds class (sphere) restores the
+      // full 4πr² area.
+      const spherePatch = unwrapKernelResult(
+        kernel.createSheet({
+          kind: "sphere",
+          placement: zeroPlacement,
+          radius: length(10),
+          vMin: angle(Math.PI / 4),
+          vMax: angle(Math.PI / 2),
+          uSweep: angle(Math.PI / 2),
+        }),
+        "sphere patch",
+      );
+      const untrimmed = unwrapKernelResult(
+        kernel.untrimSheet({ sheet: spherePatch }),
+        "untrim",
+      );
+      expect(
+        unwrapKernelResult(kernel.area(untrimmed), "untrim area"),
+      ).toBeCloseTo(4 * Math.PI * 100, 9);
+      // The face-addressed pair rides the suite's local-face hints.
+      if (localFaceHint !== undefined) {
+        const target = box(kernel, 10, 10, 10);
+        // delete-face-keep-surface: the extracted face is a 100 mm²
+        // sheet, the remainder an open shell of 500 mm².
+        const keep = unwrapKernelResult(
+          kernel.deleteFaceKeepSurface({ target, face: localFaceHint.topFace }),
+          "delete keep",
+        );
+        expect(
+          unwrapKernelResult(kernel.area(keep.face), "kept face area"),
+        ).toBeCloseTo(100, 9);
+        expect(
+          unwrapKernelResult(kernel.area(keep.remainder), "remainder area"),
+        ).toBeCloseTo(500, 9);
+        // replace-face-with-sheet: a coplanar sheet at z = 9 replaces the
+        // box's top — the cut removes the z in [9, 10] slab (900 mm³ left).
+        const cover = unwrapKernelResult(
+          kernel.createSheet({
+            kind: "plane",
+            placement: {
+              rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+              translation: { x: length(0), y: length(0), z: length(9) },
+            },
+            uMin: length(-50),
+            uMax: length(50),
+            vMin: length(-50),
+            vMax: length(50),
+          }),
+          "cover sheet",
+        );
+        const replaced = unwrapKernelResult(
+          kernel.replaceFaceWithSheet({
+            target: box(kernel, 10, 10, 10),
+            face: localFaceHint.topFace,
+            sheet: cover,
+          }),
+          "replace face",
+        );
+        expect(
+          unwrapKernelResult(kernel.volume(replaced), "replaced volume"),
+        ).toBeCloseTo(900, 9);
       }
     });
 

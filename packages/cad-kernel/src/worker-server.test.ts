@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   createBodyId,
   length,
+  ok,
   type BodyId,
   type ParseResult,
   type TopologySnapshot,
@@ -22,7 +23,14 @@ import type {
   WorkerErrorResponseMessage,
   WorkerSuccessResponseMessage,
 } from "./worker-protocol";
-import type { GeometryKernel, KernelSolid } from "./contract";
+import type {
+  GeometryKernel,
+  KernelSolid,
+  SheetKnitInput,
+  SheetOffsetInput,
+  SheetThickenInput,
+  SheetTrimInput,
+} from "./contract";
 
 import { KERNEL_ERROR_CODES } from "./contract";
 import { createFakeKernel } from "./fake-kernel";
@@ -1588,6 +1596,270 @@ describe("the solid.mirror operation (Phase 26.9)", () => {
     await flush();
     expect(successResponseAt(harness.responses, 2).result).toEqual({
       solid: "wsol_000002",
+    });
+  });
+});
+
+describe("the Phase 49 sheet-family dispatch", () => {
+  /**
+   * The sheet-op harness: the fake kernel with every `sheet.*` operation
+   * answered by a stand-in handle while RECORDING the kernel-level
+   * arguments (operand handles included — identity against the minted
+   * handles proves the session resolved the ids), plus the minted
+   * createBox handles in delivery order. The fake kernel's own sheet ops
+   * decline (capability surfaceOps is false); the overrides answer, the
+   * same stand-in discipline the bridge's surface tests ride.
+   */
+  function sheetHarness() {
+    const base = createFakeKernel();
+    const mintedBoxHandles: KernelSolid[] = [];
+    const seen: {
+      readonly trim: SheetTrimInput[];
+      thicken: SheetThickenInput | undefined;
+      knit: SheetKnitInput | undefined;
+      offset: SheetOffsetInput | undefined;
+    } = { trim: [], thicken: undefined, knit: undefined, offset: undefined };
+    const standIn = (): KernelSolid => {
+      const box = base.createBox({
+        width: mm(1),
+        depth: mm(1),
+        height: mm(1),
+      });
+      if (!box.ok) throw new Error(box.error.message);
+      return box.value;
+    };
+    const kernel: GeometryKernel = {
+      ...base,
+      createBox: (input) => {
+        const result = base.createBox(input);
+        if (result.ok) mintedBoxHandles.push(result.value);
+        return result;
+      },
+      trimSheet: (input) => {
+        seen.trim.push(input);
+        return ok(standIn());
+      },
+      thickenSheet: (input) => {
+        seen.thicken = input;
+        return ok(standIn());
+      },
+      knit: (input) => {
+        seen.knit = input;
+        return ok(standIn());
+      },
+      offsetSheet: (input) => {
+        seen.offset = input;
+        return ok(standIn());
+      },
+    };
+    const pair = createInMemoryTransportPair();
+    createWorkerServer({ kernel, transport: pair.server });
+    const responses: unknown[] = [];
+    pair.client.onMessage((data) => responses.push(data));
+    return {
+      responses,
+      mintedBoxHandles,
+      seen,
+      send: (data: unknown) => pair.client.send(data),
+    };
+  }
+
+  /** Sends one wire request against the harness's server. */
+  function request(
+    harness: ReturnType<typeof sheetHarness>,
+    requestId: string,
+    operation: "sheet.trim" | "sheet.thicken" | "sheet.knit" | "sheet.offset",
+    input: unknown,
+  ): void {
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId,
+      operation,
+      input,
+    });
+  }
+
+  /** Mints `count` session solids (wsol_000001…), at the wire level. */
+  async function mintBoxes(
+    harness: ReturnType<typeof sheetHarness>,
+    count: number,
+  ): Promise<void> {
+    for (let index = 0; index < count; index += 1) {
+      harness.send({
+        protocolVersion: 1,
+        kind: "request",
+        requestId: `req_box_${String(index + 1)}`,
+        operation: "solid.createBox",
+        input: boxWireInput,
+      });
+    }
+    await flush();
+  }
+
+  it("answers sheet.trim resolving both operands to their minted handles and mints the trimmed solid", async () => {
+    const harness = sheetHarness();
+    // The two operands: two minted session solids.
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000001",
+      operation: "solid.createBox",
+      input: boxWireInput,
+    });
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000002",
+      operation: "solid.createBox",
+      input: boxWireInput,
+    });
+    await flush();
+    expect(successResponseAt(harness.responses, 1).result).toEqual({
+      solid: "wsol_000002",
+    });
+
+    request(harness, "req_000003", "sheet.trim", {
+      sheet: "wsol_000001",
+      tool: "wsol_999999",
+      keepInside: true,
+    });
+    await flush();
+    // The unknown TOOL fails the dispatch before any kernel trim runs.
+    expect(harness.seen.trim).toHaveLength(0);
+    expect(errorResponseAt(harness.responses, 2).error.data).toEqual({
+      kernelCode: KERNEL_ERROR_CODES.solidNotOwned,
+    });
+
+    request(harness, "req_000004", "sheet.trim", {
+      sheet: "wsol_000001",
+      tool: "wsol_000002",
+      keepInside: true,
+    });
+    await flush();
+    expect(successResponseAt(harness.responses, 3).result).toEqual({
+      solid: "wsol_000003",
+    });
+    const trim = harness.seen.trim[0];
+    expect(trim?.keepInside).toBe(true);
+    // Operand resolution: the wire ids became the minted kernel handles.
+    expect(trim?.sheet).toBe(harness.mintedBoxHandles[0]);
+    expect(trim?.tool).toBe(harness.mintedBoxHandles[1]);
+
+    request(harness, "req_000005", "sheet.trim", {
+      sheet: "wsol_000002",
+      tool: "wsol_000001",
+      keepInside: false,
+    });
+    await flush();
+    expect(successResponseAt(harness.responses, 4).result).toEqual({
+      solid: "wsol_000004",
+    });
+    expect(harness.seen.trim[1]?.keepInside).toBe(false);
+  });
+
+  it("answers sheet.thicken with the parsed thickness and side, minting one solid", async () => {
+    const harness = sheetHarness();
+    await mintBoxes(harness, 1);
+    request(harness, "req_000001", "sheet.thicken", {
+      sheet: "wsol_000001",
+      thickness: mmWire(2),
+      side: -1,
+    });
+    await flush();
+    expect(successResponseAt(harness.responses, 1).result).toEqual({
+      solid: "wsol_000002",
+    });
+    expect(harness.seen.thicken?.sheet).toBe(harness.mintedBoxHandles[0]);
+    expect(harness.seen.thicken?.thickness.value).toBe(2);
+    expect(harness.seen.thicken?.side).toBe(-1);
+  });
+
+  it("answers sheet.knit with every operand handle in order", async () => {
+    const harness = sheetHarness();
+    await mintBoxes(harness, 2);
+    request(harness, "req_000001", "sheet.knit", {
+      bodies: ["wsol_000001", "wsol_000002"],
+      tolerance: mmWire(0.001),
+    });
+    await flush();
+    expect(successResponseAt(harness.responses, 2).result).toEqual({
+      solid: "wsol_000003",
+    });
+    expect(harness.seen.knit?.bodies).toEqual([
+      harness.mintedBoxHandles[0],
+      harness.mintedBoxHandles[1],
+    ]);
+    expect(harness.seen.knit?.tolerance.value).toBe(0.001);
+  });
+
+  it("answers sheet.offset with the signed distance verbatim", async () => {
+    const harness = sheetHarness();
+    await mintBoxes(harness, 1);
+    request(harness, "req_000001", "sheet.offset", {
+      sheet: "wsol_000001",
+      distance: mmWire(-3),
+    });
+    await flush();
+    expect(successResponseAt(harness.responses, 1).result).toEqual({
+      solid: "wsol_000002",
+    });
+    expect(harness.seen.offset?.sheet).toBe(harness.mintedBoxHandles[0]);
+    expect(harness.seen.offset?.distance.value).toBe(-3);
+  });
+
+  it("fails an unknown operand for every sheet op with solid-not-owned and mints nothing", async () => {
+    const harness = sheetHarness();
+    const unknown: readonly (
+      "sheet.trim" | "sheet.thicken" | "sheet.knit" | "sheet.offset"
+    )[] = ["sheet.trim", "sheet.thicken", "sheet.knit", "sheet.offset"];
+    const inputs: Record<string, unknown> = {
+      "sheet.trim": {
+        sheet: "wsol_999999",
+        tool: "wsol_999998",
+        keepInside: true,
+      },
+      "sheet.thicken": {
+        sheet: "wsol_999999",
+        thickness: mmWire(2),
+        side: 1,
+      },
+      "sheet.knit": {
+        bodies: ["wsol_999999", "wsol_999998"],
+        tolerance: mmWire(0.001),
+      },
+      "sheet.offset": { sheet: "wsol_999999", distance: mmWire(3) },
+    };
+    for (const [index, operation] of unknown.entries()) {
+      request(
+        harness,
+        `req_${String(index + 1).padStart(6, "0")}`,
+        operation,
+        inputs[operation],
+      );
+      await flush();
+      const response = errorResponseAt(harness.responses, index);
+      expect(response.error.code).toBe("worker/operation-failed");
+      expect(response.error.data).toEqual({
+        kernelCode: KERNEL_ERROR_CODES.solidNotOwned,
+      });
+    }
+    // Every refusal consumed no id: the session's FIRST minted solid is
+    // still id one.
+    expect(harness.seen.trim).toHaveLength(0);
+    expect(harness.seen.thicken).toBeUndefined();
+    expect(harness.seen.knit).toBeUndefined();
+    expect(harness.seen.offset).toBeUndefined();
+    harness.send({
+      protocolVersion: 1,
+      kind: "request",
+      requestId: "req_000005",
+      operation: "solid.createBox",
+      input: boxWireInput,
+    });
+    await flush();
+    expect(successResponseAt(harness.responses, 4).result).toEqual({
+      solid: "wsol_000001",
     });
   });
 });

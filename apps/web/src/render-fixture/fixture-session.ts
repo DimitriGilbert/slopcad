@@ -45,6 +45,7 @@ import type {
 } from "../cad-workbench/pattern";
 import type { BooleanSceneRequest } from "../cad-workbench/boolean";
 import type { MoveBodySceneRequest } from "../cad-workbench/move-body";
+import type { SheetSceneRequest } from "../cad-workbench/surface-scene";
 
 import {
   computePlateRenderState,
@@ -75,6 +76,10 @@ import {
   computeBooleanScene,
   computeMoveBodyScene,
 } from "../worker-fixture/body-ops-scenes";
+import {
+  computeSheetScene,
+  sheetRenderState,
+} from "../worker-fixture/sheet-scene";
 
 /** The fixtures' fixed viewport, in CSS pixels — the scene camera spec is
  * authored for exactly this size (and the scene runs at dpr 1), which is
@@ -165,6 +170,17 @@ export interface RenderFixtureSession {
    * `kernel/unsupported-operation` lands on the error surface.
    */
   dispatchThicken(request: ThickenSceneRequest, bodyId: string): void;
+  /**
+   * Dispatches the Phase 49 sheet computation: the REAL kernel evaluates
+   * the surface-family feature's rebuild plan in the worker — the base
+   * patch through `solid.createSheet`, the sheet-consuming family through
+   * `sheet.trim`/`sheet.thicken`/`sheet.knit`/`sheet.offset` — and the
+   * settled body's measurement + projection become the visible scene (an
+   * open shell renders BOTH sides). On a kernel without the surfaceOps
+   * capability the structured `kernel/unsupported-operation` lands on the
+   * error surface.
+   */
+  dispatchSheet(request: SheetSceneRequest, bodyId: string): void;
   /**
    * Dispatches the Phase 41 split computation: the REAL kernel composes
    * the base extrusion, the bridge's planned covering-box tool, and the
@@ -366,7 +382,8 @@ export type FeatureSceneKind =
   | "patternPath"
   | "mirror"
   | "hole"
-  | "pad";
+  | "pad"
+  | "sheet";
 
 /**
  * One feature-backed scene dispatch's worker verdict — the seam a host uses
@@ -746,6 +763,19 @@ export function bootRenderFixtureSession(
         .then(
           settleWithVerdict("thicken", bodyId),
           failWithVerdict("thicken", bodyId),
+        );
+    },
+    dispatchSheet(request: SheetSceneRequest, bodyId: string): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          sheetRenderState(await computeSheetScene(context, request), bodyId),
+        )
+        .then(
+          settleWithVerdict("sheet", bodyId),
+          failWithVerdict("sheet", bodyId),
         );
     },
     dispatchSplit(request: SplitSceneRequest, bodyId: string): void {
