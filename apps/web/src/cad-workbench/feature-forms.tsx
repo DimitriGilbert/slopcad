@@ -31,6 +31,11 @@ import {
 } from "@slopcad/cad-kernel";
 
 import { LOFT_DEFAULT_STATION_STEP_MM, type LoftSectionChoice } from "./loft";
+import {
+  CURVE_DEFAULTS,
+  CURVE_FORM_FIELDS,
+  type CurveAuthoring,
+} from "./curves";
 import { BOOLEAN_DEFAULTS, type BooleanOperation } from "./boolean";
 import { MOVE_BODY_DEFAULTS } from "./move-body";
 import { HELIX_DEFAULTS } from "./helix";
@@ -645,6 +650,85 @@ export function DatumFeatureForm({
                     normal,
                   };
         onCreateDatum(payload);
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form aria-label={labels.title} className="space-y-3" noValidate />
+  );
+}
+
+/** Form values of the curve form — the curve module's authoring shape. */
+export interface CurveFormValues
+  extends Record<string, unknown>, CurveAuthoring {}
+
+/** Labels of the curve form (overridable via props). */
+export interface CurveFormLabels {
+  readonly title: string;
+  readonly hint: string;
+  readonly submit: string;
+}
+
+/** Documented label defaults; every form-authored string lives here. */
+export const CURVE_FORM_LABELS: CurveFormLabels = {
+  title: "Create a 3D curve",
+  hint: "A named curve entity the document keeps: an interpolated spline through points, a control-point spline, a helix, or an equation curve — sweeps can address it as a spine.",
+  submit: "Create curve",
+};
+
+/**
+ * The Phase 47 curve creation form: the curve module's own field list
+ * (`CURVE_FORM_FIELDS` — the single source of truth for what the authoring
+ * surface collects) mapped onto Formedible field configs. Every field is
+ * visible; the curve-kind select decides which ones the payload consumes,
+ * and submission routes through the engine's curve action, which re-runs
+ * the module's authoring validators before anything commits (the same
+ * validation seam every create action rides).
+ */
+export function CurveFeatureForm({
+  labels: labelOverrides = CURVE_FORM_LABELS,
+  onCreateCurve,
+}: {
+  readonly labels?: CurveFormLabels;
+  readonly onCreateCurve: (authoring: CurveAuthoring) => void;
+}): ReactElement {
+  const labels = { ...CURVE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<CurveFormValues>[] =
+    CURVE_FORM_FIELDS.map((field) => ({
+      name: field.name,
+      label: field.label,
+      required: field.name === "name" || field.name === "kind",
+      type:
+        field.kind === "multiline"
+          ? ("textarea" as const)
+          : field.kind === "select"
+            ? ("select" as const)
+            : ("text" as const),
+      ...(field.kind === "select" && "options" in field
+        ? { options: [...field.options] as readonly string[] }
+        : {}),
+    }));
+  const form = useFormedible<CurveFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: { ...CURVE_DEFAULTS },
+      onSubmit: ({ value }) => {
+        onCreateCurve({
+          name: value.name,
+          kind: value.kind,
+          pointsText: value.pointsText,
+          helixRadius: value.helixRadius,
+          helixPitch: value.helixPitch,
+          helixTurns: value.helixTurns,
+          helixHandedness: value.helixHandedness,
+          tMin: value.tMin,
+          tMax: value.tMax,
+          xExpression: value.xExpression,
+          yExpression: value.yExpression,
+          zExpression: value.zExpression,
+        });
       },
     },
     resetOnSubmitSuccess: false,

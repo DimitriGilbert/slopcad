@@ -61,6 +61,7 @@ import {
   addDocumentReference,
   addDocumentSketch,
   addDocumentDatum,
+  addDocumentCurve,
   addDocumentParameter,
   addFeature,
   type CadDocument,
@@ -76,11 +77,13 @@ import {
 } from "./document";
 import {
   type BodyId,
+  type CurveId,
   type DatumId,
   type FeatureId,
   type ParameterId,
   type SketchDocumentId,
   parseBodyId,
+  parseCurveId,
   parseDatumId,
   parseFeatureId,
   parseParameterId,
@@ -88,11 +91,12 @@ import {
   type ReferenceId,
   parseReferenceId,
 } from "./ids";
+import { type SerializedCurve, parseSerializedCurve } from "./curve";
 import { type ParameterError, updateParameterValue } from "./parameter";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
-/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder + Phase 39 datums + Phase 44 body.update). */
+/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder + Phase 39 datums + Phase 44 body.update + Phase 47 curves). */
 export const CAD_COMMAND_TYPES = [
   "parameter.set",
   "parameter.create",
@@ -105,6 +109,7 @@ export const CAD_COMMAND_TYPES = [
   "sketch.create",
   "reference.create",
   "datum.create",
+  "curve.create",
 ] as const;
 
 export type CadCommandType = (typeof CAD_COMMAND_TYPES)[number];
@@ -176,6 +181,16 @@ export type CadCommand =
       readonly id?: DatumId;
       readonly name: string;
       readonly datum: Readonly<Record<string, unknown>>;
+    }
+  | {
+      /**
+       * The Phase 47 curve record creation: the curve module's canonical
+       * serialized payload, stored verbatim (the sketch/datum discipline).
+       */
+      readonly type: "curve.create";
+      readonly id?: CurveId;
+      readonly name: string;
+      readonly curve: SerializedCurve;
     }
   | {
       readonly type: "feature.create";
@@ -310,6 +325,15 @@ export function applyCommand(
       if (!added.ok) return added;
       return ok(added.value.document);
     }
+    case "curve.create": {
+      const added = addDocumentCurve(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        name: command.name,
+        curve: command.curve,
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
     case "feature.create": {
       const added = addFeature(document, command);
       if (!added.ok) return added;
@@ -388,6 +412,13 @@ export type SerializedCadCommand =
       readonly id?: string;
       readonly name: string;
       readonly datum: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "curve.create";
+      readonly id?: string;
+      readonly name: string;
+      readonly curve: SerializedCurve;
     }
   | {
       readonly formatVersion: number;
@@ -531,6 +562,21 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
             id: command.id,
             name: command.name,
             datum: command.datum,
+          };
+    case "curve.create":
+      return command.id === undefined
+        ? {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            name: command.name,
+            curve: command.curve,
+          }
+        : {
+            formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+            type: command.type,
+            id: command.id,
+            name: command.name,
+            curve: command.curve,
           };
     case "feature.update":
       return {
@@ -979,6 +1025,52 @@ export function parseCommand(
           id === undefined
             ? { type, name: input.name, datum: input.datum }
             : { type, id, name: input.name, datum: input.datum },
+        ),
+      );
+    }
+    case "curve.create": {
+      let id: CurveId | undefined;
+      if (input.id !== undefined) {
+        const parsedId = parseCurveId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A curve.create command needs a valid curve id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A curve.create command needs a non-empty name string.",
+            input.name,
+          ),
+        );
+      }
+      // The curve payload parses through the curve module's own strict
+      // parser here (stronger than the datum's plain-record check, because
+      // the curve schema is shared); the semantic battery re-runs at the
+      // substrate ({@link addDocumentCurve}).
+      const parsedCurve = parseSerializedCurve(input.curve);
+      if (!parsedCurve.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A curve.create command needs a valid curve payload: ${parsedCurve.error.message}`,
+            input.curve,
+          ),
+        );
+      }
+      return ok(
+        Object.freeze(
+          id === undefined
+            ? { type, name: input.name, curve: parsedCurve.value }
+            : { type, id, name: input.name, curve: parsedCurve.value },
         ),
       );
     }

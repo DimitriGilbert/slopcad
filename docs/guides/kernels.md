@@ -43,6 +43,34 @@ Read the flags from the kernels' own constants
 | sheets                | —        | ✓           | —     | —    |
 | localFaceOps          | —        | ✓           | —     | —    |
 | section               | ✓        | ✓           | ✓     | ✓    |
+| sweepWire             | —        | ✓ *         | —     | ✓    |
+| intersectionCurve     | —        | ✓           | —     | —    |
+
+Phase 47 adds three curve-entity operations. `wire` — a curve entity's
+deterministic polyline, length, and bounds
+(`packages/cad-kernel/src/curve-geometry.ts`) — is PURE MATH, not an
+engine capability: every backend delegates to the one shared evaluation,
+so the results are byte-identical across kernels (pinned by the wire
+equivalence tests) and the op carries no capability flag.
+`sweepWire` sweeps a profile along a 3D wire spine with parallel
+transport: the fake kernel answers the Cavalieri reference `V = A·L`
+exactly (the analytic node), OCCT pipes the spine through
+`BRepOffsetAPI_MakePipeShell` — `✓ *` its probed scope: COLLINEAR
+spines pipe exact (pinned at the prism volume), curved spines DECLINE
+structurally because the binding's pipe over the G0 chordal station
+spine yields inverted solids (negative volume against the reference;
+see the prespike findings — the exact C2 spine waits on the binding's
+`GeomAPI_Interpolate` point-array setter), and JSCAD/Manifold decline
+wholesale (no native sweep primitive / the probed sweep verdict).
+`intersectionCurve` sections a solid with a solid or a plane through
+OCCT's `BRepAlgoAPI_Section`, walking the section edges' EXACT geometry
+at the fixed uniform station rule (`BRepAdaptor_Curve.Value` — the
+binding has no `GCPnts` deflection sampler, so the deterministic station
+discipline IS the honest polyline); every other kernel declines
+structurally (no exact section-edge geometry). The projected-curve
+family is declined outright this phase: the probe found `ProjLib`
+absent from the binding — the pinned vocabulary and probe note carry
+forward to the surface phases.
 
 Every capability-gated decline answers the structured
 `kernel/unsupported-operation` — Manifold's `sweep`, its `fillet`,

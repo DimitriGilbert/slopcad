@@ -268,6 +268,17 @@ import {
   type Tessellation,
   type ThickenInput,
   type TransformInput,
+  type IntersectionCurveInput,
+  type KernelWire,
+  type ProfileSweepWireInput,
+  type SerializedCurve,
+  type WireCurveInput,
+  canonicalizeCurve,
+  curvePolyline,
+  curveRecordProblems,
+  evaluateWire,
+  parallelTransportFrames,
+  wireG1FailureIndex,
 } from "@slopcad/cad-kernel";
 import {
   axisAngleMatrix,
@@ -448,6 +459,8 @@ export const OCCT_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   surfaceArea: true,
   sheets: true,
   localFaceOps: true,
+  sweepWire: true,
+  intersectionCurve: true,
 });
 
 /**
@@ -1432,6 +1445,97 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
    * profile, then the placement transform. Probed exact: straight spines
    * prism, arc spines hit Pappus, closed circular spines torus.
    */
+  /**
+   * The 3D wire spine (Phase 47): the deterministic station polyline from
+   * `curve-geometry` as exact line edges — the shared deflection rule,
+   * inside the documented band the fixtures pin against the fake kernel's
+   * Cavalieri reference (the binding's `GeomAPI_Interpolate` exists but
+   * its point-array typings expose no SetValue, so the exact interpolated
+   * spine is deferred; see the prespike findings).
+   */
+  /** Whether every station point lies on one line (the exact-pipe domain). */
+  const stationsCollinear = (
+    stations: readonly (readonly [number, number, number])[],
+  ): boolean => {
+    if (stations.length < 3) return true;
+    const first = stations[0];
+    const second = stations[1];
+    if (first === undefined || second === undefined) return true;
+    const direction: readonly [number, number, number] = [
+      second[0] - first[0],
+      second[1] - first[1],
+      second[2] - first[2],
+    ];
+    const norm = Math.sqrt(
+      direction[0] ** 2 + direction[1] ** 2 + direction[2] ** 2,
+    );
+    if (norm === 0) return false;
+    for (let index = 2; index < stations.length; index += 1) {
+      const point = stations[index];
+      if (point === undefined) continue;
+      const delta: readonly [number, number, number] = [
+        point[0] - first[0],
+        point[1] - first[1],
+        point[2] - first[2],
+      ];
+      const cross: readonly [number, number, number] = [
+        direction[1] * delta[2] - direction[2] * delta[1],
+        direction[2] * delta[0] - direction[0] * delta[2],
+        direction[0] * delta[1] - direction[1] * delta[0],
+      ];
+      const crossNorm = Math.sqrt(
+        cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2,
+      );
+      if (crossNorm > 1e-6 * norm) return false;
+    }
+    return true;
+  };
+
+  const wireSweepSpine = (spine: SerializedCurve): TopoDS_Wire => {
+    const mkWire = new oc.BRepBuilderAPI_MakeWire();
+    const edges: TopoDS_Edge[] = [];
+    const disposables: { delete(): void }[] = [];
+    const addEdge = (mkEdge: BRepBuilderAPI_MakeEdge): void => {
+      const edge = mkEdge.Edge();
+      mkEdge.delete();
+      mkWire.Add(edge);
+      edges.push(edge);
+    };
+    // The probed-binding note (prespike): `GeomAPI_Interpolate` exists in
+    // the binding but its point-array typings expose no SetValue, so the
+    // EXACT interpolated spine is deferred — every kind chords at the
+    // shared station rule, inside the band the fixtures pin against the
+    // fake kernel's Cavalieri reference.
+    const canonical = canonicalizeCurve(spine);
+    if (!canonical.ok) {
+      mkWire.delete();
+      for (const edge of edges) edge.delete();
+      throw new Error(canonical.error.message);
+    }
+    const stations = curvePolyline(canonical.value);
+    for (let index = 1; index < stations.length; index += 1) {
+      const from = stations[index - 1];
+      const to = stations[index];
+      if (from === undefined || to === undefined) continue;
+      const p1 = new oc.gp_Pnt(from[0], from[1], from[2]);
+      const p2 = new oc.gp_Pnt(to[0], to[1], to[2]);
+      const mkEdge = new oc.BRepBuilderAPI_MakeEdge(p1, p2);
+      p1.delete();
+      p2.delete();
+      addEdge(mkEdge);
+    }
+    for (const disposable of disposables) disposable.delete();
+    if (!mkWire.IsDone()) {
+      mkWire.delete();
+      for (const edge of edges) edge.delete();
+      throw new Error("the wire spine did not build.");
+    }
+    const wire = mkWire.Wire();
+    mkWire.delete();
+    for (const edge of edges) edge.delete();
+    return wire;
+  };
+
   const newSweep = (input: ProfileSweepInput): TopoDS_Shape => {
     const spine = sweepSpineWire(input.path);
     const profile = profileWire(input.loop);
@@ -2458,6 +2562,430 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         revolved.delete();
         return ok(wrapSolid(placed));
       });
+    },
+
+    wire(input: WireCurveInput): KernelResult<KernelWire> {
+      // Pure shared math (Phase 47): canonicalize, validate, and walk the
+      // deterministic stations — identical in every kernel by construction,
+      // so this adapter simply answers the shared evaluation.
+      const evaluated = evaluateWire(input);
+      if (!evaluated.ok) {
+        return fail(
+          kernelError(KERNEL_ERROR_CODES.invalidProfile, evaluated.message),
+        );
+      }
+      return ok(evaluated.wire);
+    },
+
+    sweepWire(input: ProfileSweepWireInput): KernelResult<KernelSolid> {
+      return run("sweepWire", KERNEL_ERROR_CODES.invalidProfile, () => {
+        // Validation BEFORE any OCCT call (the silent-mirror rule): the
+        // placement, the shared profile battery, the spine's semantic
+        // battery, and the generalized G1 + self-intersection checks —
+        // the same battery every implementing kernel runs.
+        const angle = angleIn(input.placement.rotation.angle, "sweepWire");
+        if (!angle.ok) return fail(angle.error);
+        const axis = axisIn(input.placement.rotation.axis, "sweepWire");
+        if (!axis.ok) return fail(axis.error);
+        const tx = lengthIn(
+          input.placement.translation.x,
+          "translation.x",
+          "sweepWire",
+        );
+        if (!tx.ok) return fail(tx.error);
+        const ty = lengthIn(
+          input.placement.translation.y,
+          "translation.y",
+          "sweepWire",
+        );
+        if (!ty.ok) return fail(ty.error);
+        const tz = lengthIn(
+          input.placement.translation.z,
+          "translation.z",
+          "sweepWire",
+        );
+        if (!tz.ok) return fail(tz.error);
+        const problem = profileLoopProblem(input.loop);
+        if (problem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweepWire rejected the profile loop: ${problem}.`,
+            ),
+          );
+        }
+        const polygon = tessellateProfileLoop(input.loop);
+        if (
+          polygon.length < 3 ||
+          !(Math.abs(polygonSignedArea(polygon)) > 1e-9)
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "sweepWire rejected the profile loop: it is degenerate (fewer than three distinct vertices or zero enclosed area).",
+            ),
+          );
+        }
+        const spineProblems = curveRecordProblems(input.spine);
+        if (spineProblems.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweepWire rejected the spine: ${spineProblems[0]?.message ?? "the curve is semantically invalid."}`,
+            ),
+          );
+        }
+        const canonical = canonicalizeCurve(input.spine);
+        if (!canonical.ok) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweepWire rejected the spine: ${canonical.error.message}`,
+            ),
+          );
+        }
+        const stations = curvePolyline(canonical.value);
+        if (stations.length < 2) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidPath,
+              "sweepWire rejected the spine: its station polyline is degenerate.",
+            ),
+          );
+        }
+        const g1Failure = wireG1FailureIndex(stations);
+        if (g1Failure !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidPath,
+              `sweepWire rejected the spine: station ${String(g1Failure)} is a tangent-continuity violation (a kinked spine sweeps a different solid in every engine).`,
+            ),
+          );
+        }
+        // The probed scope (prespike): the station polyline is a G0 spine,
+        // and MakePipeShell over G0 chordal spines yields inverted solids
+        // on this binding (negative volume against the Cavalieri
+        // reference) — so the OCCT route accepts COLLINEAR spines (the
+        // exact prism pipe, probed exact below) and declines curved ones
+        // with the probe verdict, never a silently wrong solid.
+        if (!stationsCollinear(stations)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.unsupportedOperation,
+              "sweepWire declined the curved spine: the binding's pipe over the G0 chordal station spine yields an inverted solid (probed; see the prespike findings) — the exact interpolated spine needs the binding's GeomAPI_Interpolate point-array setter, deferred.",
+            ),
+          );
+        }
+        const spineWire = wireSweepSpine(input.spine);
+        // The perpendicular attachment: the profile wire (local XY plane)
+        // mapped into the plane through the spine's start, spanned by the
+        // parallel-transport frame's (normal, binormal) — the same frame
+        // matrix the fake kernel's node transports with.
+        const frames = parallelTransportFrames(stations);
+        const first = frames[0];
+        if (first === undefined) {
+          spineWire.delete();
+          throw new Error(
+            "the transport frames are empty over a non-degenerate spine.",
+          );
+        }
+        const profile = profileWire(input.loop);
+        const frameTrsf = new oc.gp_Trsf();
+        frameTrsf.SetValues(
+          first.normal[0],
+          first.binormal[0],
+          first.tangent[0],
+          first.point[0],
+          first.normal[1],
+          first.binormal[1],
+          first.tangent[1],
+          first.point[1],
+          first.normal[2],
+          first.binormal[2],
+          first.tangent[2],
+          first.point[2],
+        );
+        const attached = new oc.BRepBuilderAPI_Transform(
+          profile,
+          frameTrsf,
+          false,
+          true,
+        );
+        frameTrsf.delete();
+        profile.delete();
+        const mkPipe = new oc.BRepOffsetAPI_MakePipeShell(spineWire);
+        mkPipe.SetMode(true);
+        mkPipe.Add(buildShape(attached), false, false);
+        const ready = mkPipe.IsReady();
+        if (ready) {
+          mkPipe.Build();
+        }
+        const solidOk = ready && mkPipe.MakeSolid();
+        spineWire.delete();
+        if (!ready || !solidOk) {
+          mkPipe.delete();
+          throw new Error("the wire-swept pipe did not build into a solid.");
+        }
+        const piped = buildShape(mkPipe);
+        const rot = axisAngleMatrix(axis.value, angle.value);
+        const trsf = new oc.gp_Trsf();
+        trsf.SetValues(
+          rot[0]?.[0] ?? 0,
+          rot[0]?.[1] ?? 0,
+          rot[0]?.[2] ?? 0,
+          tx.value,
+          rot[1]?.[0] ?? 0,
+          rot[1]?.[1] ?? 0,
+          rot[1]?.[2] ?? 0,
+          ty.value,
+          rot[2]?.[0] ?? 0,
+          rot[2]?.[1] ?? 0,
+          rot[2]?.[2] ?? 0,
+          tz.value,
+        );
+        const placed = buildShape(
+          new oc.BRepBuilderAPI_Transform(piped, trsf, false, true),
+        );
+        trsf.delete();
+        piped.delete();
+        return ok(wrapSolid(placed));
+      });
+    },
+
+    intersectionCurve(input: IntersectionCurveInput): KernelResult<KernelWire> {
+      return run(
+        "intersectionCurve",
+        KERNEL_ERROR_CODES.invalidOperands,
+        () => {
+          const target = shapeOf(input.target, "intersectionCurve");
+          if (!target.ok) return fail(target.error);
+          let second: TopoDS_Shape;
+          if (input.kind === "solid-solid") {
+            const tool = shapeOf(input.tool, "intersectionCurve");
+            if (!tool.ok) return fail(tool.error);
+            second = tool.value;
+          } else {
+            // The unbounded plane as a covering face over the target's own
+            // optimal bounds (plus margin): the section of a solid with a
+            // plane is invariant to the face's extent, so the bound-derived
+            // covering is honest — never a fixed-size guess.
+            const box = new oc.Bnd_Box();
+            oc.BRepBndLib.AddOptimal(target.value, box, false, false);
+            if (box.IsVoid()) {
+              box.delete();
+              throw new Error("the target solid is empty.");
+            }
+            const xmin = box.GetXMin();
+            const xmax = box.GetXMax();
+            const ymin = box.GetYMin();
+            const ymax = box.GetYMax();
+            const zmin = box.GetZMin();
+            const zmax = box.GetZMax();
+            box.delete();
+            const margin =
+              1 + 0.5 * Math.max(xmax - xmin, ymax - ymin, zmax - zmin);
+            const cx = (xmin + xmax) / 2;
+            const cy = (ymin + ymax) / 2;
+            const cz = (zmin + zmax) / 2;
+            const n = input.normal;
+            const norm = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+            if (!(norm > 0)) {
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.invalidOperands,
+                  "intersectionCurve rejected a zero-length plane normal.",
+                ),
+              );
+            }
+            const axis: readonly [number, number, number] = [
+              n[0] / norm,
+              n[1] / norm,
+              n[2] / norm,
+            ];
+            // Two orthonormal in-plane directions (the helix frame rule:
+            // least-aligned world axis rejection, ties to the earliest).
+            const candidates: readonly (readonly [number, number, number])[] = [
+              [1, 0, 0],
+              [0, 1, 0],
+              [0, 0, 1],
+            ];
+            let best = candidates[0] ?? [1, 0, 0];
+            let bestAbs = Infinity;
+            for (const candidate of candidates) {
+              const dot =
+                candidate[0] * axis[0] +
+                candidate[1] * axis[1] +
+                candidate[2] * axis[2];
+              if (Math.abs(dot) < bestAbs) {
+                bestAbs = Math.abs(dot);
+                best = candidate;
+              }
+            }
+            const dot =
+              best[0] * axis[0] + best[1] * axis[1] + best[2] * axis[2];
+            const uRaw: readonly [number, number, number] = [
+              best[0] - dot * axis[0],
+              best[1] - dot * axis[1],
+              best[2] - dot * axis[2],
+            ];
+            const uNorm = Math.sqrt(uRaw[0] ** 2 + uRaw[1] ** 2 + uRaw[2] ** 2);
+            const u: readonly [number, number, number] = [
+              uRaw[0] / uNorm,
+              uRaw[1] / uNorm,
+              uRaw[2] / uNorm,
+            ];
+            const v: readonly [number, number, number] = [
+              axis[1] * u[2] - axis[2] * u[1],
+              axis[2] * u[0] - axis[0] * u[2],
+              axis[0] * u[1] - axis[1] * u[0],
+            ];
+            const corner = (su: number, sv: number) =>
+              new oc.gp_Pnt(
+                cx + su * margin * u[0] + sv * margin * v[0],
+                cy + su * margin * u[1] + sv * margin * v[1],
+                cz + su * margin * u[2] + sv * margin * v[2],
+              );
+            const mkWire = new oc.BRepBuilderAPI_MakeWire();
+            const edges: TopoDS_Edge[] = [];
+            const loop: readonly (readonly [number, number])[] = [
+              [-1, -1],
+              [1, -1],
+              [1, 1],
+              [-1, 1],
+            ];
+            for (let index = 0; index < loop.length; index += 1) {
+              const from = loop[index];
+              const to = loop[(index + 1) % loop.length];
+              if (from === undefined || to === undefined) continue;
+              const p1 = corner(from[0], from[1]);
+              const p2 = corner(to[0], to[1]);
+              const mkEdge = new oc.BRepBuilderAPI_MakeEdge(p1, p2);
+              p1.delete();
+              p2.delete();
+              const edge = mkEdge.Edge();
+              mkEdge.delete();
+              mkWire.Add(edge);
+              edges.push(edge);
+            }
+            const origin = new oc.gp_Pnt(
+              input.origin[0],
+              input.origin[1],
+              input.origin[2],
+            );
+            const direction = new oc.gp_Dir(axis[0], axis[1], axis[2]);
+            const plane = new oc.gp_Pln(origin, direction);
+            origin.delete();
+            direction.delete();
+            const mkFace = new oc.BRepBuilderAPI_MakeFace(
+              plane,
+              mkWire.Wire(),
+              true,
+            );
+            plane.delete();
+            mkWire.delete();
+            for (const edge of edges) edge.delete();
+            if (!mkFace.IsDone()) {
+              mkFace.delete();
+              throw new Error("the covering plane face did not build.");
+            }
+            second = mkFace.Face();
+            mkFace.delete();
+          }
+          const section = new oc.BRepAlgoAPI_Section(
+            target.value,
+            second,
+            false,
+          );
+          section.Build();
+          if (!section.IsDone()) {
+            section.delete();
+            throw new Error("the section did not build.");
+          }
+          // The section edges' EXACT geometry, walked at the fixed uniform
+          // station rule (the equation curves' discipline — the binding has
+          // no GCPnts deflection sampler, so the deterministic station count
+          // IS the honest polyline).
+          const chains: (readonly [number, number, number])[][] = [];
+          const explorer = new oc.TopExp_Explorer(
+            section.Shape(),
+            oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+          );
+          const adaptors: { delete(): void }[] = [];
+          while (explorer.More()) {
+            const edge = oc.TopoDS.Edge(explorer.Value());
+            const adaptor = new oc.BRepAdaptor_Curve(edge);
+            adaptors.push(adaptor);
+            const first = adaptor.FirstParameter();
+            const last = adaptor.LastParameter();
+            const chain: [number, number, number][] = [];
+            const stations = 16;
+            for (let index = 0; index <= stations; index += 1) {
+              const u = first + ((last - first) * index) / stations;
+              const point = adaptor.Value(u);
+              chain.push([point.X(), point.Y(), point.Z()]);
+              point.delete();
+            }
+            chains.push(chain);
+            explorer.Next();
+          }
+          explorer.delete();
+          section.delete();
+          for (const adaptor of adaptors) adaptor.delete();
+          const polyline: (readonly [number, number, number])[] = [];
+          let length = 0;
+          const min: [number, number, number] = [Infinity, Infinity, Infinity];
+          const max: [number, number, number] = [
+            -Infinity,
+            -Infinity,
+            -Infinity,
+          ];
+          for (const chain of chains) {
+            for (let index = 0; index < chain.length; index += 1) {
+              const point = chain[index];
+              if (point === undefined) continue;
+              polyline.push(point);
+              if (index > 0) {
+                const previous = chain[index - 1];
+                if (previous !== undefined) {
+                  length += Math.sqrt(
+                    (point[0] - previous[0]) ** 2 +
+                      (point[1] - previous[1]) ** 2 +
+                      (point[2] - previous[2]) ** 2,
+                  );
+                }
+              }
+              for (let component = 0; component < 3; component += 1) {
+                const value = point[component];
+                const lo = min[component];
+                const hi = max[component];
+                if (
+                  value === undefined ||
+                  lo === undefined ||
+                  hi === undefined
+                ) {
+                  continue;
+                }
+                if (value < lo) min[component] = value;
+                if (value > hi) max[component] = value;
+              }
+            }
+          }
+          if (chains.length === 0) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidOperands,
+                "intersectionCurve produced no section edges (the operands do not intersect).",
+              ),
+            );
+          }
+          return ok({
+            polyline,
+            chains,
+            length,
+            bounds: { min, max },
+          });
+        },
+      );
     },
 
     sweep(input: ProfileSweepInput): KernelResult<KernelSolid> {

@@ -81,7 +81,13 @@ export type {
   TransformInput,
   TranslationInput,
 } from "./contract";
-export type { KernelSolid } from "./contract";
+export type {
+  IntersectionCurveInput,
+  KernelSolid,
+  KernelWire,
+  ProfileSweepWireInput,
+  WireCurveInput,
+} from "./contract";
 
 export {
   createFakeKernel,
@@ -483,3 +489,14 @@ export type {
   StaleResultCoordinatorOptions,
   SupersededComputationPolicy,
 } from "./stale-result-coordinator";
+
+export {
+  canonicalizeCurve,
+  curvePolyline,
+  curveRecordProblems,
+  evaluateWire,
+  parallelTransportFrames,
+  wireG1FailureIndex,
+} from "./curve-geometry";
+
+export type { SerializedCurve } from "@slopcad/cad-core";

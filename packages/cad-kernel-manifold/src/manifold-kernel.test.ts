@@ -10,6 +10,7 @@
  * test uses fresh kernel instances from it.
  */
 
+import { evaluateWire } from "@slopcad/cad-kernel";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type LengthValue, length } from "@slopcad/cad-core";
 import {
@@ -115,6 +116,8 @@ describe("manifold kernel identity and capabilities", () => {
       surfaceArea: true,
       sheets: false,
       localFaceOps: false,
+      sweepWire: false,
+      intersectionCurve: false,
     });
   });
 
@@ -696,5 +699,25 @@ describe("manifold kernel mirror (Phase 26.9)", () => {
       KERNEL_ERROR_CODES.solidNotOwned,
       "foreign mirror target",
     );
+  });
+});
+
+describe("wire (Phase 47)", () => {
+  it("answers the shared pure evaluation byte-identically", async () => {
+    const kernel = await createManifoldKernel();
+    const curve = {
+      kind: "interpolated-spline",
+      points: [
+        [0, 0, 0],
+        [10, 0, 0],
+        [10, 10, 5],
+      ],
+    } as const;
+    const viaKernel = kernel.wire(curve);
+    const viaHelper = evaluateWire(curve);
+    expect(viaKernel.ok).toBe(true);
+    expect(viaHelper.ok).toBe(true);
+    if (!viaKernel.ok || !viaHelper.ok) return;
+    expect(viaKernel.value).toEqual(viaHelper.wire);
   });
 });

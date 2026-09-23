@@ -97,6 +97,8 @@ import {
   type ProfileLoftInput,
   type ProfileRevolveInput,
   type ProfileSweepInput,
+  type ProfileSweepWireInput,
+  type IntersectionCurveInput,
   type ReplaceFaceInput,
   type SheetSurfaceInput,
   type ShellInput,
@@ -107,9 +109,21 @@ import {
   type Tessellation,
   type ThickenInput,
   type TransformInput,
+  type KernelWire,
+  type WireCurveInput,
 } from "./contract";
 import { planSplitCut } from "./core-bridge";
 import { createSolidTag } from "./opaque";
+import {
+  type TransportFrame,
+  canonicalizeCurve,
+  curveLength,
+  curvePolyline,
+  curveRecordProblems,
+  evaluateWire,
+  parallelTransportFrames,
+  wireG1FailureIndex,
+} from "./curve-geometry";
 import {
   type CanonicalHelixSpine,
   helixProfilePolygon,
@@ -223,6 +237,8 @@ export const FAKE_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   sheets: false,
   localFaceOps: false,
   section: true,
+  sweepWire: true,
+  intersectionCurve: false,
 });
 
 /** The fake kernel's backend id. */
@@ -379,6 +395,29 @@ type FakeShape =
       readonly pieces: readonly SweepPiece[];
       /** Whether the path closes on itself (a ring: the mesh has no caps). */
       readonly closed: boolean;
+      /** World placement: rotation (row-major) applied first, then translation. */
+      readonly rotation: readonly (readonly [number, number, number])[];
+      readonly translation: Vec3;
+    }
+  | {
+      readonly kind: "wireSweep";
+      /**
+       * The profile's CCW chord polygon in its OWN local (x, y) frame
+       * (mm) — transported rigidly, so every station addresses the
+       * profile through this one polygon.
+       */
+      readonly polygon: readonly ProfilePoint2[];
+      /**
+       * The parallel-transport frames along the spine's station polyline
+       * (LOCAL space; the placement composes on top). Volume is
+       * Cavalieri-exact `|A|·L`; membership is the nearest-station frame
+       * projection (exact for straight spines, the documented station
+       * approximation for curved ones); tessellation is the station loft
+       * at the shared deflection.
+       */
+      readonly frames: readonly TransportFrame[];
+      /** The spine's walked length (mm) — the Cavalieri L. */
+      readonly spineLength: number;
       /** World placement: rotation (row-major) applied first, then translation. */
       readonly rotation: readonly (readonly [number, number, number])[];
       readonly translation: Vec3;
@@ -696,6 +735,8 @@ function shapeBounds(shape: FakeShape): KernelBounds {
       return revolutionBounds(shape);
     case "sweep":
       return sweepBounds(shape);
+    case "wireSweep":
+      return wireSweepBounds(shape);
     case "loft":
       return loftBounds(shape);
     case "helix":
@@ -816,6 +857,241 @@ type LoftNode = Extract<FakeShape, { kind: "loft" }>;
 
 /** The helix leaf node type (Phase 40's screw solid). */
 type HelixNode = Extract<FakeShape, { kind: "helix" }>;
+type WireSweepNode = Extract<FakeShape, { kind: "wireSweep" }>;
+
+/** The station polygon of a wire sweep at frame index i (LOCAL space). */
+function wireSweepStationPolygon(
+  shape: WireSweepNode,
+  index: number,
+): readonly Vec3[] {
+  const frame = shape.frames[index];
+  if (frame === undefined) return [];
+  return shape.polygon.map((vertex) => [
+    frame.point[0] + vertex.x * frame.normal[0] + vertex.y * frame.binormal[0],
+    frame.point[1] + vertex.x * frame.normal[1] + vertex.y * frame.binormal[1],
+    frame.point[2] + vertex.x * frame.normal[2] + vertex.y * frame.binormal[2],
+  ]);
+}
+
+/** The tight AABB over every station polygon's vertices (LOCAL, pre-placement). */
+function wireSweepBounds(shape: WireSweepNode): KernelBounds {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (let index = 0; index < shape.frames.length; index += 1) {
+    for (const vertex of wireSweepStationPolygon(shape, index)) {
+      minX = Math.min(minX, vertex[0]);
+      minY = Math.min(minY, vertex[1]);
+      minZ = Math.min(minZ, vertex[2]);
+      maxX = Math.max(maxX, vertex[0]);
+      maxY = Math.max(maxY, vertex[1]);
+      maxZ = Math.max(maxZ, vertex[2]);
+    }
+  }
+  if (!Number.isFinite(minX)) {
+    return boundsOf([0, 0, 0], [0, 0, 0]);
+  }
+  return boundsOf([minX, minY, minZ], [maxX, maxY, maxZ]);
+}
+
+/** The station loft: side quads between consecutive stations plus the two caps. */
+function wireSweepTriangles(shape: WireSweepNode): readonly Triangle[] {
+  const triangles: Triangle[] = [];
+  const count = shape.polygon.length;
+  if (count < 3 || shape.frames.length < 2) return triangles;
+  const stationAt = (index: number): readonly Vec3[] =>
+    wireSweepStationPolygon(shape, index);
+  for (let index = 0; index + 1 < shape.frames.length; index += 1) {
+    const here = stationAt(index);
+    const next = stationAt(index + 1);
+    for (let vertex = 0; vertex < count; vertex += 1) {
+      const a = here[vertex];
+      const b = here[(vertex + 1) % count];
+      const c = next[(vertex + 1) % count];
+      const d = next[vertex];
+      if (
+        a === undefined ||
+        b === undefined ||
+        c === undefined ||
+        d === undefined
+      ) {
+        continue;
+      }
+      triangles.push([a, b, c]);
+      triangles.push([a, c, d]);
+    }
+  }
+  // Caps: the first and last station polygons, fanned from their centroid.
+  for (const index of [0, shape.frames.length - 1]) {
+    const polygon = stationAt(index);
+    const centroid: Vec3 = [
+      polygon.reduce((sum, v) => sum + v[0], 0) / count,
+      polygon.reduce((sum, v) => sum + v[1], 0) / count,
+      polygon.reduce((sum, v) => sum + v[2], 0) / count,
+    ];
+    for (let vertex = 0; vertex < count; vertex += 1) {
+      const a = polygon[vertex];
+      const b = polygon[(vertex + 1) % count];
+      if (a === undefined || b === undefined) continue;
+      // Winding: the first cap faces backwards along the spine, the last
+      // forwards — the transported tube's outward normals.
+      triangles.push(index === 0 ? [centroid, b, a] : [centroid, a, b]);
+    }
+  }
+  return triangles;
+}
+
+/**
+ * The nearest-station frame projection: classify the query in the frame
+ * whose station point is nearest (point-in-polygon on the station's
+ * transported profile, with the axial coordinate inside the station's
+ * tangent span). Exact for straight spines — the projection decouples —
+ * and the documented station approximation for curved ones (the node's
+ * own comment states the band).
+ */
+function wireSweepContains(
+  shape: WireSweepNode,
+  x: number,
+  y: number,
+  z: number,
+): boolean {
+  let best = 0;
+  let bestDistance = Infinity;
+  for (let index = 0; index < shape.frames.length; index += 1) {
+    const point = shape.frames[index]?.point;
+    if (point === undefined) continue;
+    const distance =
+      (point[0] - x) ** 2 + (point[1] - y) ** 2 + (point[2] - z) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  }
+  const frame = shape.frames[best];
+  if (frame === undefined) return false;
+  // The axial coordinate: the projection of (query − point) on the local
+  // tangent, accepted within the neighbouring stations' half-span.
+  const delta: Vec3 = [
+    x - frame.point[0],
+    y - frame.point[1],
+    z - frame.point[2],
+  ];
+  const axial =
+    delta[0] * frame.tangent[0] +
+    delta[1] * frame.tangent[1] +
+    delta[2] * frame.tangent[2];
+  const span =
+    shape.frames.length > 1 ? shape.spineLength / (shape.frames.length - 1) : 0;
+  if (axial < -span || axial > span) return false;
+  const u =
+    delta[0] * frame.normal[0] +
+    delta[1] * frame.normal[1] +
+    delta[2] * frame.normal[2];
+  const v =
+    delta[0] * frame.binormal[0] +
+    delta[1] * frame.binormal[1] +
+    delta[2] * frame.binormal[2];
+  return pointInPolygon2(shape.polygon, u, v);
+}
+
+/** Inclusive even-odd point-in-polygon on the station's (normal, binormal) plane. */
+function pointInPolygon2(
+  polygon: readonly ProfilePoint2[],
+  u: number,
+  v: number,
+): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const a = polygon[i];
+    const b = polygon[j];
+    if (a === undefined || b === undefined) continue;
+    const intersects =
+      a.y > v !== b.y > v && u < ((b.x - a.x) * (v - a.y)) / (b.y - a.y) + a.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * The 3D chord self-intersection battery for wire spines: the closest
+ * approach of any two NON-ADJACENT station chords under the shared
+ * tolerance rejects the spine (`kernel/path-self-intersecting`) — the
+ * planar sweep's battery carried to 3D, honest at the polyline it has.
+ */
+function wireChordsSelfIntersect(polyline: readonly Vec3[]): boolean {
+  const tolerance = 1e-9;
+  for (let i = 0; i + 1 < polyline.length; i += 1) {
+    for (let j = i + 2; j + 1 < polyline.length; j += 1) {
+      if (
+        segmentDistance(
+          polyline[i],
+          polyline[i + 1],
+          polyline[j],
+          polyline[j + 1],
+        ) < tolerance
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** The closest distance between two 3D segments (clamped projections). */
+function segmentDistance(
+  p1: Vec3 | undefined,
+  q1: Vec3 | undefined,
+  p2: Vec3 | undefined,
+  q2: Vec3 | undefined,
+): number {
+  if (
+    p1 === undefined ||
+    q1 === undefined ||
+    p2 === undefined ||
+    q2 === undefined
+  ) {
+    return Infinity;
+  }
+  const d1: Vec3 = [q1[0] - p1[0], q1[1] - p1[1], q1[2] - p1[2]];
+  const d2: Vec3 = [q2[0] - p2[0], q2[1] - p2[1], q2[2] - p2[2]];
+  const r: Vec3 = [p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]];
+  const a = d1[0] * d1[0] + d1[1] * d1[1] + d1[2] * d1[2];
+  const e = d2[0] * d2[0] + d2[1] * d2[1] + d2[2] * d2[2];
+  const f = d2[0] * r[0] + d2[1] * r[1] + d2[2] * r[2];
+  const c = d1[0] * r[0] + d1[1] * r[1] + d1[2] * r[2];
+  const b = d1[0] * d2[0] + d1[1] * d2[1] + d1[2] * d2[2];
+  const denominator = a * e - b * b;
+  let s =
+    denominator !== 0
+      ? Math.min(Math.max((b * f - c * e) / denominator, 0), 1)
+      : 0;
+  let t = (b * s + f) / e;
+  if (t < 0) {
+    t = 0;
+    s = Math.min(Math.max(-c / a, 0), 1);
+  } else if (t > 1) {
+    t = 1;
+    s = Math.min(Math.max((b - c) / a, 0), 1);
+  }
+  const closest1: Vec3 = [
+    p1[0] + d1[0] * s,
+    p1[1] + d1[1] * s,
+    p1[2] + d1[2] * s,
+  ];
+  const closest2: Vec3 = [
+    p2[0] + d2[0] * t,
+    p2[1] + d2[1] * t,
+    p2[2] + d2[2] * t,
+  ];
+  return Math.sqrt(
+    (closest1[0] - closest2[0]) ** 2 +
+      (closest1[1] - closest2[1]) ** 2 +
+      (closest1[2] - closest2[2]) ** 2,
+  );
+}
 
 /** The local-frame position of a profile vertex (u, v) at a station. */
 function sweepStationVertex(station: SweepStation, u: number, v: number): Vec3 {
@@ -1075,6 +1351,8 @@ function contains(shape: FakeShape, x: number, y: number, z: number): boolean {
       return revolutionContains(shape, x, y, z);
     case "sweep":
       return sweepContains(shape, x, y, z);
+    case "wireSweep":
+      return wireSweepContains(shape, x, y, z);
     case "loft":
       return loftContains(shape, x, y, z);
     case "helix":
@@ -2304,6 +2582,11 @@ function analyticVolume(shape: FakeShape): number | undefined {
       // Cavalieri, arc pieces by Pappus about their centre axes — exact
       // over the chord polygon, no quadrature anywhere.
       return sweepAnalyticVolume(shape.polygon, shape.pieces);
+    case "wireSweep":
+      // Cavalieri over the transported perpendicular sections: a rigid
+      // planar profile swept along a non-self-intersecting C1 spine has
+      // V = A·L exactly (the contract's pinned reference volume).
+      return Math.abs(polygonSignedArea(shape.polygon)) * shape.spineLength;
     case "loft":
       // The Simpson/prismoidal decomposition the contract documents: the
       // morph's cross-section area is quadratic in the span parameter, so
@@ -2534,6 +2817,7 @@ function primitiveTriangles(
     | ExtrusionNode
     | RevolutionNode
     | SweepNode
+    | WireSweepNode
     | LoftNode
     | HelixNode
     | FilletNode
@@ -2560,6 +2844,8 @@ function primitiveTriangles(
       return revolutionTriangles(shape);
     case "sweep":
       return sweepTriangles(shape);
+    case "wireSweep":
+      return wireSweepTriangles(shape);
     case "loft":
       return loftTriangles(shape);
     case "helix":
@@ -3193,6 +3479,7 @@ interface Leaf {
     | ExtrusionNode
     | RevolutionNode
     | SweepNode
+    | WireSweepNode
     | LoftNode
     | HelixNode
     | FilletNode
@@ -3218,6 +3505,7 @@ function collectLeaves(
     case "extrusion":
     case "revolution":
     case "sweep":
+    case "wireSweep":
     case "loft":
     case "helix":
     case "fillet":
@@ -3360,6 +3648,8 @@ function renderTriangles(shape: FakeShape): readonly Triangle[] {
       return revolutionTriangles(shape);
     case "sweep":
       return sweepTriangles(shape);
+    case "wireSweep":
+      return wireSweepTriangles(shape);
     case "loft":
       return loftTriangles(shape);
     case "fillet":
@@ -4584,6 +4874,182 @@ export function createFakeKernel(): GeometryKernel {
           ),
         );
       }
+    },
+
+    wire(input: WireCurveInput): KernelResult<KernelWire> {
+      // Pure shared math (Phase 47): canonicalize, validate, and walk the
+      // deterministic stations — identical in every kernel by construction,
+      // so this adapter simply answers the shared evaluation.
+      const evaluated = evaluateWire(input);
+      if (!evaluated.ok) {
+        return fail(
+          kernelError(KERNEL_ERROR_CODES.invalidProfile, evaluated.message),
+        );
+      }
+      return ok({
+        polyline: evaluated.wire.polyline,
+        chains: [evaluated.wire.polyline],
+        length: evaluated.wire.length,
+        bounds: evaluated.wire.bounds,
+      });
+    },
+    sweepWire(input: ProfileSweepWireInput): KernelResult<KernelSolid> {
+      // The no-throw discipline: placement validation, the shared profile
+      // battery, the spine's own semantic battery, the generalized G1 and
+      // self-intersection checks — then the analytic Cavalieri node.
+      try {
+        const angle = valueIn(input.placement.rotation.angle, "rad");
+        if (!Number.isFinite(angle)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              "sweepWire rejected the placement rotation: its angle magnitude is not a finite number.",
+            ),
+          );
+        }
+        const rotationAxis = input.placement.rotation.axis;
+        const axisSquared =
+          rotationAxis[0] * rotationAxis[0] +
+          rotationAxis[1] * rotationAxis[1] +
+          rotationAxis[2] * rotationAxis[2];
+        if (
+          !Number.isFinite(axisSquared) ||
+          axisSquared === 0 ||
+          !Number.isFinite(rotationAxis[0]) ||
+          !Number.isFinite(rotationAxis[1]) ||
+          !Number.isFinite(rotationAxis[2])
+        ) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidRotation,
+              `sweepWire rejected a rotation about [${String(rotationAxis[0])}, ${String(rotationAxis[1])}, ${String(rotationAxis[2])}]: the axis must be a non-zero finite vector.`,
+            ),
+          );
+        }
+        const translation: Vec3 = [
+          valueIn(input.placement.translation.x, "mm"),
+          valueIn(input.placement.translation.y, "mm"),
+          valueIn(input.placement.translation.z, "mm"),
+        ];
+        if (!translation.every((component) => Number.isFinite(component))) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidLength,
+              "sweepWire rejected the placement translation: components must be finite lengths.",
+            ),
+          );
+        }
+        const loopProblem = profileLoopProblem(input.loop);
+        if (loopProblem !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweepWire rejected the profile loop: ${loopProblem}.`,
+            ),
+          );
+        }
+        const polygon = tessellateProfileLoop(input.loop);
+        const area = polygonSignedArea(polygon);
+        if (polygon.length < 3 || !(Math.abs(area) > 1e-9)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              "sweepWire rejected the profile loop: it is degenerate (fewer than three distinct boundary vertices or no enclosed area).",
+            ),
+          );
+        }
+        const spineProblems = curveRecordProblems(input.spine);
+        if (spineProblems.length > 0) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweepWire rejected the spine: ${spineProblems[0]?.message ?? "the curve is semantically invalid."}`,
+            ),
+          );
+        }
+        const canonical = canonicalizeCurve(input.spine);
+        if (!canonical.ok) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidProfile,
+              `sweepWire rejected the spine: ${canonical.error.message}`,
+            ),
+          );
+        }
+        const polyline = curvePolyline(canonical.value);
+        for (const point of polyline) {
+          if (
+            !Number.isFinite(point[0]) ||
+            !Number.isFinite(point[1]) ||
+            !Number.isFinite(point[2])
+          ) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidProfile,
+                "sweepWire rejected the spine: its station walk produced a non-finite point.",
+              ),
+            );
+          }
+        }
+        if (polyline.length < 2) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidPath,
+              "sweepWire rejected the spine: its station polyline is degenerate.",
+            ),
+          );
+        }
+        const g1Failure = wireG1FailureIndex(polyline);
+        if (g1Failure !== null) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.invalidPath,
+              `sweepWire rejected the spine: station ${String(g1Failure)} is a tangent-continuity violation (a kinked spine sweeps a different solid in every engine).`,
+            ),
+          );
+        }
+        if (wireChordsSelfIntersect(polyline)) {
+          return fail(
+            kernelError(
+              KERNEL_ERROR_CODES.pathSelfIntersecting,
+              "sweepWire rejected the spine: its chord polyline crosses itself (non-adjacent chords touch within the shared tolerance).",
+            ),
+          );
+        }
+        const ccw = area > 0 ? polygon : [...polygon].reverse();
+        return ok(
+          tag.wrap({
+            kind: "wireSweep",
+            polygon: ccw,
+            frames: parallelTransportFrames(polyline),
+            spineLength: curveLength(canonical.value),
+            rotation: axisAngleMatrix(rotationAxis, angle),
+            translation,
+          }),
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fail(
+          kernelError(
+            KERNEL_ERROR_CODES.invalidProfile,
+            `sweepWire rejected its input: ${detail}`,
+          ),
+        );
+      }
+    },
+
+    intersectionCurve(input: IntersectionCurveInput): KernelResult<KernelWire> {
+      void input;
+      // The capability-flag discipline: the fake kernel's solids are
+      // analytic primitives and boolean nodes without exact section
+      // edges — an intersection CURVE would be a tessellated guess, so
+      // the structured decline is the honest answer.
+      return fail(
+        kernelError(
+          KERNEL_ERROR_CODES.unsupportedOperation,
+          "intersectionCurve is not implemented by the fake kernel: its solids carry no exact section-edge geometry (the OpenCascade backend is the exact producer).",
+        ),
+      );
     },
 
     helixSweep(input: HelixSweepInput): KernelResult<KernelSolid> {

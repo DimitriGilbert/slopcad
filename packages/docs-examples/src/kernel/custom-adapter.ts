@@ -9,7 +9,6 @@
  * interface honestly and everything above it works unchanged.
  */
 
-import type { KernelSolid } from "@slopcad/cad-kernel";
 import {
   createFakeKernel,
   type BoxInput,
@@ -20,6 +19,10 @@ import {
   type FilletInput,
   type GeometryKernel,
   type KernelResult,
+  type IntersectionCurveInput,
+  type KernelSolid,
+  type ProfileSweepWireInput,
+  type WireCurveInput,
   type MirrorInput,
   type MoveFaceInput,
   type SectionInput,
@@ -76,6 +79,11 @@ export function withOperationLog(kernel: GeometryKernel): LoggedKernel {
       log("revolve", () => kernel.revolve(input)),
     sweep: (input: ProfileSweepInput) =>
       log("sweep", () => kernel.sweep(input)),
+    wire: (input: WireCurveInput) => log("wire", () => kernel.wire(input)),
+    sweepWire: (input: ProfileSweepWireInput) =>
+      log("sweepWire", () => kernel.sweepWire(input)),
+    intersectionCurve: (input: IntersectionCurveInput) =>
+      log("intersectionCurve", () => kernel.intersectionCurve(input)),
     loft: (input: ProfileLoftInput) => log("loft", () => kernel.loft(input)),
     helixSweep: (input: HelixSweepInput) =>
       log("helixSweep", () => kernel.helixSweep(input)),

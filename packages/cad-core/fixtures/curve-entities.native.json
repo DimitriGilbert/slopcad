@@ -1,0 +1,171 @@
+{
+  "formatVersion": 4,
+  "metadata": {
+    "name": "curve-entities",
+    "unitSystem": "metric"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_curves",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": []
+    },
+    "bodies": [],
+    "features": [],
+    "curves": [
+      {
+        "id": "crv_spline-guide",
+        "name": "spline-guide",
+        "curve": {
+          "kind": "interpolated-spline",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              10
+            ],
+            [
+              20,
+              5,
+              20
+            ]
+          ]
+        }
+      },
+      {
+        "id": "crv_coil",
+        "name": "coil",
+        "curve": {
+          "kind": "helix",
+          "radius": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 6
+          },
+          "pitch": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 4
+          },
+          "turns": 2.5,
+          "handedness": 1,
+          "startAngle": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          }
+        }
+      },
+      {
+        "id": "crv_slide",
+        "name": "slide",
+        "curve": {
+          "kind": "equation",
+          "tMin": 0,
+          "tMax": 1,
+          "x": "10mm * t",
+          "y": "0mm",
+          "z": "10mm * (1 - t)"
+        }
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_curves",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": []
+      },
+      "bodies": [],
+      "features": [],
+      "curves": [
+        {
+          "id": "crv_spline-guide",
+          "name": "spline-guide",
+          "curve": {
+            "kind": "interpolated-spline",
+            "points": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                10,
+                0,
+                10
+              ],
+              [
+                20,
+                5,
+                20
+              ]
+            ]
+          }
+        },
+        {
+          "id": "crv_coil",
+          "name": "coil",
+          "curve": {
+            "kind": "helix",
+            "radius": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 6
+            },
+            "pitch": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 4
+            },
+            "turns": 2.5,
+            "handedness": 1,
+            "startAngle": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            }
+          }
+        },
+        {
+          "id": "crv_slide",
+          "name": "slide",
+          "curve": {
+            "kind": "equation",
+            "tMin": 0,
+            "tMax": 1,
+            "x": "10mm * t",
+            "y": "0mm",
+            "z": "10mm * (1 - t)"
+          }
+        }
+      ]
+    },
+    "transactions": [],
+    "cursor": 0
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": []
+  }
+}

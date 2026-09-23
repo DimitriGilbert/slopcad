@@ -73,6 +73,8 @@ describe("fake kernel identity and capabilities", () => {
       surfaceArea: true,
       sheets: false,
       localFaceOps: false,
+      sweepWire: true,
+      intersectionCurve: false,
     });
   });
 

@@ -17,6 +17,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
+import { curveRecordProblems } from "./curve";
 import {
   CAD_NATIVE_FORMAT_VERSION,
   canRedo,
@@ -333,5 +334,27 @@ describe("the rolled-back fixture", () => {
     expect(stringifyNativeCadDocument(serializeNativeCadDocument(again))).toBe(
       await readFixture("rolled-back.native.json"),
     );
+  });
+});
+
+describe("the curve-entities fixture (Phase 47)", () => {
+  it("carries the three curve kinds with the shared payload vocabulary", async () => {
+    const text = await readFile(
+      new URL("../fixtures/curve-entities.native.json", import.meta.url),
+      "utf8",
+    );
+    const native = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "parsing curve-entities",
+    );
+    const curves = native.document.curves;
+    expect(curves?.map((curve) => curve.curve.kind)).toEqual([
+      "interpolated-spline",
+      "helix",
+      "equation",
+    ]);
+    for (const curve of curves ?? []) {
+      expect(curveRecordProblems(curve.curve)).toEqual([]);
+    }
   });
 });

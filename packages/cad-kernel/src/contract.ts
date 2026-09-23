@@ -57,6 +57,7 @@ import type {
   LengthValue,
   ParseFailure,
   ParseResult,
+  SerializedCurve,
 } from "@slopcad/cad-core";
 import type { KernelBackendId } from "./backend-ids";
 import type { KernelCapabilities } from "./capabilities";
@@ -745,6 +746,141 @@ export interface ProfileSweepInput {
    */
   readonly sheet?: true;
 }
+
+/**
+ * The 3D wire vocabulary of a curve entity (Phase 47): the shared
+ * {@link SerializedCurve} payload schema — one source of truth consumed by
+ * the document record AND the kernel `wire`/`sweepWire` operations (the
+ * record/wire duality the roadmap pins). The four kinds:
+ *
+ * - `interpolated-spline`: a natural cubic through the points
+ *   (chord-length parameterized; exact at every knot — the round-trip
+ *   fixture).
+ * - `control-spline`: a uniform cubic B-spline over the poles
+ *   (approaching, not passing).
+ * - `helix`: the Phase 40 spine parametrization, placed at `origin` along
+ *   `axis` (the first-class generalization of `helixSweep`'s embedded
+ *   spine).
+ * - `equation`: `t ∈ [tMin, tMax]` with `x`/`y`/`z` expression sources
+ *   bound to the dimensionless parameter `t`, each evaluating to a length
+ *   (the expression engine's consumer).
+ *
+ * The payload's semantic battery (`curveRecordProblems`) runs before any
+ * geometry: bad point spacing, degenerate helices, and non-length
+ * equations reject with the profile ops' existing structured codes.
+ */
+export type WireCurveInput = SerializedCurve;
+
+/**
+ * The evaluated result of the `wire` operation (Phase 47): a curve's
+ * DETERMINISTIC geometry — the shared station polyline every kernel, the
+ * renderer, and the serialization validator re-derive identically (pure
+ * float64 math in `curve-geometry.ts`; no engine participates, so
+ * cross-kernel equivalence is byte-exact by construction and the op needs
+ * no capability flag). `length` is the closed form for the untapered
+ * helix (`turns·√((2πR)² + pitch²)`) and the station chord sum otherwise
+ * (the documented lower-bound band); `bounds` are the polyline's
+ * axis-aligned extrema.
+ */
+export interface KernelWire {
+  /**
+   * The wire's station polyline: for a curve entity the one deterministic
+   * chain; for a multi-edge result (an intersection curve) the ordered
+   * concatenation of the per-edge chains.
+   */
+  readonly polyline: readonly (readonly [number, number, number])[];
+  /**
+   * The wire's disjoint chains in order (a curve entity answers exactly
+   * one; an intersection curve answers one per section edge loop piece).
+   */
+  readonly chains: readonly (readonly (readonly [number, number, number])[])[];
+  readonly length: number;
+  readonly bounds: {
+    readonly min: readonly [number, number, number];
+    readonly max: readonly [number, number, number];
+  };
+}
+
+/**
+ * Input of `sweepWire` (Phase 47): one closed profile loop in the local
+ * XY plane carried along a 3D WIRE spine — the generalized path input of
+ * the sweep family. The planar-XZ `sweep` is the compatible subset: a
+ * planar XZ chain whose first tangent is +z, embedded as a 3D wire,
+ * sweeps the IDENTICAL solid, because the transport of a planar path
+ * keeps the path-plane normal fixed — seated on `binormal` for the +z
+ * start (the same world direction the planar sweep fixes as its
+ * fixed-binormal frame), on `normal` for any other in-plane start (the
+ * fixed-frame equivalence, pinned by fixture: identical volume and
+ * bounds against the planar `sweep`).
+ *
+ * ## Semantics — the perpendicular transport
+ *
+ * The profile lies perpendicular to the spine's start tangent (the
+ * perpendicular-attachment rule carried to 3D; there is no +z rule — the
+ * frame IS the transport) and is carried along the spine by PARALLEL
+ * TRANSPORT (double-reflection about the tangent bisector, the
+ * translation-invariant form: the frames depend only on the path's
+ * shape). The spine must be G1: at every station joint the chord
+ * directions agree within the documented tolerance
+ * (`kernel/invalid-path` — the planar sweep's tangent-continuity rule,
+ * generalized), and the spine must not self-intersect on its chord
+ * polyline (`kernel/path-self-intersecting`, the planar battery reused).
+ * The swept volume of a rigid planar profile transported perpendicular
+ * along a non-self-intersecting C1 spine is Cavalieri-exact: `V = A·L`.
+ *
+ * ## Per-kernel fidelity (the probed scope, stated honestly)
+ *
+ * - Fake: `V = A·L` exactly (the analytic Cavalieri reference), bounds
+ *   from the station frames, tessellation the station loft at the shared
+ *   deflection. `sweepWire: true`.
+ * - OCCT: `sweepWire: true` within the probed scope — COLLINEAR spines
+ *   pipe exact through `BRepOffsetAPI_MakePipeShell` (pinned at the
+ *   Cavalieri prism volume), CURVED spines DECLINE with
+ *   `kernel/unsupported-operation`: the binding's pipe over the G0
+ *   chordal station spine yields inverted solids (negative volume
+ *   against the reference; the prespike probe) — the exact interpolated
+ *   spine waits on the binding's `GeomAPI_Interpolate` point-array
+ *   setter, and a decline is never a silently wrong solid.
+ * - JSCAD: `sweepWire: false` — every call declines with
+ *   `kernel/unsupported-operation` (no native sweep primitive over 3D
+ *   wire spines; the adapter does not hand-roll one).
+ * - Manifold: `sweepWire: false` — the engine has no sweep or loft
+ *   primitive (the probed `sweep` verdict verbatim); every call answers
+ *   `kernel/unsupported-operation`.
+ */
+export interface ProfileSweepWireInput {
+  readonly loop: readonly ProfileSegmentInput[];
+  readonly spine: WireCurveInput;
+  readonly placement: ProfilePlacementInput;
+}
+
+/**
+ * Input of `intersectionCurve` (Phase 47): the exact intersection CURVE
+ * of a solid with a solid or an unbounded plane. OCCT implements it
+ * (`BRepAlgoAPI_Section` reused as a curve producer; the section edges'
+ * EXACT geometry walked at a fixed uniform-parameter station rule through
+ * `BRepAdaptor_Curve.Value` — the binding exposes no `GCPnts`
+ * deflection sampler, so the deterministic station discipline the
+ * equation curves use IS the honest polyline). The fake kernel's solids
+ * are analytic primitives without exact section edges and Manifold/JSCAD
+ * are mesh engines whose edge intersections would be adapter-side meshing
+ * — both answer the structured `kernel/unsupported-operation` (the
+ * capability-flag discipline; never a tessellated guess).
+ */
+export type IntersectionCurveInput =
+  | {
+      readonly kind: "solid-solid";
+      readonly target: KernelSolid;
+      readonly tool: KernelSolid;
+    }
+  | {
+      readonly kind: "solid-plane";
+      readonly target: KernelSolid;
+      /** A point on the plane. */
+      readonly origin: readonly [number, number, number];
+      /** The plane's unit normal (any non-zero vector; normalized). */
+      readonly normal: readonly [number, number, number];
+    };
 
 /**
  * The analytic helix spine of `helixSweep` (Phase 40): radius, pitch,
@@ -1937,6 +2073,32 @@ export interface GeometryKernel {
    * `kernel/unsupported-operation`, never a silent bad approximation.
    */
   sweep(input: ProfileSweepInput): KernelResult<KernelSolid>;
+
+  /**
+   * Evaluates a 3D curve entity's wire geometry (Phase 47): the shared
+   * deterministic polyline, length, and bounds — pure math, identical in
+   * every kernel (no capability flag; see {@link KernelWire}).
+   */
+  wire(input: WireCurveInput): KernelResult<KernelWire>;
+
+  /**
+   * Sweeps one closed profile loop along a 3D wire spine (Phase 47): the
+   * generalized sweep — perpendicular attachment, parallel transport,
+   * Cavalieri-exact `A·L` reference volume. See
+   * {@link ProfileSweepWireInput} for the transport semantics, the
+   * generalized G1 battery, and the per-kernel coverage matrix — a kernel
+   * declaring `sweepWire: false` answers every call with the structured
+   * `kernel/unsupported-operation`.
+   */
+  sweepWire(input: ProfileSweepWireInput): KernelResult<KernelSolid>;
+
+  /**
+   * Produces the exact intersection curve of a solid with a solid or a
+   * plane (Phase 47; OCCT `BRepAlgoAPI_Section` reuse). A kernel
+   * declaring `intersectionCurve: false` answers every call with the
+   * structured `kernel/unsupported-operation`.
+   */
+  intersectionCurve(input: IntersectionCurveInput): KernelResult<KernelWire>;
 
   /**
    * Sweeps one closed profile loop along an ANALYTIC helix spine (Phase

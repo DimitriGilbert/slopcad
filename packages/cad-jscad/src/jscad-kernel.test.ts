@@ -8,6 +8,7 @@
  * observability, and the documented normals omission.
  */
 
+import { evaluateWire } from "@slopcad/cad-kernel";
 import { describe, expect, it } from "vitest";
 import { angle, length } from "@slopcad/cad-core";
 import type { LengthValue } from "@slopcad/cad-core";
@@ -65,6 +66,8 @@ describe("createJscadKernel", () => {
       surfaceArea: true,
       sheets: false,
       localFaceOps: false,
+      sweepWire: false,
+      intersectionCurve: false,
     });
   });
 
@@ -419,5 +422,25 @@ describe("jscad kernel mirror (Phase 26.9)", () => {
       KERNEL_ERROR_CODES.invalidLength,
       "NaN offset",
     );
+  });
+});
+
+describe("wire (Phase 47)", () => {
+  it("answers the shared pure evaluation byte-identically", () => {
+    const kernel = createJscadKernel();
+    const curve = {
+      kind: "helix",
+      radius: { dimension: "length", unit: "mm", value: 6 },
+      pitch: { dimension: "length", unit: "mm", value: 4 },
+      turns: 2.5,
+      handedness: 1,
+      startAngle: { dimension: "angle", unit: "rad", value: 0 },
+    } as const;
+    const viaKernel = kernel.wire(curve);
+    const viaHelper = evaluateWire(curve);
+    expect(viaKernel.ok).toBe(true);
+    expect(viaHelper.ok).toBe(true);
+    if (!viaKernel.ok || !viaHelper.ok) return;
+    expect(viaKernel.value).toEqual(viaHelper.wire);
   });
 });

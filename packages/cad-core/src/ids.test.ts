@@ -68,6 +68,7 @@ describe("id wire format parsing", () => {
       datum: "dtm",
       section: "sec",
       occurrence: "occ",
+      curve: "crv",
     });
     expect(parseDatumId("dtm_a").ok).toBe(true);
     expect(parseOccurrenceId("occ_a").ok).toBe(true);
@@ -233,6 +234,7 @@ describe("createIdGenerator", () => {
       datum: 0,
       section: 0,
       occurrence: 0,
+      curve: 0,
     });
   });
 
@@ -248,6 +250,7 @@ describe("createIdGenerator", () => {
         datum: 0,
         section: 0,
         occurrence: 0,
+        curve: 0,
       }),
     ).toThrow(RangeError);
     expect(() =>
@@ -261,6 +264,7 @@ describe("createIdGenerator", () => {
         datum: 0,
         section: 0,
         occurrence: 0,
+        curve: 0,
       }),
     ).toThrow(RangeError);
   });
@@ -276,6 +280,7 @@ describe("createIdGenerator", () => {
       datum: 0,
       section: 0,
       occurrence: 0,
+      curve: 0,
     });
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);
     try {
@@ -304,6 +309,7 @@ describe("createIdGenerator", () => {
       datum: 0,
       section: 0,
       occurrence: 0,
+      curve: 0,
     });
     expect(generator.nextBodyId()).toBe("body_9007199254740991");
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);

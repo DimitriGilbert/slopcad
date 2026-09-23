@@ -35,6 +35,7 @@ export const CAD_ID_KINDS = [
   "datum",
   "section",
   "occurrence",
+  "curve",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -81,6 +82,13 @@ export type SectionId = BrandedId<"section">;
  * every later assembly phase (mates, patterns, BOM tables) uses.
  */
 export type OccurrenceId = BrandedId<"occurrence">;
+/**
+ * Identifier of a 3D curve entity (e.g. `crv_spine-guide`): the
+ * document-resident record of a free-standing curve — spline, helix, or
+ * equation curve (Phase 47) — that sweep features address through the
+ * `curve` input kind.
+ */
+export type CurveId = BrandedId<"curve">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -92,6 +100,7 @@ type CadIdTable = {
   datum: DatumId;
   section: SectionId;
   occurrence: OccurrenceId;
+  curve: CurveId;
 };
 
 /** The branded id type of a given id kind. */
@@ -114,6 +123,7 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   datum: "dtm",
   section: "sec",
   occurrence: "occ",
+  curve: "crv",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -264,6 +274,13 @@ export function parseDatumId(
   return parseIdOfKind("datum", input);
 }
 
+/** Parses untrusted input as a {@link CurveId}. */
+export function parseCurveId(
+  input: unknown,
+): ParseResult<CurveId, IdParseError> {
+  return parseIdOfKind("curve", input);
+}
+
 /** An id of any kind together with the kind it was recognized as. */
 export interface ParsedCadId<K extends CadIdKind = CadIdKind> {
   readonly kind: K;
@@ -405,6 +422,13 @@ export function createDatumId(raw: string): DatumId {
 export function createSectionId(raw: string): SectionId {
   return requireId("section", raw);
 }
+/**
+ * Adopts an explicit user-provided curve id exactly as given (`crv_…` wire
+ * format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createCurveId(raw: string): CurveId {
+  return requireId("curve", raw);
+}
 
 /**
  * Adopts an explicit user-provided occurrence id exactly as given (`occ_…`
@@ -470,6 +494,7 @@ export interface IdGenerator {
   nextDatumId(): DatumId;
   nextSectionId(): SectionId;
   nextOccurrenceId(): OccurrenceId;
+  nextCurveId(): CurveId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -484,6 +509,7 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   datum: 0,
   section: 0,
   occurrence: 0,
+  curve: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -541,6 +567,7 @@ export function createIdGenerator(
     nextDatumId: () => requireId("datum", nextRawId("datum")),
     nextSectionId: () => requireId("section", nextRawId("section")),
     nextOccurrenceId: () => requireId("occurrence", nextRawId("occurrence")),
+    nextCurveId: () => requireId("curve", nextRawId("curve")),
     state: () => Object.freeze({ ...counters }),
   };
 }

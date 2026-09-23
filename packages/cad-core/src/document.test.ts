@@ -138,6 +138,7 @@ describe("createDocument", () => {
       body: 0,
       reference: 0,
       sketch: 0,
+      curve: 0,
       datum: 0,
       section: 0,
       occurrence: 0,
@@ -866,7 +867,7 @@ describe("serializeCadDocument", () => {
         feature: 0,
         body: 0,
         reference: 0,
-        // The additive sketch counter is emitted only when nonzero.
+        // The additive sketch/curve counters are emitted only when nonzero.
       },
       parameters: {
         parameters: [
@@ -1250,6 +1251,7 @@ describe("parseCadDocument rejects malformed input", () => {
       body: 2,
       reference: 0,
       sketch: 0,
+      curve: 0,
       datum: 0,
       section: 0,
       occurrence: 0,
