@@ -223,6 +223,88 @@ describe("SettleProbe content gate", () => {
     expect(onSettled).not.toHaveBeenCalled();
     view.unmount();
   });
+
+  it("reports a committed camera state once, after the projection already settled", () => {
+    const settle: SettleLedger = {
+      syncedProjection: PROJECTION,
+      appliedCamera: PROJECTION.camera,
+    };
+    const onSettled = vi.fn();
+    const onCameraSettled = vi.fn();
+    const view = render(
+      <SettleProbe
+        camera={PROJECTION.camera}
+        onCameraSettled={onCameraSettled}
+        onSettled={onSettled}
+        projection={PROJECTION}
+        settle={settle}
+      />,
+    );
+    // The boot frame settles the projection AND its camera together: one
+    // report, on onSettled — the camera-only report never double-counts it.
+    fiber.runFrames();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(onCameraSettled).not.toHaveBeenCalled();
+    // A committed camera overlay (a series step): the probe waits for the
+    // rig to actually apply it, then reports exactly once.
+    const overlay = perspectiveCamera({ position: [0, 60, 10] });
+    view.rerender(
+      <SettleProbe
+        camera={overlay}
+        onCameraSettled={onCameraSettled}
+        onSettled={onSettled}
+        projection={PROJECTION}
+        settle={settle}
+      />,
+    );
+    // The premature frame: the commit landed but the rig has not applied
+    // the overlay yet — no report (the frame would draw the OLD camera).
+    fiber.runFrames();
+    expect(onCameraSettled).not.toHaveBeenCalled();
+    settle.appliedCamera = overlay;
+    fiber.runFrames();
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(onCameraSettled).toHaveBeenCalledTimes(1);
+    // Once per application: later frames without a new rig application
+    // (selection/display invalidations) stay silent.
+    fiber.runFrames();
+    expect(onCameraSettled).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it("counts a content-equal camera re-application: it is a new rendered frame", () => {
+    const settle: SettleLedger = {
+      syncedProjection: PROJECTION,
+      appliedCamera: PROJECTION.camera,
+    };
+    const onCameraSettled = vi.fn();
+    const view = render(
+      <SettleProbe
+        camera={PROJECTION.camera}
+        onCameraSettled={onCameraSettled}
+        projection={PROJECTION}
+        settle={settle}
+      />,
+    );
+    fiber.runFrames();
+    expect(onCameraSettled).not.toHaveBeenCalled();
+    // The same camera content under a new object identity: the rig
+    // re-applied it (a fresh spec object per application) and a demand
+    // frame rendered — the series' per-step ledger contract counts it.
+    const equal = cloneCamera(PROJECTION.camera);
+    view.rerender(
+      <SettleProbe
+        camera={equal}
+        onCameraSettled={onCameraSettled}
+        projection={PROJECTION}
+        settle={settle}
+      />,
+    );
+    settle.appliedCamera = equal;
+    fiber.runFrames();
+    expect(onCameraSettled).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
 });
 
 describe("CadScene settle wiring", () => {

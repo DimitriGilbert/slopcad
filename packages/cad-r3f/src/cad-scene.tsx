@@ -41,6 +41,13 @@
  * page-level convention; this is the package-level equivalent). Pixels may
  * only be compared once a settle consumer has reported.
  *
+ * `onCameraSettled` is the camera-application counterpart: a COMMITTED
+ * camera state that reaches its first rendered frame on an already-settled
+ * projection reports once (see SettleProbe). The camera-series exports and
+ * every camera-driven render ledger advance ride this signal — a frame's
+ * pixels may be captured only after the camera that should have drawn them
+ * has provably rendered.
+ *
  * `onSelectionRendered` is the Phase 12 counterpart for the highlight
  * layer: it fires with the canonical selection key (the references joined
  * through `selectionReferenceKey`) on the first demand frame that carried
@@ -190,6 +197,16 @@ export interface CadSceneProps {
    * above).
    */
   readonly onSettled?: () => void;
+  /**
+   * Fires once per COMMITTED camera state that actually rendered, when the
+   * projection itself is already settled (see the settle protocol above):
+   * a user-camera overlay application, a standard view, a restored spec —
+   * each reports on its first demand frame after the rig applied it. Never
+   * fires per pointer move (a drag stays off the React render path) and
+   * never for the frame that settles a projection (that frame's
+   * {@link onSettled} already covers its camera).
+   */
+  readonly onCameraSettled?: () => void;
   /**
    * Renders the ground furniture (grid, axes, origin marker). Default
    * `true`; the documented override for camera-only views.
@@ -465,31 +482,47 @@ function QualityPostProcessor(): null {
  * geometry synced through the model's controller AND the EFFECTIVE camera
  * applied by the rig (the user overlay's, when present — the settle ledger),
  * not merely after the projection prop arrived (module doc).
+ *
+ * The camera-only counterpart: when the projection is already settled and
+ * the rig APPLIES a new camera spec (a committed application — the rig
+ * writes a fresh spec object per application, and the application's first
+ * demand frame carries it), `onCameraSettled` fires once. Application
+ * IDENTITY, not camera content, is what counts: a re-applied content-equal
+ * camera still rendered a new frame, while frames invalidated by
+ * selection/display changes re-run no rig application and count nothing.
+ * A drag never re-renders the host per pointer move, so there is nothing
+ * to count between commits. The frame that settles a projection also
+ * settles its camera (one report, never two).
  */
 export function SettleProbe({
   camera,
+  onCameraSettled,
   onSettled,
   projection,
   settle,
 }: {
   /** The effective camera the frame must have applied (overlay ?? spec). */
   camera: RenderCamera;
+  onCameraSettled?: () => void;
   onSettled?: () => void;
   projection: RenderProjection;
   settle: SettleLedger;
 }): null {
   const reportedRef = useRef<RenderProjection | null>(null);
+  // The appliedCamera OBJECT last reported: the rig reassigns
+  // `settle.appliedCamera` on every application, so identity is the
+  // application epoch this frame reports.
+  const reportedAppliedRef = useRef<RenderCamera | null>(null);
   const onSettledRef = useRef(onSettled);
+  const onCameraSettledRef = useRef(onCameraSettled);
   // Layout timing: R3F's demand frame can run after this commit but before
   // the passive-effect flush (the reconciler invalidates during commit), and
   // a stale callback in that window reports the PREVIOUS render's state.
   useLayoutEffect(() => {
     onSettledRef.current = onSettled;
+    onCameraSettledRef.current = onCameraSettled;
   });
   useFrame(() => {
-    if (reportedRef.current === projection) {
-      return;
-    }
     // Content gate: a frame scheduled during the projection's commit can run
     // before the passive effects apply its geometry and camera, so prop
     // identity is not evidence the frame will draw this projection.
@@ -500,8 +533,20 @@ export function SettleProbe({
     if (appliedCamera === null || !camerasEqual(appliedCamera, camera)) {
       return;
     }
-    reportedRef.current = projection;
-    onSettledRef.current?.();
+    if (reportedRef.current !== projection) {
+      reportedRef.current = projection;
+      // This frame settles the camera too: the camera-only report below
+      // must never double-count it.
+      reportedAppliedRef.current = appliedCamera;
+      onSettledRef.current?.();
+      return;
+    }
+    // A rig application SINCE the last report, rendered by this frame:
+    // exactly one report per application.
+    if (reportedAppliedRef.current !== appliedCamera) {
+      reportedAppliedRef.current = appliedCamera;
+      onCameraSettledRef.current?.();
+    }
   });
   return null;
 }
@@ -547,6 +592,7 @@ export function CadScene({
   displayMode,
   lightRig = CAD_LIGHT_RIG_STUDIO,
   onCameraState,
+  onCameraSettled,
   onHover,
   onPick,
   onPickDown,
@@ -675,6 +721,7 @@ export function CadScene({
       />
       <SettleProbe
         camera={effectiveCamera}
+        onCameraSettled={onCameraSettled}
         onSettled={onSettled}
         projection={projection}
         settle={settle}

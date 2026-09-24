@@ -11,7 +11,8 @@ import { dispatchedCount, waitForSettledScene } from "../e2e-render/helpers";
  *  - BOOT — the overlay defaults OFF: camera source "spec", display mode
  *    "shaded" — the exact state every pre-Phase-45 baseline renders with;
  *  - ORBIT — a real pointer drag takes the camera ("user" source), the
- *    document is untouched (the settle volume and frame count stand),
+ *    document is untouched (the settle volume stands) and the rendered-
+ *    frames ledger counts the committed camera's render exactly once,
  *    and RESET returns to spec law explicitly;
  *  - COMMIT LEDGER — one full drag gesture commits the user-camera
  *    record EXACTLY ONCE (the `data-camera-commit-count` ledger reads
@@ -144,13 +145,16 @@ test("orbit takes the camera; the document is untouched; reset returns to spec",
     .poll(async () => rootAttribute(page, "data-viewport-camera-source"))
     .toBe("user");
   expect(await cameraAttribute(page, "mode")).toBe("user");
-  // The user camera is rendering-only: the document's settle volume and
-  // frame count stand (no document action, no serialization).
+  // The user camera is rendering-only: the document's settle volume stands
+  // (no document action, no serialization). The rendered-frames ledger
+  // counts the COMMITTED camera state's render — exactly once per gesture
+  // (the commit ledger below pins once-per-gesture; the camera-settle
+  // probe counts only rendered commits, never pointer moves).
   expect(await rootAttribute(page, "data-cad-rendered-volume")).toBe(
     volumeBefore,
   );
   expect(Number(await rootAttribute(page, "data-rendered-frames"))).toBe(
-    framesBefore,
+    framesBefore + 1,
   );
 
   await page.click('[data-testid="view-reset"]');
