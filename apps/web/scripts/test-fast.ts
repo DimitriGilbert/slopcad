@@ -50,6 +50,9 @@ const HARNESS: ReadonlyArray<{
   { name: "projects", config: "playwright.projects.config.ts" },
   { name: "matrix", config: "playwright.matrix.config.ts" },
   { name: "docs", config: "playwright.docs.config.ts" },
+  // The one-session exhaustive walk: its own worker over the shared
+  // server, serial by construction (one context carries the whole run).
+  { name: "session", config: "playwright.session.config.ts" },
 ];
 
 /**
