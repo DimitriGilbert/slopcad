@@ -1587,6 +1587,17 @@ export function CompleteCadWorkbench({
                 : appearedProjection
           }
           userCamera={viewSession.userCamera}
+          onCameraSettled={() => {
+            // The camera-commit frame: a committed overlay state (a series
+            // step, a standard view, a restored spec) reached its first
+            // rendered frame. Count it on the rendered-frames ledger —
+            // COUNT ONLY: the settle-volume surface stays
+            // document-settle-anchored (a camera application is not a
+            // document action). Gesture commits are the only source (a
+            // drag never re-renders per pointer move), so the ledger
+            // advances exactly once per rendered camera state.
+            noteRenderedFrame(null);
+          }}
           onSettled={() => {
             if (showingPreview) {
               // The imported frame stamps the IMPORT surface, never the

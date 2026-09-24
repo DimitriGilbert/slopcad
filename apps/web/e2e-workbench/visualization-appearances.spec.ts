@@ -231,11 +231,22 @@ test("turntable export: 8 distinct frame files, overlay and canvas restored afte
   const collector = (download: Download): void => {
     downloads.push(download);
   };
+  // The series renders 8 committed camera applications, then the restore
+  // renders a 9th; the ledger counts each. Read the base BEFORE the
+  // export so the restored-frame gate below is exact.
+  const framesBeforeExport = await settledFrames(page);
   page.on("download", collector);
   await page.getByTestId("complete-command-menu-trigger").click();
   await page.locator('[data-cad-command-id="export-turntable"]').click();
   await expect.poll(() => downloads.length, { timeout: 120_000 }).toBe(8);
   page.off("download", collector);
+  // The restore commit's frame: the camera-source attribute flips at the
+  // React commit, but the restored canvas may be captured only once the
+  // spec camera's frame is provably on screen (the ledger's 9th advance —
+  // the 8 series bumps have landed before the last download; only the
+  // restore's can be pending, and the gate is >=, so an already-landed
+  // bump passes instantly).
+  await waitForFrames(page, framesBeforeExport + 9);
 
   // -- Eight PNG files, the series' documented names IN ORDER, and every
   //    frame's bytes DISTINCT (a turntable frame that repeats a previous
@@ -259,10 +270,10 @@ test("turntable export: 8 distinct frame files, overlay and canvas restored afte
   expect(shas.size, `expected 8 distinct frame shas, got ${shas.size}`).toBe(8);
 
   // -- The overlay is restored: the camera source returns to the spec.
-  //    (The frame ledger is settle-ANCHORED — it counts settled projection
-  //    frames, and a camera-only series legitimately never advances it —
-  //    so the frames that DID render are evidenced by the distinct bytes
-  //    above, not by the ledger.)
+  //    (The rendered-frames ledger counts committed camera applications —
+  //    the gate above waited for the restore's own frame — so the frames
+  //    that DID render are evidenced by the ledger AND the distinct bytes
+  //    above.)
   await expect(page.locator(ROOT)).toHaveAttribute(
     "data-viewport-camera-source",
     "spec",

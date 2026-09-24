@@ -18,8 +18,9 @@ import { defineConfig } from "@playwright/test";
  * the video encoder is what keeps the demand frames scheduled under
  * SwiftShader headless). One whole-session video for the single context.
  * `SESSION_VIDEO=0` opts out for timing comparisons; the camera-series
- * stages deliver in either mode — their slow frame waits are the
- * documented ledger finding (see the collectDownloads docblock).
+ * stages deliver in either mode — their per-frame waits are answered by
+ * real camera renders (the camera-settle probe advances the
+ * `data-rendered-frames` ledger; see the collectDownloads docblock).
  *
  * Kept OUT of `pnpm verify` — run via `pnpm test:session`, or through the
  * root `pnpm test:fast` orchestrator (which exports SLOPCAD_E2E_SHARED_URL
@@ -38,10 +39,10 @@ const baseURL =
 // luxury: under SwiftShader headless the R3F demand frames only stay
 // scheduled while the video encoder pumps the compositor (the workbench
 // harness's recorded reason for its always-on video). The camera-series
-// stages' slow frame waits are a LEDGER finding, not an encoder one —
-// `data-rendered-frames` never advances in this habitat, video on or off
-// (see the collectDownloads docblock: output correct, per-frame 10s
-// degrade) — so `SESSION_VIDEO=0` opts out for timing comparisons only.
+// stages' per-frame waits are answered by the camera-settle probe's ledger
+// advances (`data-rendered-frames` counts committed camera renders;
+// see the collectDownloads docblock) — so `SESSION_VIDEO=0` opts out for
+// timing comparisons only.
 const videoOn = process.env.SESSION_VIDEO !== "0";
 
 export default defineConfig({

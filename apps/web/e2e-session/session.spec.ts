@@ -1730,16 +1730,16 @@ test("s10b datum geometry and 3D curves with their history", async ({
 /**
  * Collects `expected` downloads produced by `run` (bounded poll).
  *
- * MEASURED FINDING (probed, this habitat): the camera-series commands wait
- * per frame on `data-rendered-frames`, and that ledger NEVER advances in
- * SwiftShader headless — video on or off, compositor nudges included — so
- * every frame burns its internal 10s degrade before the capture. The
- * output is still correct (8 distinct frame PNGs, camera restored — the
- * appearances suite pins the semantics), but the series wall-clock is
- * frames × 10s: ~90s for the 8-frame turntable, ~45s for the 4-view
- * isometric. These two stages therefore carry explicit, documented
- * budgets above the session's 30s cap — the finding is the ledger, and
- * it is reported, not papered over.
+ * HISTORY (probed, this habitat): the camera-series commands wait per frame
+ * on `data-rendered-frames`, and that ledger used to advance on document
+ * settles only — camera-only applications never re-settled the document, so
+ * every frame burned its internal 10s degrade before the capture (~90s for
+ * the 8-frame turntable, ~45s for the isometric; output was still correct).
+ * The ledger now counts COMMITTED camera renders too (the scene's
+ * camera-settle probe → the host's `noteRenderedFrame`), so each frame
+ * completes as soon as its camera actually rendered — seconds per series.
+ * The budgets stay as bounded caps over the fast path, not a license to
+ * degrade again.
  */
 async function collectDownloads(
   page: Page,
@@ -1807,10 +1807,8 @@ test("s11 snapshot exports: PNG, the 8-frame turntable, and the isometric series
 test("s11b the 8-frame turntable series export", async ({
   sessionPage: page,
 }) => {
-  // DOCUMENTED over-cap budget (the only two in the session): the series
-  // waits per frame on a ledger that never advances in this habitat —
-  // measured 88.5s for all 8 downloads, correct bytes (see the
-  // collectDownloads docblock). THE timeline-line finding of this report.
+  // The camera ledger now advances per committed camera render, so the
+  // series completes in seconds; the cap is a bounded ceiling only.
   test.setTimeout(150_000);
   await stage("s11b turntable", async () => {
     await openComplete(page);
@@ -1839,7 +1837,8 @@ test("s11b the 8-frame turntable series export", async ({
 test("s11c the isometric 4-view series export", async ({
   sessionPage: page,
 }) => {
-  // The second documented over-cap budget: 4 ledger waits ≈ 45s measured.
+  // Second series: 4 ledger waits, each answered by a real camera render
+  // (seconds, not the historical 45s of dead degrades).
   test.setTimeout(90_000);
   await stage("s11c isometric", async () => {
     await openComplete(page);
