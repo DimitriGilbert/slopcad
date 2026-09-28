@@ -43,11 +43,33 @@ documented outcomes (64 tests at the time of writing, including the
 Every browser gate boots the REAL production build (`vite build` + nitro
 node-server) under software WebGL (`--use-angle=swiftshader
 --enable-unsafe-swiftshader`), fixed viewport 1280×720, DPR 1 — so the
-tested bytes are the shipped bytes and screenshots are byte-stable:
+tested bytes are the shipped bytes and screenshots are byte-stable.
+
+### The session harness — the browser e2e
+
+```bash
+pnpm test:session
+```
+
+One user, one browser context, the WHOLE program walked in order like a
+real working session (`apps/web/e2e-session/`, serial, single worker).
+It ends in a self-verifying coverage gate: the run loads the Phase 60
+command-surface manifest (52 commands/panels) plus the 13 planned routes
+into a ledger, every stage records what it exercised, and the final
+test FAILS if any available path went untested. If you touched the app,
+this is the browser gate to run.
+
+### The legacy per-feature fleet (deprecated)
+
+The per-feature harnesses below are the older way to drive the same
+app — runnable for per-harness granularity the session walk doesn't
+isolate (render pins, a11y rules, perf budgets, multi-browser matrix),
+but superseded by the session harness for general e2e. `pnpm test:fast`
+(the one-build/one-port orchestrator) is deprecated with them.
 
 | Command                | Suite             | Covers                                                                                                                                                                                                                                                                                                                                                   |
 | ---------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm test:e2e`        | `e2e/`            | the app smoke                                                                                                                                                                                                                                                                                                                                            |
+| `pnpm test:e2e`        | `e2e/`            | the app smoke (deprecated)                                                                                                                                                                                                                                                                                                                               |
 | `pnpm test:render`     | `e2e-render/`     | the deterministic scene, selection, tools, workbench, IO, sketch — 87 tests, byte-stable screenshots                                                                                                                                                                                                                                                     |
 | `pnpm test:worker`     | `e2e-worker/`     | the Manifold and OCCT worker fixtures                                                                                                                                                                                                                                                                                                                    |
 | `pnpm test:workbench`  | `e2e-workbench/`  | the complete workbench suite, plus the Phase 45 viewport-navigation battery (the user-camera overlay asserted resettable; every pre-Phase-45 suite stays green untouched)                                                                                                                                                                                |

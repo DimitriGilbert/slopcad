@@ -23,6 +23,12 @@
  * commands changes; this orchestrator only removes the eleven redundant
  * builds and boots. Server port booked in the port-book ledger
  * (`slopcad e2e-shared`), never 3001.
+ *
+ * DEPRECATED: the per-feature fleet this orchestrates is superseded by the
+ * session harness (`pnpm test:session`), which walks the whole program in
+ * one serial user session and gates itself on the command-surface manifest
+ * and route list. Reach for this script only when per-harness granularity
+ * (render pins, a11y rules, perf budgets) is actually needed.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -137,6 +143,12 @@ function run(
 
 async function main(): Promise<void> {
   const started = Date.now();
+  console.warn(
+    "[deprecated] pnpm test:fast orchestrates the old per-feature e2e fleet — " +
+      "superseded by `pnpm test:session` (one serial user session, self-verifying " +
+      "coverage over the command-surface manifest and routes). Use it only when " +
+      "per-harness granularity (render pins, a11y rules, perf budgets) is needed.",
+  );
   if (await portBusy(PORT)) {
     throw new Error(
       `Port ${String(PORT)} is already listening — stop whatever owns it (or set SHARED_E2E_PORT) before pnpm test:fast.`,

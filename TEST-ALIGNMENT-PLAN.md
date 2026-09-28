@@ -104,6 +104,13 @@ eleven concurrent Playwright harnesses) whose `e2e-workbench` harness now
 also carries the Phase 60 command-surface audit
 (`apps/web/e2e-workbench/command-surface.spec.ts` + its generated
 checklist, kept closed against `ROADMAP-CAD-PARITY.md` by
-`pnpm audit:command-surface`). The D1–D7 decisions, the deviations, and
+`pnpm audit:command-surface`).
+
+_2026-09-28 update:_ the browser e2e is now the session harness
+(`pnpm test:session`, `apps/web/e2e-session/`) — one serial user session
+whose coverage gate closes the same command-surface manifest and route
+list automatically. `pnpm test:fast` and the per-feature fleet are
+deprecated but kept runnable for per-harness granularity (render pins,
+a11y rules, perf budgets). The D1–D7 decisions, the deviations, and
 the no-CI gate model all stand as written above; `pnpm verify` remains
 the single headless quality gate.

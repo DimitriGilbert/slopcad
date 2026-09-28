@@ -32,10 +32,17 @@ pnpm run dev:web    # the web app only (port 3001)
 ```
 
 The browser suites are deliberately outside `verify` because they boot
-the production build:
+the production build. The session harness is the browser e2e:
 
 ```bash
-pnpm test:e2e        # smoke (2)
+pnpm test:session    # the whole program in one serial user session,
+                     # self-verifying coverage (command surface + routes)
+```
+
+The legacy per-feature fleet is deprecated but still runnable:
+
+```bash
+pnpm test:e2e        # smoke (2)                          [deprecated]
 pnpm test:render     # render + workbench fixtures (87, byte-stable)
 pnpm test:worker     # the Manifold and OCCT worker fixtures (5)
 pnpm test:perf       # performance budgets (24; budgets.json untouched)

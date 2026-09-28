@@ -20,7 +20,7 @@ pnpm workspaces monorepo, with Turborepo running cross-package tasks.
 
 Dev: `pnpm dev` (all apps), `pnpm dev:web` (web only)
 Build & typecheck: `pnpm build`, `pnpm run check-types`
-Test & quality: `pnpm test` (all unit suites via turbo), `pnpm test:e2e` (Playwright smoke), `pnpm run test:coverage`, `pnpm run lint`, `pnpm run format` / `format:check`, `pnpm run quality` (coverage → CRAP → duplication → HTML report in `reports/quality/`), `pnpm run quality:knip` (report-only)
+Test & quality: `pnpm test` (all unit suites via turbo), `pnpm test:session` (the browser e2e — one serial user session, self-verifying coverage), `pnpm run test:coverage`, `pnpm run lint`, `pnpm run format` / `format:check`, `pnpm run quality` (coverage → CRAP → duplication → HTML report in `reports/quality/`), `pnpm run quality:knip` (report-only). Deprecated legacy entries: `pnpm test:e2e` (old smoke) and `pnpm test:fast` (old 11-harness orchestrator) — runnable, but reach for `pnpm test:session` first
 The gate: `pnpm run verify` runs check-types → lint → test → build in one headless command — run it before declaring any work done
 Database (`packages/db`): `pnpm db:push` pushes the schema, `pnpm db:generate` generates migration SQL from the schema, `pnpm db:migrate` applies migrations, `pnpm db:studio` opens the data browser, `pnpm db:local` starts a local database
 Docker Compose: `pnpm docker:build`, `docker:up`, `docker:logs`, `docker:down`
@@ -28,7 +28,7 @@ Per package: `pnpm --filter <name> <script>` — e.g. `pnpm --filter web dev`; a
 
 ## Testing
 
-Runner: Vitest v4, tests colocated as `src/**/*.test.ts(x)`; shared `createTestConfig()` factory in `packages/config/vitest/base.ts` (node env by default, jsdom only for React component tests in `apps/web` and `packages/ui`). Playwright covers browser journeys from `apps/web/e2e/` (Chromium, software WebGL/SwiftShader, fixed viewport/DPR, trace on first retry, video on).
+Runner: Vitest v4, tests colocated as `src/**/*.test.ts(x)`; shared `createTestConfig()` factory in `packages/config/vitest/base.ts` (node env by default, jsdom only for React component tests in `apps/web` and `packages/ui`). The browser e2e is the session harness: `pnpm test:session` (`apps/web/e2e-session/`) — ONE user, ONE browser context, the whole program walked serially under the real production build (Chromium, software WebGL/SwiftShader, fixed viewport/DPR, video on), ending in a coverage gate that fails if any command-surface manifest entry or route went untested. The old per-feature fleet (`apps/web/e2e*/`, fronted by the deprecated `pnpm test:e2e` and `pnpm test:fast`) stays runnable for per-harness granularity (render pins, a11y rules, perf budgets).
 
 Hard rules: no live network in unit tests (runtime-enforced fetch guard in `apps/web` and `packages/api` setups), no real database (`createInMemoryDb()` from `@slopcad/db` applies committed migrations to an ephemeral temp-file libsql database), no env validation at import time (`SKIP_ENV_VALIDATION=1` in per-package `src/test-setup.ts`).
 
