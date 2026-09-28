@@ -1,13 +1,40 @@
+/**
+ * The project detail page: one project's document shelf beside its
+ * create-document panel. Documents read as instrument rows — name,
+ * version badge, mono save metadata — and the Open action hands the
+ * document to the workbench. Loading and error states keep the page's
+ * shape instead of collapsing it.
+ */
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { ChevronLeft } from "lucide-react";
+import { Box, ChevronLeft } from "lucide-react";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
+import { Badge } from "@slopcad/ui/components/badge";
+import { buttonVariants } from "@slopcad/ui/components/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@slopcad/ui/components/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@slopcad/ui/components/empty";
+import { Skeleton } from "@slopcad/ui/components/skeleton";
 
 import {
   CreateDocumentForm,
   type CreateDocumentValues,
 } from "@/cad-projects/project-forms";
+import { AppPage, PageHeader } from "@/components/app/page";
+import { formatStamp, plural } from "@/utils/format";
 import { useTRPC } from "@/utils/trpc";
 
 export const Route = createFileRoute("/_auth/projects/$projectId")({
@@ -52,25 +79,31 @@ function ProjectDetailPage(): ReactElement {
 
   if (projectQuery.isPending) {
     return (
-      <div className="container mx-auto max-w-3xl px-4 py-8">
-        <p className="text-muted-foreground text-sm">Loading project…</p>
-      </div>
+      <AppPage>
+        <BackLink />
+        <div aria-hidden="true" className="mt-6">
+          <Skeleton className="h-9 w-72 max-w-full" />
+          <Skeleton className="mt-3 h-5 w-96 max-w-full" />
+          <div className="mt-10 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="space-y-3">
+              <Skeleton className="h-20" />
+              <Skeleton className="h-20" />
+            </div>
+            <Skeleton className="h-40" />
+          </div>
+        </div>
+      </AppPage>
     );
   }
 
   if (projectQuery.isError) {
     return (
-      <div className="container mx-auto max-w-3xl px-4 py-8">
-        <p className="text-destructive text-sm" role="alert">
+      <AppPage>
+        <BackLink />
+        <p className="text-destructive mt-8 text-sm" role="alert">
           {projectQuery.error.message}
         </p>
-        <Link
-          to="/projects"
-          className="text-muted-foreground mt-4 inline-block text-sm underline"
-        >
-          Back to projects
-        </Link>
-      </div>
+      </AppPage>
     );
   }
 
@@ -78,79 +111,118 @@ function ProjectDetailPage(): ReactElement {
   const documents = documentsQuery.data ?? [];
 
   return (
-    <div className="container mx-auto max-w-3xl px-4 py-8">
-      <Link
-        to="/projects"
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
-      >
-        <ChevronLeft className="size-3" />
-        Projects
-      </Link>
-      <header className="mt-3 mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {project.name}
-        </h1>
-        {project.description !== null && project.description !== "" ? (
-          <p className="text-muted-foreground mt-1 text-sm">
-            {project.description}
-          </p>
-        ) : null}
-      </header>
-
-      <section
-        aria-label="Create document"
-        className="border-border bg-card mb-8 border p-4"
-        data-testid="create-document-panel"
-      >
-        <h2 className="text-muted-foreground mb-3 text-xs font-medium tracking-wider uppercase">
-          New document
-        </h2>
-        <CreateDocumentForm onSubmitted={handleCreateDocument} />
-      </section>
-
-      <section aria-label="Documents">
-        <h2 className="text-muted-foreground mb-2 text-xs font-medium tracking-wider uppercase">
-          Documents
-        </h2>
-        {documentsQuery.isPending ? (
-          <p className="text-muted-foreground text-sm">Loading documents…</p>
-        ) : documentsQuery.isError ? (
-          <p className="text-destructive text-sm" role="alert">
-            Documents could not be loaded: {documentsQuery.error.message}
-          </p>
-        ) : documents.length === 0 ? (
-          <div className="text-muted-foreground border-border border border-dashed p-8 text-center text-sm">
-            No documents yet. Create one above and open it in the workbench.
+    <AppPage>
+      <BackLink />
+      <div className="mt-6">
+        <PageHeader
+          lead={
+            project.description !== null && project.description !== ""
+              ? project.description
+              : undefined
+          }
+          meta={`created ${formatStamp(project.createdAt)}`}
+          title={project.name}
+        />
+      </div>
+      <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <aside className="lg:order-2 lg:sticky lg:top-16">
+          <Card data-testid="create-document-panel">
+            <CardHeader>
+              <CardTitle>New document</CardTitle>
+              <CardDescription>
+                One document holds one model and its saved versions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CreateDocumentForm onSubmitted={handleCreateDocument} />
+            </CardContent>
+          </Card>
+        </aside>
+        <section aria-label="Documents" className="lg:order-1">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-medium">Documents</h2>
+            {documentsQuery.isPending ? null : (
+              <span className="text-muted-foreground font-mono text-xs">
+                {plural(documents.length, "document")}
+              </span>
+            )}
           </div>
-        ) : (
-          <ul className="divide-border divide-y" data-testid="document-list">
-            {documents.map((document) => (
-              <li
-                key={document.id}
-                className="flex items-center gap-3 px-2 py-3"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">{document.name}</div>
-                  <div className="text-muted-foreground mt-1 font-mono text-xs">
-                    {document.versionCount === 0
-                      ? "never saved"
-                      : `v${String(document.latestVersion)} \u00B7 ${String(document.versionCount)} ${document.versionCount === 1 ? "save" : "saves"}`}
-                    {" \u00B7 "}
-                    updated {new Date(document.updatedAt).toLocaleString()}
-                  </div>
-                </div>
-                <Link
-                  to="/documents/$documentId"
-                  params={{ documentId: document.id }}
-                  className="border-border hover:bg-accent border px-2 py-1 text-xs"
+          {documentsQuery.isPending ? (
+            <div aria-hidden="true" className="space-y-3">
+              <Skeleton className="h-20" />
+              <Skeleton className="h-20" />
+            </div>
+          ) : documentsQuery.isError ? (
+            <p className="text-destructive text-sm" role="alert">
+              Documents could not be loaded: {documentsQuery.error.message}
+            </p>
+          ) : documents.length === 0 ? (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Box />
+                </EmptyMedia>
+                <EmptyTitle>No documents yet</EmptyTitle>
+                <EmptyDescription>
+                  Create one in the New document panel; it opens in the
+                  workbench unsaved at v0.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <ul className="space-y-3" data-testid="document-list">
+              {documents.map((document) => (
+                <li
+                  className="border-border bg-card flex items-center gap-4 border p-4"
+                  key={document.id}
                 >
-                  Open
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2.5">
+                      <span className="truncate text-sm font-medium">
+                        {document.name}
+                      </span>
+                      {document.versionCount > 0 ? (
+                        <Badge variant="outline">
+                          {`v${String(document.latestVersion)}`}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="text-muted-foreground mt-1.5 font-mono text-[11px]">
+                      {document.versionCount === 0
+                        ? "never saved"
+                        : plural(document.versionCount, "save")}
+                      <span aria-hidden="true"> · </span>
+                      {`updated ${formatStamp(document.updatedAt)}`}
+                    </div>
+                  </div>
+                  <Link
+                    className={buttonVariants({
+                      size: "sm",
+                      variant: "outline",
+                    })}
+                    params={{ documentId: document.id }}
+                    to="/documents/$documentId"
+                  >
+                    Open
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </AppPage>
+  );
+}
+
+function BackLink(): ReactElement {
+  return (
+    <Link
+      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors"
+      to="/projects"
+    >
+      <ChevronLeft className="size-3" />
+      Projects
+    </Link>
   );
 }

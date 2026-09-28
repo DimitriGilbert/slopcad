@@ -1,13 +1,39 @@
+/**
+ * The projects index: the workspace's shelf. Two-region layout on wide
+ * screens — the project cards on the left, the create panel pinned
+ * beside them; stacked on small screens with the panel first, where the
+ * empty workspace needs it. Cards, skeletons, and the empty state share
+ * components with the dashboard so the two surfaces stay one system.
+ */
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
+import { Box } from "lucide-react";
 import type { ReactElement } from "react";
 import { toast } from "sonner";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@slopcad/ui/components/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@slopcad/ui/components/empty";
+import { Skeleton } from "@slopcad/ui/components/skeleton";
 
 import {
   CreateProjectForm,
   type CreateProjectValues,
 } from "@/cad-projects/project-forms";
+import { AppPage, PageHeader } from "@/components/app/page";
+import { ProjectCard } from "@/components/app/project-card";
+import { plural } from "@/utils/format";
 import { useTRPC } from "@/utils/trpc";
 
 export const Route = createFileRoute("/_auth/projects/")({
@@ -51,67 +77,66 @@ function ProjectsPage(): ReactElement {
   const projects = projectsQuery.data ?? [];
 
   return (
-    <div className="container mx-auto max-w-3xl px-4 py-8">
-      <header className="mb-8">
-        <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
-          Workspace — {session?.user.name}
-        </p>
-        <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-      </header>
-
-      <section
-        aria-label="Create project"
-        className="border-border bg-card mb-8 border p-4"
-        data-testid="create-project-panel"
-      >
-        <h2 className="text-muted-foreground mb-3 text-xs font-medium tracking-wider uppercase">
-          New project
-        </h2>
-        <CreateProjectForm onSubmitted={handleCreate} />
-      </section>
-
-      <section aria-label="Your projects">
-        {projectsQuery.isPending ? (
-          <p className="text-muted-foreground text-sm">Loading projects…</p>
-        ) : projectsQuery.isError ? (
-          <p className="text-destructive text-sm" role="alert">
-            Projects could not be loaded: {projectsQuery.error.message}
-          </p>
-        ) : projects.length === 0 ? (
-          <div className="text-muted-foreground border-border border border-dashed p-8 text-center text-sm">
-            No projects yet. Name one above to start a model.
-          </div>
-        ) : (
-          <ul className="divide-border divide-y" data-testid="project-list">
-            {projects.map((project) => (
-              <li key={project.id}>
-                <Link
-                  to="/projects/$projectId"
-                  params={{ projectId: project.id }}
-                  className="hover:bg-accent group flex items-center gap-3 px-2 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium">{project.name}</div>
-                    {project.description !== null &&
-                    project.description !== "" ? (
-                      <div className="text-muted-foreground truncate text-xs">
-                        {project.description}
-                      </div>
-                    ) : null}
-                    <div className="text-muted-foreground mt-1 font-mono text-xs">
-                      {String(project.documentCount)}
-                      {project.documentCount === 1 ? " document" : " documents"}
-                      {" \u00B7 "}
-                      updated {new Date(project.updatedAt).toLocaleString()}
-                    </div>
-                  </div>
-                  <ChevronRight className="text-muted-foreground size-4" />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+    <AppPage>
+      <PageHeader
+        lead={`Workspace of ${session?.user.name ?? "unknown"}. Every project groups its documents and their saved versions.`}
+        meta={
+          projects.length > 0 ? plural(projects.length, "project") : undefined
+        }
+        title="Projects"
+      />
+      <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <aside className="lg:order-2 lg:sticky lg:top-16">
+          <Card data-testid="create-project-panel">
+            <CardHeader>
+              <CardTitle>New project</CardTitle>
+              <CardDescription>
+                Projects group documents and their version history.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CreateProjectForm onSubmitted={handleCreate} />
+            </CardContent>
+          </Card>
+        </aside>
+        <section aria-label="Your projects" className="lg:order-1">
+          {projectsQuery.isPending ? (
+            <div aria-hidden="true" className="grid gap-3 md:grid-cols-2">
+              {Array.from({ length: 4 }, (_, index) => (
+                <Skeleton key={index} className="h-28" />
+              ))}
+            </div>
+          ) : projectsQuery.isError ? (
+            <p className="text-destructive text-sm" role="alert">
+              Projects could not be loaded: {projectsQuery.error.message}
+            </p>
+          ) : projects.length === 0 ? (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Box />
+                </EmptyMedia>
+                <EmptyTitle>No projects yet</EmptyTitle>
+                <EmptyDescription>
+                  Name one in the New project panel and it appears here, ready
+                  for its first document.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <ul
+              className="grid gap-3 md:grid-cols-2"
+              data-testid="project-list"
+            >
+              {projects.map((project) => (
+                <li key={project.id}>
+                  <ProjectCard project={project} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </AppPage>
   );
 }
