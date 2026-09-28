@@ -31,6 +31,12 @@ export const env = createEnv({
         },
       ),
     BETTER_AUTH_URL: z.url(),
+    /**
+     * Extra origins (comma-separated) that may call the auth API besides
+     * `BETTER_AUTH_URL` itself — e.g. reaching the dev server over LAN
+     * (`http://192.168.1.41:3001`) while `BETTER_AUTH_URL` stays localhost.
+     */
+    BETTER_AUTH_TRUSTED_ORIGINS: z.string().optional(),
     NODE_ENV: z
       .enum(["development", "production", "test"])
       .default("development"),
