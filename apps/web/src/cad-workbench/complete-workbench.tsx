@@ -241,6 +241,15 @@ export type CadWorkbenchSlot = (context: CadWorkbenchSlotContext) => ReactNode;
 
 /** The replaceable surfaces of the complete workbench. */
 export interface CadWorkbenchSlots {
+  /**
+   * The host's one page-level row ABOVE the command row — the project
+   * persistence bar of the document route (the WorkbenchLayout `bar`
+   * slot's contract, carried over): one honest row of document-level
+   * chrome, wrapped by the composition in the same hairline band the
+   * old layout used. Absent on the bare route, whose DOM stays
+   * unchanged.
+   */
+  readonly bar?: CadWorkbenchSlot;
   /** The command row's tool strip. */
   readonly toolbar?: CadWorkbenchSlot;
   /** The feature band's history timeline (full width, below the workspace). */
@@ -2021,6 +2030,7 @@ export function CompleteCadWorkbench({
 
   // -- Slot resolution: a function slot replaces its default entirely -------
 
+  const barNode = slots.bar?.(context);
   const toolbar = slots.toolbar?.(context) ?? defaultToolbar;
   const historyTimeline =
     slots.historyTimeline?.(context) ?? defaultHistoryTimeline;
@@ -2124,6 +2134,15 @@ export function CompleteCadWorkbench({
       data-viewport-convention={viewSession.convention}
       id={rootId}
     >
+      {/* The host's page-level bar (the document route's persistence
+          chrome) when a slot supplies one; the bare route renders nothing
+          here, keeping its DOM unchanged. Same wrapper band the shared
+          WorkbenchLayout wraps its bar in. */}
+      {barNode === undefined ? null : (
+        <div className="border-border bg-background shrink-0 border-b">
+          {barNode}
+        </div>
+      )}
       {/* The command row, grouped like a machine headstock: the document
           plate (what this document IS, live), the tool group, then the
           pinned terminal actions — history, the command menu, and the

@@ -1,9 +1,10 @@
 /**
- * The project workbench (Phase 31): the REAL workbench — the same engine,
- * the same composed layout, the same four CAD components — with the
+ * The project workbench (Phase 31, recomposed): the COMPLETE workbench —
+ * the same engine and the same full-bleed cockpit the public
+ * /workbench-complete route runs, not a demo composition — with the
  * persistence chrome the product needs around it. The bar is one honest
- * row ABOVE the command row (rendered through the layout's bar slot, so
- * the bare workbench's pinned DOM stays byte-identical):
+ * row ABOVE the command row (rendered through the composition's bar
+ * slot, so the bare route's DOM stays unchanged):
  *
  * - OPEN — the document's latest saved version loads on mount through the
  *   tRPC documents API and enters the store through `replaceSession` (the
@@ -38,12 +39,10 @@ import { ArrowLeft, History, Save } from "lucide-react";
 import type { ReactElement } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { useWorkbenchEngine } from "../cad-workbench/workbench-engine";
 
-import { WorkbenchLayout } from "../cad-workbench/CadWorkbenchPage";
-import {
-  useWorkbenchEngine,
-  WorkbenchStoreProvider,
-} from "../cad-workbench/workbench-engine";
+import { CompleteCadWorkbench } from "../cad-workbench/complete-workbench";
+import { WorkbenchStoreProvider } from "../cad-workbench/workbench-engine";
 import { shouldApplyLatestContent } from "./latest-content-gate";
 import {
   parseNativeTextToSession,
@@ -91,16 +90,21 @@ function ProjectWorkbenchBody({
 }: {
   readonly documentId: string;
 }): ReactElement {
-  const engine = useWorkbenchEngine({
-    rootId: "workbench-root",
-    statusId: "workbench-status",
-    volumeId: "workbench-volume",
-    errorId: "workbench-error",
-  });
+  // The COMPLETE workbench — the same full-bleed cockpit the public
+  // /workbench-complete route runs — with the persistence chrome riding
+  // the composition's bar slot (the WorkbenchLayout `bar` contract,
+  // carried over). The machine surface keeps its pinned `workbench-root`
+  // id: the settle protocol, dispatch counter, and scene attributes the
+  // suites read are written by the engine onto that root, so the
+  // document route and the workbench routes stay one instrument.
   return (
-    <WorkbenchLayout
-      engine={engine}
-      bar={<PersistenceBar engine={engine} documentId={documentId} />}
+    <CompleteCadWorkbench
+      rootId="workbench-root"
+      slots={{
+        bar: ({ engine }) => (
+          <PersistenceBar engine={engine} documentId={documentId} />
+        ),
+      }}
     />
   );
 }

@@ -30,7 +30,6 @@ const PERSISTENCE_BAR = '[data-testid="project-persistence-bar"]';
 const STATE_TEXT = '[data-testid="persistence-state"]';
 const SKETCH = "#sketch-root";
 const EXTRUDE_BUTTON = '[data-testid="sketch-extrude"]';
-const MODE_TOGGLE = '[data-testid="workbench-mode-toggle"]';
 
 /** The sketch rectangle this journey draws (workplane mm). */
 const RECT = { x0: 10, y0: 10, x1: 30, y1: 25 } as const;
@@ -176,7 +175,18 @@ test("persistence: register, create project and document, model, save, reload, r
   // the bridge's document commit and the scene's dispatch effect land in
   // separate commits, so an unanchored wait could accept the pre-extrude
   // settled state.
-  await page.locator(MODE_TOGGLE).click();
+  // The document workbench runs the complete composition now: sketch mode
+  // enters through its command menu, not a dedicated mode toggle.
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
+    "data-command-menu-open",
+    "true",
+  );
+  await page.locator('[data-cad-command-id="sketch"]').click();
+  await expect(page.locator(`#${ROOT}`)).toHaveAttribute(
+    "data-command-menu-open",
+    "false",
+  );
   await expect(page.locator(SKETCH)).toBeVisible();
   await activateSketchTool(page, "rectangle");
   const surface = page.locator(`${SKETCH} [data-sketch-surface]`);

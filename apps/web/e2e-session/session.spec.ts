@@ -3284,7 +3284,10 @@ test("s26b model, save v2, reload, reopen, and walk the history", async ({
     await page.locator('[data-testid="persistence-save"]').click();
     await expect(bar).toHaveAttribute("data-live-version", "1");
     await expect(bar).toHaveAttribute("data-dirty", "false");
-    await page.locator('[data-testid="workbench-mode-toggle"]').click();
+    // MODEL: the document workbench is the complete composition now, so
+    // sketch mode enters through its command menu (the dedicated mode
+    // toggle lives on the bare /workbench layout only).
+    await runCommand(page, "workbench-root", "sketch");
     await expect(page.locator(SKETCH)).toBeVisible();
     await activateSketchTool(page, "rectangle");
     await clickCanvasPoint(page, RECT.x0, RECT.y0);
