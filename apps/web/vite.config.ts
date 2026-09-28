@@ -31,7 +31,11 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     tanstackStart(),
-    nitro({ preset: "node-server" }),
+    // compressPublicAssets: precompress every client asset (hashed bundles,
+    // workers, fonts) to .gz and .br at build time — the node-server preset
+    // only serves them with Content-Encoding when precompressed; without it
+    // a multi-MB workbench payload ships raw over the internet.
+    nitro({ preset: "node-server", compressPublicAssets: true }),
     viteReact(),
   ],
 });
