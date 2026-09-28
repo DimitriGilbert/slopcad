@@ -72,3 +72,6 @@ temp
 # generated per validation run, never committed)
 /vision-shots/
 apps/vision-shots/
+
+# Local-only compose overrides (host port mappings etc.).
+docker-compose.override.yml

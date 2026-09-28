@@ -31,6 +31,7 @@ import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
+import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ComponentsComponentIdRouteImport } from './routes/components.$componentId'
 import { Route as AuthDocumentsDocumentIdRouteImport } from './routes/_auth/documents.$documentId'
 import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.index'
@@ -149,6 +150,11 @@ const AuthDashboardRoute = AuthDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthRouteRoute,
 } as any)
+const ApiHealthRoute = ApiHealthRouteImport.update({
+  id: '/api/health',
+  path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ComponentsComponentIdRoute = ComponentsComponentIdRouteImport.update({
   id: '/components/$componentId',
   path: '/components/$componentId',
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
   '/projects/$projectId': typeof AuthProjectsProjectIdRoute
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
   '/projects/$projectId': typeof AuthProjectsProjectIdRoute
@@ -269,6 +277,7 @@ export interface FileRoutesById {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
+  '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/_auth/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
   '/_auth/projects/$projectId': typeof AuthProjectsProjectIdRoute
@@ -301,6 +310,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/api/health'
     | '/components/$componentId'
     | '/documents/$documentId'
     | '/projects/$projectId'
@@ -331,6 +341,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/api/health'
     | '/components/$componentId'
     | '/documents/$documentId'
     | '/projects/$projectId'
@@ -362,6 +373,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/_auth/dashboard'
+    | '/api/health'
     | '/components/$componentId'
     | '/_auth/documents/$documentId'
     | '/_auth/projects/$projectId'
@@ -393,6 +405,7 @@ export interface RootRouteChildren {
   WorkerRoute: typeof WorkerRoute
   WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
+  ApiHealthRoute: typeof ApiHealthRoute
   ComponentsComponentIdRoute: typeof ComponentsComponentIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiIoImport3mfRoute: typeof ApiIoImport3mfRoute
@@ -555,6 +568,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthDashboardRouteImport
       parentRoute: typeof AuthRouteRoute
     }
+    '/api/health': {
+      id: '/api/health'
+      path: '/api/health'
+      fullPath: '/api/health'
+      preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/components/$componentId': {
       id: '/components/$componentId'
       path: '/components/$componentId'
@@ -647,6 +667,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkerRoute: WorkerRoute,
   WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,
+  ApiHealthRoute: ApiHealthRoute,
   ComponentsComponentIdRoute: ComponentsComponentIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiIoImport3mfRoute: ApiIoImport3mfRoute,

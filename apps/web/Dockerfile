@@ -24,7 +24,9 @@ EXPOSE 3001
 
 # SSR chunks require workspace dependencies at runtime
 WORKDIR /app/apps/web
-# Run as the unprivileged node user; port 3001 needs no privileges and /data
-# (bind-mounted SQLite) is host-owned — see docker-compose.yml create_host_path: false
+# /data (SQLite volume mountpoint) pre-created owned by node so a named
+# volume inherits the right ownership on first use — see docker-compose.yml
+RUN mkdir -p /data && chown node:node /data
+# Run as the unprivileged node user; port 3001 needs no privileges
 USER node
 CMD ["node", ".output/server/index.mjs"]

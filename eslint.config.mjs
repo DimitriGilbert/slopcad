@@ -50,6 +50,21 @@ export default tseslint.config(
     },
   },
   {
+    // apps/web is the only package with enough files to trip the TypeScript 6
+    // tsserver document-registry crash (updateOpen → isDocumentRegistryEntry,
+    // microsoft/TypeScript #62369/#62451) that projectService drives through
+    // its updateOpen cycle. Classic project mode builds the program directly
+    // and never touches that layer; every apps/web ts/tsx is in its tsconfig.
+    files: ["apps/web/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: {
+        projectService: false,
+        project: ["./apps/web/tsconfig.json"],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
     files: [
       "apps/web/**/*.{ts,tsx}",
       "packages/ui/**/*.{ts,tsx}",
@@ -67,7 +82,16 @@ export default tseslint.config(
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
-    files: ["scripts/**/*.mjs", "**/*.config.mjs"],
+    files: ["**/scripts/**/*.mjs", "**/*.config.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      // These are Node-run scripts; without a TS project the parser has no
+      // environment to source Node globals from.
+      globals: {
+        URL: "readonly",
+        console: "readonly",
+        process: "readonly",
+      },
+    },
   },
 );

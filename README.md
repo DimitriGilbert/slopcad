@@ -94,12 +94,25 @@ If you want to add app-specific blocks instead of shared primitives, run the sha
 - Logs: pnpm run docker:logs
 - Stop: pnpm run docker:down
 
-Environment variables are read from each app's `.env` file (baked into web builds for public variables) and overridden in `docker-compose.yml` for container networking.
+Environment variables come from the host environment or a `.env` file next to `docker-compose.yml`:
+`BETTER_AUTH_SECRET` is mandatory (`openssl rand -base64 32`) — the stack refuses to start without
+it — and `BETTER_AUTH_URL` must be the public origin (it is better-auth's baseURL and trusted
+origin) for anything but local use. `DATABASE_URL` defaults to the SQLite file inside the stack's
+persistent data.
 
-Docker Compose uses the local `./.data/local.db` file. Run `pnpm run db:push` before starting the stack.
-The container runs as the `node` user (uid 1000) and Compose will not create `./.data` for you
-(`create_host_path: false`), so the directory must already exist and be writable by the host user
-matching that uid — running `pnpm run db:push` as your own user beforehand already leaves it correct.
+Migrations run automatically at every container start against the SQLite file in the `slopcad-data`
+Docker volume, so no host-side `db:push` or directory preparation is needed; data survives restarts
+and rebuilds through that volume. The stack is plain Docker Compose — any host that runs compose
+files (including Dokploy) can deploy it. It publishes **no host port**: point your reverse proxy at
+the `web` service's port 3001 on the compose network (in Dokploy: Domains → service `web`, port
+3001). To poke the stack from your own machine, create an untracked `docker-compose.override.yml`:
+
+```yaml
+services:
+  web:
+    ports:
+      - "127.0.0.1:31001:3001"
+```
 
 For more details, see the guide on [Deploying with Docker Compose](https://www.better-t-stack.dev/docs/guides/docker).
 

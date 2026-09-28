@@ -16,3 +16,6 @@ local.db-*
 packages/cad-core/fixtures/
 # Live review-session artifacts, not source.
 .review/
+
+# Agent tooling workspace (plans, session state), not source.
+.zcode/
