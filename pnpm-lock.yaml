@@ -481,9 +481,15 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: 'catalog:'
         version: 4.1.11(vitest@4.1.11)
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       react:
         specifier: 'catalog:'
         version: 19.2.8
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -743,6 +749,9 @@ importers:
       '@slopcad/cad-jscad':
         specifier: workspace:*
         version: link:../cad-jscad
+      '@slopcad/cad-jsx':
+        specifier: workspace:*
+        version: link:../cad-jsx
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel

@@ -2,12 +2,15 @@
  * `@slopcad/cad-jsx`: author CAD models as React element trees, compiled
  * deterministically to the `@slopcad/cad-core` command vocabulary.
  *
- * The public surface is the element vocabulary (`./elements.ts`) and the
- * compiler entry point (`compileModel` from `./compiler.ts`). See the
- * package README for the authoring guide, the id assignment scheme, the
- * reference mechanisms (`<Use>` for shared features, `ref_…`/`dtm_…`
- * props for records minted outside the tree, `<Sketch id=…>` siblings for
- * sketch-consuming elements), and the determinism guarantees.
+ * The public surface is the element vocabulary (`./elements.ts`), the
+ * compiler entry point (`compileModel` from `./compiler.ts`), and the
+ * native emission bridge (`compileToNative` from `./native.ts` — compile,
+ * fold over a fresh document, serialize to the native `slopcad` format's
+ * canonical text). See the package README for the authoring guide, the id
+ * assignment scheme, the reference mechanisms (`<Use>` for shared
+ * features, `ref_…`/`dtm_…` props for records minted outside the tree,
+ * `<Sketch id=…>` siblings for sketch-consuming elements), the native
+ * emission and CLI, and the determinism guarantees.
  */
 
 export type {
@@ -123,3 +126,14 @@ export {
 
 export type { CadJsxCompileError, CadJsxErrorCode } from "./compiler";
 export { CAD_JSX_ERROR_CODES, compileModel } from "./compiler";
+export type {
+  CompileToNativeOptions,
+  NativeEmitError,
+  NativeEmitErrorCode,
+} from "./native";
+export {
+  compileToNative,
+  DEFAULT_NATIVE_DOCUMENT_ID,
+  NATIVE_EMIT_ERROR_CODES,
+  NATIVE_EMIT_METADATA,
+} from "./native";

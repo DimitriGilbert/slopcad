@@ -15,7 +15,8 @@
     "check-types": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "compile": "tsx scripts/compile.ts"
   },
   "dependencies": {
     "@slopcad/cad-core": "workspace:*"
@@ -27,7 +28,9 @@
     "@slopcad/config": "workspace:*",
     "@types/react": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
+    "esbuild": "0.28.2",
     "react": "catalog:",
+    "tsx": "4.23.13",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

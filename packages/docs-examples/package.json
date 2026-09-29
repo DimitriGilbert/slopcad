@@ -26,6 +26,7 @@
     "@slopcad/cad-components": "workspace:*",
     "@slopcad/cad-core": "workspace:*",
     "@slopcad/cad-io": "workspace:*",
+    "@slopcad/cad-jsx": "workspace:*",
     "@slopcad/cad-jscad": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",

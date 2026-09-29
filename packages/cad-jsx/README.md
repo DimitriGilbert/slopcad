@@ -325,6 +325,88 @@ same element tree compiles to a transaction whose
 `JSON.stringify(serializeTransaction(…))` is byte-identical every time.
 Registries inside the walk are keyed for lookup only — never iterated to
 produce output — so no map iteration order leaks into the result.
+`compileToNative` inherits the discipline (its only inputs are the tree
+and fixed defaults), so the same tree emits the identical native string.
+
+## Native emission
+
+`compileToNative` bridges the compiler onto the canonical native `slopcad`
+document format in one step:
+
+```ts
+import { compileToNative } from "@slopcad/cad-jsx";
+
+const result = compileToNative(<Plate boreRadius={4} />, {
+  documentId: "doc_plate",       // optional; default doc_cadjsx-model
+  metadata: { note: "…" },       // optional; default { generator: "@slopcad/cad-jsx" }
+});
+// result.ok → result.value is the native format's canonical text
+// result.ok === false → a structured CadJsxCompileError or NativeEmitError
+```
+
+The pipeline (and the provenance of every piece):
+
+1. **Compile** — `compileModel`, exactly as above.
+2. **Fold** — the transaction commits over a fresh empty document through
+   cad-core's `applySessionTransaction` (whose `applyTransaction` folds
+   every command through `applyCommand`, the sole interpreter) — the same
+   session route the workbench saves through. A command that does not
+   apply (e.g. a `ref_…`/`dtm_…`/`crv_…` input naming a record the
+   document does not carry) fails structurally with
+   `cadjsx/native-command-failed`, the command's `index`, and the cad-core
+   transaction error as `cause`.
+3. **Serialize** — cad-core's own native serializer
+   (`serializeNativeCadDocument` + `stringifyNativeCadDocument` from
+   `packages/cad-core/src/native-format.ts`, stamped with the current
+   `CAD_NATIVE_FORMAT_VERSION`): two-space-indented JSON with a trailing
+   newline, fixed key order, sorted metadata keys. This is the exact pair
+   the workbench's persistence bridge
+   (`apps/web/src/cad-projects/native-document-bridge.ts`) uses to produce
+   the `nativeContent` string the documents API stores.
+4. **Self-check** — before returning, the emission re-parses its own text
+   with `parseNativeCadDocumentFromString` (the exact parse the documents
+   router's save path applies to every `nativeContent` payload) and
+   verifies the parsed document is serialization-equal to the folded one.
+   A caller never receives a string the format would refuse; a violation
+   surfaces as `cadjsx/native-round-trip-failed` (or
+   `cadjsx/native-metadata-invalid` for non-JSON-safe metadata) with the
+   native-format error as `cause`.
+
+The emitted document carries the dual-persisted history (the empty base
+document, the one compiled transaction, cursor 1) and no regeneration
+states (nothing has executed), so opening it in the workbench replays the
+model exactly.
+
+## The compile CLI
+
+```
+pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>]
+```
+
+- The model file's **default export** is rendered: a React element, or a
+  component function (invoked once with no props).
+- The native JSON is **always written to stdout**; `--out <path>`
+  additionally writes it to a file. An extensionless `--out` path gains
+  the repo's `.native.json` fixture extension. The output is raw JSON
+  text — the workbench's open and the documents API's `nativeContent`
+  both accept it exactly as written.
+- The emitted document's id derives from the model file's basename
+  (`hub-mount.tsx` → `doc_hub-mount`), sanitized into the id payload
+  charset and length.
+- Paths resolve from the current working directory (pnpm runs the script
+  from `packages/cad-jsx`).
+- Exit codes: `0` success; `1` compile or validation error (message on
+  stderr, structured `cadjsx…`/`cadjsx-cli…` code); `2` usage error.
+- `--help` prints the same contract.
+
+Loading an authored `.tsx` needs a real JSX transform, so the CLI
+transpiles the model through esbuild (the transform engine the repo's
+vite/vitest toolchain runs on, pinned to the version already in the
+lockfile) into a temporary sibling `.mjs` — same directory, so the
+model's own imports resolve normally — imports it, and removes it. A
+runnable target lives in the workspace:
+`packages/docs-examples/src/cadjsx/hub-mount.tsx` (the JSX-authored-model
+docs example, also covered by the docs-examples suite).
 
 ## What is rejected, and why
 
@@ -416,9 +498,19 @@ renders.
 
 - `compileModel(root: ReactElement<unknown>): ParseResult<CadTransaction, CadJsxCompileError>` —
   compile a model to its command transaction.
+- `compileToNative(root: ReactElement<unknown>, options?): ParseResult<string, CadJsxCompileError | NativeEmitError>` —
+  compile, fold over a fresh document, and serialize to the native
+  format's canonical text (see [Native emission](#native-emission)).
+  `options.documentId` (default `doc_cadjsx-model`) and `options.metadata`
+  (default `{ generator: "@slopcad/cad-jsx" }`).
 - `defineCadElement<P>(kind: string): CadElementTag<P>` — the element
   factory (the extension point for later phases).
 - `CAD_JSX_ERROR_CODES` / `CadJsxCompileError` — the stable failure codes
   and structured error shape.
+- `NATIVE_EMIT_ERROR_CODES` / `NativeEmitError` — the native emission's
+  failure codes (`cadjsx/native-document-id-invalid`,
+  `cadjsx/native-metadata-invalid`, `cadjsx/native-command-failed`,
+  `cadjsx/native-round-trip-failed`) and its structured error shape
+  (`index` and `cause` on fold failures).
 - The element tags and their prop types (`Box`, `BoxProps`, `Union`,
   `UnionProps`, `Sketch`, `SketchProps`, …) from `./elements`.
