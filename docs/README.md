@@ -20,6 +20,7 @@ This directory is the documentation home. Two rules govern it:
 
 | Group                   | Topics                                                                                                                                                                                                           |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tutorials               | [the tutorial studio](guides/tutorials.md)                                                                                                                                                                       |
 | Foundations             | [installation](guides/installation.md) · [CAD core](guides/cad-core.md) · [parameters](guides/parameters.md) · [expressions](guides/expressions.md) · [units](guides/units.md) · [JSX models](guides/cad-jsx.md) |
 | Geometry                | [primitives](guides/primitives.md) · [booleans](guides/booleans.md) · [features](guides/features.md) · [kernels](guides/kernels.md) · [workers](guides/workers.md)                                               |
 | Assemblies              | [assemblies](guides/assemblies.md)                                                                                                                                                                               |

@@ -17,6 +17,7 @@
     "test:workbench": "playwright test -c playwright.workbench.config.ts",
     "test:session": "playwright test -c playwright.session.config.ts",
     "tutorial:record": "playwright test -c playwright.tutorial.config.ts",
+    "tutorial:cut": "node scripts/tutorial-cut.mjs",
     "test:a11y": "playwright test -c playwright.a11y.config.ts",
     "test:projects": "playwright test -c playwright.projects.config.ts",
     "test:worker": "playwright test -c playwright.worker.config.ts",

@@ -211,12 +211,15 @@ export const chapter: ChapterModule = {
     await driver.humanPoint(page.getByText(/preview: obj mesh/));
     await driver.dwell();
 
-    await driver.step("recap");
+    // The recap is dwell-only like every chapter's: the teardown click
+    // rides the previous cue's tail, so the final beat just narrates.
     await driver.humanClick(page.getByTestId("complete-clear-import"));
     await expect(page.locator(COMPLETE)).toHaveAttribute(
       "data-viewport-showing",
       "document",
     );
+
+    await driver.step("recap");
     await driver.dwell(1_200);
   },
 };
