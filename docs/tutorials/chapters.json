@@ -1,0 +1,227 @@
+{
+  "chapters": [
+    {
+      "id": "home-tour",
+      "title": "The front door",
+      "summary": "What slopcad is, what the home page shows you, and where the workbench lives.",
+      "start": 0.061,
+      "end": 14.806,
+      "cues": [
+        {
+          "id": "home-tour/welcome",
+          "stepId": "welcome",
+          "text": "Welcome to slopcad. Before any modeling, a quick map of where everything lives.",
+          "start": 0.237,
+          "end": 1.442
+        },
+        {
+          "id": "home-tour/claim",
+          "stepId": "claim",
+          "text": "The headline is the promise: parametric CAD whose document always tells the truth.",
+          "start": 1.442,
+          "end": 2.696
+        },
+        {
+          "id": "home-tour/live-viewport",
+          "stepId": "live-viewport",
+          "text": "The right panel renders the guide plate live — your browser is the CAD engine.",
+          "start": 2.696,
+          "end": 4.278
+        },
+        {
+          "id": "home-tour/cta",
+          "stepId": "cta",
+          "text": "This button, Open the workbench, is the door to the modeling cockpit.",
+          "start": 4.278,
+          "end": 6.112
+        },
+        {
+          "id": "home-tour/cards",
+          "stepId": "cards",
+          "text": "Three cards below index the app: Workbench, Components, and Docs.",
+          "start": 6.112,
+          "end": 8.477
+        },
+        {
+          "id": "home-tour/components-card",
+          "stepId": "components-card",
+          "text": "Components opens reusable parametric parts, rebuilt live by the kernel.",
+          "start": 8.477,
+          "end": 9.73
+        },
+        {
+          "id": "home-tour/docs-card",
+          "stepId": "docs-card",
+          "text": "Docs holds every guide, generated from the constants the test gates prove.",
+          "start": 9.73,
+          "end": 10.977
+        },
+        {
+          "id": "home-tour/api-light",
+          "stepId": "api-light",
+          "text": "The dot beside the buttons is the API light. Green means the server answers.",
+          "start": 10.977,
+          "end": 12.378
+        },
+        {
+          "id": "home-tour/enter",
+          "stepId": "enter",
+          "text": "Come through the door. The workbench loads the boot plate document.",
+          "start": 12.378,
+          "end": 14.806
+        }
+      ]
+    },
+    {
+      "id": "sketch-workspace",
+      "title": "Drawing your first sketch",
+      "summary": "Entering the sketch workspace through the command menu, the drawing tools, and saving a rectangle.",
+      "start": 14.862,
+      "end": 30.608,
+      "cues": [
+        {
+          "id": "sketch-workspace/cockpit",
+          "stepId": "cockpit",
+          "text": "The cockpit: toolbar on top, model tree left, timeline strip below.",
+          "start": 14.869,
+          "end": 18.221
+        },
+        {
+          "id": "sketch-workspace/menu",
+          "stepId": "menu",
+          "text": "Every command hides behind this menu button. Click it to open the palette.",
+          "start": 18.221,
+          "end": 19.428
+        },
+        {
+          "id": "sketch-workspace/palette",
+          "stepId": "palette",
+          "text": "The palette lists every verb the workbench ships. A row runs on click.",
+          "start": 19.428,
+          "end": 20.636
+        },
+        {
+          "id": "sketch-workspace/sketch-row",
+          "stepId": "sketch-row",
+          "text": "Find the Sketch row and click it: it opens the 2D drawing workspace.",
+          "start": 20.636,
+          "end": 21.85
+        },
+        {
+          "id": "sketch-workspace/workspace",
+          "stepId": "workspace",
+          "text": "Sketch mode: a gridded canvas replaces the 3D view. Squares are 10 mm.",
+          "start": 21.85,
+          "end": 23.058
+        },
+        {
+          "id": "sketch-workspace/tools",
+          "stepId": "tools",
+          "text": "The first cluster holds the drawing tools: line, circle, rectangle, point.",
+          "start": 23.058,
+          "end": 25.467
+        },
+        {
+          "id": "sketch-workspace/arm-rectangle",
+          "stepId": "arm-rectangle",
+          "text": "Click the rectangle tool to arm it. The status strip confirms the tool.",
+          "start": 25.467,
+          "end": 26.676
+        },
+        {
+          "id": "sketch-workspace/first-corner",
+          "stepId": "first-corner",
+          "text": "Click once to drop the first corner. The grid reads out in millimeters.",
+          "start": 26.676,
+          "end": 28.193
+        },
+        {
+          "id": "sketch-workspace/second-corner",
+          "stepId": "second-corner",
+          "text": "Click the opposite corner. The rectangle commits as one closed profile.",
+          "start": 28.193,
+          "end": 29.401
+        },
+        {
+          "id": "sketch-workspace/save",
+          "stepId": "save",
+          "text": "Save returns to the model. The sketch is now a record solid features use.",
+          "start": 29.401,
+          "end": 30.608
+        }
+      ]
+    },
+    {
+      "id": "first-extrude",
+      "title": "From profile to solid",
+      "summary": "Turning a sketch into a 3D pad, reading the timeline, and undo/redo as the safety net.",
+      "start": 30.679,
+      "end": 52.957,
+      "cues": [
+        {
+          "id": "first-extrude/fresh-plate",
+          "stepId": "fresh-plate",
+          "text": "Start from the fresh boot plate. Every session opens on this document.",
+          "start": 30.68,
+          "end": 41.035
+        },
+        {
+          "id": "first-extrude/sketch-button",
+          "stepId": "sketch-button",
+          "text": "The Sketch button in the top bar is the second door into the workspace.",
+          "start": 41.035,
+          "end": 42.566
+        },
+        {
+          "id": "first-extrude/draw-again",
+          "stepId": "draw-again",
+          "text": "Same rectangle as before: arm the tool, then one click per corner.",
+          "start": 42.566,
+          "end": 45.086
+        },
+        {
+          "id": "first-extrude/extrude",
+          "stepId": "extrude",
+          "text": "With a closed profile in place, Extrude turns the sketch into a solid.",
+          "start": 45.086,
+          "end": 46.293
+        },
+        {
+          "id": "first-extrude/the-pad",
+          "stepId": "the-pad",
+          "text": "The pad rises at the default depth of ten millimeters, back in 3D.",
+          "start": 46.293,
+          "end": 47.501
+        },
+        {
+          "id": "first-extrude/timeline",
+          "stepId": "timeline",
+          "text": "The timeline is the recipe: translate, rotate, extrude. Every chip is editable.",
+          "start": 47.501,
+          "end": 49.318
+        },
+        {
+          "id": "first-extrude/undo",
+          "stepId": "undo",
+          "text": "Undo removes the pad. The document falls back to the plate, nothing lost.",
+          "start": 49.318,
+          "end": 50.537
+        },
+        {
+          "id": "first-extrude/redo",
+          "stepId": "redo",
+          "text": "Redo brings the pad straight back. History is the safety net while you explore.",
+          "start": 50.537,
+          "end": 51.748
+        },
+        {
+          "id": "first-extrude/loop",
+          "stepId": "loop",
+          "text": "That is the core loop: sketch a profile, extrude it, then edit via history.",
+          "start": 51.748,
+          "end": 52.957
+        }
+      ]
+    }
+  ]
+}
