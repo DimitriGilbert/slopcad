@@ -10,6 +10,7 @@ import {
   angle,
   CAD_DOCUMENT_FORMAT_VERSION,
   dimensionless,
+  length,
   serializeDimensionalValue,
   serializeTransaction,
 } from "@slopcad/cad-core";
@@ -29,11 +30,13 @@ import {
   Cylinder,
   defineCadElement,
   DeleteFace,
+  Extrude,
   Fillet,
   Helix,
   Hole,
   Intersect,
   Line,
+  Loft,
   Mirror,
   Parameter,
   MoveFace,
@@ -41,7 +44,9 @@ import {
   PatternLinear,
   PatternPath,
   Point,
+  Rectangle,
   ReplaceFace,
+  Revolve,
   Rib,
   Scale,
   Shell,
@@ -49,6 +54,8 @@ import {
   Sphere,
   Split,
   Subtract,
+  Sweep,
+  SweepWire,
   Thicken,
   Thread,
   Translate,
@@ -811,6 +818,309 @@ describe("local operation golden commands", () => {
   });
 });
 
+describe("sketch-driven producer golden commands", () => {
+  it("compiles <Extrude> to the sketch input and the signed distance parameter", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_profile" },
+          createElement(Circle, { cx: 5, cy: 0, radius: 2 }),
+        ),
+        createElement(Extrude, {
+          id: "feat_pad",
+          sketch: "skd_profile",
+          height: 10,
+        }),
+      ),
+    );
+    expect(result.commands.at(-3)).toEqual({
+      formatVersion: V,
+      type: "parameter.create",
+      id: "param_pad-height",
+      name: "padHeight",
+      value: mm(10),
+    });
+    expect(result.commands.at(-1)).toEqual({
+      formatVersion: V,
+      type: "feature.create",
+      id: "feat_pad",
+      kind: "extrude",
+      inputs: [
+        { kind: "sketch", id: "skd_profile" },
+        { kind: "parameter", id: "param_pad-height" },
+      ],
+      outputs: ["body_pad"],
+    });
+  });
+
+  it("folds <Extrude> direction={-1} into the distance sign and carries the taper third", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_p" },
+          createElement(Circle, { cx: 5, cy: 0, radius: 2 }),
+        ),
+        createElement(Extrude, {
+          sketch: "skd_p",
+          height: length(2, "cm"),
+          direction: -1,
+          taper: 0.05,
+        }),
+      ),
+    );
+    const feature = result.commands.at(-1);
+    if (feature === undefined || feature.type !== "feature.create") {
+      throw new Error("the extrude feature is missing");
+    }
+    expect(feature.inputs).toEqual([
+      { kind: "sketch", id: "skd_p" },
+      { kind: "parameter", id: "param_extrude-1-height" },
+      { kind: "parameter", id: "param_extrude-1-taper" },
+    ]);
+    const values = result.commands
+      .filter(
+        (
+          command,
+        ): command is Extract<
+          (typeof result.commands)[number],
+          { type: "parameter.create" }
+        > =>
+          command.type === "parameter.create" &&
+          command.id !== undefined &&
+          command.id.startsWith("param_extrude-1-"),
+      )
+      .map((command) => command.value);
+    expect(values).toEqual([mm(-20), rad(0.05)]);
+  });
+
+  it("lets <Extrude> consume a declared height parameter by reference", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(Parameter, { name: "plateHeight", value: 6 }),
+        createElement(
+          Sketch,
+          { id: "skd_p" },
+          createElement(Rectangle, { x1: -30, y1: -20, x2: 30, y2: 20 }),
+        ),
+        createElement(Extrude, {
+          sketch: "skd_p",
+          height: "param_plateHeight",
+        }),
+      ),
+    );
+    const feature = result.commands.at(-1);
+    if (feature === undefined || feature.type !== "feature.create") {
+      throw new Error("the extrude feature is missing");
+    }
+    expect(feature.inputs).toEqual([
+      { kind: "sketch", id: "skd_p" },
+      { kind: "parameter", id: "param_plateHeight" },
+    ]);
+  });
+
+  it("compiles <Revolve> to sketch, sweep, and the in-plane axis angle", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_ring" },
+          createElement(Circle, { cx: 12, cy: 0, radius: 3 }),
+        ),
+        createElement(Revolve, {
+          sketch: "skd_ring",
+          angle: Math.PI,
+          axis: Math.PI / 2,
+        }),
+      ),
+    );
+    const feature = result.commands.at(-1);
+    if (feature === undefined || feature.type !== "feature.create") {
+      throw new Error("the revolve feature is missing");
+    }
+    expect(feature.inputs).toEqual([
+      { kind: "sketch", id: "skd_ring" },
+      { kind: "parameter", id: "param_revolve-1-angle" },
+      { kind: "parameter", id: "param_revolve-1-axis" },
+    ]);
+    const values = result.commands
+      .filter(
+        (
+          command,
+        ): command is Extract<
+          (typeof result.commands)[number],
+          { type: "parameter.create" }
+        > =>
+          command.type === "parameter.create" &&
+          command.id !== undefined &&
+          command.id.startsWith("param_revolve-1-"),
+      )
+      .map((command) => command.value);
+    expect(values).toEqual([rad(Math.PI), rad(Math.PI / 2)]);
+  });
+
+  it("compiles <Revolve> with a datum axis in place of the angle parameter", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_ring" },
+          createElement(Circle, { cx: 12, cy: 0, radius: 3 }),
+        ),
+        createElement(Revolve, {
+          sketch: "skd_ring",
+          angle: Math.PI * 2,
+          axisDatum: "dtm_axis",
+        }),
+      ),
+    );
+    const feature = result.commands.at(-1);
+    if (feature === undefined || feature.type !== "feature.create") {
+      throw new Error("the revolve feature is missing");
+    }
+    expect(feature.inputs).toEqual([
+      { kind: "sketch", id: "skd_ring" },
+      { kind: "parameter", id: "param_revolve-1-angle" },
+      { kind: "datum", id: "dtm_axis" },
+    ]);
+  });
+
+  it("compiles <Sweep> to exactly two sketch inputs, profile first", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_loop" },
+          createElement(Circle, { cx: 0, cy: 0, radius: 2 }),
+        ),
+        createElement(
+          Sketch,
+          { id: "skd_spine" },
+          createElement(Line, { x1: 0, y1: 0, x2: 20, y2: 0 }),
+          createElement(Line, { x1: 20, y1: 0, x2: 20, y2: 10 }),
+        ),
+        createElement(Sweep, { profile: "skd_loop", path: "skd_spine" }),
+      ),
+    );
+    expect(result.commands.at(-1)).toEqual({
+      formatVersion: V,
+      type: "feature.create",
+      id: "feat_sweep-1",
+      kind: "sweep",
+      inputs: [
+        { kind: "sketch", id: "skd_loop" },
+        { kind: "sketch", id: "skd_spine" },
+      ],
+      outputs: ["body_sweep-1"],
+    });
+  });
+
+  it("compiles <SweepWire> to the profile sketch and the curve spine input", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_loop" },
+          createElement(Circle, { cx: 0, cy: 0, radius: 2 }),
+        ),
+        createElement(SweepWire, { profile: "skd_loop", spine: "crv_spine" }),
+      ),
+    );
+    expect(result.commands.at(-1)).toEqual({
+      formatVersion: V,
+      type: "feature.create",
+      id: "feat_sweepWire-1",
+      kind: "sweepWire",
+      inputs: [
+        { kind: "sketch", id: "skd_loop" },
+        { kind: "curve", id: "crv_spine" },
+      ],
+      outputs: ["body_sweepWire-1"],
+    });
+  });
+
+  it("compiles <Loft> to interleaved section sketches and station parameters", () => {
+    const result = serializedOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_base" },
+          createElement(Circle, { cx: 0, cy: 0, radius: 8 }),
+        ),
+        createElement(
+          Sketch,
+          { id: "skd_top" },
+          createElement(Circle, { cx: 0, cy: 0, radius: 5 }),
+        ),
+        createElement(Loft, {
+          id: "feat_boss",
+          sections: [
+            { sketch: "skd_base", z: 6 },
+            { sketch: "skd_top", z: 12 },
+          ],
+        }),
+      ),
+    );
+    const stations = result.commands.filter(
+      (
+        command,
+      ): command is Extract<
+        (typeof result.commands)[number],
+        { type: "parameter.create" }
+      > =>
+        command.type === "parameter.create" &&
+        command.id !== undefined &&
+        command.id.startsWith("param_boss-"),
+    );
+    expect(stations).toEqual([
+      {
+        formatVersion: V,
+        type: "parameter.create",
+        id: "param_boss-stationZ1",
+        name: "bossStationZ1",
+        value: mm(6),
+      },
+      {
+        formatVersion: V,
+        type: "parameter.create",
+        id: "param_boss-stationZ2",
+        name: "bossStationZ2",
+        value: mm(12),
+      },
+    ]);
+    expect(result.commands.at(-1)).toEqual({
+      formatVersion: V,
+      type: "feature.create",
+      id: "feat_boss",
+      kind: "loft",
+      inputs: [
+        { kind: "sketch", id: "skd_base" },
+        { kind: "parameter", id: "param_boss-stationZ1" },
+        { kind: "sketch", id: "skd_top" },
+        { kind: "parameter", id: "param_boss-stationZ2" },
+      ],
+      outputs: ["body_boss"],
+    });
+  });
+});
+
 describe("pattern and mirror golden commands", () => {
   it("compiles <PatternLinear> to count, spacing, direction", () => {
     const result = serializedOf(
@@ -1461,5 +1771,205 @@ describe("operation rejections", () => {
       kind: "parameter",
       id: "param_copies",
     });
+  });
+
+  const looseExtrude = defineCadElement<{
+    readonly sketch?: unknown;
+    readonly height?: unknown;
+    readonly direction?: unknown;
+  }>("extrude");
+
+  const looseLoft = defineCadElement<{
+    readonly sections?: unknown;
+  }>("loft");
+
+  it("rejects the sketch-driven producers' sketch and prop misuse", () => {
+    const ghostSketch = rejectionOf(
+      createElement(Extrude, { sketch: "skd_ghost", height: 10 }),
+    );
+    expect(ghostSketch.code).toBe(CAD_JSX_ERROR_CODES.sketchUnknown);
+
+    const ghostPath = rejectionOf(
+      createElement(Sweep, { profile: "skd_p", path: "skd_ghost" }),
+    );
+    expect(ghostPath.code).toBe(CAD_JSX_ERROR_CODES.sketchUnknown);
+
+    const ghostSection = rejectionOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_a" },
+          createElement(Circle, { cx: 0, cy: 0, radius: 8 }),
+        ),
+        createElement(Loft, {
+          sections: [
+            { sketch: "skd_a", z: 0 },
+            { sketch: "skd_ghost", z: 8 },
+          ],
+        }),
+      ),
+    );
+    expect(ghostSection.code).toBe(CAD_JSX_ERROR_CODES.sketchUnknown);
+
+    const missingHeight = rejectionOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_p" },
+          createElement(Circle, { cx: 5, cy: 0, radius: 2 }),
+        ),
+        createElement(looseExtrude, { sketch: "skd_p" }),
+      ),
+    );
+    expect(missingHeight.code).toBe(CAD_JSX_ERROR_CODES.propValueInvalid);
+
+    const badDirection = rejectionOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_p" },
+          createElement(Circle, { cx: 5, cy: 0, radius: 2 }),
+        ),
+        createElement(looseExtrude, {
+          sketch: "skd_p",
+          height: 10,
+          direction: 2,
+        }),
+      ),
+    );
+    expect(badDirection.code).toBe(CAD_JSX_ERROR_CODES.propValueInvalid);
+
+    const badSpine = rejectionOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_p" },
+          createElement(Circle, { cx: 5, cy: 0, radius: 2 }),
+        ),
+        createElement(SweepWire, { profile: "skd_p", spine: "nope" }),
+      ),
+    );
+    expect(badSpine.code).toBe(CAD_JSX_ERROR_CODES.referenceInvalid);
+  });
+
+  it("rejects <Extrude> direction on a referenced height parameter", () => {
+    const error = rejectionOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(Parameter, { name: "plateHeight", value: 6 }),
+        createElement(
+          Sketch,
+          { id: "skd_p" },
+          createElement(Circle, { cx: 5, cy: 0, radius: 2 }),
+        ),
+        createElement(Extrude, {
+          sketch: "skd_p",
+          height: "param_plateHeight",
+          direction: -1,
+        }),
+      ),
+    );
+    expect(error.code).toBe(CAD_JSX_ERROR_CODES.propConflict);
+  });
+
+  it("rejects <Revolve> with both axis forms and <Loft> with malformed sections", () => {
+    const bothAxes = rejectionOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_r" },
+          createElement(Circle, { cx: 12, cy: 0, radius: 3 }),
+        ),
+        createElement(Revolve, {
+          sketch: "skd_r",
+          angle: Math.PI,
+          axis: 0,
+          axisDatum: "dtm_a",
+        }),
+      ),
+    );
+    expect(bothAxes.code).toBe(CAD_JSX_ERROR_CODES.propConflict);
+
+    const oneSection = rejectionOf(
+      createElement(Loft, { sections: [{ sketch: "skd_a", z: 0 }] }),
+    );
+    expect(oneSection.code).toBe(CAD_JSX_ERROR_CODES.propValueInvalid);
+
+    const notRecords = rejectionOf(
+      createElement(looseLoft, { sections: "skd_a" }),
+    );
+    expect(notRecords.code).toBe(CAD_JSX_ERROR_CODES.propValueInvalid);
+
+    const extraKey = rejectionOf(
+      createElement(looseLoft, {
+        sections: [
+          { sketch: "skd_a", z: 0, station: 4 },
+          { sketch: "skd_b", z: 8 },
+        ],
+      }),
+    );
+    expect(extraKey.code).toBe(CAD_JSX_ERROR_CODES.propUnknown);
+
+    const missingZ = rejectionOf(
+      createElement(looseLoft, {
+        sections: [{ sketch: "skd_a" }, { sketch: "skd_b", z: 8 }],
+      }),
+    );
+    expect(missingZ.code).toBe(CAD_JSX_ERROR_CODES.propValueInvalid);
+  });
+
+  it("rejects the producers with children (they author from sketches, not targets)", () => {
+    const extrude = rejectionOf(
+      createElement(
+        Extrude,
+        { sketch: "skd_p", height: 10 },
+        createElement(Sphere, { radius: 1 }),
+      ),
+    );
+    expect(extrude.code).toBe(CAD_JSX_ERROR_CODES.propUnknown);
+
+    const revolve = rejectionOf(
+      createElement(Revolve, { sketch: "skd_p", angle: 1 }, targetBox()),
+    );
+    expect(revolve.code).toBe(CAD_JSX_ERROR_CODES.propUnknown);
+
+    const sweep = rejectionOf(
+      createElement(Sweep, { profile: "skd_a", path: "skd_b" }, targetBox()),
+    );
+    expect(sweep.code).toBe(CAD_JSX_ERROR_CODES.propUnknown);
+
+    const sweepWire = rejectionOf(
+      createElement(
+        SweepWire,
+        { profile: "skd_a", spine: "crv_s" },
+        targetBox(),
+      ),
+    );
+    expect(sweepWire.code).toBe(CAD_JSX_ERROR_CODES.propUnknown);
+
+    const loft = rejectionOf(
+      createElement(
+        Loft,
+        {
+          sections: [
+            { sketch: "skd_a", z: 0 },
+            { sketch: "skd_b", z: 8 },
+          ],
+        },
+        targetBox(),
+      ),
+    );
+    expect(loft.code).toBe(CAD_JSX_ERROR_CODES.propUnknown);
   });
 });

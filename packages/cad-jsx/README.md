@@ -56,8 +56,9 @@ renderer, no DOM, no hooks runtime. In plain TypeScript (no JSX), write
 The element kinds and their input order mirror the kernel bridge
 (`@slopcad/cad-kernel`'s `BRIDGE_FEATURE_KINDS` readers) exactly: every
 dimensional prop becomes a parameter the feature consumes, in the order
-the bridge reads them; every sketch, datum, and persistent-reference
-input rides the same `{ kind, id }` feature input the bridge resolves.
+the bridge reads them; every sketch, datum, curve, and
+persistent-reference input rides the same `{ kind, id }` feature input
+the bridge resolves.
 
 ### Primitives, parameters, bodies (Phase 1)
 
@@ -128,6 +129,28 @@ Each boolean needs **at least two producing children** (nested solids or
 datum-plane layout with the optional `merge` (standalone copy, or one
 union with the original). Mixing the two layouts' props is rejected.
 
+### Sketch-driven producers (Phase 2b)
+
+| Element       | Props                                                                                  | Compiles to (feature inputs, in order)                                                                                                                                                 |
+| ------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<Extrude>`   | `sketch`, `height`, `direction?` (1 or −1), `taper?`, `id?` (no children — a producer) | kind `extrude`: the profile sketch input, ONE signed length parameter (magnitude `height`, sign `direction` — `direction={-1}` folds into the sign), an optional taper angle parameter |
+| `<Revolve>`   | `sketch`, `angle`, `axis?` (angle form) / `axisDatum?` (datum form), `id?`             | kind `revolve`: the profile sketch input, the sweep angle parameter, then the in-plane axis angle parameter (CCW from the workplane +x; default 0) or the datum axis input             |
+| `<Sweep>`     | `profile`, `path`, `id?`                                                               | kind `sweep`: the profile sketch input, the path sketch input (no parameters — the path determines the extent)                                                                         |
+| `<SweepWire>` | `profile`, `spine` (`crv_…`), `id?`                                                    | kind `sweepWire`: the profile sketch input, the curve record input (the 3D wire spine)                                                                                                 |
+| `<Loft>`      | `sections` (≥ 2 `{ sketch, z }` records), `id?`                                        | kind `loft`: per section in order, its sketch input then its station-z length parameter (interleaved)                                                                                  |
+
+All five are PRODUCERS (they create bodies, like the primitives) with no
+target children; each sketch reference names an in-scope `<Sketch id=…>`
+sibling declared earlier in the tree. `<Extrude>`'s bridge reads one
+SIGNED distance parameter, so `parameter.set` on it re-drives both height
+and direction — the compiler folds `direction={-1}` into the emitted
+parameter's sign for literal heights; a REFERENCED height parameter's own
+sign is already the direction, so `direction` may not be passed with one
+(rejected with `cadjsx/prop-conflict`). `<Loft>`'s station parameters
+derive per-section ids (`param_<slug>-stationZ1`, `-stationZ2`, …); the
+sections' order IS the loft direction, and the one-workplane-frame and
+strictly-increasing-station rules are the kernel's regeneration verdicts.
+
 ### Sketches (Phase 2's fourth requirement)
 
 | Element       | Props                                                                 | Compiles to                                                                                                                                 |
@@ -159,11 +182,13 @@ entity props are plain numbers in the stored units (workplane mm and
 radians), exactly as the sketch domain persists them.
 
 A `<Sketch>` is a top-level record (like `<Body>` and `<Parameter>`);
-its children are entity elements only. Sketch-consuming elements (`<Rib>`,
+its children are entity elements only. Sketch-consuming elements
+(`<Extrude>`, `<Revolve>`, `<Sweep>`, `<SweepWire>`, `<Loft>`, `<Rib>`,
 `<Helix>`, `<PatternPath>`, and `<Hole positions>`) reference one through
-a `sketch`/`positions` prop naming an **in-scope `<Sketch id=…>` sibling
-declared earlier in the tree** — the same atomic-record discipline the
-workbench's sketch → feature actions use.
+a `sketch`/`profile`/`path`/`positions` prop (or a `sections` entry)
+naming an **in-scope `<Sketch id=…>` sibling declared earlier in the
+tree** — the same atomic-record discipline the workbench's sketch →
+feature actions use.
 
 ### Shared subtrees: `<Use>`
 
@@ -200,15 +225,21 @@ create:
   (the tests mint one through cad-core's own `mintTopologyReference`,
   the same fixture discipline the kernel bridge's tests use).
 - **Datums** (`plane`/`axis`/`axisDatum` props on `<Split>`, `<Mirror>`,
-  `<ReplaceFace>`, `<Thread>`, `<Helix>`, `<Hole>`): datum records are
-  document entities this vocabulary cannot declare yet (no `<Datum>`
-  element), so the props carry `dtm_…` record ids of records the target
-  document already carries.
+  `<ReplaceFace>`, `<Thread>`, `<Helix>`, `<Revolve>`, `<Hole>`): datum
+  records are document entities this vocabulary cannot declare yet (no
+  `<Datum>` element), so the props carry `dtm_…` record ids of records
+  the target document already carries.
+- **Curves** (`spine` prop on `<SweepWire>`): the wire spine resolves
+  through the document's curve records (Phase 47 — 3D interpolated and
+  control splines, helices, equation curves). This vocabulary cannot
+  declare a curve yet (no `<Curve>` element), so the prop carries a
+  `crv_…` record id of a record the target document already carries.
 
-Both prop families are validated by id shape at compile time; whether the
-record exists — and whether its payload is the right datum kind or a live
-topology entity — is the document's and the kernel's structured verdict
-at apply/regeneration time, never guessed here.
+All three prop families are validated by id shape at compile time;
+whether the record exists — and whether its payload is the right datum
+kind, a live topology entity, or a resolvable wire — is the document's
+and the kernel's structured verdict at apply/regeneration time, never
+guessed here.
 
 ## Dimensional props
 
@@ -330,8 +361,9 @@ errors:
   (`cadjsx/operation-target-invalid`); `<Translate>` needs exactly one
   (`cadjsx/translate-target-invalid`); `<Body>` with two producers.
 - **Mixed mirror layouts, both axis forms, structured-hole props on the
-  wrong type** — `cadjsx/prop-conflict`.
-- **Malformed `ref_…`/`dtm_…` reference props** —
+  wrong type, `<Extrude>` direction on a referenced height** —
+  `cadjsx/prop-conflict`.
+- **Malformed `ref_…`/`dtm_…`/`crv_…` reference props** —
   `cadjsx/reference-invalid`.
 - **Sketch structure**: entities outside a sketch
   (`cadjsx/sketch-entity-outside`), non-entity children inside one
@@ -350,24 +382,27 @@ arrays of children (flattened in order), and user function components
 
 ## Honest-decline limitations (what this vocabulary does not express)
 
-- **No `<Extrude>`/`<Revolve>`/`<Sweep>`/`<Loft>` elements yet.** The
-  bridge's extrude-style kinds are sketch + parameter layouts this
-  vocabulary will grow in a later phase; composing solids from sketches
-  today means `<Rib>` (whose cross-section is a sketch) or `<Helix>`.
-  Silently approximating them with primitives would be a second
-  representation, so they are simply absent until they can be faithful.
+- **Curve records cannot be declared here.** `<SweepWire>`'s 3D wire
+  spine resolves through the document's curve records (a 3D spline,
+  helix, or equation curve payload — a whole record vocabulary of its
+  own). This package does not re-represent that payload as element tags;
+  the `spine` prop addresses a `crv_…` record the document already
+  carries, exactly the datum discipline.
 - **Edge/face addressing cannot be minted here.** Fillet, chamfer, shell,
   and the local-face operations consume persistent-reference records that
   only a picking layer against a live topology snapshot can mint; this
   vocabulary consumes such records by id and never fabricates them.
 - **Datum records cannot be declared here.** Datum-plane/axis consumers
   (`<Split>`, `<Mirror>`'s datum form, `<ReplaceFace>`, `<Thread>`,
-  `<Helix>`, `<Hole>`) address `dtm_…` records the document already
-  carries.
+  `<Helix>`, `<Revolve>`'s datum-axis form, `<Hole>`) address `dtm_…`
+  records the document already carries.
 - **Selector props are constants.** The bridge reads axis/plane/mode
   selectors as dimensionless parameters, which a shared `<Parameter>`
   could drive — this surface pins them as authored constants rather than
-  guess at a naming convention for selector parameters.
+  guess at a naming convention for selector parameters. (`<Extrude>`'s
+  `direction` is not a selector parameter: the bridge's extrude feature
+  kind carries no direction input — the sign of its ONE distance
+  parameter is the direction, so the prop folds into that sign.)
 
 ## Boundaries
 

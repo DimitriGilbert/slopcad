@@ -6,17 +6,21 @@
  * persistent-reference record — asserted as a FULL transaction golden, an
  * applyCommand fold (with the edge reference's record minted the way the
  * picking layer mints it), and a byte-identical determinism check. Plus
- * the shared-input reference test (one feature consumed by two different
- * booleans) and the document-level vocabulary folds for representative
- * kinds. Pure data: no DOM, no network, no database.
+ * the Phase 2b sketch-driven hub mount (an `<Extrude>` plate, a
+ * `<Revolve>` ring, a `<Loft>` boss, one boolean chain), the shared-input
+ * reference test (one feature consumed by two different booleans), and the
+ * document-level vocabulary folds for representative kinds. Pure data: no
+ * DOM, no network, no database.
  */
 
 import {
+  addDocumentCurve,
   addDocumentReference,
   applyCommand,
   CAD_DOCUMENT_FORMAT_VERSION,
   type CadDocument,
   createBodyId,
+  createCurveId,
   createDocument,
   createDocumentId,
   createReferenceId,
@@ -35,17 +39,23 @@ import { compileModel } from "./compiler";
 import {
   Body,
   Box,
+  Circle,
   Cylinder,
+  Extrude,
   Fillet,
   Hole,
   Line,
+  Loft,
   Mirror,
   Parameter,
   PatternLinear,
+  Rectangle,
+  Revolve,
   Rib,
   Sketch,
   Sphere,
   Subtract,
+  SweepWire,
   Translate,
   Union,
   Use,
@@ -55,6 +65,7 @@ const V = CAD_DOCUMENT_FORMAT_VERSION;
 
 /** Canonical serialized quantities. */
 const mm = (value: number) => ({ dimension: "length", unit: "mm", value });
+const rad = (value: number) => ({ dimension: "angle", unit: "rad", value });
 
 /** Unwraps a successful compile into its canonical serialized transaction. */
 function serializedOf(root: ReactElement<unknown>) {
@@ -452,6 +463,347 @@ describe("the composed Nema17 mount", () => {
   });
 });
 
+describe("the sketch-driven hub mount (Phase 2b producers)", () => {
+  /** The default XY workplane frame every authored sketch here carries. */
+  const XY_WORKPLANE = {
+    origin: { x: 0, y: 0, z: 0 },
+    normal: { x: 0, y: 0, z: 1 },
+    xAxis: { x: 1, y: 0, z: 0 },
+  };
+
+  /** One sketch.create command carrying a single circle entity. */
+  const circleSketch = (
+    id: string,
+    name: string,
+    entityOrdinal: number,
+    cx: number,
+    radius: number,
+  ) => ({
+    formatVersion: V,
+    type: "sketch.create" as const,
+    id,
+    name,
+    sketch: {
+      formatVersion: 2,
+      workplane: XY_WORKPLANE,
+      entities: [
+        {
+          id: `skent_circle-${String(entityOrdinal)}`,
+          kind: "circle",
+          construction: false,
+          fixed: false,
+          cx,
+          cy: 0,
+          radius,
+        },
+      ],
+      constraints: [],
+    },
+  });
+
+  /** The composed hub mount: extruded plate, revolved ring, lofted boss. */
+  const SketchHubMount = (): ReactElement<unknown> =>
+    createElement(
+      Fragment,
+      null,
+      createElement(Parameter, { name: "plateHeight", value: 6 }),
+      createElement(
+        Sketch,
+        { id: "skd_plate" },
+        createElement(Rectangle, { x1: -30, y1: -20, x2: 30, y2: 20 }),
+      ),
+      createElement(Extrude, {
+        sketch: "skd_plate",
+        height: "param_plateHeight",
+      }),
+      createElement(
+        Sketch,
+        { id: "skd_ring" },
+        createElement(Circle, { cx: 12, cy: 0, radius: 2 }),
+      ),
+      createElement(Revolve, {
+        id: "feat_ring",
+        sketch: "skd_ring",
+        angle: Math.PI * 2,
+        axis: Math.PI / 2,
+      }),
+      createElement(
+        Sketch,
+        { id: "skd_boss-base" },
+        createElement(Circle, { cx: 0, cy: 0, radius: 8 }),
+      ),
+      createElement(
+        Sketch,
+        { id: "skd_boss-top" },
+        createElement(Circle, { cx: 0, cy: 0, radius: 5 }),
+      ),
+      createElement(Loft, {
+        id: "feat_boss",
+        sections: [
+          { sketch: "skd_boss-base", z: 6 },
+          { sketch: "skd_boss-top", z: 12 },
+        ],
+      }),
+      createElement(
+        Subtract,
+        { id: "feat_cleared" },
+        createElement(Use, { feature: "feat_extrude-1" }),
+        createElement(Use, { feature: "feat_ring" }),
+      ),
+      createElement(
+        Body,
+        { name: "mount" },
+        createElement(
+          Union,
+          { id: "feat_mount" },
+          createElement(Use, { feature: "feat_cleared" }),
+          createElement(Use, { feature: "feat_boss" }),
+        ),
+      ),
+    );
+
+  it("compiles to the exact canonical transaction", () => {
+    const result = serializedOf(SketchHubMount());
+    expect(result.commands).toEqual([
+      {
+        formatVersion: V,
+        type: "parameter.create",
+        id: "param_plateHeight",
+        name: "plateHeight",
+        value: mm(6),
+      },
+      {
+        formatVersion: V,
+        type: "sketch.create",
+        id: "skd_plate",
+        name: "plate",
+        sketch: {
+          formatVersion: 2,
+          workplane: XY_WORKPLANE,
+          entities: [
+            {
+              id: "skent_rectangle-1-bottom",
+              kind: "line",
+              construction: false,
+              fixed: false,
+              x1: -30,
+              y1: -20,
+              x2: 30,
+              y2: -20,
+            },
+            {
+              id: "skent_rectangle-1-right",
+              kind: "line",
+              construction: false,
+              fixed: false,
+              x1: 30,
+              y1: -20,
+              x2: 30,
+              y2: 20,
+            },
+            {
+              id: "skent_rectangle-1-top",
+              kind: "line",
+              construction: false,
+              fixed: false,
+              x1: 30,
+              y1: 20,
+              x2: -30,
+              y2: 20,
+            },
+            {
+              id: "skent_rectangle-1-left",
+              kind: "line",
+              construction: false,
+              fixed: false,
+              x1: -30,
+              y1: 20,
+              x2: -30,
+              y2: -20,
+            },
+            {
+              id: "skent_rectangle-1",
+              kind: "rectangle",
+              construction: false,
+              fixed: false,
+              edges: [
+                "skent_rectangle-1-bottom",
+                "skent_rectangle-1-right",
+                "skent_rectangle-1-top",
+                "skent_rectangle-1-left",
+              ],
+            },
+          ],
+          constraints: [],
+        },
+      },
+      {
+        formatVersion: V,
+        type: "body.create",
+        id: "body_extrude-1",
+        name: "extrude 1",
+      },
+      {
+        formatVersion: V,
+        type: "feature.create",
+        id: "feat_extrude-1",
+        kind: "extrude",
+        inputs: [
+          { kind: "sketch", id: "skd_plate" },
+          { kind: "parameter", id: "param_plateHeight" },
+        ],
+        outputs: ["body_extrude-1"],
+      },
+      circleSketch("skd_ring", "ring", 1, 12, 2),
+      {
+        formatVersion: V,
+        type: "parameter.create",
+        id: "param_ring-angle",
+        name: "ringAngle",
+        value: rad(Math.PI * 2),
+      },
+      {
+        formatVersion: V,
+        type: "parameter.create",
+        id: "param_ring-axis",
+        name: "ringAxis",
+        value: rad(Math.PI / 2),
+      },
+      {
+        formatVersion: V,
+        type: "body.create",
+        id: "body_ring",
+        name: "ring",
+      },
+      {
+        formatVersion: V,
+        type: "feature.create",
+        id: "feat_ring",
+        kind: "revolve",
+        inputs: [
+          { kind: "sketch", id: "skd_ring" },
+          { kind: "parameter", id: "param_ring-angle" },
+          { kind: "parameter", id: "param_ring-axis" },
+        ],
+        outputs: ["body_ring"],
+      },
+      circleSketch("skd_boss-base", "boss base", 2, 0, 8),
+      circleSketch("skd_boss-top", "boss top", 3, 0, 5),
+      {
+        formatVersion: V,
+        type: "parameter.create",
+        id: "param_boss-stationZ1",
+        name: "bossStationZ1",
+        value: mm(6),
+      },
+      {
+        formatVersion: V,
+        type: "parameter.create",
+        id: "param_boss-stationZ2",
+        name: "bossStationZ2",
+        value: mm(12),
+      },
+      {
+        formatVersion: V,
+        type: "body.create",
+        id: "body_boss",
+        name: "boss",
+      },
+      {
+        formatVersion: V,
+        type: "feature.create",
+        id: "feat_boss",
+        kind: "loft",
+        inputs: [
+          { kind: "sketch", id: "skd_boss-base" },
+          { kind: "parameter", id: "param_boss-stationZ1" },
+          { kind: "sketch", id: "skd_boss-top" },
+          { kind: "parameter", id: "param_boss-stationZ2" },
+        ],
+        outputs: ["body_boss"],
+      },
+      {
+        formatVersion: V,
+        type: "body.create",
+        id: "body_cleared",
+        name: "cleared",
+      },
+      {
+        formatVersion: V,
+        type: "feature.create",
+        id: "feat_cleared",
+        kind: "subtract",
+        inputs: [
+          { kind: "feature", id: "feat_extrude-1" },
+          { kind: "feature", id: "feat_ring" },
+        ],
+        outputs: ["body_cleared"],
+      },
+      {
+        formatVersion: V,
+        type: "body.create",
+        id: "body_mount",
+        name: "mount",
+      },
+      {
+        formatVersion: V,
+        type: "feature.create",
+        id: "feat_mount",
+        kind: "union",
+        inputs: [
+          { kind: "feature", id: "feat_cleared" },
+          { kind: "feature", id: "feat_boss" },
+        ],
+        outputs: ["body_mount"],
+      },
+    ]);
+  });
+
+  it("compiles byte-identically every time", () => {
+    expect(JSON.stringify(serializedOf(SketchHubMount()))).toBe(
+      JSON.stringify(serializedOf(SketchHubMount())),
+    );
+  });
+
+  it("folds onto a document as one self-contained transaction", () => {
+    const result = compileModel(SketchHubMount());
+    if (!result.ok) throw new Error(result.error.message);
+    let document = createDocument(createDocumentId("doc_hub_mount"));
+    for (const command of result.value.commands) {
+      const applied = applyCommand(document, command);
+      if (!applied.ok) throw new Error(applied.error.message);
+      document = applied.value;
+    }
+    expect(document.parameters.parameters).toHaveLength(5);
+    expect(document.sketches.map((sketch) => sketch.id)).toEqual([
+      "skd_plate",
+      "skd_ring",
+      "skd_boss-base",
+      "skd_boss-top",
+    ]);
+    expect(document.bodies.map((body) => body.id)).toEqual([
+      "body_extrude-1",
+      "body_ring",
+      "body_boss",
+      "body_cleared",
+      "body_mount",
+    ]);
+    expect(document.features.map((feature) => feature.kind)).toEqual([
+      "extrude",
+      "revolve",
+      "loft",
+      "subtract",
+      "union",
+    ]);
+    const mount = document.features.at(-1);
+    expect(mount?.inputs).toEqual([
+      { kind: "feature", id: "feat_cleared" },
+      { kind: "feature", id: "feat_boss" },
+    ]);
+    expect(mount?.outputs).toEqual([createBodyId("body_mount")]);
+  });
+});
+
 describe("shared inputs by reference", () => {
   const sharedModel = (): ReactElement<unknown> =>
     createElement(
@@ -601,6 +953,70 @@ describe("document-level vocabulary folds", () => {
       { kind: "sketch", id: "skd_gusset" },
       { kind: "parameter", id: "param_rib-1-thickness" },
     ]);
+  });
+
+  it("folds a wire sweep against a spine curve record the document carries", () => {
+    const result = compileModel(
+      createElement(
+        Fragment,
+        null,
+        createElement(
+          Sketch,
+          { id: "skd_loop" },
+          createElement(Circle, { cx: 0, cy: 0, radius: 2 }),
+        ),
+        createElement(SweepWire, {
+          id: "feat_conduit",
+          profile: "skd_loop",
+          spine: "crv_spine",
+        }),
+      ),
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const commands = result.value.commands;
+    let document = createDocument(createDocumentId("doc_wire_sweep"));
+
+    // Fold everything except the feature.create — the spine curve record
+    // must exist before the feature that consumes it (the datum discipline).
+    for (const command of commands.slice(0, commands.length - 1)) {
+      const applied = applyCommand(document, command);
+      if (!applied.ok) throw new Error(applied.error.message);
+      document = applied.value;
+    }
+
+    // The curve record, added the way the document's own API carries it (a
+    // 3D interpolated spline — one of the curve module's canonical kinds).
+    const curved = addDocumentCurve(document, {
+      id: createCurveId("crv_spine"),
+      name: "conduit spine",
+      curve: {
+        kind: "interpolated-spline",
+        points: [
+          [0, 0, 0],
+          [20, 0, 0],
+          [20, 10, 30],
+        ],
+      },
+    });
+    if (!curved.ok) throw new Error(curved.error.message);
+    document = curved.value.document;
+
+    const final = applyCommand(
+      document,
+      commands[commands.length - 1] as (typeof commands)[number],
+    );
+    if (!final.ok) throw new Error(final.error.message);
+    document = final.value;
+
+    expect(document.features.map((feature) => feature.kind)).toEqual([
+      "sweepWire",
+    ]);
+    const wire = document.features.at(-1);
+    expect(wire?.inputs).toEqual([
+      { kind: "sketch", id: "skd_loop" },
+      { kind: "curve", id: "crv_spine" },
+    ]);
+    expect(document.curves.map((curve) => curve.id)).toEqual(["crv_spine"]);
   });
 
   it("folds a flat hole and a linear pattern onto a plate", () => {

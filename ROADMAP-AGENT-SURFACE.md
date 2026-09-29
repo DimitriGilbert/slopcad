@@ -196,6 +196,19 @@ fixtures against the cad-sketch builders.
 **Risk**: medium — the ref-resolution rules (id vs document order) must be
 pinned by fixtures before Phase 4's generator mirrors them.
 
+### Phase 2b — Amendment: the sketch-driven producers (2026-09-29)
+
+An orchestrator amendment, executed after Phase 2 with the same
+implement→validate discipline: the approved Phase 2 element list omitted
+the sketch-driven PRODUCER features — the most fundamental CAD verbs. Scope:
+`Extrude`/`Revolve`/`Sweep`/`SweepWire`/`Loft` in `packages/cad-jsx`,
+each prop/input layout derived from the kernel bridge's feature-kind
+dispatch (sketch inputs via in-scope `<Sketch id=…>` references; the
+`crv_…` spine addressed by record id, the datum discipline). Phase 2's
+honest-decline note for these kinds is retired; curve-record declaration
+remains declined. No plan dependencies change (Phases 3–4 consume the
+vocabulary as-is).
+
 ### Phase 3 — Native emission + compile CLI
 
 **Requirements**: `compileToNative` emitting through

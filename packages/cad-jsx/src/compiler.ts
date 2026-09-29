@@ -50,6 +50,7 @@ import {
   ok,
   parseBodyId,
   parseCommand,
+  parseCurveId,
   parseDatumId,
   parseDimensionalValue,
   parseFeatureId,
@@ -57,12 +58,14 @@ import {
   parseReferenceId,
   parseSketchDocumentId,
   serializeDimensionalValueResult,
+  valueIn,
 } from "@slopcad/cad-core";
 import type {
   AnyDimensionalValue,
   BodyId,
   CadCommand,
   CadTransaction,
+  CurveId,
   DatumId,
   FeatureId,
   ParameterId,
@@ -172,6 +175,7 @@ type WireInput =
   | { readonly kind: "body"; readonly id: BodyId }
   | { readonly kind: "sketch"; readonly id: SketchDocumentId }
   | { readonly kind: "datum"; readonly id: DatumId }
+  | { readonly kind: "curve"; readonly id: CurveId }
   | { readonly kind: "reference"; readonly id: ReferenceId };
 
 /** The dimensions a parameter-carrying prop may declare. */
@@ -654,6 +658,16 @@ function dispatchElement(
       return compileBooleanElement(kind, props, ctx, state);
     case "use":
       return compileUseElement(props, ctx, state);
+    case "extrude":
+      return compileExtrudeElement(props, ctx, state);
+    case "revolve":
+      return compileRevolveElement(props, ctx, state);
+    case "sweep":
+      return compileSweepElement(props, ctx, state);
+    case "sweepWire":
+      return compileSweepWireElement(props, ctx, state);
+    case "loft":
+      return compileLoftElement(props, ctx, state);
     case "fillet":
     case "chamfer":
     case "shell":
@@ -991,6 +1005,30 @@ function registerParameterName(
   return undefined;
 }
 
+/**
+ * Verifies a referenced parameter was declared before this point in the
+ * tree and wraps it as its feature input (the shared ref branch of
+ * {@link dimensionInput} and the extrude's pre-resolved distance fold).
+ */
+function parameterRefInput(
+  name: string,
+  id: ParameterId,
+  ctx: WalkContext,
+  state: CompileState,
+): ParseResult<WireInput, CadJsxCompileError> {
+  if (!state.parameters.has(id)) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.parameterUnknown,
+        `The "${name}" prop references parameter "${id}", which is not declared before this point in the tree — declare the <Parameter> above the element that consumes it.`,
+        ctx.path,
+        id,
+      ),
+    );
+  }
+  return ok({ kind: "parameter", id });
+}
+
 /** Resolves one dimension to a feature input, emitting the implicit parameter when it is a literal. */
 function dimensionInput(
   slug: string,
@@ -1003,17 +1041,7 @@ function dimensionInput(
   const resolved = resolveDimension(raw, name, dimension, ctx);
   if (!resolved.ok) return fail(resolved.error);
   if (resolved.value.kind === "ref") {
-    if (!state.parameters.has(resolved.value.id)) {
-      return fail(
-        compileError(
-          CAD_JSX_ERROR_CODES.parameterUnknown,
-          `The "${name}" prop references parameter "${resolved.value.id}", which is not declared before this point in the tree — declare the <Parameter> above the element that consumes it.`,
-          ctx.path,
-          resolved.value.id,
-        ),
-      );
-    }
-    return ok({ kind: "parameter", id: resolved.value.id });
+    return parameterRefInput(name, resolved.value.id, ctx, state);
   }
   const parameterId = emitImplicitParameter(
     slug,
@@ -1116,6 +1144,42 @@ function datumIdOf(
       compileError(
         CAD_JSX_ERROR_CODES.referenceInvalid,
         `The "${prop}" prop of <${kind}> is not a valid datum record id: ${parsed.error.message}`,
+        ctx.path,
+        raw,
+      ),
+    );
+  }
+  return ok(parsed.value);
+}
+
+/**
+ * Parses one curve record id (`crv_…`) a curve-consuming element addresses
+ * — the wire-spine discipline: curve records are document entities this
+ * vocabulary cannot declare, so the prop addresses a record the target
+ * document already carries (the datum discipline's twin).
+ */
+function curveIdOf(
+  kind: string,
+  prop: string,
+  raw: unknown,
+  ctx: WalkContext,
+): ParseResult<CurveId, CadJsxCompileError> {
+  if (typeof raw !== "string") {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.referenceInvalid,
+        `The "${prop}" prop of <${kind}> must be a curve record id string ("crv_…").`,
+        ctx.path,
+        raw,
+      ),
+    );
+  }
+  const parsed = parseCurveId(raw);
+  if (!parsed.ok) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.referenceInvalid,
+        `The "${prop}" prop of <${kind}> is not a valid curve record id: ${parsed.error.message}`,
         ctx.path,
         raw,
       ),
@@ -2446,6 +2510,393 @@ function compileHelixElement(
     inputs.push({ kind: "datum", id: datum.value });
   }
   return emitOperation("helix", identity.value, inputs, ctx, state);
+}
+
+/**
+ * `<Extrude>`: a PRODUCER — the bridge's exact sketch-driven layout: one
+ * sketch input (the profile source), ONE signed length parameter (the
+ * distance; magnitude the height, sign the direction — `direction={-1}`
+ * folds into the sign so one `parameter.set` re-drives both, Phase 26.1),
+ * and an optional third angle parameter (the Phase 41 draft taper; absent
+ * or zero = the plain prism).
+ */
+function compileExtrudeElement(
+  props: Record<string, unknown>,
+  ctx: WalkContext,
+  state: CompileState,
+): ParseResult<NodeResult, CadJsxCompileError> {
+  const invalid = validateDescriptorProps(
+    "extrude",
+    props,
+    ["sketch", "height", "direction", "taper", "id"],
+    true,
+    ctx,
+  );
+  if (invalid !== undefined) return fail(invalid);
+  if (props.sketch === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <Extrude> element requires the "sketch" prop: an in-scope <Sketch id=…> carrying the profile to extrude.',
+        ctx.path,
+      ),
+    );
+  }
+  if (props.height === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <Extrude> element requires the "height" prop.',
+        ctx.path,
+      ),
+    );
+  }
+  if (
+    props.direction !== undefined &&
+    props.direction !== 1 &&
+    props.direction !== -1
+  ) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        "The direction prop of <Extrude> must be 1 (along the sketch plane's normal) or -1 (against it).",
+        ctx.path,
+        props.direction,
+      ),
+    );
+  }
+  const sketch = sketchInputOf("extrude", "sketch", props.sketch, ctx, state);
+  if (!sketch.ok) return fail(sketch.error);
+  const identity = elementSlug("extrude", props.id, ctx, state);
+  if (!identity.ok) return fail(identity.error);
+  const direction = props.direction === -1 ? -1 : 1;
+  const resolvedHeight = resolveDimension(
+    props.height,
+    "height",
+    "length",
+    ctx,
+  );
+  if (!resolvedHeight.ok) return fail(resolvedHeight.error);
+  let heightRaw: unknown = props.height;
+  if (resolvedHeight.value.kind === "ref") {
+    if (direction === -1) {
+      return fail(
+        compileError(
+          CAD_JSX_ERROR_CODES.propConflict,
+          "The direction prop of <Extrude> cannot flip a referenced height parameter — the referenced parameter's own sign carries the direction (its magnitude the height); author the sign into the <Parameter> itself.",
+          ctx.path,
+          props.direction,
+        ),
+      );
+    }
+  } else {
+    // Fold the direction into the ONE signed distance parameter the bridge
+    // reads (magnitude the height, sign the direction).
+    heightRaw = length(valueIn(resolvedHeight.value.value, "mm") * direction);
+  }
+  const distance = dimensionInput(
+    identity.value.slug,
+    "height",
+    heightRaw,
+    "length",
+    ctx,
+    state,
+  );
+  if (!distance.ok) return fail(distance.error);
+  const inputs: WireInput[] = [sketch.value, distance.value];
+  if (props.taper !== undefined) {
+    const taper = dimensionInput(
+      identity.value.slug,
+      "taper",
+      props.taper,
+      "angle",
+      ctx,
+      state,
+    );
+    if (!taper.ok) return fail(taper.error);
+    inputs.push(taper.value);
+  }
+  return emitOperation("extrude", identity.value, inputs, ctx, state);
+}
+
+/**
+ * `<Revolve>`: a PRODUCER — the bridge's compat layout: one sketch input
+ * (the profile source), one angle parameter (the sweep), and the axis — an
+ * angle parameter (the in-plane direction CCW from the workplane +x axis,
+ * the axis line through the workplane origin) or a datum axis input (the
+ * Phase 39 form; the datum must lie IN the sketch plane — the kernel's
+ * structured verdict).
+ */
+function compileRevolveElement(
+  props: Record<string, unknown>,
+  ctx: WalkContext,
+  state: CompileState,
+): ParseResult<NodeResult, CadJsxCompileError> {
+  const invalid = validateDescriptorProps(
+    "revolve",
+    props,
+    ["sketch", "angle", "axis", "axisDatum", "id"],
+    true,
+    ctx,
+  );
+  if (invalid !== undefined) return fail(invalid);
+  if (props.axis !== undefined && props.axisDatum !== undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propConflict,
+        "The axis and axisDatum props of <revolve> are alternatives — pass the in-plane axis direction angle or a datum axis record id, not both.",
+        ctx.path,
+      ),
+    );
+  }
+  if (props.sketch === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <Revolve> element requires the "sketch" prop: an in-scope <Sketch id=…> carrying the profile to revolve.',
+        ctx.path,
+      ),
+    );
+  }
+  if (props.angle === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <Revolve> element requires the "angle" prop (the sweep; a plain number is canonical radians).',
+        ctx.path,
+      ),
+    );
+  }
+  const sketch = sketchInputOf("revolve", "sketch", props.sketch, ctx, state);
+  if (!sketch.ok) return fail(sketch.error);
+  const identity = elementSlug("revolve", props.id, ctx, state);
+  if (!identity.ok) return fail(identity.error);
+  const sweep = dimensionInput(
+    identity.value.slug,
+    "angle",
+    props.angle,
+    "angle",
+    ctx,
+    state,
+  );
+  if (!sweep.ok) return fail(sweep.error);
+  const inputs: WireInput[] = [sketch.value, sweep.value];
+  if (props.axisDatum !== undefined) {
+    const datum = datumIdOf("revolve", "axisDatum", props.axisDatum, ctx);
+    if (!datum.ok) return fail(datum.error);
+    inputs.push({ kind: "datum", id: datum.value });
+  } else {
+    const axis = optionalDimensionInput(
+      identity.value.slug,
+      "axis",
+      props.axis,
+      0,
+      "angle",
+      ctx,
+      state,
+    );
+    if (!axis.ok) return fail(axis.error);
+    inputs.push(axis.value);
+  }
+  return emitOperation("revolve", identity.value, inputs, ctx, state);
+}
+
+/**
+ * `<Sweep>`: a PRODUCER — the Phase 38 planar sweep's exact layout: two
+ * sketch inputs, the profile first and the path second; no dimension
+ * parameters (the path determines the extent).
+ */
+function compileSweepElement(
+  props: Record<string, unknown>,
+  ctx: WalkContext,
+  state: CompileState,
+): ParseResult<NodeResult, CadJsxCompileError> {
+  const invalid = validateDescriptorProps(
+    "sweep",
+    props,
+    ["profile", "path", "id"],
+    true,
+    ctx,
+  );
+  if (invalid !== undefined) return fail(invalid);
+  if (props.profile === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <Sweep> element requires the "profile" prop: an in-scope <Sketch id=…> carrying the closed profile loop.',
+        ctx.path,
+      ),
+    );
+  }
+  if (props.path === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <Sweep> element requires the "path" prop: an in-scope <Sketch id=…> carrying the path chain.',
+        ctx.path,
+      ),
+    );
+  }
+  const profile = sketchInputOf("sweep", "profile", props.profile, ctx, state);
+  if (!profile.ok) return fail(profile.error);
+  const path = sketchInputOf("sweep", "path", props.path, ctx, state);
+  if (!path.ok) return fail(path.error);
+  const identity = elementSlug("sweep", props.id, ctx, state);
+  if (!identity.ok) return fail(identity.error);
+  return emitOperation(
+    "sweep",
+    identity.value,
+    [profile.value, path.value],
+    ctx,
+    state,
+  );
+}
+
+/**
+ * `<SweepWire>`: a PRODUCER — the Phase 47 generalized sweep's exact
+ * layout: one sketch input (the profile loop) and one curve input (the 3D
+ * wire spine, a curve record the target document carries).
+ */
+function compileSweepWireElement(
+  props: Record<string, unknown>,
+  ctx: WalkContext,
+  state: CompileState,
+): ParseResult<NodeResult, CadJsxCompileError> {
+  const invalid = validateDescriptorProps(
+    "sweepWire",
+    props,
+    ["profile", "spine", "id"],
+    true,
+    ctx,
+  );
+  if (invalid !== undefined) return fail(invalid);
+  if (props.profile === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <SweepWire> element requires the "profile" prop: an in-scope <Sketch id=…> carrying the closed profile loop.',
+        ctx.path,
+      ),
+    );
+  }
+  if (props.spine === undefined) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <SweepWire> element requires the "spine" prop: a curve record id ("crv_…") carrying the 3D wire spine.',
+        ctx.path,
+      ),
+    );
+  }
+  const profile = sketchInputOf(
+    "sweepWire",
+    "profile",
+    props.profile,
+    ctx,
+    state,
+  );
+  if (!profile.ok) return fail(profile.error);
+  const spine = curveIdOf("sweepWire", "spine", props.spine, ctx);
+  if (!spine.ok) return fail(spine.error);
+  const identity = elementSlug("sweepWire", props.id, ctx, state);
+  if (!identity.ok) return fail(identity.error);
+  return emitOperation(
+    "sweepWire",
+    identity.value,
+    [profile.value, { kind: "curve", id: spine.value }],
+    ctx,
+    state,
+  );
+}
+
+/**
+ * `<Loft>`: a PRODUCER — the Phase 38 loft's exact layout: per section, its
+ * sketch input then its station-z length parameter, interleaved in order
+ * (the workbench authoring order; the bridge matches sketches and stations
+ * by per-kind declared position). At least two sections.
+ */
+function compileLoftElement(
+  props: Record<string, unknown>,
+  ctx: WalkContext,
+  state: CompileState,
+): ParseResult<NodeResult, CadJsxCompileError> {
+  const invalid = validateDescriptorProps(
+    "loft",
+    props,
+    ["sections", "id"],
+    true,
+    ctx,
+  );
+  if (invalid !== undefined) return fail(invalid);
+  const rawSections = props.sections;
+  if (!Array.isArray(rawSections) || rawSections.length < 2) {
+    return fail(
+      compileError(
+        CAD_JSX_ERROR_CODES.propValueInvalid,
+        'The <Loft> element requires the "sections" prop: an array of at least two { sketch, z } section records — the bridge lofts between at least two sections.',
+        ctx.path,
+        rawSections,
+      ),
+    );
+  }
+  const identity = elementSlug("loft", props.id, ctx, state);
+  if (!identity.ok) return fail(identity.error);
+  const inputs: WireInput[] = [];
+  for (const [index, rawSection] of rawSections.entries()) {
+    if (!isPlainRecord(rawSection)) {
+      return fail(
+        compileError(
+          CAD_JSX_ERROR_CODES.propValueInvalid,
+          `Every <Loft> section must be a plain { sketch, z } record; section ${String(index + 1)} is not one.`,
+          ctx.path,
+          rawSection,
+        ),
+      );
+    }
+    for (const key of Object.keys(rawSection)) {
+      if (key !== "sketch" && key !== "z") {
+        return fail(
+          compileError(
+            CAD_JSX_ERROR_CODES.propUnknown,
+            `"${key}" is not a key of a <Loft> section; each section carries exactly sketch and z.`,
+            ctx.path,
+            key,
+          ),
+        );
+      }
+    }
+    if (rawSection.sketch === undefined || rawSection.z === undefined) {
+      return fail(
+        compileError(
+          CAD_JSX_ERROR_CODES.propValueInvalid,
+          `Every <Loft> section requires its sketch and z; section ${String(index + 1)} misses one.`,
+          ctx.path,
+          rawSection,
+        ),
+      );
+    }
+    const sketch = sketchInputOf(
+      "loft",
+      `sections[${index}].sketch`,
+      rawSection.sketch,
+      ctx,
+      state,
+    );
+    if (!sketch.ok) return fail(sketch.error);
+    // The per-station parameter role keeps an identifier-safe suffix so each
+    // section's implicit parameter claims a distinct id and name.
+    const station = dimensionInput(
+      identity.value.slug,
+      `stationZ${String(index + 1)}`,
+      rawSection.z,
+      "length",
+      ctx,
+      state,
+    );
+    if (!station.ok) return fail(station.error);
+    inputs.push(sketch.value, station.value);
+  }
+  return emitOperation("loft", identity.value, inputs, ctx, state);
 }
 
 /** `<Scale>`: one target + one dimensionless factor (uniform scaling only). */

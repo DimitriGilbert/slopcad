@@ -18,6 +18,7 @@
 import type {
   AnyDimensionalValue,
   BodyId,
+  CurveId,
   DatumId,
   FeatureId,
   ParameterId,
@@ -61,6 +62,11 @@ export const CAD_ELEMENT_KINDS = [
   "subtract",
   "intersect",
   "use",
+  "extrude",
+  "revolve",
+  "sweep",
+  "sweepWire",
+  "loft",
   "fillet",
   "chamfer",
   "shell",
@@ -253,6 +259,14 @@ export type ReferenceProp = ReferenceId | (string & {});
  * prop addresses a record the target document already carries.
  */
 export type DatumProp = DatumId | (string & {});
+
+/**
+ * A curve record id (`crv_…`) a curve-consuming element addresses. Curve
+ * records (3D splines, helices, equation curves) are document entities
+ * this vocabulary cannot declare yet, so the prop addresses a record the
+ * target document already carries.
+ */
+export type CurveProp = CurveId | (string & {});
 
 /**
  * A sketch record id (`skd_…`) a sketch-consuming element addresses —
@@ -502,6 +516,102 @@ export interface HelixProps {
   readonly taper?: DimensionalProp;
   /** A datum axis record the spine runs along (default: world +z through the origin). */
   readonly axis?: DatumProp;
+  /** Explicit feature id (`feat_…`); body and parameter ids derive from it. */
+  readonly id?: FeatureId | (string & {});
+}
+
+/**
+ * Props of `<Extrude>`: prisms a sketch profile along the sketch plane's
+ * normal — a PRODUCER (no target child), like a primitive. The bridge reads
+ * ONE signed length parameter whose magnitude is the height and whose sign
+ * is the direction; `direction={-1}` folds into that sign, so `parameter.set`
+ * on the emitted parameter re-drives both (Phase 26.1's edit discipline).
+ */
+export interface ExtrudeProps {
+  /** An in-scope `<Sketch id=…>` carrying the closed profile to extrude. */
+  readonly sketch: SketchRefProp;
+  /** The extrusion height (the distance parameter's magnitude). */
+  readonly height: DimensionalProp;
+  /** 1 (default) extrudes along the sketch normal, -1 against it. */
+  readonly direction?: 1 | -1;
+  /**
+   * The optional Phase 41 draft taper (a plain number is canonical radians);
+   * absent or 0 = the plain prism.
+   */
+  readonly taper?: DimensionalProp;
+  /** Explicit feature id (`feat_…`); body and parameter ids derive from it. */
+  readonly id?: FeatureId | (string & {});
+}
+
+/**
+ * Props of `<Revolve>`: sweeps a sketch profile about an axis in the sketch
+ * plane — a PRODUCER. Two bridge-faithful axis forms (the `axis`/
+ * `axisDatum` alternative discipline): the in-plane angle parameter, or a
+ * datum axis record that must lie in the sketch plane.
+ */
+export interface RevolveProps {
+  /** An in-scope `<Sketch id=…>` carrying the profile to revolve. */
+  readonly sketch: SketchRefProp;
+  /** The sweep (kernel domain (0, 2π]; 2π the full revolve); a plain number is canonical radians. */
+  readonly angle: DimensionalProp;
+  /**
+   * The revolve axis direction, counter-clockwise in the sketch plane from
+   * the workplane +x axis (a plain number is canonical radians; default 0 =
+   * the workplane x axis itself). The axis line runs through the workplane
+   * origin.
+   */
+  readonly axis?: DimensionalProp;
+  /** A datum axis record the profile revolves about (replaces `axis`). */
+  readonly axisDatum?: DatumProp;
+  /** Explicit feature id (`feat_…`); body and parameter ids derive from it. */
+  readonly id?: FeatureId | (string & {});
+}
+
+/**
+ * Props of `<Sweep>`: carries a sketch profile along a sketch path (the
+ * Phase 38 planar sweep) — a PRODUCER with no dimension parameters; the
+ * path determines the extent.
+ */
+export interface SweepProps {
+  /** An in-scope `<Sketch id=…>` carrying the closed profile loop. */
+  readonly profile: SketchRefProp;
+  /** An in-scope `<Sketch id=…>` carrying the path chain. */
+  readonly path: SketchRefProp;
+  /** Explicit feature id (`feat_…`); body and parameter ids derive from it. */
+  readonly id?: FeatureId | (string & {});
+}
+
+/**
+ * Props of `<SweepWire>`: carries a sketch profile loop along a 3D wire
+ * spine from the document's curve records (the Phase 47 generalized sweep)
+ * — a PRODUCER.
+ */
+export interface SweepWireProps {
+  /** An in-scope `<Sketch id=…>` carrying the closed profile loop. */
+  readonly profile: SketchRefProp;
+  /** The curve record id (`crv_…`) carrying the 3D wire spine. */
+  readonly spine: CurveProp;
+  /** Explicit feature id (`feat_…`); body and parameter ids derive from it. */
+  readonly id?: FeatureId | (string & {});
+}
+
+/** One ordered loft section: its sketch and its station z. */
+export interface LoftSectionProp {
+  /** An in-scope `<Sketch id=…>` carrying this section's profile. */
+  readonly sketch: SketchRefProp;
+  /** The section's station z along the loft (the kernel demands strictly increasing stations). */
+  readonly z: DimensionalProp;
+}
+
+/**
+ * Props of `<Loft>`: skins ordered sketch sections into one solid (the
+ * Phase 38 loft) — a PRODUCER. The order IS the loft direction; every
+ * section must share the FIRST section's workplane frame (the kernel's
+ * one-placement rule).
+ */
+export interface LoftProps {
+  /** At least two ordered sections (sketch + station z each). */
+  readonly sections: readonly LoftSectionProp[];
   /** Explicit feature id (`feat_…`); body and parameter ids derive from it. */
   readonly id?: FeatureId | (string & {});
 }
@@ -854,6 +964,21 @@ export const Thread = defineCadElement<ThreadProps>("thread");
 
 /** Sweeps a meridian profile along a helical spine (a producer): kind `helix`. */
 export const Helix = defineCadElement<HelixProps>("helix");
+
+/** Prisms a sketch profile along its sketch normal (a producer): kind `extrude`. */
+export const Extrude = defineCadElement<ExtrudeProps>("extrude");
+
+/** Revolves a sketch profile about an in-plane axis (a producer): kind `revolve`. */
+export const Revolve = defineCadElement<RevolveProps>("revolve");
+
+/** Carries a sketch profile along a sketch path (a producer): kind `sweep`. */
+export const Sweep = defineCadElement<SweepProps>("sweep");
+
+/** Carries a sketch profile along a 3D curve spine (a producer): kind `sweepWire`. */
+export const SweepWire = defineCadElement<SweepWireProps>("sweepWire");
+
+/** Skins ordered sketch sections into one solid (a producer): kind `loft`. */
+export const Loft = defineCadElement<LoftProps>("loft");
 
 /** Uniformly scales its target by one factor: kind `scale`. */
 export const Scale = defineCadElement<ScaleProps>("scale");
