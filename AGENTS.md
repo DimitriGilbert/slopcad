@@ -44,6 +44,7 @@ No `any`, `as any`, or `: any` — use proper types, `unknown`, inference, or va
 With verbatimModuleSyntax on, use `import type` for type-only imports.
 Keep imports ordered: external/workspace imports first, a blank line, then local imports.
 All new forms must use Formedible (`packages/ui/src/components/formedible`) — a schema-driven form renderer on top of TanStack Form. Forms are config objects (schema + field list + options), not long TSX files, so they can be combined, reused and adapted easily. Load the `formedible` skill before building or modifying Formedible forms.
+CAD models are authored as React/TSX files with `@slopcad/cad-jsx` (`packages/cad-jsx`) — a deterministic JSX → CadCommand compiler. Read `skills/slopcad-cad-jsx/SKILL.md` before authoring, compiling, or importing CAD models as React files in this repo.
 Search for existing components, types, and utilities before creating new ones; keep one source of truth for types, and never hand-edit generated files.
 Check the `pnpm-workspace.yaml` catalog and existing `package.json` files before adding a dependency, and use `catalog:` references when available.
 Do not start long-running dev servers — assume one is already running; start one only if the user explicitly asks or none is clearly running.
