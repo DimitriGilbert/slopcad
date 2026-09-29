@@ -17,9 +17,12 @@ import type { SerializedCadTransaction } from "@slopcad/cad-core";
 import { Component, createElement, Fragment, useState } from "react";
 import type { ReactElement } from "react";
 import { describe, expect, it } from "vitest";
-import type { CadJsxCompileError } from "./compiler";
 
-import { CAD_JSX_ERROR_CODES, compileModel } from "./compiler";
+import {
+  CAD_JSX_ERROR_CODES,
+  compileModel,
+  type CadJsxCompileError,
+} from "./compiler";
 import {
   Body,
   Box,
@@ -699,6 +702,15 @@ describe("rejections", () => {
     expect(error.path).toEqual(["<root>"]);
   });
 
+  it("rejects symbol element types", () => {
+    const SymbolTag = Symbol("cadjsx.test.symbol-tag");
+    const error = rejectionOf(
+      createElement(SymbolTag as unknown as string, {}),
+    );
+    expect(error.code).toBe(CAD_JSX_ERROR_CODES.elementTypeUnknown);
+    expect(error.path).toEqual(["<root>"]);
+  });
+
   it("rejects functions in user component props", () => {
     const WithCallback: (props: {
       onPick: () => void;
@@ -729,10 +741,10 @@ describe("rejections", () => {
   });
 
   it("rejects unknown element kinds", () => {
-    const Union = defineCadElement<Record<string, never>>("union");
-    const error = rejectionOf(createElement(Union, {}));
+    const Quantum = defineCadElement<Record<string, never>>("quantum");
+    const error = rejectionOf(createElement(Quantum, {}));
     expect(error.code).toBe(CAD_JSX_ERROR_CODES.kindUnsupported);
-    expect(error.path).toEqual(["<root>", "<union>"]);
+    expect(error.path).toEqual(["<root>", "<quantum>"]);
   });
 
   it("rejects unknown props, non-finite numbers, and functions in descriptor props", () => {
