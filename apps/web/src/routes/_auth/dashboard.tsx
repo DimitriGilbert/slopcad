@@ -28,6 +28,7 @@ import { AppPage, PageHeader } from "@/components/app/page";
 import { ProjectCard } from "@/components/app/project-card";
 import { formatStamp } from "@/utils/format";
 import { useTRPC } from "@/utils/trpc";
+import { useProjectsWebMcpTools } from "@/webmcp/projects-tools";
 
 export const Route = createFileRoute("/_auth/dashboard")({
   component: RouteComponent,
@@ -39,6 +40,7 @@ function RouteComponent(): ReactElement {
   const { session } = Route.useRouteContext();
   const trpc = useTRPC();
   const projectsQuery = useQuery(trpc.projects.list.queryOptions());
+  useProjectsWebMcpTools();
 
   const projects = projectsQuery.data ?? [];
   const lastActivityAt = projects[0]?.updatedAt;

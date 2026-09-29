@@ -4,6 +4,10 @@ import { readFile } from "node:fs/promises";
 import type { Download, Page } from "@playwright/test";
 import { expect, test as base } from "@playwright/test";
 import type { SettleAnchor } from "../e2e-render/helpers";
+import type {
+  WebMcpToolAnnotations,
+  WebMcpToolSnapshot,
+} from "../src/webmcp/registry";
 
 import {
   dispatchedCount,
@@ -172,6 +176,25 @@ const REDO_BUTTON = 'button[aria-label="Redo"]';
 const DIALOG = '[data-testid="feature-form-dialog"]';
 const VIEWPORT_COMPLETE = "workbench-complete-viewport";
 
+/** The eight workbench WebMCP tools the complete page registers (Phase 7). */
+const WORKBENCH_WEBMCP_TOOLS = [
+  "cad_get_document_summary",
+  "cad_list_commands",
+  "cad_run_command",
+  "cad_set_parameter",
+  "cad_undo",
+  "cad_redo",
+  "cad_apply_commands",
+  "cad_measure",
+] as const;
+
+/** The projects WebMCP tools the authenticated pages register (Phase 8). */
+const PROJECTS_WEBMCP_TOOLS = [
+  "projects_list",
+  "projects_create",
+  "open_document",
+] as const;
+
 /** The sketch rectangle the create journeys draw (workplane mm). */
 const RECT = { x0: 10, y0: 10, x1: 30, y1: 25 } as const;
 
@@ -335,6 +358,31 @@ async function cameraAttribute(page: Page, name: string): Promise<string> {
 /** One root attribute off the complete workbench root. */
 async function rootAttribute(page: Page, name: string): Promise<string> {
   return (await page.locator(COMPLETE).getAttribute(name)) ?? "";
+}
+
+/**
+ * Reads the WebMCP registry snapshot through the window test seam. The
+ * seam is SNAPSHOT-ONLY by design (Phase 7): it exposes registration —
+ * names, JSON Schemas, annotations — and deliberately NO execution entry,
+ * so the session asserts what agents can discover, never drives tools.
+ */
+async function readWebMcpSnapshot(
+  page: Page,
+): Promise<readonly WebMcpToolSnapshot[]> {
+  return page.evaluate(() => window.__slopcadWebMcpTools?.() ?? []);
+}
+
+/** The JSON-Schema form's type member of one snapshot entry's input. */
+function schemaTypeOf(tool: WebMcpToolSnapshot): string | undefined {
+  return (tool.inputSchema as { readonly type?: string }).type;
+}
+
+/** One named tool's annotations from a snapshot (null when absent). */
+function annotationsOf(
+  tools: readonly WebMcpToolSnapshot[],
+  name: string,
+): WebMcpToolAnnotations | null {
+  return tools.find((tool) => tool.name === name)?.annotations ?? null;
 }
 
 /** Opens the command menu (Ctrl+K) on a complete workbench. */
@@ -3444,6 +3492,57 @@ test("s26c the TSX model exchange: import a .tsx model, export TSX, round-trip t
       .toBe("extrude,revolve,loft,subtract,union");
     await waitForSettledScene(page, COMPLETE_ROOT);
     extra("tsx-model-round-trip");
+  });
+});
+
+test("s27 the WebMCP agent surface: registry snapshots on the workbench and the projects pages", async ({
+  sessionPage: page,
+}) => {
+  await stage("s27 webmcp agent surface", async () => {
+    // THE WORKBENCH SNAPSHOT: the eight CAD tools the complete page
+    // mounts, each with a JSON object input schema and honest usage
+    // annotations (the seam is snapshot-only — see readWebMcpSnapshot).
+    await openComplete(page);
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...WORKBENCH_WEBMCP_TOOLS]);
+    const workbenchTools = await readWebMcpSnapshot(page);
+    for (const tool of workbenchTools) {
+      expect(schemaTypeOf(tool)).toBe("object");
+    }
+    expect(annotationsOf(workbenchTools, "cad_run_command")).toMatchObject({
+      consequentialHint: true,
+    });
+    expect(
+      annotationsOf(workbenchTools, "cad_get_document_summary"),
+    ).toMatchObject({ readOnlyHint: true });
+    extra("webmcp-workbench-surface");
+
+    // THE PROJECTS SNAPSHOT: the three workspace tools the authenticated
+    // pages mount (the user is signed in since s26), same honesty rules.
+    await page.goto("/projects");
+    await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...PROJECTS_WEBMCP_TOOLS]);
+    const projectsTools = await readWebMcpSnapshot(page);
+    for (const tool of projectsTools) {
+      expect(schemaTypeOf(tool)).toBe("object");
+    }
+    expect(annotationsOf(projectsTools, "projects_list")).toMatchObject({
+      readOnlyHint: true,
+    });
+    expect(annotationsOf(projectsTools, "projects_create")).toMatchObject({
+      consequentialHint: true,
+    });
+    expect(annotationsOf(projectsTools, "open_document")).toMatchObject({
+      consequentialHint: true,
+    });
+    extra("webmcp-projects-surface");
   });
 });
 
