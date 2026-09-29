@@ -125,7 +125,7 @@ export const chapter: ChapterModule = {
         "0",
     );
     expect(cutVolume).toBeCloseTo(BOOT_PLATE_VOLUME / 2, -1);
-    await driver.humanPoint(page.locator("#workbench-volume-readout"));
+    await driver.pointAtReadout(page.locator("#workbench-volume-readout"));
     await driver.dwell();
 
     await driver.step("off");

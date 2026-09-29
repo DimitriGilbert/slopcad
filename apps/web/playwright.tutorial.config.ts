@@ -15,6 +15,9 @@ import { defineConfig } from "@playwright/test";
  */
 
 const PORT = 3214;
+// The standing-server fast path (the session config's shared-URL pattern):
+// export TUTORIAL_E2E_BASE_URL while a pre-built server is already up and
+// this config skips its own boot — the debug loop iterates in seconds.
 const baseURL = process.env.TUTORIAL_E2E_BASE_URL ?? `http://localhost:${PORT}`;
 
 export default defineConfig({
@@ -55,13 +58,16 @@ export default defineConfig({
       args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
     },
   },
-  webServer: {
-    // The session harness's boot discipline: the committed migrations
-    // first, then the production build and server with BETTER_AUTH_URL
-    // matching the harness port.
-    command: `pnpm --filter @slopcad/db db:migrate && pnpm build && PORT=${PORT} BETTER_AUTH_URL=${baseURL} node --env-file-if-exists=.env .output/server/index.mjs`,
-    url: baseURL,
-    timeout: 300_000,
-    reuseExistingServer: false,
-  },
+  webServer:
+    process.env.TUTORIAL_E2E_BASE_URL === undefined
+      ? {
+          // The session harness's boot discipline: the committed migrations
+          // first, then the production build and server with BETTER_AUTH_URL
+          // matching the harness port.
+          command: `pnpm --filter @slopcad/db db:migrate && pnpm build && PORT=${PORT} BETTER_AUTH_URL=${baseURL} node --env-file-if-exists=.env .output/server/index.mjs`,
+          url: baseURL,
+          timeout: 300_000,
+          reuseExistingServer: false,
+        }
+      : undefined,
 });

@@ -4,14 +4,24 @@ import type { ChapterModule } from "./narration";
 
 import { chapter as appearanceAndLightingChapter } from "./chapters/appearance-and-lighting";
 import { chapter as baseToolsChapter } from "./chapters/base-tools";
+import { chapter as booleansChapter } from "./chapters/booleans";
 import { chapter as cameraViewsChapter } from "./chapters/camera-views";
 import { chapter as deleteAndHistoryChapter } from "./chapters/delete-and-history";
 import { chapter as displayModesChapter } from "./chapters/display-modes";
+import { chapter as draftRibScaleChapter } from "./chapters/draft-rib-scale";
 import { chapter as firstExtrudeChapter } from "./chapters/first-extrude";
+import { chapter as helixFeatureChapter } from "./chapters/helix-feature";
+import { chapter as holesAndPatternsChapter } from "./chapters/holes-and-patterns";
 import { chapter as homeTourChapter } from "./chapters/home-tour";
+import { chapter as loftFeatureChapter } from "./chapters/loft-feature";
 import { chapter as sectionClippingChapter } from "./chapters/section-clipping";
 import { chapter as selectionInspectChapter } from "./chapters/selection-inspect";
+import { chapter as sketchOnFaceChapter } from "./chapters/sketch-on-face";
 import { chapter as sketchWorkspaceChapter } from "./chapters/sketch-workspace";
+import { chapter as surfacesChapter } from "./chapters/surfaces";
+import { chapter as sweepFeatureChapter } from "./chapters/sweep-feature";
+import { chapter as threadFeatureChapter } from "./chapters/thread-feature";
+import { chapter as thickenSplitChapter } from "./chapters/thicken-split";
 import { chapter as undoRedoRollbackChapter } from "./chapters/undo-redo-rollback";
 import { chapterTimelines, installCursorOverlay, playChapter } from "./driver";
 import {
@@ -28,7 +38,8 @@ import {
  * ONE browser context for the whole run (worker-scoped fixture + serial
  * mode, the session harness's discipline), the cursor overlay injected on
  * the context, and the chapters played in teaching order as serial tests
- * (the three pilots, then the workbench-fundamentals batch). The final
+ * (the three pilots, the workbench-fundamentals batch, then the
+ * feature-authoring batch). The final
  * gate validates the narration ledger (every cue bound to a real recorded
  * step, timestamps monotonic, every cue watchable) and writes it to
  * `test-results/tutorial/ledger.json`; the fixture teardown then finalizes
@@ -36,7 +47,13 @@ import {
  * `docs/tutorials/` artifacts from the pair.
  */
 
-/** The chapters, in teaching order (the workbench fundamentals batch). */
+/**
+ * The chapters, in teaching order: the workbench fundamentals batch, then
+ * the feature-authoring batch (the sketch-on-face verb on the default
+ * route, then the OCCT-only features — sweep, loft, helix, thread, the
+ * shaping family, structured holes and patterns, booleans, and the
+ * surface pipeline — each on the kernel that executes them).
+ */
 const CHAPTERS: readonly ChapterModule[] = [
   homeTourChapter,
   sketchWorkspaceChapter,
@@ -49,6 +66,16 @@ const CHAPTERS: readonly ChapterModule[] = [
   cameraViewsChapter,
   sectionClippingChapter,
   appearanceAndLightingChapter,
+  sketchOnFaceChapter,
+  sweepFeatureChapter,
+  loftFeatureChapter,
+  helixFeatureChapter,
+  threadFeatureChapter,
+  draftRibScaleChapter,
+  thickenSplitChapter,
+  holesAndPatternsChapter,
+  booleansChapter,
+  surfacesChapter,
 ];
 
 const test = base.extend<object, { tutorialPage: Page }>({
@@ -142,6 +169,68 @@ test("chapter: section-clipping", async ({ tutorialPage: page }) => {
 test("chapter: appearance-and-lighting", async ({ tutorialPage: page }) => {
   test.setTimeout(120_000);
   await playChapter(page, appearanceAndLightingChapter);
+});
+
+test("chapter: sketch-on-face", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, sketchOnFaceChapter);
+});
+
+test("chapter: sweep-feature", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, sweepFeatureChapter);
+});
+
+test("chapter: loft-feature", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, loftFeatureChapter);
+});
+
+test("chapter: helix-feature", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, helixFeatureChapter);
+});
+
+test("chapter: thread-feature", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, threadFeatureChapter);
+});
+
+// The merged shaping chapter walks THREE session stages (s14, s14b, s14c
+// — each a ≤ 30 s stage at session machine pace) plus their teaching
+// pace: 120 s cannot hold that floor, so the budget mirrors the session's
+// own elevated-stage precedent (s11b's 90 s / s11c's 150 s).
+test("chapter: draft-rib-scale", async ({ tutorialPage: page }) => {
+  test.setTimeout(240_000);
+  await playChapter(page, draftRibScaleChapter);
+});
+
+// Two merged session stages (s14d + s14e) on the OCCT kernel: the two
+// boots and four kernel settles alone eat the 120 s floor.
+test("chapter: thicken-split", async ({ tutorialPage: page }) => {
+  test.setTimeout(180_000);
+  await playChapter(page, thickenSplitChapter);
+});
+
+// FOUR merged session stages (s15, s15b, s16, s16c — the hole family and
+// the pattern family): four boots, four kernel creates, two re-drives.
+test("chapter: holes-and-patterns", async ({ tutorialPage: page }) => {
+  test.setTimeout(300_000);
+  await playChapter(page, holesAndPatternsChapter);
+});
+
+// Three merged boolean stages (s16d, s16e, s16f) with four sketch
+// extrusions on the OCCT kernel between them.
+test("chapter: booleans", async ({ tutorialPage: page }) => {
+  test.setTimeout(240_000);
+  await playChapter(page, booleansChapter);
+});
+
+// The whole surface pipeline (s17 + s17b): one boot, six kernel dialog
+// operations, each with its own settle.
+test("chapter: surfaces", async ({ tutorialPage: page }) => {
+  test.setTimeout(180_000);
+  await playChapter(page, surfacesChapter);
 });
 
 test("tutorial gate: the narration ledger is complete and watchable", async () => {

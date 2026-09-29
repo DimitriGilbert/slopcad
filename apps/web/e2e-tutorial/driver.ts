@@ -5,6 +5,7 @@ import type { ChapterModule, RawChapterRecord } from "./narration";
 import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
 import {
   COMPLETE_ROOT,
+  OCCT_ROOT,
   SKETCH,
   waitForRootSettle,
 } from "../e2e-session/helpers";
@@ -50,11 +51,43 @@ const CLICK_SETTLE_MS = 140;
  * `data-tutorial-cursor` so the app's own DOM assertions can never match
  * it, and the whole layer is `pointer-events: none` — it can never
  * intercept an interaction.
+ *
+ * The pointer is VISIBLE from the first painted frame of every page: it
+ * installs the moment the document element exists (document_start, before
+ * the app's first paint) parked at the last position the pointer came to
+ * rest on — persisted through `sessionStorage` so a hard navigation
+ * re-lands the arrow exactly where the glide left it (no teleport, the
+ * same never-teleports rule the driver's glides keep) — and at the
+ * viewport center when no rest position is known yet. Soft navigations
+ * (client-side route changes) never replace the document, so the layer
+ * simply lives for the whole page lifetime; hard navigations re-run this
+ * script and the id guard keeps the reinstall a no-op if the element
+ * somehow survived.
  */
 export async function installCursorOverlay(
   context: BrowserContext,
 ): Promise<void> {
   await context.addInitScript(() => {
+    /** The sessionStorage key the rest position persists under. */
+    const REST_KEY = "tutorial-cursor-rest";
+
+    /** Reads the persisted rest point; `null` when none is readable. */
+    const readRestPoint = (): { x: number; y: number } | null => {
+      try {
+        const raw = window.sessionStorage.getItem(REST_KEY);
+        if (raw === null) return null;
+        const [x, y] = raw.split(",");
+        const px = Number(x);
+        const py = Number(y);
+        if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+        return { x: px, y: py };
+      } catch {
+        // Storage can refuse (an opaque origin on the initial blank page):
+        // the center park below is the fallback, never a failure.
+        return null;
+      }
+    };
+
     const install = (): void => {
       if (document.getElementById("tutorial-cursor-overlay") !== null) {
         return;
@@ -67,10 +100,17 @@ export async function installCursorOverlay(
 
       const cursor = document.createElement("div");
       cursor.setAttribute("data-tutorial-cursor", "pointer");
+      // Parked where the last glide came to rest (the center on a fresh
+      // context) — the driver's own first-move fallback agrees with the
+      // center, so the arrow's park and the next glide's origin coincide.
+      const rest = readRestPoint() ?? {
+        x: Math.round(window.innerWidth / 2),
+        y: Math.round(window.innerHeight / 2),
+      };
       cursor.style.cssText =
         "position:fixed;left:0;top:0;width:24px;height:24px;" +
         "pointer-events:none;will-change:transform;" +
-        "transform:translate3d(-48px,-48px,0);" +
+        `transform:translate3d(${String(rest.x)}px,${String(rest.y)}px,0);` +
         "filter:drop-shadow(0 2px 3px rgba(0,0,0,0.55));";
       cursor.innerHTML =
         '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" ' +
@@ -105,12 +145,44 @@ export async function installCursorOverlay(
         }, 700);
       };
 
+      // The rest-position persistence: the handler only records the latest
+      // coords and schedules one trailing write per burst of moves (never a
+      // synchronous storage write per event); `pagehide` flushes the same
+      // coords the moment a navigation starts, so a timer cancelled by the
+      // unload can never lose the final rest point. Failures stay silent
+      // (the center park covers a read-only store).
+      let restX = rest.x;
+      let restY = rest.y;
+      const writeRest = (): void => {
+        try {
+          window.sessionStorage.setItem(
+            REST_KEY,
+            `${String(Math.round(restX))},${String(Math.round(restY))}`,
+          );
+        } catch {
+          // A refused write only costs the next navigation its exact park.
+        }
+      };
+      let restWritePending = false;
+      const persistRest = (): void => {
+        if (restWritePending) return;
+        restWritePending = true;
+        window.setTimeout((): void => {
+          restWritePending = false;
+          writeRest();
+        }, 150);
+      };
+      window.addEventListener("pagehide", writeRest);
+
       window.addEventListener(
         "pointermove",
         (event: PointerEvent): void => {
+          restX = event.clientX;
+          restY = event.clientY;
           cursor.style.transform = `translate3d(${String(event.clientX)}px,${String(
             event.clientY,
           )}px,0)`;
+          persistRest();
         },
         { passive: true },
       );
@@ -142,10 +214,16 @@ export async function installCursorOverlay(
 
       document.documentElement.appendChild(root);
     };
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", install, { once: true });
-    } else {
+    // Install the moment the document element exists — document_start,
+    // before the app paints a single frame — so no painted frame of any
+    // navigation lacks the pointer. The element-exists check (not
+    // readyState) is the gate: init scripts run after the document
+    // element is created, and DOMContentLoaded stays only as the
+    // never-observed fallback.
+    if (document.documentElement !== null) {
       install();
+    } else {
+      document.addEventListener("DOMContentLoaded", install, { once: true });
     }
   });
 }
@@ -192,6 +270,27 @@ async function resolveTarget(
     throw new Error("the tutorial pointer target has no bounding box");
   }
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/**
+ * The teaching point for readout VALUES: glides the arrow to rest just
+ * left of the target — on the label that leads the number — so the
+ * pointer points AT the readout without covering the digits the cue
+ * narrates (a centered rest hides half the number under the arrow's
+ * body; the video must let the viewer read it).
+ */
+async function humanPointReadout(page: Page, target: Locator): Promise<void> {
+  await target.scrollIntoViewIfNeeded();
+  const box = await target.boundingBox();
+  if (box === null) {
+    throw new Error("the tutorial pointer target has no bounding box");
+  }
+  // 26 px keeps the 24 px arrow's right edge 2 px clear of the value,
+  // over the dim label ink; clamped so a left-edge readout never sends
+  // the tip off-screen.
+  const x = Math.max(2, box.x - 26);
+  await humanMove(page, x, box.y + box.height / 2);
+  await dwell(page, CLICK_SETTLE_MS);
 }
 
 /**
@@ -410,20 +509,89 @@ async function humanActivateSketchTool(
  * Clicks the sketch canvas at a workplane mm point with a visible glide —
  * the same mm→px mapping the session helpers' `clickCanvasPoint` uses
  * (SKETCH_CANVAS's documented transform), resolved onto the surface's
- * bounding box to land in viewport coordinates.
+ * bounding box to land in viewport coordinates. The surface is scrolled
+ * into view FIRST (the session's locator click gets that for free from
+ * its `position` option), and the mapped point is guarded loud twice:
+ * it must sit inside the viewport AND the sketch surface must be the hit
+ * target there — the workbench clips the surface's lower band under the
+ * status bar, and the driver never fires a click a sibling would eat.
  */
 async function humanClickCanvasPoint(
   page: Page,
   xMm: number,
   yMm: number,
 ): Promise<void> {
-  const box = await page
-    .locator(`${SKETCH} [data-sketch-surface]`)
-    .boundingBox();
+  const surface = page.locator(`${SKETCH} [data-sketch-surface]`);
+  await surface.scrollIntoViewIfNeeded();
+  const box = await surface.boundingBox();
   if (box === null) throw new Error("the sketch surface is not mounted");
   const px = SKETCH_CANVAS.origin.x + xMm * SKETCH_CANVAS.scale;
   const py = SKETCH_CANVAS.origin.y - yMm * SKETCH_CANVAS.scale;
-  await humanClick(page, { x: box.x + px, y: box.y + py });
+  const x = box.x + px;
+  const y = box.y + py;
+  const viewport = page.viewportSize();
+  if (
+    viewport === null ||
+    x < 0 ||
+    y < 0 ||
+    x > viewport.width ||
+    y > viewport.height
+  ) {
+    throw new Error(
+      `the workplane point (${xMm}, ${yMm}) mm maps off-viewport to (${x}, ${y}) — the surface cannot show it`,
+    );
+  }
+  const surfaceOwnsPoint = await page.evaluate(
+    ({ x: hx, y: hy }): boolean => {
+      const hit = document.elementFromPoint(hx, hy);
+      return hit !== null && hit.closest("[data-sketch-surface]") !== null;
+    },
+    { x, y },
+  );
+  if (!surfaceOwnsPoint) {
+    throw new Error(
+      `the workplane point (${xMm}, ${yMm}) mm maps to (${x}, ${y}) where another element owns the hit — the surface's visible band does not reach it`,
+    );
+  }
+  await humanClick(page, { x, y });
+}
+
+/**
+ * Picks one PINNED workplane point a raw pointer cannot teach — the rows
+ * the fixed canvas transform places inside the status bar's band
+ * (workplane y below roughly 5 mm, the sketch origin included), which
+ * contracts still pin geometry to: the sweep path's start, the thread
+ * cut's origin-centered rod. The pick rides the session helpers' locator
+ * click — the mechanism the suites' own `clickCanvasPoint` uses, which
+ * delivers the pointer event through that band — after a visible glide
+ * to the nearest visible row, so the video still shows where the pinned
+ * geometry lives before the pick lands.
+ */
+async function humanPickPinnedCanvasPoint(
+  page: Page,
+  xMm: number,
+  yMm: number,
+): Promise<void> {
+  const surface = page.locator(`${SKETCH} [data-sketch-surface]`);
+  const box = await surface.boundingBox();
+  if (box === null) throw new Error("the sketch surface is not mounted");
+  const pinnedX = box.x + SKETCH_CANVAS.origin.x + xMm * SKETCH_CANVAS.scale;
+  const pinnedY = box.y + SKETCH_CANVAS.origin.y - yMm * SKETCH_CANVAS.scale;
+  await humanMove(
+    page,
+    pinnedX,
+    box.y +
+      SKETCH_CANVAS.origin.y -
+      Math.max(yMm + 10, 12) * SKETCH_CANVAS.scale,
+  );
+  await dwell(page, CLICK_SETTLE_MS);
+  await surface.click({
+    position: {
+      x: SKETCH_CANVAS.origin.x + xMm * SKETCH_CANVAS.scale,
+      y: SKETCH_CANVAS.origin.y - yMm * SKETCH_CANVAS.scale,
+    },
+  });
+  lastPointer.set(page, { x: pinnedX, y: pinnedY });
 }
 
 /** Enters sketch mode through the top-bar Sketch button (paced). */
@@ -465,6 +633,12 @@ export interface TutorialDriver {
   dwell(ms?: number): Promise<void>;
   /** Glides the pointer onto a target and rests there — no click. */
   humanPoint(target: Locator | ViewportPoint): Promise<void>;
+  /**
+   * Glides the pointer to rest BESIDE a readout value — on its label,
+   * pointing at the number without covering it (the digits stay
+   * readable in the recording).
+   */
+  pointAtReadout(target: Locator): Promise<void>;
   /** Glides to the target, settles, and clicks it. */
   humanClick(target: Locator | ViewportPoint): Promise<void>;
   /** Opens the command menu via its visible trigger button. */
@@ -475,8 +649,16 @@ export interface TutorialDriver {
   activateSketchTool(toolId: string): Promise<void>;
   /** Clicks the sketch canvas at a workplane mm point. */
   clickCanvasPoint(xMm: number, yMm: number): Promise<void>;
+  /**
+   * Picks one PINNED workplane point the canvas transform hides under
+   * the status bar's band (the origin and its lowest rows) — the rows
+   * contracts like the sweep path's start and the thread's rod still
+   * pin geometry to (the locator-click mechanics, after a visible
+   * glide to the nearest visible row).
+   */
+  pickPinnedCanvasPoint(xMm: number, yMm: number): Promise<void>;
   /** Enters sketch mode through the top-bar Sketch button. */
-  enterSketchMode(): Promise<void>;
+  enterSketchMode(rootId?: string): Promise<void>;
   /** Dismisses the getting-started hint with a visible click, bounded. */
   dismissHint(): Promise<void>;
   /**
@@ -492,9 +674,12 @@ export interface TutorialDriver {
   /**
    * Arrives at the complete workbench for teaching: navigates, dismisses
    * the hint human-paced, and waits the settled first scene (the session
-   * `openComplete` shape, pointer-first).
+   * `openComplete` shape, pointer-first). The kernel picks the route:
+   * "manifold" (the default — `/workbench-complete`) or "occt"
+   * (`/workbench-complete-occt`, where the sweep/loft/surface features
+   * execute as real BREP solids instead of honest declines).
    */
-  arriveAtWorkbench(): Promise<string>;
+  arriveAtWorkbench(kernel?: "manifold" | "occt"): Promise<string>;
 }
 
 /** Binds the page into the chapter-facing driver. */
@@ -508,6 +693,9 @@ function createTutorialDriver(page: Page): TutorialDriver {
     },
     async humanPoint(target: Locator | ViewportPoint): Promise<void> {
       await humanPoint(page, target);
+    },
+    async pointAtReadout(target: Locator): Promise<void> {
+      await humanPointReadout(page, target);
     },
     async humanClick(target: Locator | ViewportPoint): Promise<void> {
       await humanClick(page, target);
@@ -524,8 +712,11 @@ function createTutorialDriver(page: Page): TutorialDriver {
     async clickCanvasPoint(xMm: number, yMm: number): Promise<void> {
       await humanClickCanvasPoint(page, xMm, yMm);
     },
-    async enterSketchMode(): Promise<void> {
-      await humanEnterSketchMode(page);
+    async pickPinnedCanvasPoint(xMm: number, yMm: number): Promise<void> {
+      await humanPickPinnedCanvasPoint(page, xMm, yMm);
+    },
+    async enterSketchMode(rootId: string = COMPLETE_ROOT): Promise<void> {
+      await humanEnterSketchMode(page, rootId);
     },
     async dismissHint(): Promise<void> {
       await humanDismissHint(page);
@@ -536,10 +727,15 @@ function createTutorialDriver(page: Page): TutorialDriver {
     async drag(from: ViewportPoint, to: ViewportPoint): Promise<void> {
       await humanDrag(page, from, to);
     },
-    async arriveAtWorkbench(): Promise<string> {
-      await page.goto("/workbench-complete");
+    async arriveAtWorkbench(
+      kernel: "manifold" | "occt" = "manifold",
+    ): Promise<string> {
+      const rootId = kernel === "occt" ? OCCT_ROOT : COMPLETE_ROOT;
+      await page.goto(
+        kernel === "occt" ? "/workbench-complete-occt" : "/workbench-complete",
+      );
       await humanDismissHint(page);
-      return waitForRootSettle(page, COMPLETE_ROOT);
+      return waitForRootSettle(page, rootId);
     },
   };
 }

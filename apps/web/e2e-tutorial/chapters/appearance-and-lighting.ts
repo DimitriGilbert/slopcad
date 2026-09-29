@@ -82,10 +82,13 @@ export const chapter: ChapterModule = {
       await driver.dwell(300);
     };
 
-    await driver.step("library");
+    // The cue walks the library's swatches, so its beat opens with the
+    // library on screen — the open gesture rides the chip cue's tail,
+    // which narrates exactly that invitation.
     await openLibrary();
     const presets = page.locator('[aria-label="Appearance presets"]');
     await expect(presets).toBeAttached();
+    await driver.step("library");
     for (const presetId of [
       "steel",
       "brass",
@@ -114,8 +117,11 @@ export const chapter: ChapterModule = {
     await driver.humanPoint(page.locator("[data-cad-tree-appearance-active]"));
     await driver.dwell();
 
-    await driver.step("clear");
+    // Same discipline: the "None" row the cue names lives in the library,
+    // so the beat opens with the library back on screen (the re-open
+    // gesture rides the applied cue's tail).
     await openLibrary();
+    await driver.step("clear");
     await driver.humanClick(page.getByTestId("appearance-preset-none"));
     await expect
       .poll(async () =>

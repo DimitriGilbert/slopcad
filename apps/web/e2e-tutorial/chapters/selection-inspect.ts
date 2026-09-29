@@ -97,8 +97,8 @@ export const chapter: ChapterModule = {
     await expect(page.locator("#workbench-volume-readout")).toContainText(
       "mm³",
     );
-    await driver.humanPoint(page.locator("#workbench-bounds-readout"));
-    await driver.humanPoint(page.locator("#workbench-volume-readout"));
+    await driver.pointAtReadout(page.locator("#workbench-bounds-readout"));
+    await driver.pointAtReadout(page.locator("#workbench-volume-readout"));
     await driver.dwell();
 
     await driver.step("parameters");
@@ -123,7 +123,7 @@ export const chapter: ChapterModule = {
 
     await driver.step("follow");
     expect(Number(edited)).toBeLessThan(Number(bootVolume));
-    await driver.humanPoint(page.locator("#workbench-volume-readout"));
+    await driver.pointAtReadout(page.locator("#workbench-volume-readout"));
     await driver.dwell();
 
     await driver.step("valid");
