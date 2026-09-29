@@ -2,9 +2,17 @@ import type { Page } from "@playwright/test";
 import { expect, test as base } from "@playwright/test";
 import type { ChapterModule } from "./narration";
 
+import { chapter as appearanceAndLightingChapter } from "./chapters/appearance-and-lighting";
+import { chapter as baseToolsChapter } from "./chapters/base-tools";
+import { chapter as cameraViewsChapter } from "./chapters/camera-views";
+import { chapter as deleteAndHistoryChapter } from "./chapters/delete-and-history";
+import { chapter as displayModesChapter } from "./chapters/display-modes";
 import { chapter as firstExtrudeChapter } from "./chapters/first-extrude";
 import { chapter as homeTourChapter } from "./chapters/home-tour";
+import { chapter as sectionClippingChapter } from "./chapters/section-clipping";
+import { chapter as selectionInspectChapter } from "./chapters/selection-inspect";
 import { chapter as sketchWorkspaceChapter } from "./chapters/sketch-workspace";
+import { chapter as undoRedoRollbackChapter } from "./chapters/undo-redo-rollback";
 import { chapterTimelines, installCursorOverlay, playChapter } from "./driver";
 import {
   assembleChapters,
@@ -19,19 +27,28 @@ import {
  * The tutorial harness — the recorded, narrated walk a new user watches.
  * ONE browser context for the whole run (worker-scoped fixture + serial
  * mode, the session harness's discipline), the cursor overlay injected on
- * the context, and the three pilot chapters played in teaching order as
- * serial tests. The final gate validates the narration ledger (every cue
- * bound to a real recorded step, timestamps monotonic, every cue watchable)
- * and writes it to `test-results/tutorial/ledger.json`; the fixture
- * teardown then finalizes the master video and attaches its path, and the
- * reporter emits the `docs/tutorials/` artifacts from the pair.
+ * the context, and the chapters played in teaching order as serial tests
+ * (the three pilots, then the workbench-fundamentals batch). The final
+ * gate validates the narration ledger (every cue bound to a real recorded
+ * step, timestamps monotonic, every cue watchable) and writes it to
+ * `test-results/tutorial/ledger.json`; the fixture teardown then finalizes
+ * the master video and attaches its path, and the reporter emits the
+ * `docs/tutorials/` artifacts from the pair.
  */
 
-/** The pilot chapters, in teaching order. */
+/** The chapters, in teaching order (the workbench fundamentals batch). */
 const CHAPTERS: readonly ChapterModule[] = [
   homeTourChapter,
   sketchWorkspaceChapter,
   firstExtrudeChapter,
+  baseToolsChapter,
+  selectionInspectChapter,
+  undoRedoRollbackChapter,
+  deleteAndHistoryChapter,
+  displayModesChapter,
+  cameraViewsChapter,
+  sectionClippingChapter,
+  appearanceAndLightingChapter,
 ];
 
 const test = base.extend<object, { tutorialPage: Page }>({
@@ -85,6 +102,46 @@ test("chapter: sketch-workspace", async ({ tutorialPage: page }) => {
 test("chapter: first-extrude", async ({ tutorialPage: page }) => {
   test.setTimeout(120_000);
   await playChapter(page, firstExtrudeChapter);
+});
+
+test("chapter: base-tools", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, baseToolsChapter);
+});
+
+test("chapter: selection-inspect", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, selectionInspectChapter);
+});
+
+test("chapter: undo-redo-rollback", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, undoRedoRollbackChapter);
+});
+
+test("chapter: delete-and-history", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, deleteAndHistoryChapter);
+});
+
+test("chapter: display-modes", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, displayModesChapter);
+});
+
+test("chapter: camera-views", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, cameraViewsChapter);
+});
+
+test("chapter: section-clipping", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, sectionClippingChapter);
+});
+
+test("chapter: appearance-and-lighting", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, appearanceAndLightingChapter);
 });
 
 test("tutorial gate: the narration ledger is complete and watchable", async () => {

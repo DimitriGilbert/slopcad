@@ -32,12 +32,9 @@ function pacingFromEnv(name: string, fallbackMs: number): number {
 }
 
 /** The beat between teaching actions — long enough to see what happened. */
-export const TUTORIAL_DWELL_MS = pacingFromEnv("TUTORIAL_DWELL_MS", 600);
+const TUTORIAL_DWELL_MS = pacingFromEnv("TUTORIAL_DWELL_MS", 600);
 /** The minimum on-screen life of one narration cue (readable captions). */
-export const TUTORIAL_CUE_HOLD_MS = pacingFromEnv(
-  "TUTORIAL_CUE_HOLD_MS",
-  1_200,
-);
+const TUTORIAL_CUE_HOLD_MS = pacingFromEnv("TUTORIAL_CUE_HOLD_MS", 1_200);
 /** The settle beat between the cursor's arrival and its click. */
 const CLICK_SETTLE_MS = 140;
 
@@ -167,7 +164,7 @@ export interface ViewportPoint {
 const lastPointer = new WeakMap<Page, ViewportPoint>();
 
 /** An explicit hold for narration beats. */
-export async function dwell(page: Page, ms: number): Promise<void> {
+async function dwell(page: Page, ms: number): Promise<void> {
   await page.waitForTimeout(ms);
 }
 
@@ -176,11 +173,7 @@ export async function dwell(page: Page, ms: number): Promise<void> {
  * glide is the point: the viewer sees WHERE the cursor is heading. A first
  * move with no history starts from the viewport center.
  */
-export async function humanMove(
-  page: Page,
-  x: number,
-  y: number,
-): Promise<void> {
+async function humanMove(page: Page, x: number, y: number): Promise<void> {
   const from = lastPointer.get(page) ?? { x: 640, y: 360 };
   const distance = Math.hypot(x - from.x, y - from.y);
   const steps = Math.max(8, Math.ceil(distance / 12));
@@ -206,7 +199,7 @@ async function resolveTarget(
  * registers, then the click itself — the overlay's ripple fires from the
  * real `pointerdown` automatically.
  */
-export async function humanClick(
+async function humanClick(
   page: Page,
   target: Locator | ViewportPoint,
 ): Promise<void> {
@@ -222,13 +215,32 @@ export async function humanClick(
  * The teaching point: the same glide as a click, but the pointer only
  * arrives and rests — for narrating "here it is" without changing state.
  */
-export async function humanPoint(
+async function humanPoint(
   page: Page,
   target: Locator | ViewportPoint,
 ): Promise<void> {
   const point = await resolveTarget(target);
   await humanMove(page, point.x, point.y);
   await dwell(page, CLICK_SETTLE_MS);
+}
+
+/**
+ * The teaching drag: glide to the start, a short settle, press, glide to
+ * the end with the button held, then release — orbit strokes, zoom
+ * windows, any press-move-release gesture. Raw viewport points: the
+ * chapter computes where the gesture lives (a canvas, an armed layer).
+ */
+async function humanDrag(
+  page: Page,
+  from: ViewportPoint,
+  to: ViewportPoint,
+): Promise<void> {
+  await humanMove(page, from.x, from.y);
+  await dwell(page, CLICK_SETTLE_MS);
+  await page.mouse.down();
+  await humanMove(page, to.x, to.y);
+  await dwell(page, CLICK_SETTLE_MS);
+  await page.mouse.up();
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +289,7 @@ async function nextFrame(page: Page): Promise<void> {
  * The chapter's own navigation happens after this — arriving IS part of the
  * chapter's opening beat.
  */
-export async function beginChapter(
+async function beginChapter(
   page: Page,
   id: string,
   title: string,
@@ -296,7 +308,7 @@ export async function beginChapter(
  * at least {@link TUTORIAL_CUE_HOLD_MS} first, so every caption is readable
  * — the timestamps stay real, the pacing makes them watchable.
  */
-export async function step(page: Page, stepId: string): Promise<void> {
+async function step(page: Page, stepId: string): Promise<void> {
   if (openChapter === null) {
     throw new Error(`step("${stepId}") called before beginChapter()`);
   }
@@ -316,7 +328,7 @@ export async function step(page: Page, stepId: string): Promise<void> {
 }
 
 /** Closes the chapter, holding the final cue for its readable life first. */
-export async function endChapter(page: Page): Promise<void> {
+async function endChapter(page: Page): Promise<void> {
   if (openChapter === null) {
     throw new Error("endChapter() called before beginChapter()");
   }
@@ -427,6 +439,24 @@ async function humanEnterSketchMode(
   );
 }
 
+/**
+ * Picks a model-tree row with a visible glide — at the row's LABEL offset,
+ * the session spec's own discipline (s05d), so the trailing body
+ * affordances (hide, isolate, appearance) can never eat the pick.
+ */
+async function humanPickTreeNode(page: Page, key: string): Promise<void> {
+  const node = page.locator(
+    `[data-slot="cad-model-tree"] [data-node-key="${key}"]`,
+  );
+  await node.scrollIntoViewIfNeeded();
+  const box = await node.boundingBox();
+  if (box === null) {
+    throw new Error(`the tree node "${key}" has no bounding box`);
+  }
+  const yOffset = Math.min(12, box.height / 2);
+  await humanClick(page, { x: box.x + 40, y: box.y + yOffset });
+}
+
 /** The chapter-bound teaching surface: pacing, pointing, and the timeline. */
 export interface TutorialDriver {
   /** Marks the start of one narration cue's beat (holds the previous cue). */
@@ -450,6 +480,16 @@ export interface TutorialDriver {
   /** Dismisses the getting-started hint with a visible click, bounded. */
   dismissHint(): Promise<void>;
   /**
+   * Picks a model-tree row at its label offset — the row affordances can
+   * never eat the pick (the session s05d discipline, human-paced).
+   */
+  pickTreeNode(key: string): Promise<void>;
+  /**
+   * The teaching drag between two viewport points: glide to the start,
+   * press, glide to the end, release — orbit strokes and zoom windows.
+   */
+  drag(from: ViewportPoint, to: ViewportPoint): Promise<void>;
+  /**
    * Arrives at the complete workbench for teaching: navigates, dismisses
    * the hint human-paced, and waits the settled first scene (the session
    * `openComplete` shape, pointer-first).
@@ -458,7 +498,7 @@ export interface TutorialDriver {
 }
 
 /** Binds the page into the chapter-facing driver. */
-export function createTutorialDriver(page: Page): TutorialDriver {
+function createTutorialDriver(page: Page): TutorialDriver {
   return {
     async step(stepId: string): Promise<void> {
       await step(page, stepId);
@@ -489,6 +529,12 @@ export function createTutorialDriver(page: Page): TutorialDriver {
     },
     async dismissHint(): Promise<void> {
       await humanDismissHint(page);
+    },
+    async pickTreeNode(key: string): Promise<void> {
+      await humanPickTreeNode(page, key);
+    },
+    async drag(from: ViewportPoint, to: ViewportPoint): Promise<void> {
+      await humanDrag(page, from, to);
     },
     async arriveAtWorkbench(): Promise<string> {
       await page.goto("/workbench-complete");

@@ -4,71 +4,71 @@
       "id": "home-tour",
       "title": "The front door",
       "summary": "What slopcad is, what the home page shows you, and where the workbench lives.",
-      "start": 0.061,
-      "end": 14.806,
+      "start": 0.046,
+      "end": 14.793,
       "cues": [
         {
           "id": "home-tour/welcome",
           "stepId": "welcome",
           "text": "Welcome to slopcad. Before any modeling, a quick map of where everything lives.",
-          "start": 0.237,
-          "end": 1.442
+          "start": 0.214,
+          "end": 1.42
         },
         {
           "id": "home-tour/claim",
           "stepId": "claim",
           "text": "The headline is the promise: parametric CAD whose document always tells the truth.",
-          "start": 1.442,
-          "end": 2.696
+          "start": 1.42,
+          "end": 2.675
         },
         {
           "id": "home-tour/live-viewport",
           "stepId": "live-viewport",
           "text": "The right panel renders the guide plate live — your browser is the CAD engine.",
-          "start": 2.696,
-          "end": 4.278
+          "start": 2.675,
+          "end": 4.258
         },
         {
           "id": "home-tour/cta",
           "stepId": "cta",
           "text": "This button, Open the workbench, is the door to the modeling cockpit.",
-          "start": 4.278,
-          "end": 6.112
+          "start": 4.258,
+          "end": 6.075
         },
         {
           "id": "home-tour/cards",
           "stepId": "cards",
           "text": "Three cards below index the app: Workbench, Components, and Docs.",
-          "start": 6.112,
-          "end": 8.477
+          "start": 6.075,
+          "end": 8.441
         },
         {
           "id": "home-tour/components-card",
           "stepId": "components-card",
           "text": "Components opens reusable parametric parts, rebuilt live by the kernel.",
-          "start": 8.477,
-          "end": 9.73
+          "start": 8.441,
+          "end": 9.693
         },
         {
           "id": "home-tour/docs-card",
           "stepId": "docs-card",
           "text": "Docs holds every guide, generated from the constants the test gates prove.",
-          "start": 9.73,
-          "end": 10.977
+          "start": 9.693,
+          "end": 10.942
         },
         {
           "id": "home-tour/api-light",
           "stepId": "api-light",
           "text": "The dot beside the buttons is the API light. Green means the server answers.",
-          "start": 10.977,
-          "end": 12.378
+          "start": 10.942,
+          "end": 12.348
         },
         {
           "id": "home-tour/enter",
           "stepId": "enter",
           "text": "Come through the door. The workbench loads the boot plate document.",
-          "start": 12.378,
-          "end": 14.806
+          "start": 12.348,
+          "end": 14.793
         }
       ]
     },
@@ -76,78 +76,78 @@
       "id": "sketch-workspace",
       "title": "Drawing your first sketch",
       "summary": "Entering the sketch workspace through the command menu, the drawing tools, and saving a rectangle.",
-      "start": 14.862,
-      "end": 30.608,
+      "start": 14.846,
+      "end": 30.623,
       "cues": [
         {
           "id": "sketch-workspace/cockpit",
           "stepId": "cockpit",
           "text": "The cockpit: toolbar on top, model tree left, timeline strip below.",
-          "start": 14.869,
-          "end": 18.221
+          "start": 14.852,
+          "end": 18.234
         },
         {
           "id": "sketch-workspace/menu",
           "stepId": "menu",
           "text": "Every command hides behind this menu button. Click it to open the palette.",
-          "start": 18.221,
-          "end": 19.428
+          "start": 18.234,
+          "end": 19.442
         },
         {
           "id": "sketch-workspace/palette",
           "stepId": "palette",
           "text": "The palette lists every verb the workbench ships. A row runs on click.",
-          "start": 19.428,
-          "end": 20.636
+          "start": 19.442,
+          "end": 20.649
         },
         {
           "id": "sketch-workspace/sketch-row",
           "stepId": "sketch-row",
           "text": "Find the Sketch row and click it: it opens the 2D drawing workspace.",
-          "start": 20.636,
-          "end": 21.85
+          "start": 20.649,
+          "end": 21.858
         },
         {
           "id": "sketch-workspace/workspace",
           "stepId": "workspace",
           "text": "Sketch mode: a gridded canvas replaces the 3D view. Squares are 10 mm.",
-          "start": 21.85,
-          "end": 23.058
+          "start": 21.858,
+          "end": 23.066
         },
         {
           "id": "sketch-workspace/tools",
           "stepId": "tools",
           "text": "The first cluster holds the drawing tools: line, circle, rectangle, point.",
-          "start": 23.058,
-          "end": 25.467
+          "start": 23.066,
+          "end": 25.484
         },
         {
           "id": "sketch-workspace/arm-rectangle",
           "stepId": "arm-rectangle",
           "text": "Click the rectangle tool to arm it. The status strip confirms the tool.",
-          "start": 25.467,
-          "end": 26.676
+          "start": 25.484,
+          "end": 26.692
         },
         {
           "id": "sketch-workspace/first-corner",
           "stepId": "first-corner",
           "text": "Click once to drop the first corner. The grid reads out in millimeters.",
-          "start": 26.676,
-          "end": 28.193
+          "start": 26.692,
+          "end": 28.208
         },
         {
           "id": "sketch-workspace/second-corner",
           "stepId": "second-corner",
           "text": "Click the opposite corner. The rectangle commits as one closed profile.",
-          "start": 28.193,
-          "end": 29.401
+          "start": 28.208,
+          "end": 29.417
         },
         {
           "id": "sketch-workspace/save",
           "stepId": "save",
           "text": "Save returns to the model. The sketch is now a record solid features use.",
-          "start": 29.401,
-          "end": 30.608
+          "start": 29.417,
+          "end": 30.623
         }
       ]
     },
@@ -156,70 +156,702 @@
       "title": "From profile to solid",
       "summary": "Turning a sketch into a 3D pad, reading the timeline, and undo/redo as the safety net.",
       "start": 30.679,
-      "end": 52.957,
+      "end": 52.956,
       "cues": [
         {
           "id": "first-extrude/fresh-plate",
           "stepId": "fresh-plate",
           "text": "Start from the fresh boot plate. Every session opens on this document.",
-          "start": 30.68,
-          "end": 41.035
+          "start": 30.679,
+          "end": 41.03
         },
         {
           "id": "first-extrude/sketch-button",
           "stepId": "sketch-button",
           "text": "The Sketch button in the top bar is the second door into the workspace.",
-          "start": 41.035,
-          "end": 42.566
+          "start": 41.03,
+          "end": 42.556
         },
         {
           "id": "first-extrude/draw-again",
           "stepId": "draw-again",
           "text": "Same rectangle as before: arm the tool, then one click per corner.",
-          "start": 42.566,
-          "end": 45.086
+          "start": 42.556,
+          "end": 45.053
         },
         {
           "id": "first-extrude/extrude",
           "stepId": "extrude",
           "text": "With a closed profile in place, Extrude turns the sketch into a solid.",
-          "start": 45.086,
-          "end": 46.293
+          "start": 45.053,
+          "end": 46.259
         },
         {
           "id": "first-extrude/the-pad",
           "stepId": "the-pad",
           "text": "The pad rises at the default depth of ten millimeters, back in 3D.",
-          "start": 46.293,
-          "end": 47.501
+          "start": 46.259,
+          "end": 47.466
         },
         {
           "id": "first-extrude/timeline",
           "stepId": "timeline",
           "text": "The timeline is the recipe: translate, rotate, extrude. Every chip is editable.",
-          "start": 47.501,
-          "end": 49.318
+          "start": 47.466,
+          "end": 49.298
         },
         {
           "id": "first-extrude/undo",
           "stepId": "undo",
           "text": "Undo removes the pad. The document falls back to the plate, nothing lost.",
-          "start": 49.318,
-          "end": 50.537
+          "start": 49.298,
+          "end": 50.535
         },
         {
           "id": "first-extrude/redo",
           "stepId": "redo",
           "text": "Redo brings the pad straight back. History is the safety net while you explore.",
-          "start": 50.537,
-          "end": 51.748
+          "start": 50.535,
+          "end": 51.747
         },
         {
           "id": "first-extrude/loop",
           "stepId": "loop",
           "text": "That is the core loop: sketch a profile, extrude it, then edit via history.",
-          "start": 51.748,
-          "end": 52.957
+          "start": 51.747,
+          "end": 52.956
+        }
+      ]
+    },
+    {
+      "id": "base-tools",
+      "title": "The base tools",
+      "summary": "Select, Measure, and Rotate in the toolbar, the digit shortcuts, and Escape to cancel.",
+      "start": 52.986,
+      "end": 69.58,
+      "cues": [
+        {
+          "id": "base-tools/strip",
+          "stepId": "strip",
+          "text": "Three verbs live beside the document plate: Select, Measure, Rotate.",
+          "start": 52.986,
+          "end": 57.914
+        },
+        {
+          "id": "base-tools/digits",
+          "stepId": "digits",
+          "text": "Each button wears its digit. One, two, three arm the tools in order.",
+          "start": 57.914,
+          "end": 59.562
+        },
+        {
+          "id": "base-tools/status",
+          "stepId": "status",
+          "text": "The status bar echoes the live tool: tool = select (active).",
+          "start": 59.562,
+          "end": 61.316
+        },
+        {
+          "id": "base-tools/arm-measure",
+          "stepId": "arm-measure",
+          "text": "Click Measure. The button stays pressed while the tool is live.",
+          "start": 61.316,
+          "end": 62.58
+        },
+        {
+          "id": "base-tools/status-flip",
+          "stepId": "status-flip",
+          "text": "The status bar flips too: tool = measure (active).",
+          "start": 62.58,
+          "end": 64.449
+        },
+        {
+          "id": "base-tools/cancel",
+          "stepId": "cancel",
+          "text": "Escape cancels a live tool. Focus the viewport, then press it.",
+          "start": 64.449,
+          "end": 65.657
+        },
+        {
+          "id": "base-tools/arm-rotate",
+          "stepId": "arm-rotate",
+          "text": "Rotate arms the same way — click it and the pressed state moves.",
+          "start": 65.657,
+          "end": 66.866
+        },
+        {
+          "id": "base-tools/shortcut",
+          "stepId": "shortcut",
+          "text": "Now the shortcut: with the toolbar focused, press the digit.",
+          "start": 66.866,
+          "end": 68.075
+        },
+        {
+          "id": "base-tools/recap",
+          "stepId": "recap",
+          "text": "Any tool, any time: click it, press its digit, or Escape away.",
+          "start": 68.075,
+          "end": 69.58
+        }
+      ]
+    },
+    {
+      "id": "selection-inspect",
+      "title": "Selecting and inspecting",
+      "summary": "Picking a body, reading the Properties and Measurement panels, and editing a parameter.",
+      "start": 69.61,
+      "end": 93.264,
+      "cues": [
+        {
+          "id": "selection-inspect/right-rail",
+          "stepId": "right-rail",
+          "text": "The right rail: Properties, Parameters, then the Measurement block.",
+          "start": 69.61,
+          "end": 76.916
+        },
+        {
+          "id": "selection-inspect/nothing",
+          "stepId": "nothing",
+          "text": "With nothing selected, the Properties panel says so — honestly.",
+          "start": 76.916,
+          "end": 79.149
+        },
+        {
+          "id": "selection-inspect/pick-body",
+          "stepId": "pick-body",
+          "text": "In the model tree, click the plate body. It lights up selected.",
+          "start": 79.149,
+          "end": 80.887
+        },
+        {
+          "id": "selection-inspect/properties",
+          "stepId": "properties",
+          "text": "Properties answers: name, id, kind — and the feature that produces it.",
+          "start": 80.887,
+          "end": 83.116
+        },
+        {
+          "id": "selection-inspect/measurement",
+          "stepId": "measurement",
+          "text": "Measurement reads the solid live: bounds, volume, area.",
+          "start": 83.116,
+          "end": 85.483
+        },
+        {
+          "id": "selection-inspect/parameters",
+          "stepId": "parameters",
+          "text": "Parameters holds the driving numbers. Find holeDiameter — 8 today.",
+          "start": 85.483,
+          "end": 87.599
+        },
+        {
+          "id": "selection-inspect/edit",
+          "stepId": "edit",
+          "text": "Click the field, select all, type 10, then Apply.",
+          "start": 87.599,
+          "end": 88.805
+        },
+        {
+          "id": "selection-inspect/follow",
+          "stepId": "follow",
+          "text": "The bore widens on screen and the volume drops. Geometry follows.",
+          "start": 88.805,
+          "end": 90.946
+        },
+        {
+          "id": "selection-inspect/valid",
+          "stepId": "valid",
+          "text": "The timeline summary still reads 2 valid — the edit re-ran cleanly.",
+          "start": 90.946,
+          "end": 93.264
+        }
+      ]
+    },
+    {
+      "id": "undo-redo-rollback",
+      "title": "Undo, redo, and rollback",
+      "summary": "The history buttons, the timeline's rollback points, and clearing a selection.",
+      "start": 93.293,
+      "end": 124.723,
+      "cues": [
+        {
+          "id": "undo-redo-rollback/build",
+          "stepId": "build",
+          "text": "One quick pad gives the history something to walk. Sketch, draw, extrude.",
+          "start": 93.293,
+          "end": 108.347
+        },
+        {
+          "id": "undo-redo-rollback/history-buttons",
+          "stepId": "history-buttons",
+          "text": "The History group holds Undo and Redo — the document's cursor.",
+          "start": 108.347,
+          "end": 109.985
+        },
+        {
+          "id": "undo-redo-rollback/undo",
+          "stepId": "undo",
+          "text": "Undo: the pad leaves, the timeline falls back a chip.",
+          "start": 109.985,
+          "end": 111.197
+        },
+        {
+          "id": "undo-redo-rollback/redo",
+          "stepId": "redo",
+          "text": "Redo brings it straight back — no rework, no loss.",
+          "start": 111.197,
+          "end": 112.405
+        },
+        {
+          "id": "undo-redo-rollback/gaps",
+          "stepId": "gaps",
+          "text": "Between the timeline chips sit gaps — each a rollback point.",
+          "start": 112.405,
+          "end": 114.567
+        },
+        {
+          "id": "undo-redo-rollback/set-rollback",
+          "stepId": "set-rollback",
+          "text": "Click the gap after translate. The marker drops in.",
+          "start": 114.567,
+          "end": 115.777
+        },
+        {
+          "id": "undo-redo-rollback/parked",
+          "stepId": "parked",
+          "text": "Everything after the marker parks — dashed, out of the recipe.",
+          "start": 115.777,
+          "end": 116.983
+        },
+        {
+          "id": "undo-redo-rollback/clear-rollback",
+          "stepId": "clear-rollback",
+          "text": "The command menu's History group: Remove rollback point.",
+          "start": 116.983,
+          "end": 119.028
+        },
+        {
+          "id": "undo-redo-rollback/recovers",
+          "stepId": "recovers",
+          "text": "The chain re-executes — 3 valid — and the pad is back.",
+          "start": 119.028,
+          "end": 120.236
+        },
+        {
+          "id": "undo-redo-rollback/pick-body",
+          "stepId": "pick-body",
+          "text": "One more history verb: pick the plate body in the tree.",
+          "start": 120.236,
+          "end": 121.446
+        },
+        {
+          "id": "undo-redo-rollback/clear-selection",
+          "stepId": "clear-selection",
+          "text": "Clear selection — the menu's deselect — empties the panels again.",
+          "start": 121.446,
+          "end": 124.723
+        }
+      ]
+    },
+    {
+      "id": "delete-and-history",
+      "title": "Deleting features",
+      "summary": "Upstream features refuse deletion; leaves delete; undo restores them exactly.",
+      "start": 124.763,
+      "end": 142.744,
+      "cues": [
+        {
+          "id": "delete-and-history/recipe",
+          "stepId": "recipe",
+          "text": "The boot plate is a recipe: translate, then rotate, both feeding the plate.",
+          "start": 124.764,
+          "end": 128.877
+        },
+        {
+          "id": "delete-and-history/pick-upstream",
+          "stepId": "pick-upstream",
+          "text": "Select the translate feature — the upstream step — in the tree.",
+          "start": 128.877,
+          "end": 130.233
+        },
+        {
+          "id": "delete-and-history/delete-action",
+          "stepId": "delete-action",
+          "text": "Properties shows a Delete feature action for the selected feature.",
+          "start": 130.233,
+          "end": 132.615
+        },
+        {
+          "id": "delete-and-history/refusal",
+          "stepId": "refusal",
+          "text": "Click it — and the domain refuses: rotate references this feature.",
+          "start": 132.615,
+          "end": 133.821
+        },
+        {
+          "id": "delete-and-history/refusal-honest",
+          "stepId": "refusal-honest",
+          "text": "The refusal is verbatim, and nothing was issued — the log stands.",
+          "start": 133.821,
+          "end": 135.027
+        },
+        {
+          "id": "delete-and-history/pick-leaf",
+          "stepId": "pick-leaf",
+          "text": "Now the leaf: select the rotate feature.",
+          "start": 135.027,
+          "end": 136.797
+        },
+        {
+          "id": "delete-and-history/delete-leaf",
+          "stepId": "delete-leaf",
+          "text": "Delete feature commits. The timeline falls to translate alone.",
+          "start": 136.797,
+          "end": 138.624
+        },
+        {
+          "id": "delete-and-history/recompute",
+          "stepId": "recompute",
+          "text": "The document recomputes: the plate now depends on translate alone.",
+          "start": 138.624,
+          "end": 140.38
+        },
+        {
+          "id": "delete-and-history/undo",
+          "stepId": "undo",
+          "text": "Undo restores the leaf exactly — deletes are history too.",
+          "start": 140.38,
+          "end": 142.744
+        }
+      ]
+    },
+    {
+      "id": "display-modes",
+      "title": "Display modes and the zoom window",
+      "summary": "Shaded, +Edges, Wire, and Hidden — plus dragging a zoom window.",
+      "start": 142.773,
+      "end": 166.216,
+      "cues": [
+        {
+          "id": "display-modes/panel",
+          "stepId": "panel",
+          "text": "The view panel sits bottom-right: navigation above, display below.",
+          "start": 142.773,
+          "end": 154.728
+        },
+        {
+          "id": "display-modes/shaded",
+          "stepId": "shaded",
+          "text": "Shaded is the boot mode — solid faces, lit, no edges.",
+          "start": 154.728,
+          "end": 155.936
+        },
+        {
+          "id": "display-modes/edges",
+          "stepId": "edges",
+          "text": "Click +Edges: the model's edges overlay the faces.",
+          "start": 155.936,
+          "end": 157.144
+        },
+        {
+          "id": "display-modes/wire",
+          "stepId": "wire",
+          "text": "Wire strips to edges alone — pure topology.",
+          "start": 157.144,
+          "end": 158.352
+        },
+        {
+          "id": "display-modes/hidden",
+          "stepId": "hidden",
+          "text": "Hidden-line gives the technical-drawing look.",
+          "start": 158.352,
+          "end": 159.558
+        },
+        {
+          "id": "display-modes/back-to-shaded",
+          "stepId": "back-to-shaded",
+          "text": "Back to Shaded for the rest of the tour.",
+          "start": 159.558,
+          "end": 160.766
+        },
+        {
+          "id": "display-modes/front",
+          "stepId": "front",
+          "text": "Set a standard view first — Front — then arm the zoom window.",
+          "start": 160.766,
+          "end": 161.974
+        },
+        {
+          "id": "display-modes/arm",
+          "stepId": "arm",
+          "text": "The magnifier arms the zoom window — the viewport says how.",
+          "start": 161.974,
+          "end": 163.182
+        },
+        {
+          "id": "display-modes/drag",
+          "stepId": "drag",
+          "text": "Drag a box over the plate. Release to commit.",
+          "start": 163.182,
+          "end": 164.98
+        },
+        {
+          "id": "display-modes/zoomed",
+          "stepId": "zoomed",
+          "text": "The camera halves its distance — the model fills the window.",
+          "start": 164.98,
+          "end": 166.216
+        }
+      ]
+    },
+    {
+      "id": "camera-views",
+      "title": "The camera: orbit, views, fit",
+      "summary": "Orbiting by drag, the standard views, first and third-angle, fit, and look-at.",
+      "start": 166.245,
+      "end": 186.793,
+      "cues": [
+        {
+          "id": "camera-views/spec-view",
+          "stepId": "spec-view",
+          "text": "The camera opens on the document's spec view. Drag the canvas to orbit.",
+          "start": 166.245,
+          "end": 170.479
+        },
+        {
+          "id": "camera-views/orbited",
+          "stepId": "orbited",
+          "text": "You own the camera now — the tiny cube tracks your corner.",
+          "start": 170.479,
+          "end": 171.696
+        },
+        {
+          "id": "camera-views/reset",
+          "stepId": "reset",
+          "text": "The reset arrow returns the camera to the document spec.",
+          "start": 171.696,
+          "end": 172.903
+        },
+        {
+          "id": "camera-views/front",
+          "stepId": "front",
+          "text": "Front is exact: azimuth 270, elevation 0.",
+          "start": 172.903,
+          "end": 174.109
+        },
+        {
+          "id": "camera-views/top",
+          "stepId": "top",
+          "text": "Top looks straight down the z axis.",
+          "start": 174.109,
+          "end": 175.317
+        },
+        {
+          "id": "camera-views/iso",
+          "stepId": "iso",
+          "text": "Iso frames the near corner — the modeling default.",
+          "start": 175.317,
+          "end": 176.525
+        },
+        {
+          "id": "camera-views/convention",
+          "stepId": "convention",
+          "text": "The frame icon flips the drafting convention. Click it once.",
+          "start": 176.525,
+          "end": 177.733
+        },
+        {
+          "id": "camera-views/first-angle",
+          "stepId": "first-angle",
+          "text": "First-angle moves the iso corner by ninety degrees.",
+          "start": 177.733,
+          "end": 178.938
+        },
+        {
+          "id": "camera-views/back-third",
+          "stepId": "back-third",
+          "text": "Back to third-angle — the views keep their letters.",
+          "start": 178.938,
+          "end": 180.146
+        },
+        {
+          "id": "camera-views/fit",
+          "stepId": "fit",
+          "text": "Fit frames the model's bounds exactly.",
+          "start": 180.146,
+          "end": 181.356
+        },
+        {
+          "id": "camera-views/look-at-gated",
+          "stepId": "look-at-gated",
+          "text": "Look-at needs a selection — the crosshair is dim until one exists.",
+          "start": 181.356,
+          "end": 182.563
+        },
+        {
+          "id": "camera-views/look-at",
+          "stepId": "look-at",
+          "text": "Pick the plate in the tree, click the crosshair — the camera centers.",
+          "start": 182.563,
+          "end": 186.793
+        }
+      ]
+    },
+    {
+      "id": "section-clipping",
+      "title": "Section clipping",
+      "summary": "Cutting the model at a plane and reading the true face it leaves.",
+      "start": 186.832,
+      "end": 202.307,
+      "cues": [
+        {
+          "id": "section-clipping/block",
+          "stepId": "block",
+          "text": "The Measurement block ends in two small buttons: section, view cut.",
+          "start": 186.832,
+          "end": 192.324
+        },
+        {
+          "id": "section-clipping/select-body",
+          "stepId": "select-body",
+          "text": "Section rides a selected body. Pick the plate in the tree.",
+          "start": 192.324,
+          "end": 193.537
+        },
+        {
+          "id": "section-clipping/arm",
+          "stepId": "arm",
+          "text": "Click section. The clip plane sits at the plate's mid-height.",
+          "start": 193.537,
+          "end": 194.753
+        },
+        {
+          "id": "section-clipping/area",
+          "stepId": "area",
+          "text": "The Section row measures the true cut face: about 550 mm².",
+          "start": 194.753,
+          "end": 195.96
+        },
+        {
+          "id": "section-clipping/centroid",
+          "stepId": "centroid",
+          "text": "The centroid line gives the face's center: x 15, y 10, z 5.",
+          "start": 195.96,
+          "end": 197.168
+        },
+        {
+          "id": "section-clipping/view-cut",
+          "stepId": "view-cut",
+          "text": "View cut removes the kept half — cap faces close the solid.",
+          "start": 197.168,
+          "end": 198.384
+        },
+        {
+          "id": "section-clipping/halved",
+          "stepId": "halved",
+          "text": "The volume readout halves: you are looking inside the plate.",
+          "start": 198.384,
+          "end": 199.591
+        },
+        {
+          "id": "section-clipping/off",
+          "stepId": "off",
+          "text": "Toggle section off — the rows leave with the plane.",
+          "start": 199.591,
+          "end": 200.796
+        },
+        {
+          "id": "section-clipping/recap",
+          "stepId": "recap",
+          "text": "A section is a view state: measured, honest, and reversible.",
+          "start": 200.796,
+          "end": 202.307
+        }
+      ]
+    },
+    {
+      "id": "appearance-and-lighting",
+      "title": "Appearances and lighting",
+      "summary": "Body appearances from the tree palette, the light rigs, and quality mode.",
+      "start": 202.337,
+      "end": 222.835,
+      "cues": [
+        {
+          "id": "appearance-and-lighting/chip",
+          "stepId": "chip",
+          "text": "The palette dot on the plate's tree row opens appearances.",
+          "start": 202.337,
+          "end": 206.559
+        },
+        {
+          "id": "appearance-and-lighting/library",
+          "stepId": "library",
+          "text": "The library: steel, brass, copper, anodized blue, carbon, ceramic.",
+          "start": 206.559,
+          "end": 209.827
+        },
+        {
+          "id": "appearance-and-lighting/brass",
+          "stepId": "brass",
+          "text": "Click Brass.",
+          "start": 209.827,
+          "end": 211.045
+        },
+        {
+          "id": "appearance-and-lighting/applied",
+          "stepId": "applied",
+          "text": "The plate renders brass — and the chip carries its color.",
+          "start": 211.045,
+          "end": 212.259
+        },
+        {
+          "id": "appearance-and-lighting/clear",
+          "stepId": "clear",
+          "text": "None returns the scene default.",
+          "start": 212.259,
+          "end": 213.877
+        },
+        {
+          "id": "appearance-and-lighting/rigs",
+          "stepId": "rigs",
+          "text": "Lower in the view panel: three light rigs — Studio, North, Inspect.",
+          "start": 213.877,
+          "end": 216.425
+        },
+        {
+          "id": "appearance-and-lighting/inspect",
+          "stepId": "inspect",
+          "text": "Inspect is one hard light — flattening, but honest.",
+          "start": 216.425,
+          "end": 217.634
+        },
+        {
+          "id": "appearance-and-lighting/studio",
+          "stepId": "studio",
+          "text": "Studio wraps the model in soft, even light.",
+          "start": 217.634,
+          "end": 218.843
+        },
+        {
+          "id": "appearance-and-lighting/quality-pair",
+          "stepId": "quality-pair",
+          "text": "Render quality: Standard is the deterministic default.",
+          "start": 218.843,
+          "end": 220.076
+        },
+        {
+          "id": "appearance-and-lighting/quality-on",
+          "stepId": "quality-on",
+          "text": "Quality opts into soft shadows and ambient occlusion.",
+          "start": 220.076,
+          "end": 221.284
+        },
+        {
+          "id": "appearance-and-lighting/back-standard",
+          "stepId": "back-standard",
+          "text": "Back to Standard — fast and reproducible.",
+          "start": 221.284,
+          "end": 222.835
         }
       ]
     }

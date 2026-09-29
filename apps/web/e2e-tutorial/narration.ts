@@ -98,9 +98,9 @@ export interface TutorialLedger {
 /** The shortest readable on-screen life of one caption cue. */
 export const MIN_CUE_SECONDS = 1.0;
 /** VTT caption line budget (the classic 42-char caption column). */
-export const VTT_LINE_MAX_CHARS = 42;
+const VTT_LINE_MAX_CHARS = 42;
 /** VTT caption line count budget. */
-export const VTT_LINE_MAX_COUNT = 2;
+const VTT_LINE_MAX_COUNT = 2;
 
 /** The ledger file both the spec (write) and the reporter (read) share. */
 export const LEDGER_FILE = "test-results/tutorial/ledger.json";
@@ -225,7 +225,7 @@ export function assembleChapters(
 // ---------------------------------------------------------------------------
 
 /** Seconds → WebVTT timestamp (`MM:SS.mmm`, or `H:MM:SS.mmm` past an hour). */
-export function formatVttTime(seconds: number): string {
+function formatVttTime(seconds: number): string {
   const clamped = Math.max(0, seconds);
   const whole = Math.floor(clamped);
   const fraction = Math.round((clamped - whole) * 1000);
@@ -243,7 +243,7 @@ export function formatVttTime(seconds: number): string {
  * Wraps cue text to the caption column (greedy word wrap). Throws — never
  * silently truncates — when a cue cannot fit its lines.
  */
-export function wrapCueText(text: string): string {
+function wrapCueText(text: string): string {
   const words = text.split(/\s+/).filter((word) => word !== "");
   const lines: string[] = [];
   let line = "";
