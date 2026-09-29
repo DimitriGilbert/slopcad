@@ -2,18 +2,26 @@ import type { Page } from "@playwright/test";
 import { expect, test as base } from "@playwright/test";
 import type { ChapterModule } from "./narration";
 
+import { chapter as analysisChapter } from "./chapters/analysis";
 import { chapter as appearanceAndLightingChapter } from "./chapters/appearance-and-lighting";
+import { chapter as assemblyMotionChapter } from "./chapters/assembly-motion";
+import { chapter as assemblyTreeChapter } from "./chapters/assembly-tree";
 import { chapter as baseToolsChapter } from "./chapters/base-tools";
+import { chapter as bomOutputChapter } from "./chapters/bom-output";
 import { chapter as booleansChapter } from "./chapters/booleans";
 import { chapter as cameraViewsChapter } from "./chapters/camera-views";
 import { chapter as deleteAndHistoryChapter } from "./chapters/delete-and-history";
 import { chapter as displayModesChapter } from "./chapters/display-modes";
+import { chapter as drawingsChapter } from "./chapters/drawings";
 import { chapter as draftRibScaleChapter } from "./chapters/draft-rib-scale";
 import { chapter as firstExtrudeChapter } from "./chapters/first-extrude";
 import { chapter as helixFeatureChapter } from "./chapters/helix-feature";
 import { chapter as holesAndPatternsChapter } from "./chapters/holes-and-patterns";
 import { chapter as homeTourChapter } from "./chapters/home-tour";
+import { chapter as interferenceChapter } from "./chapters/interference";
+import { chapter as ioImportExportChapter } from "./chapters/io-import-export";
 import { chapter as loftFeatureChapter } from "./chapters/loft-feature";
+import { chapter as projectsAndVersionsChapter } from "./chapters/projects-and-versions";
 import { chapter as sectionClippingChapter } from "./chapters/section-clipping";
 import { chapter as selectionInspectChapter } from "./chapters/selection-inspect";
 import { chapter as sketchOnFaceChapter } from "./chapters/sketch-on-face";
@@ -22,6 +30,7 @@ import { chapter as surfacesChapter } from "./chapters/surfaces";
 import { chapter as sweepFeatureChapter } from "./chapters/sweep-feature";
 import { chapter as threadFeatureChapter } from "./chapters/thread-feature";
 import { chapter as thickenSplitChapter } from "./chapters/thicken-split";
+import { chapter as tsxExchangeChapter } from "./chapters/tsx-exchange";
 import { chapter as undoRedoRollbackChapter } from "./chapters/undo-redo-rollback";
 import { chapterTimelines, installCursorOverlay, playChapter } from "./driver";
 import {
@@ -48,11 +57,16 @@ import {
  */
 
 /**
- * The chapters, in teaching order: the workbench fundamentals batch, then
- * the feature-authoring batch (the sketch-on-face verb on the default
- * route, then the OCCT-only features — sweep, loft, helix, thread, the
- * shaping family, structured holes and patterns, booleans, and the
- * surface pipeline — each on the kernel that executes them).
+ * The chapters, in teaching order: the workbench fundamentals batch, the
+ * feature-authoring batch (the sketch-on-face verb on the default route,
+ * then the OCCT-only features — sweep, loft, helix, thread, the shaping
+ * family, structured holes and patterns, booleans, and the surface
+ * pipeline), then the product-surface batch: the assembly workbenches,
+ * analysis, the drawing workbench, the model exchange, and the projects
+ * persistence loop. The tsx-exchange chapter is deliberately last-but-one
+ * AFTER projects-and-versions: its import crosses the session-gated
+ * server endpoint, so it rides that chapter's sign-in (the session's own
+ * s26c-rides-s26 precedent).
  */
 const CHAPTERS: readonly ChapterModule[] = [
   homeTourChapter,
@@ -76,6 +90,15 @@ const CHAPTERS: readonly ChapterModule[] = [
   holesAndPatternsChapter,
   booleansChapter,
   surfacesChapter,
+  assemblyTreeChapter,
+  assemblyMotionChapter,
+  interferenceChapter,
+  analysisChapter,
+  drawingsChapter,
+  bomOutputChapter,
+  ioImportExportChapter,
+  projectsAndVersionsChapter,
+  tsxExchangeChapter,
 ];
 
 const test = base.extend<object, { tutorialPage: Page }>({
@@ -231,6 +254,62 @@ test("chapter: booleans", async ({ tutorialPage: page }) => {
 test("chapter: surfaces", async ({ tutorialPage: page }) => {
   test.setTimeout(180_000);
   await playChapter(page, surfacesChapter);
+});
+
+// Seven fixture button flows, two scrubs, and the staleness walk (s20).
+test("chapter: assembly-tree", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, assemblyTreeChapter);
+});
+
+test("chapter: assembly-motion", async ({ tutorialPage: page }) => {
+  test.setTimeout(180_000);
+  await playChapter(page, assemblyMotionChapter);
+});
+
+test("chapter: interference", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, interferenceChapter);
+});
+
+test("chapter: analysis", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, analysisChapter);
+});
+
+// Two merged session stages (s23 + s23b): four dialog journeys and two
+// exports after the sheet, views, and annotations.
+test("chapter: drawings", async ({ tutorialPage: page }) => {
+  test.setTimeout(180_000);
+  await playChapter(page, drawingsChapter);
+});
+
+test("chapter: bom-output", async ({ tutorialPage: page }) => {
+  test.setTimeout(120_000);
+  await playChapter(page, bomOutputChapter);
+});
+
+// Two merged session stages (s09 + s09b): the export run, the held STL
+// round-trip, and the OBJ file import, each with its own settle.
+test("chapter: io-import-export", async ({ tutorialPage: page }) => {
+  test.setTimeout(180_000);
+  await playChapter(page, ioImportExportChapter);
+});
+
+// Two merged session stages (s26 + s26b, each a full user journey): the
+// public sign-up, two projects forms, two saves, a reload, and the
+// history walk — the session's elevated-stage precedent (s11b/s11c).
+test("chapter: projects-and-versions", async ({ tutorialPage: page }) => {
+  test.setTimeout(240_000);
+  await playChapter(page, projectsAndVersionsChapter);
+});
+
+// The TSX round-trip crosses the session-gated server loader TWICE
+// (import + round-trip) plus the export generation; it rides the
+// projects chapter's sign-in (the s26c-rides-s26 precedent).
+test("chapter: tsx-exchange", async ({ tutorialPage: page }) => {
+  test.setTimeout(180_000);
+  await playChapter(page, tsxExchangeChapter);
 });
 
 test("tutorial gate: the narration ledger is complete and watchable", async () => {
