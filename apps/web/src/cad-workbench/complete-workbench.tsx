@@ -118,6 +118,7 @@ import type { LoftSectionChoice } from "./loft";
 import type { ThreadCutInput } from "./thread";
 import { clippingPlanesOf } from "@slopcad/cad-r3f";
 
+import { useWorkbenchWebMcpTools } from "../webmcp/workbench-tools";
 import { completionJson } from "../render-fixture/fixture-session";
 import {
   CAD_FEATURE_FORM_LABELS,
@@ -1467,6 +1468,11 @@ export function CompleteCadWorkbench({
     toolsApi,
     viewSession.userCamera,
   ]);
+
+  // The WebMCP binding (Phase 7): the eight workbench tools registered for
+  // the page's lifetime — always in the internal registry, mirrored to
+  // `document.modelContext` when the browser exposes the agent surface.
+  useWorkbenchWebMcpTools({ commands, engine });
 
   // -- Default pieces (each exactly what its slot replaces) -----------------
 
