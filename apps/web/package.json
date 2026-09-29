@@ -35,6 +35,8 @@
     "@slopcad/cad-components": "workspace:*",
     "@slopcad/cad-core": "workspace:*",
     "@slopcad/cad-io": "workspace:*",
+    "@slopcad/cad-jsx": "workspace:*",
+    "esbuild": "0.28.2",
     "@slopcad/cad-kernel": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",
     "@slopcad/cad-kernel-occt": "workspace:*",

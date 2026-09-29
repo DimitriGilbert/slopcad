@@ -18,6 +18,15 @@ export default defineConfig({
   preview: {
     host: true,
   },
+  // esbuild must stay EXTERNAL in the server build: the /api/io/import-tsx
+  // route reaches it through @slopcad/cad-jsx's loader (workspace source,
+  // so the bundler would otherwise inline the whole package — and esbuild's
+  // own guard refuses to run bundled, locating its binary relative to the
+  // API file). apps/web declares the same pinned version so the external
+  // import resolves at runtime from this package's node_modules.
+  ssr: {
+    external: ["esbuild"],
+  },
   // Module workers: the kernel worker entries are ES modules with
   // bundle-split imports (`@slopcad/cad-kernel-manifold`'s
   // `manifold-worker.web`, hosted per its module doc), so worker bundles

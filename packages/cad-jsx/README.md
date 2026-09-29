@@ -408,6 +408,65 @@ runnable target lives in the workspace:
 `packages/docs-examples/src/cadjsx/hub-mount.tsx` (the JSX-authored-model
 docs example, also covered by the docs-examples suite).
 
+## The canonical TSX loader (Phase 4)
+
+```ts
+import { compileTsxSource } from "@slopcad/cad-jsx/loader";
+
+const native = await compileTsxSource({ source: modelTsxText });
+```
+
+`compileTsxSource` is the ONE transpile → evaluate → compile pipeline
+every server-side consumer of authored `.tsx` models runs (the
+`/api/io/import-tsx` route and this package's round-trip tests share
+it). It transpiles through esbuild with the classic JSX transform,
+evaluates the module body in a fresh `node:vm` context, and compiles the
+default export (an element, or a no-props component — the CLI's
+contract) through `compileToNative`.
+
+The sandbox exposes ONLY what a model needs: React's `createElement` and
+`Fragment`, this package's full element runtime as globals, and a
+`require` resolving exactly `"react"` and `"@slopcad/cad-jsx"` —
+anything else (`node:fs`, a network client, another workspace package)
+is a structured `cadjsx-load/forbidden-import` refusal. The vm context
+carries the standard ECMAScript builtins and no host objects (no
+`process`, no `fs`, no `fetch`); this contains accidents and vocabulary
+drift — the surrounding endpoint's session gate owns who may submit
+source at all. Hard limits: a 1 MiB source cap
+(`cadjsx-load/source-too-large`) and vm's synchronous evaluation budget
+(250 ms; a CommonJS-free module body is synchronous code, so the timeout
+fits exactly — a runaway loop is terminated and surfaced as
+`cadjsx-load/evaluation-failed`).
+
+The module is Node-only (esbuild + `node:vm`) and deliberately not
+re-exported from the package index, so browser bundles stay clean.
+
+## The TSX generator (Phase 4): `generateTsx`
+
+The compiler's inverse: a pure walk over a `CadDocument`'s records that
+emits TSX source which, loaded through the canonical loader, reproduces
+the document **byte-stably** — the round-trip gate this package's suite
+pins model by model (parameters, sketches, producers, booleans, `<Use>`
+sharing, a `<Body>` capture), normalizing exactly the document id and
+metadata block (which belong to the emitting options, not the model).
+
+- **Canonical form.** Explicit parameters first in document order, each
+  sketch immediately before its first consumer, the feature DAG in
+  timeline order — a feature consumed by exactly one later feature nests
+  as its consumer's child when that reproduces the timeline, and a
+  feature consumed by two or more stands alone behind
+  `<Use feature="…">`. The generator VALIDATES its own emission order
+  against the document's parameter/body/sketch/feature sequences and
+  refuses (`cadjsx-generate/…-order`) when a document's creation order
+  is not reproducible — never a silent diff.
+- **Declines, never drops.** Records the vocabulary cannot declare
+  (datum, curve, and persistent-reference records; sections,
+  occurrences, mates, joints, configurations; display-flagged bodies;
+  expression- or metadata-carrying parameters; features whose input
+  layouts are not the compiler's) are declined with a structured note —
+  kind, id, reason — returned as data AND listed in the generated
+  file's header comment. Declines cascade to consumers.
+
 ## What is rejected, and why
 
 Everything below is rejected with a structured `CadJsxCompileError`

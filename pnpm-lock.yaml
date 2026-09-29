@@ -150,6 +150,9 @@ importers:
       '@slopcad/cad-io':
         specifier: workspace:*
         version: link:../../packages/cad-io
+      '@slopcad/cad-jsx':
+        specifier: workspace:*
+        version: link:../../packages/cad-jsx
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../../packages/cad-kernel
@@ -210,6 +213,9 @@ importers:
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       libsql:
         specifier: 'catalog:'
         version: 0.5.29
@@ -471,6 +477,9 @@ importers:
       '@slopcad/cad-core':
         specifier: workspace:*
         version: link:../cad-core
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
     devDependencies:
       '@slopcad/config':
         specifier: workspace:*
@@ -481,9 +490,6 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: 'catalog:'
         version: 4.1.11(vitest@4.1.11)
-      esbuild:
-        specifier: 0.28.2
-        version: 0.28.2
       react:
         specifier: 'catalog:'
         version: 19.2.8
