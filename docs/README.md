@@ -18,17 +18,17 @@ This directory is the documentation home. Two rules govern it:
 
 ## The topic map
 
-| Group                   | Topics                                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Foundations             | [installation](guides/installation.md) · [CAD core](guides/cad-core.md) · [parameters](guides/parameters.md) · [expressions](guides/expressions.md) · [units](guides/units.md) |
-| Geometry                | [primitives](guides/primitives.md) · [booleans](guides/booleans.md) · [features](guides/features.md) · [kernels](guides/kernels.md) · [workers](guides/workers.md)             |
-| Assemblies              | [assemblies](guides/assemblies.md)                                                                                                                                             |
-| Rendering & interaction | [R3F](guides/r3f.md) · [selection](guides/selection.md) · [tools](guides/tools.md) · [UI components](guides/ui.md)                                                             |
-| Data exchange           | [native files](guides/native-files.md) · [STL/3MF/GLB](guides/mesh-exchange.md) · [STEP/IGES](guides/step-iges.md)                                                             |
-| Sketching               | [sketches](guides/sketches.md) · [constraints](guides/constraints.md)                                                                                                          |
-| Drawings                | [drawings](guides/drawings.md)                                                                                                                                                 |
-| Distribution            | [registry](guides/registry.md) · [reusable components](guides/components.md) · [custom tools](guides/custom-tools.md) · [custom kernel adapters](guides/custom-kernels.md)     |
-| Engineering             | [testing](guides/testing.md) · [package boundaries](guides/package-boundaries.md)                                                                                              |
+| Group                   | Topics                                                                                                                                                                                                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Foundations             | [installation](guides/installation.md) · [CAD core](guides/cad-core.md) · [parameters](guides/parameters.md) · [expressions](guides/expressions.md) · [units](guides/units.md) · [JSX models](guides/cad-jsx.md) |
+| Geometry                | [primitives](guides/primitives.md) · [booleans](guides/booleans.md) · [features](guides/features.md) · [kernels](guides/kernels.md) · [workers](guides/workers.md)                                               |
+| Assemblies              | [assemblies](guides/assemblies.md)                                                                                                                                                                               |
+| Rendering & interaction | [R3F](guides/r3f.md) · [React integration](guides/react.md) · [selection](guides/selection.md) · [tools](guides/tools.md) · [UI components](guides/ui.md)                                                        |
+| Data exchange           | [native files](guides/native-files.md) · [STL/3MF/GLB](guides/mesh-exchange.md) · [STEP/IGES](guides/step-iges.md)                                                                                               |
+| Sketching               | [sketches](guides/sketches.md) · [constraints](guides/constraints.md)                                                                                                                                            |
+| Drawings                | [drawings](guides/drawings.md)                                                                                                                                                                                   |
+| Distribution            | [registry](guides/registry.md) · [reusable components](guides/components.md) · [custom tools](guides/custom-tools.md) · [custom kernel adapters](guides/custom-kernels.md)                                       |
+| Engineering             | [testing](guides/testing.md) · [package boundaries](guides/package-boundaries.md)                                                                                                                                |
 
 The `/docs` route of `apps/web` renders this map with the live examples
 (gate: `pnpm test:docs`). The architecture record lives in

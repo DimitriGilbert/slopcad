@@ -1,14 +1,17 @@
 /**
  * The canonical TSX loader's tests (Phase 4): the sandbox's authoring
- * surface (imported and global elements both work), the structured
- * refusals (oversized source, broken TSX, forbidden imports, evaluation
- * failures under the vm budget, invalid default exports, compile-error
- * pass-through), and the happy path's native text passing the format's
- * own parser.
+ * surface (imported and global elements both work; every element kind
+ * re-exported from the package index the sandbox resolves), the
+ * structured refusals (oversized source, broken TSX, forbidden imports,
+ * evaluation failures under the vm budget, invalid default exports,
+ * compile-error pass-through), and the happy path's native text passing
+ * the format's own parser.
  */
 
 import { describe, expect, it } from "vitest";
 import { parseNativeCadDocumentFromString } from "@slopcad/cad-core";
+import type { CadElementKind } from "./elements";
+import type * as CadJsxSurface from "./index";
 import type { TsxCompileFailure } from "./loader";
 import { createElement } from "react";
 
@@ -20,6 +23,7 @@ import {
   compileTsxSource,
 } from "./loader";
 import { Box, Cylinder, Union } from "./index";
+import { CAD_ELEMENT_KINDS, isCadElementTag } from "./elements";
 
 const IMPORTED_MODEL = `
 import { Box, Cylinder, Union } from "@slopcad/cad-jsx";
@@ -164,5 +168,80 @@ describe("compileTsxSource structured refusals", () => {
       "cadjsx/string-tag-rejected",
     );
     expect("path" in failure).toBe(true);
+  });
+});
+
+/**
+ * Every element kind mapped to the package index export that must carry
+ * its tag — the surface the sandbox's `require("@slopcad/cad-jsx")`
+ * resolves, so a model's ONLY import reaches every kind. Exhaustive
+ * twice over at the type level: a kind added to `CAD_ELEMENT_KINDS`
+ * without a row here fails check-types (a missing mapped key), and a
+ * row naming an export the index does not carry fails check-types
+ * (`keyof typeof CadJsxSurface`). The test below then fails at runtime
+ * if the mapped export is missing or is not a tag carrying that exact
+ * kind — the `<Thicken>` gap cannot recur quietly.
+ */
+const KIND_TAG_EXPORTS: {
+  readonly [K in CadElementKind]: keyof typeof CadJsxSurface;
+} = {
+  parameter: "Parameter",
+  body: "Body",
+  box: "Box",
+  sphere: "Sphere",
+  cylinder: "Cylinder",
+  cone: "Cone",
+  translate: "Translate",
+  union: "Union",
+  subtract: "Subtract",
+  intersect: "Intersect",
+  use: "Use",
+  extrude: "Extrude",
+  revolve: "Revolve",
+  sweep: "Sweep",
+  sweepWire: "SweepWire",
+  loft: "Loft",
+  fillet: "Fillet",
+  chamfer: "Chamfer",
+  shell: "Shell",
+  thicken: "Thicken",
+  split: "Split",
+  hole: "Hole",
+  rib: "Rib",
+  thread: "Thread",
+  helix: "Helix",
+  scale: "Scale",
+  moveFace: "MoveFace",
+  replaceFace: "ReplaceFace",
+  deleteFace: "DeleteFace",
+  patternLinear: "PatternLinear",
+  patternCircular: "PatternCircular",
+  patternPath: "PatternPath",
+  mirror: "Mirror",
+  sketch: "Sketch",
+  point: "Point",
+  line: "Line",
+  rectangle: "Rectangle",
+  circle: "Circle",
+  arc: "Arc",
+  ellipse: "Ellipse",
+  slot: "Slot",
+  polygon: "Polygon",
+  spline: "Spline",
+};
+
+describe("the package index surface (what the sandbox's require resolves)", () => {
+  it("re-exports a matching CAD element tag for every kind in CAD_ELEMENT_KINDS", async () => {
+    const surface: Record<string, unknown> = await import("./index");
+    for (const kind of CAD_ELEMENT_KINDS) {
+      const exportName = KIND_TAG_EXPORTS[kind];
+      const tag = surface[exportName];
+      if (!isCadElementTag(tag)) {
+        throw new Error(
+          `The "${kind}" kind's tag is not exported from the package index as "${exportName}".`,
+        );
+      }
+      expect(tag.kind).toBe(kind);
+    }
   });
 });

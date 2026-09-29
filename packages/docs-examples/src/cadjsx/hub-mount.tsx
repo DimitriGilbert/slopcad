@@ -1,5 +1,6 @@
 /**
- * The JSX-authored models guide's runnable example: a hub mount authored
+ * The JSX models guide's runnable example
+ * (docs/guides/cad-jsx.md): a hub mount authored
  * as a React element tree with `@slopcad/cad-jsx` — a parameterized
  * extruded plate, a revolved ring meridian, a lofted boss (sketches,
  * producers, and booleans through `<Use>` shared references) — compiled
@@ -8,7 +9,7 @@
  * replays the transaction log over the base and refuses any
  * state/log disagreement), and structurally validated. The default export
  * is what the package's `compile` CLI renders:
- * `pnpm --filter @slopcad/cad-jsx compile packages/docs-examples/src/cadjsx/hub-mount.tsx`.
+ * `pnpm --filter @slopcad/cad-jsx compile ../docs-examples/src/cadjsx/hub-mount.tsx`.
  */
 
 import {
