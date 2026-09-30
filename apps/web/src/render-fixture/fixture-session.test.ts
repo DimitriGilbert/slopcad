@@ -16,6 +16,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as KernelModule from "@slopcad/cad-kernel";
+import type { DocumentBodySceneRequest } from "../cad-workbench/document-scene";
+import type { SceneDispatchOutcome } from "./fixture-session";
 import type {
   BootedWorkerChannel,
   ComputationOutcome,
@@ -26,14 +28,11 @@ import type {
   WorkerTransport,
 } from "@slopcad/cad-kernel";
 
-/** One controllable in-flight coordinator update, per dispatched form. */
-interface ControlledUpdate {
-  settleApplied(): void;
-  failWith(failure: unknown): void;
-}
-
 const controller = vi.hoisted(() => {
-  const pending: ControlledUpdate[] = [];
+  const pending: {
+    settleApplied(result?: unknown): void;
+    failWith(failure: unknown): void;
+  }[] = [];
   const crashCallbacks: Array<(failure: WorkerBootFailure) => void> = [];
   return {
     pending,
@@ -81,8 +80,8 @@ vi.mock("@slopcad/cad-kernel", async (importOriginal) => {
     update: () =>
       new Promise<ComputationOutcome<unknown>>((resolve, reject) => {
         controller.pending.push({
-          settleApplied: () =>
-            resolve({ outcome: "applied", revision, result: undefined }),
+          settleApplied: (result?: unknown) =>
+            resolve({ outcome: "applied", revision, result }),
           failWith: reject,
         });
       }),
@@ -250,6 +249,112 @@ describe("bootRenderFixtureSession error-surface reset", () => {
     await flushMicrotasks();
     expect(root.getAttribute("data-error")).toBe("late refusal");
     expect(textOf(STATUS_ID)).toBe("failed");
+
+    session.dispose();
+  });
+
+  it("the document dispatch reports per-body verdicts and clears on success", async () => {
+    vi.stubGlobal(
+      "Worker",
+      class {
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        postMessage(): void {}
+        terminate(): void {}
+      },
+    );
+    const root = mountSurface();
+    const outcomes: SceneDispatchOutcome[] = [];
+    const session = bootRenderFixtureSession(
+      {
+        rootId: ROOT_ID,
+        statusId: STATUS_ID,
+        volumeId: VOLUME_ID,
+        errorId: ERROR_ID,
+      },
+      () => {},
+      { onSceneOutcome: (outcome) => outcomes.push(outcome) },
+    );
+    // A plain extrude body request (the verdict seam only reads ids and
+    // kinds — the computation is the mocked coordinator's business).
+    const bodies: readonly DocumentBodySceneRequest[] = [
+      {
+        bodyId: "body_one",
+        scene: {
+          kind: "extrude",
+          request: {
+            loop: [
+              {
+                kind: "line",
+                start: [0, 0] as const,
+                end: [10, 0] as const,
+              },
+              {
+                kind: "line",
+                start: [10, 0] as const,
+                end: [10, 10] as const,
+              },
+              {
+                kind: "line",
+                start: [10, 10] as const,
+                end: [0, 0] as const,
+              },
+            ],
+            placement: {
+              rotation: {
+                axis: [0, 0, 1] as const,
+                angle: {
+                  dimension: "angle" as const,
+                  unit: "rad" as const,
+                  value: 0,
+                },
+              },
+              translation: {
+                x: { dimension: "length", unit: "mm", value: 0 },
+                y: { dimension: "length", unit: "mm", value: 0 },
+                z: { dimension: "length", unit: "mm", value: 0 },
+              },
+            },
+            distanceMm: 10,
+            bodyId: "body_one",
+          },
+        },
+      },
+    ];
+    session.dispatchDocument(bodies, new Set(["body_one"]));
+
+    // The pass settles with ONE refused body: its structured refusal rides
+    // the verdict seam verbatim, and no success verdict clears it.
+    const failed = controller.pending[0];
+    if (failed === undefined) {
+      throw new Error("the document dispatch registered no update");
+    }
+    failed.settleApplied({
+      measurement: {
+        failures: [
+          { bodyId: "body_one", scene: "extrude", failure: new Error("boom") },
+        ],
+      },
+    });
+    await flushMicrotasks();
+    expect(outcomes).toEqual([
+      { ok: false, scene: "extrude", bodyId: "body_one", text: "boom" },
+    ]);
+    expect(root.getAttribute("data-dispatched")).toBe("1");
+
+    // A fully built pass reports the success once — clearing the refusal.
+    session.dispatchDocument(bodies, new Set(["body_one"]));
+    const recovered = controller.pending[1];
+    if (recovered === undefined) {
+      throw new Error("the recovery dispatch registered no update");
+    }
+    recovered.settleApplied({ measurement: { failures: [] } });
+    await flushMicrotasks();
+    expect(outcomes[1]).toEqual({
+      ok: true,
+      scene: "extrude",
+      bodyId: "body_one",
+    });
 
     session.dispose();
   });

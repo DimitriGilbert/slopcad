@@ -90,27 +90,22 @@ import {
 import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
 import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
 import type { Workplane } from "@slopcad/cad-sketch";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene";
 
 import {
   bootRenderFixtureSession,
   faceAnchorSurface,
+  type FixtureRenderState,
   type RenderFixtureSession,
   type SceneDispatchOutcome,
 } from "../render-fixture/fixture-session";
+import { documentSceneBodies, renderableBodyIds } from "./document-scene";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { createCadWorkbenchSession } from "./session";
-import {
-  documentExtrudeRequest,
-  documentPadSceneRequest,
-  sketchProfileResolverOf,
-  type ExtrudeSceneRequest,
-} from "./extrude";
+import { sketchProfileResolverOf } from "./extrude";
 import {
   defaultHolePosition,
-  documentHoleSceneRequest,
   holeBaseFeatureOf,
   HOLE_DEFAULT_AXIS,
   HOLE_DEFAULT_DEPTH_MM,
@@ -122,23 +117,9 @@ import {
   validateStructuredHoleSubmission,
   type StructuredHoleSubmission,
 } from "./hole-dialog";
-import {
-  documentRevolveRequest,
-  type RevolveSceneRequest,
-  type SketchRevolveSubmission,
-} from "./revolve";
-import {
-  documentSweepRequest,
-  sketchPathResolverOf,
-  validateSweepSubmission,
-  type SweepSceneRequest,
-} from "./sweep";
-import {
-  documentLoftRequest,
-  validateLoftSubmission,
-  type LoftSceneRequest,
-  type LoftSectionChoice,
-} from "./loft";
+import { type SketchRevolveSubmission } from "./revolve";
+import { sketchPathResolverOf, validateSweepSubmission } from "./sweep";
+import { validateLoftSubmission, type LoftSectionChoice } from "./loft";
 import {
   EXTRUDE_DEFAULT_DEPTH_MM,
   type SketchExtrudeSubmission,
@@ -156,48 +137,27 @@ import { massPropertiesReadout } from "./mass-properties-inspection";
 import { sectionInspectionReadout } from "./section-inspection";
 import { radiusReadout } from "./radius-inspection";
 import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
+import { helixSpineOf, validateHelixSubmission } from "./helix";
+import { threadTargetFeatureOf, validateThreadSubmission } from "./thread";
+import { ribTargetFeatureOf, validateRibSubmission } from "./rib";
 import {
-  documentHelixRequest,
-  helixSpineOf,
-  validateHelixSubmission,
-} from "./helix";
-import {
-  documentThreadSceneRequest,
-  threadTargetFeatureOf,
-  validateThreadSubmission,
-} from "./thread";
-import {
-  documentRibSceneRequest,
-  ribTargetFeatureOf,
-  validateRibSubmission,
-} from "./rib";
-import {
-  documentScaleSceneRequest,
-  documentThickenSceneRequest,
   richnessTargetFeatureOf,
   validateScaleSubmission,
   validateSplitSubmission,
   validateThickenSubmission,
 } from "./scale-thicken";
-import { documentSplitSceneRequest } from "./split";
-import { documentSheetSceneRequest } from "./surface-scene";
 import {
-  documentMirrorSceneRequest,
-  documentPatternFeatureSceneRequest,
-  documentPatternPathSceneRequest,
   patternTargetFeatureOf,
   validateMirrorSubmission,
   validatePatternPathSubmission,
   validatePatternSubmission,
 } from "./pattern";
 import {
-  documentBooleanSceneRequest,
   featureProducingBody,
   validateBooleanSubmission,
   type BooleanOperation,
 } from "./boolean";
 import {
-  documentMoveBodySceneRequest,
   moveBodyTargetFeatureOf,
   validateMoveBodySubmission,
 } from "./move-body";
@@ -207,7 +167,6 @@ import {
   curveSceneSegments,
   type CurveAuthoring,
 } from "./curves";
-import { highestResolvableScene } from "./scene-fallback";
 import {
   sessionBackendOf,
   type FixtureSessionBackendId,
@@ -218,7 +177,7 @@ export type WorkbenchMode = "model" | "sketch";
 
 /** An applied computation: the render state plus its revision identity. */
 interface AppliedRenderState {
-  readonly state: PlateRenderState;
+  readonly state: FixtureRenderState;
   readonly revision: number;
 }
 
@@ -1144,8 +1103,20 @@ export function useWorkbenchEngine(
     [workbenchDocument],
   );
   const handleHole = (): void => {
-    const bounds = applied?.state.measurement.bounds;
-    if (holeBase === undefined || bounds === undefined) return;
+    if (holeBase === undefined) return;
+    // The default position centers the TARGET body's rendered bounds — the
+    // applied scene is the full document (Phase 16), so the aggregate
+    // bounds can center on material the hole does not cut. The base
+    // body's own render object carries the exact world AABB.
+    const baseBodyId = holeBase.outputs[0];
+    const baseObject =
+      applied === null || baseBodyId === undefined
+        ? undefined
+        : applied.state.projection.objects.find(
+            (object) => object.bodyId === baseBodyId,
+          );
+    const bounds = baseObject?.bounds ?? applied?.state.measurement.bounds;
+    if (bounds === undefined) return;
     const n = holeCount + 1;
     // Unlike extrude/revolve, the FIRST hole's parameters carry their index
     // too: the Phase 15 plate fixture document already owns the unsuffixed
@@ -3094,153 +3065,30 @@ export function useWorkbenchEngine(
     setSectionViewMode((current) => !current);
   }, []);
 
-  // The scene dispatch: whichever computation the active scene names follows
-  // the DOCUMENT (the parameter edit → regenerate criterion) — the plate
-  // scene follows the hole diameter, the extrude scene re-reads the
-  // document's extrude feature through the profile resolver (a datum-
-  // anchored pad dispatches the COMPOSED pad scene: base + pad union, so a
-  // driving-face edit is measurable in the settle volume), the hole scene
-  // re-reads the hole composition (base extrusion + every hole's five
-  // parameters). Declared AFTER the boot effect above so the mount pass
-  // runs with the session already in sessionRef — the initial plate
-  // dispatch fires, and later action re-triggers (extrudeCount, revolveCount,
-  // holeCount) re-dispatch the current scene.
+  // The scene dispatch (Phase 16 owner fix — "CAD software lets you control
+  // what you see"): the applied scene IS the applied document. Every
+  // document/suppression/rollback change rebuilds the DOCUMENT scene
+  // request — one body-scene per lineage tip of the active timeline
+  // (./document-scene: consumed bodies are absorbed by the compositions
+  // that rebuild them, a rolled-back state un-absorbs its parked features'
+  // bases) — and dispatches it as ONE settle whose volume is the sum of
+  // the rendered bodies, the keep rule applied per body at computation.
+  // The emptiness decision is PRE-display-filter: an ALL-HIDDEN document
+  // still dispatches the document scene (which settles the honest empty
+  // scene) — it must never re-materialize the plate. Only when NO active
+  // feature's scene resolves (the boot plate document among them) does the
+  // plate dispatch follow the stored hole diameter.
+  // Declared AFTER the boot effect above so the mount pass runs with the
+  // session already in sessionRef; the action counters stay as re-trigger
+  // insurance (an action that commits always changes the document, so the
+  // dispatch they force is the same request the document change forces).
   useEffect(() => {
-    // The `curves` scene (Phase 47) rides ABOVE the document's solids: its
-    // dispatch re-drives the highest solid scene the document still
-    // resolves (the plate when there is none), so authoring a curve never
-    // blanks existing bodies — the curve records render through the curve
-    // overlay, a pure function of (document, projection).
-    const dispatchScene =
-      activeScene === "curves"
-        ? highestResolvableScene(workbenchDocument)
-        : activeScene;
-    if (dispatchScene === "extrude") {
-      const padRequest = documentPadSceneRequest(workbenchDocument);
-      if (padRequest !== null) {
-        sessionRef.current?.dispatchPad(padRequest, padRequest.bodyId);
-        return;
-      }
-      const request: ExtrudeSceneRequest | null =
-        documentExtrudeRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchExtrude(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "revolve") {
-      const request: RevolveSceneRequest | null =
-        documentRevolveRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchRevolve(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "sweep") {
-      const request: SweepSceneRequest | null =
-        documentSweepRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchSweep(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "loft") {
-      const request: LoftSceneRequest | null =
-        documentLoftRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchLoft(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "helix") {
-      const request = documentHelixRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchHelix(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "thread") {
-      const request = documentThreadSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchThread(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "rib") {
-      const request = documentRibSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchRib(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "scale") {
-      const request = documentScaleSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchScale(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "thicken") {
-      const request = documentThickenSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchThicken(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "sheet") {
-      const request = documentSheetSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchSheet(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "split") {
-      const request = documentSplitSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchSplit(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "patternFeature") {
-      const request = documentPatternFeatureSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchPatternFeature(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "patternPath") {
-      const request = documentPatternPathSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchPatternPath(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "mirror") {
-      const request = documentMirrorSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchMirror(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "boolean") {
-      const request = documentBooleanSceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchBoolean(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "moveBody") {
-      const request = documentMoveBodySceneRequest(workbenchDocument);
-      if (request !== null) {
-        sessionRef.current?.dispatchMoveBody(request, request.bodyId);
-      }
-      return;
-    }
-    if (dispatchScene === "hole") {
-      const derived = documentHoleSceneRequest(workbenchDocument);
-      if (derived !== null) {
-        sessionRef.current?.dispatchHole(derived.request, derived.bodyId);
-      }
+    const bodies = documentSceneBodies(workbenchDocument, suppressed, rollback);
+    if (bodies.length > 0) {
+      sessionRef.current?.dispatchDocument(
+        bodies,
+        renderableBodyIds(workbenchDocument),
+      );
       return;
     }
     if (storedHole !== null) {
@@ -3249,6 +3097,8 @@ export function useWorkbenchEngine(
   }, [
     activeScene,
     workbenchDocument,
+    suppressed,
+    rollback,
     storedHole,
     activeSectionRequest,
     extrudeCount,
@@ -3327,10 +3177,26 @@ export function useWorkbenchEngine(
       ? valueIn(toolsApi.completion.detail.distance, "mm").toFixed(3)
       : null;
 
+  // The document scene's per-body measurements: every rendered body's own
+  // kernel numbers, keyed by body id — what the per-body readouts answer
+  // from when the applied scene IS the document (Phase 16).
+  const measuredBodies =
+    applied === null
+      ? undefined
+      : "bodies" in applied.state.measurement
+        ? new Map(
+            applied.state.measurement.bodies.map((body) => [
+              body.bodyId,
+              body.measurement,
+            ]),
+          )
+        : undefined;
+
   // The bounds inspection (Phase 27.1): the scene solid's kernel-measured
   // bounds displayed when the selection resolves to exactly the measured
   // body, with the booted kernel's declared tightness (see
-  // ./bounds-inspection).
+  // ./bounds-inspection). The document scene answers per body — the
+  // selected body's own bounds.
   const boundsState = boundsReadout({
     selected: selectionApi.selected,
     features: workbenchDocument.features,
@@ -3341,6 +3207,7 @@ export function useWorkbenchEngine(
             (object) => object.bodyId !== undefined,
           )?.bodyId,
     bounds: applied === null ? undefined : applied.state.measurement.bounds,
+    measuredBodies,
     tightBooleanBounds: sessionBackendOf(backend).tightBooleanBounds,
   });
 
@@ -3397,6 +3264,7 @@ export function useWorkbenchEngine(
           )?.bodyId,
     volume: applied === null ? undefined : applied.state.measurement.volume,
     area: applied === null ? undefined : applied.state.measurement.area,
+    measuredBodies,
   });
 
   const timelineJson = useMemo(

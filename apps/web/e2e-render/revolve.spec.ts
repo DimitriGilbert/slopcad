@@ -50,19 +50,26 @@ const AXIS_X_BUTTON = '[data-testid="revolve-axis-x"]';
 const AXIS_Y_BUTTON = '[data-testid="revolve-axis-y"]';
 
 /**
- * The revolved rectangle: workplane (0,0) → (30,25), touching the x axis
+ * The revolved rectangle: workplane (5,0) → (45,25), touching the x axis
  * along its bottom edge — a full revolve about X is a cylinder, radius 25,
- * length 30.
+ * length 40. Phase 16 document-scene re-baseline: the profile no longer
+ * starts at x=0, so neither cap is coplanar with the boot plate's end
+ * faces (the plate renders BESIDE the cylinder now) and the wall is the
+ * outermost surface at its own pick point.
  */
 const RECT = {
-  x0: 0,
+  x0: 5,
   y0: 0,
-  x1: 30,
+  x1: 45,
   y1: 25,
 } as const;
 
 /** The analytic cylinder volume of the full revolve (mm³). */
-const CYLINDER_VOLUME = Math.PI * 25 ** 2 * 30;
+const CYLINDER_VOLUME = Math.PI * 25 ** 2 * (RECT.x1 - RECT.x0);
+
+/** The boot plate's analytic volume (30×20×10 with the ⌀8 through bore) —
+ *  the document scene renders it beside the cylinder. */
+const PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 4 ** 2 * 10;
 
 /** The half-turn sweep, in the parameter panel's canonical unit (rad). */
 const HALF_SWEEP_RAD_TEXT = String(Math.PI);
@@ -168,19 +175,21 @@ test("sketch → revolve produces the real cylinder at the analytic volume, byte
 }) => {
   const volume = await runRectangleRevolveJourney(page);
 
-  // GEOMETRY SEMANTICS: settled volume within the documented band of the
-  // analytic cylinder (Manifold's 63-segment revolution measured at
-  // ≈0.167% deficit — well inside the band).
+  // GEOMETRY SEMANTICS: settled DOCUMENT volume within the documented
+  // band of plate + cylinder (Manifold's 63-segment revolution measured
+  // at ≈0.167% deficit — well inside the band).
+  const analytic = PLATE_VOLUME + CYLINDER_VOLUME;
   const settled = Number(volume);
   expect(
-    Math.abs(settled - CYLINDER_VOLUME) / CYLINDER_VOLUME,
-    `volume ${settled} vs analytic ${CYLINDER_VOLUME}`,
+    Math.abs(settled - analytic) / analytic,
+    `volume ${settled} vs analytic ${analytic}`,
   ).toBeLessThan(VOLUME_REL_TOLERANCE);
   const scene = await readSceneSurface(page);
-  // The solid spans x ∈ [0,30], radially ±25 (chord vertices keep the true
+  // The UNION spans the cylinder's extent — the plate [0,30]×[0,20]×[0,10]
+  // sits inside the tube [5,45]×[±25]×[±25] (chord vertices keep the true
   // radius; per-axis extremes fall within the documented 0.05 mm band).
-  expect(boundAt(scene, "min", 0)).toBe(0);
-  expect(boundAt(scene, "max", 0)).toBe(30);
+  expect(Math.abs(boundAt(scene, "min", 0) - 0)).toBeLessThan(0.05);
+  expect(Math.abs(boundAt(scene, "max", 0) - 45)).toBeLessThan(0.05);
   expect(Math.abs(boundAt(scene, "min", 1) + 25)).toBeLessThan(0.05);
   expect(Math.abs(boundAt(scene, "max", 1) - 25)).toBeLessThan(0.05);
   expect(Math.abs(boundAt(scene, "min", 2) + 25)).toBeLessThan(0.05);
@@ -219,9 +228,8 @@ test("the settled revolve scene reproduces byte-identically in a second context"
 test("a partial sweep parameter edit halves the volume", async ({ page }) => {
   const volume = await runRectangleRevolveJourney(page);
   const settled = Number(volume);
-  expect(Math.abs(settled - CYLINDER_VOLUME) / CYLINDER_VOLUME).toBeLessThan(
-    VOLUME_REL_TOLERANCE,
-  );
+  const full = PLATE_VOLUME + CYLINDER_VOLUME;
+  expect(Math.abs(settled - full) / full).toBeLessThan(VOLUME_REL_TOLERANCE);
 
   // FULL / PARTIAL: the sweep parameter edits in its canonical unit (rad)
   // through the same `parameter.set` surface every dimension edit rides.
@@ -238,12 +246,14 @@ test("a partial sweep parameter edit halves the volume", async ({ page }) => {
       afterDispatch: beforeSweep,
     }),
   );
-  const analytic = CYLINDER_VOLUME / 2;
+  // The document volume: plate + half cylinder.
+  const analytic = PLATE_VOLUME + CYLINDER_VOLUME / 2;
   expect(
     Math.abs(regenerated - analytic) / analytic,
     `partial ${regenerated} vs analytic ${analytic}`,
   ).toBeLessThan(VOLUME_REL_TOLERANCE);
-  // The half cylinder's radial z extent shrinks to the +z half.
+  // The half cylinder's radial z extent shrinks to the +z half; the union
+  // with the plate (z ∈ [0,10]) keeps the same span.
   const scene = await readSceneSurface(page);
   expect(Math.abs(boundAt(scene, "min", 2) - 0)).toBeLessThan(0.05);
   expect(Math.abs(boundAt(scene, "max", 2) - 25)).toBeLessThan(0.05);

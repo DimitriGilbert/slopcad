@@ -29,6 +29,8 @@ import {
   length as lengthValue,
   valueIn,
   type AnyDimensionalValue,
+  type CadDocument,
+  type FeatureRecord,
 } from "@slopcad/cad-core";
 import type {
   HelixSweepInput,
@@ -168,18 +170,18 @@ function magnitudeIn(
 }
 
 /**
- * Reads the document's FIRST helix feature into its worker-scene request,
- * resolving the profile sketch through the same seam the executor bridge
- * uses and the datum axis (when declared) through the session's axis
- * resolver. `null` when the document carries no helix feature or the
- * feature's inputs no longer resolve — callers render the prior scene
- * rather than fabricate geometry.
+ * Reads ONE helix feature into its worker-scene request, resolving the
+ * profile sketch through the same seam the executor bridge uses and the
+ * datum axis (when declared) through the session's axis resolver. `null`
+ * when the feature's inputs no longer resolve — callers render the prior
+ * scene rather than fabricate geometry. The per-feature extraction the
+ * document readers share (`documentHelixRequest` here, the document-scene
+ * builder's per-body requests in `./document-scene`).
  */
-export function documentHelixRequest(
-  document: Parameters<typeof sketchProfileResolverOf>[0],
+export function helixSceneRequestOfFeature(
+  document: CadDocument,
+  feature: FeatureRecord,
 ): HelixSceneRequest | null {
-  const feature = document.features.find((entry) => entry.kind === "helix");
-  if (feature === undefined) return null;
   const bodyId = feature.outputs[0];
   const sketchRef = feature.inputs.find((ref) => ref.kind === "sketch");
   const datumRef = feature.inputs.find((ref) => ref.kind === "datum");
@@ -237,4 +239,18 @@ export function documentHelixRequest(
     placement,
     bodyId,
   };
+}
+
+/**
+ * Reads the document's FIRST helix feature into its worker-scene request.
+ * `null` when the document carries no helix feature or the feature's
+ * inputs no longer resolve — callers render the prior scene rather than
+ * fabricate geometry.
+ */
+export function documentHelixRequest(
+  document: CadDocument,
+): HelixSceneRequest | null {
+  const feature = document.features.find((entry) => entry.kind === "helix");
+  if (feature === undefined) return null;
+  return helixSceneRequestOfFeature(document, feature);
 }

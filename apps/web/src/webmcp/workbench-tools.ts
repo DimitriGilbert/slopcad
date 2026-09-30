@@ -50,7 +50,7 @@ import {
 } from "@slopcad/cad-core";
 import { setParameterCommand, type CadStore } from "@slopcad/cad-react";
 import type { CadCommandDescriptor } from "@slopcad/ui/components/cad/cad-command-menu";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
+import type { FixtureRenderState } from "../render-fixture/fixture-session";
 import type { WorkbenchEngine } from "../cad-workbench/workbench-engine";
 import type { WebMcpToolEntry } from "./registry";
 
@@ -68,7 +68,7 @@ export interface WorkbenchWebMcpSurface {
   /** The live command-menu vocabulary (what the palette renders). */
   readonly commands: () => readonly CadCommandDescriptor[];
   /** The engine's applied render state, or `null` before the first settle. */
-  readonly appliedState: () => PlateRenderState | null;
+  readonly appliedState: () => FixtureRenderState | null;
   /** The measure tool's last point-pair distance (mm), or `null`. */
   readonly measureText: () => string | null;
 }
@@ -135,7 +135,7 @@ function canonicalValue(
 }
 
 /** The body the settled scene measured, in the readouts' own resolution. */
-function sceneBodyIdOf(applied: PlateRenderState): string | null {
+function sceneBodyIdOf(applied: FixtureRenderState): string | null {
   const bodyId = applied.projection.objects.find(
     (object) => object.bodyId !== undefined,
   )?.bodyId;

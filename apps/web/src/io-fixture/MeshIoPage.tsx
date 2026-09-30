@@ -128,14 +128,16 @@ import { bootWorkerChannel, WorkerRequestFailure } from "@slopcad/cad-kernel";
 import type { WorkerClient } from "@slopcad/cad-kernel";
 import { CadScene } from "@slopcad/cad-r3f";
 import { Button } from "@slopcad/ui/components/button";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 import type { ThreeMfImportResponse } from "./io-protocol";
 import type { GlbViewerState } from "./io-glb";
 
 import {
   bootRenderFixtureSession,
+  isPlateRenderState,
+  type FixtureRenderState,
   type RenderFixtureSession,
 } from "../render-fixture/fixture-session";
+import { documentSceneTessellation } from "../cad-workbench/document-scene";
 import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
 import {
   buildImportedMeshState,
@@ -214,7 +216,7 @@ const EXPORT_TITLE = "slopcad plate";
 const VIEWPORT_CLASS = "h-[400px] w-[600px]";
 
 export function MeshIoPage(): ReactElement {
-  const [applied, setApplied] = useState<PlateRenderState | null>(null);
+  const [applied, setApplied] = useState<FixtureRenderState | null>(null);
   const [heldStl, setHeldStl] = useState<HeldExport | null>(null);
   const [held3Mf, setHeld3Mf] = useState<HeldExport | null>(null);
   const [heldGlb, setHeldGlb] = useState<HeldExport | null>(null);
@@ -294,7 +296,9 @@ export function MeshIoPage(): ReactElement {
   /** Exports the settled source soup; returns null when it cannot. */
   const exportHeld = (format: "stl" | "3mf" | "glb"): HeldExport | null => {
     if (applied === null) return null;
-    const tessellation = applied.measurement.tessellation;
+    const tessellation = isPlateRenderState(applied)
+      ? applied.measurement.tessellation
+      : documentSceneTessellation(applied.measurement.bodies);
     const triangles = tessellation.indices.length / 3;
     const result =
       format === "stl"
@@ -696,7 +700,13 @@ export function MeshIoPage(): ReactElement {
       data-source-mesh-volume={
         applied === null
           ? ""
-          : String(meshSignedVolume(applied.measurement.tessellation))
+          : String(
+              meshSignedVolume(
+                isPlateRenderState(applied)
+                  ? applied.measurement.tessellation
+                  : documentSceneTessellation(applied.measurement.bodies),
+              ),
+            )
       }
       data-import-extents={
         importView === null ? "" : formatBoundsExtents(importView.mesh.bounds)

@@ -189,10 +189,12 @@ test("a parameter edit changes the selected body's displayed bounds live", async
   await page.waitForTimeout(300);
   await saveArtifact("bounds-regenerated-extrude.png", await page.screenshot());
 
-  // HONESTY: the unrendered plate body stays selected-unresolvable — the
-  // readout empties rather than showing the pad's numbers for the plate.
+  // Phase 16 document-scene semantics: the plate renders as a body of the
+  // document scene, so selecting it answers with ITS OWN kernel-measured
+  // bounds — the readout answers for every body the settled scene
+  // measured, never another body's numbers.
   await treeNode(page, PLATE_KEY).click();
   await waitForTreeSelectionFrame(page, PLATE_KEY, ROOT);
-  await waitForBounds(page, "");
-  await expect(page.locator(READOUT)).toHaveCount(0);
+  await waitForBounds(page, "30.000 × 20.000 × 10.000 mm");
+  await expect(page.locator(READOUT)).toHaveText("30.000 × 20.000 × 10.000 mm");
 });

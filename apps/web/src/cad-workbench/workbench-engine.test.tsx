@@ -31,14 +31,29 @@ import {
   createBodyId,
   createDatumId,
   createFeatureId,
+  createParameterId,
+  createSketchDocumentId,
 } from "@slopcad/cad-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { length } from "@slopcad/cad-core";
+import {
+  createLineEntity,
+  createRectangleEntity,
+  createSketch,
+  createSketchEntityId,
+  serializeSketch,
+  xyWorkplane,
+} from "@slopcad/cad-sketch";
 import type { SceneDispatchOutcome } from "../render-fixture/fixture-session";
 
 /** The last boot's captured options — the verdict seam under test. */
 const bootedOptions: {
   onSceneOutcome?: (outcome: SceneDispatchOutcome) => void;
 } = {};
+
+/** The session dispatches the stub recorded, in order — the plate-vs-
+ * document decision's seam (the plate fallback regression pin). */
+const dispatchCalls: { readonly method: string }[] = [];
 
 vi.mock("../render-fixture/fixture-session", () => ({
   bootRenderFixtureSession: (
@@ -49,6 +64,7 @@ vi.mock("../render-fixture/fixture-session", () => ({
     },
   ): {
     dispatch(): void;
+    dispatchDocument(): void;
     dispatchExtrude(): void;
     dispatchRevolve(): void;
     dispatchSweep(): void;
@@ -58,7 +74,12 @@ vi.mock("../render-fixture/fixture-session", () => ({
   } => {
     bootedOptions.onSceneOutcome = options?.onSceneOutcome;
     return {
-      dispatch: () => {},
+      dispatch: () => {
+        dispatchCalls.push({ method: "dispatch" });
+      },
+      dispatchDocument: () => {
+        dispatchCalls.push({ method: "dispatchDocument" });
+      },
       dispatchExtrude: () => {},
       dispatchRevolve: () => {},
       dispatchSweep: () => {},
@@ -82,6 +103,36 @@ const PROBE_FEATURE = createFeatureId("feat_probe");
 const PROBE_BODY = createBodyId("body_probe");
 const AXIS_DATUM = createDatumId("dtm_engine_axis");
 const PLANE_DATUM = createDatumId("dtm_engine_plane");
+const EXTRUDE_SKETCH = createSketchDocumentId("skd_engine_extrude");
+const EXTRUDE_DEPTH = createParameterId("param_engine_depth");
+const EXTRUDE_FEATURE = createFeatureId("feat_engine_extrude");
+const EXTRUDE_BODY = createBodyId("body_engine_extrude");
+
+/** A serialized 20×15 rectangle on the XY workplane (the extrude profile). */
+function extrudeSketchPayload(): Record<string, unknown> {
+  const bottom = createSketchEntityId("skent_engine-bottom");
+  const right = createSketchEntityId("skent_engine-right");
+  const top = createSketchEntityId("skent_engine-top");
+  const left = createSketchEntityId("skent_engine-left");
+  const created = createSketch(
+    xyWorkplane(),
+    [
+      createLineEntity(bottom, { x: 10, y: 10 }, { x: 30, y: 10 }),
+      createLineEntity(right, { x: 30, y: 10 }, { x: 30, y: 25 }),
+      createLineEntity(top, { x: 30, y: 25 }, { x: 10, y: 25 }),
+      createLineEntity(left, { x: 10, y: 25 }, { x: 10, y: 10 }),
+      createRectangleEntity(createSketchEntityId("skent_engine-rect"), [
+        bottom,
+        right,
+        top,
+        left,
+      ]),
+    ],
+    [],
+  );
+  if (!created.ok) throw new Error(created.error.message);
+  return serializeSketch(created.value) as unknown as Record<string, unknown>;
+}
 
 function EngineHarness(): ReactElement {
   const engine = useWorkbenchEngine({
@@ -138,6 +189,62 @@ function EngineHarness(): ReactElement {
         }}
       >
         add probe feature
+      </button>
+      <button
+        type="button"
+        data-testid="add-extrude"
+        onClick={() => {
+          const applied = engine.documentApi.applyTransaction({
+            commands: [
+              {
+                type: "parameter.create",
+                id: EXTRUDE_DEPTH,
+                name: "engineDepth",
+                value: length(10),
+              },
+              {
+                type: "sketch.create",
+                id: EXTRUDE_SKETCH,
+                name: "engine profile",
+                sketch: extrudeSketchPayload(),
+              },
+              { type: "body.create", id: EXTRUDE_BODY, name: "engine pad" },
+              {
+                type: "feature.create",
+                id: EXTRUDE_FEATURE,
+                kind: "extrude",
+                inputs: [
+                  { kind: "sketch", id: EXTRUDE_SKETCH },
+                  { kind: "parameter", id: EXTRUDE_DEPTH },
+                ],
+                outputs: [EXTRUDE_BODY],
+              },
+            ],
+          });
+          if (!applied.ok) {
+            throw new Error("the extrude commit was refused");
+          }
+        }}
+      >
+        add extrude
+      </button>
+      <button
+        type="button"
+        data-testid="hide-all-bodies"
+        onClick={() => {
+          const applied = engine.documentApi.applyTransaction({
+            commands: engine.documentApi.document.bodies.map((body) => ({
+              type: "body.update" as const,
+              id: body.id,
+              visible: false,
+            })),
+          });
+          if (!applied.ok) {
+            throw new Error("the hide-all commit was refused");
+          }
+        }}
+      >
+        hide all bodies
       </button>
       <button
         type="button"
@@ -355,6 +462,52 @@ describe("the workbench engine's stale rollback-marker clamp", () => {
     expect(surface().getAttribute("data-timeline")).not.toContain("feat_probe");
     expect(statuses()).toContain("feat_translate_plate=valid");
     expect(statuses()).toContain("feat_rotate_plate=valid");
+  });
+});
+
+describe("the scene dispatch's plate fallback", () => {
+  it("keeps the document dispatch for an all-hidden scene — the plate never re-materializes", async () => {
+    dispatchCalls.length = 0;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    const surface = (): HTMLElement => screen.getByTestId("engine-surface");
+
+    // Boot: the featureless plate document has no resolved scene, so the
+    // dedicated plate dispatch fires (its authored camera the baselines pin).
+    await waitFor(() => {
+      expect(surface().getAttribute("data-timeline")).toContain(
+        "feat_translate_plate",
+      );
+    });
+    expect(dispatchCalls.at(-1)?.method).toBe("dispatch");
+
+    // A real extrude resolves a document scene: the boot plate rides it as
+    // one body beside the extrude (the document dispatch takes over).
+    fireEvent.click(screen.getByTestId("add-extrude"));
+    const documentDispatches = (): number =>
+      dispatchCalls.filter((call) => call.method === "dispatchDocument").length;
+    await waitFor(() => {
+      expect(documentDispatches()).toBeGreaterThan(0);
+    });
+    const firstDocumentDispatch = dispatchCalls.length - 1;
+
+    // Hiding EVERY body must keep the document dispatch — the emptiness
+    // decision is pre-display-filter, so "the user hid everything" never
+    // re-materializes the fixture plate. The computation renders the
+    // honest empty scene; the engine's part of that contract is this seam.
+    const beforeHide = dispatchCalls.length;
+    fireEvent.click(screen.getByTestId("hide-all-bodies"));
+    await waitFor(() => {
+      expect(dispatchCalls.length).toBeGreaterThan(beforeHide);
+      expect(dispatchCalls.at(-1)?.method).toBe("dispatchDocument");
+    });
+    const sinceExtrude = dispatchCalls.slice(firstDocumentDispatch);
+    expect(
+      sinceExtrude.every((call) => call.method === "dispatchDocument"),
+    ).toBe(true);
   });
 });
 

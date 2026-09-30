@@ -5,7 +5,6 @@ import { expect, test as base } from "@playwright/test";
 
 import {
   dispatchedCount,
-  faceWithNormal,
   readFaceAnchors,
   waitForImportedMeshSettled,
   waitForSettledScene,
@@ -319,7 +318,11 @@ test("s02 the plain workbench models and history round-trips", async ({
     const extruded = await waitForRootSettle(page, "workbench-root", {
       afterDispatch: before,
     });
-    const analytic = CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
+    // Phase 16 document-scene semantics: the applied scene IS the applied
+    // document — the boot plate renders as one body BESIDE the new pad, so
+    // the settle is the DOCUMENT volume (plate + pad).
+    const analytic =
+      BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
     expect(
       volumeNear(Number(extruded), analytic),
       `extruded ${extruded} vs analytic ${String(analytic)}`,
@@ -925,7 +928,9 @@ test("s06b extrude the profile and cut the plain hole", async ({
     const extruded = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: before,
     });
-    const analytic = CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
+    // The document scene renders the boot plate beside the pad (Phase 16).
+    const analytic =
+      BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
     expect(volumeNear(Number(extruded), analytic)).toBe(true);
 
     // THE PLAIN HOLE bridge cuts the new extrusion.
@@ -952,9 +957,15 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
   await stage("s07 sketch-on-face", async () => {
     await openComplete(page);
 
-    // The base extrusion (the s06 create journey's analytic pad).
+    // The base extrusion: the same 20×15 rectangle the create journeys
+    // draw, parked at x ∈ [40,60] — BESIDE the boot plate's footprint.
+    // Phase 16 document-scene re-baseline: the plate renders beside the
+    // pad now, and a pad overlapping the plate's footprint would put the
+    // two top faces coplanar (the face pick could not distinguish them).
     await enterSketchMode(page);
-    await drawRectangle(page);
+    await activateSketchTool(page, "rectangle");
+    await clickCanvasPoint(page, 40, 10);
+    await clickCanvasPoint(page, 60, 25);
     const before = await dispatchedCount(page, COMPLETE_ROOT);
     await page.locator('[data-testid="sketch-extrude"]').click();
     await expect(page.locator(COMPLETE)).toHaveAttribute(
@@ -965,11 +976,32 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
       afterDispatch: before,
     });
     const baseAnalytic = CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
-    expect(volumeNear(Number(baseVolume), baseAnalytic)).toBe(true);
+    // The document scene renders the boot plate beside the base pad
+    // (Phase 16).
+    expect(
+      volumeNear(Number(baseVolume), BOOT_PLATE_VOLUME + baseAnalytic),
+    ).toBe(true);
 
-    // SELECT the driving face through the published anchor surface.
+    // SELECT the driving face through the published anchor surface. The
+    // document scene carries the plate's faces too, so the search filters
+    // to the base extrusion's own top face.
     const anchors = await readFaceAnchors(page, COMPLETE_ROOT);
-    const top = faceWithNormal(anchors, [0, 0, 1]);
+    const topMatches = Object.entries(anchors).filter(([key, anchor]) => {
+      if (!key.startsWith("body_extrude/")) return false;
+      if (anchor.normal === null) return false;
+      return (
+        Math.abs(anchor.normal[0]) <= 0.05 &&
+        Math.abs(anchor.normal[1]) <= 0.05 &&
+        Math.abs(anchor.normal[2] - 1) <= 0.05
+      );
+    });
+    expect(topMatches.length, "exactly one top face on the base pad").toBe(1);
+    const topEntry = topMatches[0];
+    if (topEntry === undefined) throw new Error("unreachable: top asserted");
+    const top = {
+      faceIndex: Number(topEntry[0].split("/")[1]),
+      anchor: topEntry[1],
+    };
     await page
       .locator(`#${VIEWPORT_COMPLETE} canvas`)
       .click({ position: { x: top.anchor.point[0], y: top.anchor.point[1] } });
@@ -1002,7 +1034,11 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
     const padded = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: beforePad,
     });
-    expect(volumeNear(Number(padded), baseAnalytic * 2)).toBe(true);
+    // The pad composition unions base + pad (the base body is absorbed);
+    // the document scene renders the boot plate beside them (Phase 16).
+    expect(
+      volumeNear(Number(padded), BOOT_PLATE_VOLUME + baseAnalytic * 2),
+    ).toBe(true);
 
     // EDIT THE DRIVING FACE: the datum origin lifts and the pad follows.
     const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
@@ -1011,7 +1047,9 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
     const edited = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: beforeEdit,
     });
-    expect(volumeNear(Number(edited), baseAnalytic * 2.5)).toBe(true);
+    expect(
+      volumeNear(Number(edited), BOOT_PLATE_VOLUME + baseAnalytic * 2.5),
+    ).toBe(true);
     const datums = JSON.parse(
       (await page.locator(COMPLETE).getAttribute("data-datums")) ?? "[]",
     ) as { resolved: boolean; origin: readonly [number, number, number] }[];
@@ -1566,9 +1604,11 @@ test("s12 OCCT sweep and loft land on the analytic volumes", async ({
     const swept = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeSweep,
     });
+    // The document scene renders the boot plate beside the swept tube
+    // (Phase 16).
     expect(
-      volumeNear(Number(swept), SWEEP_VOLUME),
-      `swept ${swept} vs analytic ${String(SWEEP_VOLUME)}`,
+      volumeNear(Number(swept), BOOT_PLATE_VOLUME + SWEEP_VOLUME),
+      `swept ${swept} vs analytic ${String(BOOT_PLATE_VOLUME + SWEEP_VOLUME)}`,
     ).toBe(true);
     cover("sweep-feature");
     await undoRedoCheckpoint(page, OCCT_ROOT, "sweep");
@@ -1598,7 +1638,10 @@ test("s12b OCCT loft lands on the Simpson volume and re-drives", async ({
     const lofted = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeLoft,
     });
-    expect(volumeNear(Number(lofted), LOFT_VOLUME_20)).toBe(true);
+    // The boot plate rides beside the loft (Phase 16 document scene).
+    expect(volumeNear(Number(lofted), BOOT_PLATE_VOLUME + LOFT_VOLUME_20)).toBe(
+      true,
+    );
 
     // The station edit re-drives to the Simpson volume at 50 mm.
     const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
@@ -1607,7 +1650,9 @@ test("s12b OCCT loft lands on the Simpson volume and re-drives", async ({
     const redriven = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeEdit,
     });
-    expect(volumeNear(Number(redriven), LOFT_VOLUME_50)).toBe(true);
+    expect(
+      volumeNear(Number(redriven), BOOT_PLATE_VOLUME + LOFT_VOLUME_50),
+    ).toBe(true);
     cover("loft-feature");
   });
 });
@@ -1640,9 +1685,12 @@ test("s13 OCCT helix and thread land inside the derived bands", async ({
     const helical = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeHelix,
     });
+    // The document volume: the boot plate rides beside the screw (the
+    // band covers the plate's documented bore deficit too).
+    const helixDocument = BOOT_PLATE_VOLUME + HELIX_OCCT;
     expect(
-      Math.abs(Number(helical) - HELIX_OCCT) / HELIX_OCCT,
-      `helical ${helical} vs derived ${String(HELIX_OCCT)}`,
+      Math.abs(Number(helical) - helixDocument) / helixDocument,
+      `helical ${helical} vs derived ${String(helixDocument)}`,
     ).toBeLessThan(2e-3);
     cover("helix-feature");
   });
@@ -1666,9 +1714,16 @@ test("s13b OCCT thread inside the derived band and its re-drive", async ({
     const threaded = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeThread }),
     );
-    expect(threaded).toBeGreaterThanOrEqual(ROD_VOLUME - THREAD_TOOL_VOLUME);
+    // The document volume: the boot plate AND s13's helix body are part
+    // of this document (the stage continues the same session), and the
+    // document scene renders every lineage — plate + helix + the threaded
+    // rod (the thread output absorbs its base).
+    const threadDocument = BOOT_PLATE_VOLUME + HELIX_OCCT + ROD_VOLUME;
+    expect(threaded).toBeGreaterThanOrEqual(
+      threadDocument - THREAD_TOOL_VOLUME,
+    );
     expect(threaded).toBeLessThanOrEqual(
-      ROD_VOLUME - THREAD_TOOL_VOLUME * 0.83,
+      threadDocument - THREAD_TOOL_VOLUME * 0.83,
     );
     const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("threadLength1", { exact: true }).fill("8");
@@ -1759,14 +1814,17 @@ test("s14 OCCT draft, rib, scale, thicken, and split land on the analytic volume
     const drafted = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeDraft,
     });
-    expect(volumeNear(Number(drafted), DRAFT_VOLUME)).toBe(true);
+    // The boot plate rides beside the frustum (Phase 16 document scene).
+    expect(volumeNear(Number(drafted), BOOT_PLATE_VOLUME + DRAFT_VOLUME)).toBe(
+      true,
+    );
     const beforeFlat = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("extrudeTaper1", { exact: true }).fill("0");
     await page.getByRole("button", { name: "Apply" }).click();
     const flat = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeFlat,
     });
-    expect(volumeNear(Number(flat), ROD_VOLUME)).toBe(true);
+    expect(volumeNear(Number(flat), BOOT_PLATE_VOLUME + ROD_VOLUME)).toBe(true);
     cover("draft-taper-feature");
   });
 });
@@ -1793,8 +1851,9 @@ test("s14b OCCT rib unions and re-drives", async ({ sessionPage: page }) => {
     const ribbed = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeRib }),
     );
-    expect(ribbed).toBeGreaterThan(ROD_VOLUME);
-    expect(ribbed).toBeLessThanOrEqual(ROD_VOLUME + 20);
+    // The document volume: the boot plate rides beside the ribbed rod.
+    expect(ribbed).toBeGreaterThan(BOOT_PLATE_VOLUME + ROD_VOLUME);
+    expect(ribbed).toBeLessThanOrEqual(BOOT_PLATE_VOLUME + ROD_VOLUME + 20);
     const beforeRibEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("ribThickness", { exact: true }).fill("4");
     await page.getByRole("button", { name: "Apply" }).click();
@@ -1824,14 +1883,21 @@ test("s14c OCCT scale doubles cubically", async ({ sessionPage: page }) => {
     const scaled = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeScale,
     });
-    expect(volumeNear(Number(scaled), ROD_VOLUME * 8)).toBe(true);
+    // The document volume: the boot plate is NOT scaled — the scale
+    // feature rebuilds its base into its own output body, which the
+    // document scene renders beside the plate (Phase 16).
+    expect(volumeNear(Number(scaled), BOOT_PLATE_VOLUME + ROD_VOLUME * 8)).toBe(
+      true,
+    );
     const beforeScaleEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("scaleFactor", { exact: true }).fill("3");
     await page.getByRole("button", { name: "Apply" }).click();
     const bigger = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeScaleEdit,
     });
-    expect(volumeNear(Number(bigger), ROD_VOLUME * 27)).toBe(true);
+    expect(
+      volumeNear(Number(bigger), BOOT_PLATE_VOLUME + ROD_VOLUME * 27),
+    ).toBe(true);
     cover("scale-feature");
   });
 });
@@ -1855,7 +1921,10 @@ test("s14d OCCT thicken hollows to the exact shell", async ({
     const hollowed = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeThicken,
     });
-    expect(volumeNear(Number(hollowed), THICKEN_VOLUME)).toBe(true);
+    // The boot plate rides beside the shell (Phase 16 document scene).
+    expect(
+      volumeNear(Number(hollowed), BOOT_PLATE_VOLUME + THICKEN_VOLUME),
+    ).toBe(true);
     cover("thicken-shell-feature");
   });
 });
@@ -1886,14 +1955,19 @@ test("s14e OCCT split keeps the analytic half", async ({
     const split = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeSplit,
     });
-    expect(volumeNear(Number(split), SPLIT_VOLUME)).toBe(true);
+    // The boot plate rides beside the kept half (Phase 16 document scene).
+    expect(volumeNear(Number(split), BOOT_PLATE_VOLUME + SPLIT_VOLUME)).toBe(
+      true,
+    );
     const beforeFlip = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("splitSide", { exact: true }).fill("-1");
     await page.getByRole("button", { name: "Apply" }).click();
     const flipped = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeFlip,
     });
-    expect(volumeNear(Number(flipped), SPLIT_VOLUME)).toBe(true);
+    expect(volumeNear(Number(flipped), BOOT_PLATE_VOLUME + SPLIT_VOLUME)).toBe(
+      true,
+    );
     cover("split-body-feature");
   });
 });
@@ -1949,6 +2023,11 @@ test("s15 OCCT structured holes land on the derived volumes", async ({
       Math.PI * 16 * (6 - tip) +
       (Math.PI * 16 * tip) / 3 +
       Math.PI * (49 - 16) * 3;
+    // The document volume: the boot plate renders beside the drilled plate
+    // (Phase 16). The band covers the boot plate's documented bore deficit
+    // (≈0.08% of its own volume), which the tighter feature-only band
+    // could not.
+    const counterboreDocument = BOOT_PLATE_VOLUME + plateVolume - cboreRemoved;
     const before = await dispatchedCount(page, OCCT_ROOT);
     await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
     await expect(page.locator(DIALOG)).toBeHidden();
@@ -1957,9 +2036,8 @@ test("s15 OCCT structured holes land on the derived volumes", async ({
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: before }),
     );
     expect(
-      Math.abs(counterbored - (plateVolume - cboreRemoved)) /
-        (plateVolume - cboreRemoved),
-    ).toBeLessThanOrEqual(1e-4);
+      Math.abs(counterbored - counterboreDocument) / counterboreDocument,
+    ).toBeLessThanOrEqual(2e-3);
 
     // The depth edit re-drives deeper.
     const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
@@ -1972,10 +2050,10 @@ test("s15 OCCT structured holes land on the derived volumes", async ({
       Math.PI * 16 * (8 - tip) +
       (Math.PI * 16 * tip) / 3 +
       Math.PI * (49 - 16) * 3;
+    const deepDocument = BOOT_PLATE_VOLUME + plateVolume - deepRemoved;
     expect(
-      Math.abs(reDriven - (plateVolume - deepRemoved)) /
-        (plateVolume - deepRemoved),
-    ).toBeLessThanOrEqual(1e-4);
+      Math.abs(reDriven - deepDocument) / deepDocument,
+    ).toBeLessThanOrEqual(2e-3);
     expect(reDriven).toBeLessThan(counterbored);
     cover("structured-hole-feature");
   });
@@ -2029,10 +2107,13 @@ test("s15b the positions sketch cuts many holes from one feature", async ({
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeMany }),
     );
     const straightRemoved = Math.PI * 16 * (6 - tip) + (Math.PI * 16 * tip) / 3;
+    // The document volume: the boot plate rides beside the drilled plate
+    // (Phase 16); the band covers its documented bore deficit.
+    const twoHoleDocument =
+      BOOT_PLATE_VOLUME + plateVolume - 2 * straightRemoved;
     expect(
-      Math.abs(twoHoles - (plateVolume - 2 * straightRemoved)) /
-        (plateVolume - 2 * straightRemoved),
-    ).toBeLessThanOrEqual(1e-4);
+      Math.abs(twoHoles - twoHoleDocument) / twoHoleDocument,
+    ).toBeLessThanOrEqual(2e-3);
   });
 });
 
@@ -2060,7 +2141,11 @@ test("s16 OCCT pattern, path pattern, mirror, booleans, and the moved body", asy
         afterDispatch: beforePattern,
       }),
     );
-    expect(volumeNear(patterned, 2 * ROD_VOLUME)).toBe(true);
+    // The document volume: the boot plate rides beside the pattern
+    // (Phase 16 document scene).
+    expect(volumeNear(patterned, BOOT_PLATE_VOLUME + 2 * ROD_VOLUME)).toBe(
+      true,
+    );
     const beforePatternEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("patternCount1", { exact: true }).fill("5");
     await page.getByLabel("patternSpacing1", { exact: true }).fill("30");
@@ -2070,7 +2155,7 @@ test("s16 OCCT pattern, path pattern, mirror, booleans, and the moved body", asy
         afterDispatch: beforePatternEdit,
       }),
     );
-    expect(volumeNear(redriven, 4 * ROD_VOLUME)).toBe(true);
+    expect(volumeNear(redriven, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(true);
     cover("feature-pattern");
   });
 });
@@ -2101,7 +2186,10 @@ test("s16b OCCT path pattern repeats along a saved path", async ({
     const pathPatterned = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforePath }),
     );
-    expect(volumeNear(pathPatterned, 4 * ROD_VOLUME)).toBe(true);
+    // The boot plate rides beside the path pattern (Phase 16).
+    expect(volumeNear(pathPatterned, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(
+      true,
+    );
     cover("path-pattern-feature");
   });
 });
@@ -2138,7 +2226,8 @@ test("s16c OCCT mirror merges and re-drives standalone", async ({
     const mirrored = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeMirror }),
     );
-    expect(volumeNear(mirrored, 2 * ROD_VOLUME)).toBe(true);
+    // The boot plate rides beside the mirror (Phase 16 document scene).
+    expect(volumeNear(mirrored, BOOT_PLATE_VOLUME + 2 * ROD_VOLUME)).toBe(true);
     const beforeMirrorEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("mirrorMerge", { exact: true }).fill("1");
     await page.getByRole("button", { name: "Apply" }).click();
@@ -2147,7 +2236,7 @@ test("s16c OCCT mirror merges and re-drives standalone", async ({
         afterDispatch: beforeMirrorEdit,
       }),
     );
-    expect(volumeNear(standalone, ROD_VOLUME)).toBe(true);
+    expect(volumeNear(standalone, BOOT_PLATE_VOLUME + ROD_VOLUME)).toBe(true);
     cover("mirror-feature");
   });
 });
@@ -2195,7 +2284,11 @@ test("s16d OCCT boolean subtract at the analytic volume", async ({
         afterDispatch: beforeSubtract,
       }),
     );
-    expect(volumeNear(subtracted, PLATE_WITH_HOLE_VOLUME)).toBe(true);
+    // The document volume: the boolean output absorbs its operands and
+    // the boot plate rides beside it (Phase 16 document scene).
+    expect(
+      volumeNear(subtracted, BOOT_PLATE_VOLUME + PLATE_WITH_HOLE_VOLUME),
+    ).toBe(true);
     await expect(
       page
         .locator(
@@ -2247,7 +2340,9 @@ test("s16e OCCT boolean union sums the slab", async ({ sessionPage: page }) => {
     const united = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeUnion }),
     );
-    expect(volumeNear(united, PLATE_60_VOLUME)).toBe(true);
+    // The document volume: the union absorbs both operands; the boot
+    // plate rides beside it (Phase 16 document scene).
+    expect(volumeNear(united, BOOT_PLATE_VOLUME + PLATE_60_VOLUME)).toBe(true);
     cover("boolean-commands");
   });
 });
@@ -2339,8 +2434,12 @@ test("s17b OCCT surface thicken, offset, and knit", async ({
       OCCT_ROOT,
       "Thicken sheet",
     );
+    // The document volume: the boot plate rides beside the sheet bodies
+    // (Phase 16 document scene).
     expect(
-      Math.abs(Number(thickened) - THICKENED_SHEET_VOLUME),
+      Math.abs(
+        Number(thickened) - (BOOT_PLATE_VOLUME + THICKENED_SHEET_VOLUME),
+      ),
       `thickened ${thickened}`,
     ).toBeLessThanOrEqual(THICKENED_SHEET_VOLUME * 0.002);
     cover("surface-thicken-op");
@@ -2973,8 +3072,13 @@ test("s26b model, save v2, reload, reopen, and walk the history", async ({
     const extruded = await waitForSettledScene(page, "workbench-root", {
       afterDispatch: before,
     });
+    // The projects route boots the same fixture-plate session, and the
+    // document scene renders the plate beside the new pad (Phase 16).
     expect(
-      volumeNear(Number(extruded), CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM)),
+      volumeNear(
+        Number(extruded),
+        BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM),
+      ),
     ).toBe(true);
     await page.locator('[data-testid="persistence-save"]').click();
     await expect(bar).toHaveAttribute("data-live-version", "2");
@@ -2989,8 +3093,13 @@ test("s26b model, save v2, reload, reopen, and walk the history", async ({
       "extrude",
     );
     const reopened = await waitForSettledScene(page, "workbench-root");
+    // The persisted document restores its content — plate beside pad, the
+    // same document volume (Phase 16).
     expect(
-      volumeNear(Number(reopened), CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM)),
+      volumeNear(
+        Number(reopened),
+        BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM),
+      ),
     ).toBe(true);
     await expect(
       page.locator(`${TREE} [data-node-key="feature|feat_extrude"]`),

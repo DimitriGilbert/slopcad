@@ -59,7 +59,7 @@ import type {
   CadImportFormatOption,
   CadImportOutcome,
 } from "@slopcad/ui/components/cad/cad-io-dialog";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
+import type { FixtureRenderState } from "../render-fixture/fixture-session";
 import type { ThreeMfImportResponse } from "../io-fixture/io-protocol";
 import type { ImportTsxResponse } from "../io-fixture/import-tsx-endpoint";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
@@ -67,6 +67,7 @@ import type { CadImportPreview, CadWorkbenchIo } from "./complete-workbench";
 import type { WorkbenchEngine } from "./workbench-engine";
 
 import { parseNativeTextToSession } from "../cad-projects/native-document-bridge";
+import { documentSceneTessellation } from "./document-scene";
 import {
   buildImportedMeshState,
   type ImportedMeshState,
@@ -682,17 +683,24 @@ function CompleteWorkbenchBody({
             setExportError("");
             return;
           }
-          const applied: PlateRenderState | null =
+          const applied: FixtureRenderState | null =
             engine.applied?.state ?? null;
           if (applied === null) return;
           if (formatId !== "stl" && formatId !== "3mf" && formatId !== "glb") {
             return;
           }
+          // The document scene carries per-body soups: the mesh exporters
+          // consume ONE indexed soup, so the rendered bodies merge in
+          // document order (the projection itself feeds GLB either way).
+          const soup =
+            "tessellation" in applied.measurement
+              ? applied.measurement.tessellation
+              : documentSceneTessellation(applied.measurement.bodies);
           const result =
             formatId === "stl"
-              ? exportStlBinary(applied.measurement.tessellation)
+              ? exportStlBinary(soup)
               : formatId === "3mf"
-                ? exportThreeMf(applied.measurement.tessellation, {
+                ? exportThreeMf(soup, {
                     title: EXPORT_TITLE,
                   })
                 : // GLB exports the RENDER PROJECTION — the renderer-neutral

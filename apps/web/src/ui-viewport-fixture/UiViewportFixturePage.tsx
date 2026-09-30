@@ -69,11 +69,11 @@ import { CadModelTree } from "@slopcad/ui/components/cad/cad-model-tree";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
 import {
   bootRenderFixtureSession,
   faceAnchorSurface,
+  type FixtureRenderState,
   type RenderFixtureSession,
 } from "../render-fixture/fixture-session";
 import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
@@ -88,7 +88,7 @@ import {
 
 /** An applied computation: the render state plus its revision identity. */
 interface AppliedRenderState {
-  readonly state: PlateRenderState;
+  readonly state: FixtureRenderState;
   readonly revision: number;
 }
 

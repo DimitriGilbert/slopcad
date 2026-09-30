@@ -285,18 +285,30 @@ export function documentExtrudeRequest(
 }
 
 /**
- * The pad composition scene request (Phase 39): the document's FIRST
+ * The pad composition scene request (Phase 39): the base extrusion and the
+ * datum-anchored pad extrusion unioned into ONE output body — the body id
+ * the composition renders under (the pad feature's output).
+ */
+export interface PadSceneRequest {
+  /** The base extrusion (the driving body). */
+  readonly base: ExtrudeSceneRequest;
+  /** The pad extrusion, placed on the datum's re-resolved frame. */
+  readonly pad: ExtrudeSceneRequest;
+  /** The pad feature's output body id (the rendered body). */
+  readonly bodyId: string;
+}
+
+/**
+ * The pad composition scene reader (Phase 39): the document's FIRST
  * extrude feature is the base, the LAST is the pad (datum-anchored — its
  * placement re-resolves through `sessionDatumPlacement` on every dispatch).
  * `null` when the document does not carry the composition — fewer than two
  * extrudes, or the pad is not datum-anchored (a plain second extrude still
  * rides the plain extrude scene) — or any input no longer resolves.
  */
-export function documentPadSceneRequest(document: CadDocument): {
-  readonly base: ExtrudeSceneRequest;
-  readonly pad: ExtrudeSceneRequest;
-  readonly bodyId: string;
-} | null {
+export function documentPadSceneRequest(
+  document: CadDocument,
+): PadSceneRequest | null {
   const extrudes = document.features.filter(
     (entry) => entry.kind === "extrude",
   );

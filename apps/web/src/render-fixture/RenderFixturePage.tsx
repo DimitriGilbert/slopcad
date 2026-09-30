@@ -95,12 +95,11 @@ import {
   completionJson,
   faceAnchorSurface,
   selectionJson,
+  isPlateRenderState,
+  type FixtureRenderState,
   type RenderFixtureSession,
 } from "./fixture-session";
-import {
-  offsetPlateRenderState,
-  type PlateRenderState,
-} from "./plate-render-scene";
+import { offsetPlateRenderState } from "./plate-render-scene";
 import {
   PLATE_HOLE_DIAMETER_DEFAULT_MM,
   PLATE_HOLE_DIAMETER_MAX_MM,
@@ -109,7 +108,7 @@ import {
 
 /** An applied computation: the render state plus its revision identity. */
 interface AppliedRenderState {
-  readonly state: PlateRenderState;
+  readonly state: FixtureRenderState;
   readonly revision: number;
 }
 
@@ -321,6 +320,10 @@ export function RenderFixturePage() {
   const applied = useMemo(() => {
     if (workerState === null) return null;
     if (sameVector(translateOffset, [0, 0, 0])) return workerState;
+    // The offset seam re-derives the PLATE soup (this fixture dispatches
+    // plate scenes only); a state without its own single tessellation has
+    // nothing to offset — it passes through unchanged.
+    if (!isPlateRenderState(workerState.state)) return workerState;
     return {
       revision: workerState.revision,
       state: offsetPlateRenderState(workerState.state, translateOffset),

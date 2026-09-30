@@ -285,6 +285,23 @@ function offsetPlanOf(
 }
 
 /**
+ * Reads ONE sheet-family body's scene request: its rebuild plan (the same
+ * recursive evaluation the document reader uses). `null` when the body has
+ * no producing surface feature or the plan no longer rebuilds — callers
+ * render the prior scene rather than fabricate geometry. The per-body
+ * extraction the document readers share (`documentSheetSceneRequest` here,
+ * the document-scene builder's per-body requests in `./document-scene`).
+ */
+export function sheetSceneRequestOfBody(
+  document: CadDocument,
+  bodyId: string,
+): SheetSceneRequest | null {
+  const plan = sheetPlanOf(document, bodyId, 0);
+  if (plan === null) return null;
+  return { bodyId, plan };
+}
+
+/**
  * Reads the document's sheet scene request: the output body of the
  * document's LAST surface-family feature, with its rebuild plan. Absent
  * surface features (or an unrebuildable chain) is null — the honest
@@ -306,7 +323,5 @@ export function documentSheetSceneRequest(
   }
   const bodyId = latest?.outputs[0];
   if (latest === undefined || bodyId === undefined) return null;
-  const plan = sheetPlanOf(document, bodyId, 0);
-  if (plan === null) return null;
-  return { bodyId, plan };
+  return sheetSceneRequestOfBody(document, bodyId);
 }
