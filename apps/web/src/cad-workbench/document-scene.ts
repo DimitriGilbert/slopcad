@@ -67,7 +67,10 @@
  * honest empty scene.
  *
  * Determinism: the request list is a pure function of (document,
- * suppressed, rollback) — no Date, no random, no scene state.
+ * suppressed, rollback, computedFaces) — no Date, no random, no scene
+ * state beyond the caller-supplied computed-face source itself (the
+ * engine's derivation from the settled scene — the only scene-dependent
+ * input, and only for datums anchored on computed bodies).
  */
 
 import type { CadDocument, FeatureRecord } from "@slopcad/cad-core";
@@ -77,6 +80,7 @@ import {
 } from "@slopcad/cad-core";
 import type { FeatureId, FeatureRollbackPoint } from "@slopcad/cad-react";
 import type { Tessellation } from "@slopcad/cad-kernel";
+import type { ComputedFaceSource } from "./datum";
 
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import {
@@ -319,15 +323,20 @@ export function documentSceneTessellation(
  * Builds the document scene request: the body list whose scenes the
  * applied computation executes — one entry per lineage tip, in document
  * body order, BEFORE the body-display keep rule (hidden tips stay listed;
- * the computation skips them per body). `[]` only when no active feature's
- * scene resolves (the boot plate document among them) — the caller keeps
- * the plate dispatch for exactly that case, never for an all-hidden
- * document.
+ * the computation skips them per body). The optional computed-face source
+ * threads into the extrude/pad request readers' datum resolution (a datum
+ * anchored on a computed body re-resolves against the settled scene —
+ * `./extrude`'s `sessionComputedFacesOf`; omitted, such datums refuse and
+ * their scenes fall back, exactly as before). `[]` only when no active
+ * feature's scene resolves (the boot plate document among them) — the
+ * caller keeps the plate dispatch for exactly that case, never for an
+ * all-hidden document.
  */
 export function documentSceneBodies(
   document: CadDocument,
   suppressed: ReadonlySet<FeatureId>,
   rollback: FeatureRollbackPoint | null,
+  computedFaces?: ComputedFaceSource,
 ): readonly DocumentBodySceneRequest[] {
   const active = activeFeaturesOf(document, suppressed, rollback);
   const activeDocument: CadDocument = { ...document, features: active };
@@ -341,7 +350,11 @@ export function documentSceneBodies(
   for (const feature of active) {
     switch (feature.kind) {
       case "extrude": {
-        const request = extrudeSceneRequestOfFeature(activeDocument, feature);
+        const request = extrudeSceneRequestOfFeature(
+          activeDocument,
+          feature,
+          computedFaces,
+        );
         if (request !== null) {
           requests.set(request.bodyId, { kind: "extrude", request });
         }
@@ -451,7 +464,7 @@ export function documentSceneBodies(
   // directly; the hole, the booleans, and the move may consume a COMPUTED
   // operand — an earlier composition's output — and admit in producing-
   // feature order below.
-  const pad = documentPadSceneRequest(activeDocument);
+  const pad = documentPadSceneRequest(activeDocument, computedFaces);
   if (pad !== null) {
     requests.set(pad.bodyId, { kind: "pad", request: pad });
   }

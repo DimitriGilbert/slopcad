@@ -103,7 +103,14 @@ import { documentSceneBodies, renderableBodyIds } from "./document-scene";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { createCadWorkbenchSession } from "./session";
-import { sceneOperandOfBody, sketchProfileResolverOf } from "./extrude";
+import {
+  computedFacePickOrdinal,
+  hasComputedAnchoredExtrude,
+  sceneOperandOfBody,
+  sessionComputedFacesOf,
+  sketchProfileResolverOf,
+  type SessionComputedFaces,
+} from "./extrude";
 import {
   defaultHolePosition,
   holeBaseFeatureOf,
@@ -818,6 +825,34 @@ export function useWorkbenchEngine(
 
   const workbenchDocument = documentApi.document;
 
+  // The computed-face source (the sketch-on-face fix for computed bodies):
+  // the settled scene's analytic face planes for every COMPUTED-classified
+  // body — a boolean cavity floor, a holed face, a pad face, a moved body —
+  // derived from the SAME projection the picker addresses, so a datum
+  // recorded at pick time re-resolves against the face the scene settled.
+  // `null` before the first settle (computed references refuse — the
+  // honest absence; plain-extrude datums resolve from the document as
+  // always). One worker dispatch produced the projection; the derivation
+  // is cached per settle (the memo) and the dispatch effect reads it
+  // through `computedFacesRef` so a settle re-triggers the scene pass only
+  // when a computed-anchored datum's planes actually moved (the digest).
+  const computedFaces = useMemo(
+    () =>
+      sessionComputedFacesOf(
+        workbenchDocument,
+        applied === null ? null : applied.state.projection,
+      ),
+    [workbenchDocument, applied],
+  );
+  const computedFacesRef = useRef<SessionComputedFaces | null>(null);
+  const datumFollowDigest = useMemo(
+    () =>
+      hasComputedAnchoredExtrude(workbenchDocument)
+        ? (computedFaces?.digest ?? "")
+        : "",
+    [workbenchDocument, computedFaces],
+  );
+
   // The Phase 46 section display: the document's FIRST section record is
   // the persisted model artifact (its plane and kept side serialize with
   // the document); the CLIP and VIEW toggles are session display state,
@@ -958,7 +993,10 @@ export function useWorkbenchEngine(
   // re-derivation computes, so what the author draws is what re-drives
   // when the face moves (no anchor-vs-resolution coordinate jump). A
   // curved face (no single normal) is refused structurally — no guessed
-  // plane.
+  // plane. A face picked on a COMPUTED body (boolean cavity floor, holed
+  // face, pad face, moved body) records the same-normal ordinal and
+  // resolves through the settled scene's computed-face source (./extrude's
+  // `sessionComputedFacesOf`) — the same planes the pick addressed.
   const handleSketchOnFace = (reference: {
     readonly kind: "face";
     readonly bodyId: string;
@@ -983,13 +1021,27 @@ export function useWorkbenchEngine(
           "The picked face has no single normal (a curved or vanished face); sketch-on-face needs a planar face.",
       };
     }
-    const referencePayload = sessionFaceReferenceOf(pick);
-    if (referencePayload === null) {
+    const pickedReference = sessionFaceReferenceOf(pick);
+    if (pickedReference === null) {
       return {
         ok: false,
         message: "The picked face cannot anchor a datum plane.",
       };
     }
+    // A COMPUTED body's reference records the same-normal ordinal — the
+    // key its computed-face resolution re-derives the plane from on every
+    // dispatch (the ordinal contract in ./datum). A plain extrusion's
+    // reference stays ordinal-free; its caps resolution keys on the
+    // normal alone, exactly as it always has.
+    const faceOrdinal = computedFacePickOrdinal(
+      workbenchDocument,
+      applied.state.projection,
+      reference,
+    );
+    const referencePayload =
+      faceOrdinal === null
+        ? pickedReference
+        : { ...pickedReference, faceOrdinal };
     const n = datumCount + 1;
     const datumId = createDatumId(`dtm_face_plane${n === 1 ? "" : String(n)}`);
     const commit = documentApi.applyTransaction({
@@ -1017,8 +1069,14 @@ export function useWorkbenchEngine(
       return { ok: false, message: commit.error.message };
     }
     // Boot the sketch on the datum's RESOLVED plane — the resolution the
-    // scene request re-derives on every dispatch.
-    const plane = resolveSessionDatumPlane(commit.value.document, datumId);
+    // scene request re-derives on every dispatch. The settled scene's
+    // computed-face source rides along so a COMPUTED body's face resolves
+    // here (the pick came from that same scene — the frames agree).
+    const plane = resolveSessionDatumPlane(
+      commit.value.document,
+      datumId,
+      computedFaces ?? undefined,
+    );
     if (!plane.ok) {
       return { ok: false, message: plane.error.message };
     }
@@ -3075,6 +3133,16 @@ export function useWorkbenchEngine(
     setSectionViewMode((current) => !current);
   }, []);
 
+  // The computed-face source feeds the dispatch below through a ref: the
+  // settle-produced projection refreshes the memo WITHOUT re-triggering
+  // the dispatch (the effect's triggers are document identity, display
+  // state, and the datum-follow digest — a settle alone is not one). The
+  // sync effect is declared FIRST so the same render's pass reads the
+  // current source.
+  useEffect(() => {
+    computedFacesRef.current = computedFaces;
+  }, [computedFaces]);
+
   // The scene dispatch (Phase 16 owner fix — "CAD software lets you control
   // what you see"): the applied scene IS the applied document. Every
   // document/suppression/rollback change rebuilds the DOCUMENT scene
@@ -3088,12 +3156,25 @@ export function useWorkbenchEngine(
   // scene) — it must never re-materialize the plate. Only when NO active
   // feature's scene resolves (the boot plate document among them) does the
   // plate dispatch follow the stored hole diameter.
+  // The datum-follow digest: documents WITHOUT a datum anchored on a
+  // computed body keep an empty digest — their dispatch rhythm is exactly
+  // as before. With one, the digest rides the settled scene's computed
+  // face planes: an edit that moves such a face (a pocket deepened under a
+  // standoff) settles a changed digest, which re-triggers this pass ONCE
+  // with the fresh planes — the datum-anchored feature follows the face.
+  // The pass converges (the anchor body's own mesh does not depend on the
+  // datum-anchored feature), never loops.
   // Declared AFTER the boot effect above so the mount pass runs with the
   // session already in sessionRef; the action counters stay as re-trigger
   // insurance (an action that commits always changes the document, so the
   // dispatch they force is the same request the document change forces).
   useEffect(() => {
-    const bodies = documentSceneBodies(workbenchDocument, suppressed, rollback);
+    const bodies = documentSceneBodies(
+      workbenchDocument,
+      suppressed,
+      rollback,
+      computedFacesRef.current ?? undefined,
+    );
     if (bodies.length > 0) {
       sessionRef.current?.dispatchDocument(
         bodies,
@@ -3111,6 +3192,7 @@ export function useWorkbenchEngine(
     rollback,
     storedHole,
     activeSectionRequest,
+    datumFollowDigest,
     extrudeCount,
     revolveCount,
     sweepCount,
@@ -3394,7 +3476,9 @@ export function useWorkbenchEngine(
   // failure code — the surface tells the truth about unanchored datums
   // instead of hiding them. A NON-plane datum (axis, point, cSys) reports
   // `resolved: null` with its kind: this surface resolves PLANES, and a
-  // healthy axis datum is not a failed plane resolution.
+  // healthy axis datum is not a failed plane resolution. The computed-face
+  // source rides along so a datum anchored on a computed body reads
+  // resolved against the same settled scene the viewport draws.
   const datumsJson = useMemo(() => {
     const resolved = workbenchDocument.datums.map((datum) => {
       const payload = parseDatumPayload(datum.datum);
@@ -3407,7 +3491,11 @@ export function useWorkbenchEngine(
           resolved: null,
         };
       }
-      const plane = resolveSessionDatumPlane(workbenchDocument, datum.id);
+      const plane = resolveSessionDatumPlane(
+        workbenchDocument,
+        datum.id,
+        computedFaces ?? undefined,
+      );
       return plane.ok
         ? {
             id: datum.id,
@@ -3426,7 +3514,7 @@ export function useWorkbenchEngine(
           };
     });
     return JSON.stringify(resolved);
-  }, [workbenchDocument]);
+  }, [workbenchDocument, computedFaces]);
 
   // -- The Phase 57 configuration switch ------------------------------------
   // The ACTIVE configuration is session state (ADR: derived data, never

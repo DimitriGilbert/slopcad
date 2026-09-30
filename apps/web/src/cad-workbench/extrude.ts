@@ -25,13 +25,22 @@
  * `parameter.set` on the distance re-dispatches the REAL kernel execution.
  */
 
-import { angle, getDocumentSketch, length, valueIn } from "@slopcad/cad-core";
+import {
+  angle,
+  getDocumentDatum,
+  getDocumentSketch,
+  length,
+  parseDatumPayload,
+  valueIn,
+} from "@slopcad/cad-core";
 import type {
   AnyDimensionalValue,
   BodyId,
   CadDocument,
+  DatumId,
   FeatureRecord,
   ParseFailure,
+  RenderProjection,
   SketchDocumentId,
 } from "@slopcad/cad-core";
 import type {
@@ -46,7 +55,13 @@ import {
   type ProfileSegment,
 } from "@slopcad/cad-sketch";
 
-import { sessionDatumPlacement } from "./datum";
+import {
+  computedFaceOrdinalOfObject,
+  computedFacePlanesOfObject,
+  sessionDatumPlacement,
+  type ComputedFacePlane,
+  type ComputedFaceSource,
+} from "./datum";
 
 /** One profile segment mapped into the kernel contract's tuple form. */
 export function kernelSegment(
@@ -249,14 +264,19 @@ export function sceneOperandOfBody(
  * declares a DATUM input (the sketch-on-face association, Phase 39), the
  * placement is overridden with the datum's RE-RESOLVED frame — the edit-
  * driving-face re-derivation: moving the driving face moves the datum, and
- * the extrusion follows. `null` when the feature's inputs no longer resolve
- * — callers render the prior scene rather than fabricate geometry. The
- * per-feature extraction the document readers share (`documentExtrudeRequest`
- * here, the hole scene's base resolution in `./hole`).
+ * the extrusion follows. The optional computed-face source extends that
+ * re-derivation to datums anchored on COMPUTED bodies (a boolean cavity
+ * floor, a holed face — see `./datum`); without it such a datum refuses
+ * and the request is null, the honest scene fallback. `null` when the
+ * feature's inputs no longer resolve — callers render the prior scene
+ * rather than fabricate geometry. The per-feature extraction the document
+ * readers share (`documentExtrudeRequest` here, the hole scene's base
+ * resolution in `./hole`).
  */
 export function extrudeSceneRequestOfFeature(
   document: CadDocument,
   feature: FeatureRecord,
+  computedFaces?: ComputedFaceSource,
 ): ExtrudeSceneRequest | null {
   const sketchRef = feature.inputs.find((ref) => ref.kind === "sketch");
   const distanceRef = feature.inputs.find((ref) => ref.kind === "parameter");
@@ -305,7 +325,11 @@ export function extrudeSceneRequestOfFeature(
   // whole request null — the honest scene fallback).
   let placement = resolved.value.placement;
   if (datumRef !== undefined && datumRef.kind === "datum") {
-    const datumPlacement = sessionDatumPlacement(document, datumRef.id);
+    const datumPlacement = sessionDatumPlacement(
+      document,
+      datumRef.id,
+      computedFaces,
+    );
     if (!datumPlacement.ok) return null;
     placement = {
       rotation: {
@@ -339,13 +363,14 @@ export function extrudeSceneRequestOfFeature(
  */
 export function documentExtrudeRequest(
   document: CadDocument,
+  computedFaces?: ComputedFaceSource,
 ): ExtrudeSceneRequest | null {
   let feature: FeatureRecord | undefined;
   for (const entry of document.features) {
     if (entry.kind === "extrude") feature = entry;
   }
   if (feature === undefined) return null;
-  return extrudeSceneRequestOfFeature(document, feature);
+  return extrudeSceneRequestOfFeature(document, feature, computedFaces);
 }
 
 /**
@@ -368,10 +393,13 @@ export interface PadSceneRequest {
  * placement re-resolves through `sessionDatumPlacement` on every dispatch).
  * `null` when the document does not carry the composition — fewer than two
  * extrudes, or the pad is not datum-anchored (a plain second extrude still
- * rides the plain extrude scene) — or any input no longer resolves.
+ * rides the plain extrude scene), or the pad's datum anchors on a COMPUTED
+ * body (the extrude then renders as its own body on the datum plane, the
+ * computed body beside it) — or any input no longer resolves.
  */
 export function documentPadSceneRequest(
   document: CadDocument,
+  computedFaces?: ComputedFaceSource,
 ): PadSceneRequest | null {
   const extrudes = document.features.filter(
     (entry) => entry.kind === "extrude",
@@ -386,11 +414,183 @@ export function documentPadSceneRequest(
   ) {
     return null;
   }
-  const baseRequest = extrudeSceneRequestOfFeature(document, base);
-  const padRequest = extrudeSceneRequestOfFeature(document, pad);
+  // The computed-anchor decline: a pad whose datum anchors on a COMPUTED
+  // body (a standoff sketched on a boolean cavity floor) is not the
+  // two-extrude composition — unioning it over the FIRST extrude would
+  // rebuild the un-composed base and erase every feature applied to it.
+  // The extrude renders as its OWN body on the datum's re-resolved plane
+  // (the plain per-feature scene, the computed source riding along), the
+  // computed body beside it — the document scene's aggregate is the
+  // honest shell + post.
+  for (const ref of pad.inputs) {
+    if (ref.kind === "datum" && datumAnchorsComputedBody(document, ref.id)) {
+      return null;
+    }
+  }
+  const baseRequest = extrudeSceneRequestOfFeature(
+    document,
+    base,
+    computedFaces,
+  );
+  const padRequest = extrudeSceneRequestOfFeature(document, pad, computedFaces);
   const bodyId = pad.outputs[0];
   if (baseRequest === null || padRequest === null || bodyId === undefined) {
     return null;
   }
   return { base: baseRequest, pad: padRequest, bodyId };
+}
+
+/**
+ * Whether the datum record's face reference anchors on a COMPUTED-classified
+ * body (a boolean, hole, pad, or moved body). Unreadable records decline —
+ * the caller's ordinary refusal path answers for them.
+ *
+ * The classification here is deliberately REDUCED (producer kind only —
+ * the hole/boolean family and the translate-with-authored-pair move): the
+ * full `sceneOperandOfBody` re-enters the pad reader, which consults this
+ * very predicate for its computed-anchor decline — a cycle. A pad output
+ * as the anchor body therefore classifies as its extrude producer here,
+ * and a pad-on-pad-anchor composition proceeds exactly as it always has.
+ */
+function datumAnchorsComputedBody(
+  document: CadDocument,
+  datumId: DatumId,
+): boolean {
+  const record = getDocumentDatum(document, datumId);
+  if (record === undefined) return false;
+  const payload = parseDatumPayload(record.datum);
+  if (
+    !payload.ok ||
+    payload.value.datumType !== "plane" ||
+    payload.value.definition !== "faceOffset"
+  ) {
+    return false;
+  }
+  const reference = payload.value.reference as {
+    readonly kind?: unknown;
+    readonly bodyId?: unknown;
+  };
+  if (reference.kind !== "sessionFace") return false;
+  if (typeof reference.bodyId !== "string") return false;
+  const producer = document.features.find((feature) =>
+    feature.outputs.includes(reference.bodyId as BodyId),
+  );
+  if (producer === undefined) return false;
+  if (
+    producer.kind === "hole" ||
+    producer.kind === "union" ||
+    producer.kind === "subtract" ||
+    producer.kind === "intersect"
+  ) {
+    return true;
+  }
+  return (
+    producer.kind === "translate" &&
+    producer.inputs.filter((ref) => ref.kind === "parameter").length >= 4
+  );
+}
+
+/**
+ * The computed-face source the engine derives from the settled scene: the
+ * applied projection's analytic face planes for every COMPUTED-classified
+ * body (`sceneOperandOfBody` — a boolean, hole, pad, or moved body; a
+ * plain extrusion is never listed, so its datum resolution cannot take
+ * the computed path). The planes ride the SAME synthetic-face grouping the
+ * picker addresses, so the datum's recorded ordinal addresses the faces
+ * deterministically (the ordinal contract in `./datum`). `digest` is a
+ * deterministic fingerprint of the planes — the engine's staleness key
+ * for the follow-along re-dispatch (a document edit that moves a
+ * computed face changes the digest on the next settle, and the scene
+ * re-dispatches once so datum-anchored features follow). `null` when the
+ * projection is absent or carries no computed body.
+ *
+ * Determinism: the planes and the digest are pure functions of
+ * (document, projection) — no Date, no random.
+ */
+export interface SessionComputedFaces extends ComputedFaceSource {
+  /** The deterministic staleness fingerprint of the planes. */
+  readonly digest: string;
+}
+
+export function sessionComputedFacesOf(
+  document: CadDocument,
+  projection: RenderProjection | null,
+): SessionComputedFaces | null {
+  if (projection === null) return null;
+  const entries: {
+    readonly bodyId: string;
+    readonly planes: readonly ComputedFacePlane[];
+  }[] = [];
+  const seen = new Set<string>();
+  for (const object of projection.objects) {
+    if (object.bodyId === undefined || seen.has(object.bodyId)) continue;
+    if (sceneOperandOfBody(document, object.bodyId)?.kind !== "computed") {
+      continue;
+    }
+    seen.add(object.bodyId);
+    entries.push({
+      bodyId: object.bodyId,
+      planes: computedFacePlanesOfObject(object),
+    });
+  }
+  if (entries.length === 0) return null;
+  return {
+    planesOf: (bodyId) =>
+      entries.find((entry) => entry.bodyId === bodyId)?.planes,
+    digest: entries
+      .map(
+        (entry) =>
+          `${entry.bodyId}|${entry.planes
+            .map(
+              (plane) => `${plane.origin.join(",")};${plane.normal.join(",")}`,
+            )
+            .join("|")}`,
+      )
+      .join("||"),
+  };
+}
+
+/**
+ * The picked face's same-normal ordinal at pick time (the computed path's
+ * reference key — the contract in `./datum`): `null` unless the picked
+ * body is COMPUTED-classified (a plain extrusion's reference stays
+ * ordinal-free, its caps path untouched) or the reference no longer
+ * matches the projection.
+ */
+export function computedFacePickOrdinal(
+  document: CadDocument,
+  projection: RenderProjection,
+  reference: {
+    readonly kind: "face";
+    readonly bodyId: string;
+    readonly faceIndex: number;
+  },
+): number | null {
+  if (sceneOperandOfBody(document, reference.bodyId)?.kind !== "computed") {
+    return null;
+  }
+  const object = projection.objects.find(
+    (candidate) => candidate.bodyId === reference.bodyId,
+  );
+  if (object === undefined) return null;
+  return computedFaceOrdinalOfObject(object, reference.faceIndex);
+}
+
+/**
+ * Whether any extrude feature anchors its datum on a COMPUTED-classified
+ * body (a sketch-on-face datum on a boolean cavity floor, a holed face, a
+ * pad face, a moved body) — the engine's gate for the follow-along
+ * re-dispatch: only documents carrying such a datum need the scene-settle
+ * digest in their dispatch triggers, so every established flow's dispatch
+ * rhythm stays exactly as it is.
+ */
+export function hasComputedAnchoredExtrude(document: CadDocument): boolean {
+  for (const feature of document.features) {
+    if (feature.kind !== "extrude") continue;
+    for (const ref of feature.inputs) {
+      if (ref.kind !== "datum") continue;
+      if (datumAnchorsComputedBody(document, ref.id)) return true;
+    }
+  }
+  return false;
 }
