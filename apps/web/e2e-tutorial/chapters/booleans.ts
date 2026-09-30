@@ -21,6 +21,9 @@ import {
 /** The s16d/e analytic pins: the plate-with-hole and the united slab. */
 const PLATE_60_VOLUME = 60 * 40 * 10;
 const PLATE_WITH_HOLE_VOLUME = PLATE_60_VOLUME - Math.PI * 25 * 10;
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside every boolean output (the s16d/e pins). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 
 /** Extrudes one sketched profile at the default depth (the s16d/e body). */
 async function extrudeSketch(
@@ -69,7 +72,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "removed",
-        text: "The cylinder is gone: the plate-with-hole pin, to the digit.",
+        text: "The cylinder is gone — the holed plate, beside the plate.",
       },
       {
         stepId: "union-boot",
@@ -81,7 +84,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "slab",
-        text: "One slab: exactly 60 × 40 × 10 mm³.",
+        text: "One slab — 60 by 40 by 10, beside the boot plate.",
       },
       {
         stepId: "move-boot",
@@ -107,10 +110,11 @@ export const chapter: ChapterModule = {
     const subtractBoot = await driver.arriveAtWorkbench("occt");
     expect(Number(subtractBoot)).toBeGreaterThan(0);
     // The session's corner-origin bodies shifted into the visible canvas
-    // band (the status bar and the surface's clipped bottom band cover
-    // workplane y below roughly 5 mm): congruent bodies, so both analytic pins hold.
-    await extrudeSketch(page, driver, "rectangle", 5, 15, 65, 55);
-    await extrudeSketch(page, driver, "circle", 35, 35, 40, 35);
+    // band AND beside the boot plate's footprint (the document scene
+    // renders the plate beside them): congruent bodies, so both analytic
+    // pins hold.
+    await extrudeSketch(page, driver, "rectangle", 45, 15, 105, 55);
+    await extrudeSketch(page, driver, "circle", 75, 35, 80, 35);
 
     // A cue that describes a form starts only when that form is on screen:
     // the menu journey rides the previous cue's tail, which narrates the
@@ -127,7 +131,11 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("removed");
-    expect(volumeNear(subtracted, PLATE_WITH_HOLE_VOLUME)).toBe(true);
+    // The boolean output absorbs its operands, and the boot plate rides
+    // beside it (the s16d document-scene pin).
+    expect(
+      volumeNear(subtracted, BOOT_PLATE_VOLUME + PLATE_WITH_HOLE_VOLUME),
+    ).toBe(true);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
@@ -137,8 +145,8 @@ export const chapter: ChapterModule = {
     await driver.step("union-boot");
     const unionBoot = await driver.arriveAtWorkbench("occt");
     expect(Number(unionBoot)).toBeGreaterThan(0);
-    await extrudeSketch(page, driver, "rectangle", 5, 15, 35, 55);
-    await extrudeSketch(page, driver, "rectangle", 35, 15, 65, 55);
+    await extrudeSketch(page, driver, "rectangle", 45, 15, 75, 55);
+    await extrudeSketch(page, driver, "rectangle", 75, 15, 105, 55);
 
     await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
     await driver.step("union-row");
@@ -153,7 +161,9 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("slab");
-    expect(volumeNear(united, PLATE_60_VOLUME)).toBe(true);
+    // The union absorbs both operands; the boot plate rides beside it
+    // (the s16e document-scene pin).
+    expect(volumeNear(united, BOOT_PLATE_VOLUME + PLATE_60_VOLUME)).toBe(true);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 

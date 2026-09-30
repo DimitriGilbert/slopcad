@@ -18,6 +18,9 @@ import {
 
 /** The trimmed 10 × 20 patch and its 2 mm-thick sheet (session s17b). */
 const THICKENED_SHEET_VOLUME = 10 * 20 * 2;
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside the sheet bodies (the s17b pin). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 
 /**
  * Chapter 21 — the surface pipeline. A datum plane, two base sheets off
@@ -55,7 +58,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "thicken",
-        text: "Thicken gives the patch a 2 mm wall — 400 mm³, to the digit.",
+        text: "Thicken gives the patch a 2 mm wall — a real solid beside the plate.",
       },
       {
         stepId: "offset",
@@ -125,8 +128,11 @@ export const chapter: ChapterModule = {
       OCCT_ROOT,
       "Thicken sheet",
     );
+    // The document volume: the boot plate rides beside the sheet bodies
+    // (the s17b Phase 16 pin).
+    const thickenedDocument = BOOT_PLATE_VOLUME + THICKENED_SHEET_VOLUME;
     expect(
-      Math.abs(Number(thickened) - THICKENED_SHEET_VOLUME),
+      Math.abs(Number(thickened) - thickenedDocument),
       `thickened ${thickened}`,
     ).toBeLessThanOrEqual(THICKENED_SHEET_VOLUME * 0.002);
     await driver.step("thicken");

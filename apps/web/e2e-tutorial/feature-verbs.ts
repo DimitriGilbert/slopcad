@@ -155,14 +155,16 @@ export interface RodPlacement {
  * Draws and extrudes the ⌀6 rod (the session `drawAndExtrudeRod` step):
  * a circle through (center + 3, center), extruded at the default depth —
  * the base body the thread/rib/scale/pattern journeys stand on. The
- * default placement sits in the visible canvas band; the thread's
- * origin-pinned placement rides the pinned picks.
+ * default placement sits in the visible canvas band BESIDE the boot
+ * plate's footprint (the document scene renders the plate beside the rod —
+ * an overlapping rod would bury half its taught silhouette in the plate);
+ * the thread's origin-pinned placement rides the pinned picks.
  */
 export async function drawAndExtrudeRod(
   page: Page,
   driver: TutorialDriver,
   rootId: string,
-  placement: RodPlacement = { xMm: 10, yMm: 20 },
+  placement: RodPlacement = { xMm: 40, yMm: 20 },
 ): Promise<string> {
   await driver.enterSketchMode(rootId);
   await driver.activateSketchTool("circle");

@@ -17,6 +17,9 @@ import {
 
 /** The ⌀6 rod's analytic volume (the s14 family's base body). */
 const ROD_VOLUME = Math.PI * 9 * 10;
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside every shaped body (the s14 family pins). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 /** The 5°-taper frustum's analytic volume (session s14). */
 const DEG5 = (5 * Math.PI) / 180;
 const DRAFT_TOP_RADIUS = 3 - 10 * Math.tan(DEG5);
@@ -51,7 +54,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "frustum",
-        text: "A frustum, not a cylinder — the taper pin says ~208 mm³.",
+        text: "A frustum, not a cylinder — the taper lands beside the plate.",
       },
       {
         stepId: "flatten",
@@ -79,11 +82,11 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "eight",
-        text: "Factor 2 doubles each axis: volume × 8, exactly cubic.",
+        text: "Factor 2 doubles each axis — the rod's volume times eight.",
       },
       {
         stepId: "twenty-seven",
-        text: "Factor 3: × 27. Apply and watch the pin land.",
+        text: "Factor 3: the rod times 27. Apply and watch it land.",
       },
       {
         stepId: "recap",
@@ -121,7 +124,10 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("frustum");
-    expect(volumeNear(Number(drafted), DRAFT_VOLUME)).toBe(true);
+    // The boot plate rides beside the frustum (the s14 document-scene pin).
+    expect(volumeNear(Number(drafted), BOOT_PLATE_VOLUME + DRAFT_VOLUME)).toBe(
+      true,
+    );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
@@ -133,7 +139,7 @@ export const chapter: ChapterModule = {
       "0",
     );
     const flat = await applyFeatureEdit(page, driver, OCCT_ROOT);
-    expect(volumeNear(Number(flat), ROD_VOLUME)).toBe(true);
+    expect(volumeNear(Number(flat), BOOT_PLATE_VOLUME + ROD_VOLUME)).toBe(true);
     // The cue's taught beat is the flattened rod: point at the volume the
     // pin claims and hold it, then close the cue — the next flow's reset
     // never rides a result cue's tail as dead-air.
@@ -151,8 +157,8 @@ export const chapter: ChapterModule = {
     await driver.activateSketchTool("rectangle");
     // The session's section bar shifted with the rod (still crossing the
     // rod's footprint — the union the band pins): 10 wide, 1 tall.
-    await driver.clickCanvasPoint(5, 19.5);
-    await driver.clickCanvasPoint(15, 20.5);
+    await driver.clickCanvasPoint(35, 19.5);
+    await driver.clickCanvasPoint(45, 20.5);
     await saveSketchRecord(page, driver, OCCT_ROOT);
 
     await driver.step("rib-row");
@@ -164,9 +170,10 @@ export const chapter: ChapterModule = {
     const ribbed = Number(
       await createFeature(page, driver, OCCT_ROOT, "Create", "rib"),
     );
-    // The s14b union band: strictly more than the rod, at most 20 mm³ of rib.
-    expect(ribbed).toBeGreaterThan(ROD_VOLUME);
-    expect(ribbed).toBeLessThanOrEqual(ROD_VOLUME + 20);
+    // The s14b union band, document-scoped: strictly more than the rod,
+    // at most 20 mm³ of rib, with the boot plate riding beside (Phase 16).
+    expect(ribbed).toBeGreaterThan(BOOT_PLATE_VOLUME + ROD_VOLUME);
+    expect(ribbed).toBeLessThanOrEqual(BOOT_PLATE_VOLUME + ROD_VOLUME + 20);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
 
     await driver.step("rib-edit");
@@ -200,7 +207,12 @@ export const chapter: ChapterModule = {
       "Create",
       "scale",
     );
-    expect(volumeNear(Number(scaled), ROD_VOLUME * 8)).toBe(true);
+    // The scale feature rebuilds its base into its own output body (the
+    // s14c semantics), and the boot plate is NOT scaled — it rides beside
+    // (the Phase 16 document scene).
+    expect(volumeNear(Number(scaled), BOOT_PLATE_VOLUME + ROD_VOLUME * 8)).toBe(
+      true,
+    );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
 
     await driver.step("twenty-seven");
@@ -211,7 +223,9 @@ export const chapter: ChapterModule = {
       "3",
     );
     const bigger = await applyFeatureEdit(page, driver, OCCT_ROOT);
-    expect(volumeNear(Number(bigger), ROD_VOLUME * 27)).toBe(true);
+    expect(
+      volumeNear(Number(bigger), BOOT_PLATE_VOLUME + ROD_VOLUME * 27),
+    ).toBe(true);
 
     await driver.step("recap");
     await driver.dwell(1_200);

@@ -28,6 +28,10 @@ const TUTORIAL_USER = {
 /** The pad the chapter models between its two saves (the s26b anchor). */
 const PAD_VOLUME =
   (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * EXTRUDE_DEFAULT_DEPTH_MM;
+/** The boot plate's analytic volume — the document workbench boots the
+ * same fixture-plate session, and the document scene renders the plate
+ * beside the pad (the s26b pin). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 
 /**
  * Chapter 30 — projects and versions, the whole persistence loop: a fresh
@@ -82,7 +86,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "extrude",
-        text: "Extrude lands the pad — three thousand cubic millimeters.",
+        text: "Extrude lands the pad — it rises beside the boot plate.",
       },
       {
         stepId: "save-v2",
@@ -224,7 +228,11 @@ export const chapter: ChapterModule = {
     const extruded = await waitForRootSettle(page, WORKBENCH_ROOT, {
       afterDispatch: before,
     });
-    expect(volumeNear(Number(extruded), PAD_VOLUME)).toBe(true);
+    // The projects route boots the same fixture-plate session, and the
+    // document scene renders the plate beside the new pad (the s26b pin).
+    expect(volumeNear(Number(extruded), BOOT_PLATE_VOLUME + PAD_VOLUME)).toBe(
+      true,
+    );
     await driver.pointAtReadout(page.locator(VOLUME_READOUT));
     await driver.dwell();
 
@@ -243,7 +251,11 @@ export const chapter: ChapterModule = {
       "extrude",
     );
     const reopened = await waitForRootSettle(page, WORKBENCH_ROOT);
-    expect(volumeNear(Number(reopened), PAD_VOLUME)).toBe(true);
+    // The persisted document restores its content — plate beside pad, the
+    // same document volume (the s26b pin).
+    expect(volumeNear(Number(reopened), BOOT_PLATE_VOLUME + PAD_VOLUME)).toBe(
+      true,
+    );
     const featureRow = page.locator(
       `[data-slot="cad-model-tree"] [data-node-key="feature|feat_extrude"]`,
     );

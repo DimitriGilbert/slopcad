@@ -3,23 +3,21 @@ import { expect } from "@playwright/test";
 import type { TutorialDriver } from "../driver";
 import type { ChapterModule } from "../narration";
 
-import {
-  dispatchedCount,
-  faceWithNormal,
-  readFaceAnchors,
-} from "../../e2e-render/helpers";
+import { dispatchedCount, readFaceAnchors } from "../../e2e-render/helpers";
 import {
   COMPLETE,
   COMPLETE_ROOT,
-  RECT,
   VIEWPORT_COMPLETE,
   volumeNear,
   waitForRootSettle,
 } from "../../e2e-session/helpers";
 import { applyFeatureEdit, fillLabeledField } from "../feature-verbs";
 
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside every pad (the s07 pins). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 /** The pad's analytic volume at the sketch extrude's default depth (s07). */
-const BASE_VOLUME = (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * 10;
+const BASE_VOLUME = 20 * 15 * 10;
 
 /**
  * Chapter 12 — building on the solid itself. The base pad from Chapter 3,
@@ -61,7 +59,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "doubles",
-        text: "The document settles at exactly twice the base volume.",
+        text: "The pad doubles — the readout adds it to plate and base.",
       },
       {
         stepId: "edit",
@@ -84,8 +82,12 @@ export const chapter: ChapterModule = {
     expect(Number(bootVolume)).toBeGreaterThan(0);
     await driver.enterSketchMode();
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(RECT.x0, RECT.y0);
-    await driver.clickCanvasPoint(RECT.x1, RECT.y1);
+    // The base rectangle parked at x ∈ [40,60] — beside the boot plate's
+    // footprint (the session s07 re-baseline: the document scene renders
+    // the plate beside the pad, and an overlapping pad would put the two
+    // top faces coplanar — the face pick could not distinguish them).
+    await driver.clickCanvasPoint(40, 10);
+    await driver.clickCanvasPoint(60, 25);
     const before = await dispatchedCount(page, COMPLETE_ROOT);
     await driver.humanClick(page.locator('[data-testid="sketch-extrude"]'));
     await expect(page.locator(COMPLETE)).toHaveAttribute(
@@ -95,13 +97,34 @@ export const chapter: ChapterModule = {
     const base = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: before,
     });
-    expect(volumeNear(Number(base), BASE_VOLUME)).toBe(true);
+    // The document scene renders the boot plate beside the base pad
+    // (the Phase 16 s07 pin).
+    expect(volumeNear(Number(base), BOOT_PLATE_VOLUME + BASE_VOLUME)).toBe(
+      true,
+    );
 
     await driver.step("top-face");
     // The published anchor surface names the top face in viewport pixels
-    // (s07's discipline — the semantic pick, not a triangle index).
+    // (s07's discipline — the semantic pick, not a triangle index). The
+    // document scene carries the plate's faces too, so the search filters
+    // to the base extrusion's own top face — exactly one exists.
     const anchors = await readFaceAnchors(page, COMPLETE_ROOT);
-    const top = faceWithNormal(anchors, [0, 0, 1]);
+    const topMatches = Object.entries(anchors).filter(([key, anchor]) => {
+      if (!key.startsWith("body_extrude/")) return false;
+      if (anchor.normal === null) return false;
+      return (
+        Math.abs(anchor.normal[0]) <= 0.05 &&
+        Math.abs(anchor.normal[1]) <= 0.05 &&
+        Math.abs(anchor.normal[2] - 1) <= 0.05
+      );
+    });
+    expect(topMatches.length, "exactly one top face on the base pad").toBe(1);
+    const topEntry = topMatches[0];
+    if (topEntry === undefined) throw new Error("unreachable: top asserted");
+    const top = {
+      faceIndex: Number(topEntry[0].split("/")[1]),
+      anchor: topEntry[1],
+    };
     const canvas = await page
       .locator(`#${VIEWPORT_COMPLETE} canvas`)
       .boundingBox();
@@ -137,8 +160,10 @@ export const chapter: ChapterModule = {
 
     await driver.step("draw");
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(RECT.x0, RECT.y0);
-    await driver.clickCanvasPoint(RECT.x1, RECT.y1);
+    // The on-face rectangle rides the face datum's own workplane (the s07
+    // draw — face-local coordinates, the base pad's footprint).
+    await driver.clickCanvasPoint(10, 10);
+    await driver.clickCanvasPoint(30, 25);
     const beforePad = await dispatchedCount(page, COMPLETE_ROOT);
     await driver.humanClick(page.locator('[data-testid="sketch-extrude"]'));
     await expect(page.locator(COMPLETE)).toHaveAttribute(
@@ -148,7 +173,11 @@ export const chapter: ChapterModule = {
     const padded = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: beforePad,
     });
-    expect(volumeNear(Number(padded), BASE_VOLUME * 2)).toBe(true);
+    // The pad composition unions base + pad (the base body is absorbed);
+    // the document scene renders the boot plate beside them (the s07 pin).
+    expect(
+      volumeNear(Number(padded), BOOT_PLATE_VOLUME + BASE_VOLUME * 2),
+    ).toBe(true);
 
     await driver.step("doubles");
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
@@ -165,8 +194,10 @@ export const chapter: ChapterModule = {
 
     await driver.step("follows");
     // The s07 pins: base + a 15 mm pad is 2.5 × base, and the datum's
-    // origin rides the driving face to z = 15.
-    expect(volumeNear(Number(edited), BASE_VOLUME * 2.5)).toBe(true);
+    // origin rides the driving face to z = 15. The plate rides beside.
+    expect(
+      volumeNear(Number(edited), BOOT_PLATE_VOLUME + BASE_VOLUME * 2.5),
+    ).toBe(true);
     const datums = JSON.parse(
       (await page.locator(COMPLETE).getAttribute("data-datums")) ?? "[]",
     ) as { resolved: boolean; origin: readonly [number, number, number] }[];

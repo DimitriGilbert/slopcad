@@ -19,6 +19,9 @@ import {
 
 /** The ⌀6 rod's analytic volume (session s13b's base). */
 const ROD_VOLUME = Math.PI * 9 * 10;
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside the threaded rod (the s13b pin). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 /** The ISO thread's derived tool volume (session s13b's band anchors). */
 const ISO_THREAD_DEPTH_MM = (5 * Math.sqrt(3)) / 16;
 const GROOVE_CENTROID_OFFSET_MM =
@@ -105,10 +108,16 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("band");
-    // The s13b containment band: the tool's full cut at most, 83 % at least.
-    expect(threaded).toBeGreaterThanOrEqual(ROD_VOLUME - THREAD_TOOL_VOLUME);
+    // The s13b containment band, document-scoped: the thread output
+    // absorbs its base (the threaded rod is one body) and the boot plate
+    // rides beside it (Phase 16) — the tool's full cut at most, 83 % at
+    // least of the plate + rod document.
+    const threadDocument = BOOT_PLATE_VOLUME + ROD_VOLUME;
+    expect(threaded).toBeGreaterThanOrEqual(
+      threadDocument - THREAD_TOOL_VOLUME,
+    );
     expect(threaded).toBeLessThanOrEqual(
-      ROD_VOLUME - THREAD_TOOL_VOLUME * 0.83,
+      threadDocument - THREAD_TOOL_VOLUME * 0.83,
     );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();

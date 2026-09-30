@@ -16,6 +16,9 @@ import {
  * pitch-radius meridian, corrected by the ruled-surface factor. */
 const RULED_BAND = Math.sin(0.1) / 0.1;
 const HELIX_OCCT = 2 * Math.PI * 3 * 3 * 11 * RULED_BAND;
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside the coil (the s13 pin). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 
 /**
  * Chapter 15 — the helix. A tiny meridian rectangle beside the axis, the
@@ -102,10 +105,12 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("coil");
-    // The s13 band: the OCCT coil within 0.2 % of the derived screw.
-    expect(Math.abs(Number(helical) - HELIX_OCCT) / HELIX_OCCT).toBeLessThan(
-      2e-3,
-    );
+    // The s13 band, document-scoped: the OCCT coil within 0.2 % of the
+    // derived screw, with the boot plate riding beside it (Phase 16).
+    const coilDocument = BOOT_PLATE_VOLUME + HELIX_OCCT;
+    expect(
+      Math.abs(Number(helical) - coilDocument) / coilDocument,
+    ).toBeLessThan(2e-3);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
 
     await driver.step("recap");

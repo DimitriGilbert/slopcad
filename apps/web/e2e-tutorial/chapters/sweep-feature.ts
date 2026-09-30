@@ -11,6 +11,9 @@ import {
   saveSketchRecord,
 } from "../feature-verbs";
 
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside the swept tube (the s12 pin). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 /** The swept tube's analytic volume: the 20 × 20 profile × the 40 mm spine. */
 const SWEEP_VOLUME = 20 * 20 * 40;
 
@@ -58,7 +61,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "tube",
-        text: "The tube lands on the analytic pin: 20 × 20 × 40 mm³.",
+        text: "The tube lands on its analytic pin, beside the boot plate.",
       },
       {
         stepId: "timeline",
@@ -88,11 +91,13 @@ export const chapter: ChapterModule = {
     await driver.step("profile");
     // The session's ±10 square shifted into the visible canvas band (the
     // status bar and the surface's clipped bottom band cover workplane
-    // y below roughly 5 mm): the same 20 × 20 area, so the same analytic pin.
+    // y below roughly 5 mm) and clear of the boot plate's footprint: the
+    // same 20 × 20 area, so the same analytic pin — the sweep relocates
+    // the profile onto the path regardless.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(5, 15);
-    await driver.clickCanvasPoint(25, 35);
+    await driver.clickCanvasPoint(45, 15);
+    await driver.clickCanvasPoint(65, 35);
     await saveSketchRecord(page, driver, OCCT_ROOT);
 
     await driver.step("spine-start");
@@ -128,8 +133,11 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("tube");
-    // The s12 pin: the profile's area × the spine's length, exactly.
-    expect(volumeNear(Number(swept), SWEEP_VOLUME)).toBe(true);
+    // The s12 pin: the profile's area × the spine's length, exactly — and
+    // the document scene renders the boot plate beside the tube (Phase 16).
+    expect(volumeNear(Number(swept), BOOT_PLATE_VOLUME + SWEEP_VOLUME)).toBe(
+      true,
+    );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
 
     await driver.step("timeline");

@@ -4,71 +4,71 @@
       "id": "home-tour",
       "title": "The front door",
       "summary": "What slopcad is, what the home page shows you, and where the workbench lives.",
-      "start": 0.064,
-      "end": 14.798,
+      "start": 0.066,
+      "end": 14.786,
       "cues": [
         {
           "id": "home-tour/welcome",
           "stepId": "welcome",
           "text": "Welcome to slopcad. Before any modeling, a quick map of where everything lives.",
-          "start": 0.236,
-          "end": 1.441
+          "start": 0.237,
+          "end": 1.443
         },
         {
           "id": "home-tour/claim",
           "stepId": "claim",
           "text": "The headline is the promise: parametric CAD whose document always tells the truth.",
-          "start": 1.441,
-          "end": 2.7
+          "start": 1.443,
+          "end": 2.702
         },
         {
           "id": "home-tour/live-viewport",
           "stepId": "live-viewport",
           "text": "The right panel renders the guide plate live — your browser is the CAD engine.",
-          "start": 2.7,
-          "end": 4.281
+          "start": 2.702,
+          "end": 4.283
         },
         {
           "id": "home-tour/cta",
           "stepId": "cta",
           "text": "This button, Open the workbench, is the door to the modeling cockpit.",
-          "start": 4.281,
-          "end": 6.099
+          "start": 4.283,
+          "end": 6.101
         },
         {
           "id": "home-tour/cards",
           "stepId": "cards",
           "text": "Three cards below index the app: Workbench, Components, and Docs.",
-          "start": 6.099,
-          "end": 8.463
+          "start": 6.101,
+          "end": 8.467
         },
         {
           "id": "home-tour/components-card",
           "stepId": "components-card",
           "text": "Components opens reusable parametric parts, rebuilt live by the kernel.",
-          "start": 8.463,
-          "end": 9.714
+          "start": 8.467,
+          "end": 9.717
         },
         {
           "id": "home-tour/docs-card",
           "stepId": "docs-card",
           "text": "Docs holds every guide, generated from the constants the test gates prove.",
-          "start": 9.714,
-          "end": 10.964
+          "start": 9.717,
+          "end": 10.966
         },
         {
           "id": "home-tour/api-light",
           "stepId": "api-light",
           "text": "The dot beside the buttons is the API light. Green means the server answers.",
-          "start": 10.964,
-          "end": 12.367
+          "start": 10.966,
+          "end": 12.355
         },
         {
           "id": "home-tour/enter",
           "stepId": "enter",
           "text": "Come through the door. The workbench loads the boot plate document.",
-          "start": 12.367,
-          "end": 14.798
+          "start": 12.355,
+          "end": 14.786
         }
       ]
     },
@@ -76,78 +76,78 @@
       "id": "sketch-workspace",
       "title": "Drawing your first sketch",
       "summary": "Entering the sketch workspace through the command menu, the drawing tools, and saving a rectangle.",
-      "start": 14.832,
-      "end": 30.611,
+      "start": 14.834,
+      "end": 30.566,
       "cues": [
         {
           "id": "sketch-workspace/cockpit",
           "stepId": "cockpit",
           "text": "The cockpit: toolbar on top, model tree left, timeline strip below.",
-          "start": 14.838,
-          "end": 18.193
+          "start": 14.84,
+          "end": 18.175
         },
         {
           "id": "sketch-workspace/menu",
           "stepId": "menu",
           "text": "Every command hides behind this menu button. Click it to open the palette.",
-          "start": 18.193,
-          "end": 19.401
+          "start": 18.175,
+          "end": 19.382
         },
         {
           "id": "sketch-workspace/palette",
           "stepId": "palette",
           "text": "The palette lists every verb the workbench ships. A row runs on click.",
-          "start": 19.401,
-          "end": 20.608
+          "start": 19.382,
+          "end": 20.591
         },
         {
           "id": "sketch-workspace/sketch-row",
           "stepId": "sketch-row",
           "text": "Find the Sketch row and click it: it opens the 2D drawing workspace.",
-          "start": 20.608,
-          "end": 21.815
+          "start": 20.591,
+          "end": 21.8
         },
         {
           "id": "sketch-workspace/workspace",
           "stepId": "workspace",
           "text": "Sketch mode: a gridded canvas replaces the 3D view. Squares are 10 mm.",
-          "start": 21.815,
-          "end": 23.024
+          "start": 21.8,
+          "end": 23.01
         },
         {
           "id": "sketch-workspace/tools",
           "stepId": "tools",
           "text": "The first cluster holds the drawing tools: line, circle, rectangle, point.",
-          "start": 23.024,
-          "end": 25.44
+          "start": 23.01,
+          "end": 25.422
         },
         {
           "id": "sketch-workspace/arm-rectangle",
           "stepId": "arm-rectangle",
           "text": "Click the rectangle tool to arm it. The status strip confirms the tool.",
-          "start": 25.44,
-          "end": 26.647
+          "start": 25.422,
+          "end": 26.63
         },
         {
           "id": "sketch-workspace/first-corner",
           "stepId": "first-corner",
           "text": "Click once to drop the first corner. The grid reads out in millimeters.",
-          "start": 26.647,
-          "end": 28.198
+          "start": 26.63,
+          "end": 28.15
         },
         {
           "id": "sketch-workspace/second-corner",
           "stepId": "second-corner",
           "text": "Click the opposite corner. The rectangle commits as one closed profile.",
-          "start": 28.198,
-          "end": 29.406
+          "start": 28.15,
+          "end": 29.358
         },
         {
           "id": "sketch-workspace/save",
           "stepId": "save",
           "text": "Save returns to the model. The sketch is now a record solid features use.",
-          "start": 29.406,
-          "end": 30.611
+          "start": 29.358,
+          "end": 30.566
         }
       ]
     },
@@ -155,71 +155,71 @@
       "id": "first-extrude",
       "title": "From profile to solid",
       "summary": "Turning a sketch into a 3D pad, reading the timeline, and undo/redo as the safety net.",
-      "start": 30.665,
-      "end": 45.931,
+      "start": 30.636,
+      "end": 45.965,
       "cues": [
         {
           "id": "first-extrude/fresh-plate",
           "stepId": "fresh-plate",
           "text": "Start from the fresh boot plate. Every session opens on this document.",
-          "start": 30.669,
-          "end": 33.911
+          "start": 30.636,
+          "end": 33.877
         },
         {
           "id": "first-extrude/sketch-button",
           "stepId": "sketch-button",
           "text": "The Sketch button in the top bar is the second door into the workspace.",
-          "start": 33.911,
-          "end": 35.445
+          "start": 33.877,
+          "end": 35.411
         },
         {
           "id": "first-extrude/draw-again",
           "stepId": "draw-again",
-          "text": "Same rectangle as before: arm the tool, then one click per corner.",
-          "start": 35.445,
-          "end": 38.052
+          "text": "The 20 by 15 rectangle again: arm the tool, one click per corner.",
+          "start": 35.411,
+          "end": 38.013
         },
         {
           "id": "first-extrude/extrude",
           "stepId": "extrude",
           "text": "With a closed profile in place, Extrude turns the sketch into a solid.",
-          "start": 38.052,
-          "end": 39.257
+          "start": 38.013,
+          "end": 39.296
         },
         {
           "id": "first-extrude/the-pad",
           "stepId": "the-pad",
           "text": "The pad rises at the default depth of ten millimeters, back in 3D.",
-          "start": 39.257,
-          "end": 40.465
+          "start": 39.296,
+          "end": 40.503
         },
         {
           "id": "first-extrude/timeline",
           "stepId": "timeline",
           "text": "The timeline is the recipe: translate, rotate, extrude. Every chip is editable.",
-          "start": 40.465,
-          "end": 42.288
+          "start": 40.503,
+          "end": 42.324
         },
         {
           "id": "first-extrude/undo",
           "stepId": "undo",
           "text": "Undo removes the pad. The document falls back to the plate, nothing lost.",
-          "start": 42.288,
-          "end": 43.513
+          "start": 42.324,
+          "end": 43.543
         },
         {
           "id": "first-extrude/redo",
           "stepId": "redo",
           "text": "Redo brings the pad straight back. History is the safety net while you explore.",
-          "start": 43.513,
-          "end": 44.723
+          "start": 43.543,
+          "end": 44.755
         },
         {
           "id": "first-extrude/loop",
           "stepId": "loop",
           "text": "That is the core loop: sketch a profile, extrude it, then edit via history.",
-          "start": 44.723,
-          "end": 45.931
+          "start": 44.755,
+          "end": 45.965
         }
       ]
     },
@@ -227,71 +227,71 @@
       "id": "base-tools",
       "title": "The base tools",
       "summary": "Select, Measure, and Rotate in the toolbar, the digit shortcuts, and Escape to cancel.",
-      "start": 45.961,
-      "end": 62.537,
+      "start": 45.994,
+      "end": 69.704,
       "cues": [
         {
           "id": "base-tools/strip",
           "stepId": "strip",
           "text": "Three verbs live beside the document plate: Select, Measure, Rotate.",
-          "start": 45.961,
-          "end": 50.885
+          "start": 45.994,
+          "end": 58.023
         },
         {
           "id": "base-tools/digits",
           "stepId": "digits",
           "text": "Each button wears its digit. One, two, three arm the tools in order.",
-          "start": 50.885,
-          "end": 52.52
+          "start": 58.023,
+          "end": 59.692
         },
         {
           "id": "base-tools/status",
           "stepId": "status",
           "text": "The status bar echoes the live tool: tool = select (active).",
-          "start": 52.52,
-          "end": 54.273
+          "start": 59.692,
+          "end": 61.441
         },
         {
           "id": "base-tools/arm-measure",
           "stepId": "arm-measure",
           "text": "Click Measure. The button stays pressed while the tool is live.",
-          "start": 54.273,
-          "end": 55.527
+          "start": 61.441,
+          "end": 62.705
         },
         {
           "id": "base-tools/status-flip",
           "stepId": "status-flip",
           "text": "The status bar flips too: tool = measure (active).",
-          "start": 55.527,
-          "end": 57.403
+          "start": 62.705,
+          "end": 64.573
         },
         {
           "id": "base-tools/cancel",
           "stepId": "cancel",
           "text": "Escape cancels a live tool. Focus the viewport, then press it.",
-          "start": 57.403,
-          "end": 58.613
+          "start": 64.573,
+          "end": 65.78
         },
         {
           "id": "base-tools/arm-rotate",
           "stepId": "arm-rotate",
           "text": "Rotate arms the same way — click it and the pressed state moves.",
-          "start": 58.613,
-          "end": 59.82
+          "start": 65.78,
+          "end": 66.988
         },
         {
           "id": "base-tools/shortcut",
           "stepId": "shortcut",
           "text": "Now the shortcut: with the toolbar focused, press the digit.",
-          "start": 59.82,
-          "end": 61.027
+          "start": 66.988,
+          "end": 68.195
         },
         {
           "id": "base-tools/recap",
           "stepId": "recap",
           "text": "Any tool, any time: click it, press its digit, or Escape away.",
-          "start": 61.027,
-          "end": 62.537
+          "start": 68.195,
+          "end": 69.704
         }
       ]
     },
@@ -299,71 +299,71 @@
       "id": "selection-inspect",
       "title": "Selecting and inspecting",
       "summary": "Picking a body, reading the Properties and Measurement panels, and editing a parameter.",
-      "start": 62.564,
-      "end": 86.635,
+      "start": 69.734,
+      "end": 93.821,
       "cues": [
         {
           "id": "selection-inspect/right-rail",
           "stepId": "right-rail",
           "text": "The right rail: Properties, Parameters, then the Measurement block.",
-          "start": 62.565,
-          "end": 69.854
+          "start": 69.735,
+          "end": 77.037
         },
         {
           "id": "selection-inspect/nothing",
           "stepId": "nothing",
           "text": "With nothing selected, the Properties panel says so — honestly.",
-          "start": 69.854,
-          "end": 72.085
+          "start": 77.037,
+          "end": 79.274
         },
         {
           "id": "selection-inspect/pick-body",
           "stepId": "pick-body",
           "text": "In the model tree, click the plate body. It lights up selected.",
-          "start": 72.085,
-          "end": 73.807
+          "start": 79.274,
+          "end": 81.008
         },
         {
           "id": "selection-inspect/properties",
           "stepId": "properties",
           "text": "Properties answers: name, id, kind — and the feature that produces it.",
-          "start": 73.807,
-          "end": 76.02
+          "start": 81.008,
+          "end": 83.225
         },
         {
           "id": "selection-inspect/measurement",
           "stepId": "measurement",
           "text": "Measurement reads the solid live: bounds, volume, area.",
-          "start": 76.02,
-          "end": 78.555
+          "start": 83.225,
+          "end": 85.756
         },
         {
           "id": "selection-inspect/parameters",
           "stepId": "parameters",
           "text": "Parameters holds the driving numbers. Find holeDiameter — 8 today.",
-          "start": 78.555,
-          "end": 80.773
+          "start": 85.756,
+          "end": 87.974
         },
         {
           "id": "selection-inspect/edit",
           "stepId": "edit",
           "text": "Click the field, select all, type 10, then Apply.",
-          "start": 80.773,
-          "end": 81.981
+          "start": 87.974,
+          "end": 89.178
         },
         {
           "id": "selection-inspect/follow",
           "stepId": "follow",
           "text": "The bore widens on screen and the volume drops. Geometry follows.",
-          "start": 81.981,
-          "end": 84.221
+          "start": 89.178,
+          "end": 91.404
         },
         {
           "id": "selection-inspect/valid",
           "stepId": "valid",
           "text": "The timeline summary still reads 2 valid — the edit re-ran cleanly.",
-          "start": 84.221,
-          "end": 86.635
+          "start": 91.404,
+          "end": 93.821
         }
       ]
     },
@@ -371,85 +371,85 @@
       "id": "undo-redo-rollback",
       "title": "Undo, redo, and rollback",
       "summary": "The history buttons, the timeline's rollback points, and clearing a selection.",
-      "start": 86.664,
-      "end": 111.012,
+      "start": 93.849,
+      "end": 118.352,
       "cues": [
         {
           "id": "undo-redo-rollback/build",
           "stepId": "build",
           "text": "One quick pad gives the history something to walk. Sketch, draw, extrude.",
-          "start": 86.665,
-          "end": 94.647
+          "start": 93.849,
+          "end": 102.017
         },
         {
           "id": "undo-redo-rollback/history-buttons",
           "stepId": "history-buttons",
           "text": "The History group holds Undo and Redo — the document's cursor.",
-          "start": 94.647,
-          "end": 96.291
+          "start": 102.017,
+          "end": 103.653
         },
         {
           "id": "undo-redo-rollback/undo",
           "stepId": "undo",
           "text": "Undo: the pad leaves, the timeline falls back a chip.",
-          "start": 96.291,
-          "end": 97.514
+          "start": 103.653,
+          "end": 104.867
         },
         {
           "id": "undo-redo-rollback/redo",
           "stepId": "redo",
           "text": "Redo brings it straight back — no rework, no loss.",
-          "start": 97.514,
-          "end": 98.726
+          "start": 104.867,
+          "end": 106.08
         },
         {
           "id": "undo-redo-rollback/gaps",
           "stepId": "gaps",
           "text": "Between the timeline chips sit gaps — each a rollback point.",
-          "start": 98.726,
-          "end": 100.889
+          "start": 106.08,
+          "end": 108.241
         },
         {
           "id": "undo-redo-rollback/set-rollback",
           "stepId": "set-rollback",
           "text": "Click the gap after translate. The marker drops in.",
-          "start": 100.889,
-          "end": 102.099
+          "start": 108.241,
+          "end": 109.449
         },
         {
           "id": "undo-redo-rollback/parked",
           "stepId": "parked",
           "text": "Everything after the marker parks — dashed, out of the recipe.",
-          "start": 102.099,
-          "end": 103.314
+          "start": 109.449,
+          "end": 110.656
         },
         {
           "id": "undo-redo-rollback/clear-rollback",
           "stepId": "clear-rollback",
           "text": "The command menu's History group: Remove rollback point.",
-          "start": 103.314,
-          "end": 105.357
+          "start": 110.656,
+          "end": 112.739
         },
         {
           "id": "undo-redo-rollback/recovers",
           "stepId": "recovers",
           "text": "The chain re-executes — 3 valid — and the pad is back.",
-          "start": 105.357,
-          "end": 106.564
+          "start": 112.739,
+          "end": 113.948
         },
         {
           "id": "undo-redo-rollback/pick-body",
           "stepId": "pick-body",
           "text": "One more history verb: pick the plate body in the tree.",
-          "start": 106.564,
-          "end": 107.774
+          "start": 113.948,
+          "end": 115.16
         },
         {
           "id": "undo-redo-rollback/clear-selection",
           "stepId": "clear-selection",
           "text": "Clear selection — the menu's deselect — empties the panels again.",
-          "start": 107.774,
-          "end": 111.012
+          "start": 115.16,
+          "end": 118.352
         }
       ]
     },
@@ -457,71 +457,71 @@
       "id": "delete-and-history",
       "title": "Deleting features",
       "summary": "Upstream features refuse deletion; leaves delete; undo restores them exactly.",
-      "start": 111.041,
-      "end": 136.126,
+      "start": 118.392,
+      "end": 136.446,
       "cues": [
         {
           "id": "delete-and-history/recipe",
           "stepId": "recipe",
           "text": "The boot plate is a recipe: translate, then rotate, both feeding the plate.",
-          "start": 111.041,
-          "end": 122.265
+          "start": 118.392,
+          "end": 122.501
         },
         {
           "id": "delete-and-history/pick-upstream",
           "stepId": "pick-upstream",
           "text": "Select the translate feature — the upstream step — in the tree.",
-          "start": 122.265,
-          "end": 123.623
+          "start": 122.501,
+          "end": 123.862
         },
         {
           "id": "delete-and-history/delete-action",
           "stepId": "delete-action",
           "text": "Properties shows a Delete feature action for the selected feature.",
-          "start": 123.623,
-          "end": 125.987
+          "start": 123.862,
+          "end": 126.238
         },
         {
           "id": "delete-and-history/refusal",
           "stepId": "refusal",
           "text": "Click it — and the domain refuses: rotate references this feature.",
-          "start": 125.987,
-          "end": 127.195
+          "start": 126.238,
+          "end": 127.448
         },
         {
           "id": "delete-and-history/refusal-honest",
           "stepId": "refusal-honest",
           "text": "The refusal is verbatim, and nothing was issued — the log stands.",
-          "start": 127.195,
-          "end": 128.403
+          "start": 127.448,
+          "end": 128.656
         },
         {
           "id": "delete-and-history/pick-leaf",
           "stepId": "pick-leaf",
           "text": "Now the leaf: select the rotate feature.",
-          "start": 128.403,
-          "end": 130.175
+          "start": 128.656,
+          "end": 130.428
         },
         {
           "id": "delete-and-history/delete-leaf",
           "stepId": "delete-leaf",
           "text": "Delete feature commits. The timeline falls to translate alone.",
-          "start": 130.175,
-          "end": 131.988
+          "start": 130.428,
+          "end": 132.29
         },
         {
           "id": "delete-and-history/recompute",
           "stepId": "recompute",
           "text": "The document recomputes: the plate now depends on translate alone.",
-          "start": 131.988,
-          "end": 133.751
+          "start": 132.29,
+          "end": 134.051
         },
         {
           "id": "delete-and-history/undo",
           "stepId": "undo",
           "text": "Undo restores the leaf exactly — deletes are history too.",
-          "start": 133.751,
-          "end": 136.126
+          "start": 134.051,
+          "end": 136.446
         }
       ]
     },
@@ -529,78 +529,78 @@
       "id": "display-modes",
       "title": "Display modes and the zoom window",
       "summary": "Shaded, +Edges, Wire, and Hidden — plus dragging a zoom window.",
-      "start": 136.149,
-      "end": 152.349,
+      "start": 136.479,
+      "end": 159.77,
       "cues": [
         {
           "id": "display-modes/panel",
           "stepId": "panel",
           "text": "The view panel sits bottom-right: navigation above, display below.",
-          "start": 136.149,
-          "end": 140.953
+          "start": 136.48,
+          "end": 148.388
         },
         {
           "id": "display-modes/shaded",
           "stepId": "shaded",
           "text": "Shaded is the boot mode — solid faces, lit, no edges.",
-          "start": 140.953,
-          "end": 142.161
+          "start": 148.388,
+          "end": 149.596
         },
         {
           "id": "display-modes/edges",
           "stepId": "edges",
           "text": "Click +Edges: the model's edges overlay the faces.",
-          "start": 142.161,
-          "end": 143.367
+          "start": 149.596,
+          "end": 150.803
         },
         {
           "id": "display-modes/wire",
           "stepId": "wire",
           "text": "Wire strips to edges alone — pure topology.",
-          "start": 143.367,
-          "end": 144.575
+          "start": 150.803,
+          "end": 152.012
         },
         {
           "id": "display-modes/hidden",
           "stepId": "hidden",
           "text": "Hidden-line gives the technical-drawing look.",
-          "start": 144.575,
-          "end": 145.784
+          "start": 152.012,
+          "end": 153.219
         },
         {
           "id": "display-modes/back-to-shaded",
           "stepId": "back-to-shaded",
           "text": "Back to Shaded for the rest of the tour.",
-          "start": 145.784,
-          "end": 146.994
+          "start": 153.219,
+          "end": 154.431
         },
         {
           "id": "display-modes/front",
           "stepId": "front",
           "text": "Set a standard view first — Front — then arm the zoom window.",
-          "start": 146.994,
-          "end": 148.205
+          "start": 154.431,
+          "end": 155.638
         },
         {
           "id": "display-modes/arm",
           "stepId": "arm",
           "text": "The magnifier arms the zoom window — the viewport says how.",
-          "start": 148.205,
-          "end": 149.411
+          "start": 155.638,
+          "end": 156.844
         },
         {
           "id": "display-modes/drag",
           "stepId": "drag",
           "text": "Drag a box over the plate. Release to commit.",
-          "start": 149.411,
-          "end": 151.11
+          "start": 156.844,
+          "end": 158.527
         },
         {
           "id": "display-modes/zoomed",
           "stepId": "zoomed",
           "text": "The camera halves its distance — the model fills the window.",
-          "start": 151.11,
-          "end": 152.349
+          "start": 158.527,
+          "end": 159.77
         }
       ]
     },
@@ -608,92 +608,92 @@
       "id": "camera-views",
       "title": "The camera: orbit, views, fit",
       "summary": "Orbiting by drag, the standard views, first and third-angle, fit, and look-at.",
-      "start": 152.379,
-      "end": 172.958,
+      "start": 159.798,
+      "end": 187.464,
       "cues": [
         {
           "id": "camera-views/spec-view",
           "stepId": "spec-view",
           "text": "The camera opens on the document's spec view. Drag the canvas to orbit.",
-          "start": 152.379,
-          "end": 156.624
+          "start": 159.799,
+          "end": 171.123
         },
         {
           "id": "camera-views/orbited",
           "stepId": "orbited",
           "text": "You own the camera now — the tiny cube tracks your corner.",
-          "start": 156.624,
-          "end": 157.831
+          "start": 171.123,
+          "end": 172.33
         },
         {
           "id": "camera-views/reset",
           "stepId": "reset",
           "text": "The reset arrow returns the camera to the document spec.",
-          "start": 157.831,
-          "end": 159.04
+          "start": 172.33,
+          "end": 173.539
         },
         {
           "id": "camera-views/front",
           "stepId": "front",
           "text": "Front is exact: azimuth 270, elevation 0.",
-          "start": 159.04,
-          "end": 160.251
+          "start": 173.539,
+          "end": 174.749
         },
         {
           "id": "camera-views/top",
           "stepId": "top",
           "text": "Top looks straight down the z axis.",
-          "start": 160.251,
-          "end": 161.46
+          "start": 174.749,
+          "end": 175.961
         },
         {
           "id": "camera-views/iso",
           "stepId": "iso",
           "text": "Iso frames the near corner — the modeling default.",
-          "start": 161.46,
-          "end": 162.672
+          "start": 175.961,
+          "end": 177.17
         },
         {
           "id": "camera-views/convention",
           "stepId": "convention",
           "text": "The frame icon flips the drafting convention. Click it once.",
-          "start": 162.672,
-          "end": 163.881
+          "start": 177.17,
+          "end": 178.379
         },
         {
           "id": "camera-views/first-angle",
           "stepId": "first-angle",
           "text": "First-angle moves the iso corner by ninety degrees.",
-          "start": 163.881,
-          "end": 165.092
+          "start": 178.379,
+          "end": 179.588
         },
         {
           "id": "camera-views/back-third",
           "stepId": "back-third",
           "text": "Back to third-angle — the views keep their letters.",
-          "start": 165.092,
-          "end": 166.298
+          "start": 179.588,
+          "end": 180.794
         },
         {
           "id": "camera-views/fit",
           "stepId": "fit",
           "text": "Fit frames the model's bounds exactly.",
-          "start": 166.298,
-          "end": 167.508
+          "start": 180.794,
+          "end": 182.004
         },
         {
           "id": "camera-views/look-at-gated",
           "stepId": "look-at-gated",
           "text": "Look-at needs a selection — the crosshair is dim until one exists.",
-          "start": 167.508,
-          "end": 168.716
+          "start": 182.004,
+          "end": 183.212
         },
         {
           "id": "camera-views/look-at",
           "stepId": "look-at",
           "text": "Pick the plate in the tree, click the crosshair — the camera centers.",
-          "start": 168.716,
-          "end": 172.958
+          "start": 183.212,
+          "end": 187.464
         }
       ]
     },
@@ -701,71 +701,71 @@
       "id": "section-clipping",
       "title": "Section clipping",
       "summary": "Cutting the model at a plane and reading the true face it leaves.",
-      "start": 172.996,
-      "end": 188.466,
+      "start": 187.493,
+      "end": 202.962,
       "cues": [
         {
           "id": "section-clipping/block",
           "stepId": "block",
           "text": "The Measurement block ends in two small buttons: section, view cut.",
-          "start": 172.996,
-          "end": 178.483
+          "start": 187.493,
+          "end": 192.988
         },
         {
           "id": "section-clipping/select-body",
           "stepId": "select-body",
           "text": "Section rides a selected body. Pick the plate in the tree.",
-          "start": 178.483,
-          "end": 179.695
+          "start": 192.988,
+          "end": 194.198
         },
         {
           "id": "section-clipping/arm",
           "stepId": "arm",
           "text": "Click section. The clip plane sits at the plate's mid-height.",
-          "start": 179.695,
-          "end": 180.913
+          "start": 194.198,
+          "end": 195.404
         },
         {
           "id": "section-clipping/area",
           "stepId": "area",
           "text": "The Section row measures the true cut face: about 550 mm².",
-          "start": 180.913,
-          "end": 182.121
+          "start": 195.404,
+          "end": 196.612
         },
         {
           "id": "section-clipping/centroid",
           "stepId": "centroid",
           "text": "The centroid line gives the face's center: x 15, y 10, z 5.",
-          "start": 182.121,
-          "end": 183.329
+          "start": 196.612,
+          "end": 197.818
         },
         {
           "id": "section-clipping/view-cut",
           "stepId": "view-cut",
           "text": "View cut removes the kept half — cap faces close the solid.",
-          "start": 183.329,
-          "end": 184.535
+          "start": 197.818,
+          "end": 199.029
         },
         {
           "id": "section-clipping/halved",
           "stepId": "halved",
           "text": "The volume readout halves: you are looking inside the plate.",
-          "start": 184.535,
-          "end": 185.742
+          "start": 199.029,
+          "end": 200.237
         },
         {
           "id": "section-clipping/off",
           "stepId": "off",
           "text": "Toggle section off — the rows leave with the plane.",
-          "start": 185.742,
-          "end": 186.949
+          "start": 200.237,
+          "end": 201.447
         },
         {
           "id": "section-clipping/recap",
           "stepId": "recap",
           "text": "A section is a view state: measured, honest, and reversible.",
-          "start": 186.949,
-          "end": 188.466
+          "start": 201.447,
+          "end": 202.962
         }
       ]
     },
@@ -773,85 +773,85 @@
       "id": "appearance-and-lighting",
       "title": "Appearances and lighting",
       "summary": "Body appearances from the tree palette, the light rigs, and quality mode.",
-      "start": 188.499,
-      "end": 209.14,
+      "start": 202.986,
+      "end": 223.627,
       "cues": [
         {
           "id": "appearance-and-lighting/chip",
           "stepId": "chip",
           "text": "The palette dot on the plate's tree row opens appearances.",
-          "start": 188.499,
-          "end": 193.552
+          "start": 202.986,
+          "end": 208.038
         },
         {
           "id": "appearance-and-lighting/library",
           "stepId": "library",
           "text": "The library: steel, brass, copper, anodized blue, carbon, ceramic.",
-          "start": 193.552,
-          "end": 195.995
+          "start": 208.038,
+          "end": 210.468
         },
         {
           "id": "appearance-and-lighting/brass",
           "stepId": "brass",
           "text": "Click Brass.",
-          "start": 195.995,
-          "end": 197.214
+          "start": 210.468,
+          "end": 211.677
         },
         {
           "id": "appearance-and-lighting/applied",
           "stepId": "applied",
           "text": "The plate renders brass — and the chip carries its color.",
-          "start": 197.214,
-          "end": 199.105
+          "start": 211.677,
+          "end": 213.604
         },
         {
           "id": "appearance-and-lighting/clear",
           "stepId": "clear",
           "text": "None returns the scene default.",
-          "start": 199.105,
-          "end": 200.311
+          "start": 213.604,
+          "end": 214.811
         },
         {
           "id": "appearance-and-lighting/rigs",
           "stepId": "rigs",
           "text": "Lower in the view panel: three light rigs — Studio, North, Inspect.",
-          "start": 200.311,
-          "end": 202.728
+          "start": 214.811,
+          "end": 217.213
         },
         {
           "id": "appearance-and-lighting/inspect",
           "stepId": "inspect",
           "text": "Inspect is one hard light — flattening, but honest.",
-          "start": 202.728,
-          "end": 203.94
+          "start": 217.213,
+          "end": 218.422
         },
         {
           "id": "appearance-and-lighting/studio",
           "stepId": "studio",
           "text": "Studio wraps the model in soft, even light.",
-          "start": 203.94,
-          "end": 205.148
+          "start": 218.422,
+          "end": 219.633
         },
         {
           "id": "appearance-and-lighting/quality-pair",
           "stepId": "quality-pair",
           "text": "Render quality: Standard is the deterministic default.",
-          "start": 205.148,
-          "end": 206.381
+          "start": 219.633,
+          "end": 220.864
         },
         {
           "id": "appearance-and-lighting/quality-on",
           "stepId": "quality-on",
           "text": "Quality opts into soft shadows and ambient occlusion.",
-          "start": 206.381,
-          "end": 207.588
+          "start": 220.864,
+          "end": 222.072
         },
         {
           "id": "appearance-and-lighting/back-standard",
           "stepId": "back-standard",
           "text": "Back to Standard — fast and reproducible.",
-          "start": 207.588,
-          "end": 209.14
+          "start": 222.072,
+          "end": 223.627
         }
       ]
     },
@@ -859,78 +859,78 @@
       "id": "sketch-on-face",
       "title": "Sketching on a face",
       "summary": "Selecting a solid face, sketching on it, and editing the driving feature by number.",
-      "start": 209.168,
-      "end": 231.716,
+      "start": 223.656,
+      "end": 253.604,
       "cues": [
         {
           "id": "sketch-on-face/base",
           "stepId": "base",
           "text": "Fresh plate. Sketch a rectangle and extrude the base pad.",
-          "start": 209.168,
-          "end": 217.025
+          "start": 223.656,
+          "end": 238.814
         },
         {
           "id": "sketch-on-face/top-face",
           "stepId": "top-face",
           "text": "To build on a face, first select it: click the pad's top face.",
-          "start": 217.025,
-          "end": 218.233
+          "start": 238.814,
+          "end": 240.021
         },
         {
           "id": "sketch-on-face/selection",
           "stepId": "selection",
           "text": "The selection reads face|body_extrude — a real face, addressed.",
-          "start": 218.233,
-          "end": 219.439
+          "start": 240.021,
+          "end": 241.229
         },
         {
           "id": "sketch-on-face/command",
           "stepId": "command",
           "text": "The command menu's Sketch on face keys on that face selection.",
-          "start": 219.439,
-          "end": 220.924
+          "start": 241.229,
+          "end": 242.902
         },
         {
           "id": "sketch-on-face/on-face",
           "stepId": "on-face",
           "text": "The sketch editor boots ON the face — its datum resolves true.",
-          "start": 220.924,
-          "end": 222.133
+          "start": 242.902,
+          "end": 244.111
         },
         {
           "id": "sketch-on-face/draw",
           "stepId": "draw",
           "text": "Draw a rectangle on the face, then extrude: a pad on the pad.",
-          "start": 222.133,
-          "end": 225.395
+          "start": 244.111,
+          "end": 247.303
         },
         {
           "id": "sketch-on-face/doubles",
           "stepId": "doubles",
-          "text": "The document settles at exactly twice the base volume.",
-          "start": 225.395,
-          "end": 226.981
+          "text": "The pad doubles — the readout adds it to plate and base.",
+          "start": 247.303,
+          "end": 248.881
         },
         {
           "id": "sketch-on-face/edit",
           "stepId": "edit",
           "text": "Driving-face edit: raise extrudeDepth to 15 and Apply.",
-          "start": 226.981,
-          "end": 229.3
+          "start": 248.881,
+          "end": 251.186
         },
         {
           "id": "sketch-on-face/follows",
           "stepId": "follows",
           "text": "The datum lifts with the number — and the face's pad follows.",
-          "start": 229.3,
-          "end": 230.509
+          "start": 251.186,
+          "end": 252.395
         },
         {
           "id": "sketch-on-face/recap",
           "stepId": "recap",
           "text": "Faces are anchor surfaces: select one, sketch on it, edit by number.",
-          "start": 230.509,
-          "end": 231.716
+          "start": 252.395,
+          "end": 253.604
         }
       ]
     },
@@ -938,92 +938,92 @@
       "id": "sweep-feature",
       "title": "Sweep: profile along a path",
       "summary": "Saving a profile and a path sketch, sweeping them into a tube, and undo/redo on features.",
-      "start": 231.758,
-      "end": 256.626,
+      "start": 253.641,
+      "end": 278.799,
       "cues": [
         {
           "id": "sweep-feature/occt-route",
           "stepId": "occt-route",
           "text": "The OpenCascade workbench: same tools, a kernel that sweeps.",
-          "start": 231.759,
-          "end": 235.517
+          "start": 253.641,
+          "end": 257.411
         },
         {
           "id": "sweep-feature/profile",
           "stepId": "profile",
           "text": "Sketch one: a 20 × 20 square. Save it — sweeps need a profile.",
-          "start": 235.517,
-          "end": 239.617
+          "start": 257.411,
+          "end": 261.752
         },
         {
           "id": "sweep-feature/spine-start",
           "stepId": "spine-start",
           "text": "The path must START at the sketch origin — the tool pins it there.",
-          "start": 239.617,
-          "end": 243.334
+          "start": 261.752,
+          "end": 265.468
         },
         {
           "id": "sweep-feature/spine-end",
           "stepId": "spine-end",
           "text": "Then run it straight up 40 millimeters — the sweep's spine.",
-          "start": 243.334,
-          "end": 246.358
+          "start": 265.468,
+          "end": 268.499
         },
         {
           "id": "sweep-feature/row",
           "stepId": "row",
           "text": "Two sketches saved, the Sweep row unlocks. Profile and path: its inputs.",
-          "start": 246.358,
-          "end": 247.566
+          "start": 268.499,
+          "end": 269.708
         },
         {
           "id": "sweep-feature/pick",
           "stepId": "pick",
           "text": "Point the form at sketch 1 for the profile, sketch 2 for the path.",
-          "start": 247.566,
-          "end": 249.095
+          "start": 269.708,
+          "end": 271.251
         },
         {
           "id": "sweep-feature/create",
           "stepId": "create",
           "text": "Create. The kernel sweeps the square along the spine.",
-          "start": 249.095,
-          "end": 250.302
+          "start": 271.251,
+          "end": 272.463
         },
         {
           "id": "sweep-feature/tube",
           "stepId": "tube",
-          "text": "The tube lands on the analytic pin: 20 × 20 × 40 mm³.",
-          "start": 250.302,
-          "end": 251.509
+          "text": "The tube lands on its analytic pin, beside the boot plate.",
+          "start": 272.463,
+          "end": 273.67
         },
         {
           "id": "sweep-feature/timeline",
           "stepId": "timeline",
           "text": "The timeline chip says sweep — a real feature, not a mesh.",
-          "start": 251.509,
-          "end": 252.977
+          "start": 273.67,
+          "end": 275.151
         },
         {
           "id": "sweep-feature/undo",
           "stepId": "undo",
           "text": "Undo removes the sweep; the timeline falls back a chip.",
-          "start": 252.977,
-          "end": 254.189
+          "start": 275.151,
+          "end": 276.374
         },
         {
           "id": "sweep-feature/redo",
           "stepId": "redo",
           "text": "Redo brings the tube straight back — history holds features.",
-          "start": 254.189,
-          "end": 255.418
+          "start": 276.374,
+          "end": 277.59
         },
         {
           "id": "sweep-feature/recap",
           "stepId": "recap",
           "text": "Profile plus path: the sweep recipe. Next, lofts join two profiles.",
-          "start": 255.418,
-          "end": 256.626
+          "start": 277.59,
+          "end": 278.799
         }
       ]
     },
@@ -1031,71 +1031,71 @@
       "id": "loft-feature",
       "title": "Loft: skinning two sections",
       "summary": "Two section sketches, one skinned solid on Simpson's rule, and a station edit that re-drives it.",
-      "start": 256.656,
-      "end": 279.213,
+      "start": 278.83,
+      "end": 301.948,
       "cues": [
         {
           "id": "loft-feature/fresh",
           "stepId": "fresh",
           "text": "A fresh OCCT document for the loft: two sections, one solid.",
-          "start": 256.656,
-          "end": 260.413
+          "start": 278.83,
+          "end": 282.588
         },
         {
           "id": "loft-feature/section-wide",
           "stepId": "section-wide",
           "text": "Section one: a 20 × 20 square — the loft's wide end.",
-          "start": 260.413,
-          "end": 264.932
+          "start": 282.588,
+          "end": 287.333
         },
         {
           "id": "loft-feature/section-narrow",
           "stepId": "section-narrow",
           "text": "Section two: a 10 × 10 square, saved as the narrow end.",
-          "start": 264.932,
-          "end": 271.397
+          "start": 287.333,
+          "end": 294.158
         },
         {
           "id": "loft-feature/row",
           "stepId": "row",
           "text": "The Loft form pre-seeds its two oldest sketches — exactly ours.",
-          "start": 271.397,
-          "end": 272.605
+          "start": 294.158,
+          "end": 295.364
         },
         {
           "id": "loft-feature/create",
           "stepId": "create",
           "text": "Create, and the kernel skins a taper between the sections.",
-          "start": 272.605,
-          "end": 273.811
+          "start": 295.364,
+          "end": 296.574
         },
         {
           "id": "loft-feature/volume",
           "stepId": "volume",
-          "text": "Simpson's rule pins the taper at 1400 × 20 / 6 mm³.",
-          "start": 273.811,
-          "end": 275.078
+          "text": "Simpson's rule pins the taper — it lands beside the plate.",
+          "start": 296.574,
+          "end": 297.83
         },
         {
           "id": "loft-feature/station",
           "stepId": "station",
           "text": "Every section is a station: loftZ_1 lifts the top to 50.",
-          "start": 275.078,
-          "end": 276.796
+          "start": 297.83,
+          "end": 299.533
         },
         {
           "id": "loft-feature/redrive",
           "stepId": "redrive",
           "text": "Apply re-drives — the taper stretches to its 50 mm pin.",
-          "start": 276.796,
-          "end": 278.005
+          "start": 299.533,
+          "end": 300.74
         },
         {
           "id": "loft-feature/recap",
           "stepId": "recap",
           "text": "Loft: two sketches, one skinned transition, live stations.",
-          "start": 278.005,
-          "end": 279.213
+          "start": 300.74,
+          "end": 301.948
         }
       ]
     },
@@ -1103,64 +1103,64 @@
       "id": "helix-feature",
       "title": "Helix: a swept coil",
       "summary": "The meridian cross-section, the sketch-pool gate, and the helical sweep on its derived band.",
-      "start": 279.242,
-      "end": 299.313,
+      "start": 301.977,
+      "end": 322.04,
       "cues": [
         {
           "id": "helix-feature/occt-route",
           "stepId": "occt-route",
           "text": "The OCCT workbench again — this time a helical sweep.",
-          "start": 279.242,
-          "end": 283.002
+          "start": 301.978,
+          "end": 305.742
         },
         {
           "id": "helix-feature/meridian",
           "stepId": "meridian",
           "text": "Draw a tiny rectangle beside the axis: the thread's cross-section.",
-          "start": 283.002,
-          "end": 286.252
+          "start": 305.742,
+          "end": 308.95
         },
         {
           "id": "helix-feature/save",
           "stepId": "save",
           "text": "Save it. Feature rows gate on a pool of two sketches or more.",
-          "start": 286.252,
-          "end": 287.746
+          "start": 308.95,
+          "end": 310.41
         },
         {
           "id": "helix-feature/throwaway",
           "stepId": "throwaway",
           "text": "A one-line throwaway sketch unlocks the gate.",
-          "start": 287.746,
-          "end": 292.338
+          "start": 310.41,
+          "end": 315.029
         },
         {
           "id": "helix-feature/pick",
           "stepId": "pick",
           "text": "Open Helix and point it at the meridian explicitly: sketch 1.",
-          "start": 292.338,
-          "end": 295.083
+          "start": 315.029,
+          "end": 317.799
         },
         {
           "id": "helix-feature/create",
           "stepId": "create",
           "text": "Create. The meridian sweeps helically around the axis.",
-          "start": 295.083,
-          "end": 296.898
+          "start": 317.799,
+          "end": 319.625
         },
         {
           "id": "helix-feature/coil",
           "stepId": "coil",
           "text": "The coil lands inside its derived band — turns, radius, meridian.",
-          "start": 296.898,
-          "end": 298.106
+          "start": 319.625,
+          "end": 320.832
         },
         {
           "id": "helix-feature/recap",
           "stepId": "recap",
           "text": "One cross-section plus turns: screw geometry. Threads come next.",
-          "start": 298.106,
-          "end": 299.313
+          "start": 320.832,
+          "end": 322.04
         }
       ]
     },
@@ -1168,71 +1168,71 @@
       "id": "thread-feature",
       "title": "Threads and their history",
       "summary": "The thread feature on its containment band, a deeper re-drive, and walking it in history.",
-      "start": 299.352,
-      "end": 330.962,
+      "start": 322.076,
+      "end": 354.221,
       "cues": [
         {
           "id": "thread-feature/rod",
           "stepId": "rod",
           "text": "The ⌀6 rod at the origin — the thread cuts on the world Z axis.",
-          "start": 299.352,
-          "end": 309.806
+          "start": 322.076,
+          "end": 332.612
         },
         {
           "id": "thread-feature/row",
           "stepId": "row",
           "text": "The Thread form targets the extrusion by default. Create.",
-          "start": 309.806,
-          "end": 315.098
+          "start": 332.612,
+          "end": 338.134
         },
         {
           "id": "thread-feature/band",
           "stepId": "band",
           "text": "The ISO profile cuts a groove — inside the derived band.",
-          "start": 315.098,
-          "end": 316.36
+          "start": 338.134,
+          "end": 339.413
         },
         {
           "id": "thread-feature/edit",
           "stepId": "edit",
           "text": "threadLength1 goes to 8; Apply re-drives the cut deeper.",
-          "start": 316.36,
-          "end": 323.81
+          "start": 339.413,
+          "end": 347.078
         },
         {
           "id": "thread-feature/deeper",
           "stepId": "deeper",
           "text": "Deeper thread, less material — the volume drops on schedule.",
-          "start": 323.81,
-          "end": 326.094
+          "start": 347.078,
+          "end": 349.364
         },
         {
           "id": "thread-feature/undo-edit",
           "stepId": "undo-edit",
           "text": "The last transaction was the edit: undo reverts just the number.",
-          "start": 326.094,
-          "end": 327.324
+          "start": 349.364,
+          "end": 350.594
         },
         {
           "id": "thread-feature/undo-thread",
           "stepId": "undo-thread",
           "text": "A second undo removes the thread feature itself.",
-          "start": 327.324,
-          "end": 328.534
+          "start": 350.594,
+          "end": 351.804
         },
         {
           "id": "thread-feature/redo",
           "stepId": "redo",
           "text": "Redo restores it — valid, and back in the timeline.",
-          "start": 328.534,
-          "end": 329.753
+          "start": 351.804,
+          "end": 353.015
         },
         {
           "id": "thread-feature/recap",
           "stepId": "recap",
           "text": "Threads are features: cut, re-drive, and walk them in history.",
-          "start": 329.753,
-          "end": 330.962
+          "start": 353.015,
+          "end": 354.221
         }
       ]
     },
@@ -1240,99 +1240,99 @@
       "id": "draft-rib-scale",
       "title": "Draft, rib, and scale",
       "summary": "Tapering an extrusion, unioning a rib stiffener, and scaling cubically — each re-driven.",
-      "start": 331,
-      "end": 401.389,
+      "start": 354.268,
+      "end": 418.18,
       "cues": [
         {
           "id": "draft-rib-scale/draft-boot",
           "stepId": "draft-boot",
           "text": "Three shaping features, one family. Draft first: a saved ⌀6 circle.",
-          "start": 331,
-          "end": 345.743
+          "start": 354.268,
+          "end": 361.875
         },
         {
           "id": "draft-rib-scale/draft-unlock",
           "stepId": "draft-unlock",
           "text": "The throwaway line sketch unlocks the feature rows.",
-          "start": 345.743,
-          "end": 352.102
+          "start": 361.875,
+          "end": 368.258
         },
         {
           "id": "draft-rib-scale/draft-create",
           "stepId": "draft-create",
           "text": "Draft extrudes the circle with a 5-degree taper — Create.",
-          "start": 352.102,
-          "end": 353.311
+          "start": 368.258,
+          "end": 369.473
         },
         {
           "id": "draft-rib-scale/frustum",
           "stepId": "frustum",
-          "text": "A frustum, not a cylinder — the taper pin says ~208 mm³.",
-          "start": 353.311,
-          "end": 354.611
+          "text": "A frustum, not a cylinder — the taper lands beside the plate.",
+          "start": 369.473,
+          "end": 370.781
         },
         {
           "id": "draft-rib-scale/flatten",
           "stepId": "flatten",
           "text": "extrudeTaper1 to 0 and Apply: the taper flattens to the rod.",
-          "start": 354.611,
-          "end": 359.127
+          "start": 370.781,
+          "end": 375.279
         },
         {
           "id": "draft-rib-scale/rib-boot",
           "stepId": "rib-boot",
           "text": "Rib next, on a fresh rod. Sketch its section: a low 10 × 1 bar.",
-          "start": 359.127,
-          "end": 372.645
+          "start": 375.279,
+          "end": 389
         },
         {
           "id": "draft-rib-scale/rib-row",
           "stepId": "rib-row",
           "text": "Save, add the throwaway, open Rib, pick the section: sketch 1.",
-          "start": 372.645,
-          "end": 379.945
+          "start": 389,
+          "end": 396.35
         },
         {
           "id": "draft-rib-scale/rib-union",
           "stepId": "rib-union",
           "text": "The rib unions onto the rod — material added, one feature.",
-          "start": 379.945,
-          "end": 381.568
+          "start": 396.35,
+          "end": 398.066
         },
         {
           "id": "draft-rib-scale/rib-edit",
           "stepId": "rib-edit",
           "text": "ribThickness to 4 re-drives: more rib, more volume.",
-          "start": 381.568,
-          "end": 386.277
+          "start": 398.066,
+          "end": 402.727
         },
         {
           "id": "draft-rib-scale/scale-boot",
           "stepId": "scale-boot",
           "text": "Scale last: another fresh rod, the Scale form, Create.",
-          "start": 386.277,
-          "end": 396.546
+          "start": 402.727,
+          "end": 413.231
         },
         {
           "id": "draft-rib-scale/eight",
           "stepId": "eight",
-          "text": "Factor 2 doubles each axis: volume × 8, exactly cubic.",
-          "start": 396.546,
-          "end": 397.982
+          "text": "Factor 2 doubles each axis — the rod's volume times eight.",
+          "start": 413.231,
+          "end": 414.75
         },
         {
           "id": "draft-rib-scale/twenty-seven",
           "stepId": "twenty-seven",
-          "text": "Factor 3: × 27. Apply and watch the pin land.",
-          "start": 397.982,
-          "end": 400.179
+          "text": "Factor 3: the rod times 27. Apply and watch it land.",
+          "start": 414.75,
+          "end": 416.965
         },
         {
           "id": "draft-rib-scale/recap",
           "stepId": "recap",
           "text": "Draft shapes walls, ribs stiffen, scale sizes — all parametric.",
-          "start": 400.179,
-          "end": 401.389
+          "start": 416.965,
+          "end": 418.18
         }
       ]
     },
@@ -1340,71 +1340,71 @@
       "id": "thicken-split",
       "title": "Thicken and split",
       "summary": "Hollowing a rod into its exact shell, and splitting a body by a datum plane.",
-      "start": 401.432,
-      "end": 439.992,
+      "start": 418.222,
+      "end": 457.263,
       "cues": [
         {
           "id": "thicken-split/thicken-boot",
           "stepId": "thicken-boot",
           "text": "Hollow and cut. First the ⌀6 rod, then the Thicken form.",
-          "start": 401.432,
-          "end": 410.656
+          "start": 418.222,
+          "end": 434.698
         },
         {
           "id": "thicken-split/wall",
           "stepId": "wall",
           "text": "Wall thickness 1 mm — Create.",
-          "start": 410.656,
-          "end": 411.865
+          "start": 434.698,
+          "end": 435.912
         },
         {
           "id": "thicken-split/shell",
           "stepId": "shell",
-          "text": "The rod becomes its own shell: exactly 58π mm³.",
-          "start": 411.865,
-          "end": 413.311
+          "text": "The rod becomes its own 1 mm shell, beside the plate.",
+          "start": 435.912,
+          "end": 437.342
         },
         {
           "id": "thicken-split/split-boot",
           "stepId": "split-boot",
           "text": "Split next: a fresh rod and a datum plane at z = 5.",
-          "start": 413.311,
-          "end": 430.699
+          "start": 437.342,
+          "end": 447.818
         },
         {
           "id": "thicken-split/datum",
           "stepId": "datum",
           "text": "Origin z = 5, Create datum — a cutting plane through the mid.",
-          "start": 430.699,
-          "end": 434.054
+          "start": 447.818,
+          "end": 451.234
         },
         {
           "id": "thicken-split/split-row",
           "stepId": "split-row",
           "text": "The Split form cuts by the plane. Create keeps one side.",
-          "start": 434.054,
-          "end": 435.261
+          "start": 451.234,
+          "end": 452.448
         },
         {
           "id": "thicken-split/half",
           "stepId": "half",
-          "text": "Exactly half the rod stays: 45π mm³.",
-          "start": 435.261,
-          "end": 436.591
+          "text": "Exactly half the rod stays — cut true, beside the plate.",
+          "start": 452.448,
+          "end": 453.774
         },
         {
           "id": "thicken-split/flip",
           "stepId": "flip",
           "text": "splitSide -1 flips the kept half — same volume, other side.",
-          "start": 436.591,
-          "end": 438.779
+          "start": 453.774,
+          "end": 456.051
         },
         {
           "id": "thicken-split/recap",
           "stepId": "recap",
           "text": "Thicken hollows, split divides — both re-drivable by number.",
-          "start": 438.779,
-          "end": 439.992
+          "start": 456.051,
+          "end": 457.263
         }
       ]
     },
@@ -1412,106 +1412,106 @@
       "id": "holes-and-patterns",
       "title": "Holes and patterns",
       "summary": "The structured hole form and its ghost, positions sketches, linear patterns, and mirrors.",
-      "start": 440.023,
-      "end": 519.071,
+      "start": 457.309,
+      "end": 537.721,
       "cues": [
         {
           "id": "holes-and-patterns/plate",
           "stepId": "plate",
           "text": "Holes and repeats. First a 30 × 20 plate, extruded ten.",
-          "start": 440.023,
-          "end": 449.406
+          "start": 457.309,
+          "end": 466.915
         },
         {
           "id": "holes-and-patterns/hole-form",
           "stepId": "hole-form",
           "text": "The Hole form is structured: type, size, position — no sketch.",
-          "start": 449.406,
-          "end": 450.611
+          "start": 466.915,
+          "end": 468.123
         },
         {
           "id": "holes-and-patterns/counterbore",
           "stepId": "counterbore",
-          "text": "Pick Counterbore, set the position to 20, 25.",
-          "start": 450.611,
-          "end": 453.058
+          "text": "Pick Counterbore, set the position to 55, 25.",
+          "start": 468.123,
+          "end": 470.638
         },
         {
           "id": "holes-and-patterns/ghost-and-cut",
           "stepId": "ghost-and-cut",
           "text": "A ghost previews the cut; Create lands the analytic pin.",
-          "start": 453.058,
-          "end": 455.143
+          "start": 470.638,
+          "end": 472.873
         },
         {
           "id": "holes-and-patterns/positions",
           "stepId": "positions",
           "text": "Fresh plate, and a sketch of two points — holes by position.",
-          "start": 455.143,
-          "end": 475.632
+          "start": 472.873,
+          "end": 493.642
         },
         {
           "id": "holes-and-patterns/two-ghosts",
           "stepId": "two-ghosts",
           "text": "Point the form at the sketch: two glyphs, one feature.",
-          "start": 475.632,
-          "end": 478.242
+          "start": 493.642,
+          "end": 496.252
         },
         {
           "id": "holes-and-patterns/many",
           "stepId": "many",
           "text": "Create cuts both holes — one feature, many positions.",
-          "start": 478.242,
-          "end": 480.324
+          "start": 496.252,
+          "end": 498.421
         },
         {
           "id": "holes-and-patterns/pattern-boot",
           "stepId": "pattern-boot",
           "text": "Patterns: a fresh rod, the Pattern form, skip one instance.",
-          "start": 480.324,
-          "end": 491.136
+          "start": 498.421,
+          "end": 509.385
         },
         {
           "id": "holes-and-patterns/array",
           "stepId": "array",
-          "text": "Three placed, one skipped: two rods at 2 × the volume.",
-          "start": 491.136,
-          "end": 492.347
+          "text": "Three placed, one skipped: two rods, beside the plate.",
+          "start": 509.385,
+          "end": 510.681
         },
         {
           "id": "holes-and-patterns/redrive",
           "stepId": "redrive",
           "text": "Count 5, spacing 30 — the array re-drives to four rods.",
-          "start": 492.347,
-          "end": 497.337
+          "start": 510.681,
+          "end": 515.69
         },
         {
           "id": "holes-and-patterns/mirror-boot",
           "stepId": "mirror-boot",
-          "text": "Mirror last: a fresh rod, a datum plane at x = 5.",
-          "start": 497.337,
-          "end": 513.407
+          "text": "Mirror last: a fresh rod, a datum plane at x = 35.",
+          "start": 515.69,
+          "end": 532.001
         },
         {
           "id": "holes-and-patterns/merge",
           "stepId": "merge",
           "text": "The Mirror form with merge on: the reflection unions in.",
-          "start": 513.407,
-          "end": 515.618
+          "start": 532.001,
+          "end": 534.297
         },
         {
           "id": "holes-and-patterns/standalone",
           "stepId": "standalone",
           "text": "mirrorMerge to 1: Apply leaves the reflection standing alone.",
-          "start": 515.618,
-          "end": 517.852
+          "start": 534.297,
+          "end": 536.511
         },
         {
           "id": "holes-and-patterns/recap",
           "stepId": "recap",
           "text": "Structure the hole, sketch the positions, pattern the bodies.",
-          "start": 517.852,
-          "end": 519.071
+          "start": 536.511,
+          "end": 537.721
         }
       ]
     },
@@ -1519,78 +1519,78 @@
       "id": "booleans",
       "title": "Booleans and moving bodies",
       "summary": "Subtract, union, and the volume-invariant body move — through the command surface.",
-      "start": 519.103,
-      "end": 570.195,
+      "start": 537.753,
+      "end": 597.987,
       "cues": [
         {
           "id": "booleans/subtract-boot",
           "stepId": "subtract-boot",
           "text": "Boolean ops. A 60 × 40 plate, then a ⌀10 cylinder inside it.",
-          "start": 519.103,
-          "end": 533.967
+          "start": 537.753,
+          "end": 553.586
         },
         {
           "id": "booleans/subtract-row",
           "stepId": "subtract-row",
           "text": "The Boolean form subtracts by default. Check pad 2, Create.",
-          "start": 533.967,
-          "end": 535.183
+          "start": 553.586,
+          "end": 554.821
         },
         {
           "id": "booleans/removed",
           "stepId": "removed",
-          "text": "The cylinder is gone: the plate-with-hole pin, to the digit.",
-          "start": 535.183,
-          "end": 536.503
+          "text": "The cylinder is gone — the holed plate, beside the plate.",
+          "start": 554.821,
+          "end": 556.151
         },
         {
           "id": "booleans/union-boot",
           "stepId": "union-boot",
           "text": "Union: two 30 × 40 plates that share an edge.",
-          "start": 536.503,
-          "end": 552.623
+          "start": 556.151,
+          "end": 573.062
         },
         {
           "id": "booleans/union-row",
           "stepId": "union-row",
           "text": "Switch the op to Union (join), check pad 2, Create.",
-          "start": 552.623,
-          "end": 554.868
+          "start": 573.062,
+          "end": 575.348
         },
         {
           "id": "booleans/slab",
           "stepId": "slab",
-          "text": "One slab: exactly 60 × 40 × 10 mm³.",
-          "start": 554.868,
-          "end": 556.17
+          "text": "One slab — 60 by 40 by 10, beside the boot plate.",
+          "start": 575.348,
+          "end": 576.689
         },
         {
           "id": "booleans/move-boot",
           "stepId": "move-boot",
           "text": "Move body: translation, not geometry. The rod again.",
-          "start": 556.17,
-          "end": 566.53
+          "start": 576.689,
+          "end": 594.212
         },
         {
           "id": "booleans/move-row",
           "stepId": "move-row",
           "text": "Offset x = 10, Create.",
-          "start": 566.53,
-          "end": 567.777
+          "start": 594.212,
+          "end": 595.571
         },
         {
           "id": "booleans/invariant",
           "stepId": "invariant",
           "text": "The body slides — the volume holds. Moves are transforms.",
-          "start": 567.777,
-          "end": 568.985
+          "start": 595.571,
+          "end": 596.778
         },
         {
           "id": "booleans/recap",
           "stepId": "recap",
           "text": "Subtract removes, union joins, move transports — all features.",
-          "start": 568.985,
-          "end": 570.195
+          "start": 596.778,
+          "end": 597.987
         }
       ]
     },
@@ -1598,78 +1598,78 @@
       "id": "surfaces",
       "title": "The surface pipeline",
       "summary": "Base sheets, trim, thicken, offset, and knit — modeling with faces when solids are too much.",
-      "start": 570.236,
-      "end": 601.341,
+      "start": 598.018,
+      "end": 636.338,
       "cues": [
         {
           "id": "surfaces/boot",
           "stepId": "boot",
           "text": "Surfaces: sheets instead of solids. The OCCT workbench, fresh.",
-          "start": 570.236,
-          "end": 576.218
+          "start": 598.018,
+          "end": 611.08
         },
         {
           "id": "surfaces/datum",
           "stepId": "datum",
           "text": "A datum plane first — the sheets' support. Create datum.",
-          "start": 576.218,
-          "end": 579.826
+          "start": 611.08,
+          "end": 614.679
         },
         {
           "id": "surfaces/sheet-one",
           "stepId": "sheet-one",
           "text": "Base sheet one: the form's defaults, straight off the plane.",
-          "start": 579.826,
-          "end": 582.496
+          "start": 614.679,
+          "end": 617.325
         },
         {
           "id": "surfaces/sheet-two",
           "stepId": "sheet-two",
           "text": "Base sheet two: u 10 to 20, v -100 to 100 — a band beside it.",
-          "start": 582.496,
-          "end": 587.496
+          "start": 617.325,
+          "end": 622.463
         },
         {
           "id": "surfaces/trim",
           "stepId": "trim",
           "text": "Trim keeps the overlap: a 10 × 20 patch, exactly.",
-          "start": 587.496,
-          "end": 590.993
+          "start": 622.463,
+          "end": 625.998
         },
         {
           "id": "surfaces/thicken",
           "stepId": "thicken",
-          "text": "Thicken gives the patch a 2 mm wall — 400 mm³, to the digit.",
-          "start": 590.993,
-          "end": 595.392
+          "text": "Thicken gives the patch a 2 mm wall — a real solid beside the plate.",
+          "start": 625.998,
+          "end": 630.356
         },
         {
           "id": "surfaces/offset",
           "stepId": "offset",
           "text": "Offset pushes a copy along the sheet's normals.",
-          "start": 595.392,
-          "end": 597.205
+          "start": 630.356,
+          "end": 632.199
         },
         {
           "id": "surfaces/knit",
           "stepId": "knit",
           "text": "Knit sews sheets through shared edges — shell or honest no.",
-          "start": 597.205,
-          "end": 598.925
+          "start": 632.199,
+          "end": 633.918
         },
         {
           "id": "surfaces/honest",
           "stepId": "honest",
           "text": "Either way the timeline tells the truth: sheets never fake it.",
-          "start": 598.925,
-          "end": 600.132
+          "start": 633.918,
+          "end": 635.127
         },
         {
           "id": "surfaces/recap",
           "stepId": "recap",
           "text": "Model with faces when solids are too much: the surface pipeline.",
-          "start": 600.132,
-          "end": 601.341
+          "start": 635.127,
+          "end": 636.338
         }
       ]
     },
@@ -1677,64 +1677,64 @@
       "id": "assembly-tree",
       "title": "The assembly tree",
       "summary": "Occurrences as document records: add, place, flag, and remove instances while the tree and viewport follow.",
-      "start": 601.375,
-      "end": 611.878,
+      "start": 636.373,
+      "end": 646.912,
       "cues": [
         {
           "id": "assembly-tree/boot",
           "stepId": "boot",
           "text": "Assemblies: one part, many placed copies. This is the assembly tree.",
-          "start": 601.375,
-          "end": 602.58
+          "start": 636.373,
+          "end": 637.579
         },
         {
           "id": "assembly-tree/first",
           "stepId": "first",
           "text": "The tree lists occurrences — document records, not copies of geometry.",
-          "start": 602.58,
-          "end": 603.957
+          "start": 637.579,
+          "end": 638.955
         },
         {
           "id": "assembly-tree/add",
           "stepId": "add",
           "text": "Add instance stamps a new occurrence into the document.",
-          "start": 603.957,
-          "end": 605.16
+          "start": 638.955,
+          "end": 640.161
         },
         {
           "id": "assembly-tree/placed",
           "stepId": "placed",
           "text": "Each copy steps eighty millimeters along x — placement is data.",
-          "start": 605.16,
-          "end": 606.363
+          "start": 640.161,
+          "end": 641.366
         },
         {
           "id": "assembly-tree/phantom",
           "stepId": "phantom",
           "text": "The third copy carries the phantom chip: assembled, never ordered.",
-          "start": 606.363,
-          "end": 607.839
+          "start": 641.366,
+          "end": 642.858
         },
         {
           "id": "assembly-tree/remove",
           "stepId": "remove",
           "text": "Remove last instance deletes the record — the copy leaves.",
-          "start": 607.839,
-          "end": 609.273
+          "start": 642.858,
+          "end": 644.305
         },
         {
           "id": "assembly-tree/one-left",
           "stepId": "one-left",
           "text": "Remove again: one plate, exactly where the assembly began.",
-          "start": 609.273,
-          "end": 610.673
+          "start": 644.305,
+          "end": 645.707
         },
         {
           "id": "assembly-tree/recap",
           "stepId": "recap",
           "text": "Structure lives in the document, and the tree tells the truth.",
-          "start": 610.673,
-          "end": 611.878
+          "start": 645.707,
+          "end": 646.912
         }
       ]
     },
@@ -1742,106 +1742,106 @@
       "id": "assembly-motion",
       "title": "Assembly motion",
       "summary": "Patterns and mirror stamps, the explode scrub, the revolute joint, the clearance floor, and the staleness rule.",
-      "start": 611.896,
-      "end": 629.773,
+      "start": 646.931,
+      "end": 664.773,
       "cues": [
         {
           "id": "assembly-motion/boot",
           "stepId": "boot",
           "text": "Motion: patterns, explode, joints. Two plates to start.",
-          "start": 611.896,
-          "end": 613.102
+          "start": 646.931,
+          "end": 648.137
         },
         {
           "id": "assembly-motion/linear",
           "stepId": "linear",
           "text": "Linear pattern stamps three copies along the row — five plates.",
-          "start": 613.102,
-          "end": 614.308
+          "start": 648.137,
+          "end": 649.343
         },
         {
           "id": "assembly-motion/circular",
           "stepId": "circular",
           "text": "Circular pattern rings six more around the axis — eleven total.",
-          "start": 614.308,
-          "end": 615.513
+          "start": 649.343,
+          "end": 650.549
         },
         {
           "id": "assembly-motion/again",
           "stepId": "again",
           "text": "Click it again: nothing double-stamps. Pattern ids refuse duplicates.",
-          "start": 615.513,
-          "end": 616.718
+          "start": 650.549,
+          "end": 651.753
         },
         {
           "id": "assembly-motion/mirror",
           "stepId": "mirror",
           "text": "Mirror stamps one reflected copy across the plane — twelve.",
-          "start": 616.718,
-          "end": 617.924
+          "start": 651.753,
+          "end": 652.956
         },
         {
           "id": "assembly-motion/explode",
           "stepId": "explode",
           "text": "Author explode state: offsets for every instance, one record.",
-          "start": 617.924,
-          "end": 619.672
+          "start": 652.956,
+          "end": 654.691
         },
         {
           "id": "assembly-motion/quarter",
           "stepId": "quarter",
           "text": "Scrub to a quarter: the copies separate proportionally.",
-          "start": 619.672,
-          "end": 620.878
+          "start": 654.691,
+          "end": 655.896
         },
         {
           "id": "assembly-motion/full",
           "stepId": "full",
           "text": "Full factor restores the authored explode — deterministic, every time.",
-          "start": 620.878,
-          "end": 622.084
+          "start": 655.896,
+          "end": 657.101
         },
         {
           "id": "assembly-motion/joint",
           "stepId": "joint",
           "text": "The revolute joint swings its member — thirty degrees, in limits.",
-          "start": 622.084,
-          "end": 623.356
+          "start": 657.101,
+          "end": 658.369
         },
         {
           "id": "assembly-motion/joint-home",
           "stepId": "joint-home",
           "text": "Back to zero: the joint's home position.",
-          "start": 623.356,
-          "end": 624.563
+          "start": 658.369,
+          "end": 659.575
         },
         {
           "id": "assembly-motion/clearance",
           "stepId": "clearance",
           "text": "The clearance floor measures the closest pair — always a number.",
-          "start": 624.563,
-          "end": 625.768
+          "start": 659.575,
+          "end": 660.781
         },
         {
           "id": "assembly-motion/decline",
           "stepId": "decline",
           "text": "Try joint drag: an honest decline — the solver owns motion.",
-          "start": 625.768,
-          "end": 626.975
+          "start": 660.781,
+          "end": 661.985
         },
         {
           "id": "assembly-motion/stale",
           "stepId": "stale",
           "text": "Edit the source part: the assembly goes STALE until regenerated.",
-          "start": 626.975,
-          "end": 628.182
+          "start": 661.985,
+          "end": 663.189
         },
         {
           "id": "assembly-motion/regenerate",
           "stepId": "regenerate",
           "text": "Regenerate: revisions agree again — up to date.",
-          "start": 628.182,
-          "end": 629.773
+          "start": 663.189,
+          "end": 664.773
         }
       ]
     },
@@ -1849,71 +1849,71 @@
       "id": "interference",
       "title": "Interference checking",
       "summary": "The interference report, isolation of an offending pair, and the deterministic JSON/HTML snapshot exports.",
-      "start": 629.792,
-      "end": 642.03,
+      "start": 664.795,
+      "end": 677.011,
       "cues": [
         {
           "id": "interference/boot",
           "stepId": "boot",
           "text": "Interference: three blocks placed — two overlap, one stands clear.",
-          "start": 629.792,
-          "end": 630.996
+          "start": 664.796,
+          "end": 666.009
         },
         {
           "id": "interference/idle",
           "stepId": "idle",
           "text": "The report panel shows nothing before a run — no invented data.",
-          "start": 630.996,
-          "end": 632.2
+          "start": 666.009,
+          "end": 667.213
         },
         {
           "id": "interference/run",
           "stepId": "run",
           "text": "Run the check: every pair measured, one interference found.",
-          "start": 632.2,
-          "end": 633.403
+          "start": 667.213,
+          "end": 668.416
         },
         {
           "id": "interference/verdict",
           "stepId": "verdict",
           "text": "The row names the pair and its overlap volume. Isolate it.",
-          "start": 633.403,
-          "end": 634.887
+          "start": 668.416,
+          "end": 669.887
         },
         {
           "id": "interference/isolate",
           "stepId": "isolate",
           "text": "Isolate pulls the pair forward; the third block steps aside.",
-          "start": 634.887,
-          "end": 636.222
+          "start": 669.887,
+          "end": 671.228
         },
         {
           "id": "interference/show-all",
           "stepId": "show-all",
           "text": "Show all brings the full assembly back.",
-          "start": 636.222,
-          "end": 637.99
+          "start": 671.228,
+          "end": 672.988
         },
         {
           "id": "interference/json",
           "stepId": "json",
           "text": "The snapshot exports as JSON — a digest stamps the exact bytes.",
-          "start": 637.99,
-          "end": 639.573
+          "start": 672.988,
+          "end": 674.576
         },
         {
           "id": "interference/html",
           "stepId": "html",
           "text": "The same report as HTML: a different digest, the same truth.",
-          "start": 639.573,
-          "end": 640.823
+          "start": 674.576,
+          "end": 675.806
         },
         {
           "id": "interference/recap",
           "stepId": "recap",
           "text": "Overlaps surface before the parts are made. That is the point.",
-          "start": 640.823,
-          "end": 642.03
+          "start": 675.806,
+          "end": 677.011
         }
       ]
     },
@@ -1921,78 +1921,78 @@
       "id": "analysis",
       "title": "Model analysis",
       "summary": "Mass properties at boot, the draft and curvature run, the curvature comb's exact arc, and the zebra view.",
-      "start": 642.05,
-      "end": 655.55,
+      "start": 677.031,
+      "end": 690.517,
       "cues": [
         {
           "id": "analysis/boot",
           "stepId": "boot",
           "text": "Analysis: draft, curvature, zebra, mass. Mass is live at boot.",
-          "start": 642.05,
-          "end": 643.256
+          "start": 677.031,
+          "end": 678.252
         },
         {
           "id": "analysis/mass",
           "stepId": "mass",
           "text": "Two materials total 289.710 grams — the compound carries a COG.",
-          "start": 643.256,
-          "end": 645.059
+          "start": 678.252,
+          "end": 680.058
         },
         {
           "id": "analysis/idle",
           "stepId": "idle",
           "text": "Draft and curvature wait for the run — no numbers invented.",
-          "start": 645.059,
-          "end": 646.291
+          "start": 680.058,
+          "end": 681.274
         },
         {
           "id": "analysis/run",
           "stepId": "run",
           "text": "Run the analysis: every face classed, every vertex banded.",
-          "start": 646.291,
-          "end": 647.494
+          "start": 681.274,
+          "end": 682.477
         },
         {
           "id": "analysis/draft",
           "stepId": "draft",
           "text": "The box sorts: one positive, one negative, four vertical faces.",
-          "start": 647.494,
-          "end": 648.698
+          "start": 682.477,
+          "end": 683.682
         },
         {
           "id": "analysis/bands",
           "stepId": "bands",
           "text": "Curvature bands the welds: four flat, forty-six curved, none sharp.",
-          "start": 648.698,
-          "end": 650.671
+          "start": 683.682,
+          "end": 685.654
         },
         {
           "id": "analysis/comb",
           "stepId": "comb",
           "text": "The comb over the r30 arc peaks at 0.033 — exactly one over r.",
-          "start": 650.671,
-          "end": 651.875
+          "start": 685.654,
+          "end": 686.859
         },
         {
           "id": "analysis/zebra",
           "stepId": "zebra",
           "text": "Zebra view: reflection stripes probe surface quality.",
-          "start": 651.875,
-          "end": 653.14
+          "start": 686.859,
+          "end": 688.107
         },
         {
           "id": "analysis/shaded",
           "stepId": "shaded",
           "text": "Back to shaded — a probe is a view, never a document edit.",
-          "start": 653.14,
-          "end": 654.345
+          "start": 688.107,
+          "end": 689.311
         },
         {
           "id": "analysis/recap",
           "stepId": "recap",
           "text": "Ask the model questions; the answers stay numbers on the page.",
-          "start": 654.345,
-          "end": 655.55
+          "start": 689.311,
+          "end": 690.517
         }
       ]
     },
@@ -2000,78 +2000,78 @@
       "id": "drawings",
       "title": "Drawing sheets",
       "summary": "Sheets with recovered dimensions, base and derived views, reference dimensions, revision rows, templates, and byte-stable SVG output.",
-      "start": 655.572,
-      "end": 676.599,
+      "start": 690.536,
+      "end": 711.496,
       "cues": [
         {
           "id": "drawings/boot",
           "stepId": "boot",
           "text": "Drawings turn the model into sheets. Empty until a sheet exists.",
-          "start": 655.572,
-          "end": 657.29
+          "start": 690.536,
+          "end": 692.274
         },
         {
           "id": "drawings/sheet",
           "stepId": "sheet",
           "text": "Create sheet recovers the model's dimensions — four, never re-typed.",
-          "start": 657.29,
-          "end": 659.106
+          "start": 692.274,
+          "end": 694.101
         },
         {
           "id": "drawings/views",
           "stepId": "views",
           "text": "Base views project the plate: Front, Top, and Right.",
-          "start": 659.106,
-          "end": 660.884
+          "start": 694.101,
+          "end": 695.876
         },
         {
           "id": "drawings/section",
           "stepId": "section",
           "text": "Section A-A cuts through — hatching marks the cut faces.",
-          "start": 660.884,
-          "end": 662.7
+          "start": 695.876,
+          "end": 697.701
         },
         {
           "id": "drawings/reference",
           "stepId": "reference",
           "text": "A reference dimension annotates on top — authored, not recovered.",
-          "start": 662.7,
-          "end": 665.328
+          "start": 697.701,
+          "end": 700.337
         },
         {
           "id": "drawings/revision",
           "stepId": "revision",
           "text": "The revision row logs the change: B, described, on the sheet.",
-          "start": 665.328,
-          "end": 668.601
+          "start": 700.337,
+          "end": 703.55
         },
         {
           "id": "drawings/template",
           "stepId": "template",
           "text": "Templates resheet the drawing: A4 landscape at one-to-one.",
-          "start": 668.601,
-          "end": 671.06
+          "start": 703.55,
+          "end": 705.966
         },
         {
           "id": "drawings/export",
           "stepId": "export",
           "text": "Export SVG holds the sheet as bytes — length on the status line.",
-          "start": 671.06,
-          "end": 673.357
+          "start": 705.966,
+          "end": 708.258
         },
         {
           "id": "drawings/stable",
           "stepId": "stable",
           "text": "Export again: identical bytes. Deterministic output, every time.",
-          "start": 673.357,
-          "end": 675.392
+          "start": 708.258,
+          "end": 710.29
         },
         {
           "id": "drawings/recap",
           "stepId": "recap",
           "text": "One drawing surface: sheet, views, annotations, stable output.",
-          "start": 675.392,
-          "end": 676.599
+          "start": 710.29,
+          "end": 711.496
         }
       ]
     },
@@ -2079,50 +2079,50 @@
       "id": "bom-output",
       "title": "BOM and output",
       "summary": "The self-numbering BOM table, its balloon callout, and the furnished sheet held as deterministic SVG bytes.",
-      "start": 676.625,
-      "end": 687.313,
+      "start": 711.519,
+      "end": 722.165,
       "cues": [
         {
           "id": "bom-output/boot",
           "stepId": "boot",
           "text": "Back on Drawings, fresh: a sheet and a view for the BOM.",
-          "start": 676.625,
-          "end": 678.323
+          "start": 711.519,
+          "end": 713.231
         },
         {
           "id": "bom-output/bom",
           "stepId": "bom",
           "text": "Add BOM table: the sheet numbers the assembly's parts itself.",
-          "start": 678.323,
-          "end": 680.594
+          "start": 713.231,
+          "end": 715.475
         },
         {
           "id": "bom-output/balloon",
           "stepId": "balloon",
           "text": "The balloon pins item one to its view — table and callout agree.",
-          "start": 680.594,
-          "end": 682.592
+          "start": 715.475,
+          "end": 717.442
         },
         {
           "id": "bom-output/canvas",
           "stepId": "canvas",
           "text": "The canvas states it plainly: one BOM table, one balloon.",
-          "start": 682.592,
-          "end": 683.797
+          "start": 717.442,
+          "end": 718.648
         },
         {
           "id": "bom-output/export",
           "stepId": "export",
           "text": "SVG output holds the furnished sheet — the deliverable a shop reads.",
-          "start": 683.797,
-          "end": 686.106
+          "start": 718.648,
+          "end": 720.958
         },
         {
           "id": "bom-output/recap",
           "stepId": "recap",
           "text": "From model to manufacturing paperwork in a handful of clicks.",
-          "start": 686.106,
-          "end": 687.313
+          "start": 720.958,
+          "end": 722.165
         }
       ]
     },
@@ -2130,64 +2130,64 @@
       "id": "io-import-export",
       "title": "Import and export",
       "summary": "The honest exporter family, STL bytes held and round-tripped as a preview, the six-format import breadth, and a real OBJ file.",
-      "start": 687.336,
-      "end": 704.655,
+      "start": 722.187,
+      "end": 739.503,
       "cues": [
         {
           "id": "io-import-export/boot",
           "stepId": "boot",
           "text": "Exchange: real bytes in, real bytes out. The complete workbench.",
-          "start": 687.336,
-          "end": 692.631
+          "start": 722.187,
+          "end": 727.452
         },
         {
           "id": "io-import-export/export-dialog",
           "stepId": "export-dialog",
           "text": "The export family is honest: STL, 3MF, GLB — no IGES promise.",
-          "start": 692.631,
-          "end": 693.952
+          "start": 727.452,
+          "end": 728.786
         },
         {
           "id": "io-import-export/stl-hold",
           "stepId": "stl-hold",
           "text": "STL holds real, sized bytes — the entry counts its triangles.",
-          "start": 693.952,
-          "end": 696.614
+          "start": 728.786,
+          "end": 731.46
         },
         {
           "id": "io-import-export/formats",
           "stepId": "formats",
           "text": "Import reads six formats across browser and worker — and no DWG.",
-          "start": 696.614,
-          "end": 698.014
+          "start": 731.46,
+          "end": 732.896
         },
         {
           "id": "io-import-export/held-stl",
           "stepId": "held-stl",
           "text": "The held STL returns as a preview: geometry only, not the document.",
-          "start": 698.014,
-          "end": 700.028
+          "start": 732.896,
+          "end": 734.861
         },
         {
           "id": "io-import-export/back",
           "stepId": "back",
           "text": "Back to model clears the preview — the document never changed.",
-          "start": 700.028,
-          "end": 701.591
+          "start": 734.861,
+          "end": 736.423
         },
         {
           "id": "io-import-export/obj",
           "stepId": "obj",
           "text": "A real OBJ file imports the same way: twelve triangles, 800 mm³.",
-          "start": 701.591,
-          "end": 703.445
+          "start": 736.423,
+          "end": 738.294
         },
         {
           "id": "io-import-export/recap",
           "stepId": "recap",
           "text": "Bytes out, bytes in — the exchange never fakes a format.",
-          "start": 703.445,
-          "end": 704.655
+          "start": 738.294,
+          "end": 739.503
         }
       ]
     },
@@ -2195,106 +2195,106 @@
       "id": "projects-and-versions",
       "title": "Projects and versions",
       "summary": "Sign up, create a project and document, save two versions around a modeled pad, reload, and walk the version history.",
-      "start": 704.684,
-      "end": 745.002,
+      "start": 739.539,
+      "end": 780.083,
       "cues": [
         {
           "id": "projects-and-versions/signup",
           "stepId": "signup",
           "text": "Projects start with an account: name, email, password — sign up.",
-          "start": 704.684,
-          "end": 705.902
+          "start": 739.539,
+          "end": 740.77
         },
         {
           "id": "projects-and-versions/dashboard",
           "stepId": "dashboard",
           "text": "The dashboard greets you — the account exists.",
-          "start": 705.902,
-          "end": 709.153
+          "start": 740.77,
+          "end": 744.158
         },
         {
           "id": "projects-and-versions/projects",
           "stepId": "projects",
           "text": "Projects group documents. Create one with a name.",
-          "start": 709.153,
-          "end": 711.188
+          "start": 744.158,
+          "end": 746.205
         },
         {
           "id": "projects-and-versions/create-project",
           "stepId": "create-project",
           "text": "Name it Tutorial journey, describe it, create.",
-          "start": 711.188,
-          "end": 712.394
+          "start": 746.205,
+          "end": 747.408
         },
         {
           "id": "projects-and-versions/project",
           "stepId": "project",
           "text": "Inside: the document list. Name a document and create it.",
-          "start": 712.394,
-          "end": 714.16
+          "start": 747.408,
+          "end": 749.182
         },
         {
           "id": "projects-and-versions/create-doc",
           "stepId": "create-doc",
           "text": "tutorial-plate joins the project — still empty, honestly.",
-          "start": 714.16,
-          "end": 717.273
+          "start": 749.182,
+          "end": 752.273
         },
         {
           "id": "projects-and-versions/open",
           "stepId": "open",
           "text": "Open enters the workbench: unsaved at version zero.",
-          "start": 717.273,
-          "end": 722.258
+          "start": 752.273,
+          "end": 757.241
         },
         {
           "id": "projects-and-versions/save-v1",
           "stepId": "save-v1",
           "text": "First save: version one. An empty document is now history.",
-          "start": 722.258,
-          "end": 725.077
+          "start": 757.241,
+          "end": 760.028
         },
         {
           "id": "projects-and-versions/sketch",
           "stepId": "sketch",
           "text": "Model the pad: the command menu opens sketch mode.",
-          "start": 725.077,
-          "end": 729.069
+          "start": 760.028,
+          "end": 764.072
         },
         {
           "id": "projects-and-versions/extrude",
           "stepId": "extrude",
-          "text": "Extrude lands the pad — three thousand cubic millimeters.",
-          "start": 729.069,
-          "end": 731.561
+          "text": "Extrude lands the pad — it rises beside the boot plate.",
+          "start": 764.072,
+          "end": 766.58
         },
         {
           "id": "projects-and-versions/save-v2",
           "stepId": "save-v2",
           "text": "Save again: version two. Two milestones, one document.",
-          "start": 731.561,
-          "end": 735.264
+          "start": 766.58,
+          "end": 770.294
         },
         {
           "id": "projects-and-versions/reload",
           "stepId": "reload",
           "text": "Reload: version two returns from the server, not memory.",
-          "start": 735.264,
-          "end": 740.015
+          "start": 770.294,
+          "end": 775.059
         },
         {
           "id": "projects-and-versions/history",
           "stepId": "history",
           "text": "History loads any save: pick v1, the pad leaves.",
-          "start": 740.015,
-          "end": 743.794
+          "start": 775.059,
+          "end": 778.877
         },
         {
           "id": "projects-and-versions/recap",
           "stepId": "recap",
           "text": "Sign up, model, save, reload, walk the versions — the whole loop.",
-          "start": 743.794,
-          "end": 745.002
+          "start": 778.877,
+          "end": 780.083
         }
       ]
     },
@@ -2302,311 +2302,311 @@
       "id": "tsx-exchange",
       "title": "The .tsx model exchange",
       "summary": "Import a JSX-authored model through the real dialog, watch it land as an editable document, export TSX back, and round-trip the held bytes.",
-      "start": 745.032,
-      "end": 766.604,
+      "start": 780.129,
+      "end": 808.872,
       "cues": [
         {
           "id": "tsx-exchange/boot",
           "stepId": "boot",
           "text": "The .tsx exchange: CAD models as code, compiled in the browser.",
-          "start": 745.032,
-          "end": 748.787
+          "start": 780.13,
+          "end": 790.988
         },
         {
           "id": "tsx-exchange/what",
           "stepId": "what",
           "text": "A .tsx model is a JSX document: parameters, sketches, features.",
-          "start": 748.787,
-          "end": 751.245
+          "start": 790.988,
+          "end": 793.463
         },
         {
           "id": "tsx-exchange/dialog",
           "stepId": "dialog",
           "text": "The import dialog takes a .tsx file beside the meshes.",
-          "start": 751.245,
-          "end": 752.51
+          "start": 793.463,
+          "end": 794.765
         },
         {
           "id": "tsx-exchange/import",
           "stepId": "import",
           "text": "Import the hub mount: authored in TypeScript, five features.",
-          "start": 752.51,
-          "end": 753.722
+          "start": 794.765,
+          "end": 795.979
         },
         {
           "id": "tsx-exchange/landed",
           "stepId": "landed",
           "text": "The tree lands the mount body; the timeline reads authored order.",
-          "start": 753.722,
-          "end": 755.246
+          "start": 795.979,
+          "end": 797.51
         },
         {
           "id": "tsx-exchange/settled",
           "stepId": "settled",
           "text": "The scene settles into a real solid — editable like any document.",
-          "start": 755.246,
-          "end": 757.934
+          "start": 797.51,
+          "end": 800.176
         },
         {
           "id": "tsx-exchange/export",
           "stepId": "export",
           "text": "Export TSX generates the model source — the compiler's inverse.",
-          "start": 757.934,
-          "end": 760.346
+          "start": 800.176,
+          "end": 802.633
         },
         {
           "id": "tsx-exchange/skill",
           "stepId": "skill",
           "text": "The slopcad-cad-jsx skill authors these: read, edit, re-run.",
-          "start": 760.346,
-          "end": 762.551
+          "start": 802.633,
+          "end": 804.814
         },
         {
           "id": "tsx-exchange/roundtrip",
           "stepId": "roundtrip",
           "text": "Round trip: the held TSX re-imports to the identical timeline.",
-          "start": 762.551,
-          "end": 765.396
+          "start": 804.814,
+          "end": 807.663
         },
         {
           "id": "tsx-exchange/recap",
           "stepId": "recap",
           "text": "One format, both directions, zero transcription loss.",
-          "start": 765.396,
-          "end": 766.604
+          "start": 807.663,
+          "end": 808.872
         }
       ]
     },
     {
       "id": "applied-iot-case",
       "title": "Applied project: an IoT case for a 5×7 perfboard",
-      "summary": "One continuous build from blank workbench to a three-file print set: stock blank, USB pass-through, standoff posts, lid with lip, the pocket carve, and the exports.",
-      "start": 766.634,
-      "end": 902.108,
+      "summary": "One continuous build from blank workbench to a three-file print set: stock blank, USB pass-through, the pocket carve, standoff posts in the room, lid with lip, and the exports.",
+      "start": 808.903,
+      "end": 967.42,
       "cues": [
         {
           "id": "applied-iot-case/brief",
           "stepId": "brief",
           "text": "The commission: a print-ready case for a socketed board, parts on both faces.",
-          "start": 766.634,
-          "end": 770.392
+          "start": 808.903,
+          "end": 819.763
         },
         {
           "id": "applied-iot-case/stackup",
           "stepId": "stackup",
           "text": "The stack-up: floor 2.5, walls 3 and 35 tall, posts 8.5, lid plus lip.",
-          "start": 770.392,
-          "end": 771.874
+          "start": 819.763,
+          "end": 821.227
         },
         {
           "id": "applied-iot-case/section-instrument",
           "stepId": "section-instrument",
           "text": "First, the instrument: section cuts a plane and measures the true face.",
-          "start": 771.874,
-          "end": 774.791
+          "start": 821.227,
+          "end": 824.111
         },
         {
           "id": "applied-iot-case/section-cut",
           "stepId": "section-cut",
           "text": "View cut drops the volume to half: you are looking inside the plate.",
-          "start": 774.791,
-          "end": 776.247
+          "start": 824.111,
+          "end": 825.575
         },
         {
           "id": "applied-iot-case/section-off",
           "stepId": "section-off",
-          "text": "Section off. The instrument noted; now the case itself.",
-          "start": 776.247,
-          "end": 777.454
+          "text": "Section off. Then the plate hides — stage set.",
+          "start": 825.575,
+          "end": 826.791
         },
         {
           "id": "applied-iot-case/blank-sketch",
           "stepId": "blank-sketch",
           "text": "The footprint: the board's 70 by 50 plus a 3 mm wall all round — 76 by 56.",
-          "start": 777.454,
-          "end": 782.014
+          "start": 826.791,
+          "end": 831.361
         },
         {
           "id": "applied-iot-case/blank",
           "stepId": "blank",
           "text": "One pad, 37.5 tall: 159600 mm³ of stock. The pocket is carved, not built.",
-          "start": 782.014,
-          "end": 787.778
+          "start": 831.361,
+          "end": 837.125
         },
         {
           "id": "applied-iot-case/port-window",
           "stepId": "port-window",
           "text": "The bench models opening-down; use flips it onto its floor. Now the port.",
-          "start": 787.778,
-          "end": 788.987
+          "start": 837.125,
+          "end": 838.334
         },
         {
           "id": "applied-iot-case/port-drill",
           "stepId": "port-drill",
           "text": "⌀6.5 through at 25.75: flipped for use that spans 6 to 12.5 — plug and cable.",
-          "start": 788.987,
-          "end": 797.194
-        },
-        {
-          "id": "applied-iot-case/posts-why",
-          "stepId": "posts-why",
-          "text": "Four ⌀6 posts, six in from the edges: air under the board, pins and all.",
-          "start": 797.194,
-          "end": 798.402
-        },
-        {
-          "id": "applied-iot-case/post-one",
-          "stepId": "post-one",
-          "text": "The first post: ⌀6, 8.5 from the bed — 240.33 mm³ at the corner.",
-          "start": 798.402,
-          "end": 808.61
-        },
-        {
-          "id": "applied-iot-case/three-more",
-          "stepId": "three-more",
-          "text": "The same circle at three corners — the document keeps all four.",
-          "start": 808.61,
-          "end": 832.399
-        },
-        {
-          "id": "applied-iot-case/posts-file",
-          "stepId": "posts-file",
-          "text": "The posts export as their own file: one post, print four — epoxy seats them.",
-          "start": 832.399,
-          "end": 837.021
-        },
-        {
-          "id": "applied-iot-case/lid-why",
-          "stepId": "lid-why",
-          "text": "The lid: same footprint, its own plate, printed face-down, no supports.",
-          "start": 837.021,
-          "end": 838.229
-        },
-        {
-          "id": "applied-iot-case/lid-plate",
-          "stepId": "lid-plate",
-          "text": "76 by 56 by 2.5: the lid plate — 10640 mm³ beside the case.",
-          "start": 838.229,
-          "end": 848.427
-        },
-        {
-          "id": "applied-iot-case/lip-why",
-          "stepId": "lip-why",
-          "text": "The lip is the fit: 70 by 50 — exactly the room — two proud under the plate.",
-          "start": 848.427,
-          "end": 849.636
-        },
-        {
-          "id": "applied-iot-case/lip-sketch",
-          "stepId": "lip-sketch",
-          "text": "Trace the lip and save it: the Rib feature eats saved sections.",
-          "start": 849.636,
-          "end": 855.6
-        },
-        {
-          "id": "applied-iot-case/lip-unlock",
-          "stepId": "lip-unlock",
-          "text": "The feature rows want two free sketches: a throwaway line unlocks them.",
-          "start": 855.6,
-          "end": 863.66
-        },
-        {
-          "id": "applied-iot-case/lip-rib",
-          "stepId": "lip-rib",
-          "text": "Rib, sketch 1, four thick: the plate grows two of lip — 17640 mm³.",
-          "start": 863.66,
-          "end": 868.112
-        },
-        {
-          "id": "applied-iot-case/lid-file",
-          "stepId": "lid-file",
-          "text": "The lid exports too: plate plus lip, one file for the slicer.",
-          "start": 868.112,
-          "end": 872.08
+          "start": 838.334,
+          "end": 846.577
         },
         {
           "id": "applied-iot-case/pocket-why",
           "stepId": "pocket-why",
           "text": "The pocket tool: the board's 70 by 50, 35 deep — it stops 2.5 short: the floor.",
-          "start": 872.08,
-          "end": 873.29
+          "start": 846.577,
+          "end": 847.784
         },
         {
           "id": "applied-iot-case/pocket-sketch",
           "stepId": "pocket-sketch",
           "text": "Trace the cavity: seventy by fifty, the board's own rectangle.",
-          "start": 873.29,
-          "end": 877.475
+          "start": 847.784,
+          "end": 852.45
         },
         {
           "id": "applied-iot-case/pocket-tool",
           "stepId": "pocket-tool",
           "text": "Extrude it 35 — 122500 of air, ordered out of the stock.",
-          "start": 877.475,
-          "end": 883.341
+          "start": 852.45,
+          "end": 858.361
         },
         {
           "id": "applied-iot-case/carve-why",
           "stepId": "carve-why",
-          "text": "Subtract. The tool leaves the floor above it — the print flips onto that floor.",
-          "start": 883.341,
-          "end": 886.222
+          "text": "The stock's job is done: hide it. Subtract will open the room.",
+          "start": 858.361,
+          "end": 861.655
         },
         {
           "id": "applied-iot-case/carve",
           "stepId": "carve",
           "text": "37100 mm³: floor, walls, open face — the base, carved in one subtract.",
-          "start": 886.222,
-          "end": 888.113
+          "start": 861.655,
+          "end": 863.627
         },
         {
           "id": "applied-iot-case/carve-boundary",
           "stepId": "carve-boundary",
           "text": "This view composes pads only: the window stays in the document, not the file.",
-          "start": 888.113,
-          "end": 889.321
+          "start": 863.627,
+          "end": 864.837
         },
         {
           "id": "applied-iot-case/inside",
           "stepId": "inside",
-          "text": "Wire strips the skins: the room reads — empty: the posts are their own file.",
-          "start": 889.321,
-          "end": 892.433
+          "text": "Wire strips the skins: the room reads — empty. Watch the posts land.",
+          "start": 864.837,
+          "end": 867.94
+        },
+        {
+          "id": "applied-iot-case/posts-why",
+          "stepId": "posts-why",
+          "text": "Four ⌀6 posts, six in from the edges: air under the board, pins and all.",
+          "start": 867.94,
+          "end": 869.148
+        },
+        {
+          "id": "applied-iot-case/post-one",
+          "stepId": "post-one",
+          "text": "The first post rises inside the case — ⌀6, 8.5 tall, at the corner.",
+          "start": 869.148,
+          "end": 878.545
+        },
+        {
+          "id": "applied-iot-case/three-more",
+          "stepId": "three-more",
+          "text": "The same circle at three corners — the case keeps every post.",
+          "start": 878.545,
+          "end": 902.413
+        },
+        {
+          "id": "applied-iot-case/posts-file",
+          "stepId": "posts-file",
+          "text": "The posts export as their own file — print all four in one job.",
+          "start": 902.413,
+          "end": 908.377
         },
         {
           "id": "applied-iot-case/family",
           "stepId": "family",
-          "text": "The tree keeps every part; the viewport follows the newest solid.",
-          "start": 892.433,
-          "end": 894.79
+          "text": "Back to shaded. The tree holds every part of the build.",
+          "start": 908.377,
+          "end": 911.705
+        },
+        {
+          "id": "applied-iot-case/lid-why",
+          "stepId": "lid-why",
+          "text": "The lid: same footprint, its own plate, printed face-down, no supports.",
+          "start": 911.705,
+          "end": 912.915
+        },
+        {
+          "id": "applied-iot-case/lid-plate",
+          "stepId": "lid-plate",
+          "text": "76 by 56 by 2.5: the lid lands beside the case, its own plate.",
+          "start": 912.915,
+          "end": 923.827
+        },
+        {
+          "id": "applied-iot-case/lip-why",
+          "stepId": "lip-why",
+          "text": "The lip is the fit: 70 by 50 — exactly the room — two proud under the plate.",
+          "start": 923.827,
+          "end": 925.037
+        },
+        {
+          "id": "applied-iot-case/lip-sketch",
+          "stepId": "lip-sketch",
+          "text": "Trace the lip and save it: the Rib feature eats saved sections.",
+          "start": 925.037,
+          "end": 931.071
+        },
+        {
+          "id": "applied-iot-case/lip-unlock",
+          "stepId": "lip-unlock",
+          "text": "The feature rows want two free sketches: a throwaway line unlocks them.",
+          "start": 931.071,
+          "end": 939.58
+        },
+        {
+          "id": "applied-iot-case/lip-rib",
+          "stepId": "lip-rib",
+          "text": "Rib, sketch 1, four thick: the plate grows two of lip.",
+          "start": 939.58,
+          "end": 944.074
+        },
+        {
+          "id": "applied-iot-case/lid-file",
+          "stepId": "lid-file",
+          "text": "The lid exports too: plate plus lip, one file for the slicer.",
+          "start": 944.074,
+          "end": 954.109
         },
         {
           "id": "applied-iot-case/export-open",
           "stepId": "export-open",
           "text": "Print-ready means bytes: the set is three files — base, posts, lid.",
-          "start": 894.79,
-          "end": 897.464
+          "start": 954.109,
+          "end": 959.663
         },
         {
           "id": "applied-iot-case/export-stl",
           "stepId": "export-stl",
           "text": "STL out: real triangles, real bytes — the base file, walls and floor.",
-          "start": 897.464,
-          "end": 899.687
+          "start": 959.663,
+          "end": 964.997
         },
         {
           "id": "applied-iot-case/print-set",
           "stepId": "print-set",
           "text": "The set: the base (walls, floor — no window), four posts, the lid.",
-          "start": 899.687,
-          "end": 900.896
+          "start": 964.997,
+          "end": 966.209
         },
         {
           "id": "applied-iot-case/recap",
           "stepId": "recap",
-          "text": "The window's cut re-aims in the JSX route: subtract from the carved body there.",
-          "start": 900.896,
-          "end": 902.108
+          "text": "Blank to print set in one document — every part still editable.",
+          "start": 966.209,
+          "end": 967.42
         }
       ]
     }

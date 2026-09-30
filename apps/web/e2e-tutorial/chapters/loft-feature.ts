@@ -12,6 +12,9 @@ import {
   saveSketchRecord,
 } from "../feature-verbs";
 
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside the loft (the s12b pin). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 /** The loft's Simpson's-rule volume at a station height (session s12b). */
 const loftVolume = (stationMm: number): number => (1400 * stationMm) / 6;
 
@@ -51,7 +54,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "volume",
-        text: "Simpson's rule pins the taper at 1400 × 20 / 6 mm³.",
+        text: "Simpson's rule pins the taper — it lands beside the plate.",
       },
       {
         stepId: "station",
@@ -77,19 +80,20 @@ export const chapter: ChapterModule = {
     await driver.step("section-wide");
     // The session's ±10 / ±5 squares shifted into the visible canvas band
     // (the status bar and the surface's clipped bottom band cover workplane
-    // y below roughly 5 mm): the same 400 / 100 mm² section areas on the
-    // same center, so Simpson's pins hold unchanged.
+    // y below roughly 5 mm) and clear of the boot plate's footprint: the
+    // same 400 / 100 mm² section areas on the same center, so Simpson's
+    // pins hold unchanged.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(5, 15);
-    await driver.clickCanvasPoint(25, 35);
+    await driver.clickCanvasPoint(45, 15);
+    await driver.clickCanvasPoint(65, 35);
     await saveSketchRecord(page, driver, OCCT_ROOT);
 
     await driver.step("section-narrow");
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(10, 20);
-    await driver.clickCanvasPoint(20, 30);
+    await driver.clickCanvasPoint(50, 20);
+    await driver.clickCanvasPoint(60, 30);
     await saveSketchRecord(page, driver, OCCT_ROOT);
 
     // The cue describes the Loft form's pre-seeded sections, so its beat
@@ -109,7 +113,10 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("volume");
-    expect(volumeNear(Number(lofted), loftVolume(20))).toBe(true);
+    // The boot plate rides beside the loft (the s12b document-scene pin).
+    expect(volumeNear(Number(lofted), BOOT_PLATE_VOLUME + loftVolume(20))).toBe(
+      true,
+    );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
@@ -123,7 +130,9 @@ export const chapter: ChapterModule = {
 
     await driver.step("redrive");
     const redriven = await applyFeatureEdit(page, driver, OCCT_ROOT);
-    expect(volumeNear(Number(redriven), loftVolume(50))).toBe(true);
+    expect(
+      volumeNear(Number(redriven), BOOT_PLATE_VOLUME + loftVolume(50)),
+    ).toBe(true);
 
     await driver.step("recap");
     await driver.dwell(1_200);

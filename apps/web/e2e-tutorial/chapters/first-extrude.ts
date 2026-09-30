@@ -8,7 +8,6 @@ import {
   COMPLETE,
   COMPLETE_ROOT,
   readTimeline,
-  RECT,
   REDO_BUTTON,
   UNDO_BUTTON,
   volumeNear,
@@ -16,11 +15,16 @@ import {
 } from "../../e2e-session/helpers";
 import { EXTRUDE_DEFAULT_DEPTH_MM } from "../../src/cad-workbench/SketchMode";
 
+/** The boot plate's analytic volume (30 × 20 × 10 with the ⌀8 bore) — the
+ * document-scene body that renders beside every pad (the s02/s06b pins). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
+
 /**
  * Chapter 3 — from profile to solid. A fresh boot plate, the top-bar Sketch
- * door, the same rectangle, the extrude that turns it into a pad at the
- * default depth, the timeline as the recipe, and undo/redo as the safety
- * net (s02/s06b's create journey, walked at teaching pace).
+ * door, the create-journey rectangle parked beside the plate's footprint,
+ * the extrude that turns it into a pad at the default depth, the timeline
+ * as the recipe, and undo/redo as the safety net (s02/s06b's create
+ * journey, walked at teaching pace).
  */
 export const chapter: ChapterModule = {
   definition: {
@@ -39,7 +43,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "draw-again",
-        text: "Same rectangle as before: arm the tool, then one click per corner.",
+        text: "The 20 by 15 rectangle again: arm the tool, one click per corner.",
       },
       {
         stepId: "extrude",
@@ -78,8 +82,12 @@ export const chapter: ChapterModule = {
 
     await driver.step("draw-again");
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(RECT.x0, RECT.y0);
-    await driver.clickCanvasPoint(RECT.x1, RECT.y1);
+    // The create-journey rectangle parked at x ∈ [40,60] — beside the boot
+    // plate's footprint (the session s07 re-baseline: the document scene
+    // renders the plate beside the pad, and an overlapping pad would put
+    // the two top faces coplanar in the taught frame).
+    await driver.clickCanvasPoint(40, 10);
+    await driver.clickCanvasPoint(60, 25);
 
     await driver.step("extrude");
     const before = await dispatchedCount(page, COMPLETE_ROOT);
@@ -94,8 +102,10 @@ export const chapter: ChapterModule = {
 
     await driver.step("the-pad");
     // The pad lands on the analytic volume (the s06b pin): area × depth.
-    const analytic =
-      (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * EXTRUDE_DEFAULT_DEPTH_MM;
+    // Phase 16 document-scene semantics: the plate renders BESIDE the pad,
+    // so the settle is the DOCUMENT volume (plate + pad).
+    const padAnalytic = 20 * 15 * EXTRUDE_DEFAULT_DEPTH_MM;
+    const analytic = BOOT_PLATE_VOLUME + padAnalytic;
     expect(
       volumeNear(Number(extruded), analytic),
       `extruded ${extruded} vs analytic ${String(analytic)}`,

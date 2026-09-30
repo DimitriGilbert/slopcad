@@ -15,6 +15,9 @@ import {
 /** The 1 mm wall's exact closed shell and the rod's analytic half (s14d/e). */
 const THICKEN_VOLUME = 90 * Math.PI - 32 * Math.PI;
 const SPLIT_VOLUME = 45 * Math.PI;
+/** The boot plate's analytic volume — the document-scene body that rides
+ * beside both (the s14d/e pins). */
+const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 
 /**
  * Chapter 18 — hollowing and dividing. Thicken turns the rod into its own
@@ -39,7 +42,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "shell",
-        text: "The rod becomes its own shell: exactly 58π mm³.",
+        text: "The rod becomes its own 1 mm shell, beside the plate.",
       },
       {
         stepId: "split-boot",
@@ -55,7 +58,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "half",
-        text: "Exactly half the rod stays: 45π mm³.",
+        text: "Exactly half the rod stays — cut true, beside the plate.",
       },
       {
         stepId: "flip",
@@ -94,7 +97,10 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("shell");
-    expect(volumeNear(Number(hollowed), THICKEN_VOLUME)).toBe(true);
+    // The boot plate rides beside the shell (the s14d document-scene pin).
+    expect(
+      volumeNear(Number(hollowed), BOOT_PLATE_VOLUME + THICKEN_VOLUME),
+    ).toBe(true);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
@@ -122,7 +128,10 @@ export const chapter: ChapterModule = {
     );
 
     await driver.step("half");
-    expect(volumeNear(Number(split), SPLIT_VOLUME)).toBe(true);
+    // The boot plate rides beside the kept half (the s14e pin).
+    expect(volumeNear(Number(split), BOOT_PLATE_VOLUME + SPLIT_VOLUME)).toBe(
+      true,
+    );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
@@ -134,7 +143,9 @@ export const chapter: ChapterModule = {
       "-1",
     );
     const flipped = await applyFeatureEdit(page, driver, OCCT_ROOT);
-    expect(volumeNear(Number(flipped), SPLIT_VOLUME)).toBe(true);
+    expect(volumeNear(Number(flipped), BOOT_PLATE_VOLUME + SPLIT_VOLUME)).toBe(
+      true,
+    );
 
     await driver.step("recap");
     await driver.dwell(1_200);

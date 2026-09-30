@@ -8,7 +8,6 @@ import {
   COMPLETE,
   COMPLETE_ROOT,
   readTimeline,
-  RECT,
   REDO_BUTTON,
   UNDO_BUTTON,
   waitForRootSettle,
@@ -81,8 +80,12 @@ export const chapter: ChapterModule = {
     expect(Number(bootVolume)).toBeGreaterThan(0);
     await driver.enterSketchMode();
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(RECT.x0, RECT.y0);
-    await driver.clickCanvasPoint(RECT.x1, RECT.y1);
+    // The create-journey rectangle parked beside the boot plate's footprint
+    // (the document scene renders the plate beside the pad — the s07
+    // re-baseline; an overlapping pad would bury half its faces in the
+    // plate the video must show).
+    await driver.clickCanvasPoint(40, 10);
+    await driver.clickCanvasPoint(60, 25);
     const before = await dispatchedCount(page, COMPLETE_ROOT);
     await driver.humanClick(page.locator('[data-testid="sketch-extrude"]'));
     await expect(page.locator(COMPLETE)).toHaveAttribute(
