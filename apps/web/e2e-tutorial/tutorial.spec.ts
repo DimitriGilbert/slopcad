@@ -4,6 +4,7 @@ import type { ChapterModule } from "./narration";
 
 import { chapter as analysisChapter } from "./chapters/analysis";
 import { chapter as appearanceAndLightingChapter } from "./chapters/appearance-and-lighting";
+import { chapter as appliedIotCaseChapter } from "./chapters/applied-iot-case";
 import { chapter as assemblyMotionChapter } from "./chapters/assembly-motion";
 import { chapter as assemblyTreeChapter } from "./chapters/assembly-tree";
 import { chapter as baseToolsChapter } from "./chapters/base-tools";
@@ -66,7 +67,8 @@ import {
  * persistence loop. The tsx-exchange chapter is deliberately last-but-one
  * AFTER projects-and-versions: its import crosses the session-gated
  * server endpoint, so it rides that chapter's sign-in (the session's own
- * s26c-rides-s26 precedent).
+ * s26c-rides-s26 precedent). The applied capstone closes the deck: one
+ * continuous build from a blank workbench to an exported STL.
  */
 const CHAPTERS: readonly ChapterModule[] = [
   homeTourChapter,
@@ -99,6 +101,7 @@ const CHAPTERS: readonly ChapterModule[] = [
   ioImportExportChapter,
   projectsAndVersionsChapter,
   tsxExchangeChapter,
+  appliedIotCaseChapter,
 ];
 
 const test = base.extend<object, { tutorialPage: Page }>({
@@ -310,6 +313,19 @@ test("chapter: projects-and-versions", async ({ tutorialPage: page }) => {
 test("chapter: tsx-exchange", async ({ tutorialPage: page }) => {
   test.setTimeout(180_000);
   await playChapter(page, tsxExchangeChapter);
+});
+
+// The applied capstone: ONE continuous document carries the whole build —
+// seven sketches, seven extrudes with parameter re-drives, a hole command,
+// a saved-sketch rib, a boolean carve, the section instrument, and THREE
+// STL exports (base, posts, lid) verified against their analytic volumes
+// — at teaching pace on the OCCT backend, whose exact-BREP volumes the
+// analytic pins demand. The merged session-stage chapters set the
+// elevation precedent (holes-and-patterns' 300 s for four stages); a
+// start-to-finish applied build legitimately takes minutes of teaching.
+test("chapter: applied-iot-case", async ({ tutorialPage: page }) => {
+  test.setTimeout(480_000);
+  await playChapter(page, appliedIotCaseChapter);
 });
 
 test("tutorial gate: the narration ledger is complete and watchable", async () => {
