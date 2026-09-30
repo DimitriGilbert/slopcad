@@ -316,13 +316,15 @@ test("chapter: tsx-exchange", async ({ tutorialPage: page }) => {
 });
 
 // The applied capstone: ONE continuous document carries the whole build —
-// seven sketches, seven extrudes with parameter re-drives, a hole command,
-// a saved-sketch rib, a boolean carve, the section instrument, and THREE
-// STL exports (base, posts, lid) verified against their analytic volumes
-// — at teaching pace on the OCCT backend, whose exact-BREP volumes the
-// analytic pins demand. The merged session-stage chapters set the
-// elevation precedent (holes-and-patterns' 300 s for four stages); a
-// start-to-finish applied build legitimately takes minutes of teaching.
+// fourteen sketches, fourteen extrudes with parameter re-drives (negative
+// depths included), the sketch-on-face verb five times on real caps (the
+// wall tops and the rim top), a hole command, the section instrument, and
+// TWO view-scoped STL exports (box, lid) verified against their analytic
+// volumes AND their taught world bounds — at teaching pace on the OCCT
+// backend, whose exact-BREP volumes the analytic pins demand. The merged
+// session-stage chapters set the elevation precedent (holes-and-patterns'
+// 300 s for four stages); a start-to-finish applied build legitimately
+// takes minutes of teaching.
 test("chapter: applied-iot-case", async ({ tutorialPage: page }) => {
   test.setTimeout(480_000);
   await playChapter(page, appliedIotCaseChapter);

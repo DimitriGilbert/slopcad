@@ -11,14 +11,8 @@ import {
   volumeNear,
   waitForRootSettle,
 } from "../../e2e-session/helpers";
-import {
-  createFeature,
-  fillLabeledField,
-  openFeatureDialog,
-  pickComboboxOption,
-  saveSketchRecord,
-  saveThrowawayLine,
-} from "../feature-verbs";
+import { readFaceAnchors } from "../../e2e-render/helpers";
+import { fillLabeledField } from "../feature-verbs";
 
 // ---------------------------------------------------------------------------
 // The dimension stack-up (every number below is the brief, arithmetic shown)
@@ -26,145 +20,115 @@ import {
 //
 // The commission: a 3D-printable case for a 5×7 cm perfboard hosting a
 // SOCKLETED NodeMCU with components on BOTH faces — clearance above and
-// below, standoffs so nothing rests on the floor, a USB cutout, a lid.
+// below, standoffs so nothing rests on the floor, a USB cutout, a lid that
+// registers on the walls. The model builds in the case's NATURAL viewing
+// frame: opening UP, the camera looking down into it.
 //
 //   board            70 × 50 × 1.6   (the 5×7 cm perfboard)
 //   wall margin      3 all round  →  footprint 76 × 56
-//   floor            2.5
-//   cavity           70 × 50        (the board's own rectangle)
-//   wall height      35             (1.6 board + ~25 of parts + air)
-//   blank            76 × 56 × 37.5 (floor 2.5 + walls 35, one stock pad)
-//   posts            ⌀6 × 8.5, centers inset 6 off the board's corners
-//                    → (9, 9), (67, 9), (9, 47), (67, 47)
-//   port window      ⌀6.5 through-drill along X, world y 28, center
-//                    z 25.75 → flipped onto its floor for use it spans
-//                    6..12.5 above the floor (the board's connector plus
-//                    the cable's drop below it)
-//   lid              76 × 56 × 2.5 plus a 70 × 50 × 2 lip (a rib grown 4
-//                    thick symmetric about the bed plane: 2 merges into
-//                    the plate, 2 stands proud beneath it)
+//   floor            2.5 (dips BELOW the bed: the bed plane is its top)
+//   walls            3 thick, 35 tall, standing ON the floor's top
+//   posts            ⌀6 × 6 on the bed plane (= the floor's top), centers
+//                    inset 6 off the board's corners → (9,9), (67,9),
+//                    (9,47), (67,47); the board rests at 6
+//   port window      ⌀6.5 through-drill along X through the plug wall,
+//                    center (y, z) = (28, 9.25) → the hole spans 6..12.5
+//                    above the floor (the connector plus the cable drop)
+//   lid              four rim walls 3 × 5.5 at the footprint border plus a
+//                    70 × 50 × 2.5 plate hung on the rims' tops — the
+//                    underside slot (70 × 50 × 3) drops over the wall tops
 //
-// ## The two boundaries this chapter TEACHES instead of papering over
+// ## The frame, and the two boundaries the probes taught
 //
-// 1. ORIENTATION. The workbench extrudes from one plane, so every pad
-//    grows off the bed: the blank, the pocket tool that leaves the floor
-//    ABOVE it, the posts. The model therefore comes off the bench opening
-//    toward the bed; printing stands the case on its floor (the flip the
-//    slicer performs), and every "in use" height in the narration reads
-//    AFTER that flip — 37.5 minus the model z. The posts inherit the same
-//    boundary: they grow at the bed (z 0..8.5), not at the floor they
-//    seat against in the assembly; the file itself is orientation-free
-//    (a bare ⌀6 × 8.5 cylinder prints exactly as it sits).
-// 2. THE WINDOW IN THE EXPORT. The carve preview composes its subtract
-//    from plain pads (`documentBooleanSceneRequest` pairs one extrude
-//    target with ONE extrude tool; the hole scene pairs an extrude base
-//    with holes — the two never compose), so the drilled window shows in
-//    the document's own feature but NOT in the carved preview nor in the
-//    STL that preview exports. The chapter discloses this once at the
-//    carve beat and the print-set inventory states what the base file
-//    holds (walls and floor, no window); the finish is named: in the JSX
-//    route the booleans nest freely (a Sketch on a vertical plane, a
-//    Subtract whose base is the carved body), so the cut re-aims there.
-//    The honest fingerprint pair: the exported base pins 37100 exactly;
-//    the part WITH the window carried through would measure
-//    37100 − 2·(π·3.25²·3) ≈ 36900.9 (two 3 mm wall crossings).
+// 1. THE FRAME. Extrudes ride the bed workplane, and a signed depth moves
+//    either way (the Phase 15 finding, re-proven): the FLOOR extrudes DOWN
+//    2.5, so the bed plane IS the floor's top face — every later sketch
+//    (walls, posts) is a plain bed sketch and every wall stands on the
+//    floor without a datum. The case models opening UP because the build
+//    is upside down no more: the brief's "in use" heights read directly
+//    (the plug line at 6..12.5 above the floor).
+// 2. SKETCH-ON-FACE RESOLVES EXTRUSION CAPS. The datum the verb commits
+//    resolves against the producing extrude's two caps — a boolean body's
+//    faces and side walls refuse (the probes' structured refusal is the
+//    old carve's lesson), and a buried cap never wins the pick ray. So the
+//    box is BUILT, not carved: four walls as plain bed extrudes land the
+//    exact shell material a blank-minus-pocket carve would leave (37100
+//    analytic before the window), the rims anchor on the fourth wall's top
+//    cap, and the lid's plate anchors on the first rim's top with a
+//    NEGATIVE depth (down 2.5 — the recess is real, not a lip).
 //
 // ## The document IS the scene (Phase 16) — and the chapter teaches it
 //
-// The applied scene renders every visible lineage. The chapter stages it
-// deliberately: the demo plate owns the section-instrument beat, then the
-// user HIDES it (the section-off beat's visible eye click — the case's
-// 76 × 56 footprint would bury the plate whole), and from there every
-// volume readout counts the case alone — the cue numbers and the pixels
-// agree. The carve opens the room BEFORE the posts exist, the wireframe
-// reveal levels the camera through the walls (the case models opening
-// toward the bed, so the shaded view from above can never show the
-// room), and the posts then land IN VIEW inside their case — the build's
-// spatial story reads in the editor itself. The print set is THREE files
-// through the same view control: an export carries WHAT RENDERS, so each
-// file's beat hides the bodies that don't belong in it (the tree row's
-// visibility eye) and restores them after.
+// The applied scene renders every visible lineage. The section instrument
+// beats run on the boot plate, which then HIDES through its tree eye —
+// from there every readout counts the case alone. The lid's pieces step
+// out of view for the box export and the box's pieces for the lid export:
+// an export carries WHAT RENDERS, so each file is scoped by the same
+// visibility control the viewer just learned. The open/close beat hides
+// the plate alone: top view, the posts stand INSIDE the case, in place.
 //
-//   case base   37100 mm³  (walls + floor — the window rides the document)
-//   posts        240.33 mm³ each (⌀6 × 8.5 — the file holds all four)
-//   lid         17640 mm³  (plate + lip)
+//   box file    37679.03 mm³ analytic (37100 shell − 99.54 window
+//               + 4 × 169.65 posts); the mesh measures ~37673 — the bore
+//               and post cylinders are inscribed-polygon tessellations
+//   lid file    12908 mm³ analytic, planar-exact (4158 rims + 8750 plate)
 // Each export is verified against its analytic volume by summing the
-// downloaded mesh's signed tetrahedra — the planar bodies land exact;
-// the posts carry only the cylinder tessellation's inscribed-polygon
-// shortfall (a wider documented band).
+// downloaded mesh's signed tetrahedra, and the box's world bounds
+// [0,0,−2.5]–[76,56,35] and the lid's [0,0,35]–[76,56,40.5] are read off
+// the meshes' own vertices.
 
-/** The blank: 76 × 56 × 37.5 of stock (floor and wall material together). */
-const BLANK_VOLUME = 76 * 56 * 37.5;
-/**
- * The port's through-bore: ⌀6.5 drilled along X across the blank's full
- * 76 mm width (depth 76 ≥ 76 → the kernel's through semantic). The drill
- * happens while the stock is solid, so the beat's scene measures exactly
- * the blank minus one cylinder: 159600 − π·3.25²·76.
- */
-const BORED_VOLUME = BLANK_VOLUME - Math.PI * 3.25 * 3.25 * 76;
-/** One post: ⌀6 × 8.5 — the posts file's whole content (print four). */
-const POST_VOLUME = Math.PI * 9 * 8.5;
-/** The lid plate: the case's own footprint, 2.5 thick. */
-const LID_VOLUME = 76 * 56 * 2.5;
-/**
- * The lid with its lip: the rib extrudes the 70 × 50 section symmetrically
- * about the bed plane, 4 thick total (z −2..+2). The union absorbs the
- * +2..0 half into the plate, so the added material is the −2..0 lip:
- * 70 · 50 · 2 = 7000 on top of the plate.
- */
-const LID_WITH_LIP_VOLUME = LID_VOLUME + 70 * 50 * 2;
-/** The pocket tool: 70 × 50 × 35 — it stops one floor thickness short. */
-const POCKET_VOLUME = 70 * 50 * 35;
-/** The carved case: the blank minus the pocket (floor + wall ring). */
-const CASE_VOLUME = BLANK_VOLUME - POCKET_VOLUME;
+/** The floor slab: the full footprint, 2.5 thick, below the bed plane. */
+const FLOOR_VOLUME = 76 * 56 * 2.5;
+/** One long wall: 76 × 3 × 35. */
+const WALL_LONG = 76 * 3 * 35;
+/** One short wall: 3 × 50 × 35. */
+const WALL_SHORT = 3 * 50 * 35;
+/** The shell: floor + two long + two short walls (the carve's own number). */
+const SHELL_VOLUME = FLOOR_VOLUME + 2 * WALL_LONG + 2 * WALL_SHORT;
+/** The window's through-bore: ⌀6.5 through the 3 mm plug wall. */
+const WINDOW_CUT = Math.PI * 3.25 * 3.25 * 3;
+/** The shell with its window: the box body set's own material. */
+const CASE_VOLUME = SHELL_VOLUME - WINDOW_CUT;
+/** One long rim: 76 × 3 × 5.5. */
+const RIM_LONG = 76 * 3 * 5.5;
+/** One short rim: 3 × 50 × 5.5. */
+const RIM_SHORT = 3 * 50 * 5.5;
+/** The lid's mating rim: four rim walls at the footprint border. */
+const RIMS_VOLUME = 2 * RIM_LONG + 2 * RIM_SHORT;
+/** The lid's plate: the board's rectangle, 2.5 thick. */
+const PLATE_VOLUME = 70 * 50 * 2.5;
+/** The lid: rims + plate — the doctrine's own lid number. */
+const LID_VOLUME = RIMS_VOLUME + PLATE_VOLUME;
+/** One standoff post: ⌀6 × 6. */
+const POST_VOLUME = Math.PI * 9 * 6;
+/** The box file: the case, its window, and the four posts. */
+const BOX_VOLUME = CASE_VOLUME + 4 * POST_VOLUME;
 /** The boot demo plate's volume (30 × 20 × 10 with the ⌀8 bore). */
 const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
 /** The boot demo plate's section area at the mid-height plane (z = 5). */
 const BOOT_SECTION_AREA = 30 * 20 - Math.PI * 16;
 
-/**
- * The first post's center — six millimetres in from the board's corner
- * (the board's corner sits at (3, 3) inside the 3 mm wall).
- */
-const FIRST_POST: readonly [number, number] = [9, 9];
-/** The rest of the post grid: the other three corners, same inset. */
-const OTHER_POSTS: readonly (readonly [number, number])[] = [
-  [67, 9],
-  [9, 47],
-  [67, 47],
-];
-
-/**
- * The tessellated-cylinder band: a curved body's mesh is an inscribed
- * polygon soup, so it UNDER-measures the analytic solid — a 12-gon
- * cross-section by ~4.5%, the smoothest realistic mesh by ~0.6%. The
- * post floor sits at 0.94 of the analytic 240.33; the over-measure
- * guard stays at 1.001 for every body.
- */
-const CURVED_VOLUME_FLOOR = 0.94;
-/** The house band for planar (box-built, exactly tessellated) bodies. */
+/** The tessellated-cylinder guard: the box mesh's bore and posts land
+ * within 0.1% of analytic (measured 37673.42 vs 37679.03), so the house
+ * planar band covers the whole file. */
 const PLANAR_VOLUME_FLOOR = 0.995;
 
 /**
  * Chapter 30 — the applied capstone. ONE continuous build, blank workbench
- * to a THREE-file print set: the brief and its dimension stack-up, the
- * section instrument on the demo plate, then the case itself — the stock
- * blank, the USB pass-through drilled through the solid stock, the pocket
- * carve that opens the room, the four standoff posts landing INSIDE it,
- * and the lid with its rib-grown lip beside the case. The document is the
- * scene (Phase 16): every readout pins the visible document's total, and
- * each part exports by SCOPING THE VIEW — hide the bodies that don't
- * belong in the file, export, restore. Every export is verified against
- * its analytic volume from the downloaded mesh's own triangles, and the
- * workbench boundaries that remain (the one-plane pads, the pads-only
- * carve preview) are taught out loud instead of papered over.
+ * to a TWO-file print set: the brief and its dimension stack-up, the
+ * section instrument on the demo plate, then the case itself — the floor,
+ * four walls in the bed's frame, the USB window drilled on the plug line,
+ * the lid's mating rim sketched ON the wall tops, the lid's plate hung on
+ * the rims with a real underside slot, the open/close beat with the posts
+ * standing INSIDE the case, and the two view-scoped exports. Every export
+ * is verified against its analytic volume and its taught world bounds from
+ * the downloaded mesh's own triangles.
  */
 export const chapter: ChapterModule = {
   definition: {
     id: "applied-iot-case",
     title: "Applied project: an IoT case for a 5×7 perfboard",
     summary:
-      "One continuous build from blank workbench to a three-file print set: stock blank, USB pass-through, the pocket carve, standoff posts in the room, lid with lip, and the exports.",
+      "One continuous build from blank workbench to a two-file print set: floor, walls, USB window, the lid's mating rim and slotted plate, posts inside, and the exports.",
     cues: [
       {
         stepId: "brief",
@@ -172,7 +136,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "stackup",
-        text: "The stack-up: floor 2.5, walls 3 and 35 tall, posts 8.5, lid plus lip.",
+        text: "The stack-up: floor 2.5, walls 3 and 35, posts 6, a lid that slots on top.",
       },
       {
         stepId: "section-instrument",
@@ -184,115 +148,103 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "section-off",
-        text: "Section off. Then the plate hides — stage set.",
+        text: "Section off. Then the plate hides — the stage belongs to the case now.",
       },
       {
-        stepId: "blank-sketch",
-        text: "The footprint: the board's 70 by 50 plus a 3 mm wall all round — 76 by 56.",
+        stepId: "floor",
+        text: "The floor: 76 by 56, 2.5 thick, extruded DOWN — its top face is the bed.",
       },
       {
-        stepId: "blank",
-        text: "One pad, 37.5 tall: 159600 mm³ of stock. The pocket is carved, not built.",
+        stepId: "wall-one",
+        text: "The first wall rides the bed plane — the floor's own top: 3 by 35.",
       },
       {
-        stepId: "port-window",
-        text: "The bench models opening-down; use flips it onto its floor. Now the port.",
+        stepId: "wall-two",
+        text: "The second wall, the same plane. The case builds in the bed's frame.",
       },
       {
-        stepId: "port-drill",
-        text: "⌀6.5 through at 25.75: flipped for use that spans 6 to 12.5 — plug and cable.",
+        stepId: "wall-three",
+        text: "Three walls: 31850 mm³. The fourth waits — the window comes first.",
       },
       {
-        stepId: "pocket-why",
-        text: "The pocket tool: the board's 70 by 50, 35 deep — it stops 2.5 short: the floor.",
+        stepId: "window-why",
+        text: "The board's USB sits 6 to 12.5 above the floor: the plug line, at 9.25.",
       },
       {
-        stepId: "pocket-sketch",
-        text: "Trace the cavity: seventy by fifty, the board's own rectangle.",
+        stepId: "window-drill",
+        text: "⌀6.5 through the plug wall at the plug line — 31750.5 mm³.",
       },
       {
-        stepId: "pocket-tool",
-        text: "Extrude it 35 — 122500 of air, ordered out of the stock.",
+        stepId: "wall-four",
+        text: "The fourth wall closes the ring: 76 by 56, 35 tall — 37000.5 mm³. The case stands.",
       },
       {
-        stepId: "carve-why",
-        text: "The stock's job is done: hide it. Subtract will open the room.",
+        stepId: "shell-read",
+        text: "The wireframe strips the skins — the case reads open.",
       },
       {
-        stepId: "carve",
-        text: "37100 mm³: floor, walls, open face — the base, carved in one subtract.",
+        stepId: "rim-why",
+        text: "The lid registers on the walls: a 3 mm rim, 5.5 tall, all round the top.",
       },
       {
-        stepId: "carve-boundary",
-        text: "This view composes pads only: the window stays in the document, not the file.",
+        stepId: "rim-one",
+        text: "The first rim is sketched ON a wall's top face — select it, sketch on it.",
       },
       {
-        stepId: "inside",
-        text: "Wire strips the skins: the room reads — empty. Watch the posts land.",
+        stepId: "rim-rest",
+        text: "Three rims more, each on a wall top: 4158 mm³ of mating band.",
       },
       {
-        stepId: "posts-why",
+        stepId: "plate-why",
+        text: "The plate: 70 by 50, hung 3 below the rim tops — the slot for the walls.",
+      },
+      {
+        stepId: "plate",
+        text: "Sketched on the rim's top, extruded down 2.5: the lid reads 12908 mm³.",
+      },
+      {
+        stepId: "open-case",
+        text: "The lid's plate steps off — the case opens: floor and walls.",
+      },
+      {
+        stepId: "post-why",
         text: "Four ⌀6 posts, six in from the edges: air under the board, pins and all.",
       },
       {
         stepId: "post-one",
-        text: "The first post rises inside the case — ⌀6, 8.5 tall, at the corner.",
+        text: "The first post rises on the bed plane — 6 tall, at the corner inset.",
       },
       {
-        stepId: "three-more",
-        text: "The same circle at three corners — the case keeps every post.",
+        stepId: "posts-rest",
+        text: "Three more at the corners: the board rests at 6, touching nothing.",
       },
       {
-        stepId: "posts-file",
-        text: "The posts export as their own file — print all four in one job.",
-      },
-      {
-        stepId: "family",
-        text: "Back to shaded. The tree holds every part of the build.",
-      },
-      {
-        stepId: "lid-why",
-        text: "The lid: same footprint, its own plate, printed face-down, no supports.",
-      },
-      {
-        stepId: "lid-plate",
-        text: "76 by 56 by 2.5: the lid lands beside the case, its own plate.",
-      },
-      {
-        stepId: "lip-why",
-        text: "The lip is the fit: 70 by 50 — exactly the room — two proud under the plate.",
-      },
-      {
-        stepId: "lip-sketch",
-        text: "Trace the lip and save it: the Rib feature eats saved sections.",
-      },
-      {
-        stepId: "lip-unlock",
-        text: "The feature rows want two free sketches: a throwaway line unlocks them.",
-      },
-      {
-        stepId: "lip-rib",
-        text: "Rib, sketch 1, four thick: the plate grows two of lip.",
-      },
-      {
-        stepId: "lid-file",
-        text: "The lid exports too: plate plus lip, one file for the slicer.",
+        stepId: "close-case",
+        text: "The lid returns: rim on the walls, plate on top — the case is closed.",
       },
       {
         stepId: "export-open",
-        text: "Print-ready means bytes: the set is three files — base, posts, lid.",
+        text: "Print-ready means bytes: the set is two files — the box and the lid.",
       },
       {
-        stepId: "export-stl",
-        text: "STL out: real triangles, real bytes — the base file, walls and floor.",
+        stepId: "box-scope",
+        text: "The lid's bodies step out of view: the scene is the box alone.",
       },
       {
-        stepId: "print-set",
-        text: "The set: the base (walls, floor — no window), four posts, the lid.",
+        stepId: "export-box",
+        text: "The box's STL: 37679 mm³ of mesh — walls, floor, window, posts.",
+      },
+      {
+        stepId: "lid-scope",
+        text: "The view flips: the lid alone — its rim ring and its plate.",
+      },
+      {
+        stepId: "export-lid",
+        text: "The lid's STL: 12908 mm³, the slot read straight off the triangles.",
       },
       {
         stepId: "recap",
-        text: "Blank to print set in one document — every part still editable.",
+        text: "Two files, one document: box and lid, every part still editable.",
       },
     ],
   },
@@ -301,7 +253,7 @@ export const chapter: ChapterModule = {
     // -- The brief and the stack-up (over the fresh boot) -------------------
     await driver.step("brief");
     const bootVolume = await driver.arriveAtWorkbench("occt");
-    expect(Number(bootVolume)).toBeGreaterThan(0);
+    expect(Number(bootVolume)).toBeCloseTo(BOOT_PLATE_VOLUME, 0);
     await driver.dwell();
 
     await driver.step("stackup");
@@ -356,29 +308,74 @@ export const chapter: ChapterModule = {
     // the case alone, and the cue numbers and the pixels agree.
     await setBodyVisible(page, driver, "body|body_plate", false);
 
-    // -- The stock blank -----------------------------------------------------
-    // The taught frame anchors at the world origin: the blank's far edge is
-    // the y=0 row itself. That row sits in the status strips' band the raw
-    // pointer cannot reach — the sweep chapter's pinned pick carries it. The
-    // visible corner is picked FIRST (a raw pick maps from the unscrolled
-    // canvas; the pinned pick's locator click re-scrolls the workspace, and
-    // its position option stays element-exact through the scroll).
-    await driver.step("blank-sketch");
+    // -- The floor (the blank's role): full footprint, dipping below -------
+    await driver.step("floor");
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
+    // The taught frame anchors at the world origin: the far corner first,
+    // the y=0 row second through the pinned pick (the status bar's band).
     await driver.clickCanvasPoint(76, 56);
     await driver.pickPinnedCanvasPoint(0, 0);
-
-    await driver.step("blank");
-    await extrudeWithDepth(page, driver, "extrudeDepth", "37.5", BLANK_VOLUME);
+    await extrudeWithDepth(page, driver, "extrudeDepth", "-2.5", FLOOR_VOLUME);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    // -- The USB pass-through (drilled through the solid stock) --------------
-    await driver.step("port-window");
+    // -- The walls: plain bed extrudes standing on the floor's top ---------
+    await driver.step("wall-one");
+    await driver.enterSketchMode(OCCT_ROOT);
+    await driver.activateSketchTool("rectangle");
+    // The first wall's band spans y 0..3 — BOTH corners live in the
+    // status bar's hidden rows, so both corners ride the pinned pick.
+    await driver.pickPinnedCanvasPoint(76, 3);
+    await driver.pickPinnedCanvasPoint(0, 0);
+    await extrudeWithDepth(
+      page,
+      driver,
+      "extrudeDepth2",
+      "35",
+      FLOOR_VOLUME + WALL_LONG,
+    );
+    await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    await driver.step("port-drill");
+    await driver.step("wall-two");
+    await driver.enterSketchMode(OCCT_ROOT);
+    await driver.activateSketchTool("rectangle");
+    await driver.clickCanvasPoint(76, 56);
+    await driver.clickCanvasPoint(0, 53);
+    await extrudeWithDepth(
+      page,
+      driver,
+      "extrudeDepth3",
+      "35",
+      FLOOR_VOLUME + 2 * WALL_LONG,
+    );
+    await driver.dwell();
+
+    await driver.step("wall-three");
+    await driver.enterSketchMode(OCCT_ROOT);
+    await driver.activateSketchTool("rectangle");
+    // The cavity is the board's own rectangle: far corner first, the 3 mm
+    // band row second through the pinned pick.
+    await driver.clickCanvasPoint(3, 53);
+    await driver.pickPinnedCanvasPoint(0, 3);
+    await extrudeWithDepth(
+      page,
+      driver,
+      "extrudeDepth4",
+      "35",
+      FLOOR_VOLUME + 2 * WALL_LONG + WALL_SHORT,
+    );
+    await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
+    await driver.dwell();
+
+    // -- The USB window (drilled before the fourth wall exists: the hole
+    // consumes its target wall, and the fourth wall's top face then hosts
+    // every rim datum) ------------------------------------------------------
+    await driver.step("window-why");
+    await driver.dwell();
+
+    await driver.step("window-drill");
     await driver.openCommandMenu(OCCT_ROOT);
     await driver.clickCommandRow(OCCT_ROOT, "hole");
     await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
@@ -386,9 +383,10 @@ export const chapter: ChapterModule = {
       "hole",
     );
     await driver.dwell();
-    // Axis 1 drills along X — the board's short edge faces the x-wall — so
-    // the position pair rides the perpendicular plane in world-axis order:
-    // (y, z) = (28, 25.75), the board's y center and the window's height.
+    // Axis 1 drills along X — the plug wall faces the x-wall — so the
+    // position pair rides the perpendicular plane in world-axis order:
+    // (y, z) = (28, 9.25), the board's y center and the window's height
+    // (6..12.5 above the floor's top). Depth 4 crosses the 3 mm wall.
     await fillLabeledField(
       page,
       driver,
@@ -399,7 +397,7 @@ export const chapter: ChapterModule = {
       page,
       driver,
       page.getByLabel("holeDepth1", { exact: true }),
-      "76",
+      "4",
     );
     await fillLabeledField(
       page,
@@ -411,7 +409,7 @@ export const chapter: ChapterModule = {
       page,
       driver,
       page.getByLabel("holeY1", { exact: true }),
-      "25.75",
+      "9.25",
     );
     await fillLabeledField(
       page,
@@ -419,88 +417,31 @@ export const chapter: ChapterModule = {
       page.getByLabel("holeAxis1", { exact: true }),
       "1",
     );
-    await applyAndPin(page, driver, BORED_VOLUME);
-    await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
-    await driver.dwell();
-
-    // -- The pocket tool and the carve ---------------------------------------
-    // The carve is ordered BEFORE the posts so the room is open when they
-    // land: the document scene shows the posts standing inside the case
-    // the moment each is made — the build's spatial story reads in the
-    // editor itself.
-    await driver.step("pocket-why");
-    await driver.dwell();
-
-    await driver.step("pocket-sketch");
-    await driver.enterSketchMode(OCCT_ROOT);
-    await driver.activateSketchTool("rectangle");
-    // The cavity is the board's own rectangle, anchored at the (3, 3) wall
-    // corner: far corner first, the band row second through the pinned pick.
-    await driver.clickCanvasPoint(73, 53);
-    await driver.pickPinnedCanvasPoint(3, 3);
-
-    await driver.step("pocket-tool");
-    // The tool body lands INSIDE the solid stock (it is made to be
-    // consumed), but it renders — the document readout sums it.
-    await extrudeWithDepth(
+    await applyAndPin(
       page,
       driver,
-      "extrudeDepth2",
-      "35",
-      BORED_VOLUME + POCKET_VOLUME,
+      FLOOR_VOLUME + 2 * WALL_LONG + WALL_SHORT - WINDOW_CUT,
     );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    await driver.step("carve-why");
-    // The cue names the hide and the subtract, so its beat owns both
-    // journeys: the drilled stock's visibility eye (the file carries what
-    // renders — the stock's job is done), then the boolean dialog — the
-    // target defaults to pad 1 (the blank — the first extrusion's body);
-    // the tool is the pocket, the second pad.
-    await setBodyVisible(page, driver, "body|body_hole1", false);
-    await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
-    await driver.humanClick(
-      page
-        .locator('[data-testid="feature-form-dialog"]')
-        .getByRole("checkbox", { name: "pad 2", exact: true }),
-    );
-
-    await driver.step("carve");
-    // The boolean output absorbs both operands; the visible document is
-    // the carved shell alone (the drilled stock stays hidden — hidden
-    // bodies stay hidden).
-    await createFeature(page, driver, OCCT_ROOT, "Create", "boolean");
-    await pollVolume(page, CASE_VOLUME);
+    await driver.step("wall-four");
+    await driver.enterSketchMode(OCCT_ROOT);
+    await driver.activateSketchTool("rectangle");
+    await driver.clickCanvasPoint(76, 53);
+    await driver.pickPinnedCanvasPoint(73, 3);
+    await extrudeWithDepth(page, driver, "extrudeDepth5", "35", CASE_VOLUME);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    // The boundary, told on the beat where a viewer would otherwise feel
-    // misled: the carve preview composes the subtract from plain pads, so
-    // the drilled window (a real feature on pad 1) shows in the stock's
-    // own body but NOT in the carved preview nor in the file this scene
-    // exports. This is the chapter's ONE window disclosure.
-    await driver.step("carve-boundary");
-    await driver.dwell();
-
-    // -- The look inside, before the posts -----------------------------------
-    // The case models opening toward the bed and the orbit's pitch clamps
-    // at the world horizon (measured: a 350 px stroke lands the camera
-    // level and no further), so the shaded view from above can never show
-    // the room. The bench's honest look-inside is the WIREFRAME display:
-    // leveled through the walls, the room reads — EMPTY, the cue says, and
-    // the next beats fill it: each post lands IN VIEW as it is made.
-    await driver.step("inside");
-    const canvas = await page
-      .locator(`#${VIEWPORT_COMPLETE} canvas`)
-      .boundingBox();
-    if (canvas === null) throw new Error("the viewport canvas never mounted");
-    const centerX = canvas.x + canvas.width / 2;
-    const centerY = canvas.y + canvas.height / 2;
-    await driver.drag(
-      { x: centerX, y: centerY + 100 },
-      { x: centerX, y: centerY - 250 },
-    );
+    // -- The look into the open case ----------------------------------------
+    // The case models opening UP, but the orbit's pitch clamps at the world
+    // horizon (the old chapter's measured finding): no reachable camera
+    // looks steeply enough to see over the 35 mm walls. The bench's honest
+    // look-inside is the WIREFRAME display — the skins strip and every
+    // interior beat (the rims, the slot, the posts) reads in place, while
+    // the meshes still raycast so the face picks stay exact.
+    await driver.step("shell-read");
     await driver.humanClick(
       page.locator('[data-testid="display-mode-wireframe"]'),
     );
@@ -510,32 +451,106 @@ export const chapter: ChapterModule = {
     );
     await driver.dwell();
 
-    // -- The four standoff posts, inside the open room -----------------------
-    await driver.step("posts-why");
+    // -- The lid's mating rim: sketched ON the wall tops --------------------
+    await driver.step("rim-why");
     await driver.dwell();
 
-    await driver.step("post-one");
-    const [firstX, firstY] = FIRST_POST;
-    await driver.enterSketchMode(OCCT_ROOT);
-    await driver.activateSketchTool("circle");
-    await driver.clickCanvasPoint(firstX, firstY);
-    await driver.clickCanvasPoint(firstX + 3, firstY);
+    await driver.step("rim-one");
+    // The verb the owner asked for: select a real face, sketch ON it. The
+    // fourth wall's top cap hosts every rim datum — it is never consumed
+    // (the hole's target was the third wall) and only its OWN rim, which
+    // lands last, ever covers it.
+    await sketchOnFaceAt(page, driver, "body_extrude5/", [0, 0, 1]);
+    await driver.activateSketchTool("rectangle");
+    // The rim's band spans y 0..3 — both corners ride the pinned pick.
+    await driver.pickPinnedCanvasPoint(76, 3);
+    await driver.pickPinnedCanvasPoint(0, 0);
     await extrudeWithDepth(
       page,
       driver,
-      "extrudeDepth3",
-      "8.5",
-      CASE_VOLUME + POST_VOLUME,
+      "extrudeDepth6",
+      "5.5",
+      CASE_VOLUME + RIM_LONG,
+    );
+    await driver.dwell();
+
+    await driver.step("rim-rest");
+    let rimRunning = CASE_VOLUME + RIM_LONG;
+    for (const [body, depthLabel, corners, added] of [
+      ["body_extrude5/", "extrudeDepth7", [76, 56, 0, 53], RIM_LONG],
+      ["body_extrude5/", "extrudeDepth8", [3, 53, 0, 3], RIM_SHORT],
+      ["body_extrude5/", "extrudeDepth9", [76, 53, 73, 3], RIM_SHORT],
+    ] as const) {
+      await sketchOnFaceAt(page, driver, body, [0, 0, 1]);
+      await driver.activateSketchTool("rectangle");
+      await driver.clickCanvasPoint(corners[0], corners[1]);
+      if (corners[3] <= 5) {
+        await driver.pickPinnedCanvasPoint(corners[2], corners[3]);
+      } else {
+        await driver.clickCanvasPoint(corners[2], corners[3]);
+      }
+      rimRunning += added;
+      await extrudeWithDepth(page, driver, depthLabel, "5.5", rimRunning);
+    }
+    await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
+    await driver.dwell();
+
+    // -- The lid's plate: hung on the rims' tops, a real underside slot ----
+    await driver.step("plate-why");
+    await driver.dwell();
+
+    await driver.step("plate");
+    await sketchOnFaceAt(page, driver, "body_extrude6/", [0, 0, 1]);
+    await driver.activateSketchTool("rectangle");
+    await driver.clickCanvasPoint(73, 53);
+    await driver.pickPinnedCanvasPoint(3, 3);
+    // NEGATIVE depth on the datum: the plate hangs DOWN 2.5 from the
+    // rims' tops — its underside slot (70 × 50 × 3) drops over the walls.
+    await extrudeWithDepth(
+      page,
+      driver,
+      "extrudeDepth10",
+      "-2.5",
+      CASE_VOLUME + RIMS_VOLUME + PLATE_VOLUME,
     );
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    await driver.step("three-more");
-    // The document scene accumulates: after post k the readout is the
-    // shell + k posts.
+    // -- The open case, and the posts standing INSIDE it --------------------
+    await driver.step("open-case");
+    await setBodyVisible(page, driver, "body|body_extrude10", false);
+    await driver.dwell();
+
+    await driver.step("post-why");
+    await driver.dwell();
+
+    await driver.step("post-one");
+    // The bed plane IS the floor's top: the posts are plain bed sketches,
+    // standing on the floor with no datum at all.
+    await driver.enterSketchMode(OCCT_ROOT);
+    await driver.activateSketchTool("circle");
+    await driver.clickCanvasPoint(9, 9);
+    await driver.clickCanvasPoint(12, 9);
+    // The readout counts WHAT RENDERS: the plate is hidden in this beat,
+    // so the pin excludes it until the close-case beat brings it back.
+    await extrudeWithDepth(
+      page,
+      driver,
+      "extrudeDepth11",
+      "6",
+      CASE_VOLUME + RIMS_VOLUME + POST_VOLUME,
+    );
+    await driver.dwell();
+
+    await driver.step("posts-rest");
+    const restPosts: readonly (readonly [number, number])[] = [
+      [67, 9],
+      [9, 47],
+      [67, 47],
+    ];
+    let postDepth = 12;
     let postsVolume = 2 * POST_VOLUME;
-    let postIndex = 4;
-    for (const [cx, cy] of OTHER_POSTS) {
+    for (const [cx, cy] of restPosts) {
       await driver.enterSketchMode(OCCT_ROOT);
       await driver.activateSketchTool("circle");
       await driver.clickCanvasPoint(cx, cy);
@@ -543,26 +558,17 @@ export const chapter: ChapterModule = {
       await extrudeWithDepth(
         page,
         driver,
-        `extrudeDepth${String(postIndex)}`,
-        "8.5",
-        CASE_VOLUME + postsVolume,
+        `extrudeDepth${String(postDepth)}`,
+        "6",
+        CASE_VOLUME + RIMS_VOLUME + postsVolume,
       );
       postsVolume += POST_VOLUME;
-      postIndex += 1;
+      postDepth += 1;
     }
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    await driver.step("posts-file");
-    // The file carries what renders: hide the plate and the carved shell,
-    // and the scene is the four posts — one export, print all four. The
-    // restore rides the same beat's tail.
-    await setBodyVisible(page, driver, "body|body_boolean", false);
-    await exportStlRound(page, driver, 4 * POST_VOLUME, CURVED_VOLUME_FLOOR);
-    await setBodyVisible(page, driver, "body|body_boolean", true);
-    await driver.dwell();
-
-    await driver.step("family");
+    await driver.step("close-case");
     await driver.humanClick(
       page.locator('[data-testid="display-mode-shaded"]'),
     );
@@ -570,105 +576,25 @@ export const chapter: ChapterModule = {
       "data-viewport-display-mode",
       "shaded",
     );
-    await driver.pickTreeNode("body|body_boolean");
-    await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
-      "data-selection-key",
-      "body|body_boolean",
-    );
+    await setBodyVisible(page, driver, "body|body_extrude10", true);
     await driver.dwell();
 
-    // -- The lid and its rib-grown lip ---------------------------------------
-    await driver.step("lid-why");
-    await driver.dwell();
-
-    await driver.step("lid-plate");
-    await driver.enterSketchMode(OCCT_ROOT);
-    await driver.activateSketchTool("rectangle");
-    // Same anchored frame, same band: the far corner first, the plate's
-    // y=0 edge second through the pinned pick.
-    await driver.clickCanvasPoint(96, 56);
-    await driver.pickPinnedCanvasPoint(20, 0);
-    await extrudeWithDepth(
-      page,
-      driver,
-      "extrudeDepth7",
-      "2.5",
-      CASE_VOLUME + 4 * POST_VOLUME + LID_VOLUME,
-    );
-    await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
-    await driver.dwell();
-
-    await driver.step("lip-why");
-    await driver.dwell();
-
-    await driver.step("lip-sketch");
-    await driver.enterSketchMode(OCCT_ROOT);
-    await driver.activateSketchTool("rectangle");
-    // The lip traces the cavity: far corner first, the 3 mm wall row —
-    // which the band hides — second through the pinned pick.
-    await driver.clickCanvasPoint(93, 53);
-    await driver.pickPinnedCanvasPoint(23, 3);
-    await saveSketchRecord(page, driver, OCCT_ROOT);
-
-    await driver.step("lip-unlock");
-    await saveThrowawayLine(page, driver, OCCT_ROOT);
-    await openFeatureDialog(page, driver, OCCT_ROOT, "rib");
-    await pickComboboxOption(page, driver, 0, "sketch 1");
-    await fillLabeledField(page, driver, page.getByLabel(/Thickness/), "4");
-
-    await driver.step("lip-rib");
-    await createFeature(page, driver, OCCT_ROOT, "Create", "rib");
-    // The rib's base is the document's last extrude — the lid plate, the
-    // body the rib grew from (the carve ordered before the lid keeps it
-    // so). The document: carved shell + posts + the lid with lip.
-    await pollVolume(page, CASE_VOLUME + 4 * POST_VOLUME + LID_WITH_LIP_VOLUME);
-    // The panel's freshly mounted ribThickness field arrives EMPTY, and one
-    // invalid field blocks the panel form's Apply for every later beat —
-    // re-enter the rib's own thickness (the draft-rib-scale chapter's
-    // re-drive surface) so the panel form validates again.
-    await fillLabeledField(
-      page,
-      driver,
-      page.getByLabel("ribThickness", { exact: true }),
-      "4",
-    );
-    await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
-    await driver.dwell();
-
-    await driver.step("lid-file");
-    // The file carries what renders: hide everything but the rib body and
-    // the scene is the lid — plate plus lip, exact, in its taught frame.
-    // The restore rides the same beat's tail.
-    await setBodyVisible(page, driver, "body|body_boolean", false);
-    for (const post of ["3", "4", "5", "6"]) {
-      await setBodyVisible(page, driver, `body|body_extrude${post}`, false);
-    }
-    await exportStlRound(
-      page,
-      driver,
-      LID_WITH_LIP_VOLUME,
-      PLANAR_VOLUME_FLOOR,
-      {
-        // The plate's taught anchor: the 20 offset and the y=0 edge, plus
-        // the lip's two proud millimetres below the bed plane.
-        min: [20, 0, -2],
-        max: [96, 56, 2.5],
-      },
-    );
-    await setBodyVisible(page, driver, "body|body_boolean", true);
-    for (const post of ["3", "4", "5", "6"]) {
-      await setBodyVisible(page, driver, `body|body_extrude${post}`, true);
-    }
-
-    // -- The STL that goes to the bed ----------------------------------------
+    // -- The STLs that go to the bed ----------------------------------------
     await driver.step("export-open");
-    // The file carries what renders: hide the posts and the lid FIRST
-    // (the dialog overlays the tree once open), then open the export
-    // dialog and point at its STL row.
-    for (const post of ["3", "4", "5", "6"]) {
-      await setBodyVisible(page, driver, `body|body_extrude${post}`, false);
+    await driver.dwell();
+
+    await driver.step("box-scope");
+    // The file carries what renders: hide the lid's five bodies FIRST
+    // (the dialog overlays the tree once open), then export.
+    for (const key of [
+      "body|body_extrude6",
+      "body|body_extrude7",
+      "body|body_extrude8",
+      "body|body_extrude9",
+      "body|body_extrude10",
+    ]) {
+      await setBodyVisible(page, driver, key, false);
     }
-    await setBodyVisible(page, driver, "body|body_rib", false);
     await driver.humanClick(page.getByTestId("complete-export"));
     await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
       "data-export-dialog-open",
@@ -677,36 +603,128 @@ export const chapter: ChapterModule = {
     await driver.humanPoint(page.locator('[data-testid="cad-export-run-stl"]'));
     await driver.dwell();
 
-    await driver.step("export-stl");
-    // The scene is the carved shell alone. The mesh pins 37100 exactly:
-    // the probe that the drilled window does NOT ride the carve preview
-    // (the pads-only composition) — the window carried through would
-    // measure ≈ 36900.9, outside the planar band.
-    await runStlExport(page, driver, CASE_VOLUME, PLANAR_VOLUME_FLOOR, {
-      // The carved base keeps the blank's envelope: the taught frame's
-      // origin rows, read off the triangles the slicer receives.
-      min: [0, 0, 0],
-      max: [76, 56, 37.5],
+    await driver.step("export-box");
+    // The scene is the box alone. The mesh pins 37679.03 inside the house
+    // band (the bore and post cylinders tessellate at ~99.99% analytic),
+    // and its vertices span the taught frame: the floor's dip and the
+    // wall tops, read off the triangles the slicer receives.
+    await runStlExport(page, driver, BOX_VOLUME, PLANAR_VOLUME_FLOOR, {
+      min: [0, 0, -2.5],
+      max: [76, 56, 35],
     });
     await driver.pointAtReadout(page.locator('[data-cad-export-entry="stl"]'));
     await closeExportDialog(page);
-    for (const post of ["3", "4", "5", "6"]) {
-      await setBodyVisible(page, driver, `body|body_extrude${post}`, true);
-    }
-    await setBodyVisible(page, driver, "body|body_rib", true);
     await driver.dwell();
 
-    await driver.step("print-set");
-    // Narration only: the three files' evidence is already on the record —
-    // each export round pinned its downloaded mesh's triangles against the
-    // analytic solid (961.33 / 17640 / 37100 mm³). Byte COUNT follows
-    // triangle topology, not part size, so it pins nothing further here.
+    await driver.step("lid-scope");
+    // The box's bodies step back in, the lid's stay alone.
+    for (const key of [
+      "body|body_extrude6",
+      "body|body_extrude7",
+      "body|body_extrude8",
+      "body|body_extrude9",
+      "body|body_extrude10",
+    ]) {
+      await setBodyVisible(page, driver, key, true);
+    }
+    for (const key of [
+      "body|body_extrude",
+      "body|body_extrude2",
+      "body|body_extrude3",
+      "body|body_extrude4",
+      "body|body_extrude5",
+      "body|body_extrude11",
+      "body|body_extrude12",
+      "body|body_extrude13",
+      "body|body_extrude14",
+    ]) {
+      await setBodyVisible(page, driver, key, false);
+    }
+    await setBodyVisible(page, driver, "body|body_hole1", false);
+    await driver.dwell();
+
+    await driver.step("export-lid");
+    await driver.humanClick(page.getByTestId("complete-export"));
+    await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
+      "data-export-dialog-open",
+      "true",
+    );
+    // The scene is the lid alone: rim ring + plate, planar-exact, its
+    // bounds riding the walls' tops (the frame's +35 shift).
+    await runStlExport(page, driver, LID_VOLUME, PLANAR_VOLUME_FLOOR, {
+      min: [0, 0, 35],
+      max: [76, 56, 40.5],
+    });
+    await driver.pointAtReadout(page.locator('[data-cad-export-entry="stl"]'));
+    await closeExportDialog(page);
+    for (const key of [
+      "body|body_extrude",
+      "body|body_extrude2",
+      "body|body_extrude3",
+      "body|body_extrude4",
+      "body|body_extrude5",
+      "body|body_extrude11",
+      "body|body_extrude12",
+      "body|body_extrude13",
+      "body|body_extrude14",
+    ]) {
+      await setBodyVisible(page, driver, key, true);
+    }
+    await setBodyVisible(page, driver, "body|body_hole1", true);
     await driver.dwell();
 
     await driver.step("recap");
     await driver.dwell(1_200);
   },
 };
+
+/**
+ * Selects one published face anchor and runs sketch-on-face on it: the
+ * semantic pick (body prefix + mean normal, never a triangle index), the
+ * glide teaching where the face lives, then the command row's datum
+ * resolution as the pin.
+ */
+async function sketchOnFaceAt(
+  page: Page,
+  driver: TutorialDriver,
+  bodyPrefix: string,
+  normal: readonly [number, number, number],
+): Promise<void> {
+  const anchors = await readFaceAnchors(page, OCCT_ROOT);
+  const matches = Object.entries(anchors).filter(([key, anchor]) => {
+    if (!key.startsWith(bodyPrefix)) return false;
+    if (anchor.normal === null) return false;
+    return (
+      Math.abs(anchor.normal[0] - normal[0]) <= 0.05 &&
+      Math.abs(anchor.normal[1] - normal[1]) <= 0.05 &&
+      Math.abs(anchor.normal[2] - normal[2]) <= 0.05
+    );
+  });
+  const entry = matches[0];
+  if (entry === undefined) {
+    throw new Error(
+      `no face anchor ${bodyPrefix}* normal [${normal.join(", ")}] in [${Object.keys(anchors).join(", ")}]`,
+    );
+  }
+  const canvas = await page
+    .locator(`#${VIEWPORT_COMPLETE} canvas`)
+    .boundingBox();
+  if (canvas === null) throw new Error("the viewport canvas never mounted");
+  await driver.humanClick({
+    x: canvas.x + entry[1].point[0],
+    y: canvas.y + entry[1].point[1],
+  });
+  await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
+    "data-selection-key",
+    new RegExp(`^face\\|${bodyPrefix.slice(0, -1)}\\|\\d+\\|\\d+$`),
+  );
+  await driver.openCommandMenu(OCCT_ROOT);
+  await driver.clickCommandRow(OCCT_ROOT, "sketch-on-face");
+  await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
+    "data-datums",
+    /^\[\{.*"resolved":true.*\}\]$/,
+  );
+}
 
 /** The settled scene volume the workbench root publishes. */
 async function renderedVolume(page: Page): Promise<string> {
@@ -783,8 +801,9 @@ async function applyAndPin(
 /**
  * Extrudes the open sketch and re-drives its depth through the parameter
  * panel (the sketch extrude commits at the default 10; the panel's Apply
- * carries the real number). `expected` is the re-driven analytic volume —
- * the wait's real predicate, never a dispatch-counter anchor.
+ * carries the real number — negative depths included, the direction edit).
+ * `expected` is the re-driven analytic volume — the wait's real predicate,
+ * never a dispatch-counter anchor.
  */
 async function extrudeWithDepth(
   page: Page,
@@ -816,9 +835,8 @@ async function extrudeWithDepth(
 /**
  * The world-frame bounds a downloaded mesh must span: min corner, then
  * max. Planar bodies tessellate corner-exact, so their bounds pin the
- * taught frame's anchor rows (y 0 and the 20-offset plate edge) to the
- * cent; curved bodies never carry their silhouette extremes as vertices,
- * so the posts round passes no bounds.
+ * taught frame's anchor rows (the floor's dip, the wall tops) to the
+ * cent.
  */
 interface ExpectedMeshBounds {
   readonly min: readonly [number, number, number];
@@ -966,28 +984,4 @@ async function closeExportDialog(page: Page): Promise<void> {
     "data-export-dialog-open",
     "false",
   );
-}
-
-/**
- * One full export round on the body that owns the viewport: open the
- * dialog, run the STL, verify the download's triangles against the
- * analytic volume, close. The chapter's print-set beats ride this — the
- * posts file at the post beat, the lid file at the rib beat.
- */
-async function exportStlRound(
-  page: Page,
-  driver: TutorialDriver,
-  expectedVolume: number,
-  floorRatio: number,
-  expectedBounds?: ExpectedMeshBounds,
-): Promise<void> {
-  await driver.humanClick(page.getByTestId("complete-export"));
-  await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
-    "data-export-dialog-open",
-    "true",
-  );
-  await runStlExport(page, driver, expectedVolume, floorRatio, expectedBounds);
-  await driver.pointAtReadout(page.locator('[data-cad-export-entry="stl"]'));
-  await driver.dwell();
-  await closeExportDialog(page);
 }
