@@ -103,7 +103,7 @@ import { documentSceneBodies, renderableBodyIds } from "./document-scene";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { createCadWorkbenchSession } from "./session";
-import { sketchProfileResolverOf } from "./extrude";
+import { sceneOperandOfBody, sketchProfileResolverOf } from "./extrude";
 import {
   defaultHolePosition,
   holeBaseFeatureOf,
@@ -2679,7 +2679,11 @@ export function useWorkbenchEngine(
   // commit the boolean feature (the EXISTING union/subtract/intersect
   // bridge kinds over the operands' producing features) — and, when the
   // tools are consumed rather than kept, the tool bodies' visibility
-  // flags — in ONE atomic transaction. A refusal commits nothing.
+  // flags — in ONE atomic transaction. An operand is valid when its body
+  // carries a scene the document can compute (`sceneOperandOfBody`): a
+  // plain extrusion's output, or a composition's — pad, hole, boolean,
+  // moved body — whose computed solid the scene pass hands over. A refusal
+  // commits nothing.
   const handleBoolean = (specification: {
     readonly operation: BooleanOperation;
     readonly targetBodyId: string;
@@ -2692,23 +2696,29 @@ export function useWorkbenchEngine(
       workbenchDocument,
       specification.targetBodyId,
     );
-    if (targetFeature === undefined || targetFeature.kind !== "extrude") {
+    if (
+      targetFeature === undefined ||
+      sceneOperandOfBody(workbenchDocument, specification.targetBodyId) === null
+    ) {
       return {
         ok: false,
         code: "kernel/feature-input-invalid",
         message:
-          "A boolean's target body must be an extrusion's output — the boolean scene pairs every operand with its own extrusion.",
+          "A boolean's target body must carry a computable scene — an extrusion's output or a composition's (pad, hole, boolean, or moved body).",
       };
     }
     const toolFeatures: { kind: "feature"; id: FeatureId }[] = [];
     for (const toolBodyId of specification.toolBodyIds) {
       const toolFeature = featureProducingBody(workbenchDocument, toolBodyId);
-      if (toolFeature === undefined || toolFeature.kind !== "extrude") {
+      if (
+        toolFeature === undefined ||
+        sceneOperandOfBody(workbenchDocument, toolBodyId) === null
+      ) {
         return {
           ok: false,
           code: "kernel/feature-input-invalid",
           message:
-            "A boolean's tool body must be an extrusion's output — the boolean scene pairs every operand with its own extrusion.",
+            "A boolean's tool body must carry a computable scene — an extrusion's output or a composition's (pad, hole, boolean, or moved body).",
         };
       }
       toolFeatures.push({ kind: "feature", id: toolFeature.id });

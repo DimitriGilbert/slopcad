@@ -11,6 +11,10 @@
  *   exists (the boot plate never vanishes under the model);
  * - consumed lineages (hole, boolean) render only their tip — the plain
  *   operand forms are absorbed by the compositions that rebuild them;
+ * - EVERY boolean feature reads, in document order, and a consumer whose
+ *   operand is another composition's output admits in feature order with
+ *   the consumed base riding as a COMPUTE-ONLY entry (the real-CAD
+ *   operand handoff — a pocket cut from a holed block keeps the window);
  * - rollback and suppression un-absorb what the parked/suppressed feature
  *   consumed (a rolled-back state must not show later bodies);
  * - the body-display keep rule stays OUT of the request list — hidden and
@@ -416,10 +420,15 @@ function bodyIdsOf(
   document: CadDocument,
   suppressed: ReadonlySet<ReturnType<typeof createFeatureId>> = new Set(),
   rollback: Parameters<typeof documentSceneBodies>[2] = null,
-): readonly { readonly bodyId: string; readonly kind: string }[] {
+): readonly {
+  readonly bodyId: string;
+  readonly kind: string;
+  readonly consumedOnly?: true;
+}[] {
   return documentSceneBodies(document, suppressed, rollback).map((entry) => ({
     bodyId: entry.bodyId,
     kind: entry.scene.kind,
+    ...(entry.consumedOnly === true ? { consumedOnly: true as const } : {}),
   }));
 }
 
@@ -508,6 +517,73 @@ describe("the document-scene policy", () => {
     expect(bodyIdsOf(document)).toEqual([
       { bodyId: "body_plate", kind: "plate" },
       { bodyId: "body_stage3", kind: "boolean" },
+    ]);
+  });
+
+  it("every boolean in the document reads — a chain renders the newest tip with the consumed bases compute-only", () => {
+    // Block → subtract 1 → subtract 2: BOTH booleans read (the defect the
+    // first-only find never rendered the second), the second consuming the
+    // first's COMPUTED solid — the first's entry rides COMPUTE-ONLY, and
+    // the plain tools stay absorbed without entries (their derivations
+    // ride the requests).
+    const document = withStages(
+      bootPlateDocument(),
+      { kind: "extrude" },
+      { kind: "extrude" },
+      { kind: "boolean", operation: "subtract", targetIndex: 1, toolIndex: 2 },
+      { kind: "extrude" },
+      { kind: "boolean", operation: "subtract", targetIndex: 3, toolIndex: 4 },
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage3", kind: "boolean", consumedOnly: true },
+      { bodyId: "body_stage5", kind: "boolean" },
+    ]);
+  });
+
+  it("a boolean over a composed operand keeps its prior features — the holed block's entry rides compute-only", () => {
+    // Block → hole → pocket subtract: the hole's output is CONSUMED by the
+    // boolean, so its scene computes only to feed the consumer its solid —
+    // the render is the pocket's tip alone, whose scene cuts the holed
+    // block (the window survives), never a re-derivation of the raw block.
+    const document = withStages(
+      bootPlateDocument(),
+      { kind: "extrude" },
+      { kind: "hole", targetIndex: 1 },
+      { kind: "extrude" },
+      {
+        kind: "boolean",
+        operation: "subtract",
+        targetIndex: 2,
+        toolIndex: 3,
+      },
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage2", kind: "hole", consumedOnly: true },
+      { bodyId: "body_stage4", kind: "boolean" },
+    ]);
+  });
+
+  it("parking the second boolean un-absorbs the first's tip and its tools", () => {
+    const document = withStages(
+      bootPlateDocument(),
+      { kind: "extrude" },
+      { kind: "extrude" },
+      { kind: "boolean", operation: "subtract", targetIndex: 1, toolIndex: 2 },
+      { kind: "extrude" },
+      { kind: "boolean", operation: "subtract", targetIndex: 3, toolIndex: 4 },
+    );
+    const parked = bodyIdsOf(document, new Set(), {
+      afterFeatureId: createFeatureId("feat_stage4"),
+    });
+    // The rollback drops the second subtract: the first's tip renders (no
+    // longer consumed) and the notch tool renders as an independent
+    // extrusion again.
+    expect(parked).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage3", kind: "boolean" },
+      { bodyId: "body_stage4", kind: "extrude" },
     ]);
   });
 

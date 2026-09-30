@@ -10,7 +10,11 @@
 import { valueIn } from "@slopcad/cad-core";
 import type { FeatureRecord } from "@slopcad/cad-core";
 
-import { documentExtrudeRequest, type ExtrudeSceneRequest } from "./extrude";
+import {
+  documentExtrudeRequest,
+  sceneOperandOfBody,
+  type SceneOperand,
+} from "./extrude";
 
 /** The world axes the rotation pair selects (the bridge's selector domain). */
 export const MOVE_BODY_AXES = [1, 2, 3] as const;
@@ -82,8 +86,13 @@ export function moveBodyTargetFeatureOf(
 
 /** The worker-scene payload one move-body feature executes as. */
 export interface MoveBodySceneRequest {
-  /** The base extrusion the feature moves. */
-  readonly base: ExtrudeSceneRequest;
+  /**
+   * The moved body's operand source: a plain extrusion rides its own
+   * derivation (the established composition, byte-identical), a
+   * composition's output references the computed solid the document pass
+   * hands over — a move transports the body's CURRENT geometry.
+   */
+  readonly base: SceneOperand;
   /** The translation offsets (mm). */
   readonly offsetMm: readonly [number, number, number];
   /** The optional rotation (world-axis direction + canonical radians). */
@@ -109,9 +118,11 @@ const WORLD_AXIS_DIRECTION: Readonly<
 /**
  * Reads the document's move-body feature (the first `translate` carrying
  * the move's authored parameters) into its worker-scene request, pairing
- * it with the base extrusion (the last extrude — the engine's create
- * action guarantees the pairing). `null` when the document carries none,
- * the base no longer resolves, or the parameters no longer read.
+ * it with the moved body's operand source — the feature's own target ref
+ * resolved through `sceneOperandOfBody`, falling back to the document's
+ * last extrusion when the ref dangles (the engine's create action
+ * guarantees the pairing). `null` when the document carries none, the
+ * base no longer resolves, or the parameters no longer read.
  */
 export function documentMoveBodySceneRequest(
   document: Parameters<typeof documentExtrudeRequest>[0],
@@ -127,8 +138,28 @@ export function documentMoveBodySceneRequest(
     (ref) => ref.kind === "parameter",
   );
   if (bodyId === undefined || parameterRefs.length < 4) return null;
-  const base = documentExtrudeRequest(document);
-  if (base === null) return null;
+  // The moved body: the feature's declared target ref first (a feature ref
+  // resolves to its first output, a body ref names the body), the last
+  // extrusion as the legacy fallback.
+  const targetRef = feature.inputs.find(
+    (ref) => ref.kind === "feature" || ref.kind === "body",
+  );
+  let base: SceneOperand | null = null;
+  if (targetRef !== undefined) {
+    const targetBodyId =
+      targetRef.kind === "body"
+        ? targetRef.id
+        : document.features.find((entry) => entry.id === targetRef.id)
+            ?.outputs[0];
+    if (targetBodyId !== undefined) {
+      base = sceneOperandOfBody(document, targetBodyId);
+    }
+  }
+  if (base === null) {
+    const legacy = documentExtrudeRequest(document);
+    if (legacy === null) return null;
+    base = { kind: "extrude", request: legacy };
+  }
   const magnitudeOf = (
     id: (typeof parameterRefs)[number]["id"],
     dimension: "length" | "dimensionless" | "angle",

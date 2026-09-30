@@ -23,6 +23,20 @@
  * explicitly). What remains per lineage is the tip, and the tips together
  * ARE the document.
  *
+ * ## The operand composition (real-CAD semantics)
+ *
+ * A consuming feature composes from its operand's CURRENT solid, never a
+ * re-derivation that would erase the features applied to it. Every
+ * boolean feature reads (never first-only — the second subtract renders
+ * too), and an operand that is itself a composition's output (pad, hole,
+ * boolean, moved body) rides a COMPUTED reference: the admissions below
+ * run in producing-feature order — document order is topological — and an
+ * admitted consumer's operand body joins the list as a COMPUTE-ONLY
+ * entry, evaluated by the pass ahead of the consumer purely to hand it
+ * the solid. A plain-extrude operand keeps its embedded derivation (the
+ * established single-boolean flows stay byte-identical), and a computed
+ * operand without a scene entry declines that consumer alone.
+ *
  * ## The active timeline
  *
  * The readers see the document's ACTIVE features only: a SUPPRESSED
@@ -66,7 +80,7 @@ import type { Tessellation } from "@slopcad/cad-kernel";
 
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import {
-  documentBooleanSceneRequest,
+  documentBooleanSceneRequests,
   type BooleanSceneRequest,
 } from "./boolean";
 import { helixSceneRequestOfFeature, type HelixSceneRequest } from "./helix";
@@ -155,6 +169,14 @@ export interface DocumentBodySceneRequest {
   readonly bodyId: string;
   /** The body's worker scene. */
   readonly scene: DocumentBodyScene;
+  /**
+   * Present exactly on a COMPUTE-ONLY entry: a consumed base whose own
+   * scene must evaluate so a rendered consumer composes from its computed
+   * solid (real-CAD operand semantics). The entry renders nothing — its
+   * lineage's tip carries the view — and its measurement surfaces only
+   * through a refused consumer's lineage fallback.
+   */
+  readonly consumedOnly?: boolean;
 }
 
 /**
@@ -424,15 +446,18 @@ export function documentSceneBodies(
   }
 
   // The consuming compositions: each reader names its lineage tip (and
-  // rebuilds the lineage's earlier bodies inside the tip's scene).
+  // rebuilds the lineage's earlier bodies inside the tip's scene). The pad
+  // has no computed operands (both extrusions are positional), so it sets
+  // directly; the hole, the booleans, and the move may consume a COMPUTED
+  // operand — an earlier composition's output — and admit in producing-
+  // feature order below.
   const pad = documentPadSceneRequest(activeDocument);
   if (pad !== null) {
     requests.set(pad.bodyId, { kind: "pad", request: pad });
   }
   const hole = documentHoleSceneRequest(activeDocument);
-  if (hole !== null) {
-    requests.set(hole.bodyId, { kind: "hole", request: hole.request });
-  }
+  const booleanRequests = documentBooleanSceneRequests(activeDocument);
+  const moveBody = documentMoveBodySceneRequest(activeDocument);
   const thread = documentThreadSceneRequest(activeDocument);
   if (thread !== null) {
     requests.set(thread.bodyId, { kind: "thread", request: thread });
@@ -471,33 +496,103 @@ export function documentSceneBodies(
   if (mirror !== null) {
     requests.set(mirror.bodyId, { kind: "mirror", request: mirror });
   }
-  const boolean = documentBooleanSceneRequest(activeDocument);
-  if (boolean !== null) {
-    requests.set(boolean.bodyId, { kind: "boolean", request: boolean });
+
+  // The computed-operand admissions: the consuming compositions that may
+  // reference an earlier composition's output, admitted in PRODUCING-
+  // FEATURE order — document order is topological (a feature only names
+  // earlier outputs), so a consumer's operand entry exists exactly when
+  // the document put the operand's feature first. A computed operand
+  // without a scene entry (its own composition declined) declines that
+  // consumer alone; a plain-extrude operand needs no entry (its
+  // derivation rides the request — the established flows stay untouched).
+  const featureIndexByBody = new Map<string, number>();
+  active.forEach((feature, index) => {
+    const output = feature.outputs[0];
+    if (output !== undefined) featureIndexByBody.set(output, index);
+  });
+  const admissions: {
+    readonly bodyId: string;
+    readonly scene: DocumentBodyScene;
+    readonly computedOperands: readonly string[];
+  }[] = [];
+  if (hole !== null) {
+    admissions.push({
+      bodyId: hole.bodyId,
+      scene: { kind: "hole", request: hole.request },
+      computedOperands:
+        hole.request.base.kind === "computed" ? [hole.request.base.bodyId] : [],
+    });
   }
-  const moveBody = documentMoveBodySceneRequest(activeDocument);
+  for (const request of booleanRequests) {
+    admissions.push({
+      bodyId: request.bodyId,
+      scene: { kind: "boolean", request },
+      computedOperands: [request.target, request.tool].flatMap((operand) =>
+        operand.kind === "computed" ? [operand.bodyId] : [],
+      ),
+    });
+  }
   if (moveBody !== null) {
-    requests.set(moveBody.bodyId, { kind: "moveBody", request: moveBody });
+    admissions.push({
+      bodyId: moveBody.bodyId,
+      scene: { kind: "moveBody", request: moveBody },
+      computedOperands:
+        moveBody.base.kind === "computed" ? [moveBody.base.bodyId] : [],
+    });
+  }
+  const consumedOnly = new Set<string>();
+  const ordered = admissions
+    .map((candidate, admissionIndex) => ({ candidate, admissionIndex }))
+    .sort((first, second) => {
+      const firstIndex =
+        featureIndexByBody.get(first.candidate.bodyId) ??
+        Number.MAX_SAFE_INTEGER;
+      const secondIndex =
+        featureIndexByBody.get(second.candidate.bodyId) ??
+        Number.MAX_SAFE_INTEGER;
+      return firstIndex === secondIndex
+        ? first.admissionIndex - second.admissionIndex
+        : firstIndex - secondIndex;
+    });
+  for (const { candidate } of ordered) {
+    const ready = candidate.computedOperands.every(
+      (operandId) => operandId !== candidate.bodyId && requests.has(operandId),
+    );
+    if (!ready) continue;
+    for (const operandId of candidate.computedOperands) {
+      consumedOnly.add(operandId);
+    }
+    requests.set(candidate.bodyId, candidate.scene);
   }
 
   if (requests.size === 0) return [];
 
-  // The absorption closure over the rendered tips; the pad's base is
-  // POSITIONAL (first extrude, not a declared input), so it absorbs
-  // explicitly.
-  const absorbed = absorbedBodiesOf(activeDocument, new Set(requests.keys()));
+  // The absorption closure over the rendered tips (the compute-only
+  // entries are not tips — they are already absorbed through their
+  // consumers); the pad's base is POSITIONAL (first extrude, not a
+  // declared input), so it absorbs explicitly.
+  const tips = new Set(
+    [...requests.keys()].filter((bodyId) => !consumedOnly.has(bodyId)),
+  );
+  const absorbed = absorbedBodiesOf(activeDocument, tips);
   if (pad !== null) absorbed.add(pad.base.bodyId);
 
   // The list stays PRE-display-filter: the emptiness decision above must
   // mean "no scene resolved", never "the user hid every body" — an
   // all-hidden document keeps the document dispatch (the computation's
   // keep-rule skip renders it as the honest empty scene) instead of
-  // re-materializing the fixture plate.
+  // re-materializing the fixture plate. An absorbed body listed as
+  // compute-only rides along (`consumedOnly`) — computed to feed its
+  // consumer, never rendered.
   const rendered: DocumentBodySceneRequest[] = [];
   for (const body of document.bodies) {
-    if (absorbed.has(body.id)) continue;
     const scene = requests.get(body.id);
     if (scene === undefined) continue;
+    if (absorbed.has(body.id)) {
+      if (!consumedOnly.has(body.id)) continue;
+      rendered.push({ bodyId: body.id, scene, consumedOnly: true });
+      continue;
+    }
     rendered.push({ bodyId: body.id, scene });
   }
   return rendered;

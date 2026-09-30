@@ -20,8 +20,8 @@
 
 import { length } from "@slopcad/cad-core";
 import type { ComputationContext } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 
 /** The pad request the workbench dispatches (see cad-workbench/datum). */
 export interface PadSceneRequest {
@@ -35,14 +35,17 @@ const mm = (value: number) => length(value, "mm");
 
 /**
  * Extrudes the base, extrudes the pad on its (datum-resolved) placement,
- * unions them, and measures the result. A structured kernel rejection —
- * including a union the kernel refuses — rejects the computation, which
- * the session surfaces as the page's error text.
+ * unions them, and measures the result — returning the composed solid so
+ * the document pass can hand it to a later consumer (a boolean targeting
+ * the pad body cuts the UNION, not a bare re-derivation of the pad
+ * extrusion). A structured kernel rejection — including a union the
+ * kernel refuses — rejects the computation, which the session surfaces as
+ * the page's error text.
  */
 export async function computePadScene(
   context: ComputationContext,
   request: PadSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const baseSolid = await context.request("solid.extrude", {
     loop: request.base.loop,
     height: mm(Math.abs(request.base.distanceMm)),
@@ -69,10 +72,13 @@ export async function computePadScene(
     solid: merged.solid,
   });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    solid: merged.solid,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
   };
 }

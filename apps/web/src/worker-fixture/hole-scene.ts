@@ -23,24 +23,30 @@ import {
   structuredHoleDatumInPlaneAxes,
   structuredHoleWorldInPlaneAxes,
 } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
-import type { ExtrudeSceneRequest } from "./extrude-scene";
+import type { SceneOperand } from "../cad-workbench/extrude";
 import type {
   HoleCutInput,
   HoleSceneEntry,
   StructuredHoleCutInput,
 } from "../cad-workbench/hole";
 
+import {
+  NO_COMPUTED_SOLIDS,
+  operandSolid,
+  type ComputedSolids,
+  type ComposedSceneResult,
+} from "./body-ops-scenes";
+
 export type { HoleCutInput, HoleSceneEntry, StructuredHoleCutInput };
 
 /**
  * The hole request the workbench dispatches (see
- * `../cad-workbench/hole`): the base extrusion plus one entry per hole
- * feature, in document order (flat five-parameter entries and structured
- * type-directed entries alike).
+ * `../cad-workbench/hole`): the base operand source plus one entry per
+ * hole feature, in document order (flat five-parameter entries and
+ * structured type-directed entries alike).
  */
 export interface HoleSceneRequest {
-  readonly base: ExtrudeSceneRequest;
+  readonly base: SceneOperand;
   readonly holes: readonly HoleSceneEntry[];
 }
 
@@ -58,28 +64,26 @@ const mm = (value: number) => length(value, "mm");
 const NOOP_EPSILON_RELATIVE = 1e-9;
 
 /**
- * Extrudes the base, cuts every planned hole tool, and measures the result.
- * A structured kernel rejection (an unresolvable base, a degenerate tool,
- * a subtract the kernel refuses) or a no-op cut (every tool missed — the
- * volume did not strictly decrease) rejects the computation, which the
- * session surfaces as the page's error text.
+ * Resolves the base solid (the derivation re-extrudes, a computed
+ * reference consumes the body's current solid from the document pass),
+ * cuts every planned hole tool, and measures the result. A structured
+ * kernel rejection (an unresolvable base, a degenerate tool, a subtract
+ * the kernel refuses) or a no-op cut (every tool missed — the volume did
+ * not strictly decrease) rejects the computation, which the session
+ * surfaces as the page's error text.
  */
 export async function computeHoleScene(
   context: ComputationContext,
   request: HoleSceneRequest,
-): Promise<PlateMeasurement> {
-  const extruded = await context.request("solid.extrude", {
-    loop: request.base.loop,
-    height: mm(Math.abs(request.base.distanceMm)),
-    direction: request.base.distanceMm > 0 ? 1 : -1,
-    placement: request.base.placement,
-  });
-  // The tool plan reads the TARGET's bounds — the base solid as extruded.
+  computed: ComputedSolids = NO_COMPUTED_SOLIDS,
+): Promise<ComposedSceneResult> {
+  const baseSolid = await operandSolid(context, request.base, computed, "base");
+  // The tool plan reads the TARGET's bounds — the base solid as resolved.
   const measured = await context.request("solid.bounds", {
-    solid: extruded.solid,
+    solid: baseSolid,
   });
   const baseVolume = await context.request("solid.volume", {
-    solid: extruded.solid,
+    solid: baseSolid,
   });
   const tools: { readonly solid: WorkerSolidId }[] = [];
   for (const hole of request.holes) {
@@ -162,7 +166,7 @@ export async function computeHoleScene(
     tools.push(tool);
   }
   const cut = await context.request("solid.subtract", {
-    target: extruded.solid,
+    target: baseSolid,
     tools: tools.map((tool) => tool.solid),
   });
   const volume = await context.request("solid.volume", {
@@ -194,10 +198,13 @@ export async function computeHoleScene(
     solid: cut.solid,
   });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    solid: cut.solid,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
   };
 }

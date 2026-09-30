@@ -28,6 +28,7 @@
 import { angle, getDocumentSketch, length, valueIn } from "@slopcad/cad-core";
 import type {
   AnyDimensionalValue,
+  BodyId,
   CadDocument,
   FeatureRecord,
   ParseFailure,
@@ -177,6 +178,69 @@ export interface ExtrudeSceneRequest {
 
 function signedLengthMm(value: AnyDimensionalValue): number | null {
   return value.dimension === "length" ? valueIn(value, "mm") : null;
+}
+
+/**
+ * How a consuming composition (boolean, hole, move) obtains one operand's
+ * solid: the plain-extrude DERIVATION — the operand's own sketch extrusion,
+ * re-executed inside the consuming scene exactly as it always has (the
+ * default for plain-extrude operands, so every established flow rides the
+ * identical worker operations) — or a COMPUTED reference: the operand's own
+ * scene is itself a composition (pad, hole, boolean, moved body), so the
+ * document pass evaluates that scene first and hands its solid over keyed
+ * by the body id. Real-CAD semantics: a consumer composes from the
+ * operand's CURRENT geometry, never a re-derivation that would erase the
+ * features applied to it.
+ */
+export type SceneOperand =
+  | { readonly kind: "extrude"; readonly request: ExtrudeSceneRequest }
+  | { readonly kind: "computed"; readonly bodyId: string };
+
+/**
+ * Resolves one body's operand source from its producing feature (the
+ * first-producer rule): a plain extrusion derives through the per-feature
+ * reader; a pad, hole, boolean, or moved body rides its computed solid; a
+ * body without an operand-capable producer — data-only display chains,
+ * seeded records, sheets — declines. `null` declines the consuming scene,
+ * the honest prior-render fallback.
+ */
+export function sceneOperandOfBody(
+  document: CadDocument,
+  bodyId: string,
+): SceneOperand | null {
+  const producer = document.features.find((feature) =>
+    feature.outputs.includes(bodyId as BodyId),
+  );
+  if (producer === undefined) return null;
+  if (producer.kind === "extrude") {
+    // The pad composition's output body is an extrude feature's output
+    // whose SCENE is the base+pad union — a raw derivation of the pad
+    // extrusion alone would drop the base, so it rides the computed solid.
+    if (documentPadSceneRequest(document)?.bodyId === bodyId) {
+      return { kind: "computed", bodyId };
+    }
+    const derivation = extrudeSceneRequestOfFeature(document, producer);
+    return derivation === null
+      ? null
+      : { kind: "extrude", request: derivation };
+  }
+  if (
+    producer.kind === "hole" ||
+    producer.kind === "union" ||
+    producer.kind === "subtract" ||
+    producer.kind === "intersect"
+  ) {
+    return { kind: "computed", bodyId };
+  }
+  // The move-body feature is the translate kind carrying the authored
+  // parameter pair (the move reader's own gate).
+  if (
+    producer.kind === "translate" &&
+    producer.inputs.filter((ref) => ref.kind === "parameter").length >= 4
+  ) {
+    return { kind: "computed", bodyId };
+  }
+  return null;
 }
 
 /**

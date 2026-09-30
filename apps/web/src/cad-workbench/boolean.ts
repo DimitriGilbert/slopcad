@@ -24,10 +24,7 @@
 import type { BodyId, FeatureRecord } from "@slopcad/cad-core";
 import type { documentExtrudeRequest } from "./extrude";
 
-import {
-  extrudeSceneRequestOfFeature,
-  type ExtrudeSceneRequest,
-} from "./extrude";
+import { sceneOperandOfBody, type SceneOperand } from "./extrude";
 
 /** The three boolean operations the command surface carries. */
 export const BOOLEAN_OPERATIONS = ["union", "subtract", "intersect"] as const;
@@ -131,10 +128,10 @@ export function featureProducingBody(
 
 /** The worker-scene payload one boolean feature executes as. */
 export interface BooleanSceneRequest {
-  /** The target operand's extrusion (the boolean's first input). */
-  readonly target: ExtrudeSceneRequest;
-  /** The tool operand's extrusion (the boolean's second input). */
-  readonly tool: ExtrudeSceneRequest;
+  /** The target operand's source (the boolean's first input). */
+  readonly target: SceneOperand;
+  /** The tool operand's source (the boolean's second input). */
+  readonly tool: SceneOperand;
   /** The operation riding the scene. */
   readonly operation: BooleanOperation;
   /** The feature's output body id (the rendered body). */
@@ -142,51 +139,79 @@ export interface BooleanSceneRequest {
 }
 
 /**
- * Reads the document's boolean feature (the first `union`/`subtract`/
- * `intersect` record) into its worker-scene request, pairing the target
- * and FIRST tool operand with their own extrusions
- * (`extrudeSceneRequestOfFeature`, the per-feature extraction the pad
- * composition shares). `null` when the document carries none, an operand
- * is not an extrusion (imports and primitives are not yet scene-able —
- * the workbench's every scene rides the extrusion base, its established
- * constraint), or an input no longer resolves — callers render the prior
- * scene.
+ * One boolean feature's operand body id: a feature ref resolves to the
+ * feature's first output (the model tree's own rule), a body ref names the
+ * body itself. `null` when the reference dangles.
+ */
+function operandBodyIdOf(
+  byId: ReadonlyMap<string, FeatureRecord>,
+  ref: { readonly kind: string; readonly id: string },
+): string | null {
+  if (ref.kind === "body") return ref.id;
+  if (ref.kind === "feature") {
+    const feature = byId.get(ref.id);
+    const output = feature?.outputs[0];
+    return output === undefined ? null : output;
+  }
+  return null;
+}
+
+/**
+ * Reads EVERY boolean feature (`union`/`subtract`/`intersect`) into its
+ * worker-scene request, in document order — ALL of them render, each
+ * consuming its target's current solid (the second subtract rides the
+ * first's output). Each operand resolves through `sceneOperandOfBody`: a
+ * plain extrusion pairs with its own extrusion (the established
+ * constraint), a composition's output (pad, hole, boolean, moved body)
+ * references the computed solid the document pass hands over. A feature
+ * whose output or operands no longer resolve is skipped honestly — the
+ * other booleans still render.
+ */
+export function documentBooleanSceneRequests(
+  document: Parameters<typeof documentExtrudeRequest>[0],
+): readonly BooleanSceneRequest[] {
+  const requests: BooleanSceneRequest[] = [];
+  const byId = new Map(document.features.map((entry) => [entry.id, entry]));
+  for (const feature of document.features) {
+    if (!BOOLEAN_OPERATIONS.includes(feature.kind as BooleanOperation)) {
+      continue;
+    }
+    const bodyId = feature.outputs[0];
+    const operandRefs = feature.inputs.filter(
+      (ref) => ref.kind === "feature" || ref.kind === "body",
+    );
+    const targetRef = operandRefs[0];
+    const toolRef = operandRefs[1];
+    if (
+      bodyId === undefined ||
+      targetRef === undefined ||
+      toolRef === undefined
+    ) {
+      continue;
+    }
+    const targetBodyId = operandBodyIdOf(byId, targetRef);
+    const toolBodyId = operandBodyIdOf(byId, toolRef);
+    if (targetBodyId === null || toolBodyId === null) continue;
+    const target = sceneOperandOfBody(document, targetBodyId);
+    const tool = sceneOperandOfBody(document, toolBodyId);
+    if (target === null || tool === null) continue;
+    requests.push({
+      target,
+      tool,
+      operation: feature.kind as BooleanOperation,
+      bodyId,
+    });
+  }
+  return requests;
+}
+
+/**
+ * The document's FIRST boolean feature's scene request — the plural
+ * reader's head, kept for the callers that reason about the one-boolean
+ * document. `null` when the document carries none that resolves.
  */
 export function documentBooleanSceneRequest(
   document: Parameters<typeof documentExtrudeRequest>[0],
 ): BooleanSceneRequest | null {
-  const feature = document.features.find((entry) =>
-    BOOLEAN_OPERATIONS.includes(entry.kind as BooleanOperation),
-  );
-  if (feature === undefined) return null;
-  const bodyId = feature.outputs[0];
-  const operandRefs = feature.inputs.filter(
-    (ref) => ref.kind === "feature" || ref.kind === "body",
-  );
-  const targetRef = operandRefs[0];
-  const toolRef = operandRefs[1];
-  if (
-    bodyId === undefined ||
-    targetRef === undefined ||
-    toolRef === undefined
-  ) {
-    return null;
-  }
-  const byId = new Map(document.features.map((entry) => [entry.id, entry]));
-  const targetFeature =
-    targetRef.kind === "feature" ? byId.get(targetRef.id) : undefined;
-  const toolFeature =
-    toolRef.kind === "feature" ? byId.get(toolRef.id) : undefined;
-  if (targetFeature?.kind !== "extrude" || toolFeature?.kind !== "extrude") {
-    return null;
-  }
-  const target = extrudeSceneRequestOfFeature(document, targetFeature);
-  const tool = extrudeSceneRequestOfFeature(document, toolFeature);
-  if (target === null || tool === null) return null;
-  return {
-    target,
-    tool,
-    operation: feature.kind as BooleanOperation,
-    bodyId,
-  };
+  return documentBooleanSceneRequests(document)[0] ?? null;
 }

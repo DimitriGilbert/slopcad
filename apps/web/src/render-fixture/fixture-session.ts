@@ -765,7 +765,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeHoleScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeHoleScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(
           settleWithVerdict("hole", bodyId),
@@ -778,7 +781,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computePadScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computePadScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(settleWithVerdict("pad", bodyId), failWithVerdict("pad", bodyId));
     },
@@ -963,7 +969,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeBooleanScene(context, request),
+            (await computeBooleanScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -979,7 +985,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeMoveBodyScene(context, request),
+            (await computeMoveBodyScene(context, request)).measurement,
             bodyId,
           ),
         )

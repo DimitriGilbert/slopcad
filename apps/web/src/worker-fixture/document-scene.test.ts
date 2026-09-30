@@ -2,7 +2,7 @@
  * The document scene computation's honesty tests (Phase 16 owner fix):
  * `computeDocumentScene` executed against the fake kernel over an
  * in-memory ComputationContext (the worker server's solid-id mapping in
- * miniature), pinning the three rules the settle surface's truth rides on:
+ * miniature), pinning the rules the settle surface's truth rides on:
  *
  * - the body-display keep rule applies PER BODY, before any computation —
  *   an all-hidden request set renders nothing, measures an honest zero
@@ -12,7 +12,12 @@
  *   base state — a boolean renders BOTH operands (the union body is gone;
  *   the operands are the document's truth), not just the first;
  * - a fallback whose body id already rendered never double-counts — two
- *   refused lineages on one shared base render that base exactly once.
+ *   refused lineages on one shared base render that base exactly once;
+ * - the operand handoff (the real-CAD composition rule): a compute-only
+ *   consumed base evaluates before its consumer and the consumer composes
+ *   from its COMPUTED solid (block → hole → subtract keeps the window), a
+ *   refused consumer's fallback surfaces the operand's pass measurement,
+ *   and a missing computed solid is a structured refusal, never a crash.
  */
 
 import { describe, expect, it } from "vitest";
@@ -30,6 +35,7 @@ import {
   type WorkerSolidId,
 } from "@slopcad/cad-kernel";
 import type { DocumentBodySceneRequest } from "../cad-workbench/document-scene";
+import type { ExtrudeSceneRequest } from "../cad-workbench/extrude";
 import type { ThreadSceneRequest } from "../cad-workbench/thread";
 
 import { computeDocumentScene } from "./document-scene";
@@ -247,16 +253,22 @@ describe("computeDocumentScene: the display keep rule (Phase 16)", () => {
         kind: "boolean",
         request: {
           target: {
-            loop: squareLoop(0, 0, 10, 10),
-            placement: IDENTITY_PLACEMENT,
-            distanceMm: 10,
-            bodyId: "body_target",
+            kind: "extrude",
+            request: {
+              loop: squareLoop(0, 0, 10, 10),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_target",
+            },
           },
           tool: {
-            loop: squareLoop(20, 0, 30, 10),
-            placement: IDENTITY_PLACEMENT,
-            distanceMm: 10,
-            bodyId: "body_tool",
+            kind: "extrude",
+            request: {
+              loop: squareLoop(20, 0, 30, 10),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_tool",
+            },
           },
           operation: "union",
           bodyId: "body_boolean",
@@ -285,16 +297,22 @@ describe("computeDocumentScene: the lineage fallback (Phase 16)", () => {
         kind: "boolean",
         request: {
           target: {
-            loop: squareLoop(0, 0, 10, 10),
-            placement: IDENTITY_PLACEMENT,
-            distanceMm: 10,
-            bodyId: "body_target",
+            kind: "extrude",
+            request: {
+              loop: squareLoop(0, 0, 10, 10),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_target",
+            },
           },
           tool: {
-            loop: squareLoop(20, 0, 30, 10),
-            placement: IDENTITY_PLACEMENT,
-            distanceMm: 10,
-            bodyId: "body_tool",
+            kind: "extrude",
+            request: {
+              loop: squareLoop(20, 0, 30, 10),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_tool",
+            },
           },
           operation: "union",
           bodyId: "body_boolean",
@@ -343,7 +361,7 @@ describe("computeDocumentScene: the lineage fallback (Phase 16)", () => {
       scene: {
         kind: "hole",
         request: {
-          base: sharedBase,
+          base: { kind: "extrude", request: sharedBase },
           holes: [
             {
               diameterMm: 4,
@@ -389,5 +407,181 @@ describe("computeDocumentScene: the lineage fallback (Phase 16)", () => {
     ]);
     expect(result.volume).toBe(result.bodies[0]?.measurement.volume ?? -1);
     expect(result.volume).toBeGreaterThan(0);
+  });
+});
+
+describe("computeDocumentScene: the operand handoff (composition)", () => {
+  /** The 10×10×10 block extrusion the fixtures compose from. */
+  function blockBase(): {
+    readonly kind: "extrude";
+    readonly request: ExtrudeSceneRequest;
+  } {
+    return {
+      kind: "extrude",
+      request: {
+        loop: squareLoop(0, 0, 10, 10),
+        placement: IDENTITY_PLACEMENT,
+        distanceMm: 10,
+        bodyId: "body_block",
+      },
+    };
+  }
+
+  /** The consumed holed block: Ø4 through, at the block's centre. */
+  function holedBase(): DocumentBodySceneRequest {
+    return {
+      bodyId: "body_holed",
+      consumedOnly: true,
+      scene: {
+        kind: "hole",
+        request: {
+          base: blockBase(),
+          holes: [
+            {
+              diameterMm: 4,
+              depthMm: 10,
+              positionXMm: 5,
+              positionYMm: 5,
+              axis: 3,
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  it("a subtract consumes the holed block's computed solid — the window survives", async () => {
+    const context = sceneContext(measuringKernel());
+    const booleanBody: DocumentBodySceneRequest = {
+      bodyId: "body_boolean",
+      scene: {
+        kind: "boolean",
+        request: {
+          target: { kind: "computed", bodyId: "body_holed" },
+          tool: {
+            kind: "extrude",
+            request: {
+              loop: squareLoop(2, 8, 6, 12),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_tool",
+            },
+          },
+          operation: "subtract",
+          bodyId: "body_boolean",
+        },
+      },
+    };
+    const result = await computeDocumentScene(
+      context,
+      [holedBase(), booleanBody],
+      new Set(["body_boolean"]),
+    );
+    // The compute-only base renders nothing; only the boolean's output
+    // does — and its volume is the HOLED block minus the tool, the window
+    // carried through the handoff (1000 − 40π − 80).
+    expect(result.failures).toEqual([]);
+    expect(result.bodies.map((body) => body.bodyId)).toEqual(["body_boolean"]);
+    const expected = 1000 - Math.PI * 4 * 10 - 4 * 2 * 10;
+    expect(Math.abs(result.volume - expected)).toBeLessThanOrEqual(
+      Math.abs(expected) * 0.02,
+    );
+  });
+
+  it("a refused consumer's fallback surfaces the computed operand's current state", async () => {
+    // The stand-in declines every subtract AFTER the first: the hole's cut
+    // (call 1) succeeds, the boolean's (call 2) refuses.
+    const base = measuringKernel();
+    let subtractCalls = 0;
+    const context = sceneContext({
+      ...base,
+      subtract: (target, tools) => {
+        subtractCalls += 1;
+        if (subtractCalls >= 2) return kernelRefusal();
+        return base.subtract(target, tools);
+      },
+    });
+    const booleanBody: DocumentBodySceneRequest = {
+      bodyId: "body_boolean",
+      scene: {
+        kind: "boolean",
+        request: {
+          target: { kind: "computed", bodyId: "body_holed" },
+          tool: {
+            kind: "extrude",
+            request: {
+              loop: squareLoop(2, 8, 6, 12),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_tool",
+            },
+          },
+          operation: "subtract",
+          bodyId: "body_boolean",
+        },
+      },
+    };
+    const result = await computeDocumentScene(
+      context,
+      [holedBase(), booleanBody],
+      new Set(["body_holed", "body_tool", "body_boolean"]),
+    );
+    // The refusal surfaces once; the fallback renders the operands in
+    // their CURRENT state — the holed block (its pass measurement, the
+    // window included), then the raw tool.
+    expect(result.failures.map((failure) => failure.scene)).toEqual([
+      "boolean",
+    ]);
+    expect(result.bodies.map((body) => body.bodyId)).toEqual([
+      "body_holed",
+      "body_tool",
+    ]);
+    const holed = result.bodies[0]?.measurement.volume ?? -1;
+    const expected = 1000 - Math.PI * 4 * 10;
+    expect(Math.abs(holed - expected)).toBeLessThanOrEqual(
+      Math.abs(expected) * 0.02,
+    );
+    expect(result.volume).toBe(
+      holed + (result.bodies[1]?.measurement.volume ?? -1),
+    );
+  });
+
+  it("a missing computed solid is a structured refusal, never a crash", async () => {
+    const context = sceneContext(measuringKernel());
+    const booleanBody: DocumentBodySceneRequest = {
+      bodyId: "body_boolean",
+      scene: {
+        kind: "boolean",
+        request: {
+          target: { kind: "computed", bodyId: "body_holed" },
+          tool: {
+            kind: "extrude",
+            request: {
+              loop: squareLoop(2, 8, 6, 12),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_tool",
+            },
+          },
+          operation: "subtract",
+          bodyId: "body_boolean",
+        },
+      },
+    };
+    const result = await computeDocumentScene(
+      context,
+      // No consumedOnly entry carries the target's scene — the operand's
+      // own composition never ran in this pass.
+      [booleanBody],
+      new Set(["body_boolean", "body_tool"]),
+    );
+    expect(result.failures.map((failure) => failure.scene)).toEqual([
+      "boolean",
+    ]);
+    expect(String(result.failures[0]?.failure)).toContain(
+      "operand-unavailable",
+    );
+    // The lineage fallback still renders the tool (its derivation).
+    expect(result.bodies.map((body) => body.bodyId)).toEqual(["body_tool"]);
   });
 });

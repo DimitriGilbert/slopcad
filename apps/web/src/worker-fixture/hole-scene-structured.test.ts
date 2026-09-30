@@ -26,7 +26,7 @@ import {
 } from "@slopcad/cad-kernel";
 import { createManifoldKernel } from "@slopcad/cad-kernel-manifold";
 import type { StructuredHoleCutInput } from "./hole-scene";
-import type { ExtrudeSceneRequest } from "./extrude-scene";
+import type { SceneOperand } from "../cad-workbench/extrude";
 
 import { computeHoleScene } from "./hole-scene";
 
@@ -158,11 +158,15 @@ function squareLoop(x0: number, y0: number, x1: number, y1: number) {
 const PLATE = { w: 30, d: 20, h: 10 } as const;
 const PLATE_VOLUME = PLATE.w * PLATE.d * PLATE.h;
 
-function plateBase(): ExtrudeSceneRequest {
+function plateBase(): SceneOperand {
   return {
-    loop: squareLoop(0, 0, PLATE.w, PLATE.d),
-    placement: IDENTITY_PLACEMENT,
-    distanceMm: PLATE.h,
+    kind: "extrude",
+    request: {
+      loop: squareLoop(0, 0, PLATE.w, PLATE.d),
+      placement: IDENTITY_PLACEMENT,
+      distanceMm: PLATE.h,
+      bodyId: "body_plate",
+    },
   };
 }
 
@@ -218,7 +222,9 @@ describe("computeHoleScene: the structured entries (Phase 42)", () => {
       holes: [structuredEntry(CBORE_SPEC, [{ x: 15, y: 10 }])],
     });
     expect(
-      Math.abs(measured.volume - (PLATE_VOLUME - cboreRemovedMm3())),
+      Math.abs(
+        measured.measurement.volume - (PLATE_VOLUME - cboreRemovedMm3()),
+      ),
     ).toBeLessThanOrEqual(PLATE_VOLUME * 0.02);
   });
 
@@ -239,7 +245,7 @@ describe("computeHoleScene: the structured entries (Phase 42)", () => {
     });
     const removed = Math.PI * 4 * 4 * 6;
     expect(
-      Math.abs(measured.volume - (PLATE_VOLUME - 2 * removed)),
+      Math.abs(measured.measurement.volume - (PLATE_VOLUME - 2 * removed)),
     ).toBeLessThanOrEqual(PLATE_VOLUME * 0.02);
   });
 
@@ -274,7 +280,9 @@ describe("computeHoleScene: the structured entries (Phase 42)", () => {
     // tessellation's chord deficit — the curved band the contract suite
     // pins for mesh kernels.
     expect(
-      Math.abs(measured.volume - (PLATE_VOLUME - cboreRemovedMm3())),
+      Math.abs(
+        measured.measurement.volume - (PLATE_VOLUME - cboreRemovedMm3()),
+      ),
     ).toBeLessThanOrEqual((PLATE_VOLUME - cboreRemovedMm3()) * 0.02);
   });
 

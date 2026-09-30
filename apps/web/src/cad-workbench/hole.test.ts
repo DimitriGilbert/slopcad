@@ -208,8 +208,12 @@ describe("documentHoleSceneRequest", () => {
     const derived = documentHoleSceneRequest(buildDefaultDocument());
     expect(derived).not.toBeNull();
     expect(derived?.bodyId).toBe(HOLE_BODY);
-    expect(derived?.request.base.distanceMm).toBe(10);
-    expect(derived?.request.base.loop.length).toBe(4);
+    // The plain-extrude base rides its derivation (the established shape).
+    expect(derived?.request.base.kind).toBe("extrude");
+    const base = derived?.request.base;
+    if (base?.kind !== "extrude") throw new Error("the base fixture broke");
+    expect(base.request.distanceMm).toBe(10);
+    expect(base.request.loop.length).toBe(4);
     expect(derived?.request.holes).toEqual([
       {
         diameterMm: 8,

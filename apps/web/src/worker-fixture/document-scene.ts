@@ -7,22 +7,41 @@
  * bounds their union. The settle surface's truth rides on that aggregate
  * (`data-volume` == the sum of what the viewport draws).
  *
+ * ## The operand handoff (real-CAD composition)
+ *
+ * The request list is the document's topological order, so a consumed
+ * base a rendered consumer needs (`consumedOnly`) computes BEFORE its
+ * consumer and the pass keys its solid by the body id. A boolean, hole,
+ * or move whose operand is such a body composes from that COMPUTED solid
+ * — the operand's current geometry, earlier features included (a pocket
+ * cut from a holed block keeps the window) — while a plain-extrude
+ * operand keeps re-executing its own embedded derivation, byte-identical
+ * to every established flow.
+ *
  * ## Per-body failure honesty
  *
  * A body whose kernel build refuses does NOT fail the pass: the refusal is
  * recorded (the session surfaces it verbatim — the same structured text a
  * single-scene dispatch would), the body renders nothing, and its
- * lineage's embedded base state (the request every composing scene
- * carries — the hole's base extrusion, the boolean's operands) renders in
- * its place when the base body is still renderable. The scene shows
- * whatever IS valid at that point; it never fabricates the refused body.
+ * lineage's operand state renders in its place when still renderable —
+ * an extrude-derived operand re-executes its extrusion, a computed
+ * operand surfaces the measurement its scene already produced. The scene
+ * shows whatever IS valid at that point; it never fabricates the refused
+ * body.
  *
  * The computation stays a pure carrier of the operation matrix like every
  * other scene: no Date, no random, results derive from the requests alone.
  */
 
-import type { ComputationContext, KernelBounds } from "@slopcad/cad-kernel";
-import type { ExtrudeSceneRequest } from "../cad-workbench/extrude";
+import type {
+  ComputationContext,
+  KernelBounds,
+  WorkerSolidId,
+} from "@slopcad/cad-kernel";
+import type {
+  ExtrudeSceneRequest,
+  SceneOperand,
+} from "../cad-workbench/extrude";
 import type {
   DocumentBodyScene,
   DocumentBodySceneRequest,
@@ -87,16 +106,27 @@ export interface DocumentSceneMeasurement {
   readonly failures: readonly DocumentSceneFailure[];
 }
 
-/** One body's computed scene: its measurement plus its open-shell truth. */
+/**
+ * One body's computed scene: its measurement, its open-shell truth, and —
+ * for the operand-capable compositions (pad, hole, boolean, move) — the
+ * solid the pass keys by the body id so a later consumer composes from
+ * this body's CURRENT geometry.
+ */
 interface OneBodyMeasurement {
   readonly measurement: PlateMeasurement;
   readonly openShell?: boolean;
+  readonly solid?: WorkerSolidId;
 }
 
-/** Executes one body's scene through the compute function its kind names. */
+/**
+ * Executes one body's scene through the compute function its kind names,
+ * handing the pass's computed solids to the operand-consuming
+ * compositions.
+ */
 async function computeOneBodyScene(
   context: ComputationContext,
   scene: DocumentBodyScene,
+  computed: ReadonlyMap<string, WorkerSolidId>,
 ): Promise<OneBodyMeasurement> {
   switch (scene.kind) {
     case "plate":
@@ -108,8 +138,10 @@ async function computeOneBodyScene(
       };
     case "extrude":
       return { measurement: await computeExtrudeScene(context, scene.request) };
-    case "pad":
-      return { measurement: await computePadScene(context, scene.request) };
+    case "pad": {
+      const composed = await computePadScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
     case "revolve":
       return { measurement: await computeRevolveScene(context, scene.request) };
     case "sweep":
@@ -138,14 +170,26 @@ async function computeOneBodyScene(
       };
     case "mirror":
       return { measurement: await computeMirrorScene(context, scene.request) };
-    case "boolean":
-      return { measurement: await computeBooleanScene(context, scene.request) };
-    case "moveBody":
-      return {
-        measurement: await computeMoveBodyScene(context, scene.request),
-      };
-    case "hole":
-      return { measurement: await computeHoleScene(context, scene.request) };
+    case "boolean": {
+      const composed = await computeBooleanScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "moveBody": {
+      const composed = await computeMoveBodyScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "hole": {
+      const composed = await computeHoleScene(context, scene.request, computed);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
     case "sheet": {
       const sheet = await computeSheetScene(context, scene.request);
       return {
@@ -157,23 +201,44 @@ async function computeOneBodyScene(
 }
 
 /**
- * The lineage fallback of one refused scene: the embedded base extrusions
- * the composition carries, in render order. A boolean renders BOTH
- * operands (the union body is gone — the operands are the document's
- * truth); the single-base compositions render their base extrusion; the
- * independent kinds and the sheet chain carry nothing (a refused sheet
- * renders no partial chain).
+ * One lineage fallback source: an embedded extrusion (re-executed) or a
+ * computed operand body (its measurement surfaced from earlier in the
+ * pass — the operand's CURRENT state, prior features included).
  */
-function fallbackExtrusionsOf(
+type FallbackSource =
+  | { readonly kind: "extrude"; readonly request: ExtrudeSceneRequest }
+  | { readonly kind: "computed"; readonly bodyId: string };
+
+/** Maps one operand source onto its fallback source. */
+function fallbackSourceOf(operand: SceneOperand): FallbackSource {
+  return operand.kind === "extrude"
+    ? { kind: "extrude", request: operand.request }
+    : { kind: "computed", bodyId: operand.bodyId };
+}
+
+/**
+ * The lineage fallback of one refused scene: the operand states the
+ * composition carries, in operand order. An extrude-derived operand
+ * renders its own extrusion; a computed operand renders the measurement
+ * its scene already produced earlier in the pass — a refused boolean over
+ * a holed block shows the HOLED block, the lineage's honest current
+ * state. The pad renders its base extrusion; the independent kinds and
+ * the sheet chain carry nothing (a refused sheet renders no partial
+ * chain).
+ */
+function fallbackSourcesOf(
   scene: DocumentBodyScene,
-): readonly ExtrudeSceneRequest[] {
+): readonly FallbackSource[] {
   switch (scene.kind) {
     case "pad":
-      return [scene.request.base];
+      return [{ kind: "extrude", request: scene.request.base }];
     case "hole":
-      return [scene.request.base];
+      return [fallbackSourceOf(scene.request.base)];
     case "boolean":
-      return [scene.request.target, scene.request.tool];
+      return [
+        fallbackSourceOf(scene.request.target),
+        fallbackSourceOf(scene.request.tool),
+      ];
     case "thread":
     case "rib":
     case "scale":
@@ -182,8 +247,9 @@ function fallbackExtrusionsOf(
     case "patternFeature":
     case "patternPath":
     case "mirror":
+      return [{ kind: "extrude", request: scene.request.base }];
     case "moveBody":
-      return [scene.request.base];
+      return [fallbackSourceOf(scene.request.base)];
     default:
       return [];
   }
@@ -202,15 +268,22 @@ function unionBoundsInto(
 
 /**
  * Computes the document scene: every body's scene in request order, the
- * aggregate over the bodies that rendered. The body-display keep rule
- * applies FIRST, per body (`renderableBodyIds` — the keep-rule-approved
- * body ids the caller passes): a hidden body renders nothing and is not
- * even computed, so an all-hidden document settles the honest empty
- * aggregate. A visible body the kernel refused is recorded and skipped,
- * with its lineage fallback rendered when present and still renderable —
- * a boolean renders BOTH operands, and a fallback whose body id already
- * rendered (another refused lineage's same shared base) never
- * double-counts.
+ * aggregate over the bodies that rendered. The request order is the
+ * document's topological order, so a COMPUTE-ONLY entry (`consumedOnly` —
+ * a consumed base a rendered consumer needs) evaluates before its
+ * consumer and its solid is keyed by the body id for the handoff; the
+ * body-display keep rule applies to the RENDERED entries only
+ * (`renderableBodyIds` — the keep-rule-approved body ids the caller
+ * passes): a hidden tip renders nothing and is not even computed, so an
+ * all-hidden document settles the honest empty aggregate — while display
+ * flags never break the MODEL (a hidden consumed base still computes for
+ * its consumer). A body the kernel refused is recorded and skipped, with
+ * its lineage fallback rendered when present and still renderable — a
+ * boolean renders BOTH operands (an extrude-derived operand re-executes
+ * its extrusion, a computed operand surfaces its pass measurement — the
+ * body's current state, prior features included), and a fallback whose
+ * body id already rendered (another refused lineage's same shared base)
+ * never double-counts.
  */
 export async function computeDocumentScene(
   context: ComputationContext,
@@ -220,10 +293,25 @@ export async function computeDocumentScene(
   const rendered: DocumentSceneBodyMeasurement[] = [];
   const renderedIds = new Set<string>();
   const failures: DocumentSceneFailure[] = [];
+  // The pass's computed solids and measurements, keyed by body id — the
+  // operand handoff between the compositions and their consumers, and the
+  // refused lineage's honest fallback state.
+  const computedSolids = new Map<string, WorkerSolidId>();
+  const computedMeasurements = new Map<string, PlateMeasurement>();
   for (const body of bodies) {
-    if (!renderableBodyIds.has(body.bodyId)) continue;
+    const consumedOnly = body.consumedOnly === true;
+    if (!consumedOnly && !renderableBodyIds.has(body.bodyId)) continue;
     try {
-      const computed = await computeOneBodyScene(context, body.scene);
+      const computed = await computeOneBodyScene(
+        context,
+        body.scene,
+        computedSolids,
+      );
+      if (computed.solid !== undefined) {
+        computedSolids.set(body.bodyId, computed.solid);
+      }
+      computedMeasurements.set(body.bodyId, computed.measurement);
+      if (consumedOnly) continue;
       rendered.push({
         bodyId: body.bodyId,
         measurement: computed.measurement,
@@ -240,16 +328,28 @@ export async function computeDocumentScene(
         failure,
       });
     }
-    for (const fallback of fallbackExtrusionsOf(body.scene)) {
-      if (!renderableBodyIds.has(fallback.bodyId)) continue;
-      if (renderedIds.has(fallback.bodyId)) continue;
+    for (const fallback of fallbackSourcesOf(body.scene)) {
+      if (fallback.kind === "computed") {
+        if (!renderableBodyIds.has(fallback.bodyId)) continue;
+        if (renderedIds.has(fallback.bodyId)) continue;
+        const measurement = computedMeasurements.get(fallback.bodyId);
+        if (measurement === undefined) continue;
+        rendered.push({ bodyId: fallback.bodyId, measurement });
+        renderedIds.add(fallback.bodyId);
+        continue;
+      }
+      if (!renderableBodyIds.has(fallback.request.bodyId)) continue;
+      if (renderedIds.has(fallback.request.bodyId)) continue;
       try {
-        const measurement = await computeExtrudeScene(context, fallback);
+        const measurement = await computeExtrudeScene(
+          context,
+          fallback.request,
+        );
         rendered.push({
-          bodyId: fallback.bodyId,
+          bodyId: fallback.request.bodyId,
           measurement,
         });
-        renderedIds.add(fallback.bodyId);
+        renderedIds.add(fallback.request.bodyId);
       } catch {
         // The fallback refused too: the lineage renders nothing this pass.
       }

@@ -178,6 +178,7 @@ import {
 } from "./feature-timeline-strip";
 import { WorkbenchMeasurementSection } from "./measurement-section";
 import { honestSceneFallback } from "./scene-fallback";
+import { sceneOperandOfBody } from "./extrude";
 import { SketchMode } from "./SketchMode";
 import { useWorkbenchEngine, type WorkbenchEngine } from "./workbench-engine";
 
@@ -747,18 +748,17 @@ export function CompleteCadWorkbench({
   }[] = workbenchDocument.bodies
     .filter((body) => body.kind === "sheet")
     .map((body) => ({ id: body.id, name: body.name }));
-  // The body pool the boolean form picks from (Phase 44): the bodies an
-  // EXTRUDE outputs — the boolean scene's operand contract
-  // (`documentBooleanSceneRequest` pairs every operand with its own
-  // extrusion, so any other producer — the seeded document's translate
-  // and rotate bodies — cannot pair and the scene would silently keep
-  // the prior render), name verbatim — the sketch pool's discipline.
+  // The body pool the boolean form picks from (Phase 44): the bodies whose
+  // producer carries a computable scene (`sceneOperandOfBody` — a plain
+  // extrusion's output, or a composition's: pad, hole, boolean, moved
+  // body, whose computed solid the document pass hands the boolean scene).
+  // Any other producer — the seeded document's translate and rotate
+  // bodies, sheets — declines the operand and the scene would silently
+  // keep the prior render, so it stays out of the pool, name verbatim —
+  // the sketch pool's discipline.
   const featureProducedBodies: readonly CadFeatureBodyOption[] =
     workbenchDocument.bodies.flatMap((body) =>
-      workbenchDocument.features.some(
-        (feature) =>
-          feature.kind === "extrude" && feature.outputs.includes(body.id),
-      )
+      sceneOperandOfBody(workbenchDocument, body.id) !== null
         ? [{ id: body.id, name: body.name }]
         : [],
     );
