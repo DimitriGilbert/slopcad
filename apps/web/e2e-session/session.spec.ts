@@ -3484,6 +3484,180 @@ test("s29 stored parameter expressions: the panel commits the expression, re-dri
   );
 });
 
+test("s30 variable manager: create, live autocomplete, expression switch, clear, refused self-cycle", async ({
+  sessionPage: page,
+}) => {
+  await stage("s30 variable manager", async () => {
+    // THE FEATURE (Phase 23): the parameter panel's manage mode — the
+    // management surface for document parameters riding the vocabulary's
+    // `parameter.create` and the expression/clear forms of `parameter.set`.
+    // One variable, `caseHeight`, walks the whole life: created as a 10 mm
+    // literal, consumed from a feature dialog's `$` autocomplete, switched
+    // to `holeDiameter + 2mm` through the manager's own autocomplete,
+    // re-driven by its reference, cleared back to a literal, and finally
+    // refused a self-cycle with the chain named.
+    await openComplete(page);
+    const panel = page.locator('[data-slot="cad-parameter-panel"]');
+
+    /** The root's serialized command log (the machine surface). */
+    const readLog = async (): Promise<
+      readonly { readonly commands: readonly Record<string, unknown>[] }[]
+    > =>
+      JSON.parse(
+        (await page
+          .locator(`#${COMPLETE_ROOT}`)
+          .getAttribute("data-command-log")) ?? "[]",
+      ) as readonly {
+        readonly commands: readonly Record<string, unknown>[];
+      }[];
+
+    /** The machine log's committed-command count across transactions. */
+    const logLength = async (): Promise<number> =>
+      (await readLog()).reduce(
+        (total, entry) => total + entry.commands.length,
+        0,
+      );
+
+    const manageToggle = page.getByRole("button", {
+      name: "Manage variables",
+    });
+    const doneToggle = page.getByRole("button", { name: "Done", exact: true });
+    await manageToggle.click();
+
+    // The manager's rows (name + quantity + actions), located by variable.
+    const caseRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ hasText: "caseHeight" });
+
+    // LEG 1 — CREATE: `caseHeight` as a 10 mm literal. The commit is
+    // `parameter.create` (the vocabulary's create form: name + quantity in
+    // the domain's unit grammar), and the row appears from the live
+    // collection.
+    await panel.getByLabel("Name", { exact: true }).fill("caseHeight");
+    await panel.getByLabel("Value", { exact: true }).fill("10mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(caseRow).toBeVisible();
+    await expect(caseRow).toContainText("10 mm");
+    const createCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(createCommand?.type).toBe("parameter.create");
+    expect(createCommand?.name).toBe("caseHeight");
+    expect(createCommand?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 10,
+    });
+    // The form reset for the next variable.
+    await expect(panel.getByLabel("Name", { exact: true })).toHaveValue("");
+
+    // LEG 2 — THE FEATURE-DIALOG AUTOCOMPLETE DERIVES LIVE: the fresh
+    // variable is immediately consumable as `$caseHeight` in a feature
+    // form's `$` autocomplete (the draft extrude's Distance). The draft
+    // command authoring gate needs two sketch records, so the stage draws
+    // the profile rectangle plus the throwaway line sketch (s28's
+    // precedent — neither is extruded; the dialog is asserted, then
+    // dismissed).
+    await doneToggle.click();
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await saveSketch(page);
+    await saveThrowawaySketch(page, COMPLETE_ROOT);
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+    const distance = page.getByLabel("Distance (mm)");
+    await distance.click();
+    await distance.fill("$case");
+    await expect(
+      page.getByRole("option", { name: "$caseHeight" }),
+    ).toBeVisible();
+    // Close without submitting: the first Escape dismisses the open
+    // autocomplete, the second the dialog (one may do both — dismiss until
+    // gone).
+    await page.keyboard.press("Escape");
+    if (await page.locator(DIALOG).isVisible()) {
+      await page.keyboard.press("Escape");
+    }
+    await expect(page.locator(DIALOG)).toBeHidden();
+
+    // LEG 3 — EXPRESSION SWITCH through the manager's `$` autocomplete:
+    // `caseHeight := holeDiameter + 2mm`. The suggestions exclude the
+    // edited variable itself, a clicked row inserts the grammar's bare
+    // identifier, and the live preview evaluates the current text.
+    await manageToggle.click();
+    await caseRow.getByRole("button", { name: "Set expression" }).click();
+    const caseEditor = panel.getByLabel("caseHeight", { exact: true });
+    await expect(caseEditor).toHaveValue("10");
+    await caseEditor.fill("$hol");
+    await panel.getByRole("option", { name: "$holeDiameter" }).click();
+    await expect(caseEditor).toHaveValue("holeDiameter");
+    await caseEditor.fill("holeDiameter + 2mm");
+    // The preview: the boot's holeDiameter is 8, so 8 + 2.
+    await expect(caseRow.getByText("= 10 mm", { exact: true })).toBeVisible();
+    const logBeforeExpression = await logLength();
+    await caseRow.getByRole("button", { name: "Apply" }).click();
+    // Success closes the editor; the row reads the derived quantity and its
+    // direct reference; the commit was the expression payload (the AST, no
+    // value).
+    await expect(caseEditor).toHaveCount(0);
+    await expect(caseRow.getByText("= 10 mm", { exact: true })).toBeVisible();
+    await expect(caseRow).toContainText("depends on holeDiameter");
+    const expressionCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(expressionCommand?.type).toBe("parameter.set");
+    expect(expressionCommand?.value).toBeUndefined();
+    expect(expressionCommand?.expression).toMatchObject({
+      kind: "binary",
+      left: { kind: "identifier", name: "holeDiameter" },
+      operator: "+",
+      right: { kind: "unitLiteral", value: 2, unit: "mm" },
+    });
+    expect((await logLength()) - logBeforeExpression).toBe(1);
+
+    // THE RE-DRIVE: editing the referenced literal (8 → 12) re-derives
+    // caseHeight in the same commit — the edit-in-place form serves the
+    // literal; the plate scene follows the new bore.
+    await doneToggle.click();
+    const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.getByLabel("holeDiameter", { exact: true }).fill("12");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeEdit,
+      }),
+    );
+    expect(volumeNear(redriven, 30 * 20 * 10 - Math.PI * 36 * 10)).toBe(true);
+
+    // LEG 4 — CLEAR back to literal: the vocabulary's clear-null form lands
+    // on the expression's live evaluated quantity (12 + 2 = 14).
+    await manageToggle.click();
+    await expect(caseRow.getByText("= 14 mm", { exact: true })).toBeVisible();
+    await caseRow.getByRole("button", { name: "Make literal" }).click();
+    await expect(caseRow).toContainText("14 mm");
+    const clearCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(clearCommand?.type).toBe("parameter.set");
+    expect(clearCommand?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 14,
+    });
+    expect(clearCommand?.expression).toBeNull();
+
+    // LEG 5 — THE REFUSED SELF-CYCLE: `caseHeight := caseHeight`, typed (the
+    // self row is never suggested). The commit refuses with the closing
+    // chain in the panel's alert region, and the machine log pins the
+    // never-happened commit.
+    const logAfterClear = await logLength();
+    await caseRow.getByRole("button", { name: "Set expression" }).click();
+    const cycleEditor = panel.getByLabel("caseHeight", { exact: true });
+    await cycleEditor.fill("caseHeight");
+    await caseRow.getByRole("button", { name: "Apply" }).click();
+    const cycleAlert = page.locator("[data-cad-param-panel-error]");
+    await expect(cycleAlert).toBeVisible();
+    expect(await cycleAlert.textContent()).toContain("parameter/cycle");
+    expect(await cycleAlert.textContent()).toContain("caseHeight → caseHeight");
+    expect(await logLength()).toBe(logAfterClear);
+
+    extra("parameter-manager");
+  });
+});
+
 test("s99 THE COVERAGE GATE: every manifest path and route was exercised", () => {
   const missingEntries = ENTRY_IDS.filter((id) => !ledger.covered.has(id));
   const missingDeclines = DECLINE_IDS.filter((id) => !ledger.declines.has(id));

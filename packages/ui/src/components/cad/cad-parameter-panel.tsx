@@ -43,6 +43,16 @@
  * that is `equalQuantity` to the current one, or an expression whose text
  * equals the current printing, issues no command.
  *
+ * ## The manage mode (Phase 23)
+ *
+ * A panel-level toggle ("Manage variables") swaps the edit form for
+ * {@link CadParameterManager} — the variable management surface: creation
+ * (`parameter.create`), literal↔expression switching with a `$`-triggered
+ * autocomplete, the clear-null path back to a literal, and the stored
+ * dependency graph. The mode exists only when the store IS the apply
+ * surface (see the manager module doc); refusals from either mode surface
+ * in the SAME alert region. The default edit-in-place flow is untouched.
+ *
  * ## Error surfacing (domain-validated, never re-implemented)
  *
  * Expression correctness is checked by the DOMAIN, not by the form: each
@@ -88,13 +98,9 @@
 import { useMemo, useState } from "react";
 import {
   CadProviderError,
-  angle,
-  area,
   CANONICAL_UNITS,
-  dimensionless,
   equalQuantity,
   evaluateExpression,
-  length,
   parseExpression,
   parameterEnvironment,
   printExpression,
@@ -103,11 +109,9 @@ import {
   toCanonical,
   useCadParameters,
   useCadStore,
-  volume,
   type AnyDimensionalValue,
   type CadSession,
   type CadStore,
-  type Dimension,
   type ExpressionUpdateError,
   type Parameter,
   type ParameterCollection,
@@ -119,6 +123,11 @@ import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
 import { Button } from "../button";
 import { useFormedible } from "../formedible/hooks/use-formedible";
+import {
+  canonicalDimensionValue,
+  CadParameterManager,
+  type CadParameterCommandApply,
+} from "./cad-parameter-manager";
 
 /** The user-facing strings of {@link CadParameterPanel}. Overridable via props. */
 export interface CadParameterPanelLabels {
@@ -132,6 +141,10 @@ export interface CadParameterPanelLabels {
   readonly currentValue: string;
   /** Message shown when a value field is submitted without a usable number. */
   readonly valueInvalid: string;
+  /** The manage-mode toggle's label. */
+  readonly manage: string;
+  /** The manage-mode toggle's label while managing. */
+  readonly manageClose: string;
 }
 
 /** Documented label defaults; every component-authored string lives here. */
@@ -141,6 +154,8 @@ export const CAD_PARAMETER_PANEL_LABELS: CadParameterPanelLabels = {
   submit: "Apply",
   currentValue: "Current value",
   valueInvalid: "Enter a number.",
+  manage: "Manage variables",
+  manageClose: "Done",
 };
 
 /** The form values of the panel's generated Formedible form. */
@@ -216,25 +231,6 @@ function expressionKey(id: string): string {
   return `expression:${id}`;
 }
 
-/** The domain's canonical value of `dimension` at `magnitude`. */
-function canonicalValue(
-  dimension: Dimension,
-  magnitude: number,
-): AnyDimensionalValue {
-  switch (dimension) {
-    case "length":
-      return length(magnitude);
-    case "angle":
-      return angle(magnitude);
-    case "area":
-      return area(magnitude);
-    case "volume":
-      return volume(magnitude);
-    case "dimensionless":
-      return dimensionless(magnitude);
-  }
-}
-
 /**
  * The current quantity of a parameter in the canonical unit of its
  * dimension — the domain's unit token and magnitude formatting, verbatim.
@@ -304,7 +300,7 @@ function submittedEdit(
     if (
       equalQuantity(
         parameter.value,
-        canonicalValue(parameter.value.dimension, submitted),
+        canonicalDimensionValue(parameter.value.dimension, submitted),
       )
     ) {
       return undefined;
@@ -394,7 +390,7 @@ export function CadParameterPanel({
         const applied = store.applyCommand(
           setParameterCommand(
             parameter.id,
-            canonicalValue(parameter.value.dimension, edit.value),
+            canonicalDimensionValue(parameter.value.dimension, edit.value),
           ),
         );
         return toOutcome(applied);
@@ -424,6 +420,29 @@ export function CadParameterPanel({
   const [applyFailure, setApplyFailure] = useState<string | undefined>(
     undefined,
   );
+
+  // The manage mode (Phase 23): the panel's second mode — the variable
+  // manager (create, expression editing with the `$` autocomplete, clear,
+  // the dependency graph) rendered instead of the edit form. It rides the
+  // vocabulary's `parameter.create` and clear/expression `parameter.set`
+  // commands, which only the store apply surface interprets, so the mode
+  // exists only when the store IS the apply surface: a prop-mode `onApply`
+  // host keeps the edit form (the edit shape does not extend to those
+  // verbs, and per-group precedence keeps one apply surface). Refusals
+  // surface in the SAME alert region as the edit form's.
+  const [managing, setManaging] = useState(false);
+
+  const managerApply = useMemo<CadParameterCommandApply | undefined>(() => {
+    if (onApply !== undefined || store === null || collection === undefined) {
+      return undefined;
+    }
+    return (command) => {
+      const outcome = toOutcome(store.applyCommand(command));
+      if (!outcome.ok) setApplyFailure(formatDomainError(outcome.error));
+      else setApplyFailure(undefined);
+      return outcome;
+    };
+  }, [collection, onApply, store]);
 
   // The form description is derived once per parameter-collection / label /
   // surface identity — the Formedible defaultValues adoption gate expects
@@ -575,10 +594,36 @@ export function CadParameterPanel({
       )}
       data-slot="cad-parameter-panel"
     >
-      <div className="text-muted-foreground border-border bg-background/40 shrink-0 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
-        {mergedLabels.title}
+      <div className="text-muted-foreground border-border bg-background/40 shrink-0 border-b px-2.5 py-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em]">
+            {mergedLabels.title}
+          </span>
+          {managerApply === undefined ? null : (
+            <Button
+              aria-pressed={managing}
+              className="tracking-normal normal-case"
+              onClick={() => setManaging((current) => !current)}
+              size="xs"
+              type="button"
+              variant="ghost"
+            >
+              {managing ? mergedLabels.manageClose : mergedLabels.manage}
+            </Button>
+          )}
+        </div>
       </div>
-      {!hasParameters ? (
+      {managing && managerApply !== undefined ? (
+        // The manage mode replaces the edit form (the edit-in-place flow is
+        // untouched for the default mode); the manager mirrors the LIVE
+        // provider collection — its commands act on the document the store
+        // applies to, never on a display override.
+        <CadParameterManager
+          evaluate={evaluate}
+          onCommand={managerApply}
+          parameters={collection?.parameters ?? []}
+        />
+      ) : !hasParameters ? (
         <div className="text-muted-foreground px-2.5 py-2 text-xs">
           {mergedLabels.empty}
         </div>
@@ -607,15 +652,6 @@ export function CadParameterPanel({
               submitApply();
             }}
           />
-          {applyFailure !== undefined ? (
-            <div
-              className="text-destructive border-border shrink-0 border-t px-2.5 py-1.5 text-xs leading-4"
-              data-cad-param-panel-error=""
-              role="alert"
-            >
-              {applyFailure}
-            </div>
-          ) : null}
           {apply !== undefined ? (
             <parameterForm.form.Subscribe
               selector={(state) => ({
@@ -638,6 +674,15 @@ export function CadParameterPanel({
           ) : null}
         </>
       )}
+      {applyFailure !== undefined ? (
+        <div
+          className="text-destructive border-border shrink-0 border-t px-2.5 py-1.5 text-xs leading-4"
+          data-cad-param-panel-error=""
+          role="alert"
+        >
+          {applyFailure}
+        </div>
+      ) : null}
     </div>
   );
 }
