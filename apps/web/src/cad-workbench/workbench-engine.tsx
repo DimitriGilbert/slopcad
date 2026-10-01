@@ -85,6 +85,8 @@ import {
   type CadCommand,
   type ConfigurationId,
   type DatumId,
+  type Parameter,
+  type ParameterId,
   appearanceLibraryEntry,
 } from "@slopcad/cad-core";
 import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
@@ -145,14 +147,28 @@ import { sectionInspectionReadout } from "./section-inspection";
 import { radiusReadout } from "./radius-inspection";
 import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
 import { helixSpineOf, validateHelixSubmission } from "./helix";
-import { threadTargetFeatureOf, validateThreadSubmission } from "./thread";
+import {
+  threadTargetFeatureOf,
+  validateThreadLength,
+  validateThreadSelectors,
+  type ThreadCutInputRef,
+} from "./thread";
 import { ribTargetFeatureOf, validateRibSubmission } from "./rib";
 import {
   richnessTargetFeatureOf,
   validateScaleSubmission,
   validateSplitSubmission,
   validateThickenSubmission,
+  type ScaleInputRef,
+  type ThickenInputRef,
 } from "./scale-thicken";
+import {
+  featureSlotCreateCommand,
+  featureSlotInputId,
+  resolveFeatureNumberValue,
+  type FeatureNumberValue,
+  type FeatureValueSlot,
+} from "./parameter-reference";
 import {
   patternTargetFeatureOf,
   validateMirrorSubmission,
@@ -471,10 +487,10 @@ export interface WorkbenchEngine {
    */
   readonly handleCreateSheet: (submission: {
     readonly datumId: DatumId;
-    readonly uMinMm: number;
-    readonly uMaxMm: number;
-    readonly vMinMm: number;
-    readonly vMaxMm: number;
+    readonly uMinMm: FeatureNumberValue;
+    readonly uMaxMm: FeatureNumberValue;
+    readonly vMinMm: FeatureNumberValue;
+    readonly vMaxMm: FeatureNumberValue;
   }) => FeatureFormOutcome;
   readonly handleTrimSurface: (submission: {
     readonly sheetId: BodyId;
@@ -483,16 +499,16 @@ export interface WorkbenchEngine {
   }) => FeatureFormOutcome;
   readonly handleThickenSurface: (submission: {
     readonly sheetId: BodyId;
-    readonly thicknessMm: number;
+    readonly thicknessMm: FeatureNumberValue;
     readonly side: 1 | -1;
   }) => FeatureFormOutcome;
   readonly handleKnitSurface: (submission: {
     readonly sheetIds: readonly BodyId[];
-    readonly toleranceMm: number;
+    readonly toleranceMm: FeatureNumberValue;
   }) => FeatureFormOutcome;
   readonly handleOffsetSurface: (submission: {
     readonly sheetId: BodyId;
-    readonly distanceMm: number;
+    readonly distanceMm: FeatureNumberValue;
   }) => FeatureFormOutcome;
   /**
    * The Phase 40 helix create action: validates the picked meridian sketch
@@ -504,12 +520,12 @@ export interface WorkbenchEngine {
   readonly handleHelix: (
     sketchId: string,
     authoring: {
-      readonly radiusMm: number;
-      readonly pitchMm: number;
-      readonly turns: number;
+      readonly radiusMm: FeatureNumberValue;
+      readonly pitchMm: FeatureNumberValue;
+      readonly turns: FeatureNumberValue;
       readonly handedness: 1 | -1;
-      readonly startAngleRad: number;
-      readonly taperMm: number;
+      readonly startAngleRad: FeatureNumberValue;
+      readonly taperMm: FeatureNumberValue;
     },
     datumAxisId: string | null,
   ) => FeatureFormOutcome;
@@ -519,14 +535,9 @@ export interface WorkbenchEngine {
    * (targeting the document's last extrude) in one atomic transaction.
    * A refusal commits nothing and returns the structured outcome.
    */
-  readonly handleThread: (specification: {
-    readonly majorDiameterMm: number;
-    readonly pitchMm: number;
-    readonly lengthMm: number;
-    readonly mode: number;
-    readonly handedness: number;
-    readonly axis: number;
-  }) => FeatureFormOutcome;
+  readonly handleThread: (
+    specification: ThreadCutInputRef,
+  ) => FeatureFormOutcome;
   /**
    * The Phase 41 draft-extrude create action: validates the numbers,
    * resolves the picked sketch through the profile seam, then commits the
@@ -535,8 +546,8 @@ export interface WorkbenchEngine {
    */
   readonly handleDraft: (specification: {
     readonly sketchId: string;
-    readonly distanceMm: number;
-    readonly taperDeg: number;
+    readonly distanceMm: FeatureNumberValue;
+    readonly taperDeg: FeatureNumberValue;
   }) => FeatureFormOutcome;
   /**
    * The Phase 41 rib create action: validates the thickness, then commits
@@ -546,25 +557,23 @@ export interface WorkbenchEngine {
    */
   readonly handleRib: (specification: {
     readonly sketchId: string;
-    readonly thicknessMm: number;
+    readonly thicknessMm: FeatureNumberValue;
   }) => FeatureFormOutcome;
   /**
    * The Phase 41 scale create action: validates the factor, then commits
    * the scale parameter and the scale feature (targeting the document's
    * last extrude) in one atomic transaction. A refusal commits nothing.
    */
-  readonly handleScale: (specification: {
-    readonly factor: number;
-  }) => FeatureFormOutcome;
+  readonly handleScale: (specification: ScaleInputRef) => FeatureFormOutcome;
   /**
    * The Phase 41 thicken create action: validates the wall thickness,
    * then commits the thicken parameter and the thicken feature (targeting
    * the document's last extrude) in one atomic transaction. A refusal
    * commits nothing.
    */
-  readonly handleThicken: (specification: {
-    readonly thicknessMm: number;
-  }) => FeatureFormOutcome;
+  readonly handleThicken: (
+    specification: ThickenInputRef,
+  ) => FeatureFormOutcome;
   /**
    * The Phase 41 split create action: commits the side parameter and the
    * split feature (the picked datum plane, targeting the document's last
@@ -1318,6 +1327,26 @@ export function useWorkbenchEngine(
       datumAxis: submission.datumAxisId !== null,
     });
     const spec = { ...STRUCTURED_HOLE_DEFAULTS.spec, ...submission.spec };
+    // The Phase 21 references: each named role resolves against the
+    // document's parameters — the kernel's own role kind is the demanded
+    // dimension (one source, never a hand-maintained table). The reference
+    // carries NO literal; the role commits no parameter.create and its
+    // feature input points at the existing parameter id.
+    const parameterRefs = submission.parameterRefs ?? {};
+    const referenceOf = new Map<string, Parameter>();
+    for (const role of roles) {
+      const ref = parameterRefs[role.name];
+      if (ref === undefined) continue;
+      const resolved = resolveFeatureNumberValue(
+        ref,
+        workbenchDocument.parameters,
+        { dimension: role.kind, label: `The hole's ${role.name}` },
+      );
+      if (!resolved.ok) return resolved;
+      if (resolved.kind === "reference") {
+        referenceOf.set(role.name, resolved.parameter);
+      }
+    }
     const roleValueOf = (
       role: string,
     ):
@@ -1364,18 +1393,27 @@ export function useWorkbenchEngine(
     );
     const bodyId = createBodyId(`body_shole${suffix}`);
     const featureId = createFeatureId(`feat_shole${suffix}`);
+    const roleCommands: CadCommand[] = [];
+    const roleInputIds: ParameterId[] = [];
+    roles.forEach((role, index) => {
+      const id = roleIds[index];
+      if (id === undefined) throw new Error("the role id list");
+      const reference = referenceOf.get(role.name);
+      if (reference !== undefined) {
+        roleInputIds.push(reference.id);
+        return;
+      }
+      roleCommands.push({
+        type: "parameter.create",
+        id,
+        name: `hole${role.name.charAt(0).toUpperCase()}${role.name.slice(1)}${suffix}`,
+        value: roleValueOf(role.name),
+      });
+      roleInputIds.push(id);
+    });
     const committed = documentApi.applyTransaction({
       commands: [
-        ...roles.map((role, index) => {
-          const id = roleIds[index];
-          if (id === undefined) throw new Error("the role id list");
-          return {
-            type: "parameter.create" as const,
-            id,
-            name: `hole${role.name.charAt(0).toUpperCase()}${role.name.slice(1)}${suffix}`,
-            value: roleValueOf(role.name),
-          };
-        }),
+        ...roleCommands,
         {
           type: "body.create" as const,
           id: bodyId,
@@ -1387,7 +1425,7 @@ export function useWorkbenchEngine(
           kind: "hole",
           inputs: [
             { kind: "feature", id: target.id },
-            ...roleIds.map((id) => ({ kind: "parameter" as const, id })),
+            ...roleInputIds.map((id) => ({ kind: "parameter" as const, id })),
             ...(submission.positionsSketchId !== null
               ? [
                   {
@@ -1594,40 +1632,85 @@ export function useWorkbenchEngine(
   // command's kind marker), and the bridge feature kind in ONE atomic
   // transaction — the loft action's pattern. Kernel execution rides the
   // `create-sheet` / `trim-surface` / `thicken-surface` bridge kinds.
+  // Phase 21: the bound values accept `$name` references — the draft
+  // action's seam.
   const handleCreateSheet = (submission: {
     readonly datumId: DatumId;
-    readonly uMinMm: number;
-    readonly uMaxMm: number;
-    readonly vMinMm: number;
-    readonly vMaxMm: number;
+    readonly uMinMm: FeatureNumberValue;
+    readonly uMaxMm: FeatureNumberValue;
+    readonly vMinMm: FeatureNumberValue;
+    readonly vMaxMm: FeatureNumberValue;
   }): FeatureFormOutcome => {
+    const uMin = resolveFeatureNumberValue(
+      submission.uMinMm,
+      workbenchDocument.parameters,
+      {
+        dimension: "length",
+        label: "The u minimum",
+      },
+    );
+    if (!uMin.ok) return uMin;
+    const uMax = resolveFeatureNumberValue(
+      submission.uMaxMm,
+      workbenchDocument.parameters,
+      {
+        dimension: "length",
+        label: "The u maximum",
+      },
+    );
+    if (!uMax.ok) return uMax;
+    const vMin = resolveFeatureNumberValue(
+      submission.vMinMm,
+      workbenchDocument.parameters,
+      {
+        dimension: "length",
+        label: "The v minimum",
+      },
+    );
+    if (!vMin.ok) return vMin;
+    const vMax = resolveFeatureNumberValue(
+      submission.vMaxMm,
+      workbenchDocument.parameters,
+      {
+        dimension: "length",
+        label: "The v maximum",
+      },
+    );
+    if (!vMax.ok) return vMax;
     const n = surfaceCount + 1;
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_surface${suffix}`);
     const featureId = createFeatureId(`feat_surface${suffix}`);
     const kindParam = createParameterId(`param_surface_kind${suffix}`);
-    const boundParams = [
+    const boundSlots: readonly FeatureValueSlot[] = [
       {
-        id: createParameterId(`param_surface_umin${suffix}`),
-        name: `surfaceUMin${suffix}`,
-        mm: submission.uMinMm,
+        resolution: uMin,
+        literalId: createParameterId(`param_surface_umin${suffix}`),
+        literalName: `surfaceUMin${suffix}`,
+        toLiteralValue: length,
       },
       {
-        id: createParameterId(`param_surface_umax${suffix}`),
-        name: `surfaceUMax${suffix}`,
-        mm: submission.uMaxMm,
+        resolution: uMax,
+        literalId: createParameterId(`param_surface_umax${suffix}`),
+        literalName: `surfaceUMax${suffix}`,
+        toLiteralValue: length,
       },
       {
-        id: createParameterId(`param_surface_vmin${suffix}`),
-        name: `surfaceVMin${suffix}`,
-        mm: submission.vMinMm,
+        resolution: vMin,
+        literalId: createParameterId(`param_surface_vmin${suffix}`),
+        literalName: `surfaceVMin${suffix}`,
+        toLiteralValue: length,
       },
       {
-        id: createParameterId(`param_surface_vmax${suffix}`),
-        name: `surfaceVMax${suffix}`,
-        mm: submission.vMaxMm,
+        resolution: vMax,
+        literalId: createParameterId(`param_surface_vmax${suffix}`),
+        literalName: `surfaceVMax${suffix}`,
+        toLiteralValue: length,
       },
     ];
+    const boundCommands = boundSlots
+      .map(featureSlotCreateCommand)
+      .filter((command) => command !== null);
     const committed = documentApi.applyTransaction({
       commands: [
         {
@@ -1636,12 +1719,7 @@ export function useWorkbenchEngine(
           name: `surfaceKind${suffix}`,
           value: dimensionless(0),
         },
-        ...boundParams.map((parameter) => ({
-          type: "parameter.create" as const,
-          id: parameter.id,
-          name: parameter.name,
-          value: length(parameter.mm),
-        })),
+        ...boundCommands,
         {
           type: "body.create" as const,
           id: bodyId,
@@ -1655,9 +1733,9 @@ export function useWorkbenchEngine(
           inputs: [
             { kind: "datum" as const, id: submission.datumId },
             { kind: "parameter" as const, id: kindParam },
-            ...boundParams.map((parameter) => ({
+            ...boundSlots.map((slot) => ({
               kind: "parameter" as const,
-              id: parameter.id,
+              id: featureSlotInputId(slot),
             })),
           ],
           outputs: [bodyId],
@@ -1727,23 +1805,30 @@ export function useWorkbenchEngine(
 
   const handleThickenSurface = (submission: {
     readonly sheetId: BodyId;
-    readonly thicknessMm: number;
+    readonly thicknessMm: FeatureNumberValue;
     readonly side: 1 | -1;
   }): FeatureFormOutcome => {
+    const thickness = resolveFeatureNumberValue(
+      submission.thicknessMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The surface wall thickness" },
+    );
+    if (!thickness.ok) return thickness;
     const n = surfaceCount + 1;
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_surface_solid${suffix}`);
     const featureId = createFeatureId(`feat_surface_thicken${suffix}`);
-    const thicknessParam = createParameterId(`param_surface_t${suffix}`);
+    const thicknessSlot: FeatureValueSlot = {
+      resolution: thickness,
+      literalId: createParameterId(`param_surface_t${suffix}`),
+      literalName: `surfaceThickness${suffix}`,
+      toLiteralValue: length,
+    };
+    const thicknessCommand = featureSlotCreateCommand(thicknessSlot);
     const sideParam = createParameterId(`param_surface_side${suffix}`);
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create" as const,
-          id: thicknessParam,
-          name: `surfaceThickness${suffix}`,
-          value: length(submission.thicknessMm),
-        },
+        ...(thicknessCommand === null ? [] : [thicknessCommand]),
         {
           type: "parameter.create" as const,
           id: sideParam,
@@ -1761,7 +1846,10 @@ export function useWorkbenchEngine(
           kind: "thicken-surface",
           inputs: [
             { kind: "body" as const, id: submission.sheetId },
-            { kind: "parameter" as const, id: thicknessParam },
+            {
+              kind: "parameter" as const,
+              id: featureSlotInputId(thicknessSlot),
+            },
             { kind: "parameter" as const, id: sideParam },
           ],
           outputs: [bodyId],
@@ -1782,21 +1870,28 @@ export function useWorkbenchEngine(
 
   const handleKnitSurface = (submission: {
     readonly sheetIds: readonly BodyId[];
-    readonly toleranceMm: number;
+    readonly toleranceMm: FeatureNumberValue;
   }): FeatureFormOutcome => {
+    const tolerance = resolveFeatureNumberValue(
+      submission.toleranceMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The sewing tolerance" },
+    );
+    if (!tolerance.ok) return tolerance;
     const n = surfaceCount + 1;
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_surface_knit${suffix}`);
     const featureId = createFeatureId(`feat_surface_knit${suffix}`);
-    const toleranceParam = createParameterId(`param_surface_tol${suffix}`);
+    const toleranceSlot: FeatureValueSlot = {
+      resolution: tolerance,
+      literalId: createParameterId(`param_surface_tol${suffix}`),
+      literalName: `surfaceTolerance${suffix}`,
+      toLiteralValue: length,
+    };
+    const toleranceCommand = featureSlotCreateCommand(toleranceSlot);
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create" as const,
-          id: toleranceParam,
-          name: `surfaceTolerance${suffix}`,
-          value: length(submission.toleranceMm),
-        },
+        ...(toleranceCommand === null ? [] : [toleranceCommand]),
         {
           type: "body.create" as const,
           id: bodyId,
@@ -1812,7 +1907,10 @@ export function useWorkbenchEngine(
               kind: "body" as const,
               id: sheetId,
             })),
-            { kind: "parameter" as const, id: toleranceParam },
+            {
+              kind: "parameter" as const,
+              id: featureSlotInputId(toleranceSlot),
+            },
           ],
           outputs: [bodyId],
         },
@@ -1832,21 +1930,28 @@ export function useWorkbenchEngine(
 
   const handleOffsetSurface = (submission: {
     readonly sheetId: BodyId;
-    readonly distanceMm: number;
+    readonly distanceMm: FeatureNumberValue;
   }): FeatureFormOutcome => {
+    const distance = resolveFeatureNumberValue(
+      submission.distanceMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The offset distance" },
+    );
+    if (!distance.ok) return distance;
     const n = surfaceCount + 1;
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_surface_offset${suffix}`);
     const featureId = createFeatureId(`feat_surface_offset${suffix}`);
-    const distanceParam = createParameterId(`param_surface_dist${suffix}`);
+    const distanceSlot: FeatureValueSlot = {
+      resolution: distance,
+      literalId: createParameterId(`param_surface_dist${suffix}`),
+      literalName: `surfaceDistance${suffix}`,
+      toLiteralValue: length,
+    };
+    const distanceCommand = featureSlotCreateCommand(distanceSlot);
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create" as const,
-          id: distanceParam,
-          name: `surfaceDistance${suffix}`,
-          value: length(submission.distanceMm),
-        },
+        ...(distanceCommand === null ? [] : [distanceCommand]),
         {
           type: "body.create" as const,
           id: bodyId,
@@ -1859,7 +1964,10 @@ export function useWorkbenchEngine(
           kind: "offset-surface",
           inputs: [
             { kind: "body" as const, id: submission.sheetId },
-            { kind: "parameter" as const, id: distanceParam },
+            {
+              kind: "parameter" as const,
+              id: featureSlotInputId(distanceSlot),
+            },
           ],
           outputs: [bodyId],
         },
@@ -1883,19 +1991,52 @@ export function useWorkbenchEngine(
   // precedent), then commit the six spine parameters and the helix feature
   // in ONE atomic transaction (with the datum axis input when one was
   // picked). A refusal commits nothing and hands the structured outcome
-  // back to the form.
+  // back to the form. Phase 21: each spine value is a literal number
+  // (today's behavior) or a `$name` reference — a reference skips its
+  // creation and the literal-only spine battery (the referenced parameter's
+  // magnitude is the kernel's verdict at regeneration).
   const handleHelix = (
     sketchId: string,
     authoring: {
-      readonly radiusMm: number;
-      readonly pitchMm: number;
-      readonly turns: number;
+      readonly radiusMm: FeatureNumberValue;
+      readonly pitchMm: FeatureNumberValue;
+      readonly turns: FeatureNumberValue;
       readonly handedness: 1 | -1;
-      readonly startAngleRad: number;
-      readonly taperMm: number;
+      readonly startAngleRad: FeatureNumberValue;
+      readonly taperMm: FeatureNumberValue;
     },
     datumAxisId: string | null,
   ): FeatureFormOutcome => {
+    const radius = resolveFeatureNumberValue(
+      authoring.radiusMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The helix radius" },
+    );
+    if (!radius.ok) return radius;
+    const pitch = resolveFeatureNumberValue(
+      authoring.pitchMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The helix pitch" },
+    );
+    if (!pitch.ok) return pitch;
+    const turns = resolveFeatureNumberValue(
+      authoring.turns,
+      workbenchDocument.parameters,
+      { dimension: "dimensionless", label: "The helix turn count" },
+    );
+    if (!turns.ok) return turns;
+    const startAngle = resolveFeatureNumberValue(
+      authoring.startAngleRad,
+      workbenchDocument.parameters,
+      { dimension: "angle", label: "The helix start angle" },
+    );
+    if (!startAngle.ok) return startAngle;
+    const taper = resolveFeatureNumberValue(
+      authoring.taperMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The helix taper" },
+    );
+    if (!taper.ok) return taper;
     const profile = sketchProfileResolverOf(workbenchDocument)(
       createSketchDocumentId(sketchId),
     );
@@ -1906,57 +2047,78 @@ export function useWorkbenchEngine(
         message: profile.error.message,
       };
     }
-    const spine = helixSpineOf(authoring);
-    const validation = validateHelixSubmission({
-      loop: profile.value.loop,
-      spine,
-    });
-    if (!validation.ok) return validation;
+    if (
+      radius.kind === "number" &&
+      pitch.kind === "number" &&
+      turns.kind === "number" &&
+      startAngle.kind === "number" &&
+      taper.kind === "number"
+    ) {
+      const spine = helixSpineOf({
+        radiusMm: radius.value,
+        pitchMm: pitch.value,
+        turns: turns.value,
+        handedness: authoring.handedness,
+        startAngleRad: startAngle.value,
+        taperMm: taper.value,
+      });
+      const validation = validateHelixSubmission({
+        loop: profile.value.loop,
+        spine,
+      });
+      if (!validation.ok) return validation;
+    }
     const n = helixCount + 1;
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_helix${suffix}`);
     const featureId = createFeatureId(`feat_helix${suffix}`);
-    const parameterCommands = [
+    const slots: readonly FeatureValueSlot[] = [
       {
-        name: `helixRadius${suffix}`,
-        value: length(authoring.radiusMm),
-        id: createParameterId(`param_helix_radius${suffix}`),
+        resolution: radius,
+        literalId: createParameterId(`param_helix_radius${suffix}`),
+        literalName: `helixRadius${suffix}`,
+        toLiteralValue: length,
       },
       {
-        name: `helixPitch${suffix}`,
-        value: length(authoring.pitchMm),
-        id: createParameterId(`param_helix_pitch${suffix}`),
+        resolution: pitch,
+        literalId: createParameterId(`param_helix_pitch${suffix}`),
+        literalName: `helixPitch${suffix}`,
+        toLiteralValue: length,
       },
       {
-        name: `helixTurns${suffix}`,
-        value: dimensionless(authoring.turns),
-        id: createParameterId(`param_helix_turns${suffix}`),
+        resolution: turns,
+        literalId: createParameterId(`param_helix_turns${suffix}`),
+        literalName: `helixTurns${suffix}`,
+        toLiteralValue: dimensionless,
       },
       {
-        name: `helixHandedness${suffix}`,
-        value: dimensionless(authoring.handedness),
-        id: createParameterId(`param_helix_handedness${suffix}`),
+        resolution: {
+          ok: true,
+          kind: "number",
+          value: authoring.handedness,
+        },
+        literalId: createParameterId(`param_helix_handedness${suffix}`),
+        literalName: `helixHandedness${suffix}`,
+        toLiteralValue: dimensionless,
       },
       {
-        name: `helixStartAngle${suffix}`,
-        value: angle(authoring.startAngleRad),
-        id: createParameterId(`param_helix_start${suffix}`),
+        resolution: startAngle,
+        literalId: createParameterId(`param_helix_start${suffix}`),
+        literalName: `helixStartAngle${suffix}`,
+        toLiteralValue: angle,
       },
       {
-        name: `helixTaper${suffix}`,
-        value: length(authoring.taperMm),
-        id: createParameterId(`param_helix_taper${suffix}`),
+        resolution: taper,
+        literalId: createParameterId(`param_helix_taper${suffix}`),
+        literalName: `helixTaper${suffix}`,
+        toLiteralValue: length,
       },
-    ].map((parameter) => ({
-      type: "parameter.create" as const,
-      id: parameter.id,
-      name: parameter.name,
-      value: parameter.value,
-    }));
-    const parameterIds = parameterCommands.map((command) => command.id);
+    ];
     const committed = documentApi.applyTransaction({
       commands: [
-        ...parameterCommands,
+        ...slots
+          .map(featureSlotCreateCommand)
+          .filter((command) => command !== null),
         { type: "body.create", id: bodyId, name: `helix ${String(n)}` },
         {
           type: "feature.create",
@@ -1964,7 +2126,10 @@ export function useWorkbenchEngine(
           kind: "helix",
           inputs: [
             { kind: "sketch", id: createSketchDocumentId(sketchId) },
-            ...parameterIds.map((id) => ({ kind: "parameter" as const, id })),
+            ...slots.map((slot) => ({
+              kind: "parameter" as const,
+              id: featureSlotInputId(slot),
+            })),
             ...(datumAxisId === null
               ? []
               : [{ kind: "datum" as const, id: createDatumId(datumAxisId) }]),
@@ -1989,14 +2154,30 @@ export function useWorkbenchEngine(
   // (the action-time battery), then commit the thread parameters and the
   // thread feature targeting the document's LAST EXTRUDE (the hole
   // precedent) in ONE atomic transaction. A refusal commits nothing.
-  const handleThread = (specification: {
-    readonly majorDiameterMm: number;
-    readonly pitchMm: number;
-    readonly lengthMm: number;
-    readonly mode: number;
-    readonly handedness: number;
-    readonly axis: number;
-  }): FeatureFormOutcome => {
+  // Phase 21: each of the three lengths is a literal number (today's
+  // behavior) or a `$name` reference — a reference skips its literal gate
+  // and the parameter creation; the selectors are always literals.
+  const handleThread = (
+    specification: ThreadCutInputRef,
+  ): FeatureFormOutcome => {
+    const major = resolveFeatureNumberValue(
+      specification.majorDiameterMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The thread's major diameter" },
+    );
+    if (!major.ok) return major;
+    const pitch = resolveFeatureNumberValue(
+      specification.pitchMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The thread's pitch" },
+    );
+    if (!pitch.ok) return pitch;
+    const threadLength = resolveFeatureNumberValue(
+      specification.lengthMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The thread's length" },
+    );
+    if (!threadLength.ok) return threadLength;
     const target = threadTargetFeatureOf(workbenchDocument);
     if (target === undefined) {
       return {
@@ -2006,50 +2187,73 @@ export function useWorkbenchEngine(
           "A thread needs a target solid: extrude a profile first (the thread cuts the last extrusion, the hole's precedent).",
       };
     }
-    const validation = validateThreadSubmission(specification);
-    if (!validation.ok) return validation;
+    if (major.kind === "number") {
+      const gate = validateThreadLength("majorDiameterMm", major.value);
+      if (!gate.ok) return gate;
+    }
+    if (pitch.kind === "number") {
+      const gate = validateThreadLength("pitchMm", pitch.value);
+      if (!gate.ok) return gate;
+    }
+    if (threadLength.kind === "number") {
+      const gate = validateThreadLength("lengthMm", threadLength.value);
+      if (!gate.ok) return gate;
+    }
+    const selectors = validateThreadSelectors(specification);
+    if (!selectors.ok) return selectors;
     const n = threadCount + 1;
     const suffix = String(n);
     const bodyId = createBodyId(`body_thread${suffix}`);
     const featureId = createFeatureId(`feat_thread${suffix}`);
+    const lengthSlots: readonly FeatureValueSlot[] = [
+      {
+        resolution: major,
+        literalId: createParameterId(`param_thread_major${suffix}`),
+        literalName: `threadMajor${suffix}`,
+        toLiteralValue: length,
+      },
+      {
+        resolution: pitch,
+        literalId: createParameterId(`param_thread_pitch${suffix}`),
+        literalName: `threadPitch${suffix}`,
+        toLiteralValue: length,
+      },
+      {
+        resolution: threadLength,
+        literalId: createParameterId(`param_thread_length${suffix}`),
+        literalName: `threadLength${suffix}`,
+        toLiteralValue: length,
+      },
+    ];
+    const selectorSlots: readonly FeatureValueSlot[] = [
+      {
+        resolution: { ok: true, kind: "number", value: specification.mode },
+        literalId: createParameterId(`param_thread_mode${suffix}`),
+        literalName: `threadMode${suffix}`,
+        toLiteralValue: dimensionless,
+      },
+      {
+        resolution: {
+          ok: true,
+          kind: "number",
+          value: specification.handedness,
+        },
+        literalId: createParameterId(`param_thread_handedness${suffix}`),
+        literalName: `threadHandedness${suffix}`,
+        toLiteralValue: dimensionless,
+      },
+      {
+        resolution: { ok: true, kind: "number", value: specification.axis },
+        literalId: createParameterId(`param_thread_axis${suffix}`),
+        literalName: `threadAxis${suffix}`,
+        toLiteralValue: dimensionless,
+      },
+    ];
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_thread_major${suffix}`),
-          name: `threadMajor${suffix}`,
-          value: length(specification.majorDiameterMm),
-        },
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_thread_pitch${suffix}`),
-          name: `threadPitch${suffix}`,
-          value: length(specification.pitchMm),
-        },
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_thread_length${suffix}`),
-          name: `threadLength${suffix}`,
-          value: length(specification.lengthMm),
-        },
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_thread_mode${suffix}`),
-          name: `threadMode${suffix}`,
-          value: dimensionless(specification.mode),
-        },
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_thread_handedness${suffix}`),
-          name: `threadHandedness${suffix}`,
-          value: dimensionless(specification.handedness),
-        },
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_thread_axis${suffix}`),
-          name: `threadAxis${suffix}`,
-          value: dimensionless(specification.axis),
-        },
+        ...[...lengthSlots, ...selectorSlots]
+          .map(featureSlotCreateCommand)
+          .filter((command) => command !== null),
         { type: "body.create", id: bodyId, name: `threaded ${String(n)}` },
         {
           type: "feature.create",
@@ -2057,30 +2261,10 @@ export function useWorkbenchEngine(
           kind: "thread",
           inputs: [
             { kind: "feature", id: target.id },
-            {
-              kind: "parameter",
-              id: createParameterId(`param_thread_major${suffix}`),
-            },
-            {
-              kind: "parameter",
-              id: createParameterId(`param_thread_pitch${suffix}`),
-            },
-            {
-              kind: "parameter",
-              id: createParameterId(`param_thread_length${suffix}`),
-            },
-            {
-              kind: "parameter",
-              id: createParameterId(`param_thread_mode${suffix}`),
-            },
-            {
-              kind: "parameter",
-              id: createParameterId(`param_thread_handedness${suffix}`),
-            },
-            {
-              kind: "parameter",
-              id: createParameterId(`param_thread_axis${suffix}`),
-            },
+            ...[...lengthSlots, ...selectorSlots].map((slot) => ({
+              kind: "parameter" as const,
+              id: featureSlotInputId(slot),
+            })),
           ],
           outputs: [bodyId],
         },
@@ -2103,15 +2287,30 @@ export function useWorkbenchEngine(
   // in ONE atomic transaction. The kernel's own taper battery (the shared
   // validator) judges the geometry at regeneration; the action-time check
   // covers only the authoring domain (finite numbers, non-zero distance,
-  // the ±90° bound).
+  // the ±90° bound). Phase 21: each value is a literal number (today's
+  // behavior) or a `$name` reference — the reference skips the parameter
+  // creation and the literal-only bounds, and the feature input points at
+  // the EXISTING parameter so the regeneration loop re-reads its value.
   const handleDraft = (specification: {
     readonly sketchId: string;
-    readonly distanceMm: number;
-    readonly taperDeg: number;
+    readonly distanceMm: FeatureNumberValue;
+    readonly taperDeg: FeatureNumberValue;
   }): FeatureFormOutcome => {
+    const distance = resolveFeatureNumberValue(
+      specification.distanceMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The extrusion distance" },
+    );
+    if (!distance.ok) return distance;
+    const taper = resolveFeatureNumberValue(
+      specification.taperDeg,
+      workbenchDocument.parameters,
+      { dimension: "angle", label: "The draft taper" },
+    );
+    if (!taper.ok) return taper;
     if (
-      !Number.isFinite(specification.distanceMm) ||
-      specification.distanceMm === 0
+      distance.kind === "number" &&
+      (!Number.isFinite(distance.value) || distance.value === 0)
     ) {
       return {
         ok: false,
@@ -2121,8 +2320,8 @@ export function useWorkbenchEngine(
       };
     }
     if (
-      !Number.isFinite(specification.taperDeg) ||
-      Math.abs(specification.taperDeg) >= 90
+      taper.kind === "number" &&
+      (!Number.isFinite(taper.value) || Math.abs(taper.value) >= 90)
     ) {
       return {
         ok: false,
@@ -2145,22 +2344,25 @@ export function useWorkbenchEngine(
     const suffix = String(n);
     const bodyId = createBodyId(`body_extrude${suffix}`);
     const featureId = createFeatureId(`feat_extrude${suffix}`);
-    const depthId = createParameterId(`param_extrude_depth${suffix}`);
-    const taperId = createParameterId(`param_extrude_taper${suffix}`);
+    const slots: readonly FeatureValueSlot[] = [
+      {
+        resolution: distance,
+        literalId: createParameterId(`param_extrude_depth${suffix}`),
+        literalName: `extrudeDepth${suffix}`,
+        toLiteralValue: length,
+      },
+      {
+        resolution: taper,
+        literalId: createParameterId(`param_extrude_taper${suffix}`),
+        literalName: `extrudeTaper${suffix}`,
+        toLiteralValue: (deg) => angle((deg * Math.PI) / 180),
+      },
+    ];
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create",
-          id: depthId,
-          name: `extrudeDepth${suffix}`,
-          value: length(specification.distanceMm),
-        },
-        {
-          type: "parameter.create",
-          id: taperId,
-          name: `extrudeTaper${suffix}`,
-          value: angle((specification.taperDeg * Math.PI) / 180),
-        },
+        ...slots
+          .map(featureSlotCreateCommand)
+          .filter((command) => command !== null),
         { type: "body.create", id: bodyId, name: `drafted ${String(n)}` },
         {
           type: "feature.create",
@@ -2171,8 +2373,10 @@ export function useWorkbenchEngine(
               kind: "sketch",
               id: createSketchDocumentId(specification.sketchId),
             },
-            { kind: "parameter", id: depthId },
-            { kind: "parameter", id: taperId },
+            ...slots.map((slot) => ({
+              kind: "parameter" as const,
+              id: featureSlotInputId(slot),
+            })),
           ],
           outputs: [bodyId],
         },
@@ -2195,14 +2399,24 @@ export function useWorkbenchEngine(
   // profile seam the executor bridge uses, then commit the rib parameter
   // and the rib feature targeting the document's LAST EXTRUDE (the thread
   // precedent) in ONE atomic transaction. A refusal commits nothing.
+  // Phase 21: a `$name` thickness references the existing parameter (no
+  // creation, no literal-only battery) — the draft action's seam.
   const handleRib = (specification: {
     readonly sketchId: string;
-    readonly thicknessMm: number;
+    readonly thicknessMm: FeatureNumberValue;
   }): FeatureFormOutcome => {
-    const validation = validateRibSubmission({
-      thicknessMm: specification.thicknessMm,
-    });
-    if (!validation.ok) return validation;
+    const thickness = resolveFeatureNumberValue(
+      specification.thicknessMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The rib thickness" },
+    );
+    if (!thickness.ok) return thickness;
+    if (thickness.kind === "number") {
+      const validation = validateRibSubmission({
+        thicknessMm: thickness.value,
+      });
+      if (!validation.ok) return validation;
+    }
     const target = ribTargetFeatureOf(workbenchDocument);
     if (target === undefined) {
       return {
@@ -2226,14 +2440,16 @@ export function useWorkbenchEngine(
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_rib${suffix}`);
     const featureId = createFeatureId(`feat_rib${suffix}`);
+    const thicknessSlot: FeatureValueSlot = {
+      resolution: thickness,
+      literalId: createParameterId(`param_rib_thickness${suffix}`),
+      literalName: `ribThickness${suffix}`,
+      toLiteralValue: length,
+    };
+    const thicknessCommand = featureSlotCreateCommand(thicknessSlot);
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_rib_thickness${suffix}`),
-          name: `ribThickness${suffix}`,
-          value: length(specification.thicknessMm),
-        },
+        ...(thicknessCommand === null ? [] : [thicknessCommand]),
         { type: "body.create", id: bodyId, name: `ribbed ${String(n)}` },
         {
           type: "feature.create",
@@ -2247,7 +2463,7 @@ export function useWorkbenchEngine(
             },
             {
               kind: "parameter",
-              id: createParameterId(`param_rib_thickness${suffix}`),
+              id: featureSlotInputId(thicknessSlot),
             },
           ],
           outputs: [bodyId],
@@ -2268,14 +2484,20 @@ export function useWorkbenchEngine(
 
   // The Phase 41 scale action: validate the factor, then commit the scale
   // parameter and the scale feature targeting the document's LAST EXTRUDE
-  // in ONE atomic transaction. A refusal commits nothing.
-  const handleScale = (specification: {
-    readonly factor: number;
-  }): FeatureFormOutcome => {
-    const validation = validateScaleSubmission({
-      factor: specification.factor,
-    });
-    if (!validation.ok) return validation;
+  // in ONE atomic transaction. A refusal commits nothing. Phase 21: a
+  // `$name` factor references the existing parameter (no creation, no
+  // literal-only battery) — the draft action's seam.
+  const handleScale = (specification: ScaleInputRef): FeatureFormOutcome => {
+    const factor = resolveFeatureNumberValue(
+      specification.factor,
+      workbenchDocument.parameters,
+      { dimension: "dimensionless", label: "The scale factor" },
+    );
+    if (!factor.ok) return factor;
+    if (factor.kind === "number") {
+      const validation = validateScaleSubmission({ factor: factor.value });
+      if (!validation.ok) return validation;
+    }
     const target = richnessTargetFeatureOf(workbenchDocument);
     if (target === undefined) {
       return {
@@ -2289,14 +2511,16 @@ export function useWorkbenchEngine(
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_scale${suffix}`);
     const featureId = createFeatureId(`feat_scale${suffix}`);
+    const factorSlot: FeatureValueSlot = {
+      resolution: factor,
+      literalId: createParameterId(`param_scale_factor${suffix}`),
+      literalName: `scaleFactor${suffix}`,
+      toLiteralValue: dimensionless,
+    };
+    const factorCommand = featureSlotCreateCommand(factorSlot);
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_scale_factor${suffix}`),
-          name: `scaleFactor${suffix}`,
-          value: dimensionless(specification.factor),
-        },
+        ...(factorCommand === null ? [] : [factorCommand]),
         { type: "body.create", id: bodyId, name: `scaled ${String(n)}` },
         {
           type: "feature.create",
@@ -2306,7 +2530,7 @@ export function useWorkbenchEngine(
             { kind: "feature", id: target.id },
             {
               kind: "parameter",
-              id: createParameterId(`param_scale_factor${suffix}`),
+              id: featureSlotInputId(factorSlot),
             },
           ],
           outputs: [bodyId],
@@ -2328,13 +2552,23 @@ export function useWorkbenchEngine(
   // The Phase 41 thicken action: validate the wall thickness, then commit
   // the thicken parameter and the thicken feature targeting the document's
   // LAST EXTRUDE in ONE atomic transaction. A refusal commits nothing.
-  const handleThicken = (specification: {
-    readonly thicknessMm: number;
-  }): FeatureFormOutcome => {
-    const validation = validateThickenSubmission({
-      thicknessMm: specification.thicknessMm,
-    });
-    if (!validation.ok) return validation;
+  // Phase 21: a `$name` thickness references the existing parameter (no
+  // creation, no literal-only battery) — the draft action's seam.
+  const handleThicken = (
+    specification: ThickenInputRef,
+  ): FeatureFormOutcome => {
+    const thickness = resolveFeatureNumberValue(
+      specification.thicknessMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The wall thickness" },
+    );
+    if (!thickness.ok) return thickness;
+    if (thickness.kind === "number") {
+      const validation = validateThickenSubmission({
+        thicknessMm: thickness.value,
+      });
+      if (!validation.ok) return validation;
+    }
     const target = richnessTargetFeatureOf(workbenchDocument);
     if (target === undefined) {
       return {
@@ -2348,14 +2582,16 @@ export function useWorkbenchEngine(
     const suffix = n === 1 ? "" : String(n);
     const bodyId = createBodyId(`body_thicken${suffix}`);
     const featureId = createFeatureId(`feat_thicken${suffix}`);
+    const thicknessSlot: FeatureValueSlot = {
+      resolution: thickness,
+      literalId: createParameterId(`param_thicken_thickness${suffix}`),
+      literalName: `wallThickness${suffix}`,
+      toLiteralValue: length,
+    };
+    const thicknessCommand = featureSlotCreateCommand(thicknessSlot);
     const committed = documentApi.applyTransaction({
       commands: [
-        {
-          type: "parameter.create",
-          id: createParameterId(`param_thicken_thickness${suffix}`),
-          name: `wallThickness${suffix}`,
-          value: length(specification.thicknessMm),
-        },
+        ...(thicknessCommand === null ? [] : [thicknessCommand]),
         { type: "body.create", id: bodyId, name: `hollowed ${String(n)}` },
         {
           type: "feature.create",
@@ -2365,7 +2601,7 @@ export function useWorkbenchEngine(
             { kind: "feature", id: target.id },
             {
               kind: "parameter",
-              id: createParameterId(`param_thicken_thickness${suffix}`),
+              id: featureSlotInputId(thicknessSlot),
             },
           ],
           outputs: [bodyId],

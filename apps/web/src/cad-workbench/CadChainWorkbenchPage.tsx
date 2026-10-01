@@ -108,6 +108,9 @@ import {
   formatBoundsExtents,
   length,
   parseDatumPayload,
+  type CadCommand,
+  type Parameter,
+  type ParameterId,
 } from "@slopcad/cad-core";
 import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
 import { Redo2, Undo2 } from "lucide-react";
@@ -139,6 +142,7 @@ import {
 } from "../render-fixture/chain-fixture-session";
 import { extrudeSceneRequestOfFeature } from "./extrude";
 import { resolveSessionDatumAxis } from "./datum";
+import { resolveFeatureNumberValue } from "./parameter-reference";
 import {
   defaultHolePosition,
   holeBaseFeatureOf,
@@ -717,6 +721,10 @@ function CadChainWorkbenchBody({
         ? [{ id: datum.id, name: datum.name }]
         : [];
     });
+  // The live parameter names the hole dialog's `$`-token autocomplete
+  // offers (Phase 21): every document parameter, name verbatim.
+  const chainParameterNameOptions: readonly string[] =
+    workbenchDocument.parameters.parameters.map((parameter) => parameter.name);
 
   const handleChainStructuredHole = (
     submission: StructuredHoleSubmission,
@@ -777,6 +785,28 @@ function CadChainWorkbenchBody({
       datumAxis: submission.datumAxisId !== null,
     });
     const spec = { ...STRUCTURED_HOLE_DEFAULTS.spec, ...submission.spec };
+    // The Phase 21 references: each named role resolves against the
+    // document's parameters — the kernel's own role kind is the demanded
+    // dimension. A referenced role commits no parameter.create and its
+    // feature input points at the existing parameter id.
+    const parameterRefs = submission.parameterRefs ?? {};
+    const referenceOf = new Map<string, Parameter>();
+    for (const role of roles) {
+      const ref = parameterRefs[role.name];
+      if (ref === undefined) continue;
+      const resolved = resolveFeatureNumberValue(
+        ref,
+        workbenchDocument.parameters,
+        { dimension: role.kind, label: `The hole's ${role.name}` },
+      );
+      if (!resolved.ok) {
+        setStructuredHoleOutcome(resolved);
+        return;
+      }
+      if (resolved.kind === "reference") {
+        referenceOf.set(role.name, resolved.parameter);
+      }
+    }
     const roleValueOf = (
       role: string,
     ):
@@ -823,18 +853,27 @@ function CadChainWorkbenchBody({
     );
     const bodyId = createBodyId(`body_chain_shole${suffix}`);
     const featureId = createFeatureId(`feat_chain_shole${suffix}`);
+    const roleCommands: CadCommand[] = [];
+    const roleInputIds: ParameterId[] = [];
+    roles.forEach((role, index) => {
+      const id = roleIds[index];
+      if (id === undefined) throw new Error("the role id list");
+      const reference = referenceOf.get(role.name);
+      if (reference !== undefined) {
+        roleInputIds.push(reference.id);
+        return;
+      }
+      roleCommands.push({
+        type: "parameter.create",
+        id,
+        name: `hole${role.name.charAt(0).toUpperCase()}${role.name.slice(1)}${suffix}`,
+        value: roleValueOf(role.name),
+      });
+      roleInputIds.push(id);
+    });
     const committed = documentApi.applyTransaction({
       commands: [
-        ...roles.map((role, index) => {
-          const id = roleIds[index];
-          if (id === undefined) throw new Error("the role id list");
-          return {
-            type: "parameter.create" as const,
-            id,
-            name: `hole${role.name.charAt(0).toUpperCase()}${role.name.slice(1)}${suffix}`,
-            value: roleValueOf(role.name),
-          };
-        }),
+        ...roleCommands,
         {
           type: "body.create" as const,
           id: bodyId,
@@ -846,7 +885,7 @@ function CadChainWorkbenchBody({
           kind: "hole",
           inputs: [
             { kind: "feature", id: holeBase.id },
-            ...roleIds.map((id) => ({ kind: "parameter" as const, id })),
+            ...roleInputIds.map((id) => ({ kind: "parameter" as const, id })),
             ...(submission.positionsSketchId !== null
               ? [
                   {
@@ -1374,6 +1413,7 @@ function CadChainWorkbenchBody({
             <HoleFeatureForm
               datumAxes={chainDatumAxisOptions}
               onHole={handleChainStructuredHole}
+              parameterNames={chainParameterNameOptions}
               sketches={chainSketchOptions}
             />
           </DialogContent>

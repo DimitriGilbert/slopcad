@@ -93,13 +93,19 @@ describe("CreateSheetForm (Phase 49 surface tab)", () => {
       vi.fn<
         (submission: {
           readonly datumId: DatumId;
-          readonly uMinMm: number;
-          readonly uMaxMm: number;
-          readonly vMinMm: number;
-          readonly vMaxMm: number;
+          readonly uMinMm: number | string;
+          readonly uMaxMm: number | string;
+          readonly vMinMm: number | string;
+          readonly vMaxMm: number | string;
         }) => void
       >();
-    render(<CreateSheetForm datums={DATUMS} onCreateSheet={onCreateSheet} />);
+    render(
+      <CreateSheetForm
+        datums={DATUMS}
+        onCreateSheet={onCreateSheet}
+        parameterNames={[]}
+      />,
+    );
 
     // The defaults: first datum, a 30 × 20 patch.
     expect(numberFieldValue(/^u min/)).toBe("0");
@@ -169,7 +175,7 @@ describe("ThickenSurfaceForm (Phase 49 surface tab)", () => {
       vi.fn<
         (submission: {
           readonly sheetId: string;
-          readonly thicknessMm: number;
+          readonly thicknessMm: number | string;
           readonly side: 1 | -1;
         }) => void
       >();
@@ -177,6 +183,7 @@ describe("ThickenSurfaceForm (Phase 49 surface tab)", () => {
       <ThickenSurfaceForm
         sheets={SHEETS}
         onThickenSurface={onThickenSurface}
+        parameterNames={[]}
       />,
     );
 
@@ -198,10 +205,12 @@ describe("KnitSurfaceForm (Phase 49 surface tab)", () => {
       vi.fn<
         (submission: {
           readonly sheetIds: readonly string[];
-          readonly toleranceMm: number;
+          readonly toleranceMm: number | string;
         }) => void
       >();
-    render(<KnitSurfaceForm sheets={SHEETS} onKnit={onKnit} />);
+    render(
+      <KnitSurfaceForm sheets={SHEETS} onKnit={onKnit} parameterNames={[]} />,
+    );
 
     // The defaults: both sheets pre-listed, the 0.001 mm sewing tolerance.
     expect(numberFieldValue(/^Sewing tolerance/)).toBe("0.001");
@@ -221,10 +230,16 @@ describe("OffsetSurfaceForm (Phase 49 surface tab)", () => {
       vi.fn<
         (submission: {
           readonly sheetId: string;
-          readonly distanceMm: number;
+          readonly distanceMm: number | string;
         }) => void
       >();
-    render(<OffsetSurfaceForm sheets={SHEETS} onOffset={onOffset} />);
+    render(
+      <OffsetSurfaceForm
+        sheets={SHEETS}
+        onOffset={onOffset}
+        parameterNames={[]}
+      />,
+    );
 
     editNumberField(/^Offset distance/, "-4");
     fireEvent.click(screen.getByRole("button", { name: "Offset sheet" }));

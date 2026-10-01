@@ -107,15 +107,10 @@ import { CadPropertyPanel } from "@slopcad/ui/components/cad/cad-property-panel"
 import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
-import type {
-  DatumId,
-  RenderCamera,
-  RenderProjection,
-} from "@slopcad/cad-core";
+import type { RenderCamera, RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CurveAuthoring } from "./curves";
 import type { LoftSectionChoice } from "./loft";
-import type { ThreadCutInput } from "./thread";
 import { clippingPlanesOf } from "@slopcad/cad-r3f";
 
 import { useWorkbenchWebMcpTools } from "../webmcp/workbench-tools";
@@ -748,6 +743,12 @@ export function CompleteCadWorkbench({
   }[] = workbenchDocument.bodies
     .filter((body) => body.kind === "sheet")
     .map((body) => ({ id: body.id, name: body.name }));
+  // The live parameter names the feature dialogs' `$`-token autocomplete
+  // offers (Phase 21): every document parameter, name verbatim — a
+  // submitted `$name` resolves against THIS list, so the suggestions can
+  // never promise a reference the document cannot resolve.
+  const parameterNameOptions: readonly string[] =
+    workbenchDocument.parameters.parameters.map((parameter) => parameter.name);
   // The body pool the boolean form picks from (Phase 44): the bodies whose
   // producer carries a computable scene (`sceneOperandOfBody` — a plain
   // extrusion's output, or a composition's: pad, hole, boolean, moved
@@ -784,13 +785,9 @@ export function CompleteCadWorkbench({
   };
 
   /** Runs the create-sheet submission, surfacing the refusal and closing on success. */
-  const submitCreateSheet = (submission: {
-    readonly datumId: DatumId;
-    readonly uMinMm: number;
-    readonly uMaxMm: number;
-    readonly vMinMm: number;
-    readonly vMaxMm: number;
-  }): void => {
+  const submitCreateSheet = (
+    submission: Parameters<typeof handleCreateSheet>[0],
+  ): void => {
     const outcome = handleCreateSheet(submission);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
@@ -814,7 +811,7 @@ export function CompleteCadWorkbench({
   /** Runs the thicken-surface submission, surfacing the refusal and closing on success. */
   const submitThickenSurface = (submission: {
     readonly sheetId: string;
-    readonly thicknessMm: number;
+    readonly thicknessMm: number | string;
     readonly side: 1 | -1;
   }): void => {
     const outcome = handleThickenSurface({
@@ -828,7 +825,7 @@ export function CompleteCadWorkbench({
   /** Runs the knit-surface submission, surfacing the refusal and closing on success. */
   const submitKnitSurface = (submission: {
     readonly sheetIds: readonly string[];
-    readonly toleranceMm: number;
+    readonly toleranceMm: number | string;
   }): void => {
     const outcome = handleKnitSurface({
       ...submission,
@@ -841,7 +838,7 @@ export function CompleteCadWorkbench({
   /** Runs the offset-surface submission, surfacing the refusal and closing on success. */
   const submitOffsetSurface = (submission: {
     readonly sheetId: string;
-    readonly distanceMm: number;
+    readonly distanceMm: number | string;
   }): void => {
     const outcome = handleOffsetSurface({
       ...submission,
@@ -852,62 +849,50 @@ export function CompleteCadWorkbench({
   };
 
   /** Runs the helix submission, surfacing the refusal and closing on success. */
-  const submitHelix = (
-    sketchId: string,
-    authoring: {
-      readonly radiusMm: number;
-      readonly pitchMm: number;
-      readonly turns: number;
-      readonly handedness: 1 | -1;
-      readonly startAngleRad: number;
-      readonly taperMm: number;
-    },
-    datumAxisId: string | null,
-  ): void => {
-    const outcome = handleHelix(sketchId, authoring, datumAxisId);
+  const submitHelix = (...args: Parameters<typeof handleHelix>): void => {
+    const outcome = handleHelix(...args);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the thread submission, surfacing the refusal and closing on success. */
-  const submitThread = (specification: ThreadCutInput): void => {
+  const submitThread = (
+    specification: Parameters<typeof handleThread>[0],
+  ): void => {
     const outcome = handleThread(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the draft submission, surfacing the refusal and closing on success. */
-  const submitDraft = (specification: {
-    readonly sketchId: string;
-    readonly distanceMm: number;
-    readonly taperDeg: number;
-  }): void => {
+  const submitDraft = (
+    specification: Parameters<typeof handleDraft>[0],
+  ): void => {
     const outcome = handleDraft(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the rib submission, surfacing the refusal and closing on success. */
-  const submitRib = (specification: {
-    readonly sketchId: string;
-    readonly thicknessMm: number;
-  }): void => {
+  const submitRib = (specification: Parameters<typeof handleRib>[0]): void => {
     const outcome = handleRib(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the scale submission, surfacing the refusal and closing on success. */
-  const submitScale = (specification: { readonly factor: number }): void => {
+  const submitScale = (
+    specification: Parameters<typeof handleScale>[0],
+  ): void => {
     const outcome = handleScale(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the thicken submission, surfacing the refusal and closing on success. */
-  const submitThicken = (specification: {
-    readonly thicknessMm: number;
-  }): void => {
+  const submitThicken = (
+    specification: Parameters<typeof handleThicken>[0],
+  ): void => {
     const outcome = handleThicken(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
@@ -2933,6 +2918,7 @@ export function CompleteCadWorkbench({
               <CreateSheetForm
                 datums={datumPlaneOptions}
                 onCreateSheet={submitCreateSheet}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "surface-trim" ? (
               <TrimSurfaceForm
@@ -2943,16 +2929,19 @@ export function CompleteCadWorkbench({
               <ThickenSurfaceForm
                 sheets={sheetOptions}
                 onThickenSurface={submitThickenSurface}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "surface-knit" ? (
               <KnitSurfaceForm
                 sheets={sheetOptions}
                 onKnit={submitKnitSurface}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "surface-offset" ? (
               <OffsetSurfaceForm
                 sheets={sheetOptions}
                 onOffset={submitOffsetSurface}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "sweep" ? (
               <SweepFeatureForm
@@ -2965,21 +2954,36 @@ export function CompleteCadWorkbench({
               <HelixFeatureForm
                 datumAxes={datumAxisOptions}
                 onHelix={submitHelix}
+                parameterNames={parameterNameOptions}
                 sketches={sketchOptions}
               />
             ) : featureDialog === "thread" ? (
-              <ThreadFeatureForm onThread={submitThread} />
+              <ThreadFeatureForm
+                onThread={submitThread}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "draft" ? (
               <DraftFeatureForm
                 onDraft={submitDraft}
+                parameterNames={parameterNameOptions}
                 sketches={sketchOptions}
               />
             ) : featureDialog === "rib" ? (
-              <RibFeatureForm onRib={submitRib} sketches={sketchOptions} />
+              <RibFeatureForm
+                onRib={submitRib}
+                parameterNames={parameterNameOptions}
+                sketches={sketchOptions}
+              />
             ) : featureDialog === "scale" ? (
-              <ScaleFeatureForm onScale={submitScale} />
+              <ScaleFeatureForm
+                onScale={submitScale}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "thicken" ? (
-              <ThickenFeatureForm onThicken={submitThicken} />
+              <ThickenFeatureForm
+                onThicken={submitThicken}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "split" ? (
               <SplitFeatureForm
                 datumPlanes={datumPlaneOptions}
@@ -2990,6 +2994,7 @@ export function CompleteCadWorkbench({
                 datumAxes={datumAxisOptions}
                 onHole={submitStructuredHole}
                 onValuesChange={setHoleDialogValues}
+                parameterNames={parameterNameOptions}
                 sketches={sketchOptions}
               />
             ) : featureDialog === "pattern" ? (

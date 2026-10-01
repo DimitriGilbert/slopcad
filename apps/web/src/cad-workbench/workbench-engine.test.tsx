@@ -28,14 +28,17 @@ import {
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import {
+  angle,
   createBodyId,
   createDatumId,
   createFeatureId,
   createParameterId,
   createSketchDocumentId,
+  length,
+  type FeatureRecord,
+  type ParameterCollection,
 } from "@slopcad/cad-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { length } from "@slopcad/cad-core";
 import {
   createLineEntity,
   createRectangleEntity,
@@ -91,13 +94,68 @@ vi.mock("../render-fixture/fixture-session", () => ({
   faceAnchorSurface: (): string => "[]",
 }));
 
-import { useWorkbenchEngine, WorkbenchStoreProvider } from "./workbench-engine";
+import {
+  useWorkbenchEngine,
+  WorkbenchStoreProvider,
+  type FeatureFormOutcome,
+} from "./workbench-engine";
 import { CURVE_DEFAULTS } from "./curves";
 
 afterEach(cleanup);
 
 /** The last malformed-curve refusal the bad-curve button captured. */
 let lastRefusal: string | null = null;
+
+/** The Phase 21 draft-by-reference fixtures' parameter ids. */
+const REF_HEIGHT_PARAM = createParameterId("param_engine_case_height");
+const REF_ANGLE_PARAM = createParameterId("param_engine_case_angle");
+
+/** What a draft button captured: the outcome plus the post-commit facts. */
+interface DraftProbe {
+  readonly ok: boolean;
+  readonly refusal: string | null;
+  /** The last feature's inputs (the draft feature, just committed). */
+  readonly inputs: readonly { readonly kind: string; readonly id: string }[];
+  /** The document's parameter names after the commit. */
+  readonly parameterNames: readonly string[];
+  /** The document's parameters (name → canonical magnitude in mm). */
+  readonly parameterMm: Readonly<Record<string, number>>;
+}
+
+/** The last draft probe (the Phase 21 tests' capture seam). */
+let lastDraft: DraftProbe | null = null;
+
+/** The last seed transaction's refusal (the fixture seam's own honesty). */
+let lastSeedRefusal: string | null = null;
+
+/** The captured probe, or a thrown test failure when the click never landed. */
+function draftProbe(): DraftProbe {
+  if (lastDraft === null) throw new Error("the draft probe is absent");
+  return lastDraft;
+}
+
+/** Captures the post-commit document facts a draft button asserts on. */
+function draftProbeOf(
+  doc: {
+    readonly parameters: ParameterCollection;
+    readonly features: readonly FeatureRecord[];
+  },
+  outcome: FeatureFormOutcome,
+): DraftProbe {
+  const parameterMm: Record<string, number> = {};
+  for (const parameter of doc.parameters.parameters) {
+    parameterMm[parameter.name] = parameter.value.value;
+  }
+  return {
+    ok: outcome.ok,
+    refusal: outcome.ok ? null : `${outcome.code}: ${outcome.message}`,
+    inputs: doc.features.at(-1)?.inputs ?? [],
+    parameterNames: doc.parameters.parameters.map(
+      (parameter) => parameter.name,
+    ),
+    parameterMm,
+  };
+}
 
 const PROBE_FEATURE = createFeatureId("feat_probe");
 const PROBE_BODY = createBodyId("body_probe");
@@ -349,6 +407,116 @@ function EngineHarness(): ReactElement {
         }}
       >
         create bad curve
+      </button>
+      <button
+        type="button"
+        data-testid="seed-draft-fixtures"
+        onClick={() => {
+          const applied = engine.documentApi.applyTransaction({
+            commands: [
+              {
+                type: "parameter.create",
+                id: REF_HEIGHT_PARAM,
+                name: "engineCaseHeight",
+                value: length(7),
+              },
+              {
+                type: "parameter.create",
+                id: REF_ANGLE_PARAM,
+                name: "engineCaseAngle",
+                value: angle(0.1),
+              },
+              {
+                type: "sketch.create",
+                id: createSketchDocumentId("skd_engine_ref1"),
+                name: "reference profile",
+                sketch: extrudeSketchPayload(),
+              },
+              {
+                type: "sketch.create",
+                id: createSketchDocumentId("skd_engine_ref2"),
+                name: "literal profile",
+                sketch: extrudeSketchPayload(),
+              },
+            ],
+          });
+          lastSeedRefusal = applied.ok
+            ? null
+            : `${applied.error.code}: ${applied.error.message}`;
+        }}
+      >
+        seed draft fixtures
+      </button>
+      <button
+        type="button"
+        data-testid="draft-by-reference"
+        onClick={() => {
+          const outcome = engine.handleDraft({
+            sketchId: "skd_engine_ref1",
+            distanceMm: "$engineCaseHeight",
+            taperDeg: 0,
+          });
+          // The STORE's live getter: the hook's snapshot is one commit
+          // stale inside the click's own event (React has not re-rendered
+          // since this very transaction).
+          lastDraft = draftProbeOf(engine.store.getDocument(), outcome);
+        }}
+      >
+        draft by reference
+      </button>
+      <button
+        type="button"
+        data-testid="draft-literal"
+        onClick={() => {
+          const outcome = engine.handleDraft({
+            sketchId: "skd_engine_ref2",
+            distanceMm: 4,
+            taperDeg: 0,
+          });
+          lastDraft = draftProbeOf(engine.store.getDocument(), outcome);
+        }}
+      >
+        draft literal
+      </button>
+      <button
+        type="button"
+        data-testid="draft-unknown-ref"
+        onClick={() => {
+          const outcome = engine.handleDraft({
+            sketchId: "skd_engine_ref1",
+            distanceMm: "$engineMissing",
+            taperDeg: 0,
+          });
+          lastDraft = {
+            ok: outcome.ok,
+            refusal: outcome.ok ? null : `${outcome.code}: ${outcome.message}`,
+            inputs: [],
+            parameterNames: [],
+            parameterMm: {},
+          };
+        }}
+      >
+        draft unknown ref
+      </button>
+      <button
+        type="button"
+        data-testid="draft-wrong-dimension"
+        onClick={() => {
+          const outcome = engine.handleDraft({
+            sketchId: "skd_engine_ref1",
+            distanceMm: "$engineCaseAngle",
+            taperDeg: 0,
+          });
+          lastDraft = {
+            ok: outcome.ok,
+            refusal: outcome.ok ? null : `${outcome.code}: ${outcome.message}`,
+            inputs: [],
+            parameterNames: [],
+            parameterMm: {},
+          };
+        }}
+      >
+        draft wrong dimension
       </button>
     </div>
   );
@@ -617,5 +785,114 @@ describe("the curve creation action (Phase 47)", () => {
     expect(lastRefusal).toContain("workbench/curve-invalid");
     // Nothing committed: the machine surface stays empty.
     expect(surface().getAttribute("data-curves")).toBe("[]");
+  });
+});
+
+describe("the draft action's $name parameter references (Phase 21)", () => {
+  it("commits a reference to the EXISTING parameter and creates no literal for the role", async () => {
+    lastDraft = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    fireEvent.click(screen.getByTestId("seed-draft-fixtures"));
+    await waitFor(() => {
+      expect(lastSeedRefusal).toBeNull();
+    });
+    fireEvent.click(screen.getByTestId("draft-by-reference"));
+    await waitFor(() => {
+      expect(lastDraft).not.toBeNull();
+    });
+    const draft = draftProbe();
+    expect(draft.ok).toBe(true);
+    // The distance input references the EXISTING parameter by its id, and
+    // no `extrudeDepth1` literal was created for the role.
+    expect(draft.inputs[0]).toEqual({
+      kind: "sketch",
+      id: createSketchDocumentId("skd_engine_ref1"),
+    });
+    expect(draft.inputs[1]).toEqual({
+      kind: "parameter",
+      id: REF_HEIGHT_PARAM,
+    });
+    // The literal taper still creates its own parameter (mixed reference +
+    // literal in ONE submission).
+    expect(draft.parameterNames).toContain("engineCaseHeight");
+    expect(draft.parameterNames).toContain("extrudeTaper1");
+    expect(draft.parameterNames).not.toContain("extrudeDepth1");
+    expect(draft.parameterMm["engineCaseHeight"]).toBe(7);
+  });
+
+  it("keeps literal submissions byte-identical: both parameters created, values verbatim", async () => {
+    lastDraft = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    fireEvent.click(screen.getByTestId("seed-draft-fixtures"));
+    await waitFor(() => {
+      expect(lastSeedRefusal).toBeNull();
+    });
+    fireEvent.click(screen.getByTestId("draft-literal"));
+    await waitFor(() => {
+      expect(lastDraft).not.toBeNull();
+    });
+    const draft = draftProbe();
+    expect(draft.ok).toBe(true);
+    expect(draft.parameterNames).toContain("extrudeDepth1");
+    expect(draft.parameterNames).toContain("extrudeTaper1");
+    // The literal magnitudes: 4 mm depth, a 0 rad taper.
+    expect(draft.parameterMm["extrudeDepth1"]).toBe(4);
+    expect(draft.parameterMm["extrudeTaper1"]).toBe(0);
+    // Both feature inputs point at the freshly created literal parameters.
+    expect(draft.inputs).toHaveLength(3);
+    expect(draft.inputs[1]?.kind).toBe("parameter");
+    expect(draft.inputs[2]?.kind).toBe("parameter");
+  });
+
+  it("refuses an unknown $name structurally before any commit", async () => {
+    lastDraft = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    fireEvent.click(screen.getByTestId("seed-draft-fixtures"));
+    await waitFor(() => {
+      expect(lastSeedRefusal).toBeNull();
+    });
+    fireEvent.click(screen.getByTestId("draft-unknown-ref"));
+    await waitFor(() => {
+      expect(lastDraft).not.toBeNull();
+    });
+    const draft = draftProbe();
+    expect(draft.ok).toBe(false);
+    expect(draft.refusal).toContain("kernel/parameter-invalid");
+    expect(draft.refusal).toContain('"engineMissing"');
+  });
+
+  it("refuses a reference whose parameter carries the wrong dimension", async () => {
+    lastDraft = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    fireEvent.click(screen.getByTestId("seed-draft-fixtures"));
+    await waitFor(() => {
+      expect(lastSeedRefusal).toBeNull();
+    });
+    fireEvent.click(screen.getByTestId("draft-wrong-dimension"));
+    await waitFor(() => {
+      expect(lastDraft).not.toBeNull();
+    });
+    const draft = draftProbe();
+    expect(draft.ok).toBe(false);
+    expect(draft.refusal).toContain("kernel/parameter-invalid");
+    expect(draft.refusal).toContain('"engineCaseAngle"');
+    expect(draft.refusal).toContain("angle");
+    expect(draft.refusal).toContain("length");
   });
 });

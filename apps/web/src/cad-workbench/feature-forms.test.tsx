@@ -17,7 +17,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HoleFormValues } from "./feature-forms";
 import type { StructuredHoleSubmission } from "./hole-dialog";
-import type { ThreadCutInput } from "./thread";
+import type { ThreadCutInputRef } from "./thread";
 
 import {
   CurveFeatureForm,
@@ -80,8 +80,8 @@ async function pickDesignation(designation: string): Promise<void> {
 
 describe("ThreadFeatureForm: the designation picker fills the linked numbers", () => {
   it("fills major diameter and pitch on a pick, keeps hand edits, and never persists the designation", async () => {
-    const onThread = vi.fn<(specification: ThreadCutInput) => void>();
-    render(<ThreadFeatureForm onThread={onThread} />);
+    const onThread = vi.fn<(specification: ThreadCutInputRef) => void>();
+    render(<ThreadFeatureForm onThread={onThread} parameterNames={[]} />);
 
     // The defaults are the M6 row: 6 / 1.
     expect(numberFieldValue(/^Major diameter/)).toBe("6");
@@ -120,8 +120,8 @@ describe("ThreadFeatureForm: the designation picker fills the linked numbers", (
   });
 
   it("refills the numbers on every NEW pick (fine rows overwrite a hand edit)", async () => {
-    const onThread = vi.fn<(specification: ThreadCutInput) => void>();
-    render(<ThreadFeatureForm onThread={onThread} />);
+    const onThread = vi.fn<(specification: ThreadCutInputRef) => void>();
+    render(<ThreadFeatureForm onThread={onThread} parameterNames={[]} />);
 
     // Pick the fine M8x1 row: 8 / 1.
     await pickDesignation("M8x1");
@@ -174,7 +174,14 @@ async function pickSelectOption(
 describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
   it("renders the straight type's schema fields and hides the other types'", () => {
     const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
-    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    render(
+      <HoleFeatureForm
+        datumAxes={[]}
+        onHole={onHole}
+        parameterNames={[]}
+        sketches={[]}
+      />,
+    );
     // The straight type's load-bearing fields are present…
     expect(screen.getByLabelText(/^Diameter/)).toBeDefined();
     expect(screen.getByLabelText(/^Depth/)).toBeDefined();
@@ -190,7 +197,14 @@ describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
 
   it("reveals the counterbore fields when the type selects them", async () => {
     const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
-    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    render(
+      <HoleFeatureForm
+        datumAxes={[]}
+        onHole={onHole}
+        parameterNames={[]}
+        sketches={[]}
+      />,
+    );
     expect(screen.queryByLabelText(/Counterbore/)).toBeNull();
     await pickSelectOption(0, "Counterbore");
     await waitFor(() => {
@@ -203,7 +217,14 @@ describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
 
   it("fills the threaded type's numbers from the ISO designation picker", async () => {
     const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
-    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    render(
+      <HoleFeatureForm
+        datumAxes={[]}
+        onHole={onHole}
+        parameterNames={[]}
+        sketches={[]}
+      />,
+    );
     await pickSelectOption(0, "Threaded");
     await waitFor(() => {
       expect(screen.getByLabelText(/Thread major/)).toBeDefined();
@@ -223,6 +244,7 @@ describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
         datumAxes={[]}
         onHole={onHole}
         onValuesChange={onValuesChange}
+        parameterNames={[]}
         sketches={[]}
       />,
     );

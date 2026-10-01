@@ -3279,6 +3279,82 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench and the 
   });
 });
 
+test("s28 parameter references: the $-token autocomplete drives and re-drives a draft extrude", async ({
+  sessionPage: page,
+}) => {
+  await stage("s28 $param autocomplete + re-drive", async () => {
+    // THE FEATURE (Phase 21): a value field accepts `$varname` with a
+    // clickable autocomplete over the document's existing parameters. The
+    // boot plate's `holeDiameter` (a length parameter, 8 mm after s05's
+    // undo) is the existing var: the draft extrude's DISTANCE references
+    // it, and editing the parameter re-drives BOTH features it drives.
+    await openComplete(page);
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await saveSketch(page);
+    await saveThrowawaySketch(page, COMPLETE_ROOT);
+    const base = Number(await waitForRootSettle(page, COMPLETE_ROOT));
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+
+    // The profile: the fresh rectangle (20 × 15 = 300 mm²) — picked
+    // explicitly; the throwaway line sketch is not a profile.
+    await page.locator(`${DIALOG} [role="combobox"]`).nth(0).click();
+    await page.getByRole("option", { name: "sketch 1", exact: true }).click();
+
+    // THE AUTOCOMPLETE: typing `$` opens the document's parameter list;
+    // clicking the row inserts the full `$holeDiameter` into the field.
+    const distance = page.getByLabel("Distance (mm)");
+    await distance.click();
+    await distance.fill("$");
+    const plateHeightRow = page.getByRole("option", {
+      name: "$holeDiameter",
+    });
+    await expect(plateHeightRow).toBeVisible();
+    await plateHeightRow.click();
+    await expect(distance).toHaveValue("$holeDiameter");
+    // Taper 0: the plain prism (the extrude kind's universal path).
+    await page.getByLabel("Draft taper (deg)").fill("0");
+
+    // SUBMIT: the field resolves against the document's parameters — the
+    // feature input references the EXISTING parameter (no auto-created
+    // depth literal) — and the geometry lands at exactly 300 × 8 mm³.
+    const before = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-scene-kind",
+      "extrude",
+    );
+    const referenced = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, { afterDispatch: before }),
+    );
+    const referencedPadVolume = (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * 8;
+    expect(volumeNear(referenced, base + referencedPadVolume)).toBe(true);
+    const timeline = await readTimeline(page, COMPLETE_ROOT);
+    const draftEntry = timeline.entries.at(-1);
+    expect(draftEntry?.kind).toBe("extrude");
+    expect(draftEntry?.status).not.toBe("failed");
+
+    // THE RE-DRIVE: editing the referenced parameter in the panel re-drives
+    // the extrude (8 → 12 mm of pad) AND the plate's bore (⌀8 → ⌀12) — one
+    // parameter, both features follow on the next dispatch.
+    const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.getByLabel("holeDiameter", { exact: true }).fill("12");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeEdit,
+      }),
+    );
+    const boredPlateVolume = 30 * 20 * 10 - Math.PI * 36 * 10;
+    expect(
+      volumeNear(redriven, boredPlateVolume + referencedPadVolume * 1.5),
+    ).toBe(true);
+    expect(redriven).not.toBe(referenced);
+    extra("parameter-reference-autocomplete");
+  });
+});
+
 test("s99 THE COVERAGE GATE: every manifest path and route was exercised", () => {
   const missingEntries = ENTRY_IDS.filter((id) => !ledger.covered.has(id));
   const missingDeclines = DECLINE_IDS.filter((id) => !ledger.declines.has(id));
