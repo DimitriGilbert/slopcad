@@ -316,17 +316,23 @@ test("chapter: tsx-exchange", async ({ tutorialPage: page }) => {
 });
 
 // The applied capstone: ONE continuous document carries the whole build —
-// fourteen sketches, fourteen extrudes with parameter re-drives (negative
-// depths included), the sketch-on-face verb five times on real caps (the
-// wall tops and the rim top), a hole command, the section instrument, and
-// TWO view-scoped STL exports (box, lid) verified against their analytic
-// volumes AND their taught world bounds — at teaching pace on the OCCT
-// backend, whose exact-BREP volumes the analytic pins demand. The merged
-// session-stage chapters set the elevation precedent (holes-and-patterns'
-// 300 s for four stages); a start-to-finish applied build legitimately
-// takes minutes of teaching.
+// eight sketches, eight extrudes with parameter re-drives (negative depths
+// included), the sketch-on-face verb on the plate's top cap (the lid's pad
+// composition) and on the BOOLEAN's cavity floor (four ⌀6 standoffs, one
+// floor datum per round, the computed-face pick aimed from the standard
+// top view), a hole command drilled while the block is its target, the
+// boolean dialog whose subtract consumes the holed body through the
+// relaxed pool, the section instrument, and TWO view-scoped STL exports
+// (box, lid) verified against their analytic volumes AND their taught
+// world bounds — at teaching pace on the OCCT backend, whose exact-BREP
+// volumes the analytic pins demand. The merged session-stage chapters set
+// the elevation precedent (holes-and-patterns' 300 s for four stages); a
+// start-to-finish applied build legitimately takes minutes of teaching.
 test("chapter: applied-iot-case", async ({ tutorialPage: page }) => {
-  test.setTimeout(480_000);
+  // The four floor-datum standoff rounds (sketch-on-face + dimension pair
+  // per post) ride on top of the build-and-export walk, each at teaching
+  // pace — the merged-stage elevation precedent again, one step further.
+  test.setTimeout(900_000);
   await playChapter(page, appliedIotCaseChapter);
 });
 
