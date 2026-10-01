@@ -81,12 +81,26 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * document substrate has serialized parameter expressions since Phase 5 —
  * but the TRANSACTION LOG is no longer old-reader-faithful: an old reader
  * parsing an expression-bearing `parameter.set` drops the unknown field
- * and replays a different document (its log/head replay check refuses the
- * file with a confusing history mismatch). The version moves so the gate
+ * and replays a different document (its log/head replay check would refuse
+ * the file with a confusing history mismatch). The version moves so the gate
  * is the predictable migration refusal, not a corrupted replay; the
  * v6→v7 migration is the identity (v6 content is valid v7 content).
+ *
+ * v8 (Phase 24): the command vocabulary grew the parameter lifecycle —
+ * `parameter.rename` and `parameter.delete` are new command types. The
+ * envelope's own sections are unchanged (the document substrate has carried
+ * parameter names and expression ASTs since Phase 5, and a rename or delete
+ * is expressed entirely in the transaction log), but the LOG is no longer
+ * old-reader-faithful in the strict-gate sense: a v7 reader handed a
+ * v7-stamped file carrying the new commands refuses deep in replay at its
+ * command-type check (`command/type-unknown`) — after parsing the envelope,
+ * the document, and part of the history — instead of at the version gate.
+ * The version moves so the stamp keeps the refusal at the migration gate,
+ * where it is the documented, predictable behavior; the v7→v8 migration is
+ * the identity (v7 content is valid v8 content — an old file simply carries
+ * none of the new types).
  */
-export const CAD_NATIVE_FORMAT_VERSION = 7;
+export const CAD_NATIVE_FORMAT_VERSION = 8;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

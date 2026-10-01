@@ -16,6 +16,9 @@
  * order. The command vocabulary (`parameter.set` / `parameter.create` with
  * an expression payload) is this function's only caller; the substrate
  * mutators in `parameter.ts` keep their bulk, validation-only semantics.
+ * The Phase 24 rename borrows the cycle detection (not the install): its
+ * rewrite is name-isomorphic, so the guard only fires on the pre-existing
+ * dangling-reference corner the document layer documents.
  */
 
 import { type AnyDimensionalValue } from "./dimensional";
@@ -124,16 +127,24 @@ export interface ParameterExpressionCommit {
   readonly stale: readonly ParameterId[];
 }
 
-function cycleError(
+/**
+ * The structured `parameter/cycle` refusal for a closing chain, rendered by
+ * name; `cause` names the change that would close it ("Setting this
+ * expression" at the install gate, "Renaming this parameter" at the
+ * document rename). Shared by both callers so the two refusals carry the
+ * same shape.
+ */
+export function parameterCycleError(
   chain: readonly ParameterId[],
   collection: ParameterCollection,
+  cause: string,
 ): ParameterError {
   const names = chain
     .map((id) => getParameter(collection, id)?.name ?? id)
     .join(" → ");
   return {
     code: PARAMETER_ERROR_CODES.cycle,
-    message: `Setting this expression closes a reference cycle: ${names}. A parameter may not be defined, directly or transitively, through itself.`,
+    message: `${cause} closes a reference cycle: ${names}. A parameter may not be defined, directly or transitively, through itself.`,
     input: chain,
   };
 }
@@ -289,7 +300,11 @@ export function installParameterExpression(
   if (!installed.ok) return installed;
   if (expression !== null) {
     const cycle = findParameterCycle(installed.value);
-    if (cycle !== null) return fail(cycleError(cycle, installed.value));
+    if (cycle !== null) {
+      return fail(
+        parameterCycleError(cycle, installed.value, "Setting this expression"),
+      );
+    }
   }
   return ok(recomputeAll(installed.value));
 }

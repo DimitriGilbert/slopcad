@@ -1786,6 +1786,29 @@ function validateCommandShape(
     validateExpressionShape(input.expression, `${path}.expression`, issues);
     return;
   }
+  if (type === "parameter.rename") {
+    if (!parseParameterId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A parameter.rename command needs a valid parameter id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "parameter.rename", issues);
+    return;
+  }
+  if (type === "parameter.delete") {
+    if (!parseParameterId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A parameter.delete command needs a valid parameter id.",
+      );
+    }
+    return;
+  }
   if (type === "body.create") {
     if (input.id !== undefined && !parseBodyId(input.id).ok) {
       issue(

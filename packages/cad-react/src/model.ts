@@ -1,8 +1,10 @@
 /**
  * The composable React model API (Phase 14): a React-facing authoring
- * surface that builds its output entirely out of the Phase 7 command
- * vocabulary — `parameter.set`, `feature.create`, `feature.update`,
- * `feature.delete` — wrapped in transactions for `CadStore.applyTransaction`.
+ * surface that builds its output entirely out of the command vocabulary —
+ * `parameter.set` (all three forms), the Phase 24 parameter lifecycle
+ * (`parameter.rename` / `parameter.delete`), `feature.create`,
+ * `feature.update`, `feature.delete` — wrapped in transactions for
+ * `CadStore.applyTransaction`.
  *
  * ## No second parametric representation (the hard rule, restated)
  *
@@ -92,6 +94,30 @@ export function clearParameterExpressionCommand(
   value: AnyDimensionalValue,
 ): CadCommand {
   return Object.freeze({ type: "parameter.set", id, value, expression: null });
+}
+
+/**
+ * Builds the Phase 24 `parameter.rename` command: the name moves AND every
+ * stored expression referencing the old name is rewritten to the new one in
+ * the same application (feature inputs reference parameters BY ID and ride
+ * untouched). The identifier/reserved/uniqueness rules are the domain's
+ * structured refusals at apply.
+ */
+export function renameParameterCommand(
+  id: ParameterId,
+  name: string,
+): CadCommand {
+  return Object.freeze({ type: "parameter.rename", id, name });
+}
+
+/**
+ * Builds the Phase 24 `parameter.delete` command: refused while any
+ * reference remains (the refusal names every blocker — the variables whose
+ * stored expressions read it, the features whose inputs consume it); an
+ * unreferenced parameter deletes cleanly.
+ */
+export function deleteParameterCommand(id: ParameterId): CadCommand {
+  return Object.freeze({ type: "parameter.delete", id });
 }
 
 /** Builds a `feature.create` command (id optional — replay regenerates it). */

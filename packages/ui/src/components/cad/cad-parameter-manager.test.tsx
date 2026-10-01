@@ -601,3 +601,177 @@ describe("CadParameterPanel manage-mode alert region", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Rename (Phase 24)
+// ---------------------------------------------------------------------------
+
+describe("CadParameterManager rename", () => {
+  /** Opens the row's rename editor and returns its name field. */
+  function openRename(name: string): HTMLInputElement {
+    fireEvent.click(
+      within(rowOf(name)).getByRole("button", { name: "Rename" }),
+    );
+    const input = screen.getByLabelText("New name");
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("the rename editor field must render an input.");
+    }
+    return input;
+  }
+
+  it("commits parameter.rename and rewrites the dependent's dependency line", async () => {
+    const store = mountManager();
+    const input = openRename("width");
+
+    fireEvent.change(input, { target: { value: "shelfWidth" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(store.commandLog).toHaveLength(1));
+    const entry = JSON.parse(
+      JSON.stringify(store.commandLog[0]),
+    ) as SerializedCommandLogEntry;
+    expect(entry.commands[0]?.type).toBe("parameter.rename");
+    expect(entry.commands[0]?.id).toBe("param_width");
+    expect(entry.commands[0]?.name).toBe("shelfWidth");
+
+    // The editor closed; the row's name moved.
+    expect(screen.queryByLabelText("New name")).toBeNull();
+    expect(rowOf("shelfWidth")).toBeTruthy();
+    expect(screen.queryByText("width", { exact: true })).toBeNull();
+    // THE REWRITE, VISIBLE: the dependent's dependency line reads the NEW
+    // name (its stored AST was rewritten in the same application), and its
+    // evaluated quantity is unchanged.
+    expect(
+      within(rowOf("derivedDepth")).getByText("depends on shelfWidth"),
+    ).toBeTruthy();
+    expect(
+      within(rowOf("derivedDepth")).getByText("= 16 mm", { exact: true }),
+    ).toBeTruthy();
+    // The stored expression really carries the new identifier.
+    const stored = store
+      .getDocument()
+      .parameters.parameters.find(
+        (parameter) => parameter.id === "param_derived_depth",
+      );
+    expect(
+      stored?.expression === null
+        ? null
+        : printExpression(stored?.expression as ExpressionNode),
+    ).toBe("shelfWidth * 2");
+  });
+
+  it("validates the name rules as field errors and issues nothing", async () => {
+    const store = mountManager();
+    const input = openRename("width");
+
+    // Empty: not an identifier.
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(
+      await screen.findByText(CAD_PARAMETER_MANAGER_LABELS.nameInvalid),
+    ).toBeTruthy();
+    expect(store.commandLog).toHaveLength(0);
+
+    // Reserved: the expression function set.
+    fireEvent.change(input, { target: { value: "sqrt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(
+      await screen.findByText(
+        'The name "sqrt" is reserved by the expression function set.',
+      ),
+    ).toBeTruthy();
+    expect(store.commandLog).toHaveLength(0);
+
+    // Taken: another LIVE variable's name (the row's own is excluded).
+    fireEvent.change(input, { target: { value: "plateHeight" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(
+      await screen.findByText('A variable named "plateHeight" already exists.'),
+    ).toBeTruthy();
+    expect(store.commandLog).toHaveLength(0);
+
+    // The refusal-free path still works after the field errors.
+    fireEvent.change(input, { target: { value: "shelfWidth" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(store.commandLog).toHaveLength(1));
+    expect(rowOf("shelfWidth")).toBeTruthy();
+  });
+
+  it("cancel closes the editor and issues nothing", () => {
+    const store = mountManager();
+    openRename("width");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("New name")).toBeNull();
+    expect(screen.getByText("width", { exact: true })).toBeTruthy();
+    expect(store.commandLog).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Delete (Phase 24)
+// ---------------------------------------------------------------------------
+
+describe("CadParameterManager delete", () => {
+  it("requires the two-click confirm and removes an unreferenced variable", async () => {
+    const store = mountManager();
+
+    // First click ARMS: the action row swaps to Confirm delete + Cancel,
+    // and nothing is issued.
+    fireEvent.click(
+      within(rowOf("plateHeight")).getByRole("button", { name: "Delete" }),
+    );
+    expect(
+      within(rowOf("plateHeight")).getByRole("button", {
+        name: "Confirm delete",
+      }),
+    ).toBeTruthy();
+    expect(store.commandLog).toHaveLength(0);
+    expect(rowOf("plateHeight")).toBeTruthy();
+
+    // Cancel disarms without issuing; re-arming works.
+    fireEvent.click(
+      within(rowOf("plateHeight")).getByRole("button", { name: "Cancel" }),
+    );
+    expect(screen.queryByRole("button", { name: "Confirm delete" })).toBeNull();
+    fireEvent.click(
+      within(rowOf("plateHeight")).getByRole("button", { name: "Delete" }),
+    );
+
+    // The armed second leg issues `parameter.delete`; the row disappears
+    // with the live collection.
+    fireEvent.click(
+      within(rowOf("plateHeight")).getByRole("button", {
+        name: "Confirm delete",
+      }),
+    );
+    await waitFor(() => expect(store.commandLog).toHaveLength(1));
+    const entry = JSON.parse(
+      JSON.stringify(store.commandLog[0]),
+    ) as SerializedCommandLogEntry;
+    expect(entry.commands[0]?.type).toBe("parameter.delete");
+    expect(entry.commands[0]?.id).toBe("param_height");
+    expect(screen.queryByText("plateHeight", { exact: true })).toBeNull();
+  });
+
+  it("surfaces the refusal with the blockers and keeps the row", async () => {
+    const store = mountManager();
+
+    // `width` is read by derivedDepth's stored expression: the delete
+    // refuses, and the shared alert names the blocker.
+    fireEvent.click(
+      within(rowOf("width")).getByRole("button", { name: "Delete" }),
+    );
+    fireEvent.click(
+      within(rowOf("width")).getByRole("button", {
+        name: "Confirm delete",
+      }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("document/in-use");
+    expect(alert.textContent).toContain("derivedDepth");
+    expect(store.commandLog).toHaveLength(0);
+    // The row survived the refusal (disarmed — the confirm is gone).
+    expect(rowOf("width")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Confirm delete" })).toBeNull();
+  });
+});

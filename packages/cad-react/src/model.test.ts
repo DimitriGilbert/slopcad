@@ -21,7 +21,9 @@ import {
   createFeatureCommand,
   createPrimitiveTransaction,
   deleteFeatureCommand,
+  deleteParameterCommand,
   removeFeatureTransaction,
+  renameParameterCommand,
   setParameterCommand,
   updateFeatureCommand,
   updatePrimitiveTransaction,
@@ -81,6 +83,15 @@ describe("command factories", () => {
     expect(deleteFeatureCommand(PLATE)).toEqual({
       type: "feature.delete",
       id: PLATE,
+    });
+    expect(renameParameterCommand(WIDTH, "shelfWidth")).toEqual({
+      type: "parameter.rename",
+      id: WIDTH,
+      name: "shelfWidth",
+    });
+    expect(deleteParameterCommand(WIDTH)).toEqual({
+      type: "parameter.delete",
+      id: WIDTH,
     });
   });
 });

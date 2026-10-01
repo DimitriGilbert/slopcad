@@ -88,7 +88,9 @@ import {
   parseFeatureInputRef,
   parseFeatureKind,
   removeDocumentConfiguration,
+  removeDocumentParameter,
   removeFeature,
+  renameDocumentParameter,
   reorderFeature,
   type SerializedFeatureInputRef,
   updateBody,
@@ -125,10 +127,12 @@ import {
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
-/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder + Phase 39 datums + Phase 44 body.update + Phase 47 curves). */
+/** The command types of the mutation vocabulary (Phase 7 + Phase 20 reorder + Phase 22 expression payloads + Phase 24 parameter lifecycle + Phase 39 datums + Phase 44 body.update + Phase 47 curves). */
 export const CAD_COMMAND_TYPES = [
   "parameter.set",
   "parameter.create",
+  "parameter.rename",
+  "parameter.delete",
   "feature.create",
   "feature.update",
   "feature.delete",
@@ -201,6 +205,32 @@ export function isCadCommandType(input: unknown): input is CadCommandType {
  * document's parameters (unknown name → structured refusal naming it) and
  * refuses a closing cycle with the chain
  * (`parameter/unknown-identifier` / `parameter/cycle`).
+ *
+ * ## The Phase 24 parameter lifecycle commands (disclosed)
+ *
+ * The parameter surface of the vocabulary completes its lifecycle:
+ * `parameter.rename` and `parameter.delete` become command types. A rename
+ * is ONE lexical transition over the document's parameters — the target's
+ * name moves and every stored expression identifier referencing the old
+ * name is rewritten to the new one (identifier nodes only; function callees
+ * are structurally distinct and parameter names are validated
+ * non-reserved, so they can never match) — because a parameter's name IS
+ * the identifier vocabulary of the expressions. The rewrite is
+ * name-isomorphic: every reference still resolves through the same names to
+ * the same parameter ids, so edges, cycles, and cached values are
+ * unchanged, and feature inputs — which reference parameters BY ID — are
+ * untouched. The new name must pass the identifier/reserved/uniqueness
+ * rules at apply (`parameter/name-invalid` / `parameter/name-reserved` /
+ * `parameter/name-conflict`); the only reachable cycle refusal
+ * (`parameter/cycle`) is the pre-existing-dangling-reference corner the
+ * document layer documents. A delete refuses with `document/in-use` while
+ * ANY reference remains — the structured refusal names every blocker: the
+ * variables whose stored expressions read the parameter (by name) and the
+ * features whose declared inputs consume it (by id and kind); an
+ * unreferenced parameter deletes cleanly. The same disclosure shape as its
+ * predecessors: a log carrying either type is written only by this version,
+ * and an older reader refuses it at its strict command-type gate — which is
+ * why the native envelope version moves (see `version.ts`).
  */
 export type CadCommand =
   | {
@@ -232,6 +262,30 @@ export type CadCommand =
       readonly value: AnyDimensionalValue;
       /** The optional defining expression (validated and recomputed on apply). */
       readonly expression?: ExpressionNode;
+    }
+  | {
+      /**
+       * The Phase 24 rename: the parameter's name moves AND every stored
+       * expression identifier referencing the old name is rewritten to the
+       * new one in the same application (feature inputs reference
+       * parameters BY ID — they are untouched). The new name must pass the
+       * identifier/reserved/uniqueness rules; cached values are unchanged
+       * (the rewrite is name-isomorphic).
+       */
+      readonly type: "parameter.rename";
+      readonly id: ParameterId;
+      readonly name: string;
+    }
+  | {
+      /**
+       * The Phase 24 delete: refused with `document/in-use` while any
+       * reference remains, the refusal naming every blocker (the variables
+       * whose stored expressions read it by name, the features whose inputs
+       * consume it by id and kind); an unreferenced parameter deletes
+       * cleanly.
+       */
+      readonly type: "parameter.delete";
+      readonly id: ParameterId;
     }
   | {
       readonly type: "body.create";
@@ -458,6 +512,27 @@ export function applyCommand(
         }),
       );
     }
+    case "parameter.rename": {
+      // The rename is one lexical transition over the document's parameters:
+      // the name moves and every stored expression referencing the old name
+      // is rewritten (the substrate re-validates the name rules against the
+      // LIVE collection, so a smuggled command still fails structurally).
+      // Feature inputs reference parameters BY ID and ride untouched.
+      const renamed = renameDocumentParameter(
+        document,
+        command.id,
+        command.name,
+      );
+      if (!renamed.ok) return renamed;
+      return ok(renamed.value);
+    }
+    case "parameter.delete": {
+      // Refused while referenced — the substrate's structured `in-use`
+      // failure names every blocker (expression readers by name, feature
+      // consumers by id and kind); an unreferenced parameter deletes
+      // cleanly.
+      return removeDocumentParameter(document, command.id);
+    }
     case "body.create": {
       const added = addBody(document, {
         ...(command.id === undefined ? {} : { id: command.id }),
@@ -609,6 +684,19 @@ export type SerializedCadCommand =
       readonly value: SerializedDimensionalValue;
       /** The optional defining expression (serialized AST). */
       readonly expression?: ExpressionNode;
+    }
+  | {
+      /** The Phase 24 rename: the new name rides beside the target id. */
+      readonly formatVersion: number;
+      readonly type: "parameter.rename";
+      readonly id: string;
+      readonly name: string;
+    }
+  | {
+      /** The Phase 24 delete: the target id alone. */
+      readonly formatVersion: number;
+      readonly type: "parameter.delete";
+      readonly id: string;
     }
   | {
       readonly formatVersion: number;
@@ -776,6 +864,19 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
               ? {}
               : { expression: command.expression }),
           };
+    case "parameter.rename":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+        name: command.name,
+      };
+    case "parameter.delete":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+      };
     case "body.create":
       if (command.id === undefined && command.kind === undefined) {
         return {
@@ -1265,6 +1366,44 @@ export function parseCommand(
               },
         ),
       );
+    }
+    case "parameter.rename": {
+      const parsedId = parseParameterId(input.id);
+      if (!parsedId.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A parameter.rename command needs a valid parameter id: ${parsedId.error.message}`,
+            input.id,
+          ),
+        );
+      }
+      // Shape only (a non-empty string), matching parameter.create: the
+      // identifier/reserved/uniqueness rules are the substrate's structured
+      // refusals at apply, against the LIVE collection.
+      if (typeof input.name !== "string" || input.name.length === 0) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            "A parameter.rename command needs a non-empty name string.",
+            input.name,
+          ),
+        );
+      }
+      return ok(Object.freeze({ type, id: parsedId.value, name: input.name }));
+    }
+    case "parameter.delete": {
+      const parsedId = parseParameterId(input.id);
+      if (!parsedId.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A parameter.delete command needs a valid parameter id: ${parsedId.error.message}`,
+            input.id,
+          ),
+        );
+      }
+      return ok(Object.freeze({ type, id: parsedId.value }));
     }
     case "body.create": {
       let id: BodyId | undefined;

@@ -3658,6 +3658,184 @@ test("s30 variable manager: create, live autocomplete, expression switch, clear,
   });
 });
 
+test("s31 variable manager rename + delete: the rewrite is visible and the refusal names the blockers", async ({
+  sessionPage: page,
+}) => {
+  await stage("s31 variable rename + delete", async () => {
+    // THE FEATURE (Phase 24): the manager completes the variable lifecycle —
+    // `parameter.rename` rewrites every stored expression referencing the
+    // old name in the SAME commit (the dependent's stored AST and its
+    // `depends on` line move to the new name; its evaluated value does not
+    // move), and `parameter.delete` refuses while referenced — naming the
+    // blockers — then deletes cleanly once they are cleared. The cast: a
+    // literal base `shelfWidth` (20 mm) and `shelfDepth` defined over it
+    // (`shelfWidth / 2`, cached 10 mm).
+    await openComplete(page);
+    const panel = page.locator('[data-slot="cad-parameter-panel"]');
+
+    /** The root's serialized command log (the machine surface). */
+    const readLog = async (): Promise<
+      readonly { readonly commands: readonly Record<string, unknown>[] }[]
+    > =>
+      JSON.parse(
+        (await page
+          .locator(`#${COMPLETE_ROOT}`)
+          .getAttribute("data-command-log")) ?? "[]",
+      ) as readonly {
+        readonly commands: readonly Record<string, unknown>[];
+      }[];
+
+    /** The machine log's committed-command count across transactions. */
+    const logLength = async (): Promise<number> =>
+      (await readLog()).reduce(
+        (total, entry) => total + entry.commands.length,
+        0,
+      );
+
+    /** The management row whose NAME TEXT is exactly `name` (a `depends on` line can mention another variable's name). */
+    const rowOf = (name: string) =>
+      panel
+        .locator('[data-slot="cad-parameter-row"]')
+        .filter({ has: page.getByText(name, { exact: true }) });
+
+    const manageToggle = page.getByRole("button", {
+      name: "Manage variables",
+    });
+    const doneToggle = page.getByRole("button", { name: "Done", exact: true });
+    await manageToggle.click();
+
+    // LEG 1 — CREATE the cast: `shelfWidth` = 20mm literal, then `shelfDepth`
+    // defined over it (`shelfWidth / 2`). The define re-derives the cache in
+    // the same application, so the row reads the derived 10 mm and its
+    // direct reference.
+    await panel.getByLabel("Name", { exact: true }).fill("shelfWidth");
+    await panel.getByLabel("Value", { exact: true }).fill("20mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(rowOf("shelfWidth")).toBeVisible();
+    await panel.getByLabel("Name", { exact: true }).fill("shelfDepth");
+    await panel.getByLabel("Value", { exact: true }).fill("0mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(rowOf("shelfDepth")).toBeVisible();
+    await rowOf("shelfDepth")
+      .getByRole("button", { name: "Set expression" })
+      .click();
+    const depthEditor = panel.getByLabel("shelfDepth", { exact: true });
+    await depthEditor.fill("shelfWidth / 2");
+    await rowOf("shelfDepth").getByRole("button", { name: "Apply" }).click();
+    await expect(depthEditor).toHaveCount(0);
+    await expect(
+      rowOf("shelfDepth").getByText("= 10 mm", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      rowOf("shelfDepth").getByText("depends on shelfWidth"),
+    ).toBeVisible();
+
+    // LEG 2 — THE RENAME: `shelfWidth` → `caseWidth` through the row's
+    // rename editor. The commit is `parameter.rename`; the dependent's
+    // stored expression is rewritten in the same application — its
+    // `depends on` line moves to the new name while the evaluated value
+    // stays exactly 10 mm (the rewrite is name-isomorphic).
+    await rowOf("shelfWidth").getByRole("button", { name: "Rename" }).click();
+    const renameField = panel.getByLabel("New name", { exact: true });
+    await renameField.fill("caseWidth");
+    await rowOf("shelfWidth").getByRole("button", { name: "Apply" }).click();
+    await expect(renameField).toHaveCount(0);
+    await expect(rowOf("caseWidth")).toBeVisible();
+    await expect(rowOf("shelfWidth")).toHaveCount(0);
+    await expect(
+      rowOf("shelfDepth").getByText("depends on caseWidth"),
+    ).toBeVisible();
+    await expect(
+      rowOf("shelfDepth").getByText("= 10 mm", { exact: true }),
+    ).toBeVisible();
+    const renameCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(renameCommand?.type).toBe("parameter.rename");
+    expect(renameCommand?.name).toBe("caseWidth");
+
+    // THE FEATURE-DIALOG AUTOCOMPLETE DERIVES LIVE: the NEW name is the
+    // vocabulary — `$case` lists `$caseWidth`, and the OLD name is gone
+    // from the grammar (no `$shelfWidth` row exists to pick). The draft
+    // command authoring gate needs two sketch records (s28/s30's
+    // precedent — neither is extruded; the dialog is asserted, then
+    // dismissed).
+    await doneToggle.click();
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await saveSketch(page);
+    await saveThrowawaySketch(page, COMPLETE_ROOT);
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+    const distance = page.getByLabel("Distance (mm)");
+    await distance.click();
+    await distance.fill("$case");
+    await expect(
+      page.getByRole("option", { name: "$caseWidth" }),
+    ).toBeVisible();
+    await expect(page.getByRole("option", { name: "$shelfWidth" })).toHaveCount(
+      0,
+    );
+    await page.keyboard.press("Escape");
+    if (await page.locator(DIALOG).isVisible()) {
+      await page.keyboard.press("Escape");
+    }
+    await expect(page.locator(DIALOG)).toBeHidden();
+
+    // LEG 3 — THE REFUSED DELETE: `caseWidth` is still read by shelfDepth's
+    // stored expression. Arming issues nothing; the confirm is refused with
+    // `document/in-use` naming the blocker (the dependent, by name), and
+    // the row survives.
+    await manageToggle.click();
+    const logBeforeRefusal = await logLength();
+    await rowOf("caseWidth").getByRole("button", { name: "Delete" }).click();
+    await expect(
+      rowOf("caseWidth").getByRole("button", { name: "Confirm delete" }),
+    ).toBeVisible();
+    expect(await logLength()).toBe(logBeforeRefusal);
+    await rowOf("caseWidth")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    const refusal = page.locator("[data-cad-param-panel-error]");
+    await expect(refusal).toBeVisible();
+    expect(await refusal.textContent()).toContain("document/in-use");
+    expect(await refusal.textContent()).toContain("shelfDepth");
+    expect(await logLength()).toBe(logBeforeRefusal);
+    await expect(rowOf("caseWidth")).toBeVisible();
+
+    // LEG 4 — CLEAR THE BLOCKER: making `shelfDepth` a literal drops the
+    // reference (its evaluated quantity lands, the depends line is gone),
+    // and the base now deletes cleanly.
+    await rowOf("shelfDepth")
+      .getByRole("button", { name: "Make literal" })
+      .click();
+    await expect(
+      rowOf("shelfDepth").getByText("10 mm", { exact: true }),
+    ).toBeVisible();
+    await expect(rowOf("shelfDepth").getByText(/depends on/)).toHaveCount(0);
+    await expect(refusal).toHaveCount(0);
+    await rowOf("caseWidth").getByRole("button", { name: "Delete" }).click();
+    await rowOf("caseWidth")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    await expect(rowOf("caseWidth")).toHaveCount(0);
+    const deleteCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(deleteCommand?.type).toBe("parameter.delete");
+    expect(deleteCommand?.id).toBe(renameCommand?.id);
+
+    // LEG 5 — THE UNREFERENCED DEPENDENT DELETES CLEANLY: nothing reads
+    // `shelfDepth` (and its own definition is a literal now), so the
+    // two-click confirm removes the row without a refusal.
+    await rowOf("shelfDepth").getByRole("button", { name: "Delete" }).click();
+    await rowOf("shelfDepth")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    await expect(rowOf("shelfDepth")).toHaveCount(0);
+    const lastCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(lastCommand?.type).toBe("parameter.delete");
+    expect(lastCommand?.id).not.toBe(deleteCommand?.id);
+
+    extra("parameter-manager-rename-delete");
+  });
+});
+
 test("s99 THE COVERAGE GATE: every manifest path and route was exercised", () => {
   const missingEntries = ENTRY_IDS.filter((id) => !ledger.covered.has(id));
   const missingDeclines = DECLINE_IDS.filter((id) => !ledger.declines.has(id));

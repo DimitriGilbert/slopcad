@@ -112,6 +112,15 @@ export interface NativeFormatMigration {
  * occur in a v6 file (the writer that emits it stamps v7). The step exists
  * so the version walk has a registered path; the envelope stamp is the
  * gate that keeps old readers off v7 logs they would replay unfaithfully.
+ *
+ * The v7→v8 step (Phase 24) carries the command vocabulary's parameter
+ * lifecycle growth (`parameter.rename` / `parameter.delete`). It is the
+ * identity for the same family of reasons: the growth rides the
+ * transaction log only, no envelope section changes shape, and a
+ * rename-or-delete COMMAND cannot occur in a v7 file (the writer that
+ * emits one stamps v8). The step exists so the version walk has a
+ * registered path; the envelope stamp is the gate that keeps v7 readers
+ * off v8 logs they would only refuse deep in replay.
  */
 export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
   Object.freeze([
@@ -145,6 +154,11 @@ export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
       to: 7,
       migrate: migrateV6ToV7,
     },
+    {
+      from: 7,
+      to: 8,
+      migrate: migrateV7ToV8,
+    },
   ]);
 
 /**
@@ -161,6 +175,27 @@ function migrateV6ToV7(
       migrationError(
         NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
         "The v6→v7 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
+
+/**
+ * The v7→v8 content transform (the framework stamps `formatVersion`):
+ * the identity — the parameter-lifecycle growth rides the transaction log
+ * only, so v7 content is already valid v8 content and nothing inside the
+ * document is rewritten.
+ */
+function migrateV7ToV8(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v7→v8 migration needs a plain native document object.",
         input,
       ),
     );

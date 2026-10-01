@@ -532,7 +532,7 @@ describe("the native format with expression payloads", () => {
     expect(parameterOf(undone.document, dId).value.value).toBe(10);
   });
 
-  it("migrates a v6-stamped file (identity step) and keeps v7 native", () => {
+  it("migrates v6- and v7-stamped files (identity steps) and keeps v8 native", () => {
     const session = expressionSession();
     const native = requireOk(
       createNativeCadDocument(session.document),
@@ -540,15 +540,25 @@ describe("the native format with expression payloads", () => {
     );
     const serialized = serializeNativeCadDocument(native);
     const text = stringifyNativeCadDocument(serialized);
-    expect(readNativeFormatVersion(JSON.parse(text))).toBe(7);
+    expect(readNativeFormatVersion(JSON.parse(text))).toBe(8);
 
-    // The same content stamped 6 migrates (the identity) and re-stamps 7.
+    // The same content stamped 6 or 7 migrates (the identity) and
+    // re-stamps 8 — the two vocabulary-growth steps rewrite nothing.
     const asV6 = {
       ...(JSON.parse(text) as Record<string, unknown>),
       formatVersion: 6,
     };
     const migrated = requireOk(migrateNativeCadDocument(asV6), "the migration");
-    expect(readNativeFormatVersion(migrated)).toBe(7);
+    expect(readNativeFormatVersion(migrated)).toBe(8);
+    const asV7 = {
+      ...(JSON.parse(text) as Record<string, unknown>),
+      formatVersion: 7,
+    };
+    const migratedV7 = requireOk(
+      migrateNativeCadDocument(asV7),
+      "the v7 migration",
+    );
+    expect(readNativeFormatVersion(migratedV7)).toBe(8);
     const reparsed = requireOk(
       parseNativeCadDocumentFromBytes(
         encodeNativeCadDocument({

@@ -11,8 +11,9 @@
  *
  * Parameters live in a {@link ParameterCollection}, an immutable ordered
  * array with names unique (they are the identifier vocabulary of
- * expressions) and ids unique. Every mutation — add, remove, update value,
- * expression, or metadata — validates its input with a stable
+ * expressions) and ids unique. Every mutation — add, remove, rename (with
+ * the stored-expression rewrite), update value, expression, or metadata —
+ * validates its input with a stable
  * `parameter/*` failure code and returns a new collection, leaving the
  * original untouched. Serialization is canonical (values in their canonical
  * unit, fixed key order) and parsing validates untrusted input strictly.
@@ -29,6 +30,7 @@ import {
   isExpressionFunction,
   isExpressionIdentifierName,
   parseExpressionAst,
+  renameExpressionIdentifier,
 } from "./expression";
 import { type ExpressionEnvironment } from "./expression-evaluator";
 import { type ParameterId, parseParameterId } from "./ids";
@@ -316,6 +318,71 @@ export function removeParameter(
     );
   }
   return ok(Object.freeze({ parameters: Object.freeze(remaining) }));
+}
+
+/**
+ * Renames the parameter with the given id AND rewrites every stored
+ * expression identifier that references the old name to the new name, in one
+ * pure transition — a parameter's name is the identifier vocabulary of the
+ * collection's expressions, so the two move together. The rewrite touches
+ * identifier nodes only (function callees are structurally distinct and
+ * parameter names are validated non-reserved, so a callee can never match);
+ * an AST with no matching identifier keeps its reference identity. The new
+ * name must pass the identifier and reserved-function rules and stay unique
+ * among the OTHER parameters (renaming to the parameter's own current name
+ * is a permitted no-op), and unknown ids fail with `notFound`.
+ *
+ * The dependency graph is name-isomorphic under this rename — every
+ * expression's references resolve through the same names to the same ids —
+ * so edges, cycles, and cached values are unchanged; the graph-level cycle
+ * guard is the document layer's job ({@link renameDocumentParameter}).
+ */
+export function renameParameter(
+  collection: ParameterCollection,
+  id: ParameterId,
+  name: string,
+): ParseResult<ParameterCollection, ParameterError> {
+  const current = getParameter(collection, id);
+  if (current === undefined) {
+    return fail(
+      parameterError(
+        PARAMETER_ERROR_CODES.notFound,
+        `No parameter with id "${id}" exists.`,
+        id,
+      ),
+    );
+  }
+  const parsedName = validateName(name);
+  if (!parsedName.ok) return parsedName;
+  const next = parsedName.value;
+  const conflicting = collection.parameters.find(
+    (p) => p.name === next && p.id !== id,
+  );
+  if (conflicting !== undefined) {
+    return fail(
+      parameterError(
+        PARAMETER_ERROR_CODES.nameConflict,
+        `A parameter named "${next}" already exists (id "${conflicting.id}").`,
+        name,
+      ),
+    );
+  }
+  const parameters = collection.parameters.map((parameter) => {
+    const renamed =
+      parameter.id === id && parameter.name !== next
+        ? Object.freeze({ ...parameter, name: next })
+        : parameter;
+    if (renamed.expression === null) return renamed;
+    const rewritten = renameExpressionIdentifier(
+      renamed.expression,
+      current.name,
+      next,
+    );
+    return rewritten === renamed.expression
+      ? renamed
+      : Object.freeze({ ...renamed, expression: rewritten });
+  });
+  return ok(Object.freeze({ parameters: Object.freeze(parameters) }));
 }
 
 /** Returns the parameter with the given id, or undefined. */
