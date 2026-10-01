@@ -4,11 +4,11 @@
  * defining expressions, edited through a Formedible form (the schema +
  * field-config surface, never hand-rolled inputs), and applied EXCLUSIVELY
  * through the command vocabulary: every applied edit is committed as a
- * `parameter.set` transaction — the model API's
- * {@link setParameterCommand} interpreted by the store's `applyCommand`,
- * which is the exact path `useCadParameters().setValue` /
- * `setValueFromExpression` take. There is no second write path and no
- * direct kernel access.
+ * `parameter.set` transaction — the model API's `setParameterCommand` for
+ * literals and `setParameterExpressionCommand` for expressions, interpreted
+ * by the store's `applyCommand`, which is the exact path
+ * `useCadParameters().setValue` / `setValueFromExpression` take. There is
+ * no second write path and no direct kernel access.
  *
  * ## Field derivation (from parameter data only)
  *
@@ -21,12 +21,13 @@
  * - An EXPRESSION-DRIVEN parameter gets a `text` field whose default is the
  *   domain's own canonical printing of the defining expression
  *   (`printExpression`) — the same field displays and edits the expression.
- *   Applying evaluates the submitted text with the domain's own parser and
- *   evaluator against the document's current parameter values and commits
- *   the RESULTING VALUE: the Phase 7 vocabulary has no expression command
- *   (see `useCadParameters`), so a committed expression edit is honestly a
- *   `parameter.set` of what the expression currently produces — the stored
- *   expression is domain substrate and is never written from the UI.
+ *   Applying commits the expression ITSELF (Phase 22): the submitted text is
+ *   parsed with the domain's own parser and rides `parameter.set` as a
+ *   serialized AST (`setParameterExpressionCommand`); the document's single
+ *   interpreter validates the identifiers and cycles against the live
+ *   collection, stores the AST, and recomputes the parameter and its
+ *   dependents in the same application. Nothing is evaluated on the React
+ *   side of a commit — the domain is the only evaluator.
  * - Every field's label IS the parameter name (domain data, not prose).
  *   The current quantity never renders as a third row under the input:
  *   a LITERAL field wears its canonical unit INSIDE the control (the
@@ -49,13 +50,17 @@
  * `parseExpression`/`evaluateExpression` against the current collection, and
  * a failure surfaces that structured error verbatim in the field's error
  * display as `code: message` — blocking submit, so an invalid expression
- * issues nothing. Numeric non-values are the form's own concern: the value
+ * issues nothing. The checks the evaluator cannot make (unknown
+ * identifiers on a racing document, reference cycles) are refused by the
+ * apply surface's interpreter and surface verbatim in the panel's error
+ * region. Numeric non-values are the form's own concern: the value
  * fields carry a finite-number gate with the externalized message. All
  * validation lives in the field configs — one source of truth per concern,
  * no parallel form-level schema duplicating either. A failure returned
- * by the apply surface itself (a structured transaction refusal, or a
- * prop-mode apply outcome) is surfaced in the panel's error region — the
- * first refusal stops the submit loop, and nothing after it is issued.
+ * by the apply surface itself (a structured transaction refusal — unwrapped
+ * to its command cause when there is one — or a prop-mode apply outcome)
+ * is surfaced in the panel's error region — the first refusal stops the
+ * submit loop, and nothing after it is issued.
  *
  * ## State: two documented input modes, props first
  *
@@ -94,17 +99,20 @@ import {
   parameterEnvironment,
   printExpression,
   setParameterCommand,
+  setParameterExpressionCommand,
   toCanonical,
   useCadParameters,
   useCadStore,
   volume,
   type AnyDimensionalValue,
+  type CadSession,
   type CadStore,
   type Dimension,
   type ExpressionUpdateError,
   type Parameter,
   type ParameterCollection,
   type ParseResult,
+  type TransactionError,
 } from "@slopcad/cad-react";
 import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
@@ -244,6 +252,28 @@ function formatDomainError(error: {
   return `${error.code}: ${error.message}`;
 }
 
+/**
+ * Maps a store apply result to the panel outcome. A refused transaction
+ * carries its offending command's structured error as `cause` — the
+ * domain's own refusal (an unknown identifier, a reference cycle) — which
+ * is what the error region surfaces, verbatim; only a cause-less refusal
+ * (the transaction envelope's own shape failures) falls back to the
+ * transaction error itself.
+ */
+function toOutcome(
+  applied: ParseResult<CadSession, TransactionError>,
+): CadParameterApplyOutcome {
+  if (applied.ok) return { ok: true };
+  const cause = applied.error.cause;
+  return {
+    ok: false,
+    error: cause ?? {
+      code: applied.error.code,
+      message: applied.error.message,
+    },
+  };
+}
+
 /** Parses and evaluates `expression` against `collection`'s current values. */
 function evaluateAgainst(
   collection: ParameterCollection,
@@ -352,9 +382,10 @@ export function CadParameterPanel({
   );
 
   // The apply surface: the host's `onApply` wins; otherwise the store path —
-  // `setParameterCommand` interpreted by `applyCommand`, the same commit
-  // `useCadParameters().setValue` / `setValueFromExpression` issue. Stable
-  // per store + collection identity, so the form config below can capture it.
+  // `setParameterCommand` / `setParameterExpressionCommand` interpreted by
+  // `applyCommand`, the same commits `useCadParameters().setValue` /
+  // `setValueFromExpression` issue. Stable per store + collection identity,
+  // so the form config below can capture it.
   const apply = useMemo<CadParameterApply | undefined>(() => {
     if (onApply !== undefined) return onApply;
     if (store === null || collection === undefined) return undefined;
@@ -366,28 +397,27 @@ export function CadParameterPanel({
             canonicalValue(parameter.value.dimension, edit.value),
           ),
         );
-        return applied.ok ? { ok: true } : { ok: false, error: applied.error };
+        return toOutcome(applied);
       }
-      // The submit loop applies several edits in ONE synchronous pass, each
-      // committing immediately — so an expression edit is evaluated against
-      // the LIVE parameter collection (`store.getParameters()`), letting it
-      // see the literal edits committed earlier in the same submit. The
-      // memoized `collection` stays the PRE-submit snapshot and serves only
-      // the field-validation evaluator above.
-      const evaluated = evaluateAgainst(store.getParameters(), edit.expression);
-      if (!evaluated.ok) {
+      // The expression commit: parse the submitted text and ship the AST —
+      // the domain's interpreter evaluates, validates identifiers/cycles,
+      // and recomputes the dependents at apply time, against the LIVE
+      // document. The submit loop applies several edits in ONE synchronous
+      // pass, each committing immediately, so an expression committed after
+      // a literal in the same submit reads that literal's fresh value — the
+      // pre-submit `collection` snapshot serves only the field-validation
+      // evaluator above.
+      const parsed = parseExpression(edit.expression);
+      if (!parsed.ok) {
         return {
           ok: false,
-          error: {
-            code: evaluated.error.code,
-            message: evaluated.error.message,
-          },
+          error: { code: parsed.error.code, message: parsed.error.message },
         };
       }
       const applied = store.applyCommand(
-        setParameterCommand(parameter.id, evaluated.value),
+        setParameterExpressionCommand(parameter.id, parsed.value),
       );
-      return applied.ok ? { ok: true } : { ok: false, error: applied.error };
+      return toOutcome(applied);
     };
   }, [collection, onApply, store]);
 

@@ -34,6 +34,7 @@ import {
   length,
   angle,
   parseExpression,
+  printExpression,
   volume,
   type CadDocument,
   type CadStore,
@@ -219,6 +220,7 @@ interface SerializedCommandLogEntry {
       readonly unit: string;
       readonly value: number;
     };
+    readonly expression?: unknown;
   }[];
 }
 
@@ -337,7 +339,7 @@ describe("CadParameterPanel", () => {
     expect(store.commandLog).toHaveLength(1);
   });
 
-  it("commits an edited expression's evaluated value as a parameter.set transaction", async () => {
+  it("commits an edited expression as a parameter.set expression payload", async () => {
     const store = buildProviderStore();
     render(<PanelInProvider store={store} />);
 
@@ -346,19 +348,29 @@ describe("CadParameterPanel", () => {
     });
     fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
 
-    // Expression edits commit what the domain's evaluator produces against
-    // the document's current values: width (8 mm) * 3 = 24 mm.
+    // Expression edits commit the EXPRESSION (the serialized AST, no value);
+    // the domain's interpreter evaluates it in the same application — the
+    // document's cached value reads width (8 mm) * 3 = 24 mm.
     await waitFor(() => expect(store.commandLog).toHaveLength(1));
     const entry = JSON.parse(
       JSON.stringify(store.commandLog[0]),
     ) as SerializedCommandLogEntry;
     expect(entry.commands[0]?.type).toBe("parameter.set");
     expect(entry.commands[0]?.id).toBe("param_derived_depth");
-    expect(entry.commands[0]?.value).toEqual({
-      dimension: "length",
-      unit: "mm",
-      value: 24,
-    });
+    expect(entry.commands[0]?.value).toBeUndefined();
+    expect(entry.commands[0]?.expression).toEqual(
+      requireExpression("width * 3"),
+    );
+    const stored = store
+      .getDocument()
+      .parameters.parameters.find(
+        (parameter) => parameter.id === "param_derived_depth",
+      );
+    const storedExpression = stored?.expression ?? null;
+    expect(
+      storedExpression === null ? null : printExpression(storedExpression),
+    ).toBe("width * 3");
+    expect(stored?.value.value).toBe(24);
   });
 
   it("evaluates a batched expression edit against the literal committed earlier in the same submit", async () => {
@@ -369,8 +381,8 @@ describe("CadParameterPanel", () => {
 
     // One submit carries both edits: the literal height 10→20 and the
     // expression `height * 2`→`height * 3`. The literal is committed first,
-    // so the expression edit must evaluate against the LIVE collection
-    // (height 20) and commit brace=60 — not 30, the product of the
+    // so the domain evaluates the expression commit against the LIVE
+    // document (height 20) and caches brace=60 — not 30, the product of the
     // pre-submit snapshot's height=10.
     fireEvent.change(screen.getByLabelText("height"), {
       target: { value: "20" },
@@ -394,11 +406,38 @@ describe("CadParameterPanel", () => {
       JSON.stringify(store.commandLog[1]),
     ) as SerializedCommandLogEntry;
     expect(braceEntry.commands[0]?.id).toBe("param_brace");
-    expect(braceEntry.commands[0]?.value).toEqual({
-      dimension: "length",
-      unit: "mm",
-      value: 60,
+    expect(braceEntry.commands[0]?.expression).toEqual(
+      requireExpression("height * 3"),
+    );
+    const brace = store
+      .getDocument()
+      .parameters.parameters.find(
+        (parameter) => parameter.id === "param_brace",
+      );
+    expect(brace?.value.value).toBe(60);
+  });
+
+  it("surfaces a cycle refusal verbatim in the panel error region and issues nothing", async () => {
+    const store = createCadStore({
+      session: createSession(buildBatchDocument()),
     });
+    render(<PanelInProvider store={store} />);
+
+    // The field evaluator only validates parse/evaluate — a self-reference
+    // evaluates fine against the cached values — so the cycle arrives from
+    // the apply surface's interpreter and surfaces in the error region,
+    // verbatim, with the closing chain named.
+    fireEvent.change(screen.getByLabelText("brace"), {
+      target: { value: "brace + height" },
+    });
+    fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+
+    const region = await screen.findByRole("alert");
+    expect(region.getAttribute("data-cad-param-panel-error")).toBe("");
+    expect(region.textContent).toContain("parameter/cycle");
+    expect(region.textContent).toContain("brace → brace");
+    // The refused submit stops the loop: no command landed.
+    expect(store.commandLog).toHaveLength(0);
   });
 
   it("surfaces the domain's structured expression error verbatim and issues nothing", async () => {

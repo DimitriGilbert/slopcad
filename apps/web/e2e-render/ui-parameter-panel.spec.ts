@@ -34,9 +34,10 @@ import { saveArtifact, sha256, waitForSettledScene } from "./helpers";
  *    captured as a settled screenshot artifact whose bytes differ from the
  *    initial baseline;
  *  - EXPRESSION EDIT: submitting a new expression for `volumeHint`
- *    evaluates it against the document's current values and commits the
- *    RESULTING value as `parameter.set` — the vocabulary's honest
- *    expression-edit path.
+ *    commits the EXPRESSION ITSELF as a `parameter.set` expression payload
+ *    (the serialized AST — the vocabulary's honest expression-edit path);
+ *    the document's interpreter re-derives the cached value in the same
+ *    application.
  *
  * Byte comparisons use Playwright `Buffer.equals` on panel-element
  * screenshots. Every pixel assertion stands beside a numeric/DOM assertion.
@@ -75,6 +76,8 @@ interface SerializedCommandLogEntry {
       readonly unit: string;
       readonly value: number;
     };
+    /** The expression payload's serialized AST (present exactly on expression commits). */
+    readonly expression?: Record<string, unknown>;
   }[];
 }
 
@@ -341,9 +344,10 @@ test("an invalid expression shows the domain's error state and issues nothing", 
   ).toBe(false);
   await saveArtifact("ui-param-panel-error.png", errorShot);
 
-  // Fixing the expression re-enables Apply; clicking commits the evaluated
-  // value: the evaluator resolves holeDiameter (8 mm) against the document
-  // and the RESULTING value is committed as parameter.set.
+  // Fixing the expression re-enables Apply; clicking commits the EXPRESSION
+  // (the serialized AST — no value field): the document stores it and
+  // re-derives the cached value (holeDiameter 8 × 3 = 24) in the same
+  // application.
   await panelField(page, "volumeHint").fill("holeDiameter * 3");
   await expect(applyButton(page)).toBeEnabled();
   await applyButton(page).click();
@@ -351,10 +355,12 @@ test("an invalid expression shows the domain's error state and issues nothing", 
   const log = await readCommandLog(page);
   expect(log[0]?.commands[0]?.type).toBe("parameter.set");
   expect(log[0]?.commands[0]?.id).toBe("param_volume_hint");
-  expect(log[0]?.commands[0]?.value).toEqual({
-    dimension: "length",
-    unit: "mm",
-    value: 24,
+  expect(log[0]?.commands[0]?.value).toBeUndefined();
+  expect(log[0]?.commands[0]?.expression).toMatchObject({
+    kind: "binary",
+    left: { kind: "identifier", name: "holeDiameter" },
+    operator: "*",
+    right: { kind: "number", value: 3 },
   });
   await expect(error).toHaveCount(0);
 });

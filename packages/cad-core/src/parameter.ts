@@ -83,6 +83,10 @@ export const PARAMETER_ERROR_CODES = {
   invalidExpression: "parameter/invalid-expression",
   invalidMetadata: "parameter/invalid-metadata",
   notFound: "parameter/not-found",
+  /** An expression references a name that resolves to no parameter. */
+  unknownIdentifier: "parameter/unknown-identifier",
+  /** Installing an expression would close a reference cycle. */
+  cycle: "parameter/cycle",
 } as const;
 
 export type ParameterErrorCode =

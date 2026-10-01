@@ -294,8 +294,10 @@ export {
 } from "./parameter";
 export {
   findParameterCycle,
+  installParameterExpression,
   parameterDependencyEdges,
 } from "./parameter-graph";
+export type { ParameterExpressionCommit } from "./parameter-graph";
 export type {
   CadCommand,
   CadCommandType,

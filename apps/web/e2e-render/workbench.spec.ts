@@ -152,6 +152,8 @@ interface CommandLogEntry {
       readonly unit: string;
       readonly value: number;
     };
+    /** The expression payload's serialized AST (present exactly on expression commits). */
+    readonly expression?: Record<string, unknown>;
   }[];
 }
 
@@ -632,8 +634,10 @@ test("an invalid workbench-panel expression shows the error state and issues not
     `reentry sha256=${sha256(errorShotReentry)} vs error sha256=${sha256(errorShot)}`,
   ).toBe(true);
 
-  // Fixing the expression re-enables Apply; the commit is the evaluated
-  // RESULTING value — the honest expression-edit path.
+  // Fixing the expression re-enables Apply; the commit IS the expression
+  // (a `parameter.set` expression payload — the serialized AST, no value):
+  // the document stores it and re-derives the cached value in the same
+  // application.
   await panelField(page, "volumeHint").fill("holeDiameter * 3");
   await expect(applyButton(page)).toBeEnabled();
   await applyButton(page).click();
@@ -641,10 +645,12 @@ test("an invalid workbench-panel expression shows the error state and issues not
   const log = (await readSurface(page)).commandLog;
   expect(log[0]?.commands[0]?.type).toBe("parameter.set");
   expect(log[0]?.commands[0]?.id).toBe("param_volume_hint");
-  expect(log[0]?.commands[0]?.value).toEqual({
-    dimension: "length",
-    unit: "mm",
-    value: 24,
+  expect(log[0]?.commands[0]?.value).toBeUndefined();
+  expect(log[0]?.commands[0]?.expression).toMatchObject({
+    kind: "binary",
+    left: { kind: "identifier", name: "holeDiameter" },
+    operator: "*",
+    right: { kind: "number", value: 3 },
   });
   await expect(error).toHaveCount(0);
 });

@@ -3355,6 +3355,135 @@ test("s28 parameter references: the $-token autocomplete drives and re-drives a 
   });
 });
 
+test("s29 stored parameter expressions: the panel commits the expression, re-drives dependents, and refuses a cycle", async ({
+  sessionPage: page,
+}) => {
+  await stage(
+    "s29 panel expression commits + transitive re-drive + cycle",
+    async () => {
+      // THE FEATURE (Phase 22): an expression field commits the EXPRESSION
+      // itself (`parameter.set` with a serialized AST), the document
+      // re-derives the parameter's cached value and recomputes its dependents
+      // in the same commit, and a closing cycle is refused with the chain
+      // named. The boot document's expression pair is the stage's cast:
+      // `volumeHint` and `boreRadius`, both defined over `holeDiameter`.
+      await openComplete(page);
+      const panel = page.locator('[data-slot="cad-parameter-panel"]');
+      const apply = page.getByRole("button", { name: "Apply" });
+      const volumeHintField = page.getByLabel("volumeHint", { exact: true });
+      const boreRadiusField = page.getByLabel("boreRadius", { exact: true });
+      await expect(volumeHintField).toHaveValue("holeDiameter * 2");
+      await expect(boreRadiusField).toHaveValue("holeDiameter / 2");
+      // The stage opens on a FRESH boot (the navigation above rebuilt the
+      // boot document): holeDiameter = 8, the boot caches match, and the
+      // previews re-evaluate live: 8 × 2 = 16.
+      await expect(panel.getByText("= 16 mm", { exact: true })).toBeVisible();
+
+      /** The root's serialized command log (the machine surface). */
+      const readLog = async (): Promise<
+        readonly { readonly commands: readonly Record<string, unknown>[] }[]
+      > =>
+        JSON.parse(
+          (await page
+            .locator(`#${COMPLETE_ROOT}`)
+            .getAttribute("data-command-log")) ?? "[]",
+        ) as readonly {
+          readonly commands: readonly Record<string, unknown>[];
+        }[];
+
+      /** The machine log's committed-command count across transactions. */
+      const logLength = async (): Promise<number> =>
+        (await readLog()).reduce(
+          (total, entry) => total + entry.commands.length,
+          0,
+        );
+
+      // LEG 1 — the panel commits the expression: volumeHint :=
+      // holeDiameter + 6mm (the unit literal keeps the addition
+      // same-dimension — the domain refuses length + dimensionless). The
+      // commit rides the vocabulary's expression payload (the serialized
+      // AST, no value) and re-derives the cache (8 + 6 = 14) in the same
+      // application.
+      await volumeHintField.fill("holeDiameter + 6mm");
+      await apply.click();
+      await expect(volumeHintField).toHaveValue("holeDiameter + 6mm");
+      await expect(panel.getByText("= 14 mm", { exact: true })).toBeVisible();
+      const legOne = await readLog();
+      const legOneCommand = legOne.at(-1)?.commands.at(-1);
+      expect(legOneCommand?.type).toBe("parameter.set");
+      expect(legOneCommand?.id).toBe("param_volume_hint");
+      expect(legOneCommand?.value).toBeUndefined();
+      expect(legOneCommand?.expression).toMatchObject({
+        kind: "binary",
+        left: { kind: "identifier", name: "holeDiameter" },
+        operator: "+",
+        right: { kind: "unitLiteral", value: 6, unit: "mm" },
+      });
+
+      // LEG 2 — chain a second expression onto the first: boreRadius :=
+      // volumeHint / 2. Its preview line evaluates against the CACHED
+      // environment, so `= 7 mm` (14 / 2) is reachable only because leg 1's
+      // commit re-derived volumeHint's cache — the transitive proof.
+      await boreRadiusField.fill("volumeHint / 2");
+      await apply.click();
+      await expect(boreRadiusField).toHaveValue("volumeHint / 2");
+      await expect(panel.getByText("= 7 mm", { exact: true })).toBeVisible();
+
+      // THE CYCLE — pointing volumeHint back at boreRadius closes the loop.
+      // The field evaluator only validates parse/evaluate (it passes here),
+      // so the refusal arrives from the commit and surfaces verbatim in the
+      // panel's alert region — with the closing chain named. The machine log
+      // is pinned through the refusal too: its length, captured before the
+      // attempt, must survive unchanged (the ui suite's commandLog-length-0
+      // guarantee, on the harness surface).
+      const logBeforeCycle = await logLength();
+      await volumeHintField.fill("boreRadius * 2");
+      await apply.click();
+      const cycleAlert = page.locator("[data-cad-param-panel-error]");
+      await expect(cycleAlert).toBeVisible();
+      expect(await cycleAlert.textContent()).toContain("parameter/cycle");
+      expect(await cycleAlert.textContent()).toContain(
+        "volumeHint → boreRadius → volumeHint",
+      );
+      // The refused commit was a never-happened commit: the stored
+      // expressions are exactly what the DAG held, and nothing was issued.
+      await expect(volumeHintField).toHaveValue("boreRadius * 2");
+      await expect(boreRadiusField).toHaveValue("volumeHint / 2");
+      expect(await logLength()).toBe(logBeforeCycle);
+
+      // Restore: retyping volumeHint's stored expression makes the submit a
+      // no-op for it — the alert clears on the next submit, and nothing is
+      // issued.
+      await volumeHintField.fill("holeDiameter + 6mm");
+      await apply.click();
+      await expect(cycleAlert).toHaveCount(0);
+      await expect(panel.getByText("= 14 mm", { exact: true })).toBeVisible();
+
+      // THE RE-DRIVE: editing `holeDiameter` — the literal both stored
+      // expressions read — re-drives the panel's displayed value through the
+      // stored expression (volumeHint 8 + 6 → 10 + 6 = 16) and re-settles
+      // the boot plate at the new bore (the dispatch effect follows the
+      // document identity, and the plate scene consumes the stored hole
+      // diameter). The literal edit is a value-only commit, so boreRadius's
+      // displayed line keeps reading volumeHint's cache (14 / 2 = 7) — the
+      // domain's documented caching rule; the next expression commit
+      // re-derives it.
+      const before = await dispatchedCount(page, COMPLETE_ROOT);
+      await page.getByLabel("holeDiameter", { exact: true }).fill("10");
+      await apply.click();
+      const redriven = Number(
+        await waitForRootSettle(page, COMPLETE_ROOT, {
+          afterDispatch: before,
+        }),
+      );
+      await expect(panel.getByText("= 16 mm", { exact: true })).toBeVisible();
+      await expect(panel.getByText("= 7 mm", { exact: true })).toBeVisible();
+      expect(volumeNear(redriven, 30 * 20 * 10 - Math.PI * 25 * 10)).toBe(true);
+      extra("parameter-expression-commit");
+    },
+  );
+});
+
 test("s99 THE COVERAGE GATE: every manifest path and route was exercised", () => {
   const missingEntries = ENTRY_IDS.filter((id) => !ledger.covered.has(id));
   const missingDeclines = DECLINE_IDS.filter((id) => !ledger.declines.has(id));

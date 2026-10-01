@@ -28,6 +28,20 @@
  * type (the strict `command/type-unknown` rule); every file written before
  * the extension carries none and parses exactly as before.
  *
+ * ## The Phase 22 expression payloads (disclosed)
+ *
+ * `parameter.set` and `parameter.create` gained optional expression
+ * payloads (the full form rules and the serialized-AST wire-form rationale
+ * live on {@link CadCommand}). The same disclosure shape as `feature.reorder`:
+ * every command written before the extension parses and applies exactly as
+ * before — a `parameter.set` without an `expression` field is the identical
+ * value-only set it always was, and application recomputes expression-driven
+ * values ONLY through the new payloads, so a pre-expression log replays to
+ * byte-identical documents. A log carrying an expression payload is written
+ * only by this version; an older reader would silently drop the field and
+ * replay a different document (the native-format replay check would refuse
+ * it), which is why the native envelope version gates the capability.
+ *
  * ## Determinism of generated ids
  *
  * `feature.create` may omit its id; the id is then generated from the
@@ -47,7 +61,10 @@
  * corruption. Dimensional values serialize canonically (canonical unit,
  * canonical magnitude), so a replayed `parameter.set` stores the equal
  * canonical quantity — equal as a quantity and identical after document
- * serialization, which is canonical for the same reason.
+ * serialization, which is canonical for the same reason. Expression
+ * payloads serialize as canonical ASTs (frozen, fixed key order), so the
+ * same rule holds for them: a replayed define stores the identical
+ * expression and recomputes to the identical cached values.
  */
 
 import {
@@ -97,7 +114,9 @@ import {
   parseReferenceId,
 } from "./ids";
 import { type SerializedCurve, parseSerializedCurve } from "./curve";
+import { type ExpressionNode, parseExpressionAst } from "./expression";
 import { type ParameterError, updateParameterValue } from "./parameter";
+import { installParameterExpression } from "./parameter-graph";
 import {
   type Appearance,
   type FaceAppearanceOverride,
@@ -135,9 +154,10 @@ export function isCadCommandType(input: unknown): input is CadCommandType {
 }
 
 /**
- * One supported document mutation, as pure serializable data. `parameter.set`
- * replaces a document parameter's stored value (the cached evaluation
- * result; recomputation is the regeneration pipeline's concern).
+ * One supported document mutation, as pure serializable data.
+ * `parameter.set` has three literal/expression forms (see the Phase 22
+ * extension below): a value-only set, a clear-to-literal, and an expression
+ * definition that recomputes the parameter and its dependents.
  * `feature.create` adds a record ({@link addFeature}); `feature.update`
  * wholesale-replaces a record's mutable fields — kind, inputs, outputs —
  * with referential integrity enforced ({@link updateFeature});
@@ -146,18 +166,72 @@ export function isCadCommandType(input: unknown): input is CadCommandType {
  * after `afterFeatureId` (or to the front when `afterFeatureId` is `null`),
  * with the input-order replayability rule enforced on the result
  * ({@link reorderFeature}).
+ *
+ * ## The Phase 22 expression payloads (disclosed)
+ *
+ * A parameter's value can be DEFINED by an expression over other parameters,
+ * and the command vocabulary carries that definition. `parameter.set` gains
+ * an optional `expression` field with three strictly discriminated forms:
+ *
+ * - **Value-only** (`expression` absent): today's semantics, unchanged —
+ *   the cached value is overwritten, any stored expression is left in
+ *   place, and NOTHING is recomputed. This is the raw cached-value write
+ *   the pre-expression vocabulary always had; keeping it recompute-free is
+ *   what lets pre-expression logs replay byte-identically.
+ * - **Clear** (`expression: null`, with `value`): the parameter stops being
+ *   expression-driven and becomes the literal `value`; dependents are
+ *   re-derived against the new literal in the same application.
+ * - **Define** (`expression`: an AST, with NO `value`): the AST becomes the
+ *   parameter's defining expression, its cached value is re-derived from it,
+ *   and every expression-driven parameter is recomputed in topological order
+ *   ({@link installParameterExpression}). A literal `value` beside a
+ *   non-null `expression` is ambiguous about what defines the parameter and
+ *   is rejected by the strict parser, as is an expression-less command that
+ *   carries neither a value nor an expression. The wire form is the
+ *   SERIALIZED AST — the vocabulary's data-first style (a `curve.create`
+ *   carries its serialized curve; the document substrate serializes
+ *   expressions as ASTs) — never source text, which is non-canonical (many
+ *   texts, one AST) and would break the same-state-same-bytes rule for
+ *   command logs.
+ *
+ * `parameter.create` gains the same optional `expression` AST beside its
+ * required `value` (the initial cache) — a literal-only create simply omits
+ * the field, so every pre-expression create command parses and applies
+ * exactly as before. Application validates identifiers against the
+ * document's parameters (unknown name → structured refusal naming it) and
+ * refuses a closing cycle with the chain
+ * (`parameter/unknown-identifier` / `parameter/cycle`).
  */
 export type CadCommand =
   | {
       readonly type: "parameter.set";
       readonly id: ParameterId;
+      /** The literal to store (the cached value; on clear, the literal it lands on). */
       readonly value: AnyDimensionalValue;
+      /**
+       * Absent: a value-only set (any stored expression stays); `null`: the
+       * parameter stops being expression-driven. A non-null AST never rides
+       * with a `value` — that is the other union arm.
+       */
+      readonly expression?: null;
+    }
+  | {
+      readonly type: "parameter.set";
+      readonly id: ParameterId;
+      /**
+       * The defining expression; the parameter's cached value and its
+       * dependents are recomputed on apply. Carries no `value`.
+       */
+      readonly expression: ExpressionNode;
     }
   | {
       readonly type: "parameter.create";
       readonly id?: ParameterId;
       readonly name: string;
+      /** The initial cached value; re-derived from the expression on apply when one rides. */
       readonly value: AnyDimensionalValue;
+      /** The optional defining expression (validated and recomputed on apply). */
+      readonly expression?: ExpressionNode;
     }
   | {
       readonly type: "body.create";
@@ -314,12 +388,49 @@ export function applyCommand(
 ): ParseResult<CadDocument, CommandApplyError> {
   switch (command.type) {
     case "parameter.set": {
+      // The define form: install the AST and recompute in the same pure
+      // transition (the AST shape was validated at parse; identifiers and
+      // cycles are re-checked against the LIVE collection here, so a
+      // smuggled command still fails structurally).
+      if (command.expression !== undefined && command.expression !== null) {
+        const installed = installParameterExpression(
+          document.parameters,
+          command.id,
+          command.expression,
+        );
+        if (!installed.ok) return installed;
+        return ok(
+          Object.freeze({
+            ...document,
+            parameters: installed.value.collection,
+          }),
+        );
+      }
       const updated = updateParameterValue(
         document.parameters,
         command.id,
         command.value,
       );
       if (!updated.ok) return updated;
+      // The clear form: the literal lands and the expression goes, with the
+      // dependents re-derived against the new literal.
+      if (command.expression === null) {
+        const cleared = installParameterExpression(
+          updated.value,
+          command.id,
+          null,
+        );
+        if (!cleared.ok) return cleared;
+        return ok(
+          Object.freeze({
+            ...document,
+            parameters: cleared.value.collection,
+          }),
+        );
+      }
+      // The value-only form: exactly the pre-expression semantics — the
+      // cached value moves, nothing is recomputed (pre-expression logs
+      // replay byte-identically through this arm).
       return ok(Object.freeze({ ...document, parameters: updated.value }));
     }
     case "parameter.create": {
@@ -329,7 +440,23 @@ export function applyCommand(
         value: command.value,
       });
       if (!added.ok) return added;
-      return ok(added.value.document);
+      if (command.expression === undefined) return ok(added.value.document);
+      // The expression rides behind the substrate add so the validation sees
+      // the parameter IN the collection (a self-reference resolves and is
+      // refused as the cycle it is); the failure discards the whole pure
+      // transition — nothing partial leaks.
+      const installed = installParameterExpression(
+        added.value.document.parameters,
+        added.value.parameter.id,
+        command.expression,
+      );
+      if (!installed.ok) return installed;
+      return ok(
+        Object.freeze({
+          ...added.value.document,
+          parameters: installed.value.collection,
+        }),
+      );
     }
     case "body.create": {
       const added = addBody(document, {
@@ -464,6 +591,15 @@ export type SerializedCadCommand =
       readonly type: "parameter.set";
       readonly id: string;
       readonly value: SerializedDimensionalValue;
+      /** Present-null exactly on the clear form; absent on the value-only form. */
+      readonly expression?: null;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "parameter.set";
+      readonly id: string;
+      /** The define form: the serialized AST, with no `value` field. */
+      readonly expression: ExpressionNode;
     }
   | {
       readonly formatVersion: number;
@@ -471,6 +607,8 @@ export type SerializedCadCommand =
       readonly id?: string;
       readonly name: string;
       readonly value: SerializedDimensionalValue;
+      /** The optional defining expression (serialized AST). */
+      readonly expression?: ExpressionNode;
     }
   | {
       readonly formatVersion: number;
@@ -585,11 +723,20 @@ function serializeInputRef(ref: FeatureInputRef): SerializedFeatureInputRef {
 export function serializeCommand(command: CadCommand): SerializedCadCommand {
   switch (command.type) {
     case "parameter.set":
+      if (command.expression !== undefined && command.expression !== null) {
+        return {
+          formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+          type: command.type,
+          id: command.id,
+          expression: command.expression,
+        };
+      }
       return {
         formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
         type: command.type,
         id: command.id,
         value: serializeDimensionalValue(command.value),
+        ...(command.expression === undefined ? {} : { expression: null }),
       };
     case "feature.create":
       return command.id === undefined
@@ -615,6 +762,9 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
             type: command.type,
             name: command.name,
             value: serializeDimensionalValue(command.value),
+            ...(command.expression === undefined
+              ? {}
+              : { expression: command.expression }),
           }
         : {
             formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
@@ -622,6 +772,9 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
             id: command.id,
             name: command.name,
             value: serializeDimensionalValue(command.value),
+            ...(command.expression === undefined
+              ? {}
+              : { expression: command.expression }),
           };
     case "body.create":
       if (command.id === undefined && command.kind === undefined) {
@@ -920,9 +1073,10 @@ function parseFeatureCommandFields(
  * Parses untrusted input (e.g. a command revived from persisted JSON or IPC)
  * as a {@link CadCommand}. Known fields are validated strictly — format
  * version, command type, ids, kinds, input references, outputs, dimensional
- * values — while unknown fields are ignored so future format versions
- * deserialize without data corruption. A missing optional `id` on
- * `feature.create` is preserved: replay generates the id deterministically.
+ * values, expression ASTs and their form rules — while unknown fields are
+ * ignored so future format versions deserialize without data corruption. A
+ * missing optional `id` on `feature.create` is preserved: replay generates
+ * the id deterministically.
  */
 export function parseCommand(
   input: unknown,
@@ -967,18 +1121,70 @@ export function parseCommand(
           ),
         );
       }
-      const parsedValue = parseDimensionalValue(input.value);
-      if (!parsedValue.ok) {
+      // Three strictly discriminated forms (see the CadCommand Phase 22
+      // docs): value-only (expression absent), clear (expression null WITH a
+      // value — the literal the parameter lands on), and define (an AST with
+      // NO value). Ambiguity is rejected here, not guessed at apply.
+      if (input.expression === undefined) {
+        const parsedValue = parseDimensionalValue(input.value);
+        if (!parsedValue.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A parameter.set command needs a valid dimensional value: ${parsedValue.error.message}`,
+              input.value,
+            ),
+          );
+        }
+        return ok(
+          Object.freeze({ type, id: parsedId.value, value: parsedValue.value }),
+        );
+      }
+      if (input.expression === null) {
+        const parsedValue = parseDimensionalValue(input.value);
+        if (!parsedValue.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A parameter.set command clearing an expression needs the literal value it lands on: ${parsedValue.error.message}`,
+              input.value,
+            ),
+          );
+        }
+        return ok(
+          Object.freeze({
+            type,
+            id: parsedId.value,
+            value: parsedValue.value,
+            expression: null,
+          }),
+        );
+      }
+      if (input.value !== undefined) {
         return fail(
           commandError(
             COMMAND_ERROR_CODES.malformed,
-            `A parameter.set command needs a valid dimensional value: ${parsedValue.error.message}`,
-            input.value,
+            "A parameter.set command cannot carry both a literal value and a defining expression; commit one form — a literal (value, with expression absent or null) or an expression (expression, without value).",
+            input,
+          ),
+        );
+      }
+      const parsedExpression = parseExpressionAst(input.expression);
+      if (!parsedExpression.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A parameter.set command needs a valid expression AST: ${parsedExpression.error.message}`,
+            input.expression,
           ),
         );
       }
       return ok(
-        Object.freeze({ type, id: parsedId.value, value: parsedValue.value }),
+        Object.freeze({
+          type,
+          id: parsedId.value,
+          expression: parsedExpression.value,
+        }),
       );
     }
     case "parameter.create": {
@@ -1015,11 +1221,48 @@ export function parseCommand(
           ),
         );
       }
+      // The optional defining expression: an AST when present (a create is
+      // total, so there is no clear form — null is refused, omit the field
+      // for a literal-only parameter).
+      let expression: ExpressionNode | undefined;
+      if (input.expression !== undefined) {
+        if (input.expression === null) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              "A parameter.create command's expression must be a valid expression AST when present; omit the field for a literal-only parameter.",
+              input.expression,
+            ),
+          );
+        }
+        const parsedExpression = parseExpressionAst(input.expression);
+        if (!parsedExpression.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A parameter.create command needs a valid expression AST: ${parsedExpression.error.message}`,
+              input.expression,
+            ),
+          );
+        }
+        expression = parsedExpression.value;
+      }
       return ok(
         Object.freeze(
           id === undefined
-            ? { type, name: input.name, value: parsedValue.value }
-            : { type, id, name: input.name, value: parsedValue.value },
+            ? {
+                type,
+                name: input.name,
+                value: parsedValue.value,
+                ...(expression === undefined ? {} : { expression }),
+              }
+            : {
+                type,
+                id,
+                name: input.name,
+                value: parsedValue.value,
+                ...(expression === undefined ? {} : { expression }),
+              },
         ),
       );
     }

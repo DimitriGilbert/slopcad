@@ -10,10 +10,12 @@
  * - `cad_list_commands` / `cad_run_command` — the page's live command-menu
  *   vocabulary (`CadCommandDescriptor[]`; `run()` is the exact callback a
  *   menu row click fires).
- * - `cad_set_parameter` — `store.applyCommand(setParameterCommand(...))`,
- *   the identical commit `useCadParameters().setValue` /
+ * - `cad_set_parameter` — `store.applyCommand(setParameterCommand(...))`
+ *   for numbers and `store.applyCommand(setParameterExpressionCommand(...))`
+ *   for strings, the identical commits `useCadParameters().setValue` /
  *   `setValueFromExpression` issue (numbers in the parameter's own
- *   dimension, strings as expressions through the domain parser).
+ *   dimension, strings committed AS defining expressions through the domain
+ *   parser — the document re-derives values and refuses cycles).
  * - `cad_undo` / `cad_redo` — `store.undo()` / `store.redo()`, the history
  *   hook's own moves.
  * - `cad_apply_commands` — strict `parseCommand` on every entry, then ONE
@@ -38,17 +40,20 @@ import {
   type CadDocument,
   type Dimension,
   dimensionless,
-  evaluateExpression,
   getParameter,
   length,
+  printExpression,
   type ParameterId,
-  parameterEnvironment,
   parseCommand,
   parseExpression,
   serializeDimensionalValue,
   volume,
 } from "@slopcad/cad-core";
-import { setParameterCommand, type CadStore } from "@slopcad/cad-react";
+import {
+  setParameterCommand,
+  setParameterExpressionCommand,
+  type CadStore,
+} from "@slopcad/cad-react";
 import type { CadCommandDescriptor } from "@slopcad/ui/components/cad/cad-command-menu";
 import type { FixtureRenderState } from "../render-fixture/fixture-session";
 import type { WorkbenchEngine } from "../cad-workbench/workbench-engine";
@@ -253,7 +258,7 @@ export function createWorkbenchWebMcpTools(
     defineWebMcpTool({
       annotations: { consequentialHint: true },
       description:
-        "Set one document parameter by id: a number commits in the parameter's own dimension at its canonical unit (a length parameter takes millimetres); a string is parsed and evaluated as an expression against the current parameter values. The same `parameter.set` commit the parameter panel issues.",
+        "Set one document parameter by id. A number commits the stored value in the parameter's own dimension at its canonical unit (a length parameter takes millimetres); any defining expression stays in place and keeps driving the parameter. A string is parsed as an expression and committed AS the parameter's defining expression — the document re-derives the parameter's value and its dependents, refusing unknown identifiers and reference cycles with structured errors. The same `parameter.set` commits the parameter panel issues.",
       inputSchema: z.object({
         id: z
           .string()
@@ -271,23 +276,27 @@ export function createWorkbenchWebMcpTools(
             `No parameter "${input.id}" in the document (see cad_get_document_summary).`,
           );
         }
-        let value: AnyDimensionalValue;
+        let command: CadCommand;
         if (typeof input.value === "number") {
-          value = canonicalValue(parameter.value.dimension, input.value);
+          command = setParameterCommand(
+            input.id as ParameterId,
+            canonicalValue(parameter.value.dimension, input.value),
+          );
         } else {
           const parsed = parseExpression(input.value);
           if (!parsed.ok) return refusalFromError(parsed.error);
-          const evaluated = evaluateExpression(
+          // The expression ITSELF is committed (the serialized AST): the
+          // document's interpreter validates it against the live collection
+          // and recomputes the parameter and its dependents.
+          command = setParameterExpressionCommand(
+            input.id as ParameterId,
             parsed.value,
-            parameterEnvironment(collection),
           );
-          if (!evaluated.ok) return refusalFromError(evaluated.error);
-          value = evaluated.value;
         }
-        const applied = store.applyCommand(
-          setParameterCommand(input.id as ParameterId, value),
-        );
-        if (!applied.ok) return refusalFromError(applied.error);
+        const applied = store.applyCommand(command);
+        if (!applied.ok) {
+          return refusalFromError(applied.error.cause ?? applied.error);
+        }
         const stored = getParameter(
           store.getParameters(),
           input.id as ParameterId,
@@ -298,7 +307,12 @@ export function createWorkbenchWebMcpTools(
           parameterId: input.id,
           ...(stored === undefined
             ? {}
-            : { value: serializeDimensionalValue(stored.value) }),
+            : {
+                value: serializeDimensionalValue(stored.value),
+                ...(stored.expression === null
+                  ? {}
+                  : { expression: printExpression(stored.expression) }),
+              }),
         };
       },
     }),

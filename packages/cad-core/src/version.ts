@@ -73,8 +73,20 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * reader would silently drop the standalone section and counter —
  * configuration rows are data the old reader cannot carry, so the
  * envelope stamp is the gate.
+ *
+ * v7 (Phase 22): the command vocabulary grew expression payloads —
+ * `parameter.set` can carry a defining-expression AST (and its
+ * `expression: null` clear form), and `parameter.create` can carry one
+ * beside its value. The envelope's own sections are unchanged — the
+ * document substrate has serialized parameter expressions since Phase 5 —
+ * but the TRANSACTION LOG is no longer old-reader-faithful: an old reader
+ * parsing an expression-bearing `parameter.set` drops the unknown field
+ * and replays a different document (its log/head replay check refuses the
+ * file with a confusing history mismatch). The version moves so the gate
+ * is the predictable migration refusal, not a corrupted replay; the
+ * v6→v7 migration is the identity (v6 content is valid v7 content).
  */
-export const CAD_NATIVE_FORMAT_VERSION = 6;
+export const CAD_NATIVE_FORMAT_VERSION = 7;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

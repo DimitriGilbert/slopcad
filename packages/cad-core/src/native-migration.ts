@@ -103,6 +103,15 @@ export interface NativeFormatMigration {
  * because the growth is a standalone `occurrences` section plus the
  * `occurrence` id counter, both of which an old reader's unknown-field
  * tolerance would silently drop: the envelope stamp is the gate.
+ *
+ * The v6→v7 step (Phase 22) carries the command vocabulary's expression
+ * payloads. Like its identity predecessors it is CONTENT-PRESERVING — v6
+ * content is valid v7 content — because the growth rides fields whose
+ * sections are unchanged: parameter expressions already serialize inside
+ * the document substrate, and an expression-bearing COMMAND simply cannot
+ * occur in a v6 file (the writer that emits it stamps v7). The step exists
+ * so the version walk has a registered path; the envelope stamp is the
+ * gate that keeps old readers off v7 logs they would replay unfaithfully.
  */
 export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
   Object.freeze([
@@ -131,7 +140,33 @@ export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
       to: 6,
       migrate: migrateV5ToV6,
     },
+    {
+      from: 6,
+      to: 7,
+      migrate: migrateV6ToV7,
+    },
   ]);
+
+/**
+ * The v6→v7 content transform (the framework stamps `formatVersion`):
+ * the identity — the expression-payload growth rides vocabulary fields
+ * whose sections are unchanged, so v6 content is already valid v7 content
+ * and nothing inside the document is rewritten.
+ */
+function migrateV6ToV7(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v6→v7 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
 
 /**
  * The v5→v6 content transform (the framework stamps `formatVersion`):

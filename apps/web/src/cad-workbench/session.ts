@@ -2,18 +2,23 @@
  * The composed workbench's document: the plate body, the through-bore
  * diameter the parameter panel edits, the translate-about-the-plate feature
  * (three length-component parameters), the rotate-about-+Z feature
- * downstream of the translate feature, and the expression-driven
- * `volumeHint`. A lean, real product document with a two-feature timeline —
- * the Phase 20 history surface (rollback, suppression, failure recovery)
- * needs an upstream/downstream pair to act on, so the rotate feature
- * declares the translate feature as an input. Every tool the workbench's
- * toolbar registers resolves against it: rotate resolves the rotate feature
+ * downstream of the translate feature, and the expression-driven pair
+ * `volumeHint` (`holeDiameter * 2`) and `boreRadius` (`holeDiameter / 2`) —
+ * two levels of stored expressions, so a single `holeDiameter` commit
+ * re-derives both through the command vocabulary's recompute. A lean, real
+ * product document with a two-feature timeline — the Phase 20 history
+ * surface (rollback, suppression, failure recovery) needs an
+ * upstream/downstream pair to act on, so the rotate feature declares the
+ * translate feature as an input. Every tool the workbench's toolbar
+ * registers resolves against it: rotate resolves the rotate feature
  * (body + exactly one angle parameter), translate resolves the translate
  * feature (body + three length parameters).
  *
  * Deterministic (explicit ids), so the workbench boots identically every
  * run. The hole parameter keeps the shared fixture id, so the established
- * `holeDiameterMm` reader works on this document unchanged.
+ * `holeDiameterMm` reader works on this document unchanged. Parameters
+ * touch no feature, so the tree's derivation, the executor stand-in, and
+ * the boot scene are unaffected by the expression-driven pair.
  */
 
 import {
@@ -62,19 +67,28 @@ const ROTATE_FEATURE: FeatureId = createFeatureId("feat_rotate_plate");
 /** The volumeHint parameter id (stable across boots). */
 const VOLUME_HINT_PARAMETER = createParameterId("param_volume_hint");
 
+/** The boreRadius parameter id (stable across boots). */
+const BORE_RADIUS_PARAMETER = createParameterId("param_bore_radius");
+
 /** The hole diameter parameter id — the shared fixture id (see module doc). */
 const HOLE_PARAMETER = createParameterId("param_hole_diameter");
 
 /**
  * Builds the workbench session: the plate at the scene's default bore,
  * `holeDiameter`, the translate components, and `rotate_z` at identity,
- * and `volumeHint` defined as `holeDiameter * 2`, cached at the matching
- * value. Feature order: translate first, rotate second (downstream).
+ * `volumeHint` defined as `holeDiameter * 2`, and `boreRadius` defined as
+ * `holeDiameter / 2` — both cached at their matching values (the honest
+ * boot: cache equals what the expression produces at the default). Feature
+ * order: translate first, rotate second (downstream).
  */
 export function createCadWorkbenchSession(): CadSession {
-  const parsed = parseExpression("holeDiameter * 2");
-  if (!parsed.ok) {
-    throw new Error(`Workbench expression rejected: ${parsed.error.message}`);
+  const hint = parseExpression("holeDiameter * 2");
+  if (!hint.ok) {
+    throw new Error(`Workbench expression rejected: ${hint.error.message}`);
+  }
+  const radius = parseExpression("holeDiameter / 2");
+  if (!radius.ok) {
+    throw new Error(`Workbench expression rejected: ${radius.error.message}`);
   }
   let document = createDocument(createDocumentId("doc_cad_workbench"));
   document = requireDocumentOk(
@@ -111,9 +125,16 @@ export function createCadWorkbenchSession(): CadSession {
     id: VOLUME_HINT_PARAMETER,
     name: "volumeHint",
     value: length(PLATE_HOLE_DIAMETER_DEFAULT_MM * 2),
-    expression: parsed.value,
+    expression: hint.value,
   });
   document = requireDocumentOk(hinted, "the volumeHint parameter");
+  const radiused = addDocumentParameter(document, {
+    id: BORE_RADIUS_PARAMETER,
+    name: "boreRadius",
+    value: length(PLATE_HOLE_DIAMETER_DEFAULT_MM / 2),
+    expression: radius.value,
+  });
+  document = requireDocumentOk(radiused, "the boreRadius parameter");
   document = requireDocumentOk(
     addFeature(document, {
       id: TRANSLATE_FEATURE,

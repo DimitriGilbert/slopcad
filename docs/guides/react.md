@@ -49,11 +49,11 @@ throws the structured `CadProviderError`
   `applyTransaction`/`applyCommand` (the transactional write paths).
 - `useCadParameters` — the collection plus `setValue` (one `parameter.set`
   transaction) and the expression-aware pair `evaluate` /
-  `setValueFromExpression`, which parse and evaluate with the domain's own
-  engine and commit the resulting canonical value; a parse or evaluation
-  failure issues nothing. There is no expression command in the
-  vocabulary, so there is no React-side expression write that would bypass
-  the session.
+  `setValueFromExpression`: a text expression is parsed with the domain's
+  own parser and committed AS the defining expression (the vocabulary's
+  serialized-AST payload — the document validates identifiers and cycles
+  and recomputes the dependents); a parse failure or a domain refusal
+  issues nothing.
 - `useCadHistory` — `canUndo`/`canRedo`/`cursor`/`depth` plus the two
   history moves.
 - `useCadSelection` — the state plus pick/hover/clear/regeneration

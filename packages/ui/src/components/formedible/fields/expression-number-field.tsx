@@ -282,7 +282,11 @@ export function ExpressionNumberField<
             className="absolute left-0 right-0 top-full z-50 max-h-60 overflow-y-auto rounded-b-md border border-t-0 bg-popover p-1 text-popover-foreground shadow-md"
             id={listboxId}
             role="listbox"
-            aria-label={String(fieldConfig.label ?? field.name)}
+            aria-label={
+              typeof fieldConfig.label === "string"
+                ? fieldConfig.label
+                : field.name
+            }
           >
             {suggestions.length === 0 ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">

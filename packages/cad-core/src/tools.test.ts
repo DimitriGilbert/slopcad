@@ -495,6 +495,7 @@ describe("rotate tool", () => {
     const [command] = detail.transaction.commands;
     expect(command?.type).toBe("parameter.set");
     if (command?.type !== "parameter.set") return;
+    if (!("value" in command)) return;
     expect(command.id).toBe(ANGLE);
     expect(command.value.dimension).toBe("angle");
     expect(valueIn(command.value, "deg")).toBeCloseTo(90, 9);

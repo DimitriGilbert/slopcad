@@ -17,6 +17,7 @@ import {
   createRenderProjection,
   getParameter,
   length,
+  printExpression,
   projectTessellation,
   serializeCommand,
 } from "@slopcad/cad-core";
@@ -206,7 +207,7 @@ describe("cad_get_document_summary", () => {
     expect(run.ok).toBe(true);
     if (!run.ok) return;
     expect(run.payload).toMatchObject({
-      counts: { bodies: 1, features: 2, parameters: 6 },
+      counts: { bodies: 1, features: 2, parameters: 7 },
       documentId: "doc_cad_workbench",
     });
     const payload = run.payload as {
@@ -376,19 +377,66 @@ describe("cad_set_parameter", () => {
     unbind();
   });
 
-  it("commits an expression evaluated against the live parameters", async () => {
+  it("commits a string AS the defining expression; the document re-derives the value", async () => {
     const store = freshStore();
     const unbind = bindTools(store, surfaceState([]));
+    // The unit literal keeps the parameter a length (the expression defines
+    // the dimension — a bare `6 * 2` would honestly re-dimension it).
     const run = await runTool("cad_set_parameter", {
       id: HOLE_ID,
-      value: "6 * 2",
+      value: "6mm * 2",
     });
     expect(run.ok).toBe(true);
+    if (run.ok) {
+      expect(run.payload).toMatchObject({
+        name: "holeDiameter",
+        value: { dimension: "length", unit: "mm", value: 12 },
+        expression: "6mm * 2",
+      });
+    }
     const stored = getParameter(
       store.getParameters(),
       createParameterId(HOLE_ID),
     );
     expect(stored?.value.value).toBe(12);
+    const storedExpression = stored?.expression ?? null;
+    expect(
+      storedExpression === null ? null : printExpression(storedExpression),
+    ).toBe("6mm * 2");
+    unbind();
+  });
+
+  it("re-drives dependents through the stored expression and refuses a closing cycle", async () => {
+    const store = freshStore();
+    const unbind = bindTools(store, surfaceState([]));
+    // The boot pair: volumeHint = holeDiameter * 2, boreRadius =
+    // holeDiameter / 2. Repoint volumeHint at boreRadius (still a DAG)…
+    const repointed = await runTool("cad_set_parameter", {
+      id: "param_volume_hint",
+      value: "boreRadius * 4",
+    });
+    expect(repointed.ok).toBe(true);
+    expect(
+      getParameter(
+        store.getParameters(),
+        createParameterId("param_volume_hint"),
+      )?.value.value,
+    ).toBe(16);
+    // …then closing the loop (boreRadius through volumeHint) is refused
+    // with the domain's own cycle error, naming the chain.
+    const cycled = await runTool("cad_set_parameter", {
+      id: "param_bore_radius",
+      value: "volumeHint / 4",
+    });
+    expect(cycled).toMatchObject({ code: "parameter/cycle", ok: false });
+    if (!cycled.ok) expect(cycled.message).toContain("boreRadius → volumeHint");
+    // The refusal left both expressions exactly as the DAG had them.
+    expect(
+      getParameter(
+        store.getParameters(),
+        createParameterId("param_bore_radius"),
+      )?.value.value,
+    ).toBe(4);
     unbind();
   });
 

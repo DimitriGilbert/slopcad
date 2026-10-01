@@ -153,7 +153,7 @@ describe("cad-core runs headless end to end", () => {
       selection: createSelectionState(0),
       onTransaction: (transaction) => {
         for (const command of transaction.commands) {
-          if (command.type === "parameter.set") {
+          if (command.type === "parameter.set" && "value" in command) {
             issued.push(command.value.value);
           }
         }

@@ -41,11 +41,13 @@ export { useCadTools } from "./use-cad-tools";
 export type { CadToolsApi } from "./use-cad-tools";
 export {
   cadTransaction,
+  clearParameterExpressionCommand,
   createFeatureCommand,
   createPrimitiveTransaction,
   deleteFeatureCommand,
   removeFeatureTransaction,
   setParameterCommand,
+  setParameterExpressionCommand,
   updateFeatureCommand,
   updatePrimitiveTransaction,
 } from "./model";

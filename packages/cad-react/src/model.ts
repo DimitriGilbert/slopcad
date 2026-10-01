@@ -25,6 +25,7 @@ import type {
   BodyId,
   CadCommand,
   CadTransaction,
+  ExpressionNode,
   FeatureId,
   FeatureInputRef,
   ParameterId,
@@ -65,6 +66,32 @@ export function setParameterCommand(
   value: AnyDimensionalValue,
 ): CadCommand {
   return Object.freeze({ type: "parameter.set", id, value });
+}
+
+/**
+ * Builds the expression form of `parameter.set`: the AST becomes the
+ * parameter's defining expression, and application re-derives the cached
+ * value and its dependents (the domain validates identifiers and cycles).
+ * The wire form is the serialized AST — parse source text at the edge with
+ * the domain's `parseExpression`, never ship text.
+ */
+export function setParameterExpressionCommand(
+  id: ParameterId,
+  expression: ExpressionNode,
+): CadCommand {
+  return Object.freeze({ type: "parameter.set", id, expression });
+}
+
+/**
+ * Builds the clear form of `parameter.set`: the parameter stops being
+ * expression-driven and becomes the literal `value` (application re-derives
+ * its dependents against the new literal).
+ */
+export function clearParameterExpressionCommand(
+  id: ParameterId,
+  value: AnyDimensionalValue,
+): CadCommand {
+  return Object.freeze({ type: "parameter.set", id, value, expression: null });
 }
 
 /** Builds a `feature.create` command (id optional — replay regenerates it). */

@@ -2,22 +2,26 @@
  * `useCadParameters` (Phase 14): the parameter hook. Mirrors the document's
  * {@link ParameterCollection} through the `parameters` concern (a subset of
  * document changes — a feature-only commit does not notify it) and exposes
- * the mutation surface the Phase 7 vocabulary actually has for parameters:
- * `parameter.set` value commits, expression-aware through the domain's own
- * parser and evaluator.
+ * the mutation surface the command vocabulary has for parameters: literal
+ * `parameter.set` value commits, and — since the vocabulary's Phase 22
+ * expression payloads — defining-expression commits through the domain's
+ * own parser.
  *
- * ## Expression-aware updates, honestly scoped
+ * ## Expression-aware updates
  *
- * A parameter's defining expression lives in its domain record
- * (`Parameter.expression`) and is written by the domain substrate, not by
- * this layer — the Phase 7 command vocabulary has NO expression command, so
- * there is no React-side expression write that would not bypass the session.
- * What this hook does offer is evaluation-aware editing: a text expression
- * is parsed and evaluated with the domain's own `parseExpression` /
- * `evaluateExpression` against the document's current parameter values, and
- * the resulting canonical dimensional value is committed through
- * `parameter.set`. A parse or evaluation failure is returned structurally
- * and issues nothing. (Self-reference reads the pre-commit stored value.)
+ * A parameter's defining expression is written THROUGH the vocabulary:
+ * `setValueFromExpression` parses the text with the domain's
+ * `parseExpression` and commits the AST via `parameter.set`'s expression
+ * payload (`setParameterExpressionCommand`). The document's single
+ * interpreter then validates the identifiers and cycles against the live
+ * collection, stores the AST, and recomputes the parameter and its
+ * dependents — one write path, no React-side evaluation that could disagree
+ * with the domain. A parse failure is returned structurally and issues
+ * nothing; a domain refusal (unknown identifier, cycle) rides the
+ * transaction failure verbatim.
+ *
+ * `evaluate` remains the read-side preview: parse + evaluate against the
+ * document's current parameter values, structurally, issuing nothing.
  *
  * Notification model: re-renders exactly when the parameter collection
  * identity changes — never on feature-only commits, selection, or tools.
@@ -41,15 +45,15 @@ import {
   type TransactionError,
 } from "@slopcad/cad-core";
 
-import { setParameterCommand } from "./model";
+import { setParameterCommand, setParameterExpressionCommand } from "./model";
 import { useCadStore } from "./provider";
 
-/** Structured failure of an expression-aware update. */
+/** Structured failure of an expression-aware evaluation preview. */
 export type ExpressionUpdateError =
   ExpressionParseError | ExpressionEvaluationError;
 
 /** The failure union of {@link CadParametersApi.setValueFromExpression}. */
-export type ExpressionSetError = ExpressionUpdateError | TransactionError;
+export type ExpressionSetError = ExpressionParseError | TransactionError;
 
 /** What {@link useCadParameters} exposes. */
 export interface CadParametersApi {
@@ -78,10 +82,12 @@ export interface CadParametersApi {
     expression: string,
   ) => ParseResult<AnyDimensionalValue, ExpressionUpdateError>;
   /**
-   * Evaluates a text expression (see {@link CadParametersApi.evaluate}) and
-   * commits the resulting value through a `parameter.set` transaction. On
-   * any failure the document is untouched and the structured error is
-   * returned.
+   * Parses a text expression with the domain's parser and commits the AST
+   * through a `parameter.set` expression payload: the document stores the
+   * expression, re-derives the parameter's cached value, and recomputes its
+   * dependents. A parse failure leaves the document untouched; a domain
+   * refusal (unknown identifier, closing cycle) surfaces verbatim as the
+   * structured transaction failure.
    */
   readonly setValueFromExpression: (
     id: ParameterId,
@@ -113,9 +119,9 @@ export function useCadParameters(): CadParametersApi {
     id: ParameterId,
     expression: string,
   ): ParseResult<CadSession, ExpressionSetError> => {
-    const evaluated = evaluate(expression);
-    if (!evaluated.ok) return evaluated;
-    return store.applyCommand(setParameterCommand(id, evaluated.value));
+    const parsed = parseExpression(expression);
+    if (!parsed.ok) return parsed;
+    return store.applyCommand(setParameterExpressionCommand(id, parsed.value));
   };
 
   const setValue = (
