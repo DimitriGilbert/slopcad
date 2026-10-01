@@ -2677,6 +2677,7 @@ export function CompleteCadWorkbench({
           importSketchFiles
           onRevolve={handleRevolve}
           onSaveSketch={handleSaveSketch}
+          parameters={workbenchDocument.parameters}
         />
       ) : null}
       {/* The workspace: an edge-to-edge machine bed. Tree dock flush

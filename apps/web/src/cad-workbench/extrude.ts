@@ -40,6 +40,7 @@ import type {
   DatumId,
   FeatureRecord,
   ParseFailure,
+  ParseResult,
   RenderProjection,
   SketchDocumentId,
 } from "@slopcad/cad-core";
@@ -49,10 +50,16 @@ import type {
   KernelResolvedProfile,
 } from "@slopcad/cad-kernel";
 import {
+  applySolvedParameters,
+  boundDimensionParameterId,
+  createReferenceSketchSolver,
   parseSketch,
   resolveExtrudeProfile,
+  resolveSketchDimensionBindings,
   workplaneToPlacement,
   type ProfileSegment,
+  type Sketch,
+  type SketchParameterLookup,
 } from "@slopcad/cad-sketch";
 
 import {
@@ -62,6 +69,112 @@ import {
   type ComputedFacePlane,
   type ComputedFaceSource,
 } from "./datum";
+
+/**
+ * The scene-side sketch solver (Phase 26a): stateless, created once — the
+ * committed sketches whose dimensions bind document parameters re-solve
+ * against the CURRENT parameter values on every scene derivation.
+ */
+const SCENE_SKETCH_SOLVER = createReferenceSketchSolver();
+
+/**
+ * The document's parameter environment as the sketch domain's injected
+ * lookup: parameter id → current value, `undefined` when absent. The one
+ * adapter between the document model and `SketchParameterLookup`.
+ */
+export function documentParameterLookupOf(
+  document: CadDocument,
+): SketchParameterLookup {
+  return (parameterId) => {
+    const parameter = document.parameters.parameters.find(
+      (candidate) => candidate.id === parameterId,
+    );
+    return parameter === undefined ? undefined : { value: parameter.value };
+  };
+}
+
+/**
+ * Re-solves a parsed sketch whose dimensions bind document parameters
+ * against the document's CURRENT parameter values (the sketch stays
+ * canonical data; the environment arrives here, at consume time). An
+ * unbound sketch returns as-is — reference-identical, so every established
+ * literal flow rides the identical path it always has. A bound sketch
+ * resolves, re-solves through the reference solver, and applies the solved
+ * parameters; a dangling binding or an unresolvable solve is a structured
+ * failure the caller's honest fallback answers for.
+ */
+export function resolveDocumentSketch(
+  document: CadDocument,
+  sketch: Sketch,
+): ParseResult<Sketch, ParseFailure> {
+  const resolution = resolveSketchDimensionBindings(
+    sketch.constraints,
+    documentParameterLookupOf(document),
+  );
+  if (!resolution.ok) {
+    return {
+      ok: false,
+      error: {
+        code: resolution.error.code,
+        message: resolution.error.message,
+        input: sketch,
+      },
+    };
+  }
+  if (resolution.value === sketch.constraints) {
+    return { ok: true, value: sketch };
+  }
+  const solved = SCENE_SKETCH_SOLVER.solve(sketch.entities, resolution.value);
+  if (solved.status === "failed") {
+    const diagnostic = solved.diagnostics[0];
+    return {
+      ok: false,
+      error: {
+        code: diagnostic?.code ?? "sketch/solver-not-converged",
+        message:
+          diagnostic?.message ??
+          "The bound sketch's re-solve failed without a diagnostic.",
+        input: sketch,
+      },
+    };
+  }
+  return {
+    ok: true,
+    value: applySolvedParameters(
+      { ...sketch, constraints: resolution.value },
+      solved.parameters,
+    ),
+  };
+}
+
+/**
+ * The document sketch ids whose payloads bind ANY of the given parameters —
+ * the invalidation edge between a changed parameter and the features that
+ * consume a parameter-bound sketch. The feature graph sees only declared
+ * inputs (a feature consumes the sketch, not the sketch's bindings), so a
+ * host's staleness pass composes this over its changed-parameter set: the
+ * returned sketch ids ride `markStale` as changed nodes and the existing
+ * sketch→feature edges invalidate the right consumers. Unparseable payload
+ * shapes contribute nothing (they refuse at solve with their own
+ * diagnostics).
+ */
+export function sketchIdsBoundToParameters(
+  document: CadDocument,
+  parameterIds: ReadonlySet<string>,
+): readonly SketchDocumentId[] {
+  if (parameterIds.size === 0) return [];
+  const bound: SketchDocumentId[] = [];
+  for (const record of document.sketches) {
+    const sketch = parseSketch(record.sketch);
+    if (!sketch.ok) continue;
+    const binds = sketch.value.constraints.some((constraint) => {
+      const parameterId = boundDimensionParameterId(constraint);
+      return parameterId !== null && parameterIds.has(parameterId);
+    });
+    if (binds) bound.push(record.id);
+  }
+  return bound;
+}
 
 /** One profile segment mapped into the kernel contract's tuple form. */
 export function kernelSegment(
@@ -143,7 +256,15 @@ export function sketchProfileResolverOf(
       };
       return { ok: false, error: failure };
     }
-    const profile = resolveExtrudeProfile(sketch.value.entities);
+    // Parameter-bound sketches re-solve against the CURRENT document
+    // parameters (a parameter.set re-drives the profile with no new
+    // wiring); unbound sketches resolve from their stored coordinates
+    // exactly as before.
+    const resolved = resolveDocumentSketch(document, sketch.value);
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.error };
+    }
+    const profile = resolveExtrudeProfile(resolved.value.entities);
     if (!profile.ok) {
       const failure: ParseFailure = {
         code: profile.error.code,

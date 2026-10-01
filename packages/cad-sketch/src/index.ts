@@ -124,6 +124,7 @@ export {
   SPLINE_END_SELECTIONS,
   SketchConstraintValidationError,
   TANGENT_VARIANTS,
+  boundDimensionParameterId,
   createAngleConstraint,
   createCoincidentConstraint,
   createCollinearConstraint,
@@ -191,6 +192,9 @@ export {
   serializeSketch,
 } from "./sketch";
 export type { SerializedSketch, Sketch, SketchError } from "./sketch";
+
+export { resolveSketchDimensionBindings } from "./dimension-bindings";
+export type { SketchParameterLookup } from "./dimension-bindings";
 
 export {
   DIMENSIONAL_CONSTRAINT_KINDS,

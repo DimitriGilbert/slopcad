@@ -26,6 +26,7 @@ import type { SketchEntity } from "./entities";
 import type { SketchConstraintId, SketchEntityId } from "./sketch-ids";
 import type { SolvedEntityParameters, SolvedSketchParameters } from "./solver";
 
+import { SKETCH_DIAGNOSTIC_CODES } from "./diagnostics";
 import {
   type SplineChain,
   bezierChainOfSpline,
@@ -40,6 +41,7 @@ import {
   type PointTarget,
   type SketchConstraint,
   type SplineEndSelection,
+  boundDimensionParameterId,
   validateConstraintReferences,
 } from "./constraints";
 
@@ -2828,6 +2830,25 @@ export function compileConstraintSystem(
     if (diagnostic !== null) diagnostics.push(diagnostic);
   }
   if (diagnostics.length > 0) return { diagnostics };
+  // Parameter-bound dimensions never compile directly: their value resolves
+  // from a caller-supplied environment (resolveSketchDimensionBindings)
+  // BEFORE solving, so a bound constraint reaching this point means a caller
+  // skipped the resolution pass and would silently solve the stale cached
+  // literal — refuse instead.
+  for (const constraint of constraints) {
+    const parameterId = boundDimensionParameterId(constraint);
+    if (parameterId === null) continue;
+    return {
+      diagnostics: [
+        {
+          severity: "error",
+          code: SKETCH_DIAGNOSTIC_CODES.dimensionBindingUnresolved,
+          message: `Constraint ${constraint.id} (${constraint.kind}) is bound to parameter "${parameterId}"; resolve the sketch's dimension bindings (resolveSketchDimensionBindings) before compiling — the solver consumes resolved literals only.`,
+          location: { primary: constraint.id },
+        },
+      ],
+    };
+  }
   const context: CompiledContext = {
     layout: new ParameterLayout(entities),
     entitiesById: new Map(entities.map((entity) => [entity.id, entity])),

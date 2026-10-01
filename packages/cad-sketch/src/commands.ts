@@ -46,11 +46,15 @@
  * canonical serializations ({@link serializeSketchEntity}, {@link
  * serializeSketchConstraint}); dimensional values serialize canonically
  * (canonical unit, canonical magnitude), so a replayed
- * `sketch.dimension.set` stores the equal canonical quantity.
+ * `sketch.dimension.set` stores the equal canonical quantity. The literal
+ * form is byte-identical to every payload before bindings; the BOUND form
+ * (`parameterId`, no value) binds the dimension to a document parameter
+ * whose current value resolves at solve/profile time.
  */
 
 import {
   type LengthValue,
+  type ParameterId,
   type ParseResult,
   angle,
   valueIn,
@@ -58,6 +62,7 @@ import {
   length,
   ok,
   parseDimensionalValue,
+  parseParameterId,
   serializeDimensionalValue,
   type SerializedDimensionalValue,
   toCanonical,
@@ -160,7 +165,8 @@ export function isDimensionalConstraint(
  * `constraint.create` adds a constraint (references validated);
  * `constraint.delete` removes one; and `dimension.set` replaces a
  * dimensional constraint's value with the given length (mm) or angle (rad)
- * canonical magnitude.
+ * canonical magnitude — or, in its bound form, binds the dimension to a
+ * document parameter (the literal commit on a bound constraint unbinds it).
  */
 export type SketchCommand =
   | {
@@ -188,6 +194,18 @@ export type SketchCommand =
       readonly constraintId: SketchConstraintId;
       /** The replacement dimensional value (length or angle, canonical). */
       readonly value: LengthValue | AngleValue;
+    }
+  | {
+      readonly type: "sketch.dimension.set";
+      readonly constraintId: SketchConstraintId;
+      /**
+       * The document parameter the dimension becomes BOUND to: its value
+       * resolves from a caller-supplied parameter lookup at solve/profile
+       * time (see `dimension-bindings.ts`), so the parameter's edits
+       * re-drive the sketch. The constraint's stored literal is untouched
+       * (it stays the last literal the dimension held).
+       */
+      readonly parameterId: ParameterId;
     };
 
 /** Stable failure codes produced when sketch command input is rejected. */
@@ -516,6 +534,23 @@ export function applySketchCommand(
           ),
         );
       }
+      // The BOUND form: the dimension follows a document parameter from now
+      // on (its value resolves from the caller's environment at solve time).
+      // The stored literal is untouched — it remains the last literal the
+      // dimension held. Re-binding to the same parameter is an idempotent
+      // replace.
+      if ("parameterId" in command) {
+        const updated: SketchConstraint = {
+          ...constraint,
+          parameterId: command.parameterId,
+        };
+        return ok({
+          ...sketch,
+          constraints: sketch.constraints.map((candidate) =>
+            candidate.id === updated.id ? updated : candidate,
+          ),
+        });
+      }
       let updated: SketchConstraint;
       if (constraint.kind === "angle") {
         if (command.value.dimension !== "angle") {
@@ -538,7 +573,16 @@ export function applySketchCommand(
             ),
           );
         }
-        updated = { ...constraint, value: replacement };
+        // A literal commit unbinds: the canonical literal shape never
+        // carries the binding field — rebuild the record explicitly.
+        updated = {
+          id: constraint.id,
+          kind: "angle",
+          first: constraint.first,
+          second: constraint.second,
+          value: replacement,
+          ...(constraint.at === undefined ? {} : { at: constraint.at }),
+        };
       } else {
         if (command.value.dimension !== "length") {
           return fail(
@@ -566,7 +610,36 @@ export function applySketchCommand(
             ),
           );
         }
-        updated = { ...constraint, value: replacement };
+        switch (constraint.kind) {
+          case "distance":
+            updated = {
+              id: constraint.id,
+              kind: "distance",
+              first: constraint.first,
+              second: constraint.second,
+              value: replacement,
+            };
+            break;
+          case "radius":
+          case "diameter":
+            updated = {
+              id: constraint.id,
+              kind: constraint.kind,
+              entity: constraint.entity,
+              value: replacement,
+            };
+            break;
+          case "distanceX":
+          case "distanceY":
+            updated = {
+              id: constraint.id,
+              kind: constraint.kind,
+              first: constraint.first,
+              second: constraint.second,
+              value: replacement,
+            };
+            break;
+        }
       }
       return ok({
         ...sketch,
@@ -636,6 +709,13 @@ export type SerializedSketchCommand =
       readonly type: "sketch.dimension.set";
       readonly constraintId: string;
       readonly value: SerializedDimensionalValue;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "sketch.dimension.set";
+      readonly constraintId: string;
+      /** The bound form's document parameter id (no literal value). */
+      readonly parameterId: string;
     };
 
 /** Serializes a sketch command to its canonical, deterministic JSON form. */
@@ -669,12 +749,19 @@ export function serializeSketchCommand(
         constraintId: command.constraintId,
       };
     case "sketch.dimension.set":
-      return {
-        formatVersion: SKETCH_FORMAT_VERSION,
-        type: command.type,
-        constraintId: command.constraintId,
-        value: serializeDimensionalValue(command.value),
-      };
+      return "parameterId" in command
+        ? {
+            formatVersion: SKETCH_FORMAT_VERSION,
+            type: command.type,
+            constraintId: command.constraintId,
+            parameterId: command.parameterId,
+          }
+        : {
+            formatVersion: SKETCH_FORMAT_VERSION,
+            type: command.type,
+            constraintId: command.constraintId,
+            value: serializeDimensionalValue(command.value),
+          };
   }
 }
 
@@ -795,6 +882,39 @@ export function parseSketchCommand(
             `A sketch.dimension.set command needs a valid constraint id: ${parsedId.error.message}`,
             input.constraintId,
           ),
+        );
+      }
+      // Exactly one of the two forms: the literal value (every payload
+      // before bindings carries it) or the parameter binding. Both present
+      // is ambiguous and refused; neither is malformed.
+      const hasValue = input.value !== undefined;
+      const hasParameterId = input.parameterId !== undefined;
+      if (hasValue && hasParameterId) {
+        return fail(
+          commandError(
+            SKETCH_COMMAND_ERROR_CODES.malformed,
+            "A sketch.dimension.set command carries either a literal value or a parameterId binding, not both.",
+            input,
+          ),
+        );
+      }
+      if (hasParameterId) {
+        const parsedParameterId = parseParameterId(input.parameterId);
+        if (!parsedParameterId.ok) {
+          return fail(
+            commandError(
+              SKETCH_COMMAND_ERROR_CODES.malformed,
+              `A sketch.dimension.set command needs a valid parameter id binding: ${parsedParameterId.error.message}`,
+              input.parameterId,
+            ),
+          );
+        }
+        return ok(
+          Object.freeze({
+            type,
+            constraintId: parsedId.value,
+            parameterId: parsedParameterId.value,
+          }),
         );
       }
       const parsedValue = parseDimensionalValue(input.value);

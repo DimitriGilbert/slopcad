@@ -51,7 +51,7 @@ import {
 import type { SweepPathSegment } from "@slopcad/cad-sketch";
 import { parseSketch, resolveSweepPath } from "@slopcad/cad-sketch";
 
-import { sketchProfileResolverOf } from "./extrude";
+import { resolveDocumentSketch, sketchProfileResolverOf } from "./extrude";
 
 /**
  * Maps one resolved sketch path segment onto the kernel contract's local
@@ -104,7 +104,14 @@ export function sketchPathResolverOf(
       };
       return { ok: false, error: failure };
     }
-    const path = resolveSweepPath(sketch.value.entities);
+    // Parameter-bound path sketches re-solve against the CURRENT document
+    // parameters, exactly like the profile seam; unbound paths ride the
+    // stored coordinates verbatim.
+    const resolved = resolveDocumentSketch(document, sketch.value);
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.error };
+    }
+    const path = resolveSweepPath(resolved.value.entities);
     if (!path.ok) {
       const failure: ParseFailure = {
         code: path.error.code,

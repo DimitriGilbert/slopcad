@@ -79,6 +79,7 @@ import {
   length,
   overridesFromCsvRows,
   parseDatumPayload,
+  parseParameterId,
   parseParameterTableCsv,
   serializeParameterTableCsv,
   type AnyDimensionalValue,
@@ -110,6 +111,7 @@ import {
   hasComputedAnchoredExtrude,
   sceneOperandOfBody,
   sessionComputedFacesOf,
+  sketchIdsBoundToParameters,
   sketchProfileResolverOf,
   type SessionComputedFaces,
 } from "./extrude";
@@ -907,10 +909,29 @@ export function useWorkbenchEngine(
       previous === null || previous.document === workbenchDocument
         ? []
         : documentChangeInvalidations(previous.document, workbenchDocument);
+    // The parameter-bound-sketch edge: a feature consumes its sketch
+    // record, not the sketch's bindings, so the graph cannot see a changed
+    // parameter through it. Expand the changed-node set with every sketch
+    // bound to a changed parameter — the existing sketch→feature edges
+    // then invalidate exactly the consuming features, and the next
+    // regenerate re-executes them against the new parameter values.
+    const changedParameterIds = new Set(
+      changedNodes.flatMap((node) => {
+        const parsed = parseParameterId(node);
+        return parsed.ok ? [parsed.value] : [];
+      }),
+    );
+    const boundSketchIds = sketchIdsBoundToParameters(
+      workbenchDocument,
+      changedParameterIds,
+    );
     const states =
       previous === null
         ? initialRegenerationStates(features)
-        : markStale(features, previous.states, changedNodes);
+        : markStale(features, previous.states, [
+            ...changedNodes,
+            ...boundSketchIds,
+          ]);
     const applied = regenerate({
       features,
       states,

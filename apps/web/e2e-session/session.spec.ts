@@ -3836,6 +3836,155 @@ test("s31 variable manager rename + delete: the rewrite is visible and the refus
   });
 });
 
+test("s32 sketch dimensions bind to variables: the $-autocomplete re-drives the sketch and the solid", async ({
+  sessionPage: page,
+}) => {
+  await stage("s32 sketch dimension binding", async () => {
+    // THE FEATURE (Phase 26a — the owner's commission: "I need to be able
+    // to set the size of my perfboard"): a sketch dimension takes `$boardL`
+    // as its value through the inspector's `$`-autocomplete, the binding
+    // re-drives the LIVE sketch when the variable edits, and the case
+    // extruded from that sketch re-drives downstream — one variable moving
+    // drawn geometry and solid in the same commit.
+    await openComplete(page);
+    const panel = page.locator('[data-slot="cad-parameter-panel"]');
+
+    /** The root's serialized command log (the machine surface). */
+    const readLog = async (): Promise<
+      readonly { readonly commands: readonly Record<string, unknown>[] }[]
+    > =>
+      JSON.parse(
+        (await page
+          .locator(`#${COMPLETE_ROOT}`)
+          .getAttribute("data-command-log")) ?? "[]",
+      ) as readonly {
+        readonly commands: readonly Record<string, unknown>[];
+      }[];
+
+    /** The sketch session's serialized command log (data-sketch-commands). */
+    const sketchLog = async (): Promise<readonly Record<string, unknown>[]> =>
+      JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-commands")) ??
+          "[]",
+      ) as readonly Record<string, unknown>[];
+
+    // LEG 1 — CAST THE VARIABLE: `boardL` = 26 mm (deliberately NOT the
+    // drawn width — the binding must visibly re-drive the sketch).
+    await page.getByRole("button", { name: "Manage variables" }).click();
+    await panel.getByLabel("Name", { exact: true }).fill("boardL");
+    await panel.getByLabel("Value", { exact: true }).fill("26mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    const boardRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ hasText: "boardL" });
+    await expect(boardRow).toBeVisible();
+    const createCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(createCommand?.type).toBe("parameter.create");
+    expect(createCommand?.name).toBe("boardL");
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+
+    // LEG 2 — DRAW AND DIMENSION: the journey rectangle, then a distanceX
+    // across it (left edge midpoint → right edge midpoint = the drawn
+    // width, 20). The new constraint auto-selects, so the inspector's
+    // dimension field reads the literal.
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await activateSketchTool(page, "distanceX");
+    await clickCanvasPoint(page, RECT.x0, (RECT.y0 + RECT.y1) / 2);
+    await clickCanvasPoint(page, RECT.x1, (RECT.y0 + RECT.y1) / 2);
+    const field = page.getByLabel("Dimension (mm)");
+    await expect(field).toHaveValue("20");
+
+    // LEG 3 — THE BINDING: type `$board`, pick `$boardL` from the live
+    // autocomplete, apply. The commit is the BOUND `sketch.dimension.set`
+    // (parameterId, no value), the inspector row names the binding, and the
+    // sketch RE-SOLVES against the variable: the readout reads 26 mm and
+    // the solved geometry spans 26 — the drawn 20 is gone.
+    await field.click();
+    await field.fill("$board");
+    await page.getByRole("option", { name: "$boardL" }).click();
+    await expect(field).toHaveValue("$boardL");
+    await page
+      .locator(`${SKETCH} form`)
+      .getByRole("button", { name: "Apply" })
+      .click();
+    const boundCommand = (await sketchLog()).at(-1);
+    expect(boundCommand?.type).toBe("sketch.dimension.set");
+    expect(String(boundCommand?.parameterId)).toMatch(/^param_/);
+    expect(boundCommand?.value).toBeUndefined();
+    await expect(
+      page
+        .locator(`${SKETCH} [data-slot="cad-sketch-inspector"]`)
+        .getByText("distanceX $boardL"),
+    ).toBeVisible();
+    await expect(page.locator(SKETCH)).toHaveAttribute(
+      "data-sketch-dimensions",
+      /Δx 26 mm/,
+    );
+    const spanOfSolved = async (): Promise<number> => {
+      const solved = JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
+      ) as { kind: string; x1?: number; x2?: number }[];
+      const xs = solved
+        .filter((entity) => entity.kind === "line")
+        .flatMap((line) => [line.x1 ?? 0, line.x2 ?? 0]);
+      return Math.max(...xs) - Math.min(...xs);
+    };
+    expect(await spanOfSolved()).toBeCloseTo(26, 3);
+
+    // LEG 4 — THE DANGLING ATTEMPT IS REFUSED: `$nope` names no variable;
+    // the field gate names it the moment it is typed and the Apply button
+    // disables — an unknown token cannot leave the field, and nothing
+    // commits. (The feature dialogs' expressionNumber gate, same rule.)
+    const sketchLogLength = (await sketchLog()).length;
+    await field.click();
+    await field.fill("$nope");
+    await expect(page.getByText('Unknown parameter "nope".')).toBeVisible();
+    await expect(
+      page.locator(`${SKETCH} form`).getByRole("button", { name: "Apply" }),
+    ).toBeDisabled();
+    expect((await sketchLog()).length).toBe(sketchLogLength);
+
+    // LEG 5 — THE CASE: extrude the bound sketch (auto-exits to the model
+    // workspace). The document scene settles at the boot plate + the case
+    // at the CURRENT variable: 26 × 15 × 10.
+    const beforeExtrude = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.locator('[data-testid="sketch-extrude"]').click();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-sketch-mode",
+      "model",
+    );
+    const extruded = await waitForRootSettle(page, COMPLETE_ROOT, {
+      afterDispatch: beforeExtrude,
+    });
+    expect(
+      volumeNear(
+        Number(extruded),
+        BOOT_PLATE_VOLUME + 26 * 15 * EXTRUDE_DEFAULT_DEPTH_MM,
+      ),
+    ).toBe(true);
+
+    // LEG 6 — THE DOWNSTREAM RE-DRIVE: edit `boardL` 26 → 40 in the
+    // manager. The bound sketch re-solves at profile time, the extrusion
+    // re-derives, and the settled volume follows — the perfboard resized by
+    // one variable edit, no new sketch.
+    const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.getByLabel("boardL", { exact: true }).fill("40");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = await waitForRootSettle(page, COMPLETE_ROOT, {
+      afterDispatch: beforeEdit,
+    });
+    expect(
+      volumeNear(
+        Number(redriven),
+        BOOT_PLATE_VOLUME + 40 * 15 * EXTRUDE_DEFAULT_DEPTH_MM,
+      ),
+    ).toBe(true);
+
+    extra("sketch-dimension-binding");
+  });
+});
+
 test("s99 THE COVERAGE GATE: every manifest path and route was exercised", () => {
   const missingEntries = ENTRY_IDS.filter((id) => !ledger.covered.has(id));
   const missingDeclines = DECLINE_IDS.filter((id) => !ledger.declines.has(id));

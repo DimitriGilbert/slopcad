@@ -177,3 +177,98 @@ describe("CadSketchInspector", () => {
     expect(item?.textContent).toContain("7 degrees of freedom");
   });
 });
+
+describe("CadSketchInspector parameter-bound dimensions", () => {
+  const NAMES = ["boardL", "boardW"];
+
+  it("renders the expressionNumber field with the $-autocomplete when parameter names arrive", () => {
+    renderInspector({
+      dimension: {
+        constraintId: "skcon_width",
+        decimals: 3,
+        unit: "mm",
+        value: 60,
+      },
+      parameterNames: NAMES,
+      selectedConstraintId: "skcon_width",
+    });
+    // A combobox-role text input (tokens must be typable), not the native
+    // number spinner.
+    const input = screen.getByRole("combobox");
+    expect((input as HTMLInputElement).value).toBe("60");
+    fireEvent.change(input, { target: { value: "$bo" } });
+    expect(screen.getByRole("option", { name: "$boardL" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "$boardW" })).toBeDefined();
+    // The live filter narrows by the partial after the `$`.
+    fireEvent.change(input, { target: { value: "$rdl" } });
+    expect(screen.getByRole("option", { name: "$boardL" })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "$boardW" })).toBeNull();
+  });
+
+  it("keeps the plain number field when no parameter names arrive", () => {
+    renderInspector({
+      dimension: {
+        constraintId: "skcon_width",
+        decimals: 3,
+        unit: "mm",
+        value: 60,
+      },
+      selectedConstraintId: "skcon_width",
+    });
+    expect(screen.getByRole("spinbutton")).toBeDefined();
+    expect(screen.queryByRole("combobox")).toBeNull();
+  });
+
+  it("submits a $name token as the string value", async () => {
+    const { onEditDimension } = renderInspector({
+      dimension: {
+        constraintId: "skcon_width",
+        decimals: 3,
+        unit: "mm",
+        value: 60,
+      },
+      parameterNames: NAMES,
+      selectedConstraintId: "skcon_width",
+    });
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "$boardL" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => {
+      expect(onEditDimension).toHaveBeenCalledWith("skcon_width", "$boardL");
+    });
+  });
+
+  it("defaults to the bound dimension's $name token", () => {
+    renderInspector({
+      dimension: {
+        constraintId: "skcon_width",
+        decimals: 3,
+        parameterName: "boardL",
+        unit: "mm",
+        value: 26,
+      },
+      parameterNames: NAMES,
+      selectedConstraintId: "skcon_width",
+    });
+    const input = screen.getByRole("combobox");
+    expect((input as HTMLInputElement).value).toBe("$boardL");
+  });
+
+  it("refuses an unknown parameter token at field level (no submit)", () => {
+    const { onEditDimension } = renderInspector({
+      dimension: {
+        constraintId: "skcon_width",
+        decimals: 3,
+        unit: "mm",
+        value: 60,
+      },
+      parameterNames: NAMES,
+      selectedConstraintId: "skcon_width",
+    });
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "$nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(onEditDimension).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Unknown parameter "nope".');
+  });
+});

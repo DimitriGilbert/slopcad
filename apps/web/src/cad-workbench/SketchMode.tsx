@@ -44,16 +44,19 @@ import {
   angle,
   angle as angleValue,
   createReferenceId,
+  findParameterByName,
   length,
   length as lengthValue,
   mintTopologyReference,
   valueIn,
   type BodyId,
+  type ParameterCollection,
   type TopologyView,
 } from "@slopcad/cad-core";
 import {
   analyzeConstrainedness,
   applySolvedParameters,
+  boundDimensionParameterId,
   circularArrayCommands,
   convertTopologyEntities,
   createSketchEntityId,
@@ -69,6 +72,7 @@ import {
   rectangularArrayCommands,
   redoSketchSession,
   resolveExtrudeProfile,
+  resolveSketchDimensionBindings,
   serializeDimensionPresentation,
   serializeSketch,
   serializeSketchCommand,
@@ -76,8 +80,10 @@ import {
   workplaneToPlacement,
   type SketchCommand,
   type SketchConstrainedness,
+  type SketchConstraint,
   type SketchDiagnostic,
   type SketchEntity,
+  type SketchParameterLookup,
   type SerializedSketch,
   type SerializedSketchCommand,
   type Workplane,
@@ -87,6 +93,7 @@ import { importDxf } from "@slopcad/cad-io/dxf-import";
 import { importSvg } from "@slopcad/cad-io/svg-import";
 import { Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
+import { expressionNumberTokenName } from "@slopcad/ui/components/formedible/fields/expression-number-field";
 import {
   CadSketchCanvas,
   type CadSketchCanvasPreview,
@@ -131,8 +138,20 @@ interface SketchSolveState {
   readonly status: "solved" | "under-constrained" | "failed";
   /** Degrees of freedom; `null` when the solve failed. */
   readonly dof: number | null;
-  /** The last successfully solved sketch (`null` before the first solve). */
+  /**
+   * The last successfully solved sketch with the AUTHORED constraints —
+   * bindings included — over solved entity values. This is the commit
+   * source (extrude/revolve/save): a serialized sketch must keep its
+   * parameter bindings so the document re-drives it as parameters change.
+   */
   readonly solved: ReturnType<typeof applySolvedParameters> | null;
+  /**
+   * The same solved geometry over the RESOLVED constraint copies (bindings
+   * stripped to their current literal values) — the DISPLAY sketch: the
+   * canvas readouts present the live resolved quantities. `null` when
+   * nothing is bound (it is then just `solved`).
+   */
+  readonly resolvedDisplay: ReturnType<typeof applySolvedParameters> | null;
   readonly diagnostics: readonly SketchDiagnostic[];
   /** Per-entity constrainedness (Phase 37's ink convention). */
   readonly constrainedness: SketchConstrainedness | null;
@@ -232,6 +251,14 @@ export interface SketchModeProps {
    * scroll math moves with any row-width change).
    */
   readonly importSketchFiles?: boolean;
+  /**
+   * The document's parameter collection (Phase 26a): the environment
+   * bound dimensions resolve against and the vocabulary the inspector's
+   * dimension field offers as `$name` tokens. Optional: a host without a
+   * parameter vocabulary omits it — its sketches stay literal-only (the
+   * inspector keeps the plain number field) and nothing else changes.
+   */
+  readonly parameters?: ParameterCollection;
 }
 
 /** The default extrusion depth the action creates the parameter with (mm). */
@@ -285,6 +312,7 @@ export function SketchMode({
   onSaveSketch,
   bootWorkplane,
   importSketchFiles = false,
+  parameters,
 }: SketchModeProps): ReactElement {
   const [session, setSession] = useState(() =>
     createSketchSession(createWorkbenchSketch(bootWorkplane)),
@@ -296,6 +324,7 @@ export function SketchMode({
     status: "solved",
     dof: 0,
     solved: null,
+    resolvedDisplay: null,
     diagnostics: [],
     constrainedness: null,
   });
@@ -332,36 +361,81 @@ export function SketchMode({
     };
   }, [editor.provisional, session.sketch]);
 
+  // The parameter environment bound dimensions resolve against: a stable
+  // per-collection lookup (the document's parameter collection is an
+  // immutable value, so identity changes exactly when a parameter does).
+  // A host without parameters contributes an empty environment — its
+  // sketches cannot carry bindings anyway.
+  const parameterLookup = useMemo<SketchParameterLookup>(() => {
+    if (parameters === undefined) return () => undefined;
+    return (parameterId) => {
+      const found = parameters.parameters.find(
+        (candidate) => candidate.id === parameterId,
+      );
+      return found === undefined ? undefined : { value: found.value };
+    };
+  }, [parameters]);
+
   // The solve loop: every displayed change re-derives (including each drag
   // move — the drag re-solves through the solver per move); a failure keeps
   // the last-known-good geometry and surfaces the structured diagnostics.
+  // Bound dimensions resolve FIRST (against the live parameter environment)
+  // and the solver consumes the resolved literal copies — so a parameter
+  // edit re-drives the sketch here exactly as it re-drives committed
+  // geometry downstream, and an unresolvable binding surfaces as the
+  // sketch's structured failure (last-known-good kept).
   useEffect(() => {
-    const result = SOLVER.solve(
-      displaySketch.entities,
+    const resolution = resolveSketchDimensionBindings(
       displaySketch.constraints,
+      parameterLookup,
     );
+    if (!resolution.ok) {
+      setSolveState((previous) => ({
+        status: "failed",
+        constrainedness: null,
+        dof: null,
+        solved: previous.solved,
+        resolvedDisplay: previous.resolvedDisplay,
+        diagnostics: [resolution.error],
+      }));
+      return;
+    }
+    const solveInput =
+      resolution.value === displaySketch.constraints
+        ? displaySketch
+        : { ...displaySketch, constraints: resolution.value };
+    const result = SOLVER.solve(solveInput.entities, solveInput.constraints);
     if (result.status === "failed") {
       setSolveState((previous) => ({
         status: "failed",
         constrainedness: null,
         dof: null,
         solved: previous.solved,
+        resolvedDisplay: previous.resolvedDisplay,
         diagnostics: result.diagnostics,
       }));
       return;
     }
+    // The commit sketch keeps the AUTHORED constraints (bindings intact —
+    // the document re-drives them); the display sketch carries the resolved
+    // copies so readouts present the live resolved quantities.
     const solved = applySolvedParameters(displaySketch, result.parameters);
+    const resolvedDisplay =
+      resolution.value === displaySketch.constraints
+        ? solved
+        : { ...solved, constraints: resolution.value };
     setSolveState({
       constrainedness: analyzeConstrainedness(
-        solved.entities,
-        displaySketch.constraints,
+        resolvedDisplay.entities,
+        solveInput.constraints,
       ),
       diagnostics: result.diagnostics,
       dof: result.dof,
+      resolvedDisplay,
       solved,
       status: result.status,
     });
-  }, [displaySketch]);
+  }, [displaySketch, parameterLookup]);
 
   const dispatch = useCallback(
     (event: SketchEditorEvent): void => {
@@ -621,9 +695,15 @@ export function SketchMode({
     onSaveSketch({ sketch: serializeSketch(sketch) });
   }, [onSaveSketch, session.sketch, solveState.solved]);
 
-  // The dimension apply surface: the one write path for dimension edits.
+  // The dimension apply surface: the one write path for dimension edits. A
+  // number commits the literal form (unchanged semantics — and a literal on
+  // a bound constraint unbinds it); a `$name` string resolves against the
+  // document's parameters and commits the bound form (the dimension follows
+  // the parameter from the next solve on). Unknown or wrong-dimension names
+  // refuse exactly like the feature dialogs' value resolution — the
+  // inspector surfaces the refusal verbatim and nothing commits.
   const editDimension = useCallback(
-    (constraintId: string, value: number) => {
+    (constraintId: string, value: number | string) => {
       const constraint = session.sketch.constraints.find(
         (candidate) => candidate.id === constraintId,
       );
@@ -640,14 +720,55 @@ export function SketchMode({
           ok: false,
         } as const;
       }
-      const dimensionCommand: SketchCommand = {
-        constraintId: constraint.id,
-        type: "sketch.dimension.set",
-        value:
-          constraint.value.dimension === "length"
-            ? lengthValue(value)
-            : angleValue(value, "deg"),
-      };
+      let dimensionCommand: SketchCommand;
+      if (typeof value === "number") {
+        dimensionCommand = {
+          constraintId: constraint.id,
+          type: "sketch.dimension.set",
+          value:
+            constraint.value.dimension === "length"
+              ? lengthValue(value)
+              : angleValue(value, "deg"),
+        };
+      } else {
+        const name = expressionNumberTokenName(value);
+        if (name === null) {
+          return {
+            error: {
+              code: "sketch/dimension-binding-invalid",
+              message: `"${value}" is not a $name parameter reference.`,
+            },
+            ok: false,
+          } as const;
+        }
+        const parameter =
+          parameters === undefined
+            ? undefined
+            : findParameterByName(parameters, name);
+        if (parameter === undefined) {
+          return {
+            error: {
+              code: "sketch/dimension-binding-unresolved",
+              message: `Unknown parameter "${name}".`,
+            },
+            ok: false,
+          } as const;
+        }
+        if (parameter.value.dimension !== constraint.value.dimension) {
+          return {
+            error: {
+              code: "sketch/dimension-binding-invalid",
+              message: `The parameter "${name}" carries ${parameter.value.dimension}, but this dimension needs ${constraint.value.dimension}.`,
+            },
+            ok: false,
+          } as const;
+        }
+        dimensionCommand = {
+          constraintId: constraint.id,
+          type: "sketch.dimension.set",
+          parameterId: parameter.id,
+        };
+      }
       const applied = applySketchSessionTransaction(session, {
         commands: [dimensionCommand],
       });
@@ -661,7 +782,7 @@ export function SketchMode({
       ]);
       return { ok: true } as const;
     },
-    [session],
+    [parameters, session],
   );
 
   // The convert list (Phase 37): one persistent reference per topology
@@ -941,15 +1062,31 @@ export function SketchMode({
     return map;
   }, [diagnostics]);
 
+  /** The parameter NAME a bound constraint points at, when resolvable. */
+  const boundParameterNameOf = useCallback(
+    (constraint: SketchConstraint): string | undefined => {
+      const parameterId = boundDimensionParameterId(constraint);
+      if (parameterId === null || parameters === undefined) return undefined;
+      return parameters.parameters.find(
+        (candidate) => candidate.id === parameterId,
+      )?.name;
+    },
+    [parameters],
+  );
+
   const inspectorConstraints: readonly CadSketchInspectorConstraint[] = useMemo(
     () =>
       session.sketch.constraints.map((constraint) => {
         const diagnostic = diagnosticById.get(constraint.id);
+        const boundName = boundParameterNameOf(constraint);
         return {
           entityIds: constraintOperandIds(constraint),
           id: constraint.id,
           kind: constraint.kind,
-          label: constraintLabel(constraint),
+          label:
+            boundName === undefined
+              ? constraintLabel(constraint)
+              : `${constraint.kind} $${boundName}`,
           message: diagnostic?.message,
           status:
             diagnostic === undefined
@@ -959,7 +1096,7 @@ export function SketchMode({
                 : "warning",
         };
       }),
-    [session.sketch.constraints, diagnosticById],
+    [boundParameterNameOf, diagnosticById, session.sketch.constraints],
   );
 
   const selectedDimension: CadSketchInspectorDimension | null = useMemo(() => {
@@ -973,17 +1110,22 @@ export function SketchMode({
     return {
       constraintId: selected.id,
       decimals: 3,
+      parameterName: boundParameterNameOf(selected),
       unit: canonical.dimension === "length" ? "mm" : "deg",
       value: valueIn(
         canonical,
         canonical.dimension === "length" ? "mm" : "deg",
       ),
     };
-  }, [editor.selectedConstraintId, session.sketch.constraints]);
+  }, [
+    boundParameterNameOf,
+    editor.selectedConstraintId,
+    session.sketch.constraints,
+  ]);
 
   const view = sketchViewModel(
     displaySketch,
-    solveState.solved,
+    solveState.resolvedDisplay ?? solveState.solved,
     { entityIds: editor.selectedEntityIds },
     diagnostics,
     solveState.constrainedness,
@@ -1176,7 +1318,8 @@ export function SketchMode({
       data-sketch-solved={JSON.stringify(
         solveState.solved === null
           ? null
-          : sketchSurface(solveState.solved).entities,
+          : sketchSurface(solveState.resolvedDisplay ?? solveState.solved)
+              .entities,
       )}
       data-sketch-tool={editor.tool}
       data-sketch-tool-status={JSON.stringify(effectiveStatus)}
@@ -1408,6 +1551,11 @@ export function SketchMode({
           onApplyArray={applyArray}
           onConvert={applyConvert}
           onEditDimension={editDimension}
+          parameterNames={
+            parameters === undefined
+              ? undefined
+              : parameters.parameters.map((parameter) => parameter.name)
+          }
           onSelectConstraint={(constraintId) => {
             const found =
               constraintId === null
