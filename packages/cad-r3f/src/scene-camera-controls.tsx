@@ -17,9 +17,10 @@
  *
  * ## Gesture vocabulary (the CAD conventions)
  *
- * - **Left-drag = orbit** around the seed target (elevation clamped so
- *   the eye can neither dive under the ground plane nor flip through the
- *   pole).
+ * - **Left-drag = orbit** around the seed target (elevation clamped just
+ *   short of the pole in both directions: the orbit runs freely through
+ *   the horizon and under the ground plane, and the up-vector never
+ *   degenerates).
  * - **Wheel = dolly** (exponential, distance clamped inside the scene's
  *   clip planes), `preventDefault`-ed so a zoom never page-scrolls.
  * - **Middle-drag / Shift-left-drag = pan** (the grab-the-model
