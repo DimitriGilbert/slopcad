@@ -28,15 +28,22 @@ import {
 // SOCKLETED NodeMCU with components on both faces. The owner's modeling
 // doctrine, locked: the case starts as ONE BLOCK you extrude and THEN
 // empty the inside; the lid is ONE rectangle you extrude, then ANOTHER
-// rectangle SMALLER ON TOP that you extrude as well — never one tedious
-// extrude per wall. The model builds in the case's natural viewing frame:
-// opening UP, the camera looking down into it.
+// rectangle SMALLER — never one tedious extrude per wall. The model builds
+// in the case's natural viewing frame: opening UP, the camera looking down
+// into it — and, since the orbit band went free (61157d3), from BELOW it
+// too.
 //
 //   lid plate        76 × 56 × 2.5, extruded UP from the bed at the
-//                    footprint — the lid's first rectangle
-//   lid lip          70 × 50 × 3, sketched ON the plate's top face and
-//                    extruded UP — the doctrine's second, smaller
-//                    rectangle (the lid reads 21140 mm³ as ONE pad union)
+//                    footprint — the lid's first rectangle; it sits ON
+//                    the case's walls (z 0..2.5 at the rim plane)
+//   lid lip          69 × 49 × 3, sketched on the SAME bed plane and
+//                    extruded DOWN (z 0..−3) — the doctrine's second,
+//                    smaller rectangle, hanging INTO the opening: the
+//                    lip is the feature that keeps the lid located. It
+//                    runs HALF A MILLIMETRE small a side against the
+//                    70 × 50 cavity on purpose — a 70 × 50 lip in a
+//                    70 × 50 cavity is a zero-clearance fit no printer
+//                    delivers; the narration says so on camera
 //   block            76 × 56 × 37.5, extruded DOWN from the bed — the
 //                    whole case in one solid (159600 mm³)
 //   window           ⌀6.5 drilled along X through the 3 mm plug wall,
@@ -46,7 +53,13 @@ import {
 //   pocket tool      70 × 50 × 35, extruded DOWN from the bed — the
 //                    subtract that empties the block leaves a 2.5 floor
 //                    at the bottom (z −37.5..−35) and 3 mm walls to the
-//                    opening at z = 0
+//                    opening at z = 0. THE TOOL IS DIMENSION-CONSTRAINED,
+//                    not click-placed: drawn with its far corner ON the
+//                    final inset, held there by a dimension pair to a
+//                    construction anchor at the origin, then its SIZE
+//                    dimensions DRIVE the near corner onto (3,3) — the
+//                    cavity is 70 × 50 centered at (38,28), every wall
+//                    exactly 3 mm, BY CONSTRUCTION
 //   standoffs        four ⌀6 × 6 posts SKETCHED ON THE CAVITY FLOOR at
 //                    the corner insets (9,9), (67,9), (9,47), (67,47) —
 //                    standing 6 proud of the floor top, so the board
@@ -61,22 +74,47 @@ import {
 //    brief's in-use heights read directly: the plug line at 6..12.5 above
 //    the floor top, i.e. z −29..−22.5 — and the standoffs put the board's
 //    rest plane exactly at the plug line's bottom, z = −29.
-// 2. THE LID GOES FIRST, AND THE PAD TELLS IT TRUE. The lip is a
-//    sketch-on-face extrude — a DATUM-anchored pad — and the bench's pad
-//    composition unions the pad with the document's FIRST extrude (the
-//    pad scene's positional base, absorbed explicitly). With the lid
-//    built first, that base IS the lid's own plate: the lid beat reads
-//    21140 mm³ as one composed solid — the doctrine's two rectangles
-//    taught as the single solid they are — and the very next extrude
-//    (the block, a plain bed sketch) turns the pad reader off, so the
-//    lid settles into two plain bodies worth exactly the same 21140.
-//    Building the lid LAST was probed and refused: as the final
-//    datum-anchored extrude it stays the pad's composition forever and
-//    drags the CONSUMED block's solid back into the render (the lid
-//    export would carry 159600 mm³ of hidden box). The lid steps aside
-//    through its tree eyes before the block lands, so every box-beat
-//    readout counts the case alone.
-// 3. THE WINDOW DRILLS ON THE BLOCK, BEFORE THE POCKET EXISTS. The hole
+// 2. THE LID SITS ON THE BOX, THE LIP DROPS INTO IT — both PLAIN bed
+//    extrudes. The plate is the full footprint UP 2.5 (it rests on the
+//    rim), the lip the same plane DOWN 3 (it hangs into the cavity).
+//    The old build's sketch-on-face lip (a datum-anchored pad, composed
+//    into the plate) is gone: with both extrudes plain, the pad reader
+//    never fires, no absorption quirk applies (probed: the block later
+//    lands OVER the hanging lip and all three bodies stay their own,
+//    180383 mm³ on the nose), and the lid teaches as the two rectangles
+//    it is. The lid goes FIRST and steps aside through its tree eyes
+//    before the block lands, so every box-beat readout counts the case
+//    alone.
+// 3. THE POCKET TOOL IS DIMENSION-CONSTRAINED — the posts' treatment,
+//    adapted to a rectangle's corners. The solver's contract, probed:
+//    a dimension whose two operands carry EQUAL normal-matrix diagonals
+//    (the posts' lone circle against the lone construction point) freezes
+//    one side and the other absorbs the correction; an UNEQUAL pair lets
+//    the weaker side absorb — and a lone construction point ALWAYS loses
+//    to a rectangle's corner (the implicit chain/parallel/perpendicular
+//    rows inflate the corner's diagonal), so a corner-to-point dimension
+//    can never MOVE the rectangle; it can only HOLD it. The build uses
+//    exactly that: the far corner is drawn ON its final inset (73,53)
+//    and HELD there by distanceX/distanceY to the anchor point at the
+//    origin (committed at −73 and −53 — the measure runs second minus
+//    first — and asserted on camera), while the SIZE pair (corner to
+//    corner) is committed at the drawn 63 × 43 and then EDITED to
+//    70 × 50: the near corner slides onto (3,3) ON CAMERA (probed: both
+//    slides land on the far corners' frozen rows — 73 and 53 never move,
+//    the point never moves, the solve reads under-constrained at 2 DOF,
+//    the same honest state as the posts). The cavity's position no
+//    longer relies on click precision: the committed dimensions say
+//    70 × 50 with the far corner at (73,53) from the origin, and
+//    76 − 73 = 3 is a wall BY CONSTRUCTION. One horizontal on the
+//    bottom edge squares the frame to the world axes (the implicit
+//    chain propagates it; a second vertical would be redundant).
+//    PICK-MECHANICS NOTE: the pinned anchor picks scroll the sketch
+//    surface inside its container (the band contraction the driver's
+//    guard catches loudly), so the high rows are picked FIRST in each
+//    dimension and re-revealed through the pinned pick itself when a
+//    scroll has hidden them — the probe logged both band states and the
+//    click that survives each.
+// 4. THE WINDOW DRILLS ON THE BLOCK, BEFORE THE POCKET EXISTS. The hole
 //    action targets the document's LAST EXTRUDE (the action was never
 //    relaxed), so the beat runs while the block IS the last extrude. The
 //    bore's depth is 3 — exactly the wall the window needs — because a
@@ -85,7 +123,7 @@ import {
 //    the perpendicular plane in world-axis order — axis 1 drills along X,
 //    so (holeX, holeY) = (world y, world z) = (28, −25.75); negative
 //    positions commit fine (probed).
-// 4. THE SUBTRACT CONSUMES A COMPUTED OPERAND. Commit 72af4ca relaxed the
+// 5. THE SUBTRACT CONSUMES A COMPUTED OPERAND. Commit 72af4ca relaxed the
 //    boolean body pool to any body with a computable scene: the subtract
 //    targets "holed 1" (the window-bearing block the hole feature
 //    outputs) with "pad 4" (the pocket tool) as the tool — and the
@@ -94,7 +132,7 @@ import {
 //    (hidden) by the subtract; "holed 1" becomes compute-only; the
 //    rendered tip is the one "subtract 1" body: the hollow box with its
 //    window, 37000.451 mm³ analytic.
-// 5. THE STANDOFFS SKETCH ON THE CAVITY FLOOR — the computed-face datum.
+// 6. THE STANDOFFS SKETCH ON THE CAVITY FLOOR — the computed-face datum.
 //    Commit d5c88c7 let a face picked on a COMPUTED body (the boolean's
 //    output) anchor a sketch datum: the pick records the face's
 //    same-normal ordinal, and the datum re-derives the floor's plane
@@ -115,25 +153,36 @@ import {
 //    answer is the dimension pair: draw the ⌀6 circle near the anchor,
 //    mark the anchor with a construction point, commit distanceX and
 //    distanceY at the drawn geometry, then edit both dimensions to the
-//    signed targets — the solver moves the FIRST-picked entity (the
-//    circle) onto the inset, exact to the digit (probed end-to-end: the
-//    extruded mesh lands center-dead on the dimensioned spot). One
-//    circle, one dimension pair, one extrude UP 6 — four quick rounds of
-//    the same trick, a fresh floor datum each round, the datum marker's
-//    z pinned at −35 every time (the rim ring at z = 0 shares the
-//    floor's normal — a datum resolved there would read 0 and fail the
-//    beat loudly, the re-pick discipline the probes taught). The pad
+//    signed targets — the circle/point pair is an exact diagonal tie,
+//    so the solver moves the FIRST-created entity (the circle) onto the
+//    inset, exact to the digit (probed end-to-end: the extruded mesh
+//    lands center-dead on the dimensioned spot). One circle, one
+//    dimension pair, one extrude UP 6 — four quick rounds of the same
+//    trick, a fresh floor datum each round, the datum marker's z pinned
+//    at −35 every time (the rim ring at z = 0 shares the floor's
+//    normal — a datum resolved there would read 0 and fail the beat
+//    loudly, the re-pick discipline the probes taught). The pad
 //    composition DECLINES for these (unioning a post over the document's
 //    first extrude would erase the pocket), so each standoff renders as
 //    its own body beside the shell — the honest shell-plus-posts
 //    aggregate the readouts count.
+// 7. THE BELOW-PLANE BEAT IS THE ORBIT FREEDOM'S PAYOFF. Commit 61157d3
+//    widened the user orbit band to −88..+88: right after the lip lands
+//    (the lid alone on stage), upward drags walk the eye UNDER the world
+//    plane to about −48°, and the underside reads true — the lip's
+//    bottom face closest to the eye, the plate's rim around it, the
+//    elevation readout's negative sign as the machine pin. The standard
+//    iso view re-aims above the horizon for the lid-aside beat. The
+//    case's own interior keeps the WIREFRAME treatment: its floor is
+//    CLOSED, so a below-plane case view shows the slab's underside, not
+//    the cavity — the wireframe still teaches that beat better.
 //
 // ## The document IS the scene (Phase 16) — and the chapter teaches it
 //
 // The applied scene renders every visible lineage. The section instrument
 // beats run on the boot plate, which then HIDES through its tree eye —
-// from there every readout counts what the stage actually shows. The
-// lid's two bodies step out of view before the block lands and step back
+// from there every readout counts what the stage actually shows. The lid's
+// two bodies step out of view before the block lands and step back
 // for the lid export; an export carries WHAT RENDERS, so each file is
 // scoped by the same visibility control the viewer just learned.
 //
@@ -141,17 +190,18 @@ import {
 //               + 4 × 169.646 standoffs); the mesh measures a hair under
 //               analytic — the post cylinders are inscribed-polygon
 //               tessellations, and each post rides as its own shell
-//   lid file    21140 mm³ analytic, planar-exact (10640 plate + 10500 lip)
+//   lid file    20783 mm³ analytic, planar-exact (10640 plate + 10143
+//               lip); z spans −3..2.5 — the lip dips BELOW the rim plane
 // Each export is verified against its analytic volume by summing the
 // downloaded mesh's signed tetrahedra, and the box's world bounds
 // [0,0,−37.5]–[76,56,0] (the posts stand INSIDE the footprint — the
-// bounds don't move) and the lid's [0,0,0]–[76,56,5.5] are read off the
+// bounds don't move) and the lid's [0,0,−3]–[76,56,2.5] are read off the
 // meshes' own vertices.
 
 /** The lid's plate: the full footprint, 2.5 thick. */
 const PLATE_VOLUME = 76 * 56 * 2.5;
-/** The lid's lip: the doctrine's smaller rectangle, 3 tall. */
-const LIP_VOLUME = 70 * 50 * 3;
+/** The lid's lip: 69 × 49 — half a millimetre of slide clearance a side. */
+const LIP_VOLUME = 69 * 49 * 3;
 /** The lid file: plate + lip — the doctrine's own lid number. */
 const LID_VOLUME = PLATE_VOLUME + LIP_VOLUME;
 /** The block: the full footprint, 37.5 tall, extruded below the bed. */
@@ -191,12 +241,13 @@ const PLANAR_VOLUME_FLOOR = 0.995;
  * Chapter 30 — the applied capstone. ONE continuous build, blank workbench
  * to a TWO-file print set: the brief and its dimension stack-up, the
  * section instrument on the demo plate, then the lid (the doctrine's two
- * rectangles, taught as the pad union they compose into), then the case —
- * the block, the USB window drilled while the block is the hole's target,
- * the pocket subtract that empties the block through the relaxed boolean
- * pool, and four floor-datum standoffs — and the two view-scoped exports.
- * Every export is verified against its analytic volume and its taught world
- * bounds from the downloaded mesh's own triangles.
+ * rectangles — plate up, lip hanging down, shown from below the world
+ * plane), then the case — the block, the USB window drilled while the
+ * block is the hole's target, the dimension-constrained pocket subtract
+ * that empties the block through the relaxed boolean pool, and four
+ * floor-datum standoffs — and the two view-scoped exports. Every export
+ * is verified against its analytic volume and its taught world bounds
+ * from the downloaded mesh's own triangles.
  */
 export const chapter: ChapterModule = {
   definition: {
@@ -227,19 +278,19 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "lid-why",
-        text: "Start with the lid: one rectangle you extrude, then a smaller one ON TOP.",
+        text: "Start with the lid: one rectangle for the plate, a smaller one for the lip.",
       },
       {
         stepId: "lid-plate",
         text: "The plate: 76 by 56 at the footprint, extruded UP 2.5 — 10640 mm³.",
       },
       {
-        stepId: "lid-boss",
-        text: "Sketched ON the plate's top: 70 by 50, UP 3 — the lid reads 21140 mm³.",
+        stepId: "lid-lip",
+        text: "The lip: 69 by 49 on the same bed plane, extruded DOWN 3 — 20783 mm³.",
       },
       {
-        stepId: "lid-mate",
-        text: "As drawn the lip points up — flip the print and the lip drops inside.",
+        stepId: "lid-underside",
+        text: "Below the horizon the camera is free: the lip hangs under the plate.",
       },
       {
         stepId: "lid-aside",
@@ -263,7 +314,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "pocket",
-        text: "The tool rides beside the block for a moment — the subtract is next.",
+        text: "Drawn near the mark, held by dimensions: 70 by 50, walls 3 by construction.",
       },
       {
         stepId: "subtract-open",
@@ -311,7 +362,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "export-lid",
-        text: "The lid's STL: 21140 mm³, planar-exact, z from 0 to 5.5.",
+        text: "The lid's STL: 20783 mm³, planar-exact, z from −3 to 2.5.",
       },
       {
         stepId: "recap",
@@ -390,45 +441,65 @@ export const chapter: ChapterModule = {
     // the y=0 row second through the pinned pick (the status bar's band).
     await driver.clickCanvasPoint(76, 56);
     await driver.pickPinnedCanvasPoint(0, 0);
-    // UP 2.5: the plate starts at the bed plane — later the case's rim.
+    // UP 2.5: the plate starts at the bed plane — the case's rim, which
+    // the finished lid will rest ON.
     await extrudeWithDepth(page, driver, "extrudeDepth", "2.5", PLATE_VOLUME, {
       kind: "extrude",
     });
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    await driver.step("lid-boss");
-    // The doctrine's second rectangle: sketched ON the plate's top face
-    // (a resolvable extrusion cap) and extruded UP 3. The bench composes
-    // the datum-anchored pad with ITS base — the plate, the document's
-    // first extrude — so this beat's readout is the lid's OWN number:
-    // one union, 21140 mm³.
-    await sketchOnFaceAt(page, driver, "body_extrude/", [0, 0, 1]);
+    await driver.step("lid-lip");
+    // The doctrine's second rectangle — but a lid's lip drops INTO the
+    // opening, so it extrudes DOWN from the SAME bed plane: z 0..−3,
+    // hanging under the plate. 69 × 49, not 70 × 50: the cavity it must
+    // enter is 70 × 50, and a zero-clearance fit is a fit no printer
+    // delivers — half a millimetre a side is the honest slide fit (the
+    // narration says so). A plain bed extrude, like the plate: no datum,
+    // no pad composition — two rectangles, two bodies, one lid.
+    await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(73, 53);
-    await driver.pickPinnedCanvasPoint(3, 3);
-    await extrudeWithDepth(page, driver, "extrudeDepth2", "3", LID_VOLUME, {
+    await driver.clickCanvasPoint(72.5, 52.5);
+    await driver.pickPinnedCanvasPoint(3.5, 3.5);
+    await extrudeWithDepth(page, driver, "extrudeDepth2", "-3", LID_VOLUME, {
       kind: "extrude",
     });
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    await driver.step("lid-mate");
+    await driver.step("lid-underside");
+    // The freed orbit band's payoff (61157d3): downward drags raise the
+    // eye, so upward drags walk UNDER the world plane — and the lid's
+    // underside reads true: the lip's bottom face closest to the eye,
+    // the plate's rim around it. The negative elevation readout is the
+    // machine pin (the helper throws if the band never crosses −45).
+    await orbitBelowPlane(page, driver, -45);
+    expect(
+      Number(await cameraAttribute(page, "elevation-deg")),
+    ).toBeLessThanOrEqual(-45);
     await driver.dwell();
 
     await driver.step("lid-aside");
-    // The file carries what renders: the lid's two bodies step offstage
-    // before the box lands, so every box-beat readout counts the case
-    // alone (the section-off beat's own discipline).
+    // Back above the horizon the standard iso re-aims (the elevation
+    // readout's return is the machine truth), then the file-carries-what-
+    // renders rule: the lid's two bodies step offstage before the box
+    // lands, so every box-beat readout counts the case alone (the
+    // section-off beat's own discipline).
+    await driver.humanClick(page.locator('[data-testid="view-iso"]'));
+    await expect
+      .poll(async () => Number(await cameraAttribute(page, "elevation-deg")), {
+        timeout: 15_000,
+      })
+      .toBeGreaterThan(30);
     await setBodyVisible(page, driver, "body|body_extrude", false);
     await setBodyVisible(page, driver, "body|body_extrude2", false);
     await driver.dwell();
 
     // -- The block (the doctrine's ONE extrude) ------------------------------
     await driver.step("block");
-    // A plain bed extrude — which also turns the pad reader off: the last
-    // extrude no longer carries a datum, and the lid settles into two
-    // plain bodies worth the same 21140 they just taught.
+    // The whole case in one solid, extruded DOWN 37.5 from the rim plane
+    // — straight past the hanging lip (probed: the two lid bodies stay
+    // their own; nothing absorbs).
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
     await driver.clickCanvasPoint(76, 56);
@@ -496,15 +567,64 @@ export const chapter: ChapterModule = {
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    // -- The pocket tool (drawn now, consumed by the subtract next) ---------
+    // -- The pocket tool (dimension-constrained, consumed by the subtract) --
     await driver.step("pocket-why");
     await driver.dwell();
 
     await driver.step("pocket");
+    // The posts' treatment, adapted to a rectangle's corners (the solver
+    // contract in the header): the cavity rectangle is drawn with its FAR
+    // corner on the final inset (73,53) — 70 × 50 centered on the case
+    // would put it there, and 76 − 73 = 3 is a wall — and HELD there by
+    // a dimension pair to a construction anchor at the origin. The SIZE
+    // pair (corner to corner) is committed at the drawn 63 × 43, then
+    // EDITED to 70 × 50: the near corner slides onto (3,3) on camera and
+    // every wall lands exactly 3 mm BY CONSTRUCTION — never again
+    // dependent on click precision.
+    //
+    // Pick mechanics: the pinned anchor pick scrolls the surface in its
+    // container and the visible band contracts to v ≤ ~40 for the rest
+    // of the sketch, so every high row after the anchor lands rides the
+    // pinned pick itself (the same locator mechanics, mirrored — it
+    // re-reveals the row it picks).
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await driver.clickCanvasPoint(70, 50);
-    await driver.pickPinnedCanvasPoint(0, 0);
+    await driver.clickCanvasPoint(10, 10);
+    await driver.clickCanvasPoint(73, 53);
+    await driver.activateSketchTool("point");
+    await clickDatumPoint(driver, 0, 0);
+    // One horizontal squares the frame to the world axes (the implicit
+    // chain propagates it; a second vertical would be redundant).
+    await driver.activateSketchTool("horizontal");
+    await driver.clickCanvasPoint(40, 10);
+    // The position pair: far corner first (pinned — the anchor pick has
+    // scrolled the band by now), anchor second — measured −73 and −53
+    // (second minus first, the posts' convention), asserted below, never
+    // edited.
+    await driver.activateSketchTool("distanceX");
+    await driver.pickPinnedCanvasPoint(70, 53);
+    await clickDatumPoint(driver, 0, 0);
+    await driver.activateSketchTool("distanceY");
+    await driver.pickPinnedCanvasPoint(70, 53);
+    await clickDatumPoint(driver, 0, 0);
+    // The size pair at the drawn geometry: near corner → far corners.
+    await driver.activateSketchTool("distanceX");
+    await driver.clickCanvasPoint(15, 10);
+    await driver.clickCanvasPoint(68, 10);
+    await driver.activateSketchTool("distanceY");
+    await driver.clickCanvasPoint(10, 15);
+    await driver.pickPinnedCanvasPoint(10, 48);
+    // The constraint readouts on camera (the posts beat's discipline):
+    // row 1 rides the position pin, then the pair of size edits drive
+    // the near corner in; row 4's landed 50 is the last readout pointed
+    // at. Each set pins its value off the sketch surface's constraint
+    // JSON — the solve's own record.
+    await driver.humanPoint(page.locator("[data-sketch-constraint-id]").nth(1));
+    await setSketchDimension(page, driver, 1, -73);
+    await setSketchDimension(page, driver, 2, -53);
+    await setSketchDimension(page, driver, 3, 70);
+    await setSketchDimension(page, driver, 4, 50);
+    await driver.humanPoint(page.locator("[data-sketch-constraint-id]").nth(4));
     await extrudeWithDepth(
       page,
       driver,
@@ -703,10 +823,10 @@ export const chapter: ChapterModule = {
       "true",
     );
     // The scene is the lid alone: plate + lip, planar-exact, its bounds
-    // riding the bed plane up through the lip's top.
+    // spanning the lip's dip BELOW the rim plane up through the plate.
     await runStlExport(page, driver, LID_VOLUME, PLANAR_VOLUME_FLOOR, {
-      min: [0, 0, 0],
-      max: [76, 56, 5.5],
+      min: [0, 0, -3],
+      max: [76, 56, 2.5],
     });
     await driver.pointAtReadout(page.locator('[data-cad-export-entry="stl"]'));
     await closeExportDialog(page);
@@ -729,50 +849,35 @@ export const chapter: ChapterModule = {
 };
 
 /**
- * Selects one published face anchor and runs sketch-on-face on it: the
- * semantic pick (body prefix + mean normal, never a triangle index), the
- * glide teaching where the face lives, then the command row's datum
- * resolution as the pin.
+ * Orbits the camera BELOW the world plane by upward canvas drags (the
+ * drag-the-model convention: downward drags raise the eye, upward drags
+ * lower it through the horizon — the band 61157d3 freed to −88..+88).
+ * Each round reads the elevation off the viewport's machine surface and
+ * stops the moment it crosses `floorElevation`; loud when the band never
+ * carries the eye that far. The teaching payoff lives at the lid beat:
+ * only from below does the lip's hang read true.
  */
-async function sketchOnFaceAt(
+async function orbitBelowPlane(
   page: Page,
   driver: TutorialDriver,
-  bodyPrefix: string,
-  normal: readonly [number, number, number],
+  floorElevation: number,
 ): Promise<void> {
-  const anchors = await readFaceAnchors(page, OCCT_ROOT);
-  const matches = Object.entries(anchors).filter(([key, anchor]) => {
-    if (!key.startsWith(bodyPrefix)) return false;
-    if (anchor.normal === null) return false;
-    return (
-      Math.abs(anchor.normal[0] - normal[0]) <= 0.05 &&
-      Math.abs(anchor.normal[1] - normal[1]) <= 0.05 &&
-      Math.abs(anchor.normal[2] - normal[2]) <= 0.05
-    );
-  });
-  const entry = matches[0];
-  if (entry === undefined) {
-    throw new Error(
-      `no face anchor ${bodyPrefix}* normal [${normal.join(", ")}] in [${Object.keys(anchors).join(", ")}]`,
-    );
-  }
   const canvas = await page
     .locator(`#${VIEWPORT_COMPLETE} canvas`)
     .boundingBox();
   if (canvas === null) throw new Error("the viewport canvas never mounted");
-  await driver.humanClick({
-    x: canvas.x + entry[1].point[0],
-    y: canvas.y + entry[1].point[1],
-  });
-  await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
-    "data-selection-key",
-    new RegExp(`^face\\|${bodyPrefix.slice(0, -1)}\\|\\d+\\|\\d+$`),
-  );
-  await driver.openCommandMenu(OCCT_ROOT);
-  await driver.clickCommandRow(OCCT_ROOT, "sketch-on-face");
-  await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
-    "data-datums",
-    /^\[\{.*"resolved":true.*\}\]$/,
+  const centerX = canvas.x + canvas.width / 2;
+  const centerY = canvas.y + canvas.height / 2;
+  for (let round = 0; round < 10; round += 1) {
+    const elevation = Number(await cameraAttribute(page, "elevation-deg"));
+    if (elevation <= floorElevation) return;
+    await driver.drag(
+      { x: centerX, y: centerY + 60 },
+      { x: centerX, y: centerY - 180 },
+    );
+  }
+  throw new Error(
+    `the orbit never reached ${String(floorElevation)}° after 10 drags (last read ${await cameraAttribute(page, "elevation-deg")})`,
   );
 }
 

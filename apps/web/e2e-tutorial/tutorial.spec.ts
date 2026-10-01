@@ -317,21 +317,25 @@ test("chapter: tsx-exchange", async ({ tutorialPage: page }) => {
 
 // The applied capstone: ONE continuous document carries the whole build —
 // eight sketches, eight extrudes with parameter re-drives (negative depths
-// included), the sketch-on-face verb on the plate's top cap (the lid's pad
-// composition) and on the BOOLEAN's cavity floor (four ⌀6 standoffs, one
-// floor datum per round, the computed-face pick aimed from the standard
-// top view), a hole command drilled while the block is its target, the
-// boolean dialog whose subtract consumes the holed body through the
-// relaxed pool, the section instrument, and TWO view-scoped STL exports
-// (box, lid) verified against their analytic volumes AND their taught
-// world bounds — at teaching pace on the OCCT backend, whose exact-BREP
-// volumes the analytic pins demand. The merged session-stage chapters set
-// the elevation precedent (holes-and-patterns' 300 s for four stages); a
-// start-to-finish applied build legitimately takes minutes of teaching.
+// included), the sketch-on-face verb on the BOOLEAN's cavity floor (four
+// ⌀6 standoffs, one floor datum per round, the computed-face pick aimed
+// from the standard top view), the lid taught as two plain bed rectangles
+// (plate up, lip down) with the below-plane orbit showing the lip's hang,
+// the pocket tool dimension-constrained onto its inset (the posts' solver
+// pattern, adapted to a rectangle's corners), a hole command drilled while
+// the block is its target, the boolean dialog whose subtract consumes the
+// holed body through the relaxed pool, the section instrument, and TWO
+// view-scoped STL exports (box, lid) verified against their analytic
+// volumes AND their taught world bounds — at teaching pace on the OCCT
+// backend, whose exact-BREP volumes the analytic pins demand. The merged
+// session-stage chapters set the elevation precedent
+// (holes-and-patterns' 300 s for four stages); a start-to-finish applied
+// build legitimately takes minutes of teaching.
 test("chapter: applied-iot-case", async ({ tutorialPage: page }) => {
   // The four floor-datum standoff rounds (sketch-on-face + dimension pair
-  // per post) ride on top of the build-and-export walk, each at teaching
-  // pace — the merged-stage elevation precedent again, one step further.
+  // per post) and the pocket's five-constraint dimensioning ride on top
+  // of the build-and-export walk, each at teaching pace — the
+  // merged-stage elevation precedent again, one step further.
   test.setTimeout(900_000);
   await playChapter(page, appliedIotCaseChapter);
 });
