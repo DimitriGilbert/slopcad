@@ -167,6 +167,7 @@ import {
 import {
   featureSlotCreateCommand,
   featureSlotInputId,
+  negatedReferenceCreateCommand,
   resolveFeatureNumberValue,
   type FeatureNumberValue,
   type FeatureValueSlot,
@@ -1352,9 +1353,13 @@ export function useWorkbenchEngine(
     // document's parameters — the kernel's own role kind is the demanded
     // dimension (one source, never a hand-maintained table). The reference
     // carries NO literal; the role commits no parameter.create and its
-    // feature input points at the existing parameter id.
+    // feature input points at the existing parameter id. A NEGATED token
+    // (Phase 30) resolves the same parameter and rides the negated
+    // auto-parameter route: the role's fresh parameter is created with the
+    // `-name` expression and the input points at IT.
     const parameterRefs = submission.parameterRefs ?? {};
     const referenceOf = new Map<string, Parameter>();
+    const negatedOf = new Map<string, Parameter>();
     for (const role of roles) {
       const ref = parameterRefs[role.name];
       if (ref === undefined) continue;
@@ -1366,6 +1371,8 @@ export function useWorkbenchEngine(
       if (!resolved.ok) return resolved;
       if (resolved.kind === "reference") {
         referenceOf.set(role.name, resolved.parameter);
+      } else if (resolved.kind === "negatedReference") {
+        negatedOf.set(role.name, resolved.parameter);
       }
     }
     const roleValueOf = (
@@ -1422,6 +1429,21 @@ export function useWorkbenchEngine(
       const reference = referenceOf.get(role.name);
       if (reference !== undefined) {
         roleInputIds.push(reference.id);
+        return;
+      }
+      const negated = negatedOf.get(role.name);
+      if (negated !== undefined) {
+        // The negated route: the role's own parameter is created with the
+        // `-name` expression (the seed is the negated cache), so the sign
+        // survives in the DAG and the input references THIS id.
+        roleCommands.push(
+          negatedReferenceCreateCommand(
+            negated,
+            id,
+            `hole${role.name.charAt(0).toUpperCase()}${role.name.slice(1)}${suffix}`,
+          ),
+        );
+        roleInputIds.push(id);
         return;
       }
       roleCommands.push({
@@ -2311,7 +2333,11 @@ export function useWorkbenchEngine(
   // the ±90° bound). Phase 21: each value is a literal number (today's
   // behavior) or a `$name` reference — the reference skips the parameter
   // creation and the literal-only bounds, and the feature input points at
-  // the EXISTING parameter so the regeneration loop re-reads its value.
+  // the EXISTING parameter so the regeneration loop re-reads its value. A
+  // `-$name` value (Phase 30) rides the negated auto-parameter: the slot's
+  // create carries the `-name` expression and the input points at that
+  // fresh parameter (the literal-only bounds are reference semantics — the
+  // sign choice is the user's).
   const handleDraft = (specification: {
     readonly sketchId: string;
     readonly distanceMm: FeatureNumberValue;

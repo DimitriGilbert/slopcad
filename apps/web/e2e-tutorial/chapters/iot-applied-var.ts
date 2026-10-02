@@ -67,9 +67,11 @@ import {
 //   lipL        := boardL - lidClear              = 69.5 mm
 //   lipW        := boardW - lidClear              = 49.5 mm
 //   lipInset    := wall + lidClear / 2            = 1.05 mm
-//   The DIALOG grammar is a bare `$name` (the token pattern anchors both
-//   ends — no `-$name`), so the four DOWNWARD extrudes ride signed
-//   helpers, and the sign is a variable like everything else:
+//   The DIALOG grammar also admits a negated token (`-$name`, Phase 30 —
+//   the sign rides the reference and the negation is re-derived through an
+//   expression parameter), so the signed helpers below are now a CHOICE,
+//   not a workaround: naming the sign keeps it a variable like everything
+//   else, visible and re-drivable in the manager:
 //   cavityDrop  := -cavityD                       = -34.4 mm
 //   postDropDown := -postDrop                     = -25.4 mm
 //   portCutIn   := -portCut                       = -1.8 mm
@@ -578,8 +580,9 @@ export const chapter: ChapterModule = {
     await createVariable(page, driver, panel, "lipL", "69.5mm");
     await createVariable(page, driver, panel, "lipW", "49.5mm");
     await createVariable(page, driver, panel, "lipInset", "1.05mm");
-    // The four downward extrudes ride signed helpers: the dialog grammar
-    // is a bare `$name`, so the sign is a variable like everything else.
+    // The four downward extrudes ride signed helpers — by choice since the
+    // grammar also admits `-$name`: naming the sign keeps it a variable
+    // like everything else.
     await createVariable(page, driver, panel, "cavityDrop", "0mm");
     await createVariable(page, driver, panel, "postDropDown", "0mm");
     await createVariable(page, driver, panel, "portCutIn", "0mm");
@@ -1451,9 +1454,9 @@ async function clickDatumPoint(
  * Opens the draft dialog on one saved sketch, fills the Distance with a
  * `$name` reference (autocomplete click on camera), zeroes the taper,
  * and Creates — returning the settled scene volume. Downward extrudes
- * reference the chapter's SIGNED helper variables: the field's token
- * grammar is a bare `$name` (anchored both ends — no `-$name`), which is
- * why the sign lives in the variable system with everything else.
+ * reference the chapter's SIGNED helper variables — by choice since the
+ * grammar also admits the negated `-$name` token: naming the sign keeps it
+ * in the variable system with everything else.
  */
 async function draftDialog(
   page: Page,

@@ -294,6 +294,55 @@ describe("CadParameterManager create", () => {
     });
   });
 
+  it("commits a negative literal — the previously-refused input — verbatim", async () => {
+    const store = mountManager();
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "caseDepth" },
+    });
+    fireEvent.change(screen.getByLabelText("Value"), {
+      target: { value: "-29.6mm" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create variable" }));
+
+    await waitFor(() => expect(store.commandLog).toHaveLength(1));
+    const entry = JSON.parse(
+      JSON.stringify(store.commandLog[0]),
+    ) as SerializedCommandLogEntry;
+    // The negated literal lands as the domain's quantity — sign included.
+    expect(entry.commands[0]?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: -29.6,
+    });
+    // The row reads the signed quantity.
+    expect(within(rowOf("caseDepth")).getByText("-29.6 mm")).toBeTruthy();
+  });
+
+  it("commits a pure computation over constants — a literal seed computable without the document", async () => {
+    const store = mountManager();
+
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "plate" },
+    });
+    // No identifier nodes: the value is derivable from the text alone, so
+    // the create form's literal-seed charter admits it.
+    fireEvent.change(screen.getByLabelText("Value"), {
+      target: { value: "2mm * 3" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create variable" }));
+
+    await waitFor(() => expect(store.commandLog).toHaveLength(1));
+    const entry = JSON.parse(
+      JSON.stringify(store.commandLog[0]),
+    ) as SerializedCommandLogEntry;
+    expect(entry.commands[0]?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 6,
+    });
+  });
+
   it("validates the name rules and the quantity gate as field errors, issuing nothing", async () => {
     const store = mountManager();
     const name = screen.getByLabelText("Name");
@@ -329,9 +378,17 @@ describe("CadParameterManager create", () => {
     expect(store.commandLog).toHaveLength(0);
 
     // A valid name never carries a formula: quantities here, expressions in
-    // the row editor.
+    // the row editor. A negation over an identifier is still a formula —
+    // the identifier check catches the unary's operand.
     fireEvent.change(name, { target: { value: "caseHeight" } });
     fireEvent.change(value, { target: { value: "width * 2" } });
+    create();
+    expect(
+      await screen.findByText(CAD_PARAMETER_MANAGER_LABELS.valueFormula),
+    ).toBeTruthy();
+    expect(store.commandLog).toHaveLength(0);
+
+    fireEvent.change(value, { target: { value: "-width" } });
     create();
     expect(
       await screen.findByText(CAD_PARAMETER_MANAGER_LABELS.valueFormula),

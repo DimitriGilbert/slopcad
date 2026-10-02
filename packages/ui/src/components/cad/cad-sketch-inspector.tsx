@@ -25,6 +25,17 @@
  * constraint selected the editor renders the documented hint — it never
  * pretends to edit.
  *
+ * A NEGATED token (`-$name`, Phase 30) passes the field's token gate — the
+ * grammar admits it — but a dimension BINDING cannot carry it, and the
+ * host's apply surface refuses it with the existing
+ * `sketch/dimension-binding-invalid` code: a binding stores the parameter id
+ * and the domain's resolve pass reads the value verbatim (no sign channel),
+ * so a negated binding would either sit outside the domain's own range
+ * rules (distance/radius/diameter resolve strictly positive, angle strictly
+ * inside 0–180°) or silently drop the sign (the signed distanceX/distanceY).
+ * The taught route — define the negation as its own expression variable and
+ * bind that — stays the way a signed dimension follows a variable.
+ *
  * All user-facing strings live in {@link CAD_SKETCH_INSPECTOR_LABELS}
  * (overridable via the `labels` prop); constraint labels, diagnostic
  * messages, and codes are host data rendered verbatim.
@@ -34,7 +45,10 @@ import { useMemo, useState } from "react";
 import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
-import { expressionNumberProblem } from "../formedible/fields/expression-number-field";
+import {
+  expressionNumberProblem,
+  expressionNumberTokenName,
+} from "../formedible/fields/expression-number-field";
 import { useFormedible } from "../formedible/hooks/use-formedible";
 
 /** Merges label overrides over the documented defaults, memoized. */
@@ -365,7 +379,14 @@ export function CadSketchInspector({
           }
           return;
         }
-        if (typeof submitted === "string" && submitted.startsWith("$")) {
+        // The token gate is the grammar's own, not a `$`-prefix sniff: the
+        // negated form (`-$name`, Phase 30) reaches the apply surface too —
+        // which owns the per-kind semantics (it refuses where the domain's
+        // binding rules say so) and surfaces the refusal verbatim below.
+        if (
+          typeof submitted === "string" &&
+          expressionNumberTokenName(submitted) !== null
+        ) {
           const outcome = onEditDimension(dimension.constraintId, submitted);
           if (!outcome.ok) {
             setApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);

@@ -3505,7 +3505,13 @@ test("s30 variable manager: create, live autocomplete, expression switch, clear,
     // literal, consumed from a feature dialog's `$` autocomplete, switched
     // to `holeDiameter + 2mm` through the manager's own autocomplete,
     // re-driven by its reference, cleared back to a literal, and finally
-    // refused a self-cycle with the chain named.
+    // refused a self-cycle with the chain named. LEG 6 adds the Phase 30
+    // input-contract negatives: a NEGATIVE literal (`-25mm`) created
+    // directly in the create form (the previously-refused input), a
+    // `-$caseDepth` dialog reference typed through the autocomplete (the
+    // sign riding the token), the feature landing on the negated
+    // auto-parameter, and the re-drive through it when the source variable
+    // moves.
     await openComplete(page);
     const panel = page.locator('[data-slot="cad-parameter-panel"]');
 
@@ -3664,7 +3670,126 @@ test("s30 variable manager: create, live autocomplete, expression switch, clear,
     expect(await cycleAlert.textContent()).toContain("caseHeight → caseHeight");
     expect(await logLength()).toBe(logAfterClear);
 
-    extra("parameter-manager");
+    // LEG 6 — THE PHASE 30 NEGATIVES. (a) A NEGATIVE literal `-25mm` lands
+    // directly in the create form — the input the literal-seed gate refused
+    // before the widened rule (any identifier-free expression evaluating to
+    // a finite quantity).
+    // The row is pinned by its NAME SPAN (exact text): a plain hasText
+    // would also catch the dependent row's `depends on caseDepth` line.
+    const depthRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ has: page.getByText("caseDepth", { exact: true }) });
+    await panel.getByLabel("Name", { exact: true }).fill("caseDepth");
+    await panel.getByLabel("Value", { exact: true }).fill("-25mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(depthRow).toBeVisible();
+    await expect(depthRow).toContainText("-25 mm");
+    const depthCreate = (await readLog()).at(-1)?.commands.at(-1);
+    expect(depthCreate?.type).toBe("parameter.create");
+    expect(depthCreate?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: -25,
+    });
+
+    // (b) THE NEGATED DIALOG REFERENCE: typing `-$` opens the autocomplete
+    // (the sign rides the token), clicking the row inserts `-$caseDepth`,
+    // and the submission emits the negated auto-parameter — a fresh
+    // `parameter.create` whose defining expression is `-caseDepth` — with
+    // the feature input referencing IT. The draft reuses LEG 2's rectangle
+    // ("sketch 1", 20 × 15 = 300 mm²); the boot plate reads
+    // 30·20·10 − π·12²/4·10 at this point (LEG 3's ⌀12 bore), and the pad
+    // sits clear of it, so the volume pin is exact.
+    await doneToggle.click();
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+    await page.locator(`${DIALOG} [role="combobox"]`).nth(0).click();
+    await page.getByRole("option", { name: "sketch 1", exact: true }).click();
+    const negatedDistance = page.getByLabel("Distance (mm)");
+    await negatedDistance.click();
+    // The token opens on `-$` (the sign rides it); the stage narrows with
+    // the partial because the suggestion list caps at 8 in document order.
+    await negatedDistance.fill("-$ca");
+    await expect(
+      page.getByRole("option", { name: "$caseDepth" }),
+    ).toBeVisible();
+    await page.getByRole("option", { name: "$caseDepth" }).click();
+    await expect(negatedDistance).toHaveValue("-$caseDepth");
+    await page.getByLabel("Draft taper (deg)").fill("0");
+    const beforeNegated = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-scene-kind",
+      "extrude",
+    );
+    const negatedVolume = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeNegated,
+      }),
+    );
+    const boredPlate = 30 * 20 * 10 - Math.PI * 36 * 10;
+    expect(volumeNear(negatedVolume, boredPlate + 300 * 25)).toBe(true);
+    const negatedLog = await readLog();
+    const negatedCommands = negatedLog.at(-1)?.commands ?? [];
+    const negatedCreate = negatedCommands.find(
+      (command) =>
+        command.type === "parameter.create" && command.name === "extrudeDepth1",
+    );
+    expect(negatedCreate).toMatchObject({
+      type: "parameter.create",
+      name: "extrudeDepth1",
+      // The seed is the negation of the source's current value (−25 → +25);
+      // the defining expression re-derives the same quantity.
+      value: { dimension: "length", unit: "mm", value: 25 },
+      expression: {
+        kind: "unary",
+        operator: "-",
+        operand: { kind: "identifier", name: "caseDepth" },
+      },
+    });
+    const negatedTimeline = await readTimeline(page, COMPLETE_ROOT);
+    expect(negatedTimeline.entries.at(-1)?.kind).toBe("extrude");
+    expect(negatedTimeline.entries.at(-1)?.status).not.toBe("failed");
+
+    // (c) THE RE-DRIVE: editing the source variable through the expression
+    // arm (a constant expression with the unit attached — a bare `-30`
+    // would be dimensionless; the commit that runs the topological
+    // recompute; the panel's literal arm is the value-only form, which
+    // leaves driven caches stale by the domain's documented rule)
+    // re-derives the negated auto-parameter (−(−30 mm) = +30 mm) and the
+    // feature moves with it. The manager's rows show both ends of the DAG:
+    // caseDepth at −30 mm and extrudeDepth1 at `= 30 mm`, depends on
+    // caseDepth.
+    await manageToggle.click();
+    await depthRow.getByRole("button", { name: "Set expression" }).click();
+    const depthEditor = panel.getByLabel("caseDepth", { exact: true });
+    await expect(depthEditor).toHaveValue("-25");
+    await depthEditor.fill("-30mm");
+    const beforeRedrive = await dispatchedCount(page, COMPLETE_ROOT);
+    await depthRow.getByRole("button", { name: "Apply" }).click();
+    await expect(depthEditor).toHaveCount(0);
+    await expect(depthRow).toContainText("-30 mm");
+    await expect(depthRow).toContainText("= -30 mm");
+    const redrivenRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ has: page.getByText("extrudeDepth1", { exact: true }) });
+    await expect(redrivenRow).toContainText("= 30 mm");
+    await expect(redrivenRow).toContainText("depends on caseDepth");
+    const redriveCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(redriveCommand?.type).toBe("parameter.set");
+    expect(redriveCommand?.expression).toMatchObject({
+      kind: "unary",
+      operator: "-",
+      operand: { kind: "unitLiteral", value: 30, unit: "mm" },
+    });
+    const redrivenVolume = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeRedrive,
+      }),
+    );
+    expect(volumeNear(redrivenVolume, boredPlate + 300 * 30)).toBe(true);
+
+    extra("parameter-negated-reference");
   });
 });
 

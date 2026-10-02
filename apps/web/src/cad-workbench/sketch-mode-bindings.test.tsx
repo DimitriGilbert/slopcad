@@ -2,8 +2,10 @@
  * SketchMode's parameter-bound dimension surfaces (component level): the
  * inspector's `$`-token dimension field committing the BOUND
  * `sketch.dimension.set` form, the unknown-name refusal (nothing commits),
- * a literal submit unbinding, and the live re-drive — re-rendering with an
- * edited parameter collection re-solves the bound dimension so the solved
+ * the negated-token refusal (Phase 30: the binding seam follows the domain —
+ * a binding reads the parameter's value verbatim, so the sign cannot ride
+ * it), a literal submit unbinding, and the live re-drive — re-rendering with
+ * an edited parameter collection re-solves the bound dimension so the solved
  * geometry follows without any sketch command. Machine surfaces carry the
  * assertions (data-sketch-commands, data-sketch-dimensions,
  * data-sketch-solved), exactly like the browser battery.
@@ -240,5 +242,50 @@ describe("SketchMode parameter-bound dimensions", () => {
       expect(log.at(-1)?.parameterId).toBeUndefined();
       expect(log.at(-1)?.value).toMatchObject({ value: 25 });
     });
+  });
+
+  it("refuses a negated token at the binding seam: the sign cannot ride a verbatim read", async () => {
+    const { root, toolButton } = mount(20);
+    fireEvent.click(toolButton("line"));
+    fireCanvasPick(0, 0);
+    fireCanvasPick(20, 0);
+    await waitFor(() => {
+      expect(
+        JSON.parse(root().getAttribute("data-sketch-entities") ?? "[]"),
+      ).toHaveLength(1);
+    });
+    // distanceX: the domain genuinely supports signed separations, so this
+    // is the branch whose refusal is the MECHANISM, not a range rule — the
+    // binding reads the parameter's value verbatim and the sign would
+    // silently drop.
+    fireEvent.click(toolButton("distanceX"));
+    fireCanvasPick(0, 0);
+    fireCanvasPick(20, 0);
+    await waitFor(() => {
+      expect(root().getAttribute("data-sketch-selection")).toContain(
+        "skcon_distance",
+      );
+    });
+    const field = document.querySelector(
+      '[data-slot="cad-sketch-inspector"] input[type="text"]',
+    );
+    if (!(field instanceof HTMLInputElement)) {
+      throw new Error("the expression dimension field must be mounted");
+    }
+    // The token passes the field's grammar gate (known name), the form
+    // submits, and the apply surface refuses with the existing
+    // invalid-dimension code — nothing commits.
+    const commandsBefore = root().getAttribute("data-sketch-commands");
+    fireEvent.change(field, { target: { value: "-$boardL" } });
+    const inspector = root().querySelector(
+      '[data-slot="cad-sketch-inspector"]',
+    );
+    if (inspector === null) throw new Error("inspector missing");
+    fireEvent.submit(inspector.querySelector("form") ?? document.body);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('"-$boardL" cannot bind');
+    });
+    expect(document.body.textContent).toContain("sign would silently drop");
+    expect(root().getAttribute("data-sketch-commands")).toBe(commandsBefore);
   });
 });

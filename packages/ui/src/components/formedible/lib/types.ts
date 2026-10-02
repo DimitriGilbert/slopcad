@@ -209,11 +209,13 @@ export interface FormedibleExpressionNumberConfig {
    *
    * The field accepts a plain finite number (the number field's exact
    * semantics — the consumer's validation gates judge it unchanged) or a
-   * `$name` token referencing a document parameter. The `$`-token
-   * autocomplete offers `parameterNames`; pass the document's LIVE parameter
-   * list so the suggestions always match what a submission can resolve. A
-   * `$name` that is absent from the list is a field-level error (see the
-   * field module's `expressionNumberProblem` validator).
+   * `$name` token — optionally negated, `-$name` — referencing a document
+   * parameter. The `$`-token autocomplete offers `parameterNames`; pass the
+   * document's LIVE parameter list so the suggestions always match what a
+   * submission can resolve. A token whose parameter is absent from the list
+   * is a field-level error (see the field module's `expressionNumberProblem`
+   * validator); what a negated token means at commit is the consumer's
+   * resolution seam.
    */
   readonly parameterNames?: readonly string[];
   /** Maximum suggestions rendered at once; defaults to 8. */

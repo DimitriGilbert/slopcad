@@ -35,6 +35,8 @@ import {
   createParameterId,
   createSketchDocumentId,
   length,
+  parseExpression,
+  printExpression,
   type FeatureRecord,
   type ParameterCollection,
 } from "@slopcad/cad-core";
@@ -120,6 +122,8 @@ interface DraftProbe {
   readonly parameterNames: readonly string[];
   /** The document's parameters (name → canonical magnitude in mm). */
   readonly parameterMm: Readonly<Record<string, number>>;
+  /** The document's parameters (name → printed expression, `null` literal). */
+  readonly parameterExpressions: Readonly<Record<string, string | null>>;
 }
 
 /** The last draft probe (the Phase 21 tests' capture seam). */
@@ -143,8 +147,13 @@ function draftProbeOf(
   outcome: FeatureFormOutcome,
 ): DraftProbe {
   const parameterMm: Record<string, number> = {};
+  const parameterExpressions: Record<string, string | null> = {};
   for (const parameter of doc.parameters.parameters) {
     parameterMm[parameter.name] = parameter.value.value;
+    parameterExpressions[parameter.name] =
+      parameter.expression === null
+        ? null
+        : printExpression(parameter.expression);
   }
   return {
     ok: outcome.ok,
@@ -154,6 +163,7 @@ function draftProbeOf(
       (parameter) => parameter.name,
     ),
     parameterMm,
+    parameterExpressions,
   };
 }
 
@@ -493,6 +503,7 @@ function EngineHarness(): ReactElement {
             inputs: [],
             parameterNames: [],
             parameterMm: {},
+            parameterExpressions: {},
           };
         }}
       >
@@ -513,10 +524,54 @@ function EngineHarness(): ReactElement {
             inputs: [],
             parameterNames: [],
             parameterMm: {},
+            parameterExpressions: {},
           };
         }}
       >
         draft wrong dimension
+      </button>
+      <button
+        type="button"
+        data-testid="draft-negated-ref"
+        onClick={() => {
+          const outcome = engine.handleDraft({
+            sketchId: "skd_engine_ref1",
+            distanceMm: "-$engineCaseHeight",
+            taperDeg: 0,
+          });
+          // The STORE's live getter, as the plain reference's button uses.
+          lastDraft = draftProbeOf(engine.store.getDocument(), outcome);
+        }}
+      >
+        draft negated ref
+      </button>
+      <button
+        type="button"
+        data-testid="redrive-negated-source"
+        onClick={() => {
+          // The user's later edit of the source variable through the
+          // EXPRESSION arm (a constant with the unit attached — the unit
+          // literal keeps the parameter's dimension): the commit that runs
+          // the topological recompute — the value-only arm moves the
+          // source's cache and leaves driven caches stale.
+          const parsed = parseExpression("9mm");
+          if (!parsed.ok) throw new Error("the fixture expression rejected");
+          const applied = engine.documentApi.applyTransaction({
+            commands: [
+              {
+                type: "parameter.set" as const,
+                id: REF_HEIGHT_PARAM,
+                expression: parsed.value,
+              },
+            ],
+          });
+          if (!applied.ok) {
+            throw new Error("the source edit was refused");
+          }
+          lastDraft = draftProbeOf(engine.store.getDocument(), { ok: true });
+        }}
+      >
+        redrive negated source
       </button>
     </div>
   );
@@ -894,5 +949,70 @@ describe("the draft action's $name parameter references (Phase 21)", () => {
     expect(draft.refusal).toContain('"engineCaseAngle"');
     expect(draft.refusal).toContain("angle");
     expect(draft.refusal).toContain("length");
+  });
+
+  it("emits a negated reference as an auto-parameter carrying the -name expression", async () => {
+    lastDraft = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    fireEvent.click(screen.getByTestId("seed-draft-fixtures"));
+    await waitFor(() => {
+      expect(lastSeedRefusal).toBeNull();
+    });
+    fireEvent.click(screen.getByTestId("draft-negated-ref"));
+    await waitFor(() => {
+      expect(lastDraft).not.toBeNull();
+    });
+    const draft = draftProbe();
+    expect(draft.ok).toBe(true);
+    // The sign cannot ride a plain reference (the input reads the
+    // parameter's VALUE), so the distance input points at the FRESH
+    // auto-parameter, never at the source.
+    expect(draft.inputs[1]).toEqual({
+      kind: "parameter",
+      id: "param_extrude_depth1",
+    });
+    expect(draft.inputs[1]).not.toEqual({
+      kind: "parameter",
+      id: REF_HEIGHT_PARAM,
+    });
+    // The auto-parameter carries the negated cache (−7) and the stored
+    // `-engineCaseHeight` expression; the taper literal is unchanged.
+    expect(draft.parameterMm["extrudeDepth1"]).toBe(-7);
+    expect(draft.parameterExpressions["extrudeDepth1"]).toBe(
+      "-engineCaseHeight",
+    );
+    expect(draft.parameterMm["extrudeTaper1"]).toBe(0);
+  });
+
+  it("re-drives the negated auto-parameter when the source variable is edited", async () => {
+    lastDraft = null;
+    render(
+      <WorkbenchStoreProvider>
+        <EngineHarness />
+      </WorkbenchStoreProvider>,
+    );
+    fireEvent.click(screen.getByTestId("seed-draft-fixtures"));
+    await waitFor(() => {
+      expect(lastSeedRefusal).toBeNull();
+    });
+    fireEvent.click(screen.getByTestId("draft-negated-ref"));
+    await waitFor(() => {
+      expect(lastDraft).not.toBeNull();
+    });
+    expect(draftProbe().parameterMm["extrudeDepth1"]).toBe(-7);
+    // The source's literal edit (7 → 9) re-derives the negated cache
+    // through the expression DAG — the re-drive the feature rides.
+    fireEvent.click(screen.getByTestId("redrive-negated-source"));
+    await waitFor(() => {
+      expect(draftProbe().parameterMm["extrudeDepth1"]).toBe(-9);
+    });
+    expect(draftProbe().parameterMm["engineCaseHeight"]).toBe(9);
+    expect(draftProbe().parameterExpressions["extrudeDepth1"]).toBe(
+      "-engineCaseHeight",
+    );
   });
 });

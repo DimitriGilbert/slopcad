@@ -93,7 +93,10 @@ import { importDxf } from "@slopcad/cad-io/dxf-import";
 import { importSvg } from "@slopcad/cad-io/svg-import";
 import { Redo2, Undo2 } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
-import { expressionNumberTokenName } from "@slopcad/ui/components/formedible/fields/expression-number-field";
+import {
+  expressionNumberTokenName,
+  expressionNumberTokenNegated,
+} from "@slopcad/ui/components/formedible/fields/expression-number-field";
 import {
   CadSketchCanvas,
   type CadSketchCanvasPreview,
@@ -701,7 +704,19 @@ export function SketchMode({
   // document's parameters and commits the bound form (the dimension follows
   // the parameter from the next solve on). Unknown or wrong-dimension names
   // refuse exactly like the feature dialogs' value resolution — the
-  // inspector surfaces the refusal verbatim and nothing commits.
+  // inspector surfaces the refusal verbatim and nothing commits. A NEGATED
+  // token (`-$name`, Phase 30) passes the field's grammar gate but is
+  // refused HERE, per the domain — a binding stores the parameter id and
+  // its resolve pass reads the value verbatim (no sign channel), so:
+  // - distance/radius/diameter/angle: the domain's own range rule
+  //   (`resolveSketchDimensionBindings`) refuses a non-positive / out-of-
+  //   range resolved value at solve — the negated binding would be a
+  //   refusal-in-waiting, so the seam refuses first with the same code;
+  // - distanceX/distanceY (signed by the domain): the sign would silently
+  //   DROP — the constraint would follow `name`, not `-name` — which is a
+  //   lie, not a semantics. The established route is the chapter-taught
+  //   signed helper variable: define the negation as its own expression
+  //   variable and bind that.
   const editDimension = useCallback(
     (constraintId: string, value: number | string) => {
       const constraint = session.sketch.constraints.find(
@@ -737,6 +752,22 @@ export function SketchMode({
             error: {
               code: "sketch/dimension-binding-invalid",
               message: `"${value}" is not a $name parameter reference.`,
+            },
+            ok: false,
+          } as const;
+        }
+        // The negated-binding refusal: the domain-following split (see the
+        // comment above) — range-ruled kinds cite the domain's own resolve
+        // rule, the signed kinds cite the verbatim-read mechanism.
+        if (expressionNumberTokenNegated(value)) {
+          const signed =
+            constraint.kind === "distanceX" || constraint.kind === "distanceY";
+          return {
+            error: {
+              code: "sketch/dimension-binding-invalid",
+              message: signed
+                ? `"-$${name}" cannot bind: a dimension binding reads the parameter's value verbatim, so the sign would silently drop — define a negated variable (an expression -${name}) and bind that.`
+                : `"-$${name}" cannot bind: a dimension binding reads the parameter's value verbatim, and a ${constraint.kind} constraint must resolve inside its range (the domain refuses the negated value) — bind the positive variable.`,
             },
             ok: false,
           } as const;

@@ -8,10 +8,14 @@
  * - **Create** — a Formedible form (name, quantity) committing
  *   `parameter.create`. The name is validated with the domain's own
  *   identifier guard and reserved-function set plus the LIVE collection's
- *   names (field errors, not commit refusals); the quantity is written in
- *   the domain's own grammar — a number or attached-unit literal (`10`,
- *   `10mm`, `45deg`), so any dimension is creatable without an invented
- *   unit picker. A created variable is immediately part of the document:
+ *   names (field errors, not commit refusals); the quantity is a LITERAL
+ *   SEED in the domain's own grammar — any expression without parameter
+ *   references that evaluates to a finite quantity (`10`, `10mm`, `-29.6mm`,
+ *   `2mm * 3` — a computation over constants is still computable without
+ *   the document), so any dimension and sign is creatable without an
+ *   invented unit picker. A formula over the document's variables refuses
+ *   with the row-editor pointer: defining expressions belong to the row
+ *   editor. A created variable is immediately part of the document:
  *   every `$` autocomplete in the feature dialogs derives from the live
  *   collection.
  * - **Expression editing with `$` autocomplete** — any variable's value can
@@ -1131,10 +1135,16 @@ export function CadParameterManager({
         label: mergedLabels.valueLabel,
         placeholder: "10mm",
         inputClassName: "font-mono",
-        // The initial cache is a QUANTITY in the domain's own grammar — a
-        // number or an attached-unit literal (`10`, `10mm`, `45deg`), any
-        // dimension, parsed and evaluated pre-submit. A formula is refused
-        // here by shape: defining expressions belong to the row editor.
+        // The initial cache is a LITERAL SEED in the domain's own grammar —
+        // any expression WITHOUT parameter references that evaluates
+        // against the empty environment to a finite quantity of any
+        // dimension (Phase 30's widened rule): `10`, `10mm`, `-29.6mm` (a
+        // negated literal), `2mm * 3` (a pure computation over constants —
+        // still computable without the document, so still a literal seed).
+        // A formula over the document's variables is refused here by shape
+        // (the identifier check): defining expressions belong to the row
+        // editor. The evaluator itself is the finiteness gate (the domain's
+        // structured `expression/non-finite-result`).
         validation: (value) => {
           if (typeof value !== "string" || value.trim() === "") {
             return mergedLabels.valueInvalid;
@@ -1142,10 +1152,7 @@ export function CadParameterManager({
           const text = value.trim();
           const parsed = parseExpression(text);
           if (!parsed.ok) return formatDomainError(parsed.error);
-          if (
-            parsed.value.kind !== "number" &&
-            parsed.value.kind !== "unitLiteral"
-          ) {
+          if (extractExpressionDependencies(parsed.value).size > 0) {
             return mergedLabels.valueFormula;
           }
           const evaluated = evaluateQuantityText(text);
@@ -1160,17 +1167,15 @@ export function CadParameterManager({
       }: {
         readonly value: CadParameterManagerCreateValues;
       }) => {
-        // The field gate only lets a parsed, evaluated quantity through;
-        // its value is the `parameter.create` initial cache verbatim.
+        // The field gate only lets a parsed, identifier-free, evaluated
+        // quantity through; its value is the `parameter.create` initial
+        // cache verbatim. The checks mirror the field validation exactly
+        // (parse → no identifier nodes → domain evaluation, whose structured
+        // refusal covers non-finite results).
         const text = typeof value.value === "string" ? value.value.trim() : "";
         const parsed = parseExpression(text);
-        if (
-          !parsed.ok ||
-          (parsed.value.kind !== "number" &&
-            parsed.value.kind !== "unitLiteral")
-        ) {
-          return;
-        }
+        if (!parsed.ok) return;
+        if (extractExpressionDependencies(parsed.value).size > 0) return;
         const evaluated = evaluateQuantityText(text);
         if (!evaluated.ok) return;
         onCommand({

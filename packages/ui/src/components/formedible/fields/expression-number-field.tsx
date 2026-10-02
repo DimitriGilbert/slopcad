@@ -1,24 +1,30 @@
 /**
  * The expression-number field (Phase 21): a number field that also accepts a
- * `$name` parameter reference, with a clickable autocomplete over the
- * document's existing parameter names.
+ * `$name` parameter reference — optionally negated (`-$name`, Phase 30) —
+ * with a clickable autocomplete over the document's existing parameter
+ * names.
  *
  * ## Value contract
  * The form value is a canonical `number` (the number field's exact
  * semantics — the consumer's validation gates judge literals unchanged), a
- * `string` `$name` token, or `undefined` (empty). Partial or garbage text
- * keeps its raw string in the form value so the input never fights the
- * keyboard; the field-level validation ({@link expressionNumberProblem})
- * refuses anything that is neither a gate-passing number nor a well-formed
- * `$name` token naming a KNOWN parameter, so an invalid value cannot submit.
+ * `string` `$name` token with an OPTIONAL leading `-`, or `undefined`
+ * (empty). Partial or garbage text keeps its raw string in the form value
+ * so the input never fights the keyboard; the field-level validation
+ * ({@link expressionNumberProblem}) refuses anything that is neither a
+ * gate-passing number nor a well-formed token naming a KNOWN parameter, so
+ * an invalid value cannot submit. The negated token is one token — the sign
+ * rides the reference (`-$caseDepth` means "minus the parameter's value");
+ * what a submission DOES with the negation is the consumer's resolution
+ * seam, not the field's.
  *
  * ## The autocomplete
- * While the caret sits inside a `$` token, the dropdown lists the
- * configured `parameterNames` filtered by the partial name after the `$`
- * (substring, case-insensitive — the autocomplete field's rule). Clicking a
- * row — or ArrowDown/ArrowUp + Enter — replaces the active token with the
- * full `$name`; Escape closes. With NO active `$` token there is no
- * dropdown: plain numbers never see suggestion chrome.
+ * While the caret sits inside a `$` token — bare or `-`-prefixed — the
+ * dropdown lists the configured `parameterNames` filtered by the partial
+ * name after the `$` (substring, case-insensitive — the autocomplete
+ * field's rule). Clicking a row — or ArrowDown/ArrowUp + Enter — replaces
+ * the active token with the full reference, PRESERVING the typed sign
+ * (`-$` inserts `-$name`); Escape closes. With NO active `$` token there is
+ * no dropdown: plain numbers never see suggestion chrome.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -32,32 +38,51 @@ import { FieldWrapper } from "./field-wrapper";
 import { Button } from "../../button";
 import { Input } from "../../input";
 
-/** The exact shape of a completed `$name` token (the parameter identifier). */
+/**
+ * The exact shape of a completed `$name` token (the parameter identifier),
+ * with its optional leading `-`: the sign is part of the token, so
+ * `-$name` is one reference ("minus the parameter's value"), never a
+ * fragment of arithmetic.
+ */
 export const EXPRESSION_NUMBER_TOKEN_PATTERN =
-  /^\$([A-Za-z_][A-Za-z0-9_]{0,63})$/;
+  /^(-?)\$([A-Za-z_][A-Za-z0-9_]{0,63})$/;
 
-/** The parameter name carried by a `$name` token, or `null` when it is not one. */
+/** The parameter name carried by a `$name` (or `-$name`) token, or `null` when it is not one. */
 export function expressionNumberTokenName(value: string): string | null {
   const match = EXPRESSION_NUMBER_TOKEN_PATTERN.exec(value);
-  return match?.[1] ?? null;
+  return match?.[2] ?? null;
+}
+
+/**
+ * True when the value is a NEGATED token (`-$name`): the typed `-` rides
+ * the reference. A bare token, a number, or any non-token is not negated.
+ */
+export function expressionNumberTokenNegated(value: string): boolean {
+  const match = EXPRESSION_NUMBER_TOKEN_PATTERN.exec(value);
+  return match?.[1] === "-";
 }
 
 /** The `$` token the caret currently sits in. */
 export interface ActiveExpressionNumberToken {
-  /** The index of the token's `$` in the input text. */
+  /**
+   * The index of the token's start in the input text — the leading `-`
+   * when the token is negated, the `$` otherwise.
+   */
   readonly start: number;
   /** The caret position — the token's open end while it is being typed. */
   readonly end: number;
   /** The partial name typed after the `$` (possibly empty). */
   readonly partial: string;
+  /** Whether the token carries the leading `-` (`-$par…`). */
+  readonly negated: boolean;
 }
 
-const ACTIVE_TOKEN_PATTERN = /\$([A-Za-z_][A-Za-z0-9_]{0,63})?$/;
+const ACTIVE_TOKEN_PATTERN = /(-?)\$([A-Za-z_][A-Za-z0-9_]{0,63})?$/;
 
 /**
  * The `$` token ending at `caret` (the text before the caret must end with
- * a `$` plus an optional partial identifier), or `null` when the caret is
- * not inside one.
+ * an optional `-`, a `$`, and an optional partial identifier), or `null`
+ * when the caret is not inside one.
  */
 export function activeExpressionNumberToken(
   text: string,
@@ -68,20 +93,23 @@ export function activeExpressionNumberToken(
   return {
     start: match.index,
     end: Math.max(caret, 0),
-    partial: match[1] ?? "",
+    partial: match[2] ?? "",
+    negated: match[1] === "-",
   };
 }
 
 /**
- * Replaces the active token span with the full `$name` selection — the text
- * before the `$`, the completed token, and the text after the caret.
+ * Replaces the active token span with the full selection — the text before
+ * the token, the completed reference (the typed `-` preserved: a negated
+ * token completes to `-$name`), and the text after the caret.
  */
 export function insertExpressionNumberSelection(
   text: string,
   token: ActiveExpressionNumberToken,
   name: string,
 ): string {
-  return `${text.slice(0, token.start)}$${name}${text.slice(token.end)}`;
+  const completed = `${token.negated ? "-$" : "$"}${name}`;
+  return `${text.slice(0, token.start)}${completed}${text.slice(token.end)}`;
 }
 
 /**
@@ -122,8 +150,11 @@ export interface ExpressionNumberValidation {
 
 /**
  * The structured field-level problem of one submitted value: `null` when the
- * value is a gate-passing number or a `$name` token the parameter list
- * knows, otherwise the refusal (naming an unknown parameter verbatim).
+ * value is a gate-passing number or a `$name` / `-$name` token the
+ * parameter list knows, otherwise the refusal (naming an unknown parameter
+ * verbatim — the negated token's sign is not part of the name). Whether a
+ * NEGATED token is acceptable for a given role is the consumer resolution
+ * seam's decision, not this gate's.
  */
 export function expressionNumberProblem(
   value: unknown,
@@ -204,7 +235,8 @@ export function ExpressionNumberField<
     if (token === null) return;
     const next = insertExpressionNumberSelection(inputValue, token, name);
     setInputValue(next);
-    setCaret(token.start + 1 + name.length);
+    // The caret parks after the inserted name (`-$name` → two prefix chars).
+    setCaret(token.start + (token.negated ? 2 : 1) + name.length);
     field.onChange(next);
     lastSyncedValueRef.current = next;
     setIsOpen(false);
