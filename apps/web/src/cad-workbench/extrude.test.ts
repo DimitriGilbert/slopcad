@@ -27,6 +27,7 @@ import {
   createDistanceXConstraint,
   createHorizontalConstraint,
   createLineEntity,
+  createPointEntity,
   createRectangleEntity,
   createSketch,
   createSketchConstraintId,
@@ -460,5 +461,102 @@ describe("parameter-bound sketch resolution", () => {
       SKETCH,
     ]);
     expect(sketchIdsBoundToParameters(document, new Set([DEPTH]))).toEqual([]);
+  });
+
+  it("a pinned reference point anchors the bound re-solve — the anchored corner holds, the far corner grows", () => {
+    // The applied chapters' recipe: a rectangle placed by a LITERAL pair
+    // against a point-tool reference (pinned — the tool's `fixed` commit)
+    // and sized by a BOUND span pair. The regression this pins: with the
+    // reference free, the under-constrained re-solve resolved the
+    // translation mode onto the elimination's first pivot — the anchored
+    // corner slid to −15 while the far corner kept its drawn position
+    // (the demo-board corruption). Pinned, the re-solve is deterministic:
+    // the place pair holds the near side, the span pair grows the far
+    // side, wherever the parameter moves.
+    const anchor = createSketchEntityId("skent_anchor");
+    const bottom = createSketchEntityId("skent_bottom");
+    const right = createSketchEntityId("skent_right");
+    const top = createSketchEntityId("skent_top");
+    const left = createSketchEntityId("skent_left");
+    const created = createSketch(
+      xyWorkplane(),
+      [
+        createPointEntity(anchor, { x: 0, y: 0 }, { fixed: true }),
+        createLineEntity(bottom, { x: 10, y: 10 }, { x: 80, y: 10 }),
+        createLineEntity(right, { x: 80, y: 10 }, { x: 80, y: 25 }),
+        createLineEntity(top, { x: 80, y: 25 }, { x: 10, y: 25 }),
+        createLineEntity(left, { x: 10, y: 25 }, { x: 10, y: 10 }),
+        createRectangleEntity(createSketchEntityId("skent_rect"), [
+          bottom,
+          right,
+          top,
+          left,
+        ]),
+      ],
+      [
+        createHorizontalConstraint(createSketchConstraintId("skcon_h"), bottom),
+        createHorizontalConstraint(createSketchConstraintId("skcon_t"), top),
+        createVerticalConstraint(createSketchConstraintId("skcon_l"), left),
+        createVerticalConstraint(createSketchConstraintId("skcon_r"), right),
+        createDistanceXConstraint(
+          createSketchConstraintId("skcon_place"),
+          pointTarget(anchor, "center"),
+          pointTarget(left, "center"),
+          length(10),
+        ),
+        {
+          ...createDistanceXConstraint(
+            createSketchConstraintId("skcon_span"),
+            pointTarget(left, "center"),
+            pointTarget(right, "center"),
+            length(70),
+          ),
+          parameterId: BOARD_L,
+        },
+      ],
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const payload = serializeSketch(created.value) as unknown as Record<
+      string,
+      unknown
+    >;
+    const xOf = (document: CadDocument, id: string): number => {
+      const parsedAgain = parseSketch(
+        getDocumentSketch(document, SKETCH)?.sketch,
+      );
+      if (!parsedAgain.ok) throw new Error(parsedAgain.error.message);
+      const resolvedNow = resolveDocumentSketch(document, parsedAgain.value);
+      if (!resolvedNow.ok) throw new Error(resolvedNow.error.message);
+      const entity = resolvedNow.value.entities.find(
+        (candidate) => candidate.id === id,
+      );
+      if (entity === undefined || entity.kind !== "line") {
+        throw new Error(`unreachable: line ${id} re-solved`);
+      }
+      return (entity.x1 + entity.x2) / 2;
+    };
+    // At the drawn value nothing moves: near 10, far 80.
+    const drawn = documentWithParameter(payload, 70);
+    expect(xOf(drawn, left)).toBeCloseTo(10, 6);
+    expect(xOf(drawn, right)).toBeCloseTo(80, 6);
+    // The parameter edit re-drives the bound span: the anchored corner
+    // HOLDS, the far corner GROWS — never the reverse.
+    const edited = applyCommand(drawn, {
+      type: "parameter.set",
+      id: BOARD_L,
+      value: length(85),
+    });
+    if (!edited.ok) throw new Error(edited.error.message);
+    expect(xOf(edited.value, left)).toBeCloseTo(10, 6);
+    expect(xOf(edited.value, right)).toBeCloseTo(95, 6);
+    // The shrink direction holds the same anchor discipline.
+    const shrunk = applyCommand(edited.value, {
+      type: "parameter.set",
+      id: BOARD_L,
+      value: length(70),
+    });
+    if (!shrunk.ok) throw new Error(shrunk.error.message);
+    expect(xOf(shrunk.value, left)).toBeCloseTo(10, 6);
+    expect(xOf(shrunk.value, right)).toBeCloseTo(80, 6);
   });
 });

@@ -1804,7 +1804,18 @@ function canvasPick(
     case "point": {
       // The single-pick entity: one click places the point (Phase 42 —
       // the hole dialog's positions sketches are drawn with it; also the
-      // constraint tools' point pick operand).
+      // constraint tools' point pick operand). The placed point is a
+      // REFERENCE, committed pinned (`fixed` — the entities module's
+      // documented convention: "fixing one entity (conventionally a
+      // construction point at the workplane origin) is how sketches
+      // become fully constrained"). An unpinned reference leaves the
+      // sketch's rigid translation a free direction, and a re-solve
+      // (a parameter edit moving a bound dimension) resolves that
+      // direction onto whichever operand elimination pivots on first —
+      // the anchored corner slides instead of the far corner growing.
+      // Pinned, a dimension pair against the point pins its other
+      // operand exactly, and span dimensions grow the far side: the
+      // author's anchor is the solve's anchor.
       const id = createSketchEntityId(mint("skent", "point"));
       return {
         state: {
@@ -1815,7 +1826,7 @@ function canvasPick(
         transaction: {
           commands: [
             {
-              entity: createPointEntity(id, event.point),
+              entity: createPointEntity(id, event.point, { fixed: true }),
               type: "sketch.entity.create",
             },
           ],

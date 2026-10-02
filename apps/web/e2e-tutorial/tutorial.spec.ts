@@ -21,6 +21,7 @@ import { chapter as holesAndPatternsChapter } from "./chapters/holes-and-pattern
 import { chapter as homeTourChapter } from "./chapters/home-tour";
 import { chapter as interferenceChapter } from "./chapters/interference";
 import { chapter as ioImportExportChapter } from "./chapters/io-import-export";
+import { chapter as iotAppliedVarChapter } from "./chapters/iot-applied-var";
 import { chapter as loftFeatureChapter } from "./chapters/loft-feature";
 import { chapter as projectsAndVersionsChapter } from "./chapters/projects-and-versions";
 import { chapter as sectionClippingChapter } from "./chapters/section-clipping";
@@ -102,6 +103,7 @@ const CHAPTERS: readonly ChapterModule[] = [
   projectsAndVersionsChapter,
   tsxExchangeChapter,
   appliedIotCaseChapter,
+  iotAppliedVarChapter,
 ];
 
 const test = base.extend<object, { tutorialPage: Page }>({
@@ -338,6 +340,31 @@ test("chapter: applied-iot-case", async ({ tutorialPage: page }) => {
   // merged-stage elevation precedent again, one step further.
   test.setTimeout(900_000);
   await playChapter(page, appliedIotCaseChapter);
+});
+
+// The applied variables capstone: ONE continuous document whose whole
+// geometry derives from a variable system built live in the manager —
+// 35 variables (13 literals, 22 expressions with `$`-autocomplete clicks
+// on camera), ten draft-dialog extrudes whose Distance fields are
+// `$name` references, and (Phase 26a's binding) every footprint sketch
+// dimension bound through the sketch inspector's `$`-autocomplete: the
+// block, the cavity, the four posts, the board-outline trim, and the
+// lid's two rectangles all carry parameterId bindings, so demo 2's board
+// edit re-solves the sketches and MOVES the case. The build chain: the
+// cavity subtract, four post squares unioned back fused, the board's own
+// outline shearing them to boardLift, a face-sketched port subtract,
+// THREE full re-drive demos (each edited through the manager's expression
+// editor — the commit that re-derives — and each pinned to its analytic
+// volume, then reverted), and TWO view-scoped STL exports verified
+// against their analytic volumes AND their taught world bounds. The
+// applied-iot-case chapter set the 900 s elevation for one applied build;
+// this one carries the manager walk (35 variables at teaching pace, ~40
+// editor/form commits) plus ~30 dimension binds on top of an equal
+// build-and-export walk — the capstone's interaction count again, so the
+// budget stays at the doubled elevation the binding beats consume.
+test("chapter: iot-applied-var", async ({ tutorialPage: page }) => {
+  test.setTimeout(1_800_000);
+  await playChapter(page, iotAppliedVarChapter);
 });
 
 test("tutorial gate: the narration ledger is complete and watchable", async () => {
