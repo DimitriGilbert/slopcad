@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test as base } from "@playwright/test";
 
@@ -9,6 +11,13 @@ import {
   waitForImportedMeshSettled,
   waitForSettledScene,
 } from "../e2e-render/helpers";
+import { createCadWorkbenchSession } from "../src/cad-workbench/session";
+import { serializeSessionToNativeText } from "../src/cad-projects/native-document-bridge";
+import { VIEWER_FRAME_HEADERS } from "../src/viewer/viewer-frame-policy";
+import {
+  decodeNativeFromShare,
+  encodeNativeForShare,
+} from "../src/viewer/share-codec";
 import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
 import { CHAIN_FILLET_DEFAULT_RADIUS_MM } from "../src/cad-workbench/chain";
 import {
@@ -121,6 +130,7 @@ const PLANNED_ROUTES: readonly string[] = [
   "/render",
   "/io",
   "/projects",
+  "/viewer",
 ];
 
 /** The one-process ledger (one worker, serial mode — no cross-process races). */
@@ -3982,6 +3992,177 @@ test("s32 sketch dimensions bind to variables: the $-autocomplete re-drives the 
     ).toBe(true);
 
     extra("sketch-dimension-binding");
+  });
+});
+
+test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports, and embeds", async ({
+  sessionPage: page,
+  baseURL,
+}) => {
+  await stage("s33 viewer", async () => {
+    // The shared document is REAL: the workbench boot session serialized
+    // through the native bridge — five literal variables, two expression
+    // variables, and the plate whose volume the pins below derive from.
+    const nativeText = serializeSessionToNativeText(
+      createCadWorkbenchSession(),
+      new Map(),
+      null,
+    );
+    const payload = await encodeNativeForShare(nativeText);
+    const sharePayloadUrl = `/viewer#${payload}`;
+
+    // LEG 1 — THE SHARE PAGE: the link opens the public viewer, the part
+    // settles, and the site chrome is around it.
+    await page.goto(sharePayloadUrl);
+    walk("/viewer");
+    const settled = await waitForSettledScene(page, "viewer-root");
+    expect(volumeNear(Number(settled), BOOT_PLATE_VOLUME)).toBe(true);
+    await expect(page.locator("header")).toHaveCount(1);
+
+    // LEG 2 — THE VARIABLES FORM: literals as number fields, expressions
+    // with their `= quantity` preview line.
+    await expect(page.getByLabel("holeDiameter", { exact: true })).toHaveValue(
+      "8",
+    );
+    await expect(page.getByText("= 16 mm")).toBeVisible();
+    expect(await page.getByTestId("viewer-summary").textContent()).toContain(
+      "5 literal variables",
+    );
+
+    // LEG 3 — THE RE-DRIVE: an edit commits parameter.set through the SAME
+    // store path the workbench panel uses; the plate re-derives.
+    const beforeEdit = await dispatchedCount(page, "viewer-root");
+    await page.getByLabel("holeDiameter", { exact: true }).fill("12");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = await waitForSettledScene(page, "viewer-root", {
+      afterDispatch: beforeEdit,
+    });
+    expect(volumeNear(Number(redriven), 30 * 20 * 10 - Math.PI * 36 * 10)).toBe(
+      true,
+    );
+
+    // LEG 4 — THE EXPRESSION PATH: a committed rewrite previews its new
+    // quantity; an unknown identifier refuses inline and blocks the
+    // commit (nothing ships).
+    const hintField = page.getByLabel("volumeHint", { exact: true });
+    await hintField.fill("holeDiameter * 3");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page.getByText("= 36 mm")).toBeVisible();
+    await hintField.fill("nope * 2");
+    await expect(page.getByText('Unknown identifier "nope".')).toBeVisible();
+    await expect(page.getByRole("button", { name: "Apply" })).toBeDisabled();
+    // The preview line follows the COMMITTED expression (the field's
+    // inline verdict is the live part); restoring the text and committing
+    // is what moves the preview.
+    await hintField.fill("holeDiameter * 2");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page.getByText("= 24 mm")).toBeVisible();
+
+    // LEG 5 — THE SHARE LINK: copies the LIVE document (the two edits
+    // included) and the fragment decodes back to a real native document.
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByTestId("viewer-share").click();
+    await expect(page.getByTestId("viewer-action")).toContainText(
+      "share link copied",
+    );
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied.startsWith(`${baseURL}/viewer#1`)).toBe(true);
+    const decoded = await decodeNativeFromShare(
+      copied.slice(copied.indexOf("#")),
+    );
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) {
+      const reparsed = JSON.parse(decoded.text) as {
+        document: { parameters: { parameters: { name: string }[] } };
+      };
+      expect(reparsed.document.parameters.parameters.length).toBe(7);
+    }
+
+    // LEG 6 — THE STANDALONE EXPORT: one self-contained HTML lands with
+    // the site chrome, the viewer bundle, and the native variable inside.
+    const downloads = await collectDownloads(
+      page,
+      async () => {
+        await page.getByTestId("viewer-export").click();
+        await expect(page.getByTestId("viewer-action")).toContainText(
+          "standalone HTML downloaded",
+        );
+      },
+      1,
+      20_000,
+    );
+    const download = downloads[0];
+    if (download === undefined) throw new Error("the export never landed");
+    expect(download.suggestedFilename()).toMatch(/\.html$/);
+    const downloadPath = await download.path();
+    if (downloadPath === null) throw new Error("download has no path");
+    const bytes = await readFile(downloadPath);
+    // Size honesty: the renderer and the kernel travel inside — the file
+    // is multi-megabyte by construction.
+    expect(bytes.length).toBeGreaterThan(500_000);
+    const html = bytes.toString("utf8");
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain('window["__SLOPCAD_NATIVE__"] = ');
+    expect(html).toContain('window["__SLOPCAD_TITLE__"] = ');
+    expect(html).toContain("holeDiameter");
+    expect(html).toContain("<style>");
+
+    // LEG 7 — THE EMBED: the scoped header guarantee on the route, then a
+    // REAL host page framing the viewer (?embed=1, no site bar) whose
+    // part settles and whose form renders inside the frame. The header is
+    // the policy module's value verbatim (scheme allow, not `*` — the
+    // spec's `*` refuses opaque-origin embedders). The HOST is a local
+    // file (an opaque origin, genuinely cross-origin to the app): a
+    // data:-URL host would be refused by Chromium's local-network-access
+    // checks — a dev-only artifact of framing a loopback server that no
+    // real embedding site (public http/https) ever hits.
+    const embedResponse = await page.request.get(`${baseURL}/viewer?embed=1`);
+    expect(embedResponse.headers()["content-security-policy"]).toBe(
+      VIEWER_FRAME_HEADERS["content-security-policy"],
+    );
+    const embedUrl = `${baseURL}/viewer?embed=1#${payload}`;
+    const hostPage = `<!doctype html><html><body style="margin:0"><iframe id="embed" src="${embedUrl}" style="width:960px;height:640px;border:1px solid #ccc"></iframe></body></html>`;
+    const hostPath = join(
+      os.tmpdir(),
+      `slopcad-session-embed-${String(Date.now())}.html`,
+    );
+    await writeFile(hostPath, hostPage, "utf8");
+    try {
+      await page.goto(`file://${hostPath}`);
+      const frame = page.frameLocator("#embed");
+      // The pristine shared document again: the embed proof is the link
+      // exactly as a third site receives it.
+      const frameRoot = frame.locator("#viewer-root");
+      await expect(frameRoot).toBeVisible();
+      await expect(frame.locator("header")).toHaveCount(0);
+      await expect(frame.getByTestId("viewer-title")).toContainText("doc_");
+      await expect
+        .poll(
+          async () => {
+            const volume = await frameRoot.getAttribute("data-volume");
+            const rendered = await frameRoot.getAttribute(
+              "data-cad-rendered-volume",
+            );
+            return (
+              volume !== null &&
+              volume !== "" &&
+              volume !== "…" &&
+              volume === rendered
+            );
+          },
+          { timeout: 25_000 },
+        )
+        .toBe(true);
+      await expect(
+        frame.getByLabel("holeDiameter", { exact: true }),
+      ).toHaveValue("8");
+    } finally {
+      await rm(hostPath, { force: true });
+    }
+
+    extra("viewer-share-embed");
   });
 });
 

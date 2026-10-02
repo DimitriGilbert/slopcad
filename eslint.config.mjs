@@ -17,6 +17,10 @@ export default tseslint.config(
       "**/e2e-artifacts/**",
       "**/routeTree.gen.ts",
       "**/*.gen.ts",
+      // The standalone viewer's COMPILED bundle (vite.standalone.config's
+      // output lands in the app's public directory so the site serves it
+      // like any asset) — build output, not source.
+      "**/public/viewer-standalone/**",
     ],
   },
   js.configs.recommended,

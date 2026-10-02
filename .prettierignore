@@ -19,3 +19,8 @@ packages/cad-core/fixtures/
 
 # Agent tooling workspace (plans, session state), not source.
 .zcode/
+
+# The standalone viewer's COMPILED bundle (vite.standalone.config's output
+# lands in the app's public directory so the site serves it like any
+# asset) — build output, not source.
+**/public/viewer-standalone/**

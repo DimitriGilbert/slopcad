@@ -84,6 +84,7 @@ import {
 } from "../io-fixture/io-brep";
 import { importIgesBytes, type ImportedIgesState } from "../io-fixture/io-iges";
 import { CompleteCadWorkbench } from "./complete-workbench";
+import { WorkbenchShareBar } from "./share-viewer-bar";
 import { WorkbenchStoreProvider } from "./workbench-engine";
 
 /** The export title the 3MF exporter stamps (round-trips the import). */
@@ -754,6 +755,11 @@ function CompleteWorkbenchBody({
   // the /io fixture remains the GLTFLoader reference surface.
 
   return (
-    <CompleteCadWorkbench backend={backend} io={buildIo} rootId={rootId} />
+    <CompleteCadWorkbench
+      backend={backend}
+      io={buildIo}
+      rootId={rootId}
+      slots={{ bar: ({ engine }) => <WorkbenchShareBar engine={engine} /> }}
+    />
   );
 }

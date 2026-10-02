@@ -79,3 +79,4 @@ docs/tutorials/media/
 
 # Local-only compose overrides (host port mappings etc.).
 docker-compose.override.yml
+apps/web/public/viewer-standalone/

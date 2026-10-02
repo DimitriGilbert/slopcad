@@ -19,6 +19,7 @@ import { Route as PerfRouteImport } from './routes/perf'
 import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
+import { Route as ViewerRouteImport } from './routes/viewer'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkbenchAnalysisRouteImport } from './routes/workbench-analysis'
 import { Route as WorkbenchAssemblyRouteImport } from './routes/workbench-assembly'
@@ -88,6 +89,11 @@ const SpikeRoute = SpikeRouteImport.update({
 const UiViewportRoute = UiViewportRouteImport.update({
   id: '/ui-viewport',
   path: '/ui-viewport',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ViewerRoute = ViewerRouteImport.update({
+  id: '/viewer',
+  path: '/viewer',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkbenchRoute = WorkbenchRouteImport.update({
@@ -207,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
+  '/viewer': typeof ViewerRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
@@ -239,6 +246,7 @@ export interface FileRoutesByTo {
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
+  '/viewer': typeof ViewerRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
@@ -273,6 +281,7 @@ export interface FileRoutesById {
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
+  '/viewer': typeof ViewerRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
@@ -307,6 +316,7 @@ export interface FileRouteTypes {
     | '/render'
     | '/spike'
     | '/ui-viewport'
+    | '/viewer'
     | '/workbench'
     | '/workbench-analysis'
     | '/workbench-assembly'
@@ -339,6 +349,7 @@ export interface FileRouteTypes {
     | '/render'
     | '/spike'
     | '/ui-viewport'
+    | '/viewer'
     | '/workbench'
     | '/workbench-analysis'
     | '/workbench-assembly'
@@ -372,6 +383,7 @@ export interface FileRouteTypes {
     | '/render'
     | '/spike'
     | '/ui-viewport'
+    | '/viewer'
     | '/workbench'
     | '/workbench-analysis'
     | '/workbench-assembly'
@@ -406,6 +418,7 @@ export interface RootRouteChildren {
   RenderRoute: typeof RenderRoute
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
+  ViewerRoute: typeof ViewerRoute
   WorkbenchRoute: typeof WorkbenchRoute
   WorkbenchAnalysisRoute: typeof WorkbenchAnalysisRoute
   WorkbenchAssemblyRoute: typeof WorkbenchAssemblyRoute
@@ -495,6 +508,13 @@ declare module '@tanstack/react-router' {
       path: '/ui-viewport'
       fullPath: '/ui-viewport'
       preLoaderRoute: typeof UiViewportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/viewer': {
+      id: '/viewer'
+      path: '/viewer'
+      fullPath: '/viewer'
+      preLoaderRoute: typeof ViewerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workbench': {
@@ -676,6 +696,7 @@ const rootRouteChildren: RootRouteChildren = {
   RenderRoute: RenderRoute,
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
+  ViewerRoute: ViewerRoute,
   WorkbenchRoute: WorkbenchRoute,
   WorkbenchAnalysisRoute: WorkbenchAnalysisRoute,
   WorkbenchAssemblyRoute: WorkbenchAssemblyRoute,

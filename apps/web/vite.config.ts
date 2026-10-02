@@ -4,6 +4,8 @@ import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 
+import { VIEWER_FRAME_HEADERS } from "./src/viewer/viewer-frame-policy";
+
 export default defineConfig({
   // `host: true` binds 0.0.0.0 so the dev/preview servers are reachable
   // over the LAN from other devices (owner request). Config-level so every
@@ -44,7 +46,17 @@ export default defineConfig({
     // workers, fonts) to .gz and .br at build time — the node-server preset
     // only serves them with Content-Encoding when precompressed; without it
     // a multi-MB workbench payload ships raw over the internet.
-    nitro({ preset: "node-server", compressPublicAssets: true }),
+    // routeRules: the /viewer route carries the frame policy headers (see
+    // viewer-frame-policy) — the route-scoped embeddability guarantee, kept
+    // to exactly this path so no global relaxation ever leaks to the rest
+    // of the site.
+    nitro({
+      preset: "node-server",
+      compressPublicAssets: true,
+      routeRules: {
+        "/viewer": { headers: { ...VIEWER_FRAME_HEADERS } },
+      },
+    }),
     viteReact(),
   ],
 });

@@ -1,0 +1,99 @@
+/**
+ * The workbench's share bar (Phase — shareable parametric pages): the one
+ * page-level row the bare /workbench-complete route gains — "Share as
+ * viewer link" serializes the LIVE session through the native bridge,
+ * encodes it with the viewer's share codec, and copies the /viewer link
+ * with the whole part inside the fragment. The same codec the viewer page
+ * itself uses, so a link copied here IS a link the viewer (and any
+ * embedding host) opens.
+ *
+ * The bar rides the composition's `bar` slot (the persistence bar's
+ * contract) and reads only the slot context's public engine surfaces.
+ */
+
+import { useCallback, useState } from "react";
+import type { ReactElement } from "react";
+import { useCadStore } from "@slopcad/cad-react";
+import { Button } from "@slopcad/ui/components/button";
+import { Link2, Loader2 } from "lucide-react";
+import type { WorkbenchEngine } from "./workbench-engine";
+
+import { serializeSessionToNativeText } from "../cad-projects/native-document-bridge";
+import { buildSharePath, encodeNativeForShare } from "../viewer/share-codec";
+
+/** One share action's honest feedback line. */
+interface ShareState {
+  readonly kind: "busy" | "copied" | "error";
+  readonly message: string;
+}
+
+/** The bar: spacer left, feedback, the one affordance right. */
+export function WorkbenchShareBar({
+  engine,
+}: {
+  readonly engine: WorkbenchEngine;
+}): ReactElement {
+  const store = useCadStore("WorkbenchShareBar");
+  const [state, setState] = useState<ShareState | null>(null);
+
+  const share = useCallback((): void => {
+    setState({ kind: "busy", message: "encoding…" });
+    const encoded = encodeNativeForShare(
+      serializeSessionToNativeText(
+        store.getSession(),
+        engine.regenerationStates ?? new Map(),
+        engine.rollback,
+      ),
+    )
+      .then((payload) =>
+        navigator.clipboard.writeText(
+          `${window.location.origin}${buildSharePath(payload)}`,
+        ),
+      )
+      .then(
+        () => "copied" as const,
+        (error: unknown) =>
+          error instanceof Error ? error.message : String(error),
+      );
+    void encoded.then((outcome) => {
+      setState(
+        outcome === "copied"
+          ? {
+              kind: "copied",
+              message: "viewer link copied — the part rides in the URL",
+            }
+          : { kind: "error", message: `share failed: ${outcome}` },
+      );
+    });
+  }, [engine, store]);
+
+  return (
+    <div
+      className="flex h-10 shrink-0 items-center gap-2 px-2"
+      data-testid="workbench-share-bar"
+    >
+      <div className="flex-1" />
+      <span
+        aria-live="polite"
+        className="text-muted-foreground font-mono text-xs"
+        data-testid="workbench-share-state"
+      >
+        {state?.message ?? null}
+      </span>
+      <Button
+        data-testid="workbench-share-viewer"
+        disabled={state?.kind === "busy"}
+        onClick={share}
+        size="xs"
+        variant="outline"
+      >
+        {state?.kind === "busy" ? (
+          <Loader2 className="animate-spin" data-icon="inline-start" />
+        ) : (
+          <Link2 data-icon="inline-start" />
+        )}
+        Share as viewer link
+      </Button>
+    </div>
+  );
+}

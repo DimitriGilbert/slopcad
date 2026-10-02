@@ -57,6 +57,7 @@ import {
   extrudeRenderState,
   type PlateRenderState,
 } from "./plate-render-scene";
+import { bootFixtureWorker } from "./fixture-worker-boot";
 import { computeDocumentScene } from "../worker-fixture/document-scene";
 import { computeExtrudeScene } from "../worker-fixture/extrude-scene";
 import { computeRevolveScene } from "../worker-fixture/revolve-scene";
@@ -498,6 +499,14 @@ export interface BootRenderFixtureSessionOptions {
    */
   readonly backend?: FixtureSessionBackend;
   /**
+   * Overrides the default worker construction (the bundler-hosted module
+   * workers of `./fixture-worker-boot`). The viewer's standalone export
+   * passes its inlined blob worker — a `file://`-opened single HTML cannot
+   * fetch a classic module-worker file, but the session protocol is
+   * identical either way.
+   */
+  readonly workerFactory?: () => Worker;
+  /**
    * Receives every feature-backed scene dispatch's worker verdict —
    * success when the scene settles, the structured refusal when the
    * kernel declines (e.g. Manifold's `kernel/unsupported-operation` for
@@ -524,23 +533,17 @@ export function bootRenderFixtureSession(
   // The crash-settling boot (Phase 35 hardening): a dead thread settles
   // in-flight requests (worker/transport-closed) instead of hanging, and
   // the crash lands on the same error surface as computation failures.
-  // The worker URLs stay INLINE string literals per branch — the bundler
-  // statically rewrites exactly that form into its worker chunks, so a
-  // variable indirection here would silently break the worker emission.
+  // The default construction lives in ./fixture-worker-boot so the viewer's
+  // standalone build can alias it out entirely (a file:// standalone boots
+  // its inlined worker through `workerFactory`); the URLs there stay INLINE
+  // string literals per branch — the bundler statically rewrites exactly
+  // that form into its worker chunks, so a variable indirection would
+  // silently break the worker emission.
   const backend = options.backend ?? "manifold";
   const boot = bootWorkerChannel(
-    backend === "occt"
-      ? new Worker(
-          new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
-          { type: "module" },
-        )
-      : new Worker(
-          new URL(
-            "../worker-fixture/manifold-worker-entry.ts",
-            import.meta.url,
-          ),
-          { type: "module" },
-        ),
+    options.workerFactory !== undefined
+      ? options.workerFactory()
+      : bootFixtureWorker(backend),
     (failure) => {
       errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
       writeSurface();
