@@ -1,14 +1,17 @@
 /**
- * The workbench's share bar (Phase — shareable parametric pages): the one
- * page-level row the bare /workbench-complete route gains — "Share as
- * viewer link" serializes the LIVE session through the native bridge,
- * encodes it with the viewer's share codec, and copies the /viewer link
- * with the whole part inside the fragment. The same codec the viewer page
- * itself uses, so a link copied here IS a link the viewer (and any
- * embedding host) opens.
+ * The workbench's share control (Phase — shareable parametric pages):
+ * "Share as viewer link" serializes the LIVE session through the native
+ * bridge, encodes it with the viewer's share codec, and copies the
+ * /viewer link with the whole part inside the fragment. The same codec
+ * the viewer page itself uses, so a link copied here IS a link the
+ * viewer (and any embedding host) opens.
  *
- * The bar rides the composition's `bar` slot (the persistence bar's
- * contract) and reads only the slot context's public engine surfaces.
+ * The control rides the composition's `statusBar` slot — laid into the
+ * status row's free right end beside the default strip, NEVER as a
+ * layout row of its own: the bare /workbench-complete route's canvas
+ * geometry is pinned by the tutorial driver's workplane-mapped clicks,
+ * and one consumed row of chrome shifts every mapped point. Reads only
+ * the slot context's public engine surfaces.
  */
 
 import { useCallback, useState } from "react";
@@ -27,7 +30,7 @@ interface ShareState {
   readonly message: string;
 }
 
-/** The bar: spacer left, feedback, the one affordance right. */
+/** The section: feedback line, then the one affordance — status-row height. */
 export function WorkbenchShareBar({
   engine,
 }: {
@@ -69,10 +72,9 @@ export function WorkbenchShareBar({
 
   return (
     <div
-      className="flex h-10 shrink-0 items-center gap-2 px-2"
+      className="flex h-7 shrink-0 items-center gap-2 pr-3 pl-2"
       data-testid="workbench-share-bar"
     >
-      <div className="flex-1" />
       <span
         aria-live="polite"
         className="text-muted-foreground font-mono text-xs"

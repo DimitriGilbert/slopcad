@@ -269,6 +269,33 @@ export interface CadWorkbenchSlots {
   readonly ioDialogs?: CadWorkbenchSlot;
 }
 
+/**
+ * The composition's default status strip: the settled scene's live
+ * readouts (status, volume, tool, selection, commands, error) on the
+ * machine's fixed surface ids. Exported so a host page supplying a
+ * `statusBar` slot can KEEP this strip verbatim — one source of truth
+ * for the ids the session writer targets — while laying its own content
+ * beside it (the share bar rides the status row; the bare route grows no
+ * layout row of its own and its pinned canvas geometry stays put).
+ */
+export function CompleteWorkbenchStatusBar({
+  className,
+}: {
+  /** Merged onto the strip (a host row lays it out beside its own content). */
+  readonly className?: string;
+}): ReactElement {
+  return (
+    <CadStatusBar
+      className={className}
+      surfaceIds={{
+        statusId: "workbench-complete-status",
+        volumeId: "workbench-complete-volume",
+        errorId: "workbench-complete-error",
+      }}
+    />
+  );
+}
+
 /** Props of {@link CompleteCadWorkbench}. */
 export interface CompleteCadWorkbenchProps {
   /**
@@ -1982,15 +2009,7 @@ export function CompleteCadWorkbench({
     />
   );
 
-  const defaultStatusBar = (
-    <CadStatusBar
-      surfaceIds={{
-        statusId: "workbench-complete-status",
-        volumeId: "workbench-complete-volume",
-        errorId: "workbench-complete-error",
-      }}
-    />
-  );
+  const defaultStatusBar = <CompleteWorkbenchStatusBar />;
 
   const hasIo = io !== undefined;
   const defaultIoDialogs = !hasIo ? null : (

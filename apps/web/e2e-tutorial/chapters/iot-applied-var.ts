@@ -26,16 +26,18 @@ import {
 //
 // The commission: a 3D-printable case whose EVERY dimension derives from a
 // small variable system, built live in the parameter manager. The root is
-// the print line width; the owner's ratios (a corner post twice the wall,
-// floor and lid three times it) and the board's socketing stack (pin
-// header + board thickness + the lift gap) do the rest:
+// the print line width; the owner's print logic — walls two lines (two
+// perimeters), the corner ribs two lines, floor and lid three lines — and
+// the board's socketing stack (pin header + board thickness + the lift
+// gap) do the rest. EVERY multiple reads lineWidth DIRECTLY (the owner's
+// correction: nothing chains through the wall any more, and the old
+// wallCount indirection is gone — the wall is two perimeters outright):
 //
 //   lineWidth   0.4 mm   the root — one printed line
-//   wallCount   5        the perimeter count (dimensionless)
-//   wall        := wallCount * lineWidth          = 2 mm
-//   post        := 2 * wall                       = 4 mm
-//   bottom      := 3 * wall                       = 6 mm
-//   lidT        := 3 * wall                       = 6 mm
+//   wall        := 2 * lineWidth                  = 0.8 mm
+//   post        := 2 * lineWidth                  = 0.8 mm  (the rib width)
+//   bottom      := 3 * lineWidth                  = 1.2 mm
+//   lidT        := 3 * lineWidth                  = 1.2 mm
 //   boardL      70 mm    the perfboard, 5 by 7 cm
 //   boardW      50 mm
 //   header      8.5 mm   the pin header under the board
@@ -44,37 +46,42 @@ import {
 //   boardLift   := header + gapUnder              = 9 mm
 //   topClear    25 mm    the components above the board
 //   caseH       := boardLift + boardT + topClear  = 35.6 mm
-//   caseL       := boardL + 2 * wall              = 74 mm
-//   caseW       := boardW + 2 * wall              = 54 mm
+//   caseL       := boardL + 2 * wall              = 71.6 mm
+//   caseW       := boardW + 2 * wall              = 51.6 mm
 //   portX       35 mm    the connector's place along the front face
 //   portW       10 mm    the window's width
 //   portH       7 mm     the window's height
 //   portOffset  1 mm     centers the window on the connector
 //   portZ       := boardLift + portOffset         = 10 mm
 //   lidClear    0.5 mm   the lid lip's slide clearance (total)
-//   cavityD     := caseH - bottom                 = 29.6 mm
-//   portCut     := wall + 1mm                     = 3 mm
-//   postDrop    := cavityD - boardLift            = 20.6 mm
-//   postFarX    := boardL + wall - post           = 68 mm
-//   postFarY    := boardW + wall - post           = 48 mm
+//   cavityD     := caseH - bottom                 = 34.4 mm
+//   portCut     := wall + 1mm                     = 1.8 mm
+//   postDrop    := cavityD - boardLift            = 25.4 mm
+//   reach       6 mm     the rib's diagonal reach (a design literal,
+//                        the portX class: set once, referenced everywhere)
+//   postNearX   := caseL - lineWidth              = 71.2 mm
+//   postNearY   := caseW - lineWidth              = 51.2 mm
+//   postIn      := lineWidth + reach              = 6.4 mm
+//   postFarX    := caseL - lineWidth - reach      = 65.2 mm
+//   postFarY    := caseW - lineWidth - reach      = 45.2 mm
 //   lipL        := boardL - lidClear              = 69.5 mm
 //   lipW        := boardW - lidClear              = 49.5 mm
-//   lipInset    := wall + lidClear / 2            = 2.25 mm
+//   lipInset    := wall + lidClear / 2            = 1.05 mm
 //   The DIALOG grammar is a bare `$name` (the token pattern anchors both
 //   ends — no `-$name`), so the four DOWNWARD extrudes ride signed
 //   helpers, and the sign is a variable like everything else:
-//   cavityDrop  := -cavityD                       = -29.6 mm
-//   postDropDown := -postDrop                     = -20.6 mm
-//   portCutIn   := -portCut                       = -3 mm
-//   lidHang     := -lidT                          = -6 mm
+//   cavityDrop  := -cavityD                       = -34.4 mm
+//   postDropDown := -postDrop                     = -25.4 mm
+//   portCutIn   := -portCut                       = -1.8 mm
+//   lidHang     := -lidT                          = -1.2 mm
 //   caseDrop    := -caseH                         = -35.6 mm
 //
 // ## The build, and what the probes taught
 //
 // 1. THE FRAME. The bed plane is the case's OPENING RIM (z = 0); the whole
 //    case hangs below it — the applied-iot-case teaching frame. The block
-//    is the footprint extruded DOWN $caseH; the cavity tool is a bed
-//    sketch too, extruded DOWN $cavityD.
+//    is the footprint extruded DOWN $caseDrop; the cavity tool is a bed
+//    sketch too, extruded DOWN $cavityDrop.
 // 2. THE FOOTPRINT SKETCHES READ THE VARIABLES. Phase 26a's binding is
 //    the chapter's payoff: every plan rectangle is drawn, dimensioned
 //    with distanceX/distanceY pairs, and each dimension is then BOUND
@@ -93,33 +100,42 @@ import {
 //    after an Apply the NEXT constraint's field can mount stale-empty,
 //    so each bind re-selects its row and clears the field blind
 //    (Ctrl+A) before typing the token.
-// 3. THE POSTS ARE UNIONED BACK, ALL `$`-DRIVEN. The draft's first
-//    instinct — a notched one-piece tool whose subtract leaves the
-//    posts — died in the binding probe: the 12-gon chain has no
-//    rectangle-entity conveniences, and keeping it closed while the
-//    board moves needs ~36 constraints (twelve coincidences, twelve
-//    horizontals/verticals, fourteen dimensions) — unteachable at
-//    tutorial pace. The rectangle-native answer: the cavity is ONE
-//    bound rectangle (place pair at the wall inset, size pair at the
-//    board), the subtract empties it, and FOUR post squares — sizes at
-//    $post, the near square at the wall corner, the far three at
-//    $postFarX/$postFarY place pairs — extrude DOWN $cavityD and union
-//    back onto the shell in a sequential chain (the applied chapter's
-//    probed-and-exact union chain): born fused, printed as one body.
-//    (The old multi-tool subtract was probed and avoided: one subtract
-//    with four tools removed five prisms' worth.)
+// 3. THE POSTS ARE DIAGONAL RIBS, ONE SLOT EACH. The owner's correction:
+//    the corner posts are THIN DIAGONAL BRACES — two line widths wide,
+//    one per corner, running at 45° across the corner with both ends
+//    buried in the two walls (fused, printed with the shell). The
+//    probe's shape is the sketcher's straight slot: ONE closed entity —
+//    two cap centers and a radius — so the extrudable profile needs no
+//    chained-line welds, and the slot exposes its cap centers as point
+//    targets and its DIAMETER as the taught width. Five dimensions per
+//    rib sketch, every one `$`-bound through the inspector, BOTH cap
+//    centers pinned ABSOLUTELY off the origin point: the near cap center
+//    reads ($lineWidth, $lineWidth) at the origin corner — the round end
+//    lands flush against the two outer faces, wholly inside the wall
+//    corner — or ($postNearX, $lineWidth) and kin at the other three,
+//    and the far cap center reads $postIn or $postFarX/$postFarY — the
+//    45° held by the solved places themselves (|Δx| = |Δy| falls out of
+//    lineWidth + reach against caseL − lineWidth − reach). The first
+//    draft pinned the far cap with a magnitude reach pair (|Δx| = |Δy| =
+//    $reach) and the trim beat's re-solve flipped its signs — the ribs
+//    bloomed 6 mm past the case — so magnitude dimensions never carry a
+//    direction: place both ends. The rib is extruded DOWN $cavityDrop
+//    (fusing with the floor) and unioned into the shell in the applied
+//    chapter's probed sequential chain — born fused, printed as one
+//    body.
 // 4. THE TRIM IS THE BOARD'S OWN OUTLINE. One bed rectangle at the
 //    cavity's own bound numbers — place $wall/$wall, size
-//    $boardL/$boardW — extruded DOWN $postDrop and subtracted once:
-//    it shears exactly the four posts' tops (4 · post² · postDrop), so
-//    the posts come out boardLift tall wherever the board moves them.
-//    The old four-rect trim chain was exact but unbindable; the prism
-//    is exact AND reads the variables.
+//    $boardL/$boardW — extruded DOWN $postDropDown and subtracted once:
+//    it shears exactly the four ribs' open-cavity tops, so they come out
+//    boardLift tall wherever the board moves them. The wall-band ends
+//    need no trim — they fuse into solid wall, full height, invisibly.
 // 5. EVERY DEPTH IS A $ NAME. The draft dialog's Distance fields take
 //    `$name` references with the clickable autocomplete (Phase 21), and a
 //    referenced parameter is re-read on every dispatch. The chapter's
-//    extrudes ride $caseH, $cavityD, $postDrop (five times), $portCut and
-//    $lidT (twice) — so the payoff demos re-drive real geometry.
+//    extrudes ride the signed helpers — $caseDrop once, $cavityDrop five
+//    times (the cavity tool and the four ribs), $postDropDown,
+//    $portCutIn — and $lidT upward for the plate; so the payoff demos
+//    re-drive real geometry.
 // 6. THE EDIT THAT RE-DERIVES IS THE EXPRESSION COMMIT. Probed: the
 //    panel's literal edit is the value-only arm ("the cached value moves,
 //    nothing is recomputed") — features referencing DERIVED variables read
@@ -140,91 +156,116 @@ import {
 //
 // ## The volume ledger (defaults; every pin below derives from it)
 //
-//   block            74 * 54 * 35.6            = 142,257.6
-//   cavity tool      70 * 50 * 29.6            = 103,600
-//   shell            142,257.6 - 103,600       =  38,657.6
-//   each post union  +4 * 4 * 29.6             =   +473.6 (x4)
-//   shell + posts                              =  40,552
-//   trim prism cut   -4 * 4 * 20.6             = -1,318.4
-//   trimmed                                    =  39,233.6
-//   port prism       10 * 7 * 3                =     210   (body on stage)
-//   port cut         2 * 10 * 7                =    -140
-//   THE BOX                                    =  39,093.6
-//   lid plate        74 * 54 * 6               =  23,976
-//   lid lip          69.5 * 49.5 * 6           =  20,641.5
-//   THE LID                                    =  44,617.5
-//   box bounds   [0,0,-35.6]..[74,54,0]; lid bounds [0,0,-6]..[74,54,6]
+//   The ribs' new material is only the slot's OPEN-CAVITY part — the
+//   wall-band ends fuse into material that is already solid. At cap
+//   radius r = lineWidth and centerline L = reach·√2:
+//   A(r) = 2rL − (2√2+1)·r² + πr²/2
+//          (corner clip pair; the far cap's OUTER half-disc — its near
+//          half is inside the body rectangle, and the start cap's outer
+//          half is buried in the wall corner)
+//   A(0.4) = 6.427011;  A(0.5) = 7.920874
 //
-//   demo 1 (lineWidth 0.5): wall 2.5, post 5, bottom/lidT 7.5, caseL 75,
-//     caseW 55, cavityD 28.1, postDrop 19.1, portCut 3.5, wall cut 2.5:
-//     146,850 - 98,350 + 2,810 - 1,910 - 175 = 49,225
-//     (the posts' squares really grow now — the bindings re-derive them;
-//     the pre-binding chapter had to narrate them as held at 4)
-//   demo 2 (board 85 by 60): caseL 89, caseW 64 — THE CASE MOVES. The
-//     bound sketches re-solve: 89 * 64 * 35.6 = 202,777.6; cavity
-//     85 * 60 * 29.6 = 150,960; posts 1,894.4; trim cut 1,318.4;
-//     port cut 140: 202,777.6 - 150,960 + 1,894.4 - 1,318.4 - 140
-//     = 52,253.6. Then back to 70 by 50, re-pinned at 39,093.6.
-//   demo 3 (header 12): boardLift 12.5, caseH 39.1, cavityD 33.1,
-//     postDrop = boardT + topClear - bottom = 20.6 (the rest-plane
-//     invariant — the floor drops with the stack):
-//     156,243.6 - 115,850 + 2,118.4 - 1,318.4 - 140 = 41,053.6
+//   block            71.6 * 51.6 * 35.6        = 131,526.336
+//   cavity tool      70 * 50 * 34.4            = 120,400
+//   shell            131,526.336 - 120,400     =  11,126.336
+//   each rib union   +6.427011 * 34.4          =  +221.089 (x4)
+//   shell + ribs                               =  12,010.693
+//   trim cut         -6.427011 * 25.4          =   -163.246 (x4)
+//   trimmed                                    =  11,357.708
+//   port prism       10 * 7 * 1.8              =     126   (body on stage)
+//   port cut         0.8 * 10 * 7              =     -56
+//   THE BOX                                    =  11,301.708
+//   lid plate        71.6 * 51.6 * 1.2         =   4,433.472
+//   lid lip          69.5 * 49.5 * 1.2         =   4,128.3
+//   THE LID                                    =   8,561.772
+//   box bounds   [0,0,-35.6]..[71.6,51.6,0]; lid bounds [0,0,-1.2]..[71.6,51.6,1.2]
+//
+//   demo 1 (lineWidth 0.5): wall 1, post 1, bottom/lidT 1.5, caseL 72,
+//     caseW 52, cavityD 34.1, postDrop 25.1, portCut 2 — EVERYTHING
+//     scales, the thin parts included (the ribs' round ends stay flush):
+//     A(0.5): 133,286.4 - 119,350 + 4·270.102 - 4·198.814 - 70
+//     = 14,151.551
+//   demo 2 (board 85 by 60): caseL 86.6, caseW 61.6 — THE CASE MOVES and
+//     the ribs follow ($postNearX/$postNearY/$postFarX/$postFarY
+//     re-derive): 189,910.336 - 175,440 + 884.357 - 652.985 - 56
+//     = 14,645.708. Then back to 70 by 50, re-pinned at 11,301.708.
+//   demo 3 (header 12): boardLift 12.5, caseH 39.1, cavityD 37.9,
+//     postDrop = boardT + topClear - bottom = 25.4 (the rest-plane
+//     invariant — the floor drops with the stack, the ribs grow):
+//     144,457.296 - 132,650 + 4·243.584 - 652.985 - 56 = 12,072.646
+
+/**
+ * The diagonal rib's new-material plan area at cap radius `r`: the slot's
+ * body rectangle (2r wide, the reach·√2 centerline) less the corner-clip
+ * pair the cavity's open quadrant cuts ((2√2+1)·r²), plus the far cap's
+ * OUTER half-disc (πr²/2 — the cap's near half is already inside the body
+ * rectangle, and the start cap's outer half is buried in the wall
+ * corner). The chain repro walked this area out of the kernel exactly.
+ */
+function stripArea(r: number): number {
+  return (
+    2 * r * (6 * Math.SQRT2) -
+    (2 * Math.SQRT2 + 1) * r * r +
+    (Math.PI * r * r) / 2
+  );
+}
 
 /** The block: the full footprint, 35.6 tall, extruded below the bed. */
-const BLOCK_VOLUME = 74 * 54 * 35.6;
+const BLOCK_VOLUME = 71.6 * 51.6 * 35.6;
 /** The cavity tool: the board's own footprint, wall-inset, cavityD deep. */
-const CAVITY_VOLUME = 70 * 50 * 29.6;
-/** The shell after the cavity subtract: walls and floor, no posts. */
+const CAVITY_VOLUME = 70 * 50 * 34.4;
+/** The shell after the cavity subtract: walls and floor, no ribs. */
 const SHELL_VOLUME = BLOCK_VOLUME - CAVITY_VOLUME;
-/** One post: post by post, the cavity's full depth. */
-const POST_VOLUME = 4 * 4 * 29.6;
-/** The shell with its four corner posts unioned back on. */
-const SHELL_POSTS_VOLUME = SHELL_VOLUME + 4 * POST_VOLUME;
-/** The material one trim prism cut removes: four post-square columns. */
-const TRIM_CUT_VOLUME = 4 * 4 * 20.6;
-/** The case after the board-outline trim: boardLift-tall posts. */
-const TRIMMED_VOLUME = SHELL_POSTS_VOLUME - 4 * TRIM_CUT_VOLUME;
+/** One rib's union: the open-cavity stadium area, the cavity's full depth. */
+const STRIP_UNION_VOLUME = stripArea(0.4) * 34.4;
+/** The shell with its four diagonal ribs unioned back on. */
+const SHELL_POSTS_VOLUME = SHELL_VOLUME + 4 * STRIP_UNION_VOLUME;
+/** The open-cavity material one trim prism cuts from one rib. */
+const STRIP_TRIM_VOLUME = stripArea(0.4) * 25.4;
+/** The case after the board-outline trim: boardLift-tall ribs. */
+const TRIMMED_VOLUME = SHELL_POSTS_VOLUME - 4 * STRIP_TRIM_VOLUME;
 /** The port prism: portW by portH by portCut, overshooting into air. */
-const PORT_PRISM_VOLUME = 10 * 7 * 3;
+const PORT_PRISM_VOLUME = 10 * 7 * 1.8;
 /** The wall the port cut removes: wall thickness by the window. */
-const PORT_CUT_VOLUME = 2 * 10 * 7;
+const PORT_CUT_VOLUME = 0.8 * 10 * 7;
 /** The box file: the trimmed case with its USB window. */
 const BOX_VOLUME = TRIMMED_VOLUME - PORT_CUT_VOLUME;
 /** The lid's plate: the full footprint, lidT thick. */
-const PLATE_VOLUME = 74 * 54 * 6;
+const PLATE_VOLUME = 71.6 * 51.6 * 1.2;
 /** The lid's lip: board minus the clearance, hanging lidT down. */
-const LIP_VOLUME = 69.5 * 49.5 * 6;
+const LIP_VOLUME = 69.5 * 49.5 * 1.2;
 /** The lid file: plate + lip. */
 const LID_VOLUME = PLATE_VOLUME + LIP_VOLUME;
 /** The boot demo plate's volume (30 x 20 x 10 with the diameter-8 bore). */
 const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
-/** Demo 1 (lineWidth 0.5): the whole chain re-derived — posts included. */
+/** Demo 1 (lineWidth 0.5): the whole chain re-derived, ribs included. */
 const DEMO_WIDTH_VOLUME =
-  75 * 55 * 35.6 -
-  70 * 50 * 28.1 +
-  4 * (5 * 5 * 28.1) -
-  4 * (5 * 5 * 19.1) -
-  2.5 * 10 * 7;
+  72 * 52 * 35.6 -
+  70 * 50 * 34.1 +
+  4 * (stripArea(0.5) * 34.1) -
+  4 * (stripArea(0.5) * 25.1) -
+  1.0 * 10 * 7;
 /** Demo 2 (board 85 by 60): the bound sketches re-solve; the case MOVES. */
 const DEMO_BOARD_VOLUME =
-  89 * 64 * 35.6 -
-  85 * 60 * 29.6 +
-  4 * (4 * 4 * 29.6) -
-  4 * (4 * 4 * 20.6) -
+  86.6 * 61.6 * 35.6 -
+  85 * 60 * 34.4 +
+  4 * STRIP_UNION_VOLUME -
+  4 * STRIP_TRIM_VOLUME -
   PORT_CUT_VOLUME;
-/** Demo 3 (header 12): the deeper case, posts grown with the dropped floor. */
+/** Demo 3 (header 12): the deeper case, ribs grown with the dropped floor. */
 const DEMO_HEADER_VOLUME =
-  74 * 54 * 39.1 -
-  70 * 50 * 33.1 +
-  4 * (4 * 4 * 33.1) -
-  4 * (4 * 4 * 20.6) -
+  71.6 * 51.6 * 39.1 -
+  70 * 50 * 37.9 +
+  4 * (stripArea(0.4) * 37.9) -
+  4 * STRIP_TRIM_VOLUME -
   PORT_CUT_VOLUME;
-/** All bodies tessellate planar-exact: the house band is generous. */
+/** All bodies tessellate planar-exact within the band: the ribs' four
+ * cap arcs cost microseconds of deflection, the house floor is generous. */
 const PLANAR_VOLUME_FLOOR = 0.999;
 
 /** The extrudes' body-key suffixes ride the shared extrude counter: the
  * draft dialog's n-th extrude is `body_extrude{n}` (no bare first form —
- * the dialog path always suffixes). Block, cavity, four posts, trim,
+ * the dialog path always suffixes). Block, cavity, four ribs, trim,
  * port prism, plate, lip. */
 const EXTRUDE_KEYS = [
   "body|body_extrude1",
@@ -236,7 +277,7 @@ const EXTRUDE_KEYS = [
   "body|body_extrude7",
   "body|body_extrude8",
 ] as const;
-/** The seven booleans' bodies: the cavity subtract, four post unions,
+/** The seven booleans' bodies: the cavity subtract, four rib unions,
  * the board-outline trim, the port. */
 const BOOLEAN_KEYS = [
   "body|body_boolean",
@@ -254,19 +295,21 @@ const BOOLEAN_KEYS = [
  * live in the manager (create, expression, `$` autocomplete), the case
  * whose every dimension — extrude depth AND sketch dimension — is a
  * `$name` reference (Phase 26a's binding through the sketch inspector's
- * autocomplete), the cavity subtract with four post squares unioned back
- * fused, the board-outline trim that shears them to boardLift, the port
- * authored on the front face at its parameterized height, the three
- * re-drive demos (lineWidth, board size — the case MOVES, header), the
- * two-rectangle lid, and the two view-scoped exports verified against
- * their analytic volumes and their taught world bounds.
+ * autocomplete), the cavity subtract with four thin diagonal corner ribs
+ * (one straight slot each, width $post, both ends buried in the walls)
+ * unioned back fused, the board-outline trim that shears them to
+ * boardLift, the port authored on the front face at its parameterized
+ * height, the three re-drive demos (lineWidth, board size — the case and
+ * the ribs MOVE, header), the two-rectangle lid, and the two view-scoped
+ * exports verified against their analytic volumes and their taught world
+ * bounds.
  */
 export const chapter: ChapterModule = {
   definition: {
     id: "iot-applied-var",
     title: "Applied project: a case driven by variables",
     summary:
-      "One continuous build from a line width to a two-file print set: the variable system in the manager, every depth and every footprint dimension a $name reference, the re-drive demos, and the exports.",
+      "One continuous build from a line width to a two-file print set: the variable system in the manager, every depth and every footprint dimension a $name reference, the diagonal corner ribs, the re-drive demos, and the exports.",
     cues: [
       {
         stepId: "brief",
@@ -274,15 +317,15 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "vars-root",
-        text: "Two roots: lineWidth 0.4, a printed line; wallCount 5, the perimeter count.",
+        text: "One root: lineWidth 0.4 — a printed line. Everything multiplies it.",
       },
       {
         stepId: "vars-wall",
-        text: "wall := wallCount times lineWidth — five lines stack two millimetres.",
+        text: "wall := 2 times lineWidth — two perimeters, 0.8 millimetres.",
       },
       {
         stepId: "vars-print",
-        text: "The printer's ratios: post twice the wall, floor and lid three times.",
+        text: "The print logic: the corner ribs two lines wide, floor and lid three.",
       },
       {
         stepId: "vars-board",
@@ -302,7 +345,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "vars-build",
-        text: "Build helpers: depths, the far-post place, the lip fit — all derived.",
+        text: "Build helpers: depths, the rib places and reach, the lip fit — derived.",
       },
       {
         stepId: "stage",
@@ -310,11 +353,11 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "block",
-        text: "The block: 74 by 54 drawn, its spans bound to caseL and caseW.",
+        text: "The block: 71.6 by 51.6 drawn, its spans bound to caseL and caseW.",
       },
       {
         stepId: "pocket-why",
-        text: "The cavity is one bound rectangle; four bound squares return as posts.",
+        text: "The cavity is one bound rectangle; four diagonal slots return as ribs.",
       },
       {
         stepId: "pocket",
@@ -322,19 +365,19 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "subtract",
-        text: "The subtract: 38,657.6 — walls and floor, no posts yet.",
+        text: "The subtract: 11,126.3 — walls and floor, no ribs yet.",
       },
       {
         stepId: "posts",
-        text: "Four squares at $post, placed by variables, union back — 40,552.",
+        text: "Four diagonal slots at $post, drawn to the corners, union back — 12,010.7.",
       },
       {
         stepId: "posts-why",
-        text: "Born fused: the union is the print — walls and posts, one body.",
+        text: "Born fused: the rib ends bury in the walls — braces and shell, one body.",
       },
       {
         stepId: "trims",
-        text: "The board's own outline shears the columns to boardLift — 39,233.6.",
+        text: "The board's own outline shears the ribs to boardLift — 11,357.7.",
       },
       {
         stepId: "port-why",
@@ -346,7 +389,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "port-cut",
-        text: "A 10 by 7 window at portX, portZ, cut by $portCut — 39,093.6.",
+        text: "A 10 by 7 window at portX, portZ, cut by $portCut — 11,301.7.",
       },
       {
         stepId: "iso-read",
@@ -354,15 +397,15 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "demo-width",
-        text: "lineWidth to 0.5: wall 2.5, post 5 — the case re-derives to 49,225.",
+        text: "lineWidth to 0.5: wall 1, ribs 1 — the case re-derives to 14,151.6.",
       },
       {
         stepId: "demo-board",
-        text: "An 85 by 60 board: the sketches re-solve — the case grows to 52,253.6.",
+        text: "An 85 by 60 board: the sketches re-solve — the case grows to 14,645.7.",
       },
       {
         stepId: "demo-header",
-        text: "header to 12: the case deepens to 39.1 — the posts grow with the floor.",
+        text: "header to 12: the case deepens to 39.1 — the ribs grow with the floor.",
       },
       {
         stepId: "lid-why",
@@ -370,11 +413,11 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "lid-plate",
-        text: "The plate: the block's bound spans again, up lidT — 23,976 cubic.",
+        text: "The plate: the block's bound spans again, up lidT — 4,433.5 cubic.",
       },
       {
         stepId: "lid-lip",
-        text: "The lip: board minus clearance at the inset, hung lidT down — 20,641.5.",
+        text: "The lip: board minus clearance at the inset, hung lidT down — 4,128.3.",
       },
       {
         stepId: "box-scope",
@@ -382,7 +425,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "export-box",
-        text: "The box's STL: 39,093.6 cubic, z from -35.6 to the rim.",
+        text: "The box's STL: 11,301.7 cubic, z from -35.6 to the rim.",
       },
       {
         stepId: "lid-scope",
@@ -390,7 +433,7 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "export-lid",
-        text: "The lid's STL: 44,617.5 cubic, z from -6 to 6.",
+        text: "The lid's STL: 8,561.8 cubic, z from -1.2 to 1.2.",
       },
       {
         stepId: "recap",
@@ -413,42 +456,42 @@ export const chapter: ChapterModule = {
       page.getByRole("button", { name: "Manage variables" }),
     );
     await createVariable(page, driver, panel, "lineWidth", "0.4mm");
-    await createVariable(page, driver, panel, "wallCount", "5");
     await driver.dwell();
 
     await driver.step("vars-wall");
-    // wall := wallCount * lineWidth — the first definition, written with
-    // the manager's own `$` autocomplete (two clicked rows). Each derived
-    // name is CREATED first with the number a hand calc gives, then its
-    // expression keeps it true — the manager defines over existing rows.
-    await createVariable(page, driver, panel, "wall", "2mm");
+    // wall := 2 * lineWidth — the first definition, written with the
+    // manager's own `$` autocomplete. Each derived name is CREATED first
+    // with the number a hand calc gives, then its expression keeps it
+    // true — the manager defines over existing rows. Two perimeters: the
+    // owner's wall is two line widths outright, no count indirection.
+    await createVariable(page, driver, panel, "wall", "0.8mm");
     await defineExpression(page, driver, panel, "wall", [
-      { type: "$", text: "$wallC", option: "wallCount" },
-      { type: "text", text: " * " },
+      { type: "text", text: "2 * " },
       { type: "$", text: "$line", option: "lineWidth" },
     ]);
     await driver.pointAtReadout(
-      rowOf(page, panel, "wall").getByText("= 2 mm", { exact: true }),
+      rowOf(page, panel, "wall").getByText("= 0.8 mm", { exact: true }),
     );
     await driver.dwell();
 
     await driver.step("vars-print");
-    // The owner's print logic, two clicks an expression: a corner post is
-    // twice the wall; floor and lid are three.
-    await createVariable(page, driver, panel, "post", "4mm");
-    await createVariable(page, driver, panel, "bottom", "6mm");
-    await createVariable(page, driver, panel, "lidT", "6mm");
+    // The owner's print logic, two clicks an expression: the diagonal
+    // corner ribs are two lines wide; floor and lid are three. Every
+    // multiple reads the ROOT directly — nothing chains through wall.
+    await createVariable(page, driver, panel, "post", "0.8mm");
+    await createVariable(page, driver, panel, "bottom", "1.2mm");
+    await createVariable(page, driver, panel, "lidT", "1.2mm");
     await defineExpression(page, driver, panel, "post", [
       { type: "text", text: "2 * " },
-      { type: "$", text: "$wal", option: "wall" },
+      { type: "$", text: "$line", option: "lineWidth" },
     ]);
     await defineExpression(page, driver, panel, "bottom", [
       { type: "text", text: "3 * " },
-      { type: "$", text: "$wal", option: "wall" },
+      { type: "$", text: "$line", option: "lineWidth" },
     ]);
     await defineExpression(page, driver, panel, "lidT", [
       { type: "text", text: "3 * " },
-      { type: "$", text: "$wal", option: "wall" },
+      { type: "$", text: "$line", option: "lineWidth" },
     ]);
     await driver.dwell();
 
@@ -477,8 +520,8 @@ export const chapter: ChapterModule = {
     await driver.step("vars-case");
     await createVariable(page, driver, panel, "topClear", "25mm");
     await createVariable(page, driver, panel, "caseH", "35.6mm");
-    await createVariable(page, driver, panel, "caseL", "74mm");
-    await createVariable(page, driver, panel, "caseW", "54mm");
+    await createVariable(page, driver, panel, "caseL", "71.6mm");
+    await createVariable(page, driver, panel, "caseW", "51.6mm");
     await defineExpression(page, driver, panel, "caseH", [
       { type: "$", text: "$boardLi", option: "boardLift" },
       { type: "text", text: " + " },
@@ -516,19 +559,26 @@ export const chapter: ChapterModule = {
 
     await driver.step("vars-build");
     // The build's own helpers join the DAG: the pocket's depth, the port
-    // cut's overshoot, the post trim's drop, the far posts' place (the
-    // board's far corner minus one post), the lip's fit — every one an
+    // cut's overshoot, the rib trim's drop, the ribs' diagonal reach (a
+    // design literal, the portX class), both rib cap centers' places (the
+    // near cap at the case's corner pulled one line width inside; the far
+    // cap one reach further in — both ends absolute so the 45° is the
+    // solve's own consequence), the lip's fit — every derived one an
     // expression.
     await createVariable(page, driver, panel, "lidClear", "0.5mm");
-    await createVariable(page, driver, panel, "cavityD", "29.6mm");
-    await createVariable(page, driver, panel, "portCut", "3mm");
-    await createVariable(page, driver, panel, "postDrop", "20.6mm");
-    await createVariable(page, driver, panel, "postFarX", "68mm");
-    await createVariable(page, driver, panel, "postFarY", "48mm");
+    await createVariable(page, driver, panel, "cavityD", "34.4mm");
+    await createVariable(page, driver, panel, "portCut", "1.8mm");
+    await createVariable(page, driver, panel, "postDrop", "25.4mm");
+    await createVariable(page, driver, panel, "reach", "6mm");
+    await createVariable(page, driver, panel, "postNearX", "71.2mm");
+    await createVariable(page, driver, panel, "postNearY", "51.2mm");
+    await createVariable(page, driver, panel, "postIn", "6.4mm");
+    await createVariable(page, driver, panel, "postFarX", "65.2mm");
+    await createVariable(page, driver, panel, "postFarY", "45.2mm");
     await createVariable(page, driver, panel, "lipL", "69.5mm");
     await createVariable(page, driver, panel, "lipW", "49.5mm");
-    await createVariable(page, driver, panel, "lipInset", "2.25mm");
-    // The five downward extrudes ride signed helpers: the dialog grammar
+    await createVariable(page, driver, panel, "lipInset", "1.05mm");
+    // The four downward extrudes ride signed helpers: the dialog grammar
     // is a bare `$name`, so the sign is a variable like everything else.
     await createVariable(page, driver, panel, "cavityDrop", "0mm");
     await createVariable(page, driver, panel, "postDropDown", "0mm");
@@ -549,19 +599,34 @@ export const chapter: ChapterModule = {
       { type: "text", text: " - " },
       { type: "$", text: "$boardLi", option: "boardLift" },
     ]);
-    await defineExpression(page, driver, panel, "postFarX", [
-      { type: "$", text: "$boardL", option: "boardL" },
-      { type: "text", text: " + " },
-      { type: "$", text: "$wal", option: "wall" },
+    await defineExpression(page, driver, panel, "postNearX", [
+      { type: "$", text: "$caseL", option: "caseL" },
       { type: "text", text: " - " },
-      { type: "$", text: "$pos", option: "post" },
+      { type: "$", text: "$line", option: "lineWidth" },
+    ]);
+    await defineExpression(page, driver, panel, "postNearY", [
+      { type: "$", text: "$caseW", option: "caseW" },
+      { type: "text", text: " - " },
+      { type: "$", text: "$line", option: "lineWidth" },
+    ]);
+    await defineExpression(page, driver, panel, "postIn", [
+      { type: "$", text: "$line", option: "lineWidth" },
+      { type: "text", text: " + " },
+      { type: "$", text: "$rea", option: "reach" },
+    ]);
+    await defineExpression(page, driver, panel, "postFarX", [
+      { type: "$", text: "$cas", option: "caseL" },
+      { type: "text", text: " - " },
+      { type: "$", text: "$line", option: "lineWidth" },
+      { type: "text", text: " - " },
+      { type: "$", text: "$rea", option: "reach" },
     ]);
     await defineExpression(page, driver, panel, "postFarY", [
-      { type: "$", text: "$boardW", option: "boardW" },
-      { type: "text", text: " + " },
-      { type: "$", text: "$wal", option: "wall" },
+      { type: "$", text: "$cas", option: "caseW" },
       { type: "text", text: " - " },
-      { type: "$", text: "$pos", option: "post" },
+      { type: "$", text: "$line", option: "lineWidth" },
+      { type: "text", text: " - " },
+      { type: "$", text: "$rea", option: "reach" },
     ]);
     await defineExpression(page, driver, panel, "lipL", [
       { type: "$", text: "$boardL", option: "boardL" },
@@ -626,10 +691,10 @@ export const chapter: ChapterModule = {
     // equals the bound defaults, so nothing moves until a variable moves.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await clickDatumPoint(driver, 74, 54);
+    await clickDatumPoint(driver, 71.6, 51.6);
     await clickDatumPoint(driver, 0, 0);
     await driver.activateSketchTool("horizontal");
-    await clickDatumPoint(driver, 37, 0);
+    await clickDatumPoint(driver, 35.8, 0);
     await driver.activateSketchTool("point");
     await clickDatumPoint(driver, -10, -10);
     await driver.activateSketchTool("distanceX");
@@ -640,10 +705,10 @@ export const chapter: ChapterModule = {
     await clickDatumPoint(driver, 0, 0.4);
     await driver.activateSketchTool("distanceX");
     await clickDatumPoint(driver, 0.4, 0);
-    await clickDatumPoint(driver, 73.6, 0);
+    await clickDatumPoint(driver, 71.2, 0);
     await driver.activateSketchTool("distanceY");
     await clickDatumPoint(driver, 0, 0.4);
-    await clickDatumPoint(driver, 0, 53.6);
+    await clickDatumPoint(driver, 0, 51.2);
     // Rows: 0 horizontal, 1 placeX, 2 placeY, 3 spanX, 4 spanY.
     await bindSketchDimension(page, driver, 3, "$caseL", "distanceX");
     await bindSketchDimension(page, driver, 4, "$caseW", "distanceY");
@@ -666,24 +731,24 @@ export const chapter: ChapterModule = {
     // anchored construction point at the origin carries the place pair.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await clickDatumPoint(driver, 72, 52);
-    await clickDatumPoint(driver, 2, 2);
+    await clickDatumPoint(driver, 70.8, 50.8);
+    await clickDatumPoint(driver, 0.8, 0.8);
     await driver.activateSketchTool("horizontal");
-    await clickDatumPoint(driver, 37, 2);
+    await clickDatumPoint(driver, 35.8, 0.8);
     await driver.activateSketchTool("point");
     await clickDatumPoint(driver, 0, 0);
     await driver.activateSketchTool("distanceX");
     await clickDatumPoint(driver, 0, 0);
-    await clickDatumPoint(driver, 2.4, 2);
+    await clickDatumPoint(driver, 1.2, 0.8);
     await driver.activateSketchTool("distanceY");
     await clickDatumPoint(driver, 0, 0);
-    await clickDatumPoint(driver, 2, 2.4);
+    await clickDatumPoint(driver, 0.8, 1.2);
     await driver.activateSketchTool("distanceX");
-    await clickDatumPoint(driver, 2.4, 2);
-    await clickDatumPoint(driver, 71.6, 2);
+    await clickDatumPoint(driver, 1.2, 0.8);
+    await clickDatumPoint(driver, 70.4, 0.8);
     await driver.activateSketchTool("distanceY");
-    await clickDatumPoint(driver, 2, 2.4);
-    await clickDatumPoint(driver, 2, 51.6);
+    await clickDatumPoint(driver, 0.8, 1.2);
+    await clickDatumPoint(driver, 0.8, 50.4);
     // Rows: 0 horizontal, 1 placeX, 2 placeY, 3 spanX, 4 spanY.
     await bindSketchDimension(page, driver, 1, "$wall", "distanceX");
     await bindSketchDimension(page, driver, 2, "$wall", "distanceY");
@@ -711,58 +776,136 @@ export const chapter: ChapterModule = {
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    // -- The posts: four bound squares, unioned back fused ------------------
+    // -- The ribs: four bound diagonal slots, unioned back fused ------------
     await driver.step("posts");
-    // Each post: a post-by-post square at a cavity corner, its size pair
-    // bound to $post and its place pair bound to $wall (the near square,
-    // at the wall corner) or $postFarX/$postFarY (the far three, at the
-    // board's far corner minus a post). Extruded DOWN $cavityD and
-    // unioned onto the shell in a chain — born fused, printed as one
-    // body; every square re-places and re-sizes with the board.
-    const posts: readonly {
-      readonly corner: readonly [number, number];
+    // Each rib: ONE straight slot at a case corner — two cap centers and
+    // a radius, the probe's one-entity closed profile — drawn at 45°
+    // across the corner, both round ends burying into the two walls. Five
+    // dimensions, all `$`-bound, BOTH cap centers absolute off the origin
+    // point: the near cap center's place pair (the origin corner reads
+    // lineWidth twice — the round end lands flush with the outer faces;
+    // the far corners read postNearX/postNearY and follow the board), the
+    // far cap center's place pair (postIn, or postFarX/postFarY at the
+    // far corners — the 45° held by the solved places themselves), and
+    // the DIAMETER — $post, the two line widths the owner asked for.
+    // Extruded DOWN $cavityDrop and unioned onto the shell in a chain —
+    // born fused, printed as one body; every rib re-places and re-sizes
+    // with the variables.
+    const strips: readonly {
+      readonly near: readonly [number, number];
+      readonly far: readonly [number, number];
+      readonly radiusPick: readonly [number, number];
+      readonly inward: readonly [number, number];
+      readonly outward: readonly [number, number];
+      readonly diameterPick: readonly [number, number];
       readonly placeX: string;
       readonly placeY: string;
+      readonly farX: string;
+      readonly farY: string;
     }[] = [
-      { corner: [2, 2], placeX: "$wall", placeY: "$wall" },
-      { corner: [68, 2], placeX: "$postFarX", placeY: "$wall" },
-      { corner: [2, 48], placeX: "$wall", placeY: "$postFarY" },
-      { corner: [68, 48], placeX: "$postFarX", placeY: "$postFarY" },
+      // The origin corner: the brace runs inward at 45°; the dim picks
+      // land on the centerline but clear of the point entity's hit halo
+      // (later-drawn entities win ties, so the point would eat a closer
+      // pick — the probe's finding).
+      {
+        near: [0.4, 0.4],
+        far: [6.4, 6.4],
+        radiusPick: [0.6828, 0.1172],
+        inward: [1.1, 1.1],
+        outward: [5.9, 5.9],
+        diameterPick: [3.6828, 3.1172],
+        placeX: "$lineWidth",
+        placeY: "$lineWidth",
+        farX: "$postIn",
+        farY: "$postIn",
+      },
+      // The x-far corner (caseL, 0): the brace runs at 135°.
+      {
+        near: [71.2, 0.4],
+        far: [65.2, 6.4],
+        radiusPick: [71.4828, 0.6828],
+        inward: [70.7, 0.9],
+        outward: [65.7, 5.9],
+        diameterPick: [68.4828, 3.6828],
+        placeX: "$postNearX",
+        placeY: "$lineWidth",
+        farX: "$postFarX",
+        farY: "$postIn",
+      },
+      // The y-far corner (0, caseW).
+      {
+        near: [0.4, 51.2],
+        far: [6.4, 45.2],
+        radiusPick: [0.6828, 51.4828],
+        inward: [0.9, 50.7],
+        outward: [5.9, 45.7],
+        diameterPick: [3.6828, 47.9172],
+        placeX: "$lineWidth",
+        placeY: "$postNearY",
+        farX: "$postIn",
+        farY: "$postFarY",
+      },
+      // The far corner (caseL, caseW).
+      {
+        near: [71.2, 51.2],
+        far: [65.2, 45.2],
+        radiusPick: [71.4828, 50.9172],
+        inward: [70.7, 50.5],
+        outward: [65.7, 45.7],
+        diameterPick: [68.4828, 47.9172],
+        placeX: "$postNearX",
+        placeY: "$postNearY",
+        farX: "$postFarX",
+        farY: "$postFarY",
+      },
     ];
     let running = SHELL_VOLUME;
     let sketchNumber = 4;
     let draftedNumber = 3;
     let booleanNumber = 2;
-    for (const post of posts) {
-      const [x, y] = post.corner;
+    for (const strip of strips) {
+      const [nearX, nearY] = strip.near;
+      const [farX, farY] = strip.far;
+      const [inX, inY] = strip.inward;
+      const [outX, outY] = strip.outward;
       await driver.enterSketchMode(OCCT_ROOT);
-      await driver.activateSketchTool("rectangle");
-      await clickDatumPoint(driver, x + 4, y + 4);
-      await clickDatumPoint(driver, x, y);
-      await driver.activateSketchTool("horizontal");
-      await clickDatumPoint(driver, x + 2, y);
+      await driver.activateSketchTool("slot");
+      await clickDatumPoint(driver, nearX, nearY);
+      await clickDatumPoint(driver, farX, farY);
+      await clickDatumPoint(driver, strip.radiusPick[0], strip.radiusPick[1]);
       await driver.activateSketchTool("point");
       await clickDatumPoint(driver, 0, 0);
-      // The size pair: corner to corner, 0.4 inside the wanted endpoints.
-      await driver.activateSketchTool("distanceX");
-      await clickDatumPoint(driver, x + 0.4, y);
-      await clickDatumPoint(driver, x + 3.6, y);
-      await driver.activateSketchTool("distanceY");
-      await clickDatumPoint(driver, x + 4, y + 0.4);
-      await clickDatumPoint(driver, x + 4, y + 3.6);
-      // The place pair pins the square's near corner to its variable
-      // place — every square pinned, the near one at the wall corner.
+      // The place pair: origin point to the near cap center.
       await driver.activateSketchTool("distanceX");
       await clickDatumPoint(driver, 0, 0);
-      await clickDatumPoint(driver, x + 0.4, y);
+      await clickDatumPoint(driver, inX, inY);
       await driver.activateSketchTool("distanceY");
       await clickDatumPoint(driver, 0, 0);
-      await clickDatumPoint(driver, x, y + 0.4);
-      // Rows: 0 horizontal, 1 sizeX, 2 sizeY, 3 placeX, 4 placeY.
-      await bindSketchDimension(page, driver, 1, "$post", "distanceX");
-      await bindSketchDimension(page, driver, 2, "$post", "distanceY");
-      await bindSketchDimension(page, driver, 3, post.placeX, "distanceX");
-      await bindSketchDimension(page, driver, 4, post.placeY, "distanceY");
+      await clickDatumPoint(driver, inX, inY);
+      // The far cap center's place pair: ALSO origin-anchored — both
+      // ends absolute, so the 45° is the solve's own consequence and no
+      // magnitude dimension ever carries a direction (the first draft's
+      // |Δx| = |Δy| = $reach pair flipped signs at the trim beat's
+      // re-solve — the probe's loud lesson).
+      await driver.activateSketchTool("distanceX");
+      await clickDatumPoint(driver, 0, 0);
+      await clickDatumPoint(driver, outX, outY);
+      await driver.activateSketchTool("distanceY");
+      await clickDatumPoint(driver, 0, 0);
+      await clickDatumPoint(driver, outX, outY);
+      // The width: the slot's diameter, one pick on its boundary.
+      await driver.activateSketchTool("diameter");
+      await clickDatumPoint(
+        driver,
+        strip.diameterPick[0],
+        strip.diameterPick[1],
+      );
+      // Rows: 0 placeX, 1 placeY, 2 farX, 3 farY, 4 diameter.
+      await bindSketchDimension(page, driver, 0, strip.placeX, "distanceX");
+      await bindSketchDimension(page, driver, 1, strip.placeY, "distanceY");
+      await bindSketchDimension(page, driver, 2, strip.farX, "distanceX");
+      await bindSketchDimension(page, driver, 3, strip.farY, "distanceY");
+      await bindSketchDimension(page, driver, 4, "$post", "diameter");
       await saveSketch(page, driver);
       await draftDialog(
         page,
@@ -770,7 +913,7 @@ export const chapter: ChapterModule = {
         { ref: "cavityDrop" },
         `sketch ${String(sketchNumber)}`,
       );
-      running += POST_VOLUME;
+      running += STRIP_UNION_VOLUME;
       await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
       await pickComboboxOption(page, driver, 0, "Union (join)");
       await pickComboboxOption(
@@ -790,7 +933,7 @@ export const chapter: ChapterModule = {
       const united = await createBoolean(page, driver);
       expect(
         volumeNear(united, running),
-        `post union ${String(booleanNumber)} settled at ${String(united)}`,
+        `rib union ${String(booleanNumber)} settled at ${String(united)}`,
       ).toBe(true);
       sketchNumber += 1;
       draftedNumber += 1;
@@ -798,7 +941,7 @@ export const chapter: ChapterModule = {
     }
     expect(
       running,
-      "the post union chain's arithmetic must land on the taught number",
+      "the rib union chain's arithmetic must land on the taught number",
     ).toBeCloseTo(SHELL_POSTS_VOLUME, 3);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
@@ -810,28 +953,30 @@ export const chapter: ChapterModule = {
     await driver.step("trims");
     // ONE prism at the cavity's own bound numbers — the board's own
     // outline, place $wall/$wall and size $boardL/$boardW — extruded DOWN
-    // $postDrop and subtracted once: it shears exactly the four posts'
-    // tops, so they come out boardLift tall wherever the board moves.
+    // $postDropDown and subtracted once: it shears exactly the four ribs'
+    // open-cavity tops, so they come out boardLift tall wherever the
+    // board moves. The wall-band ends need no trim: they fuse into solid
+    // wall, full height, invisibly.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await clickDatumPoint(driver, 72, 52);
-    await clickDatumPoint(driver, 2, 2);
+    await clickDatumPoint(driver, 70.8, 50.8);
+    await clickDatumPoint(driver, 0.8, 0.8);
     await driver.activateSketchTool("horizontal");
-    await clickDatumPoint(driver, 37, 2);
+    await clickDatumPoint(driver, 35.8, 0.8);
     await driver.activateSketchTool("point");
     await clickDatumPoint(driver, 0, 0);
     await driver.activateSketchTool("distanceX");
     await clickDatumPoint(driver, 0, 0);
-    await clickDatumPoint(driver, 2.4, 2);
+    await clickDatumPoint(driver, 1.2, 0.8);
     await driver.activateSketchTool("distanceY");
     await clickDatumPoint(driver, 0, 0);
-    await clickDatumPoint(driver, 2, 2.4);
+    await clickDatumPoint(driver, 0.8, 1.2);
     await driver.activateSketchTool("distanceX");
-    await clickDatumPoint(driver, 2.4, 2);
-    await clickDatumPoint(driver, 71.6, 2);
+    await clickDatumPoint(driver, 1.2, 0.8);
+    await clickDatumPoint(driver, 70.4, 0.8);
     await driver.activateSketchTool("distanceY");
-    await clickDatumPoint(driver, 2, 2.4);
-    await clickDatumPoint(driver, 2, 51.6);
+    await clickDatumPoint(driver, 0.8, 1.2);
+    await clickDatumPoint(driver, 0.8, 50.4);
     await bindSketchDimension(page, driver, 1, "$wall", "distanceX");
     await bindSketchDimension(page, driver, 2, "$wall", "distanceY");
     await bindSketchDimension(page, driver, 3, "$boardL", "distanceX");
@@ -870,14 +1015,14 @@ export const chapter: ChapterModule = {
 
     await driver.step("port-cut");
     // The window: portW by portH centered at (portX, portZ) over the
-    // floor — world z -23.1..-16.1 here, so the v coordinates (pointing
+    // floor — world z -27.9..-20.9 here, so the v coordinates (pointing
     // DOWN the world z axis) ride the datum origin. Arithmetic from the
     // var table: u = portX +/- portW/2; v = origin + cavityD - portZ -/+
     // portH/2.
     const portUMin = 35 - 5 - portDatum.origin[1];
     const portUMax = 35 + 5 - portDatum.origin[1];
-    const portVLow = portDatum.origin[2] + 29.6 - 10 + 3.5;
-    const portVHigh = portDatum.origin[2] + 29.6 - 10 - 3.5;
+    const portVLow = portDatum.origin[2] + 34.4 - 10 + 3.5;
+    const portVHigh = portDatum.origin[2] + 34.4 - 10 - 3.5;
     await driver.activateSketchTool("rectangle");
     await clickDatumPoint(driver, portUMin, portVHigh);
     await clickDatumPoint(driver, portUMax, portVLow);
@@ -907,8 +1052,8 @@ export const chapter: ChapterModule = {
     await driver.step("demo-width");
     // The root moves 0.4 -> 0.5 through the manager's expression editor —
     // the commit that re-derives the whole DAG — and every depth, every
-    // footprint, every post follows on the next dispatch: wall 2.5, post
-    // 5 by 5, the case 75 by 55.
+    // footprint, every rib follows on the next dispatch: wall 1, ribs 1
+    // wide, the case 72 by 52, the rib ends still flush with the faces.
     await driver.humanClick(
       page.getByRole("button", { name: "Manage variables" }),
     );
@@ -932,17 +1077,17 @@ export const chapter: ChapterModule = {
 
     await driver.step("demo-board");
     // A different perfboard: 85 by 60. The bound sketches RE-SOLVE — the
-    // block, the cavity, the posts, the trim all re-place and re-size —
-    // the case visibly grows to 89 by 64, volume 52,253.6. The owner's
-    // ask, delivered: set the board, the whole case follows. Then back
-    // to 70 by 50, re-pinned.
+    // block, the cavity, the ribs (postNearX/postNearY re-derive), the
+    // trim all re-place and re-size — the case visibly grows to 86.6 by
+    // 61.6, volume 14,645.7. The owner's ask, delivered: set the board,
+    // the whole case follows. Then back to 70 by 50, re-pinned.
     await driver.humanClick(
       page.getByRole("button", { name: "Manage variables" }),
     );
     await setVariableExpression(page, driver, panel, "boardL", "85mm");
     await setVariableExpression(page, driver, panel, "boardW", "60mm");
     await driver.pointAtReadout(
-      rowOf(page, panel, "caseL").getByText("= 89 mm", { exact: true }),
+      rowOf(page, panel, "caseL").getByText("= 86.6 mm", { exact: true }),
     );
     await driver.dwell();
     await driver.humanClick(
@@ -964,7 +1109,7 @@ export const chapter: ChapterModule = {
 
     await driver.step("demo-header");
     // A taller header: boardLift 12.5, caseH 39.1 — the case deepens and
-    // the posts grow with the dropped floor (postDrop reads boardT +
+    // the ribs grow with the dropped floor (postDrop reads boardT +
     // topClear - bottom: the rest plane's own invariant). Then back.
     await driver.humanClick(
       page.getByRole("button", { name: "Manage variables" }),
@@ -993,13 +1138,14 @@ export const chapter: ChapterModule = {
     await driver.step("lid-plate");
     // The plate: the block's bound spans again — caseL and caseW — so
     // the lid's footprint is the case's footprint BY CONSTRUCTION, with
-    // the same origin-side pin (the block's own recipe).
+    // the same origin-side pin (the block's own recipe). One lidT up:
+    // three line widths, a plate, not a slab.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await clickDatumPoint(driver, 74, 54);
+    await clickDatumPoint(driver, 71.6, 51.6);
     await clickDatumPoint(driver, 0, 0);
     await driver.activateSketchTool("horizontal");
-    await clickDatumPoint(driver, 37, 0);
+    await clickDatumPoint(driver, 35.8, 0);
     await driver.activateSketchTool("point");
     await clickDatumPoint(driver, -10, -10);
     await driver.activateSketchTool("distanceX");
@@ -1010,10 +1156,10 @@ export const chapter: ChapterModule = {
     await clickDatumPoint(driver, 0, 0.4);
     await driver.activateSketchTool("distanceX");
     await clickDatumPoint(driver, 0.4, 0);
-    await clickDatumPoint(driver, 73.6, 0);
+    await clickDatumPoint(driver, 71.2, 0);
     await driver.activateSketchTool("distanceY");
     await clickDatumPoint(driver, 0, 0.4);
-    await clickDatumPoint(driver, 0, 53.6);
+    await clickDatumPoint(driver, 0, 51.2);
     // Rows: 0 horizontal, 1 placeX, 2 placeY, 3 spanX, 4 spanY.
     await bindSketchDimension(page, driver, 3, "$caseL", "distanceX");
     await bindSketchDimension(page, driver, 4, "$caseW", "distanceY");
@@ -1026,27 +1172,27 @@ export const chapter: ChapterModule = {
     await driver.step("lid-lip");
     // The lip hangs INTO the opening: board minus the clearance, placed
     // at the wall-plus-half-clearance inset — every number a variable —
-    // extruded DOWN lidT from the same bed plane.
+    // extruded DOWN lidHang from the same bed plane.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
-    await clickDatumPoint(driver, 71.75, 51.75);
-    await clickDatumPoint(driver, 2.25, 2.25);
+    await clickDatumPoint(driver, 70.55, 50.55);
+    await clickDatumPoint(driver, 1.05, 1.05);
     await driver.activateSketchTool("horizontal");
-    await clickDatumPoint(driver, 37, 2.25);
+    await clickDatumPoint(driver, 35.8, 1.05);
     await driver.activateSketchTool("point");
     await clickDatumPoint(driver, 0, 0);
     await driver.activateSketchTool("distanceX");
     await clickDatumPoint(driver, 0, 0);
-    await clickDatumPoint(driver, 2.65, 2.25);
+    await clickDatumPoint(driver, 1.45, 1.05);
     await driver.activateSketchTool("distanceY");
     await clickDatumPoint(driver, 0, 0);
-    await clickDatumPoint(driver, 2.25, 2.65);
+    await clickDatumPoint(driver, 1.05, 1.45);
     await driver.activateSketchTool("distanceX");
-    await clickDatumPoint(driver, 2.65, 2.25);
-    await clickDatumPoint(driver, 71.35, 2.25);
+    await clickDatumPoint(driver, 1.45, 1.05);
+    await clickDatumPoint(driver, 70.15, 1.05);
     await driver.activateSketchTool("distanceY");
-    await clickDatumPoint(driver, 2.25, 2.65);
-    await clickDatumPoint(driver, 2.25, 51.35);
+    await clickDatumPoint(driver, 1.05, 1.45);
+    await clickDatumPoint(driver, 1.05, 50.15);
     // Rows: 0 horizontal, 1 placeX, 2 placeY, 3 spanX, 4 spanY.
     await bindSketchDimension(page, driver, 1, "$lipInset", "distanceX");
     await bindSketchDimension(page, driver, 2, "$lipInset", "distanceY");
@@ -1074,7 +1220,7 @@ export const chapter: ChapterModule = {
     );
     await runStlExport(page, driver, BOX_VOLUME, PLANAR_VOLUME_FLOOR, {
       min: [0, 0, -35.6],
-      max: [74, 54, 0],
+      max: [71.6, 51.6, 0],
     });
     await driver.pointAtReadout(page.locator('[data-cad-export-entry="stl"]'));
     await closeExportDialog(page);
@@ -1096,8 +1242,8 @@ export const chapter: ChapterModule = {
       "true",
     );
     await runStlExport(page, driver, LID_VOLUME, PLANAR_VOLUME_FLOOR, {
-      min: [0, 0, -6],
-      max: [74, 54, 6],
+      min: [0, 0, -1.2],
+      max: [71.6, 51.6, 1.2],
     });
     await driver.pointAtReadout(page.locator('[data-cad-export-entry="stl"]'));
     await closeExportDialog(page);
@@ -1230,15 +1376,16 @@ async function setVariableExpression(
  * name's first three letters — the exact-name click below picks the row
  * out of whatever else the prefix lists), click the suggested parameter
  * row, Apply. The commit is the BOUND `sketch.dimension.set` (a
- * parameterId, no value) and the inspector row renames to
- * `distanceX $caseL` — the assertion below pins exactly that.
+ * parameterId, no value) and the inspector row renames — a distanceX to
+ * `distanceX $caseL`, a diameter to `diameter $post` — the assertions
+ * below pin exactly that.
  */
 async function bindSketchDimension(
   page: Page,
   driver: TutorialDriver,
   rowIndex: number,
   option: string,
-  kind: "distanceX" | "distanceY",
+  kind: "distanceX" | "distanceY" | "diameter",
 ): Promise<void> {
   const row = page.locator("[data-sketch-constraint-id]").nth(rowIndex);
   if ((await row.getAttribute("aria-pressed")) !== "true") {

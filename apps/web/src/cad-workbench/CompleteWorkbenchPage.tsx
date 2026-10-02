@@ -83,7 +83,10 @@ import {
   type ImportedBrepState,
 } from "../io-fixture/io-brep";
 import { importIgesBytes, type ImportedIgesState } from "../io-fixture/io-iges";
-import { CompleteCadWorkbench } from "./complete-workbench";
+import {
+  CompleteCadWorkbench,
+  CompleteWorkbenchStatusBar,
+} from "./complete-workbench";
 import { WorkbenchShareBar } from "./share-viewer-bar";
 import { WorkbenchStoreProvider } from "./workbench-engine";
 
@@ -759,7 +762,18 @@ function CompleteWorkbenchBody({
       backend={backend}
       io={buildIo}
       rootId={rootId}
-      slots={{ bar: ({ engine }) => <WorkbenchShareBar engine={engine} /> }}
+      slots={{
+        // The share control rides the status row's free right end (the
+        // strip keeps its surface ids through the exported default): a
+        // page-level bar row would consume layout height and shift the
+        // sketch canvas the tutorial driver maps workplane clicks onto.
+        statusBar: ({ engine }) => (
+          <div className="border-border flex items-center border-t">
+            <CompleteWorkbenchStatusBar className="min-w-0 flex-1 border-t-0" />
+            <WorkbenchShareBar engine={engine} />
+          </div>
+        ),
+      }}
     />
   );
 }
