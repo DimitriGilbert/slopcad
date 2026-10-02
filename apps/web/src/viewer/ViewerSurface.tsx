@@ -56,6 +56,13 @@ export interface ViewerSurfaceProps {
    */
   readonly variant: "page" | "standalone";
   /**
+   * The embed flag (the route's `?embed=1`): a cross-origin iframe host
+   * usually refuses the clipboard API and blob-URL downloads, so an
+   * embedded page mount hides the share affordances instead of offering
+   * buttons that cannot succeed. `false` by default.
+   */
+  readonly embed?: boolean;
+  /**
    * The injected native document text (the standalone mount's
    * `window.__SLOPCAD_NATIVE__`). Present, it is adopted on mount and the
    * URL fragment is ignored.
@@ -89,6 +96,7 @@ function downloadNameOf(title: string, extension: string): string {
  * body, exactly the workbench pages' structure.
  */
 export function ViewerSurface({
+  embed = false,
   injectedNativeText = null,
   injectedTitle = null,
   variant,
@@ -98,6 +106,7 @@ export function ViewerSurface({
   return (
     <CadProvider store={store}>
       <ViewerBody
+        embed={embed}
         injectedNativeText={injectedNativeText}
         injectedTitle={injectedTitle}
         variant={variant}
@@ -114,11 +123,13 @@ interface ActionState {
 }
 
 function ViewerBody({
+  embed,
   injectedNativeText,
   injectedTitle,
   variant,
   workerFactory,
 }: {
+  readonly embed: boolean;
   readonly injectedNativeText: string | null;
   readonly injectedTitle: string | null;
   readonly variant: "page" | "standalone";
@@ -284,7 +295,7 @@ function ViewerBody({
         >
           …
         </span>
-        {variant === "page" ? (
+        {variant === "page" && !embed ? (
           <>
             <Button
               data-testid="viewer-share"

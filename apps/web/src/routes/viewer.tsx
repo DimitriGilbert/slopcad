@@ -17,6 +17,15 @@ import { useEffect, useState } from "react";
 import { ViewerSurface } from "@/viewer/ViewerSurface";
 
 export const Route = createFileRoute("/viewer")({
+  // The router's default search parser may realize `?embed=1` as either
+  // the string or the number `1` (the header's flag guard documents the
+  // same); every realization is the one flag.
+  validateSearch: (search: Record<string, unknown>): { embed: boolean } => ({
+    embed:
+      search["embed"] === "1" ||
+      search["embed"] === 1 ||
+      search["embed"] === true,
+  }),
   head: () => ({
     meta: [
       {
@@ -29,6 +38,7 @@ export const Route = createFileRoute("/viewer")({
 
 /** The client-only mount gate (the projects page's discipline). */
 function ViewerRouteComponent(): ReactElement | null {
+  const { embed } = Route.useSearch();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -36,5 +46,5 @@ function ViewerRouteComponent(): ReactElement | null {
   if (!mounted) {
     return null;
   }
-  return <ViewerSurface variant="page" />;
+  return <ViewerSurface embed={embed} variant="page" />;
 }

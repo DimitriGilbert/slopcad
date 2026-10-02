@@ -384,6 +384,9 @@ importers:
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel
+      '@slopcad/cad-react':
+        specifier: workspace:*
+        version: link:../cad-react
     devDependencies:
       '@slopcad/cad-jscad':
         specifier: workspace:*
@@ -394,9 +397,15 @@ importers:
       '@slopcad/config':
         specifier: workspace:*
         version: link:../config
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.18
       '@vitest/coverage-istanbul':
         specifier: 'catalog:'
         version: 4.1.11(vitest@4.1.11)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.8
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

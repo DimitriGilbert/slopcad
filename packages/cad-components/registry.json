@@ -137,6 +137,33 @@
           "target": "src/cad/examples/nema17-assembly.ts"
         }
       ]
+    },
+    {
+      "name": "parametric-cad-viewer",
+      "type": "registry:block",
+      "title": "Parametric CAD Viewer",
+      "description": "One installable block that draws a part beside its variables: the CAD viewport rendering pre-tessellated bodies under a deterministic home camera, and the Formedible parameter panel editing the native document's variables through a real parameter.set-interpreting store. Honest boundary: it renders and edits but does not evaluate geometry — re-derivation after an edit rides the consumer-supplied rebuild callback (or the onDocumentChange escape hatch), never a faked re-drive.",
+      "registryDependencies": [
+        "@slopcad/cad-viewport",
+        "@slopcad/cad-parameter-panel"
+      ],
+      "dependencies": [
+        "@slopcad/cad-core",
+        "@slopcad/cad-kernel",
+        "@slopcad/cad-react"
+      ],
+      "files": [
+        {
+          "path": "src/viewer/parametric-cad-viewer.tsx",
+          "type": "registry:block",
+          "target": "src/cad/viewer/parametric-cad-viewer.tsx"
+        },
+        {
+          "path": "src/viewer/parametric-viewer-core.ts",
+          "type": "registry:lib",
+          "target": "src/cad/viewer/parametric-viewer-core.ts"
+        }
+      ]
     }
   ]
 }

@@ -288,6 +288,10 @@
           "type": "registry:component"
         },
         {
+          "path": "src/components/formedible/fields/expression-number-field.tsx",
+          "type": "registry:component"
+        },
+        {
           "path": "src/components/formedible/fields/field-registry.tsx",
           "type": "registry:component"
         },
@@ -480,6 +484,10 @@
       "files": [
         {
           "path": "src/components/cad/cad-parameter-panel.tsx",
+          "type": "registry:component"
+        },
+        {
+          "path": "src/components/cad/cad-parameter-manager.tsx",
           "type": "registry:component"
         }
       ]

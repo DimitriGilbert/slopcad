@@ -26,7 +26,8 @@ const SELF_CHROMED_ROUTES = ["/docs"] as const;
  * frames the instrument, not the site. Flag-scoped, not path-scoped: the
  * ordinary /viewer share page keeps the full chrome. The router hands the
  * search in parsed object form and its default parser may realize the
- * flag as either the string or the number `1`; both are the one flag.
+ * flag as either the string or the number `1`; the /viewer route's own
+ * search validator realizes it as a boolean. All are the one flag.
  */
 function embeddedViewer(pathname: string, search: unknown): boolean {
   if (pathname !== "/viewer") return false;
@@ -37,7 +38,7 @@ function embeddedViewer(pathname: string, search: unknown): boolean {
     typeof search === "object" &&
     search !== null &&
     "embed" in search &&
-    (search.embed === "1" || search.embed === 1)
+    (search.embed === "1" || search.embed === 1 || search.embed === true)
   );
 }
 

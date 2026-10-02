@@ -74,6 +74,9 @@ export default tseslint.config(
       "packages/ui/**/*.{ts,tsx}",
       "packages/cad-r3f/**/*.{ts,tsx}",
       "packages/cad-react/**/*.{ts,tsx}",
+      // The viewer composition: the one React file in cad-components (the
+      // package's component model itself stays React-free).
+      "packages/cad-components/src/viewer/**",
     ],
     rules: reactHooks.configs.recommended.rules,
   },
