@@ -48,7 +48,11 @@ import type {
 } from "../cad-workbench/document-scene";
 import type { PlateMeasurement } from "./plate-scene";
 
-import { computeBooleanScene, computeMoveBodyScene } from "./body-ops-scenes";
+import {
+  computeBooleanScene,
+  computeDuplicateScene,
+  computeMoveBodyScene,
+} from "./body-ops-scenes";
 import { computeExtrudeScene } from "./extrude-scene";
 import { computeHelixScene } from "./helix-scene";
 import { computeHoleScene } from "./hole-scene";
@@ -186,6 +190,14 @@ async function computeOneBodyScene(
       );
       return { measurement: composed.measurement, solid: composed.solid };
     }
+    case "duplicate": {
+      const composed = await computeDuplicateScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
     case "hole": {
       const composed = await computeHoleScene(context, scene.request, computed);
       return { measurement: composed.measurement, solid: composed.solid };
@@ -249,6 +261,8 @@ function fallbackSourcesOf(
     case "mirror":
       return [{ kind: "extrude", request: scene.request.base }];
     case "moveBody":
+      return [fallbackSourceOf(scene.request.base)];
+    case "duplicate":
       return [fallbackSourceOf(scene.request.base)];
     default:
       return [];

@@ -116,6 +116,26 @@ function runSweepWireOperation(
  *   the translation; capability-gated on `transformRotation`, the
  *   extrude-taper growth pattern). Absent pair = the plain Phase 8
  *   translation, unchanged.
+ * - `duplicate` (Phase 60) — one FEATURE or BODY input (the SOURCE body,
+ *   which REMAINS — the feature consumes nothing, SolidWorks move/copy
+ *   semantics: the copies render beside it) followed by SIX parameter
+ *   inputs in declared order: dx, dy, dz (LENGTH — the translation, mm),
+ *   count (DIMENSIONLESS integer 1..64 — the copies this feature emits,
+ *   each its own output body), axis (DIMENSIONLESS integer 1 = X, 2 = Y,
+ *   3 = Z — the world-axis selector precedent), and angle (ANGLE — the
+ *   per-step rotation about that world axis through the origin). The
+ *   transform is `T = rotate ∘ translate` (translation FIRST, then the
+ *   rotation — the documented duplicate order, the reverse of the
+ *   `translate` kind's contract composition) and copy i is `T^i(source)`,
+ *   i = 1..count — CUMULATIVE, the circular-pattern mental model. The
+ *   composition is analytic: copy i is ONE contract transform whose
+ *   rotation is `i·angle` and whose translation is `Σ_{k=1..i} R^{k·angle}·d`
+ *   (the exact algebra of iterating T; see `planDuplicateInstances`, the
+ *   shared planner the workbench's worker scene composes verbatim). An
+ *   all-zero transform (zero offset AND zero angle) is a structured
+ *   refusal — a pure in-place copy has no modeling value and pollutes the
+ *   document. This is the ONE bridge kind with multiple output bodies
+ *   (every other kind declares exactly one). See `runDuplicateOperation`.
  * - `extrude` — one SKETCH input (a document sketch record whose resolved
  *   profile supplies the loop and the workplane placement, via the
  *   caller-supplied {@link KernelExecutorContext.profiles} resolver) and
@@ -468,6 +488,7 @@ export const BRIDGE_FEATURE_KINDS = [
   "subtract",
   "intersect",
   "translate",
+  "duplicate",
   "extrude",
   "revolve",
   "sweep",
@@ -666,6 +687,16 @@ const ANGLE_DOMAIN_TOLERANCE_RAD = 1e-9;
  * nested pattern features.
  */
 export const PATTERN_COUNT_LIMIT = 1000;
+
+/**
+ * The duplicate count ceiling (Phase 60): a duplicate feature emits one
+ * output body and one output solid PER COPY, so the bound keeps a stray
+ * large count from flooding both the document and the synchronous
+ * regeneration pass (the pattern bound's discipline, tightened for the
+ * per-copy body cost); larger arrays compose from a pattern or from
+ * duplicating a copy (the verb's iterative use).
+ */
+export const DUPLICATE_COUNT_LIMIT = 64;
 
 /**
  * How far the hole tool overshoots past the faces it opens (Phase 26.10),
@@ -1127,6 +1158,18 @@ function applyMatrixTranspose(
   ];
 }
 
+/** The rotation itself applied to a vector (the transpose's mirror). */
+function applyMatrix(
+  matrix: readonly [DatumVec3, DatumVec3, DatumVec3],
+  v: DatumVec3,
+): DatumVec3 {
+  return [
+    matrix[0][0] * v[0] + matrix[0][1] * v[1] + matrix[0][2] * v[2],
+    matrix[1][0] * v[0] + matrix[1][1] * v[1] + matrix[1][2] * v[2],
+    matrix[2][0] * v[0] + matrix[2][1] * v[1] + matrix[2][2] * v[2],
+  ];
+}
+
 /**
  * The rotation carrying `from` onto `to` (both unit): axis = from × to,
  * angle = atan2(|axis|, from·to). Parallel vectors map to the identity
@@ -1367,6 +1410,80 @@ export function planDatumMirror(plane: {
 }
 
 /**
+ * One duplicate copy's placement: the SINGLE contract transform that maps
+ * the source onto copy `ordinal` (1-based) — the analytic `T^ordinal` of
+ * the duplicate's step transform `T = rotate ∘ translate` (translation
+ * first, then the rotation about the world-origin axis; the duplicate
+ * kind's documented order).
+ */
+export interface DuplicateInstancePlan {
+  /** The copy's ordinal in the array, 1-based (copy 1 is T^1). */
+  readonly ordinal: number;
+  /** The translation the contract transform applies (mm). */
+  readonly translationMm: readonly [number, number, number];
+  /** The rotation axis (the world axis verbatim). */
+  readonly rotationAxis: readonly [number, number, number];
+  /** The rotation angle (radians) — `ordinal · angleRad`. */
+  readonly rotationAngleRad: number;
+}
+
+/**
+ * The duplicate kind's instance planner (Phase 60) — the array-pattern
+ * planner's role: the ONE source of the copies' placements, shared
+ * verbatim by the bridge (which calls the kernel directly) and the
+ * workbench's worker scene (which composes the identical transforms
+ * through the worker operation matrix), so both paths render the same
+ * arrangement.
+ *
+ * ## The analytic T^i composition (the design decision)
+ *
+ * The duplicate's step transform is `T(p) = R(p + d)` — translation
+ * first, then the rotation about the chosen world axis through the
+ * origin. Iterating: `T^i(p) = R^i·p + Σ_{k=1..i} R^k·d`, so copy i is
+ * exactly ONE contract `transform` call — rotation `i·θ` about the axis
+ * (applied first, the contract's fixed order) plus the accumulated
+ * translation `Σ_{k=1..i} R^{k·θ}·d` (applied second) — where `R^k·d` is
+ * `d` rotated by `k·θ` (Rodrigues, the bridge's own rotation matrix).
+ * One kernel transform PER COPY (O(count) total), deterministic to the
+ * last float, and the per-copy placement is hand-derivable: translation-
+ * only steps place copy i at `i·d`; rotation-only steps place copy i at
+ * the `i·θ` turn about the axis — the circular-pattern mental model.
+ */
+export function planDuplicateInstances(input: {
+  /** The per-step translation, mm. */
+  readonly offsetMm: readonly [number, number, number];
+  /** The rotation axis (a unit world-axis direction). */
+  readonly axis: readonly [number, number, number];
+  /** The per-step rotation angle, radians. */
+  readonly angleRad: number;
+  /** The copy count, ≥ 1 (the caller owns the domain gate). */
+  readonly count: number;
+}): readonly DuplicateInstancePlan[] {
+  const plans: DuplicateInstancePlan[] = [];
+  let accumulated: [number, number, number] = [0, 0, 0];
+  for (let ordinal = 1; ordinal <= input.count; ordinal += 1) {
+    const step = rotationMatrix(input.axis, ordinal * input.angleRad);
+    const carried = applyMatrix(step, [
+      input.offsetMm[0],
+      input.offsetMm[1],
+      input.offsetMm[2],
+    ]);
+    accumulated = [
+      accumulated[0] + carried[0],
+      accumulated[1] + carried[1],
+      accumulated[2] + carried[2],
+    ];
+    plans.push({
+      ordinal,
+      translationMm: [accumulated[0], accumulated[1], accumulated[2]],
+      rotationAxis: [input.axis[0], input.axis[1], input.axis[2]],
+      rotationAngleRad: ordinal * input.angleRad,
+    });
+  }
+  return plans;
+}
+
+/**
  * Plans one mirrored copy of `solid` about the arbitrary plane
  * {@link ResolvedDatumPlane} (Phase 39): the {@link planDatumMirror} plan
  * driven against the kernel — the direct route is one `kernel.mirror`
@@ -1514,6 +1631,14 @@ type SolidOutcome =
   | { readonly ok: false; readonly diagnostic: Diagnostic };
 
 type OperationOutcome = SolidOutcome;
+
+/**
+ * The duplicate kind's outcome (Phase 60): the ONE multi-solid operation —
+ * one solid per output body, in the feature's declared output order.
+ */
+type MultiSolidOutcome =
+  | { readonly ok: true; readonly solids: readonly KernelSolid[] }
+  | { readonly ok: false; readonly diagnostic: Diagnostic };
 
 /**
  * The datum-plane-to-patch-placement composition (Phase 49): the datum
@@ -1838,19 +1963,6 @@ export function createKernelFeatureExecutor(
   };
 
   const execute = (feature: FeatureRecord): FeatureExecutionOutcome => {
-    const output = feature.outputs[0];
-    if (feature.outputs.length !== 1 || output === undefined) {
-      return {
-        ok: false,
-        diagnostics: [
-          diagnostic(
-            feature,
-            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-            `Feature "${feature.id}" of kind "${feature.kind}" must declare exactly one output body; it declares ${feature.outputs.length}.`,
-          ),
-        ],
-      };
-    }
     const kind = feature.kind;
     if (!isBridgeFeatureKind(kind)) {
       return {
@@ -1860,6 +1972,89 @@ export function createKernelFeatureExecutor(
             feature,
             DIAGNOSTIC_CODES.kernelUnknownFeatureKind,
             `Feature "${feature.id}" has kind "${kind}", which the kernel executor bridge does not interpret; known kinds: ${BRIDGE_FEATURE_KINDS.join(", ")}.`,
+          ),
+        ],
+      };
+    }
+    if (kind === "duplicate") {
+      // The ONE multi-output kind (Phase 60): the duplicate owns the
+      // outputs/count agreement (it refuses a record whose output list
+      // disagrees with its count), the single-output gate below does not
+      // apply. Each copy's solid lands on its own output body, in the
+      // feature's declared order.
+      if (feature.outputs.length === 0) {
+        return {
+          ok: false,
+          diagnostics: [
+            diagnostic(
+              feature,
+              DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+              `Feature "${feature.id}" of kind "${feature.kind}" must declare one output body per copy; it declares none.`,
+            ),
+          ],
+        };
+      }
+      const duplicated = runDuplicateOperation(kernel, feature, {
+        lengthParameter: (ref, name) => lengthParameter(feature, ref, name),
+        angleParameter: (ref, name) => angleParameter(feature, ref, name),
+        dimensionlessParameter: (ref, name) =>
+          dimensionlessParameter(feature, ref, name),
+        parameterValue: (ref) => parameters.get(ref.id),
+        solidInput: (ref) => solidInput(feature, ref),
+        sheetInput: (ref) => sheetInput(feature, ref),
+        resolveProfile: (ref) => context.profiles(ref.id),
+        resolvePath: (ref) =>
+          context.paths === undefined
+            ? ({
+                ok: false,
+                error: {
+                  code: "kernel/feature-input-invalid",
+                  message:
+                    "The executor context provides no path resolver; sweep features cannot resolve a path sketch.",
+                  input: ref.id,
+                },
+              } as const)
+            : context.paths(ref.id),
+        resolveSketchPoints: (ref) =>
+          context.points === undefined
+            ? ({
+                ok: false,
+                error: {
+                  code: "kernel/feature-input-invalid",
+                  message:
+                    "The executor context provides no sketch-points resolver; sketch-positioned hole features cannot resolve their positions sketch.",
+                  input: ref.id,
+                },
+              } as const)
+            : context.points(ref.id),
+        bodyIdOf: (ref) => {
+          if (ref.kind === "body") return ref.id;
+          if (ref.kind === "feature") return featureOutputs.get(ref.id);
+          return undefined;
+        },
+        document: context.document,
+        topology: context.topology,
+        datumTopology: context.datumTopology,
+      });
+      if (!duplicated.ok) {
+        return { ok: false, diagnostics: [duplicated.diagnostic] };
+      }
+      for (const [index, outputBody] of feature.outputs.entries()) {
+        const solid = duplicated.solids[index];
+        if (solid === undefined) continue;
+        solids.set(outputBody, solid);
+      }
+      return { ok: true };
+    }
+    const output = feature.outputs[0];
+    if (feature.outputs.length !== 1 || output === undefined) {
+      return {
+        ok: false,
+        diagnostics: [
+          diagnostic(
+            feature,
+            DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+            `Feature "${feature.id}" of kind "${feature.kind}" must declare exactly one output body; it declares ${feature.outputs.length}.`,
           ),
         ],
       };
@@ -2417,6 +2612,212 @@ function runEdgeCutOperation(
  * - Kernel failures (a transform or the union rejecting) ride through as
  *   `kernel/operation-failed` with the kernel code in `data`.
  */
+
+/**
+ * The duplicate & transform operation (Phase 60) — the ONE multi-output
+ * bridge kind. Input layout (positional, the `translate` kind's
+ * convention): `inputs[0]` the SOURCE feature/body, then SIX parameters
+ * in declared order — dx, dy, dz (LENGTH, mm), count (DIMENSIONLESS
+ * integer), axis (DIMENSIONLESS integer 1 = X, 2 = Y, 3 = Z), angle
+ * (ANGLE). The source body is READ, never consumed: the feature declares
+ * one output body PER COPY (exactly `count` of them) and the copies'
+ * solids land beside the source's own.
+ *
+ * ## Semantics (the owner's locked model)
+ *
+ * `T = rotate ∘ translate` — the translation applies FIRST, then the
+ * rotation about the chosen world axis through the origin (the
+ * circular-pattern mental model; the REVERSE of the `translate` kind's
+ * contract composition, which is why the planner exists). Copy i is
+ * `T^i(source)`, i = 1..count — cumulative, so translate ×3 steps 15/30/45
+ * and rotate 90° ×3 lands copies at 90/180/270°. The composition is the
+ * analytic per-copy plan (`planDuplicateInstances`): ONE contract
+ * transform per copy.
+ *
+ * ## Failure taxonomy (all structured, before any kernel call)
+ *
+ * - Layout: not exactly seven inputs (source + six parameters) or a
+ *   non-parameter slot → `kernel/feature-input-invalid`.
+ * - Count: wrong dimension, non-integer, `< 1`, or `> 64` →
+ *   `kernel/parameter-invalid` (count = 1 is the plain
+ *   duplicate-transform-once; the ceiling is the per-copy-body bound).
+ * - Output mismatch: the feature does not declare exactly `count` output
+ *   bodies → `kernel/feature-input-invalid` (the copies ARE the outputs —
+ *   a record that disagrees with its own count is a misdeclaration).
+ * - Axis: wrong dimension or an integer outside `1..3` →
+ *   `kernel/parameter-invalid` (the selector's domain is total).
+ * - Identity: zero offset AND zero angle → `kernel/parameter-invalid` —
+ *   a pure in-place copy has no modeling value and pollutes the document
+ *   with coincident bodies; the author asked for a transform that does
+ *   nothing, and the refusal says so instead of building it.
+ * - Rotation capability: a non-zero angle on a kernel without
+ *   `transformRotation` → `kernel/feature-input-invalid` (the
+ *   `translate` rotation-pair gate verbatim — a rotation-less kernel may
+ *   per the contract IGNORE the rotation, which would silently place
+ *   every copy on the untranslated first offset).
+ * - Kernel failures (a transform rejecting) ride through as
+ *   `kernel/operation-failed` with the kernel code in `data`.
+ */
+function runDuplicateOperation(
+  kernel: GeometryKernel,
+  feature: FeatureRecord,
+  readers: InputReaders,
+): MultiSolidOutcome {
+  const inputs = feature.inputs;
+  if (inputs.length !== 7) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "duplicate" needs exactly seven inputs: one feature/body input (the source) followed by six parameters (dx, dy, dz, count, axis, angle); it declares ${inputs.length}.`,
+      ),
+    };
+  }
+  const sourceRef = inputs[0];
+  const parameterRefs = inputs.slice(1);
+  if (
+    sourceRef === undefined ||
+    (sourceRef.kind !== "feature" && sourceRef.kind !== "body") ||
+    parameterRefs.some((ref) => ref.kind !== "parameter")
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "duplicate" needs one feature/body input (the source) followed by six parameter inputs (dx, dy, dz, count, axis, angle).`,
+      ),
+    };
+  }
+  const source = readers.solidInput(sourceRef);
+  if (!source.ok) return { ok: false, diagnostic: source.diagnostic };
+  const lengths = readLengths(feature, readers, parameterRefs.slice(0, 3), [
+    "dx",
+    "dy",
+    "dz",
+  ]);
+  if (!lengths.ok) return lengths;
+  const [dx, dy, dz] = lengths.mm;
+  if (dx === undefined || dy === undefined || dz === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "duplicate" needs exactly three translation parameter inputs.`,
+      ),
+    };
+  }
+  const countRef = parameterRefs[3];
+  const axisRef = parameterRefs[4];
+  const angleRef = parameterRefs[5];
+  if (
+    countRef === undefined ||
+    axisRef === undefined ||
+    angleRef === undefined
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "duplicate" has a malformed input list.`,
+      ),
+    };
+  }
+  const count = readers.dimensionlessParameter(countRef, "count");
+  if (!count.ok) return { ok: false, diagnostic: count.diagnostic };
+  if (
+    !Number.isInteger(count.value) ||
+    count.value < 1 ||
+    count.value > DUPLICATE_COUNT_LIMIT
+  ) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "duplicate" needs parameter "${countRef.id}" (count) to be a whole number between 1 and ${String(DUPLICATE_COUNT_LIMIT)} (${String(count.value)} given).`,
+        [countRef],
+      ),
+    };
+  }
+  if (feature.outputs.length !== count.value) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "duplicate" declares ${String(count.value)} cop${count.value === 1 ? "y" : "ies"} but ${feature.outputs.length} output bod${feature.outputs.length === 1 ? "y" : "ies"} — one output body per copy, the copies ARE the feature's outputs.`,
+      ),
+    };
+  }
+  const axis = readers.dimensionlessParameter(axisRef, "axis");
+  if (!axis.ok) return { ok: false, diagnostic: axis.diagnostic };
+  const direction = WORLD_AXIS_DIRECTIONS[axis.value];
+  if (!Number.isInteger(axis.value) || direction === undefined) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "duplicate" needs parameter "${axisRef.id}" (axis) to select a world axis: 1 = X, 2 = Y, 3 = Z (${String(axis.value)} given).`,
+        [axisRef],
+      ),
+    };
+  }
+  const angle = readers.angleParameter(angleRef, "angle");
+  if (!angle.ok) return { ok: false, diagnostic: angle.diagnostic };
+  if (dx === 0 && dy === 0 && dz === 0 && angle.rad === 0) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelParameterInvalid,
+        `Feature "${feature.id}" of kind "duplicate" carries the identity transform (zero offset, zero angle) — a pure in-place copy pollutes the document with coincident bodies; give the step a translation or a rotation.`,
+      ),
+    };
+  }
+  if (angle.rad !== 0 && !kernel.capabilities.transformRotation) {
+    return {
+      ok: false,
+      diagnostic: diagnostic(
+        feature,
+        DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        `Feature "${feature.id}" of kind "duplicate" carries a rotation, but kernel "${kernel.id}" declares transformRotation: false — the bridge refuses before the kernel could silently mis-apply it (the translate rotation-pair gate verbatim).`,
+      ),
+    };
+  }
+  const plans = planDuplicateInstances({
+    offsetMm: [dx, dy, dz],
+    axis: direction,
+    angleRad: angle.rad,
+    count: count.value,
+  });
+  const solids: KernelSolid[] = [];
+  for (const plan of plans) {
+    const placed = kernel.transform(source.solid, {
+      x: lengthValue(plan.translationMm[0]),
+      y: lengthValue(plan.translationMm[1]),
+      z: lengthValue(plan.translationMm[2]),
+      ...(plan.rotationAngleRad === 0
+        ? {}
+        : {
+            rotation: {
+              axis: plan.rotationAxis,
+              angle: angleValue(plan.rotationAngleRad, "rad"),
+            },
+          }),
+    });
+    if (!placed.ok) {
+      return operationFailure(feature, placed.error.code, placed.error.message);
+    }
+    solids.push(placed.value);
+  }
+  return { ok: true, solids };
+}
+
 function runPatternOperation(
   kernel: GeometryKernel,
   feature: FeatureRecord,
@@ -6758,6 +7159,20 @@ function runKernelOperation(
 ): OperationOutcome {
   const inputs = feature.inputs;
   switch (kind) {
+    case "duplicate":
+      // The ONE multi-output kind (Phase 60): `execute` intercepts it and
+      // runs `runDuplicateOperation` (whose result lands one solid per
+      // output body). This single-solid dispatcher never sees it — the arm
+      // exists for the switch's exhaustiveness and answers the structured
+      // refusal rather than pretending a single-solid reading exists.
+      return {
+        ok: false,
+        diagnostic: diagnostic(
+          feature,
+          DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+          `Feature "${feature.id}" of kind "duplicate" is a multi-output feature; the executor bridge runs it through runDuplicateOperation, not the single-solid operation dispatcher.`,
+        ),
+      };
     case "box": {
       const lengths = readLengths(feature, readers, inputs, [
         "width",

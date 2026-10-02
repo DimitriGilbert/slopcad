@@ -91,6 +91,10 @@ import { helixSceneRequestOfFeature, type HelixSceneRequest } from "./helix";
 import { documentHoleSceneRequest, type HoleSceneRequest } from "./hole";
 import { loftSceneRequestOfFeature, type LoftSceneRequest } from "./loft";
 import {
+  documentDuplicateSceneRequests,
+  type DuplicateSceneRequest,
+} from "./duplicate";
+import {
   documentMoveBodySceneRequest,
   type MoveBodySceneRequest,
 } from "./move-body";
@@ -159,6 +163,7 @@ export type DocumentBodyScene =
   | { readonly kind: "mirror"; readonly request: MirrorSceneRequest }
   | { readonly kind: "boolean"; readonly request: BooleanSceneRequest }
   | { readonly kind: "moveBody"; readonly request: MoveBodySceneRequest }
+  | { readonly kind: "duplicate"; readonly request: DuplicateSceneRequest }
   | { readonly kind: "hole"; readonly request: HoleSceneRequest }
   | { readonly kind: "sheet"; readonly request: SheetSceneRequest };
 
@@ -225,6 +230,20 @@ function absorbedBodiesOf(
     absorbed.add(bodyId);
     const feature = featureOfBody(bodyId);
     if (feature === undefined) return;
+    visitFeatureInputs(feature, root, depth);
+  };
+  /**
+   * The input traversal of one producing feature — EXCEPT the duplicate
+   * kind (Phase 60): a duplicate's source is never consumed (the copies
+   * render BESIDE it, the move/copy semantics), so a duplicate's build
+   * absorbs nothing and the source body keeps rendering as its own tip.
+   */
+  const visitFeatureInputs = (
+    feature: FeatureRecord,
+    root: string,
+    depth: number,
+  ): void => {
+    if (feature.kind === "duplicate") return;
     for (const ref of feature.inputs) {
       if (ref.kind === "feature") {
         const input = document.features.find((entry) => entry.id === ref.id);
@@ -241,13 +260,7 @@ function absorbedBodiesOf(
     // The tip itself is rendered, not absorbed — seed its REACH, not it.
     const feature = featureOfBody(tip);
     if (feature === undefined) continue;
-    for (const ref of feature.inputs) {
-      if (ref.kind === "feature") {
-        const input = document.features.find((entry) => entry.id === ref.id);
-        for (const output of input?.outputs ?? []) visit(output, tip, 0);
-      }
-      if (ref.kind === "body") visit(ref.id, tip, 0);
-    }
+    visitFeatureInputs(feature, tip, 0);
   }
   return absorbed;
 }
@@ -576,6 +589,26 @@ export function documentSceneBodies(
       consumedOnly.add(operandId);
     }
     requests.set(candidate.bodyId, candidate.scene);
+  }
+
+  // The duplicate features (Phase 60): EVERY feature renders (the verb's
+  // iterative use), one request per copy body. The copies admit in
+  // producing-feature order like the compositions above — a computed
+  // source (a pad, hole, moved body, or an earlier duplicate's copy) must
+  // have its scene entry first — but the source is NEVER marked
+  // consumed-only: the duplicate consumes nothing, the source renders
+  // beside its copies as its own tip (the move/copy semantics the
+  // absorption closure honors too). A duplicate whose source scene
+  // declined renders nothing this pass — the honest absence.
+  for (const request of documentDuplicateSceneRequests(activeDocument)) {
+    if (requests.has(request.bodyId)) continue;
+    if (
+      request.base.kind === "computed" &&
+      !requests.has(request.base.bodyId)
+    ) {
+      continue;
+    }
+    requests.set(request.bodyId, { kind: "duplicate", request });
   }
 
   if (requests.size === 0) return [];

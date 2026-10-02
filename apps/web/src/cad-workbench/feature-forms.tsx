@@ -25,6 +25,7 @@ import { expressionNumberProblem } from "@slopcad/ui/components/formedible/field
 import { useRef, type ReactElement } from "react";
 import { DATUM_FORMAT_VERSION } from "@slopcad/cad-core";
 import {
+  DUPLICATE_COUNT_LIMIT,
   HOLE_TYPE_VALUES,
   ISO_METRIC_THREAD_TABLE,
   isoMetricThreadByDesignation,
@@ -40,6 +41,7 @@ import {
 } from "./curves";
 import { BOOLEAN_DEFAULTS, type BooleanOperation } from "./boolean";
 import { MOVE_BODY_DEFAULTS } from "./move-body";
+import { DUPLICATE_DEFAULTS, type DuplicateSubmission } from "./duplicate";
 import { HELIX_DEFAULTS } from "./helix";
 import {
   THREAD_DEFAULTS,
@@ -238,6 +240,18 @@ export interface CadFeatureFormLabels {
   readonly moveBodyAxisZ: string;
   readonly moveBodyAngle: string;
   readonly moveBodyHint: string;
+  readonly duplicateTitle: string;
+  readonly duplicateSource: string;
+  readonly duplicateDx: string;
+  readonly duplicateDy: string;
+  readonly duplicateDz: string;
+  readonly duplicateAxis: string;
+  readonly duplicateAxisX: string;
+  readonly duplicateAxisY: string;
+  readonly duplicateAxisZ: string;
+  readonly duplicateAngle: string;
+  readonly duplicateCount: string;
+  readonly duplicateHint: string;
   readonly renameBodyTitle: string;
   readonly renameBodyName: string;
   readonly submit: string;
@@ -379,6 +393,19 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   moveBodyAngle: "Rotation angle (deg)",
   moveBodyHint:
     "The move translates the latest extrusion by the offsets; the optional rotation turns it about the world axis through the origin first (rotation-capable kernels only).",
+  duplicateTitle: "Duplicate & transform a body",
+  duplicateSource: "Source body",
+  duplicateDx: "Step x (mm)",
+  duplicateDy: "Step y (mm)",
+  duplicateDz: "Step z (mm)",
+  duplicateAxis: "Rotation axis",
+  duplicateAxisX: "X axis",
+  duplicateAxisY: "Y axis",
+  duplicateAxisZ: "Z axis",
+  duplicateAngle: "Step rotation (deg)",
+  duplicateCount: "Copies",
+  duplicateHint:
+    "Each copy steps the translation, then rotates about the world axis through the origin — cumulative, so three 15 mm steps land at 15/30/45 and three 90° turns land a body at every quadrant. The source stays; the copies are new bodies (duplicate one of them again to keep going).",
   renameBodyTitle: "Rename a body",
   renameBodyName: "Name",
   submit: "Create",
@@ -2799,6 +2826,140 @@ export function MoveBodyFeatureForm({
   return (
     <form.Form
       aria-label={labels.moveBodyTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the duplicate form (the numbers: literal or `$name`). */
+export interface DuplicateFormValues extends Record<string, unknown> {
+  readonly sourceBodyId: string;
+  readonly dxMm: number | string;
+  readonly dyMm: number | string;
+  readonly dzMm: number | string;
+  readonly axis: string;
+  readonly angleDeg: number | string;
+  readonly count: number | string;
+}
+
+/**
+ * The Phase 60 duplicate & transform form: the source body (the relaxed
+ * computable-body pool — a copy of a copy is legal input), the per-step
+ * translation (mm), the world-axis rotation selector with its angle, and
+ * the copy count — every number an expression-number field, so a `$name`
+ * value references the document's parameter and re-drives with it (the
+ * Phase 21/30 machinery). Submission routes through the engine's
+ * duplicate action; a structured refusal — the identity transform and the
+ * over-cap count among them — surfaces verbatim in the dialog's error
+ * region.
+ */
+export function DuplicateFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onDuplicate,
+  bodies,
+  parameterNames,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onDuplicate: (specification: DuplicateSubmission) => void;
+  /** The computable bodies the source picks from (name verbatim). */
+  readonly bodies: readonly CadFeatureBodyOption[];
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<DuplicateFormValues>[] = [
+    {
+      name: "sourceBodyId",
+      options: bodies.map((body) => ({ value: body.id, label: body.name })),
+      placeholder: labels.duplicateSource,
+      required: true,
+      type: "select",
+      label: labels.duplicateSource,
+    },
+    expressionNumberField(
+      "dxMm",
+      labels.duplicateDx,
+      parameterNames,
+      FINITE,
+      "Enter a finite step in millimetres.",
+    ),
+    expressionNumberField(
+      "dyMm",
+      labels.duplicateDy,
+      parameterNames,
+      FINITE,
+      "Enter a finite step in millimetres.",
+    ),
+    expressionNumberField(
+      "dzMm",
+      labels.duplicateDz,
+      parameterNames,
+      FINITE,
+      "Enter a finite step in millimetres.",
+    ),
+    {
+      name: "axis",
+      options: [
+        { value: "1", label: labels.duplicateAxisX },
+        { value: "2", label: labels.duplicateAxisY },
+        { value: "3", label: labels.duplicateAxisZ },
+      ],
+      required: true,
+      type: "select",
+      label: labels.duplicateAxis,
+    },
+    expressionNumberField(
+      "angleDeg",
+      labels.duplicateAngle,
+      parameterNames,
+      FINITE,
+      "Enter a finite angle in degrees.",
+    ),
+    expressionNumberField(
+      "count",
+      labels.duplicateCount,
+      parameterNames,
+      (value) =>
+        Number.isInteger(value) && value >= 1 && value <= DUPLICATE_COUNT_LIMIT,
+      `Enter a whole copy count between 1 and ${String(DUPLICATE_COUNT_LIMIT)}.`,
+    ),
+  ];
+  const form = useFormedible<DuplicateFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        sourceBodyId: bodies[0]?.id ?? "",
+        dxMm: DUPLICATE_DEFAULTS.dxMm,
+        dyMm: DUPLICATE_DEFAULTS.dyMm,
+        dzMm: DUPLICATE_DEFAULTS.dzMm,
+        axis:
+          DUPLICATE_DEFAULTS.axis === 2
+            ? "2"
+            : DUPLICATE_DEFAULTS.axis === 1
+              ? "1"
+              : "3",
+        angleDeg: DUPLICATE_DEFAULTS.angleDeg,
+        count: DUPLICATE_DEFAULTS.count,
+      },
+      onSubmit: ({ value }) => {
+        onDuplicate({
+          sourceBodyId: value.sourceBodyId,
+          dxMm: value.dxMm,
+          dyMm: value.dyMm,
+          dzMm: value.dzMm,
+          axis: value.axis === "1" ? 1 : value.axis === "2" ? 2 : 3,
+          angleDeg: value.angleDeg,
+          count: value.count,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.duplicateTitle}
       className="space-y-3"
       noValidate
     />

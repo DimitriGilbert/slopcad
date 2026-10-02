@@ -532,7 +532,7 @@ describe("the native format with expression payloads", () => {
     expect(parameterOf(undone.document, dId).value.value).toBe(10);
   });
 
-  it("migrates v6- and v7-stamped files (identity steps) and keeps v8 native", () => {
+  it("migrates v6-, v7-, and v8-stamped files (identity steps) and keeps v9 native", () => {
     const session = expressionSession();
     const native = requireOk(
       createNativeCadDocument(session.document),
@@ -540,16 +540,16 @@ describe("the native format with expression payloads", () => {
     );
     const serialized = serializeNativeCadDocument(native);
     const text = stringifyNativeCadDocument(serialized);
-    expect(readNativeFormatVersion(JSON.parse(text))).toBe(8);
+    expect(readNativeFormatVersion(JSON.parse(text))).toBe(9);
 
-    // The same content stamped 6 or 7 migrates (the identity) and
-    // re-stamps 8 — the two vocabulary-growth steps rewrite nothing.
+    // The same content stamped 6, 7, or 8 migrates (the identity) and
+    // re-stamps 9 — the vocabulary-growth steps rewrite nothing.
     const asV6 = {
       ...(JSON.parse(text) as Record<string, unknown>),
       formatVersion: 6,
     };
     const migrated = requireOk(migrateNativeCadDocument(asV6), "the migration");
-    expect(readNativeFormatVersion(migrated)).toBe(8);
+    expect(readNativeFormatVersion(migrated)).toBe(9);
     const asV7 = {
       ...(JSON.parse(text) as Record<string, unknown>),
       formatVersion: 7,
@@ -558,7 +558,16 @@ describe("the native format with expression payloads", () => {
       migrateNativeCadDocument(asV7),
       "the v7 migration",
     );
-    expect(readNativeFormatVersion(migratedV7)).toBe(8);
+    expect(readNativeFormatVersion(migratedV7)).toBe(9);
+    const asV8 = {
+      ...(JSON.parse(text) as Record<string, unknown>),
+      formatVersion: 8,
+    };
+    const migratedV8 = requireOk(
+      migrateNativeCadDocument(asV8),
+      "the v8 migration",
+    );
+    expect(readNativeFormatVersion(migratedV8)).toBe(9);
     const reparsed = requireOk(
       parseNativeCadDocumentFromBytes(
         encodeNativeCadDocument({
@@ -570,7 +579,7 @@ describe("the native format with expression payloads", () => {
     expect(
       stringifyNativeCadDocument(serializeNativeCadDocument(reparsed)),
     ).toBe(text);
-    // The v7 native parse of the identical text matches the migrated parse:
+    // The v9 native parse of the identical text matches the migrated parse:
     // byte-determinism across the version boundary.
     const direct = requireOk(
       parseNativeCadDocumentFromBytes(new TextEncoder().encode(text)),

@@ -132,6 +132,7 @@ import {
   SplitFeatureForm,
   BooleanFeatureForm,
   MoveBodyFeatureForm,
+  DuplicateFeatureForm,
   BodyRenameForm,
   type CadFeatureBodyOption,
   ThreadFeatureForm,
@@ -146,6 +147,7 @@ import {
   type CadFeatureSketchOption,
   type HoleFormValues,
 } from "./feature-forms";
+import { duplicateSourceOptions } from "./duplicate";
 import { CadCurveOverlay } from "./curve-overlay";
 import { CadDatumOverlay } from "./datum-overlay";
 import { CadHolePreviewGhost } from "./hole-ghost";
@@ -409,6 +411,7 @@ export function CompleteCadWorkbench({
     handleSplit,
     handleBoolean,
     handleMoveBody,
+    handleDuplicate,
     handleBodyAppearance,
     handleBodyRename,
     handleBodyVisibility,
@@ -456,6 +459,7 @@ export function CompleteCadWorkbench({
     | "curve"
     | "boolean"
     | "moveBody"
+    | "duplicate"
     | null
   >(null);
   // The Phase 44 body rename dialog: which body's rename form is open.
@@ -790,6 +794,10 @@ export function CompleteCadWorkbench({
         ? [{ id: body.id, name: body.name }]
         : [],
     );
+  // The duplicate dialog's source pool (Phase 60): the SAME computable-body
+  // predicate, read through the duplicate module's own reader — a copy of
+  // a copy is legal input, the verb's iterative use.
+  const duplicateBodies = duplicateSourceOptions(workbenchDocument);
   // The body the rename dialog is renaming (its current name seeds the form).
   const renameBody =
     renameBodyId === null
@@ -960,6 +968,15 @@ export function CompleteCadWorkbench({
     if (outcome.ok) setFeatureDialog(null);
   };
 
+  /** Runs the duplicate submission (Phase 60), surfacing the refusal. */
+  const submitDuplicate = (
+    specification: Parameters<typeof handleDuplicate>[0],
+  ): void => {
+    const outcome = handleDuplicate(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
   /** Runs the structured hole submission, surfacing the refusal. */
   const submitStructuredHole = (
     submission: Parameters<typeof handleStructuredHole>[0],
@@ -1044,7 +1061,8 @@ export function CompleteCadWorkbench({
         | "datum"
         | "curve"
         | "boolean"
-        | "moveBody",
+        | "moveBody"
+        | "duplicate",
     ): void => {
       setFeatureOutcome(null);
       if (kind === "hole") {
@@ -1373,6 +1391,17 @@ export function CompleteCadWorkbench({
         },
       },
       {
+        disabled: duplicateBodies.length === 0,
+        group: "Workspace",
+        id: "duplicate",
+        keywords:
+          "duplicate copy transform translate rotate array repeat instances iterative create",
+        label: "Duplicate & transform a body",
+        run: () => {
+          openFeatureDialog("duplicate");
+        },
+      },
+      {
         group: "Workspace",
         id: "create-datum",
         keywords: "datum plane axis point coordinate system reference create",
@@ -1457,6 +1486,7 @@ export function CompleteCadWorkbench({
     applied,
     canAuthorSketchFeatures,
     clearSelection,
+    duplicateBodies.length,
     exportIsometricSeries,
     exportSnapshotPng,
     exportTurntableSeries,
@@ -2886,9 +2916,12 @@ export function CompleteCadWorkbench({
                                                           "moveBody"
                                                         ? CAD_FEATURE_FORM_LABELS.moveBodyTitle
                                                         : featureDialog ===
-                                                            "curve"
-                                                          ? CURVE_FORM_LABELS.title
-                                                          : DATUM_FORM_LABELS.title}
+                                                            "duplicate"
+                                                          ? CAD_FEATURE_FORM_LABELS.duplicateTitle
+                                                          : featureDialog ===
+                                                              "curve"
+                                                            ? CURVE_FORM_LABELS.title
+                                                            : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -2930,9 +2963,13 @@ export function CompleteCadWorkbench({
                                                   ? CAD_FEATURE_FORM_LABELS.booleanHint
                                                   : featureDialog === "moveBody"
                                                     ? CAD_FEATURE_FORM_LABELS.moveBodyHint
-                                                    : featureDialog === "curve"
-                                                      ? CURVE_FORM_LABELS.hint
-                                                      : DATUM_FORM_LABELS.hint}
+                                                    : featureDialog ===
+                                                        "duplicate"
+                                                      ? CAD_FEATURE_FORM_LABELS.duplicateHint
+                                                      : featureDialog ===
+                                                          "curve"
+                                                        ? CURVE_FORM_LABELS.hint
+                                                        : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "surface-create" ? (
               <CreateSheetForm
@@ -3036,6 +3073,12 @@ export function CompleteCadWorkbench({
               />
             ) : featureDialog === "moveBody" ? (
               <MoveBodyFeatureForm onMoveBody={submitMoveBody} />
+            ) : featureDialog === "duplicate" ? (
+              <DuplicateFeatureForm
+                bodies={duplicateBodies}
+                onDuplicate={submitDuplicate}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "curve" ? (
               <CurveFeatureForm onCreateCurve={submitCurve} />
             ) : (

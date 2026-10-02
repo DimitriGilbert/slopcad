@@ -99,8 +99,21 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * where it is the documented, predictable behavior; the v7→v8 migration is
  * the identity (v7 content is valid v8 content — an old file simply carries
  * none of the new types).
+ *
+ * v9 (Phase 60): the feature vocabulary grew the `duplicate` kind — one
+ * feature input (the source body) plus six parameters, and one output body
+ * PER COPY. The envelope's own sections are unchanged (features are
+ * free-form kind strings at the substrate layer), but the replay is no
+ * longer old-reader-faithful in the sense that matters: a `feature.create`
+ * of kind `duplicate` replays through an old reader into a document whose
+ * feature the old executor refuses at its kind check — a multi-output
+ * feature the old reader cannot build, silently degraded at regeneration
+ * time instead of predictably at load. The version moves so the stamp keeps
+ * that refusal at the migration gate; the v8→v9 migration is the identity
+ * (v8 content is valid v9 content — an old file carries no `duplicate`
+ * features, since the writer that emits one stamps v9).
  */
-export const CAD_NATIVE_FORMAT_VERSION = 8;
+export const CAD_NATIVE_FORMAT_VERSION = 9;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

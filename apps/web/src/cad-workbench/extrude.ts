@@ -368,6 +368,13 @@ export function sceneOperandOfBody(
   ) {
     return { kind: "computed", bodyId };
   }
+  // A duplicate feature's copy bodies are computed solids (Phase 60): each
+  // copy's scene applies the planned T^i transform to the source's solid,
+  // and a LATER consumer (another duplicate, a boolean) composes from the
+  // copy's own output — the iterative use the verb is for.
+  if (producer.kind === "duplicate") {
+    return { kind: "computed", bodyId };
+  }
   // The move-body feature is the translate kind carrying the authored
   // parameter pair (the move reader's own gate).
   if (

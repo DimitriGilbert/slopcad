@@ -2380,6 +2380,90 @@ test("s16f the moved body keeps its volume", async ({ sessionPage: page }) => {
   });
 });
 
+test("s16g OCCT duplicate & transform: cumulative copies, re-drive, refusal, iterative", async ({
+  sessionPage: page,
+}) => {
+  await stage("s16g duplicate & transform", async () => {
+    // THE LADDER (the defaults): the rod duplicates ×3 with a 15 mm x-step
+    // — cumulative T^i, the copies at 15/30/45 beside the UNCONSUMED
+    // source (the document volume sums four rods over the boot plate).
+    await openComplete(page, OCCT_ROOT);
+    await drawAndExtrudeRod(page, OCCT_ROOT);
+    await openDialogViaMenu(page, OCCT_ROOT, "duplicate");
+    const beforeLadder = await dispatchedCount(page, OCCT_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    await expect(page.locator(OCCT)).toHaveAttribute(
+      "data-scene-kind",
+      "duplicate",
+    );
+    const ladder = Number(
+      await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeLadder }),
+    );
+    expect(volumeNear(ladder, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(true);
+    const ladderTimeline = await readTimeline(page, OCCT_ROOT);
+    expect(ladderTimeline.entries.at(-1)?.kind).toBe("duplicate");
+    expect(ladderTimeline.entries.at(-1)?.status).not.toBe("failed");
+
+    // THE $VAR RE-DRIVE: the step rides the auto-created `duplicateDx`
+    // parameter — editing it in the panel re-derives every copy on the
+    // next dispatch (15 → 25 mm steps; the sum is overlap-blind, the
+    // movement pin lives in the kernel suite and the visual pass).
+    const beforeStep = await dispatchedCount(page, OCCT_ROOT);
+    await page.getByLabel("duplicateDx", { exact: true }).fill("25");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const restepped = Number(
+      await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeStep }),
+    );
+    expect(volumeNear(restepped, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(
+      true,
+    );
+
+    // THE CORNER (iterative + $ref): duplicate COPY 1 — the source pool
+    // accepts an earlier duplicate's copy — with the step referencing
+    // `$duplicateDx` (the bare reference rides the existing parameter) and
+    // a 90° z-rotation: copy 1 stands east, its three T^i copies land at
+    // 90/180/270° — four bodies at the quadrants. Three new rods over the
+    // ladder document.
+    await openDialogViaMenu(page, OCCT_ROOT, "duplicate");
+    await page.locator(`${DIALOG} [data-slot=select-trigger]`).nth(0).click();
+    await page.getByRole("option", { name: "copy 1", exact: true }).click();
+    await page.getByLabel("Step x (mm)").fill("$duplicateDx");
+    await page.getByLabel("Step y (mm)").fill("0");
+    await page.getByLabel("Step z (mm)").fill("0");
+    await page.getByLabel("Step rotation (deg)").fill("90");
+    const beforeCorner = await dispatchedCount(page, OCCT_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    const corner = Number(
+      await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeCorner }),
+    );
+    expect(volumeNear(corner, BOOT_PLATE_VOLUME + 7 * ROD_VOLUME)).toBe(true);
+
+    // THE IDENTITY REFUSAL: a zero step and a zero angle is the structured
+    // refusal — the dialog stays open with the error verbatim, the
+    // timeline is unchanged, and Escape closes without committing.
+    await openDialogViaMenu(page, OCCT_ROOT, "duplicate");
+    const refusalTimeline = await readTimeline(page, OCCT_ROOT);
+    await page.getByLabel("Step x (mm)").fill("0");
+    await page.getByLabel("Step y (mm)").fill("0");
+    await page.getByLabel("Step z (mm)").fill("0");
+    await page.getByLabel("Step rotation (deg)").fill("0");
+    await page.getByLabel("Copies").fill("1");
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    const refusal = page.locator('[data-testid="feature-form-error"]');
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText("identity");
+    // The refusal commits nothing: the timeline is unchanged.
+    const afterRefusal = await readTimeline(page, OCCT_ROOT);
+    expect(afterRefusal.entries.length).toBe(refusalTimeline.entries.length);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(DIALOG)).toBeHidden();
+    cover("duplicate-transform");
+    extra("duplicate-transform-stage");
+  });
+});
+
 test("s17 OCCT surface workflow: base sheets, trim, thicken, offset, knit", async ({
   sessionPage: page,
 }) => {

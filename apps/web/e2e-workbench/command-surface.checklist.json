@@ -673,6 +673,31 @@
       ]
     },
     {
+      "id": "duplicate-transform",
+      "phase": 60,
+      "capability": "Duplicate & transform: N new bodies from one source (the source remains), the cumulative T^i of a translate step plus a world-axis rotation — every number a parameter reference, re-driven, iterative on its own copies",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "duplicate",
+      "keywords": [
+        "duplicate",
+        "copy",
+        "copies",
+        "transform",
+        "translate",
+        "rotate",
+        "repeat",
+        "instances",
+        "cumulative",
+        "iterative",
+        "parameter",
+        "reference",
+        "re-drive",
+        "bodies",
+        "create"
+      ]
+    },
+    {
       "id": "boolean-commands",
       "phase": 44,
       "capability": "User-level booleans (union/subtract/intersect over body multi-selection, keep-tool toggles)",

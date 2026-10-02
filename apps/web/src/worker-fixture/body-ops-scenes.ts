@@ -12,6 +12,11 @@
  *   translation (and, when the form authored one, the world-axis
  *   rotation the Phase 44 bridge growth carries — rotation-capable
  *   kernels only, the transform contract's own gate).
+ * - DUPLICATE (Phase 60): the source body's solid and ONE
+ *   `solid.transform` per copy scene — the copy's place comes from the
+ *   bridge's shared `planDuplicateInstances` (the analytic T^ordinal of
+ *   the translate-then-rotate step), and the result solid is keyed by
+ *   the copy's body id so a later duplicate of a copy composes from it.
  */
 
 import { angle, length } from "@slopcad/cad-core";
@@ -20,6 +25,7 @@ import type { PlateMeasurement } from "./plate-scene";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
 import type { BooleanSceneRequest } from "../cad-workbench/boolean";
 import type { MoveBodySceneRequest } from "../cad-workbench/move-body";
+import type { DuplicateSceneRequest } from "../cad-workbench/duplicate";
 import type { SceneOperand } from "../cad-workbench/extrude";
 
 const mm = (value: number) => length(value, "mm");
@@ -215,5 +221,48 @@ export async function computeMoveBodyScene(
   return {
     measurement: await measure(context, moved.solid),
     solid: moved.solid,
+  };
+}
+
+/**
+ * The duplicate (Phase 60): ONE transform per copy scene — the request
+ * carries that copy's place from the bridge's shared
+ * `planDuplicateInstances` plan (the analytic T^ordinal of the step
+ * transform), the base rides its operand source (a plain extrusion
+ * re-extrudes, a computed reference — another composition's output or an
+ * earlier duplicate's own copy — consumes the pass's solid). The result
+ * solid is keyed by the copy's body id, so a later duplicate of a copy
+ * (the verb's iterative use) composes from it.
+ */
+export async function computeDuplicateScene(
+  context: ComputationContext,
+  request: DuplicateSceneRequest,
+  computed: ComputedSolids = NO_COMPUTED_SOLIDS,
+): Promise<ComposedSceneResult> {
+  const baseSolid = await operandSolid(
+    context,
+    request.base,
+    computed,
+    "duplicate source",
+  );
+  const placed = await context.request("solid.transform", {
+    solid: baseSolid,
+    translation: {
+      x: mm(request.translationMm[0]),
+      y: mm(request.translationMm[1]),
+      z: mm(request.translationMm[2]),
+    },
+    ...(request.rotation === undefined
+      ? {}
+      : {
+          rotation: {
+            axis: request.rotation.axis,
+            angle: angle(request.rotation.angleRad),
+          },
+        }),
+  });
+  return {
+    measurement: await measure(context, placed.solid),
+    solid: placed.solid,
   };
 }

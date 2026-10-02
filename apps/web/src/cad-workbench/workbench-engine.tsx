@@ -91,7 +91,11 @@ import {
   appearanceLibraryEntry,
 } from "@slopcad/cad-core";
 import type { KernelResolvedProfile } from "@slopcad/cad-kernel";
-import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
+import {
+  DUPLICATE_COUNT_LIMIT,
+  structuredHoleRoles,
+  structuredHoleTypeOf,
+} from "@slopcad/cad-kernel";
 import type { Workplane } from "@slopcad/cad-sketch";
 import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene";
 
@@ -187,6 +191,11 @@ import {
   moveBodyTargetFeatureOf,
   validateMoveBodySubmission,
 } from "./move-body";
+import {
+  duplicateProducingFeature,
+  validateDuplicateSubmission,
+  type DuplicateSubmission,
+} from "./duplicate";
 import { validateBodyRenameSubmission } from "./body-management";
 import {
   curvePayloadOf,
@@ -297,6 +306,7 @@ export type WorkbenchSceneKind =
   | "patternFeature"
   | "patternPath"
   | "mirror"
+  | "duplicate"
   | "hole"
   | "curves"
   | "sheet";
@@ -652,6 +662,18 @@ export interface WorkbenchEngine {
     } | null;
   }) => FeatureFormOutcome;
   /**
+   * The Phase 60 duplicate create action: commits the transform parameters
+   * (dx/dy/dz/axis/angle/count — literals auto-created, `$name` values
+   * riding the existing parameters, `-$name` the negated auto-parameter
+   * expression) and the `duplicate` feature — the ONE multi-output kind,
+   * one output body PER COPY — in one atomic transaction over the picked
+   * computable body. The source body remains unconsumed. A refusal
+   * commits nothing.
+   */
+  readonly handleDuplicate: (
+    specification: DuplicateSubmission,
+  ) => FeatureFormOutcome;
+  /**
    * The Phase 44 body-management actions: rename, visibility, and
    * isolation — each one `body.update` command in its own transaction.
    */
@@ -804,6 +826,7 @@ export function useWorkbenchEngine(
   const [mirrorCount, setMirrorCount] = useState(0);
   const [booleanCount, setBooleanCount] = useState(0);
   const [moveBodyCount, setMoveBodyCount] = useState(0);
+  const [duplicateCount, setDuplicateCount] = useState(0);
   // The Phase 39 sketch-on-face anchor: the datum record the CURRENT sketch
   // session boots on (its id commits with the extrude feature; its plane
   // booted the sketch editor). `null` in the ordinary sketch flow.
@@ -3204,6 +3227,208 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The Phase 60 duplicate & transform action: resolve the $-able numbers
+  // (literals pass the authoring battery, `$name` rides the existing
+  // parameter, `-$name` the negated auto-parameter expression — the
+  // Phase 30 seam), judge the RESOLVED values (the count domain, the
+  // identity-transform refusal), then commit the parameters, one output
+  // body per copy, and the `duplicate` feature in ONE atomic transaction
+  // over the picked computable body. The source body is referenced, never
+  // consumed — the copies land beside it.
+  const handleDuplicate = (
+    specification: DuplicateSubmission,
+  ): FeatureFormOutcome => {
+    const validation = validateDuplicateSubmission(specification);
+    if (!validation.ok) return validation;
+    const base = sceneOperandOfBody(
+      workbenchDocument,
+      specification.sourceBodyId,
+    );
+    if (base === null) {
+      return {
+        ok: false,
+        code: "kernel/feature-input-invalid",
+        message:
+          "A duplicate needs a computable source body — its scene must resolve (extrude a profile first, the thread's precedent).",
+      };
+    }
+    const dx = resolveFeatureNumberValue(
+      specification.dxMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The dx offset" },
+    );
+    if (!dx.ok) return dx;
+    const dy = resolveFeatureNumberValue(
+      specification.dyMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The dy offset" },
+    );
+    if (!dy.ok) return dy;
+    const dz = resolveFeatureNumberValue(
+      specification.dzMm,
+      workbenchDocument.parameters,
+      { dimension: "length", label: "The dz offset" },
+    );
+    if (!dz.ok) return dz;
+    const count = resolveFeatureNumberValue(
+      specification.count,
+      workbenchDocument.parameters,
+      { dimension: "dimensionless", label: "The copy count" },
+    );
+    if (!count.ok) return count;
+    const stepAngle = resolveFeatureNumberValue(
+      specification.angleDeg,
+      workbenchDocument.parameters,
+      { dimension: "angle", label: "The rotation angle" },
+    );
+    if (!stepAngle.ok) return stepAngle;
+    const resolvedOf = (
+      resolution:
+        | { readonly ok: true; readonly kind: "number"; readonly value: number }
+        | {
+            readonly ok: true;
+            readonly kind: "reference" | "negatedReference";
+            readonly parameter: { readonly value: AnyDimensionalValue };
+          }
+        | {
+            readonly ok: false;
+            readonly code: string;
+            readonly message: string;
+          },
+      unit: "mm" | "1" | "rad",
+    ): number => {
+      if (!resolution.ok || resolution.kind === "number") {
+        return resolution.ok ? resolution.value : Number.NaN;
+      }
+      return valueIn(resolution.parameter.value, unit);
+    };
+    const countValue = resolvedOf(count, "1");
+    if (
+      !Number.isInteger(countValue) ||
+      countValue < 1 ||
+      countValue > DUPLICATE_COUNT_LIMIT
+    ) {
+      return {
+        ok: false,
+        code: "kernel/parameter-invalid",
+        message: `The copy count must be a whole number between 1 and ${String(DUPLICATE_COUNT_LIMIT)} (got ${String(countValue)}).`,
+      };
+    }
+    if (
+      resolvedOf(dx, "mm") === 0 &&
+      resolvedOf(dy, "mm") === 0 &&
+      resolvedOf(dz, "mm") === 0 &&
+      resolvedOf(stepAngle, "rad") === 0
+    ) {
+      return {
+        ok: false,
+        code: "kernel/parameter-invalid",
+        message:
+          "The duplicate's transform is the identity (zero offset, zero angle) — a pure in-place copy pollutes the document with coincident bodies; give the step a translation or a rotation.",
+      };
+    }
+    const n = duplicateCount + 1;
+    const suffix = n === 1 ? "" : String(n);
+    // The six input slots in the bridge's documented order — source, dx,
+    // dy, dz, count, AXIS, ANGLE (the axis-selector-last convention, the
+    // thread's) — so the feature's input list maps positionally. The axis
+    // is a literal-only slot (the helix handedness's discipline): always
+    // created, never referenced.
+    const slots: readonly FeatureValueSlot[] = [
+      {
+        resolution: dx,
+        literalId: createParameterId(`param_duplicate_dx${suffix}`),
+        literalName: `duplicateDx${suffix}`,
+        toLiteralValue: length,
+      },
+      {
+        resolution: dy,
+        literalId: createParameterId(`param_duplicate_dy${suffix}`),
+        literalName: `duplicateDy${suffix}`,
+        toLiteralValue: length,
+      },
+      {
+        resolution: dz,
+        literalId: createParameterId(`param_duplicate_dz${suffix}`),
+        literalName: `duplicateDz${suffix}`,
+        toLiteralValue: length,
+      },
+      {
+        resolution: count,
+        literalId: createParameterId(`param_duplicate_count${suffix}`),
+        literalName: `duplicateCount${suffix}`,
+        toLiteralValue: dimensionless,
+      },
+      {
+        resolution: { ok: true, kind: "number", value: specification.axis },
+        literalId: createParameterId(`param_duplicate_axis${suffix}`),
+        literalName: `duplicateAxis${suffix}`,
+        toLiteralValue: dimensionless,
+      },
+      {
+        resolution: stepAngle,
+        literalId: createParameterId(`param_duplicate_angle${suffix}`),
+        literalName: `duplicateAngle${suffix}`,
+        toLiteralValue: (value: number) => angle(value, "deg"),
+      },
+    ];
+    const sourceRefProducer = duplicateProducingFeature(
+      workbenchDocument,
+      specification.sourceBodyId,
+    );
+    // A multi-output producer (another duplicate) is referenced BY BODY —
+    // a feature ref would resolve to its first output, a different body
+    // than the one the author picked. Single-output producers ride the
+    // feature ref (the invalidation edge the other create actions emit);
+    // producerless bodies (the boot plate) reference themselves.
+    const sourceInput =
+      sourceRefProducer !== undefined && sourceRefProducer.outputs.length === 1
+        ? { kind: "feature" as const, id: sourceRefProducer.id }
+        : {
+            kind: "body" as const,
+            id: createBodyId(specification.sourceBodyId),
+          };
+    const copyBodyIds = Array.from({ length: countValue }, (_, index) =>
+      createBodyId(`body_dup${suffix}_c${String(index + 1)}`),
+    );
+    const committed = documentApi.applyTransaction({
+      commands: [
+        ...slots.flatMap((slot) => {
+          const command = featureSlotCreateCommand(slot);
+          return command === null ? [] : [command];
+        }),
+        ...copyBodyIds.map((bodyId, index) => ({
+          type: "body.create" as const,
+          id: bodyId,
+          name: `copy ${String(index + 1)}`,
+        })),
+        {
+          type: "feature.create",
+          id: createFeatureId(`feat_duplicate${suffix}`),
+          kind: "duplicate",
+          inputs: [
+            sourceInput,
+            ...slots.map((slot) => ({
+              kind: "parameter" as const,
+              id: featureSlotInputId(slot),
+            })),
+          ],
+          outputs: copyBodyIds,
+        },
+      ],
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setDuplicateCount(n);
+    setActiveScene("duplicate");
+    return { ok: true };
+  };
+
   // The Phase 44 body-management actions: each concern rides its own
   // `body.update` command (the command layer's partial-update design),
   // committed as a one-command transaction the history records.
@@ -3491,6 +3716,7 @@ export function useWorkbenchEngine(
     mirrorCount,
     booleanCount,
     moveBodyCount,
+    duplicateCount,
     holeCount,
     structuredHoleCount,
     curveCount,
@@ -4076,6 +4302,7 @@ export function useWorkbenchEngine(
     handleMirror,
     handleBoolean,
     handleMoveBody,
+    handleDuplicate,
     handleBodyRename,
     handleBodyAppearance,
     handleBodyVisibility,

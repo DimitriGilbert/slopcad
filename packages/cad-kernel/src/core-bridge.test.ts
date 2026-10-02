@@ -537,6 +537,7 @@ describe("bridge feature kinds", () => {
       "subtract",
       "intersect",
       "translate",
+      "duplicate",
       "extrude",
       "revolve",
       "sweep",

@@ -121,6 +121,15 @@ export interface NativeFormatMigration {
  * emits one stamps v8). The step exists so the version walk has a
  * registered path; the envelope stamp is the gate that keeps v7 readers
  * off v8 logs they would only refuse deep in replay.
+ *
+ * The v8→v9 step (Phase 60) carries the feature vocabulary's `duplicate`
+ * kind (one source input, six parameters, one output body per copy). It is
+ * the identity: features serialize as free-form kind strings, no envelope
+ * section changes shape, and a `duplicate` COMMAND cannot occur in a v8
+ * file (the writer that emits one stamps v9). The step exists so the
+ * version walk has a registered path; the envelope stamp is the gate that
+ * keeps v8 readers off v9 documents whose duplicate features their
+ * executors cannot build.
  */
 export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
   Object.freeze([
@@ -159,6 +168,11 @@ export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
       to: 8,
       migrate: migrateV7ToV8,
     },
+    {
+      from: 8,
+      to: 9,
+      migrate: migrateV8ToV9,
+    },
   ]);
 
 /**
@@ -196,6 +210,27 @@ function migrateV7ToV8(
       migrationError(
         NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
         "The v7→v8 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
+
+/**
+ * The v8→v9 content transform (the framework stamps `formatVersion`):
+ * the identity — the duplicate-kind growth rides free-form feature kind
+ * strings only, so v8 content is already valid v9 content and nothing
+ * inside the document is rewritten.
+ */
+function migrateV8ToV9(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v8→v9 migration needs a plain native document object.",
         input,
       ),
     );
