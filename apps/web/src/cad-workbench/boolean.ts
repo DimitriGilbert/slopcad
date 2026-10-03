@@ -130,8 +130,8 @@ export function featureProducingBody(
 export interface BooleanSceneRequest {
   /** The target operand's source (the boolean's first input). */
   readonly target: SceneOperand;
-  /** The tool operand's source (the boolean's second input). */
-  readonly tool: SceneOperand;
+  /** EVERY declared tool's source, in declared order (the commit keeps all). */
+  readonly tools: readonly SceneOperand[];
   /** The operation riding the scene. */
   readonly operation: BooleanOperation;
   /** The feature's output body id (the rendered body). */
@@ -160,12 +160,16 @@ function operandBodyIdOf(
  * Reads EVERY boolean feature (`union`/`subtract`/`intersect`) into its
  * worker-scene request, in document order — ALL of them render, each
  * consuming its target's current solid (the second subtract rides the
- * first's output). Each operand resolves through `sceneOperandOfBody`: a
- * plain extrusion pairs with its own extrusion (the established
- * constraint), a composition's output (pad, hole, boolean, moved body)
- * references the computed solid the document pass hands over. A feature
- * whose output or operands no longer resolve is skipped honestly — the
- * other booleans still render.
+ * first's output). The TARGET is the first operand ref and EVERY further
+ * operand ref is a TOOL: a multi-tool commit composes all of them in ONE
+ * scene (the kernel's boolean operations are n-ary; the commit keeps every
+ * declared tool, so dropping any would silently lose material the author
+ * picked). Each operand resolves through `sceneOperandOfBody`: a plain
+ * extrusion pairs with its own extrusion (the established constraint), a
+ * composition's output (pad, hole, boolean, moved body) references the
+ * computed solid the document pass hands over. A feature whose output or
+ * ANY operand no longer resolves is skipped honestly, whole — the other
+ * booleans still render.
  */
 export function documentBooleanSceneRequests(
   document: Parameters<typeof documentExtrudeRequest>[0],
@@ -181,23 +185,29 @@ export function documentBooleanSceneRequests(
       (ref) => ref.kind === "feature" || ref.kind === "body",
     );
     const targetRef = operandRefs[0];
-    const toolRef = operandRefs[1];
-    if (
-      bodyId === undefined ||
-      targetRef === undefined ||
-      toolRef === undefined
-    ) {
-      continue;
-    }
+    const toolRefs = operandRefs.slice(1);
+    if (bodyId === undefined || targetRef === undefined) continue;
+    if (toolRefs.length === 0) continue;
     const targetBodyId = operandBodyIdOf(byId, targetRef);
-    const toolBodyId = operandBodyIdOf(byId, toolRef);
-    if (targetBodyId === null || toolBodyId === null) continue;
+    if (targetBodyId === null) continue;
     const target = sceneOperandOfBody(document, targetBodyId);
-    const tool = sceneOperandOfBody(document, toolBodyId);
-    if (target === null || tool === null) continue;
+    if (target === null) continue;
+    const tools: SceneOperand[] = [];
+    let resolved = true;
+    for (const toolRef of toolRefs) {
+      const toolBodyId = operandBodyIdOf(byId, toolRef);
+      const tool =
+        toolBodyId === null ? null : sceneOperandOfBody(document, toolBodyId);
+      if (tool === null) {
+        resolved = false;
+        break;
+      }
+      tools.push(tool);
+    }
+    if (!resolved) continue;
     requests.push({
       target,
-      tool,
+      tools,
       operation: feature.kind as BooleanOperation,
       bodyId,
     });

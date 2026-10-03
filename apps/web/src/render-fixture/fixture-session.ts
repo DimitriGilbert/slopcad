@@ -425,6 +425,7 @@ export type FeatureSceneKind =
   | "patternFeature"
   | "patternPath"
   | "mirror"
+  | "duplicate"
   | "hole"
   | "pad"
   | "sheet"

@@ -261,15 +261,17 @@ describe("computeDocumentScene: the display keep rule (Phase 16)", () => {
               bodyId: "body_target",
             },
           },
-          tool: {
-            kind: "extrude",
-            request: {
-              loop: squareLoop(20, 0, 30, 10),
-              placement: IDENTITY_PLACEMENT,
-              distanceMm: 10,
-              bodyId: "body_tool",
+          tools: [
+            {
+              kind: "extrude",
+              request: {
+                loop: squareLoop(20, 0, 30, 10),
+                placement: IDENTITY_PLACEMENT,
+                distanceMm: 10,
+                bodyId: "body_tool",
+              },
             },
-          },
+          ],
           operation: "union",
           bodyId: "body_boolean",
         },
@@ -305,15 +307,17 @@ describe("computeDocumentScene: the lineage fallback (Phase 16)", () => {
               bodyId: "body_target",
             },
           },
-          tool: {
-            kind: "extrude",
-            request: {
-              loop: squareLoop(20, 0, 30, 10),
-              placement: IDENTITY_PLACEMENT,
-              distanceMm: 10,
-              bodyId: "body_tool",
+          tools: [
+            {
+              kind: "extrude",
+              request: {
+                loop: squareLoop(20, 0, 30, 10),
+                placement: IDENTITY_PLACEMENT,
+                distanceMm: 10,
+                bodyId: "body_tool",
+              },
             },
-          },
+          ],
           operation: "union",
           bodyId: "body_boolean",
         },
@@ -458,15 +462,17 @@ describe("computeDocumentScene: the operand handoff (composition)", () => {
         kind: "boolean",
         request: {
           target: { kind: "computed", bodyId: "body_holed" },
-          tool: {
-            kind: "extrude",
-            request: {
-              loop: squareLoop(2, 8, 6, 12),
-              placement: IDENTITY_PLACEMENT,
-              distanceMm: 10,
-              bodyId: "body_tool",
+          tools: [
+            {
+              kind: "extrude",
+              request: {
+                loop: squareLoop(2, 8, 6, 12),
+                placement: IDENTITY_PLACEMENT,
+                distanceMm: 10,
+                bodyId: "body_tool",
+              },
             },
-          },
+          ],
           operation: "subtract",
           bodyId: "body_boolean",
         },
@@ -507,15 +513,17 @@ describe("computeDocumentScene: the operand handoff (composition)", () => {
         kind: "boolean",
         request: {
           target: { kind: "computed", bodyId: "body_holed" },
-          tool: {
-            kind: "extrude",
-            request: {
-              loop: squareLoop(2, 8, 6, 12),
-              placement: IDENTITY_PLACEMENT,
-              distanceMm: 10,
-              bodyId: "body_tool",
+          tools: [
+            {
+              kind: "extrude",
+              request: {
+                loop: squareLoop(2, 8, 6, 12),
+                placement: IDENTITY_PLACEMENT,
+                distanceMm: 10,
+                bodyId: "body_tool",
+              },
             },
-          },
+          ],
           operation: "subtract",
           bodyId: "body_boolean",
         },
@@ -554,15 +562,17 @@ describe("computeDocumentScene: the operand handoff (composition)", () => {
         kind: "boolean",
         request: {
           target: { kind: "computed", bodyId: "body_holed" },
-          tool: {
-            kind: "extrude",
-            request: {
-              loop: squareLoop(2, 8, 6, 12),
-              placement: IDENTITY_PLACEMENT,
-              distanceMm: 10,
-              bodyId: "body_tool",
+          tools: [
+            {
+              kind: "extrude",
+              request: {
+                loop: squareLoop(2, 8, 6, 12),
+                placement: IDENTITY_PLACEMENT,
+                distanceMm: 10,
+                bodyId: "body_tool",
+              },
             },
-          },
+          ],
           operation: "subtract",
           bodyId: "body_boolean",
         },

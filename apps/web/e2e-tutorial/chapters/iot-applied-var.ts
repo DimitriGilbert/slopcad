@@ -59,6 +59,10 @@ import {
 //   postDrop    := cavityD - boardLift            = 25.4 mm
 //   reach       6 mm     the rib's diagonal reach (a design literal,
 //                        the portX class: set once, referenced everywhere)
+//   halfTurn    180 deg  the duplicate's rotation — half a circle about z
+//                        (an angle-dimensioned literal, the reach class)
+//   ribStepX    := -caseL                         = -71.6 mm
+//   ribStepY    := -caseW                         = -51.6 mm
 //   postNearX   := caseL - lineWidth              = 71.2 mm
 //   postNearY   := caseW - lineWidth              = 51.2 mm
 //   postIn      := lineWidth + reach              = 6.4 mm
@@ -102,10 +106,12 @@ import {
 //    after an Apply the NEXT constraint's field can mount stale-empty,
 //    so each bind re-selects its row and clears the field blind
 //    (Ctrl+A) before typing the token.
-// 3. THE POSTS ARE DIAGONAL RIBS, ONE SLOT EACH. The owner's correction:
-//    the corner posts are THIN DIAGONAL BRACES — two line widths wide,
-//    one per corner, running at 45° across the corner with both ends
-//    buried in the two walls (fused, printed with the shell). The
+// 3. THE POSTS ARE DIAGONAL RIBS, TWO DRAWN AND ONE TURN. The owner's
+//    correction: the corner posts are THIN DIAGONAL BRACES — two line
+//    widths wide, running at 45° across the corner with both ends buried
+//    in the two walls (fused, printed with the shell) — and, the owner's
+//    order for this re-recording: the braces come from ONE DRAWING plus
+//    the Duplicate & transform staple, not four repeated sketches. The
 //    probe's shape is the sketcher's straight slot: ONE closed entity —
 //    two cap centers and a radius — so the extrudable profile needs no
 //    chained-line welds, and the slot exposes its cap centers as point
@@ -114,37 +120,68 @@ import {
 //    centers pinned ABSOLUTELY off the origin point: the near cap center
 //    reads ($lineWidth, $lineWidth) at the origin corner — the round end
 //    lands flush against the two outer faces, wholly inside the wall
-//    corner — or ($postNearX, $lineWidth) and kin at the other three,
-//    and the far cap center reads $postIn or $postFarX/$postFarY — the
-//    45° held by the solved places themselves (|Δx| = |Δy| falls out of
-//    lineWidth + reach against caseL − lineWidth − reach). The first
-//    draft pinned the far cap with a magnitude reach pair (|Δx| = |Δy| =
-//    $reach) and the trim beat's re-solve flipped its signs — the ribs
-//    bloomed 6 mm past the case — so magnitude dimensions never carry a
-//    direction: place both ends. The rib is extruded DOWN $cavityDrop
-//    (fusing with the floor) and unioned into the shell in the applied
-//    chapter's probed sequential chain — born fused, printed as one
-//    body.
-// 4. THE TRIM IS THE BOARD'S OWN OUTLINE. One bed rectangle at the
+//    corner — or ($postNearX, $lineWidth) at the x-far corner, and the
+//    far cap center reads $postIn or $postFarX/$postIn — the 45° held
+//    by the solved places themselves (|Δx| = |Δy| falls out of lineWidth
+//    + reach against caseL − lineWidth − reach). The first draft pinned
+//    the far cap with a magnitude reach pair (|Δx| = |Δy| = $reach) and
+//    the trim beat's re-solve flipped its signs — the ribs bloomed 6 mm
+//    past the case — so magnitude dimensions never carry a direction:
+//    place both ends.
+// 4. THE DUPLICATE IS THE STAPLE, AND THE GEOMETRY FIXES ITS SHAPE. The
+//    four corners of a RECTANGULAR case are one half-turn orbit split in
+//    two: a 90° z-step swaps the footprint's x/y extents (71.6 against
+//    51.6 — copy 2 would always land off the case; hand-derived, no
+//    single (d, 90°) step walks one rib around a rectangle), so ONE rib
+//    turned can only ever reach its diagonal twin. Each brace is
+//    therefore DRAWN ONCE and turned onto its far corner by ITS OWN
+//    Duplicate & transform — the owner's "draw one, duplicate with
+//    rotation", applied once per diagonal orientation (45° and 135°).
+//    The sources are the EXTRUDED braces: the probe caught a
+//    boolean-sourced duplicate's copy rendering displaced, while an
+//    extrude-sourced copy rides its own derivation and lands exactly.
+//    The step transform is T(p) = R(p + d) — translate
+//    first, then the rotation about the WORLD axis through the ORIGIN,
+//    which this corner-anchored frame pins at the case's own min corner
+//    — so the step carries the case's own diagonal while it turns:
+//    ribStepX := -caseL, ribStepY := -caseW (the Phase-30 signed-helper
+//    route; the dialog grammar's `-$name` would also ride, but the named
+//    variable keeps the carry visible and re-drivable in the manager),
+//    half a circle about z ($halfTurn, an angle literal), one copy.
+//    Hand-derived landings — R is (x, y, z) ↦ (−x, −y, z), so
+//    T(p) = (caseL − px, caseW − py, pz):
+//      brace 1 near (0.4, 0.4)  → (71.2, 51.2)  = the far corner's near cap
+//      brace 1 far  (6.4, 6.4)  → (65.2, 45.2)  = its far cap
+//      brace 2 near (71.2, 0.4) → (0.4, 51.2)   = the y-far corner's near cap
+//      brace 2 far  (65.2, 6.4) → (6.4, 45.2)   = its far cap
+//    exactly the two missing braces, each diagonal FLIPPED by the turn —
+//    the work no translation can do, and the reason the staple is a
+//    rotation here. The volume ledger proves the landings: a brace in
+//    open air would add its full stadium; only the corner-correct copies
+//    add the open-cavity part the pins below encode.
+// 5. THE TRIM IS THE BOARD'S OWN OUTLINE. One bed rectangle at the
 //    cavity's own bound numbers — place $wall/$wall, size
 //    $boardL/$boardW — extruded DOWN $postDropDown and subtracted once:
 //    it shears exactly the four ribs' open-cavity tops, so they come out
 //    boardLift tall wherever the board moves them. The wall-band ends
 //    need no trim — they fuse into solid wall, full height, invisibly.
-// 5. EVERY DEPTH IS A $ NAME. The draft dialog's Distance fields take
+// 6. EVERY DEPTH IS A $ NAME. The draft dialog's Distance fields take
 //    `$name` references with the clickable autocomplete (Phase 21), and a
 //    referenced parameter is re-read on every dispatch. The chapter's
-//    extrudes ride the signed helpers — $caseDrop once, $cavityDrop five
-//    times (the cavity tool and the four ribs), $postDropDown,
+//    extrudes ride the signed helpers — $caseDrop once, $cavityDrop
+//    three times (the cavity tool and the two braces), $postDropDown,
 //    $portCutIn — and $lidT upward for the plate; so the payoff demos
-//    re-drive real geometry.
-// 6. THE EDIT THAT RE-DERIVES IS THE EXPRESSION COMMIT. Probed: the
+//    re-drive real geometry. The duplicate's fields ride the same
+//    autocomplete — $ribStepX, $ribStepY, $halfTurn — and the duplicate
+//    feature re-executes on every dispatch, so the demos' re-drives turn
+//    the copies too.
+// 7. THE EDIT THAT RE-DERIVES IS THE EXPRESSION COMMIT. Probed: the
 //    panel's literal edit is the value-only arm ("the cached value moves,
 //    nothing is recomputed") — features referencing DERIVED variables read
 //    the stale cache. The manager's expression editor (a constant is a
 //    legal expression) is the commit that runs the topological recompute;
 //    the demos edit the roots THERE, and the whole DAG follows.
-// 7. THE PORT IS ONE FACE SUBTRACT. The hole dialog takes no `$` (probed),
+// 8. THE PORT IS ONE FACE SUBTRACT. The hole dialog takes no `$` (probed),
 //    so the window is a prism sketched on the front wall's outer face —
 //    the view cube's LEFT face aims it, sketch-on-face anchors it, and
 //    the datum frame's u/v ride the session's in-plane rule (u = world Y,
@@ -160,19 +197,23 @@ import {
 //
 //   The ribs' new material is only the slot's OPEN-CAVITY part — the
 //   wall-band ends fuse into material that is already solid. At cap
-//   radius r = lineWidth and centerline L = reach·√2:
+//   radius r = lineWidth and centerline L = reach·√2 (the duplicate
+//   re-recording changed how the four ribs are AUTHORED — two drawn,
+//   two turned — not what they ARE: the copies land exactly on the
+//   previously drawn third and fourth braces, so every number below is
+//   unchanged; volume is placement-invariant):
 //   A(r) = 2rL − (2√2+1)·r² + πr²/2
 //          (corner clip pair; the far cap's OUTER half-disc — its near
 //          half is inside the body rectangle, and the start cap's outer
 //          half is buried in the wall corner)
-//   A(0.4) = 6.427011;  A(0.5) = 7.920874
+//   A(0.4) = 6.427004;  A(0.5) = 7.920874
 //
 //   block            71.6 * 51.6 * 35.6        = 131,526.336
 //   cavity tool      70 * 50 * 34.4            = 120,400
 //   shell            131,526.336 - 120,400     =  11,126.336
-//   each rib union   +6.427011 * 34.4          =  +221.089 (x4)
-//   shell + ribs                               =  12,010.693
-//   trim cut         -6.427011 * 25.4          =   -163.246 (x4)
+//   each rib union   +6.427004 * 34.4          =  +221.089 (x4)
+//   shell + ribs                               =  12,010.692
+//   trim cut         -6.427004 * 25.4          =   -163.246 (x4)
 //   trimmed                                    =  11,357.708
 //   port prism       10 * 7 * 1.8              =     126   (body on stage)
 //   port cut         0.8 * 10 * 7              =     -56
@@ -220,6 +261,14 @@ const CAVITY_VOLUME = 70 * 50 * 34.4;
 const SHELL_VOLUME = BLOCK_VOLUME - CAVITY_VOLUME;
 /** One rib's union: the open-cavity stadium area, the cavity's full depth. */
 const STRIP_UNION_VOLUME = stripArea(0.4) * 34.4;
+/**
+ * One brace's own EXTRUDED body: the full stadium prism (2r·L body
+ * rectangle plus the πr² cap pair), cavity deep. The open-cavity part of
+ * that area only materializes at the big union — a drafted brace on the
+ * stage adds its whole stadium, wall-buried halves and all.
+ */
+const STRIP_BODY_VOLUME =
+  (2 * 0.4 * (6 * Math.SQRT2) + Math.PI * 0.4 * 0.4) * 34.4;
 /** The shell with its four diagonal ribs unioned back on. */
 const SHELL_POSTS_VOLUME = SHELL_VOLUME + 4 * STRIP_UNION_VOLUME;
 /** The open-cavity material one trim prism cuts from one rib. */
@@ -267,8 +316,8 @@ const PLANAR_VOLUME_FLOOR = 0.999;
 
 /** The extrudes' body-key suffixes ride the shared extrude counter: the
  * draft dialog's n-th extrude is `body_extrude{n}` (no bare first form —
- * the dialog path always suffixes). Block, cavity, four ribs, trim,
- * port prism, plate, lip. */
+ * the dialog path always suffixes). Block, cavity, the two drawn braces,
+ * trim, port prism, plate, lip. */
 const EXTRUDE_KEYS = [
   "body|body_extrude1",
   "body|body_extrude2",
@@ -279,7 +328,8 @@ const EXTRUDE_KEYS = [
   "body|body_extrude7",
   "body|body_extrude8",
 ] as const;
-/** The seven booleans' bodies: the cavity subtract, four rib unions,
+/** The seven booleans' bodies: the cavity subtract, the four fuse-one-
+ * tool unions (brace one, its turned twin, brace two, its turned twin),
  * the board-outline trim, the port. */
 const BOOLEAN_KEYS = [
   "body|body_boolean",
@@ -290,6 +340,9 @@ const BOOLEAN_KEYS = [
   "body|body_boolean6",
   "body|body_boolean7",
 ] as const;
+/** The duplicates' copies: each duplicate feature names its copies
+ * `copy 1` onward (`body_dup_c1`, then `body_dup2_c1` for feature two). */
+const DUPLICATE_KEYS = ["body|body_dup_c1", "body|body_dup2_c1"] as const;
 
 /**
  * Chapter 31 — the applied variables capstone. ONE continuous build that
@@ -297,25 +350,31 @@ const BOOLEAN_KEYS = [
  * live in the manager (create, expression, `$` autocomplete), the case
  * whose every dimension — extrude depth AND sketch dimension — is a
  * `$name` reference (Phase 26a's binding through the sketch inspector's
- * autocomplete), the cavity subtract with four thin diagonal corner ribs
- * (one straight slot each, width $post, both ends buried in the walls)
- * unioned back fused, the board-outline trim that shears them to
- * boardLift, the port authored on the front face at its parameterized
- * height, the three re-drive demos (lineWidth, board size — the case and
- * the ribs MOVE, header), the two-rectangle lid, and the two view-scoped
- * exports verified against their analytic volumes and their taught world
- * bounds.
+ * autocomplete), the cavity subtract, and the corner braces taught the
+ * Duplicate & transform way (the owner's order for this re-recording):
+ * TWO thin diagonal braces drawn (one slot each, width $post, both ends
+ * buried in the walls — one per diagonal orientation, the rotation
+ * orbits a rectangle's corners only in diagonal pairs), and each turned
+ * onto its far corner by ITS OWN duplicate whose step carries the case's
+ * own diagonal ($ribStepX := -caseL, $ribStepY := -caseW) while
+ * $halfTurn flips the brace's diagonal — the work no translation can
+ * do. The board-outline trim shears the four
+ * braces to boardLift, the port is authored on the front face at its
+ * parameterized height, the three re-drive demos run (lineWidth, board
+ * size — the case and the turned copies MOVE, header), the two-rectangle
+ * lid closes the case, and the two view-scoped exports verify against
+ * their analytic volumes and their taught world bounds.
  */
 export const chapter: ChapterModule = {
   definition: {
     id: "iot-applied-var",
     title: "Applied project: a case driven by variables",
     summary:
-      "One continuous build from a line width to a two-file print set: the variable system in the manager, every depth and every footprint dimension a $name reference, the diagonal corner ribs, the re-drive demos, and the exports.",
+      "One continuous build from a line width to a two-file print set: the variable system in the manager, every depth and every footprint dimension a $name reference, each corner brace drawn once and planted by its own Duplicate & transform half-turn, the re-drive demos, and the exports.",
     cues: [
       {
         stepId: "brief",
-        text: "The commission: a case where one number, the print line width, drives it all.",
+        text: "The commission: one number drives it all — the OCCT kernel turns the copies.",
       },
       {
         stepId: "vars-root",
@@ -347,11 +406,11 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "vars-build",
-        text: "Build helpers: depths, the rib places and reach, the lip fit — derived.",
+        text: "Build helpers: depths, rib places, the turn and its carry, the lip fit.",
       },
       {
         stepId: "stage",
-        text: "The demo plate steps aside — the stage belongs to the build now.",
+        text: "A clean stage — the case builds on nothing but its variables.",
       },
       {
         stepId: "block",
@@ -371,11 +430,19 @@ export const chapter: ChapterModule = {
       },
       {
         stepId: "posts",
-        text: "Four diagonal slots at $post, drawn to the corners, union back — 12,010.7.",
+        text: "The first corner brace: one slot, five dimensions, every one a $name.",
+      },
+      {
+        stepId: "posts-turn",
+        text: "Duplicate & transform: drawn once, the half-turn plants its twin.",
+      },
+      {
+        stepId: "posts-two",
+        text: "The second brace, the same staple: drawn once, its twin turned in.",
       },
       {
         stepId: "posts-why",
-        text: "Born fused: the rib ends bury in the walls — braces and shell, one body.",
+        text: "Born fused: the turn flips each diagonal — a slide never could. 12,010.7.",
       },
       {
         stepId: "trims",
@@ -446,9 +513,15 @@ export const chapter: ChapterModule = {
 
   async run(page: Page, driver: TutorialDriver): Promise<void> {
     // -- The brief, over the fresh boot -------------------------------------
+    // The OCCT route is the chapter's home (the analytic volume pins
+    // demand exact-BREP settles) and is now load-bearing twice over: the
+    // duplicate's rotation executes as a real kernel transform here. The
+    // boot plate is dismissed through its tree eye the moment the boot is
+    // read — the flag lands here, the pixels follow one dispatch later.
     await driver.step("brief");
     const bootVolume = await driver.arriveAtWorkbench("occt");
     expect(Number(bootVolume)).toBeCloseTo(BOOT_PLATE_VOLUME, 0);
+    await setBodyVisible(page, driver, "body|body_plate", false);
     await driver.dwell();
 
     // -- The variable system, live in the manager ---------------------------
@@ -561,8 +634,12 @@ export const chapter: ChapterModule = {
 
     await driver.step("vars-build");
     // The build's own helpers join the DAG: the pocket's depth, the port
-    // cut's overshoot, the rib trim's drop, the ribs' diagonal reach (a
-    // design literal, the portX class), both rib cap centers' places (the
+    // cut's overshoot, the rib trim's drop, the braces' diagonal reach (a
+    // design literal, the portX class), the duplicate's half turn (an
+    // ANGLE literal — the duplicate's rotation field resolves angle-
+    // dimensioned references) and its carry (the case's own diagonal,
+    // named negative — the signed-helper route keeps the step visible and
+    // re-drivable in the manager), both brace cap centers' places (the
     // near cap at the case's corner pulled one line width inside; the far
     // cap one reach further in — both ends absolute so the 45° is the
     // solve's own consequence), the lip's fit — every derived one an
@@ -572,6 +649,9 @@ export const chapter: ChapterModule = {
     await createVariable(page, driver, panel, "portCut", "1.8mm");
     await createVariable(page, driver, panel, "postDrop", "25.4mm");
     await createVariable(page, driver, panel, "reach", "6mm");
+    await createVariable(page, driver, panel, "halfTurn", "180deg");
+    await createVariable(page, driver, panel, "ribStepX", "0mm");
+    await createVariable(page, driver, panel, "ribStepY", "0mm");
     await createVariable(page, driver, panel, "postNearX", "71.2mm");
     await createVariable(page, driver, panel, "postNearY", "51.2mm");
     await createVariable(page, driver, panel, "postIn", "6.4mm");
@@ -601,6 +681,16 @@ export const chapter: ChapterModule = {
       { type: "$", text: "$cavity", option: "cavityD" },
       { type: "text", text: " - " },
       { type: "$", text: "$boardLi", option: "boardLift" },
+    ]);
+    // The duplicate's step carries the case's own diagonal, named
+    // negative like every signed depth in this build.
+    await defineExpression(page, driver, panel, "ribStepX", [
+      { type: "text", text: "-" },
+      { type: "$", text: "$caseL", option: "caseL" },
+    ]);
+    await defineExpression(page, driver, panel, "ribStepY", [
+      { type: "text", text: "-" },
+      { type: "$", text: "$caseW", option: "caseW" },
     ]);
     await defineExpression(page, driver, panel, "postNearX", [
       { type: "$", text: "$caseL", option: "caseL" },
@@ -673,11 +763,9 @@ export const chapter: ChapterModule = {
     await driver.dwell();
 
     await driver.step("stage");
-    // The readouts must count the build alone: the demo plate steps
-    // offstage through its tree eye (the applied chapter's discipline).
-    // The display flag renders at the sketch round-trip inside the block
-    // beat — the flag lands here, the pixels follow one dispatch later.
-    await setBodyVisible(page, driver, "body|body_plate", false);
+    // The plate left the scene at the boot — the flag landed there, its
+    // last pixels followed one dispatch later — so every readout from
+    // here on counts the case alone.
     await driver.dwell();
 
     // -- The block: the first bound footprint -------------------------------
@@ -779,187 +867,127 @@ export const chapter: ChapterModule = {
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
-    // -- The ribs: four bound diagonal slots, unioned back fused ------------
+    // -- The braces: each drawn once, its twin placed by the turn -----------
     await driver.step("posts");
-    // Each rib: ONE straight slot at a case corner — two cap centers and
-    // a radius, the probe's one-entity closed profile — drawn at 45°
-    // across the corner, both round ends burying into the two walls. Five
-    // dimensions, all `$`-bound, BOTH cap centers absolute off the origin
-    // point: the near cap center's place pair (the origin corner reads
-    // lineWidth twice — the round end lands flush with the outer faces;
-    // the far corners read postNearX/postNearY and follow the board), the
-    // far cap center's place pair (postIn, or postFarX/postFarY at the
-    // far corners — the 45° held by the solved places themselves), and
-    // the DIAMETER — $post, the two line widths the owner asked for.
-    // Extruded DOWN $cavityDrop and unioned onto the shell in a chain —
-    // born fused, printed as one body; every rib re-places and re-sizes
-    // with the variables.
-    const strips: readonly {
-      readonly near: readonly [number, number];
-      readonly far: readonly [number, number];
-      readonly radiusPick: readonly [number, number];
-      readonly inward: readonly [number, number];
-      readonly outward: readonly [number, number];
-      readonly diameterPick: readonly [number, number];
-      readonly placeX: string;
-      readonly placeY: string;
-      readonly farX: string;
-      readonly farY: string;
-    }[] = [
-      // The origin corner: the brace runs inward at 45°; the dim picks
-      // land on the centerline but clear of the point entity's hit halo
-      // (later-drawn entities win ties, so the point would eat a closer
-      // pick — the probe's finding).
-      {
-        near: [0.4, 0.4],
-        far: [6.4, 6.4],
-        radiusPick: [0.6828, 0.1172],
-        inward: [1.1, 1.1],
-        outward: [5.9, 5.9],
-        diameterPick: [3.6828, 3.1172],
-        placeX: "$lineWidth",
-        placeY: "$lineWidth",
-        farX: "$postIn",
-        farY: "$postIn",
-      },
-      // The x-far corner (caseL, 0): the brace runs at 135°.
-      {
-        near: [71.2, 0.4],
-        far: [65.2, 6.4],
-        radiusPick: [71.4828, 0.6828],
-        inward: [70.7, 0.9],
-        outward: [65.7, 5.9],
-        diameterPick: [68.4828, 3.6828],
-        placeX: "$postNearX",
-        placeY: "$lineWidth",
-        farX: "$postFarX",
-        farY: "$postIn",
-      },
-      // The y-far corner (0, caseW).
-      {
-        near: [0.4, 51.2],
-        far: [6.4, 45.2],
-        radiusPick: [0.6828, 51.4828],
-        inward: [0.9, 50.7],
-        outward: [5.9, 45.7],
-        diameterPick: [3.6828, 47.9172],
-        placeX: "$lineWidth",
-        placeY: "$postNearY",
-        farX: "$postIn",
-        farY: "$postFarY",
-      },
-      // The far corner (caseL, caseW).
-      {
-        near: [71.2, 51.2],
-        far: [65.2, 45.2],
-        radiusPick: [71.4828, 50.9172],
-        inward: [70.7, 50.5],
-        outward: [65.7, 45.7],
-        diameterPick: [68.4828, 47.9172],
-        placeX: "$postNearX",
-        placeY: "$postNearY",
-        farX: "$postFarX",
-        farY: "$postFarY",
-      },
-    ];
-    let running = SHELL_VOLUME;
-    let sketchNumber = 4;
-    let draftedNumber = 3;
-    let booleanNumber = 2;
-    for (const strip of strips) {
-      const [nearX, nearY] = strip.near;
-      const [farX, farY] = strip.far;
-      const [inX, inY] = strip.inward;
-      const [outX, outY] = strip.outward;
-      await driver.enterSketchMode(OCCT_ROOT);
-      await driver.activateSketchTool("slot");
-      await clickDatumPoint(driver, nearX, nearY);
-      await clickDatumPoint(driver, farX, farY);
-      await clickDatumPoint(driver, strip.radiusPick[0], strip.radiusPick[1]);
-      await driver.activateSketchTool("point");
-      await clickDatumPoint(driver, 0, 0);
-      // The place pair: origin point to the near cap center.
-      await driver.activateSketchTool("distanceX");
-      await clickDatumPoint(driver, 0, 0);
-      await clickDatumPoint(driver, inX, inY);
-      await driver.activateSketchTool("distanceY");
-      await clickDatumPoint(driver, 0, 0);
-      await clickDatumPoint(driver, inX, inY);
-      // The far cap center's place pair: ALSO origin-anchored — both
-      // ends absolute, so the 45° is the solve's own consequence and no
-      // magnitude dimension ever carries a direction (the first draft's
-      // |Δx| = |Δy| = $reach pair flipped signs at the trim beat's
-      // re-solve — the probe's loud lesson).
-      await driver.activateSketchTool("distanceX");
-      await clickDatumPoint(driver, 0, 0);
-      await clickDatumPoint(driver, outX, outY);
-      await driver.activateSketchTool("distanceY");
-      await clickDatumPoint(driver, 0, 0);
-      await clickDatumPoint(driver, outX, outY);
-      // The width: the slot's diameter, one pick on its boundary.
-      await driver.activateSketchTool("diameter");
-      await clickDatumPoint(
-        driver,
-        strip.diameterPick[0],
-        strip.diameterPick[1],
-      );
-      // Rows: 0 placeX, 1 placeY, 2 farX, 3 farY, 4 diameter.
-      await bindSketchDimension(page, driver, 0, strip.placeX, "distanceX");
-      await bindSketchDimension(page, driver, 1, strip.placeY, "distanceY");
-      await bindSketchDimension(page, driver, 2, strip.farX, "distanceX");
-      await bindSketchDimension(page, driver, 3, strip.farY, "distanceY");
-      await bindSketchDimension(page, driver, 4, "$post", "diameter");
-      await saveSketch(page, driver);
-      await draftDialog(
-        page,
-        driver,
-        { ref: "cavityDrop" },
-        `sketch ${String(sketchNumber)}`,
-      );
-      running += STRIP_UNION_VOLUME;
-      await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
-      await pickComboboxOption(page, driver, 0, "Union (join)");
-      await pickComboboxOption(
-        page,
-        driver,
-        1,
-        booleanNumber === 2
-          ? "subtract 1"
-          : `union ${String(booleanNumber - 1)}`,
-      );
-      await driver.humanClick(
-        page.locator(DIALOG).getByRole("checkbox", {
-          name: `drafted ${String(draftedNumber)}`,
-          exact: true,
-        }),
-      );
-      const united = await createBoolean(page, driver);
-      expect(
-        volumeNear(united, running),
-        `rib union ${String(booleanNumber)} settled at ${String(united)}`,
-      ).toBe(true);
-      sketchNumber += 1;
-      draftedNumber += 1;
-      booleanNumber += 1;
-    }
-    expect(
-      running,
-      "the rib union chain's arithmetic must land on the taught number",
-    ).toBeCloseTo(SHELL_POSTS_VOLUME, 3);
+    // Brace one, at the origin corner: ONE straight slot — two cap
+    // centers and a radius, the probe's one-entity closed profile —
+    // drawn at 45° across the corner, both round ends burying into the
+    // two walls. Five dimensions, all `$`-bound, BOTH cap centers
+    // absolute off the origin point: the near cap center reads
+    // ($lineWidth, $lineWidth) — the round end lands flush with the two
+    // outer faces — the far cap center reads $postIn twice, and the
+    // DIAMETER is $post, the two line widths the owner asked for. The
+    // dim picks land on the centerline but clear of the point entity's
+    // hit halo (later-drawn entities win ties, so the point would eat a
+    // closer pick — the probe's finding). Extruded DOWN $cavityDrop.
+    await drawBrace(page, driver, {
+      near: [0.4, 0.4],
+      far: [6.4, 6.4],
+      radiusPick: [0.6828, 0.1172],
+      inward: [1.1, 1.1],
+      outward: [5.9, 5.9],
+      diameterPick: [3.6828, 3.1172],
+      placeX: "$lineWidth",
+      placeY: "$lineWidth",
+      farX: "$postIn",
+      farY: "$postIn",
+    });
+    await draftDialog(page, driver, { ref: "cavityDrop" }, "sketch 4");
+    // The drafted brace adds its FULL stadium (the wall-buried halves
+    // only fuse away at the unions).
+    await expectVolume(page, SHELL_VOLUME + STRIP_BODY_VOLUME);
+    await driver.dwell();
+
+    await driver.step("posts-turn");
+    // THE STAPLE, on camera: Duplicate & transform. Source = the drawn
+    // brace; the step carries the case's own diagonal ($ribStepX :=
+    // -caseL, $ribStepY := -caseW — the world pivot this frame sits at
+    // the case's min corner, so the carry lands the turn) while
+    // $halfTurn rotates half a circle about z; one copy. The turn FLIPS
+    // the brace's diagonal — hand-derived, the copy lands exactly on the
+    // far corner's brace: T(p) = (caseL − px, caseW − py, pz) maps the
+    // near cap (0.4, 0.4) → (71.2, 51.2) and the far cap (6.4, 6.4) →
+    // (65.2, 45.2) — the work no translation can do, and the volume pin
+    // proves the landing (a brace in open air would add its full
+    // stadium; only the corner-correct copy adds the open-cavity part).
+    await duplicateDialog(page, driver, "drafted 3");
+    await expectVolume(page, SHELL_VOLUME + 2 * STRIP_BODY_VOLUME);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
+    await driver.step("posts-two");
+    // Brace two, at the x-far corner: the SAME five-dimension recipe, its
+    // diagonal running at 135° (the near cap reads $postNearX and follows
+    // the board) — and THE SAME STAPLE: drawn once, its twin turned into
+    // the y-far corner. Two drawn braces, two turns, four corners.
+    await drawBrace(page, driver, {
+      near: [71.2, 0.4],
+      far: [65.2, 6.4],
+      radiusPick: [71.4828, 0.6828],
+      inward: [70.7, 0.9],
+      outward: [65.7, 5.9],
+      diameterPick: [68.4828, 3.6828],
+      placeX: "$postNearX",
+      placeY: "$lineWidth",
+      farX: "$postFarX",
+      farY: "$postIn",
+    });
+    await draftDialog(page, driver, { ref: "cavityDrop" }, "sketch 5");
+    await expectVolume(
+      page,
+      SHELL_VOLUME + 2 * STRIP_BODY_VOLUME + STRIP_UNION_VOLUME,
+    );
+    await duplicateDialog(page, driver, "drafted 4");
+    await expectVolume(
+      page,
+      SHELL_VOLUME + 2 * STRIP_BODY_VOLUME + 2 * STRIP_UNION_VOLUME,
+    );
+    await driver.dwell();
+
     await driver.step("posts-why");
+    // Born fused: FOUR single-tool unions fold each brace, drawn and
+    // turned, into the shell — braces and shell, one body, printed as
+    // one. One tool per boolean is not a grammar the scene imposes —
+    // multi-tool unions compose fine — it is the chapter's teaching
+    // choice: four visible fuse steps teach better than one batched
+    // commit.
+    await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
+    await pickComboboxOption(page, driver, 0, "Union (join)");
+    await pickComboboxOption(page, driver, 1, "subtract 1");
+    await checkBooleanTool(page, driver, "drafted 3");
+    await createBoolean(page, driver);
+    await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
+    await pickComboboxOption(page, driver, 0, "Union (join)");
+    await pickComboboxOption(page, driver, 1, "union 2");
+    await checkBooleanToolAt(page, driver, "copy 1", 0);
+    await createBoolean(page, driver);
+    await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
+    await pickComboboxOption(page, driver, 0, "Union (join)");
+    await pickComboboxOption(page, driver, 1, "union 3");
+    await checkBooleanTool(page, driver, "drafted 4");
+    await createBoolean(page, driver);
+    await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
+    await pickComboboxOption(page, driver, 0, "Union (join)");
+    await pickComboboxOption(page, driver, 1, "union 4");
+    await checkBooleanToolAt(page, driver, "copy 1", 1);
+    const fused = await createBoolean(page, driver);
+    expect(
+      volumeNear(fused, SHELL_POSTS_VOLUME),
+      `the fused union settled at ${String(fused)}`,
+    ).toBe(true);
+    await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
 
     // -- The board-outline trim ---------------------------------------------
     await driver.step("trims");
     // ONE prism at the cavity's own bound numbers — the board's own
     // outline, place $wall/$wall and size $boardL/$boardW — extruded DOWN
-    // $postDropDown and subtracted once: it shears exactly the four ribs'
-    // open-cavity tops, so they come out boardLift tall wherever the
-    // board moves. The wall-band ends need no trim: they fuse into solid
-    // wall, full height, invisibly.
+    // $postDropDown and subtracted once: it shears exactly the four
+    // braces' open-cavity tops, so they come out boardLift tall wherever
+    // the board moves. The wall-band ends need no trim: they fuse into
+    // solid wall, full height, invisibly — and the turned copies came out
+    // of the duplicate at full cavity depth exactly like the drawn pair,
+    // so the one trim serves all four.
     await driver.enterSketchMode(OCCT_ROOT);
     await driver.activateSketchTool("rectangle");
     await clickDatumPoint(driver, 70.8, 50.8);
@@ -985,14 +1013,10 @@ export const chapter: ChapterModule = {
     await bindSketchDimension(page, driver, 3, "$boardL", "distanceX");
     await bindSketchDimension(page, driver, 4, "$boardW", "distanceY");
     await saveSketch(page, driver);
-    await draftDialog(page, driver, { ref: "postDropDown" }, "sketch 8");
+    await draftDialog(page, driver, { ref: "postDropDown" }, "sketch 6");
     await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
     await pickComboboxOption(page, driver, 1, "union 5");
-    await driver.humanClick(
-      page
-        .locator(DIALOG)
-        .getByRole("checkbox", { name: "drafted 7", exact: true }),
-    );
+    await checkBooleanTool(page, driver, "drafted 5");
     const trimmed = await createBoolean(page, driver);
     expect(
       volumeNear(trimmed, TRIMMED_VOLUME),
@@ -1030,15 +1054,11 @@ export const chapter: ChapterModule = {
     await clickDatumPoint(driver, portUMin, portVHigh);
     await clickDatumPoint(driver, portUMax, portVLow);
     await saveSketch(page, driver);
-    await draftDialog(page, driver, { ref: "portCutIn" }, "sketch 9");
+    await draftDialog(page, driver, { ref: "portCutIn" }, "sketch 7");
     await expectVolume(page, TRIMMED_VOLUME + PORT_PRISM_VOLUME);
     await openFeatureDialog(page, driver, OCCT_ROOT, "boolean");
     await pickComboboxOption(page, driver, 1, "subtract 6");
-    await driver.humanClick(
-      page
-        .locator(DIALOG)
-        .getByRole("checkbox", { name: "drafted 8", exact: true }),
-    );
+    await checkBooleanTool(page, driver, "drafted 6");
     const boxVolume = await createBoolean(page, driver);
     expect(
       volumeNear(boxVolume, BOX_VOLUME),
@@ -1167,7 +1187,7 @@ export const chapter: ChapterModule = {
     await bindSketchDimension(page, driver, 3, "$caseL", "distanceX");
     await bindSketchDimension(page, driver, 4, "$caseW", "distanceY");
     await saveSketch(page, driver);
-    await draftDialog(page, driver, { ref: "lidT" }, "sketch 10");
+    await draftDialog(page, driver, { ref: "lidT" }, "sketch 8");
     await expectVolume(page, BOX_VOLUME + PLATE_VOLUME);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
@@ -1202,7 +1222,7 @@ export const chapter: ChapterModule = {
     await bindSketchDimension(page, driver, 3, "$lipL", "distanceX");
     await bindSketchDimension(page, driver, 4, "$lipW", "distanceY");
     await saveSketch(page, driver);
-    await draftDialog(page, driver, { ref: "lidHang" }, "sketch 11");
+    await draftDialog(page, driver, { ref: "lidHang" }, "sketch 9");
     await expectVolume(page, BOX_VOLUME + LID_VOLUME);
     await driver.pointAtReadout(page.locator("#workbench-complete-volume"));
     await driver.dwell();
@@ -1211,8 +1231,8 @@ export const chapter: ChapterModule = {
     await driver.step("box-scope");
     // The lid's two bodies step aside through their tree eyes: the scene
     // is the box alone, and the export carries what renders.
-    await setBodyVisible(page, driver, "body|body_extrude9", false);
-    await setBodyVisible(page, driver, "body|body_extrude10", false);
+    await setBodyVisible(page, driver, "body|body_extrude7", false);
+    await setBodyVisible(page, driver, "body|body_extrude8", false);
     await driver.dwell();
 
     await driver.step("export-box");
@@ -1230,10 +1250,18 @@ export const chapter: ChapterModule = {
     await driver.dwell();
 
     await driver.step("lid-scope");
-    // The opposite file: the box steps aside, the lid steps back.
-    await setBodyVisible(page, driver, "body|body_extrude9", true);
-    await setBodyVisible(page, driver, "body|body_extrude10", true);
-    for (const key of [...EXTRUDE_KEYS, ...BOOLEAN_KEYS]) {
+    // The opposite file: the box steps aside — its extrudes, its
+    // booleans, and the duplicate's copy — and the lid steps back.
+    await setBodyVisible(page, driver, "body|body_extrude7", true);
+    await setBodyVisible(page, driver, "body|body_extrude8", true);
+    // The box's own extrudes are 1..6 — the lid's plate and lip are 7/8,
+    // shown again above (Phase 32b: the hide set once re-hidden them, and
+    // the lid export refused on the honest empty scene).
+    for (const key of [
+      ...EXTRUDE_KEYS.slice(0, 6),
+      ...BOOLEAN_KEYS,
+      ...DUPLICATE_KEYS,
+    ]) {
       await setBodyVisible(page, driver, key, false);
     }
     await driver.dwell();
@@ -1250,7 +1278,13 @@ export const chapter: ChapterModule = {
     });
     await driver.pointAtReadout(page.locator('[data-cad-export-entry="stl"]'));
     await closeExportDialog(page);
-    for (const key of [...EXTRUDE_KEYS, ...BOOLEAN_KEYS]) {
+    // The restore mirrors the hide: the box's extrudes, its booleans, and
+    // the copies — the lid never stepped aside (Phase 32b).
+    for (const key of [
+      ...EXTRUDE_KEYS.slice(0, 6),
+      ...BOOLEAN_KEYS,
+      ...DUPLICATE_KEYS,
+    ]) {
       await setBodyVisible(page, driver, key, true);
     }
     await driver.dwell();
@@ -1434,6 +1468,174 @@ async function saveThrowawayLine(
   await saveSketch(page, driver);
 }
 
+/** The pick coordinates one brace's slot sketch rides (all workplane mm). */
+interface BracePlacement {
+  readonly near: readonly [number, number];
+  readonly far: readonly [number, number];
+  readonly radiusPick: readonly [number, number];
+  readonly inward: readonly [number, number];
+  readonly outward: readonly [number, number];
+  readonly diameterPick: readonly [number, number];
+  readonly placeX: string;
+  readonly placeY: string;
+  readonly farX: string;
+  readonly farY: string;
+}
+
+/**
+ * Draws ONE diagonal brace at a case corner and extrudes nothing — the
+ * sketch only. The straight slot (two cap centers and a radius pick) is
+ * the probe's one-entity closed profile; the point entity at the origin
+ * carries both cap centers' ABSOLUTE place pairs (near and far, so the
+ * 45° is the solve's own consequence — no magnitude dimension ever
+ * carries a direction), and the diameter dim picks the slot's side edge
+ * for the taught width. Every dimension is `$`-bound through the
+ * inspector before the sketch saves.
+ */
+async function drawBrace(
+  page: Page,
+  driver: TutorialDriver,
+  brace: BracePlacement,
+): Promise<void> {
+  await driver.enterSketchMode(OCCT_ROOT);
+  await driver.activateSketchTool("slot");
+  await clickDatumPoint(driver, brace.near[0], brace.near[1]);
+  await clickDatumPoint(driver, brace.far[0], brace.far[1]);
+  await clickDatumPoint(driver, brace.radiusPick[0], brace.radiusPick[1]);
+  await driver.activateSketchTool("point");
+  await clickDatumPoint(driver, 0, 0);
+  // The place pair: origin point to the near cap center.
+  await driver.activateSketchTool("distanceX");
+  await clickDatumPoint(driver, 0, 0);
+  await clickDatumPoint(driver, brace.inward[0], brace.inward[1]);
+  await driver.activateSketchTool("distanceY");
+  await clickDatumPoint(driver, 0, 0);
+  await clickDatumPoint(driver, brace.inward[0], brace.inward[1]);
+  // The far cap center's place pair: ALSO origin-anchored — both ends
+  // absolute, so the 45° is the solve's own consequence and no magnitude
+  // dimension ever carries a direction (the first draft's |Δx| = |Δy| =
+  // $reach pair flipped signs at the trim beat's re-solve — the probe's
+  // loud lesson).
+  await driver.activateSketchTool("distanceX");
+  await clickDatumPoint(driver, 0, 0);
+  await clickDatumPoint(driver, brace.outward[0], brace.outward[1]);
+  await driver.activateSketchTool("distanceY");
+  await clickDatumPoint(driver, 0, 0);
+  await clickDatumPoint(driver, brace.outward[0], brace.outward[1]);
+  // The width: the slot's diameter, one pick on its boundary.
+  await driver.activateSketchTool("diameter");
+  await clickDatumPoint(driver, brace.diameterPick[0], brace.diameterPick[1]);
+  // Rows: 0 placeX, 1 placeY, 2 farX, 3 farY, 4 diameter.
+  await bindSketchDimension(page, driver, 0, brace.placeX, "distanceX");
+  await bindSketchDimension(page, driver, 1, brace.placeY, "distanceY");
+  await bindSketchDimension(page, driver, 2, brace.farX, "distanceX");
+  await bindSketchDimension(page, driver, 3, brace.farY, "distanceY");
+  await bindSketchDimension(page, driver, 4, "$post", "diameter");
+  // The binds re-solve asynchronously; the save snapshots the session, so
+  // the SOLVED geometry is pinned to the intended places before the
+  // record lands — a mid-solve snapshot would carry a transient state.
+  await expect
+    .poll(
+      async () => {
+        const raw = await page
+          .locator(SKETCH)
+          .getAttribute("data-sketch-solved");
+        if (raw === null || raw === "null") return "unsolved";
+        const entities = JSON.parse(raw) as {
+          kind: string;
+          x1?: number;
+          y1?: number;
+          x2?: number;
+          y2?: number;
+        }[];
+        const slot = entities.find((entity) => entity.kind === "slot");
+        if (
+          slot === undefined ||
+          slot.x1 === undefined ||
+          slot.y1 === undefined ||
+          slot.x2 === undefined ||
+          slot.y2 === undefined
+        ) {
+          return "no-slot";
+        }
+        const atPlace =
+          Math.abs(slot.x1 - brace.near[0]) < 0.01 &&
+          Math.abs(slot.y1 - brace.near[1]) < 0.01 &&
+          Math.abs(slot.x2 - brace.far[0]) < 0.01 &&
+          Math.abs(slot.y2 - brace.far[1]) < 0.01;
+        return atPlace ? "at-place" : `off ${JSON.stringify(slot)}`;
+      },
+      { timeout: 15_000 },
+    )
+    .toBe("at-place");
+  await saveSketch(page, driver);
+}
+
+/**
+ * Fills one expression-number dialog field with a `$name` reference the
+ * established way: click, select all, type the trigger (the target name's
+ * first three letters), click the suggested parameter row — the field's
+ * value lands as the full reference, pinned.
+ */
+async function fillExpressionField(
+  page: Page,
+  driver: TutorialDriver,
+  label: string,
+  ref: string,
+): Promise<void> {
+  const field = page.getByLabel(label);
+  await driver.humanClick(field);
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type(`$${ref.slice(1, 4)}`);
+  await driver.humanClick(page.getByRole("option", { name: ref, exact: true }));
+  await expect(field).toHaveValue(ref);
+}
+
+/**
+ * The Duplicate & transform dialog, filled on camera and submitted: the
+ * source body pick, the step carrying the case's own diagonal
+ * ($ribStepX/$ribStepY — the world pivot this frame sits at the case's
+ * min corner), zero z step, the world-z axis, the half turn
+ * ($halfTurn, an angle reference), one copy. Waits the settled scene and
+ * returns its volume.
+ */
+async function duplicateDialog(
+  page: Page,
+  driver: TutorialDriver,
+  sourceBody: string,
+): Promise<string> {
+  await openFeatureDialog(page, driver, OCCT_ROOT, "duplicate");
+  // The two radix selects (source, axis) ride their data-slot triggers —
+  // the expression-number inputs ALSO carry role="combobox", so a
+  // role-based index would land on a field, not a select.
+  const selectTrigger = page
+    .locator(DIALOG)
+    .locator('[data-slot="select-trigger"]');
+  await driver.humanClick(selectTrigger.nth(0));
+  await driver.humanClick(
+    page.getByRole("option", { name: sourceBody, exact: true }),
+  );
+  await fillExpressionField(page, driver, "Step x (mm)", "$ribStepX");
+  await fillExpressionField(page, driver, "Step y (mm)", "$ribStepY");
+  await fillLabeledField(page, driver, page.getByLabel("Step z (mm)"), "0");
+  await driver.humanClick(selectTrigger.nth(1));
+  await driver.humanClick(
+    page.getByRole("option", { name: "Z axis", exact: true }),
+  );
+  await fillExpressionField(page, driver, "Step rotation (deg)", "$halfTurn");
+  await fillLabeledField(page, driver, page.getByLabel("Copies"), "1");
+  const before = await dispatchedCount(page, OCCT_ROOT);
+  await driver.humanClick(
+    page.locator(DIALOG).getByRole("button", { name: "Create" }),
+  );
+  await expect(page.locator(DIALOG)).toBeHidden();
+  await expect(page.locator(`#${OCCT_ROOT}`)).toHaveAttribute(
+    "data-scene-kind",
+    "duplicate",
+  );
+  return waitForRootSettle(page, OCCT_ROOT, { afterDispatch: before });
+}
+
 /**
  * One sketch point, ALWAYS through the pinned pick: the locator click's
  * position is ELEMENT-relative, so a mid-drawing layout shift (the
@@ -1493,6 +1695,47 @@ async function dispatchedCount(page: Page, rootId: string): Promise<number> {
   const raw =
     (await page.locator(`#${rootId}`).getAttribute("data-dispatched")) ?? "0";
   return Number(raw);
+}
+
+/**
+ * Checks one boolean dialog tool checkbox through the driver and PINS the
+ * toggle: the boolean's arithmetic only holds when every named tool is
+ * actually checked, so the commit is gated on the checkbox's own
+ * aria-checked state (a glide that lost the click to a re-render fails
+ * here, loudly, instead of poisoning the volume chain).
+ */
+async function checkBooleanTool(
+  page: Page,
+  driver: TutorialDriver,
+  name: string,
+): Promise<void> {
+  await checkBooleanToolAt(page, driver, name, 0);
+}
+
+/**
+ * {@link checkBooleanTool} for a REUSED body name: the second duplicate's
+ * copy is also named `copy 1` (each duplicate feature numbers its copies
+ * from one), and consumed bodies stay in the dialog pools — the nth index
+ * picks the live twin (document body order: the first duplicate's copy
+ * indexes first).
+ */
+async function checkBooleanToolAt(
+  page: Page,
+  driver: TutorialDriver,
+  name: string,
+  index: number,
+): Promise<void> {
+  const box = page
+    .locator(DIALOG)
+    .getByRole("checkbox", { name, exact: true })
+    .nth(index);
+  await driver.humanClick(box);
+  // A glide that lost the click to a mid-glide re-render retries once,
+  // still on camera, before the pin makes the failure loud.
+  if ((await box.getAttribute("aria-checked")) !== "true") {
+    await driver.humanClick(box);
+  }
+  await expect(box).toHaveAttribute("aria-checked", "true");
 }
 
 /**

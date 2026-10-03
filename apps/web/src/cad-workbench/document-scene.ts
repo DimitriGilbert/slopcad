@@ -524,22 +524,31 @@ export function documentSceneBodies(
   }
 
   // The computed-operand admissions: the consuming compositions that may
-  // reference an earlier composition's output, admitted in PRODUCING-
-  // FEATURE order — document order is topological (a feature only names
-  // earlier outputs), so a consumer's operand entry exists exactly when
-  // the document put the operand's feature first. A computed operand
-  // without a scene entry (its own composition declined) declines that
-  // consumer alone; a plain-extrude operand needs no entry (its
+  // reference an earlier composition's output — and the duplicate copies,
+  // whose scene may reference a computed SOURCE — admitted in PRODUCING-
+  // FEATURE order in ONE pass — document order is topological (a feature
+  // only names earlier outputs), so a consumer's operand entry exists
+  // exactly when the document put the operand's feature first. A computed
+  // operand without a scene entry (its own composition declined) declines
+  // that consumer alone; a plain-extrude operand needs no entry (its
   // derivation rides the request — the established flows stay untouched).
+  // The admissions must include the DUPLICATES because a composition can
+  // consume a COPY (a union fusing a duplicate's copy): with the copies
+  // admitted only after the compositions, such a consumer could never see
+  // its operand's entry and silently declined — the Phase 32b fix.
   const featureIndexByBody = new Map<string, number>();
   active.forEach((feature, index) => {
-    const output = feature.outputs[0];
-    if (output !== undefined) featureIndexByBody.set(output, index);
+    for (const output of feature.outputs) {
+      if (!featureIndexByBody.has(output))
+        featureIndexByBody.set(output, index);
+    }
   });
   const admissions: {
     readonly bodyId: string;
     readonly scene: DocumentBodyScene;
     readonly computedOperands: readonly string[];
+    /** Whether admitting this candidate consumes its computed operands. */
+    readonly consumesOperands: boolean;
   }[] = [];
   if (hole !== null) {
     admissions.push({
@@ -547,15 +556,17 @@ export function documentSceneBodies(
       scene: { kind: "hole", request: hole.request },
       computedOperands:
         hole.request.base.kind === "computed" ? [hole.request.base.bodyId] : [],
+      consumesOperands: true,
     });
   }
   for (const request of booleanRequests) {
     admissions.push({
       bodyId: request.bodyId,
       scene: { kind: "boolean", request },
-      computedOperands: [request.target, request.tool].flatMap((operand) =>
+      computedOperands: [request.target, ...request.tools].flatMap((operand) =>
         operand.kind === "computed" ? [operand.bodyId] : [],
       ),
+      consumesOperands: true,
     });
   }
   if (moveBody !== null) {
@@ -564,6 +575,24 @@ export function documentSceneBodies(
       scene: { kind: "moveBody", request: moveBody },
       computedOperands:
         moveBody.base.kind === "computed" ? [moveBody.base.bodyId] : [],
+      consumesOperands: true,
+    });
+  }
+  // The duplicate features (Phase 60): EVERY feature renders (the verb's
+  // iterative use), one request per copy body. A duplicate CONSUMES
+  // NOTHING: its operands ride along unconsumed — the source (when
+  // computed, a pad, hole, boolean, moved body, or an earlier duplicate's
+  // copy) must merely have its scene entry first, and it keeps rendering
+  // beside the copies as its own tip (the move/copy semantics the
+  // absorption closure honors too). A duplicate whose source scene
+  // declined renders nothing this pass — the honest absence.
+  for (const request of documentDuplicateSceneRequests(activeDocument)) {
+    admissions.push({
+      bodyId: request.bodyId,
+      scene: { kind: "duplicate", request },
+      computedOperands:
+        request.base.kind === "computed" ? [request.base.bodyId] : [],
+      consumesOperands: false,
     });
   }
   const consumedOnly = new Set<string>();
@@ -585,30 +614,17 @@ export function documentSceneBodies(
       (operandId) => operandId !== candidate.bodyId && requests.has(operandId),
     );
     if (!ready) continue;
-    for (const operandId of candidate.computedOperands) {
-      consumedOnly.add(operandId);
-    }
-    requests.set(candidate.bodyId, candidate.scene);
-  }
-
-  // The duplicate features (Phase 60): EVERY feature renders (the verb's
-  // iterative use), one request per copy body. The copies admit in
-  // producing-feature order like the compositions above — a computed
-  // source (a pad, hole, moved body, or an earlier duplicate's copy) must
-  // have its scene entry first — but the source is NEVER marked
-  // consumed-only: the duplicate consumes nothing, the source renders
-  // beside its copies as its own tip (the move/copy semantics the
-  // absorption closure honors too). A duplicate whose source scene
-  // declined renders nothing this pass — the honest absence.
-  for (const request of documentDuplicateSceneRequests(activeDocument)) {
-    if (requests.has(request.bodyId)) continue;
-    if (
-      request.base.kind === "computed" &&
-      !requests.has(request.base.bodyId)
-    ) {
+    // The copies' established guard: a body that already carries a scene
+    // entry keeps it (the duplicate never clobbers another scene).
+    if (!candidate.consumesOperands && requests.has(candidate.bodyId)) {
       continue;
     }
-    requests.set(request.bodyId, { kind: "duplicate", request });
+    if (candidate.consumesOperands) {
+      for (const operandId of candidate.computedOperands) {
+        consumedOnly.add(operandId);
+      }
+    }
+    requests.set(candidate.bodyId, candidate.scene);
   }
 
   if (requests.size === 0) return [];

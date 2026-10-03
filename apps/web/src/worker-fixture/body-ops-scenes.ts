@@ -113,13 +113,14 @@ async function measure(
 
 /**
  * The boolean: the target and tool solids combined by the picked
- * operation. Each operand rides its source — a plain-extrude derivation
- * re-extrudes (the established flows, byte-identical), a computed
- * reference consumes the body's current solid from the document pass. A
- * structured kernel rejection or a degenerate combination (a union that
- * added nothing — coincident operands; a subtract that removed nothing —
- * a disjoint tool) rejects the computation, the composed features' own
- * guards.
+ * operation — EVERY declared tool rides (the kernel's boolean operations
+ * are n-ary, and a multi-tool commit keeps every tool the author picked).
+ * Each operand rides its source — a plain-extrude derivation re-extrudes
+ * (the established flows, byte-identical), a computed reference consumes
+ * the body's current solid from the document pass. A structured kernel
+ * rejection or a degenerate combination (a union that added nothing —
+ * coincident operands; a subtract that removed nothing — a disjoint tool)
+ * rejects the computation, the composed features' own guards.
  */
 export async function computeBooleanScene(
   context: ComputationContext,
@@ -132,13 +133,18 @@ export async function computeBooleanScene(
     computed,
     "target",
   );
-  const toolSolid = await operandSolid(context, request.tool, computed, "tool");
+  const toolSolids: WorkerSolidId[] = [];
+  for (const [index, tool] of request.tools.entries()) {
+    toolSolids.push(
+      await operandSolid(context, tool, computed, `tool ${String(index + 1)}`),
+    );
+  }
   const targetVolume = await context.request("solid.volume", {
     solid: targetSolid,
   });
   if (request.operation === "union") {
     const merged = await context.request("solid.union", {
-      operands: [targetSolid, toolSolid],
+      operands: [targetSolid, ...toolSolids],
     });
     const after = await context.request("solid.volume", {
       solid: merged.solid,
@@ -156,7 +162,7 @@ export async function computeBooleanScene(
   if (request.operation === "subtract") {
     const cut = await context.request("solid.subtract", {
       target: targetSolid,
-      tools: [toolSolid],
+      tools: toolSolids,
     });
     const after = await context.request("solid.volume", { solid: cut.solid });
     if (after.volume >= targetVolume.volume * (1 - NOOP_EPSILON_RELATIVE)) {
@@ -172,7 +178,7 @@ export async function computeBooleanScene(
     return { measurement: await measure(context, cut.solid), solid: cut.solid };
   }
   const common = await context.request("solid.intersect", {
-    operands: [targetSolid, toolSolid],
+    operands: [targetSolid, ...toolSolids],
   });
   const after = await context.request("solid.volume", {
     solid: common.solid,

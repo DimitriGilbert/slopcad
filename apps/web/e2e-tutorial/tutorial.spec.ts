@@ -344,24 +344,35 @@ test("chapter: applied-iot-case", async ({ tutorialPage: page }) => {
 
 // The applied variables capstone: ONE continuous document whose whole
 // geometry derives from a variable system built live in the manager —
-// 35 variables (13 literals, 22 expressions with `$`-autocomplete clicks
-// on camera), ten draft-dialog extrudes whose Distance fields are
+// 41 variables (14 literals, 27 expressions with `$`-autocomplete clicks
+// on camera), eight draft-dialog extrudes whose Distance fields are
 // `$name` references, and (Phase 26a's binding) every footprint sketch
 // dimension bound through the sketch inspector's `$`-autocomplete: the
-// block, the cavity, the four posts, the board-outline trim, and the
-// lid's two rectangles all carry parameterId bindings, so demo 2's board
-// edit re-solves the sketches and MOVES the case. The build chain: the
-// cavity subtract, four post squares unioned back fused, the board's own
-// outline shearing them to boardLift, a face-sketched port subtract,
+// block, the cavity, the two drawn braces, the board-outline trim, and
+// the lid's two rectangles all carry parameterId bindings, so demo 2's
+// board edit re-solves the sketches and MOVES the case. The corner
+// braces ride the Duplicate & transform staple (the owner's order for
+// the re-recording): each drawn slot is turned onto its far corner by
+// ITS OWN duplicate whose step carries the case's own diagonal
+// ($ribStepX := -caseL, $ribStepY := -caseW) while $halfTurn flips the
+// diagonal — two drawn braces, two turns, four corners. The build
+// chain: the cavity subtract, four fuse-one-tool unions (each brace and
+// each turned twin into the shell — one tool per boolean is the
+// chapter's teaching choice: four visible fuse steps teach better than
+// one batched commit), the board's own outline shearing the four braces
+// to boardLift, a face-sketched port subtract,
 // THREE full re-drive demos (each edited through the manager's expression
 // editor — the commit that re-derives — and each pinned to its analytic
-// volume, then reverted), and TWO view-scoped STL exports verified
-// against their analytic volumes AND their taught world bounds. The
-// applied-iot-case chapter set the 900 s elevation for one applied build;
-// this one carries the manager walk (35 variables at teaching pace, ~40
-// editor/form commits) plus ~30 dimension binds on top of an equal
-// build-and-export walk — the capstone's interaction count again, so the
-// budget stays at the doubled elevation the binding beats consume.
+// volume, then reverted; the duplicates re-execute inside every
+// re-drive), and TWO view-scoped STL exports verified against their
+// analytic volumes AND their taught world bounds. The applied-iot-case
+// chapter set the 900 s elevation for one applied build; this one
+// carries the manager walk (41 variables at teaching pace, ~40
+// editor/form commits) plus ~20 dimension binds and the duplicate
+// dialog's seven-field journey on top of an equal build-and-export walk
+// — two fewer sketch journeys than the four-drawing build it replaced,
+// but the capstone's interaction count stands, so the budget stays at
+// the doubled elevation the binding beats consume.
 test("chapter: iot-applied-var", async ({ tutorialPage: page }) => {
   test.setTimeout(1_800_000);
   await playChapter(page, iotAppliedVarChapter);

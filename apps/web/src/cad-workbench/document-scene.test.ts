@@ -717,3 +717,223 @@ describe("the document-scene policy", () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The duplicate-to-boolean admissions (Phase 32b): a composition may consume
+// a DUPLICATE's copy (a union fusing a turned copy), so the copies must
+// admit IN PRODUCING-FEATURE ORDER beside the compositions — the copies
+// admitted only after them let such a consumer's operand check fail and the
+// whole chain silently drop.
+// ---------------------------------------------------------------------------
+
+const DUP_DX = createParameterId("param_chain_dx");
+const DUP_DY = createParameterId("param_chain_dy");
+const DUP_DZ = createParameterId("param_chain_dz");
+const DUP_COUNT = createParameterId("param_chain_count");
+const DUP_AXIS = createParameterId("param_chain_axis");
+const DUP_ANGLE = createParameterId("param_chain_angle");
+const DUP_FEATURE = createFeatureId("feat_chain_duplicate");
+
+/**
+ * The chapter's posts-why shape, minimal: one extruded base, ONE duplicate
+ * copy of it, then the union chain — union1 fuses the base with the copy
+ * (the copy is a COMPUTED operand), union2 fuses union1's output with a
+ * second extruded brace. Before the fix union1's operand check ran before
+ * the duplicate's entries existed, union1 declined, and union2 cascaded.
+ */
+/** Unwraps one builder result's document (the fixture discipline). */
+function chained(
+  result:
+    | {
+        readonly ok: true;
+        readonly value: { readonly document: CadDocument } | CadDocument;
+      }
+    | { readonly ok: false; readonly error: { readonly message: string } },
+): CadDocument {
+  if (!result.ok) throw new Error(result.error.message);
+  return "document" in result.value ? result.value.document : result.value;
+}
+
+/** The duplicate chain's six auto-parameter identities. */
+function chainFeature(
+  document: CadDocument,
+  featureId: ReturnType<typeof createFeatureId>,
+  kind: string,
+  inputs: readonly FeatureInputRef[],
+  outputs: readonly string[],
+): CadDocument {
+  return chained(
+    addFeature(document, {
+      id: featureId,
+      kind,
+      inputs,
+      outputs: outputs.map((output) => createBodyId(output)),
+    }),
+  );
+}
+
+function duplicateChainDocument(): CadDocument {
+  let document = createDocument(DOC);
+  document = chained(
+    addDocumentParameter(document, {
+      id: createParameterId("param_chain_depth"),
+      name: "depth",
+      value: length(10),
+    }),
+  );
+  for (const [index, bodyName] of ["brace one", "brace two"].entries()) {
+    const suffix = String(index + 1);
+    const bodyId = createBodyId(`body_chain${suffix}`);
+    const sketchId = createSketchDocumentId(`skd_chain${suffix}`);
+    document = chained(addBody(document, { id: bodyId, name: bodyName }));
+    document = chained(
+      addDocumentSketch(document, {
+        id: sketchId,
+        name: `sketch ${suffix}`,
+        sketch: extrudeSketchPayload(),
+      }),
+    );
+    document = chainFeature(
+      document,
+      createFeatureId(`feat_chain_extrude${suffix}`),
+      "extrude",
+      [
+        { kind: "sketch", id: sketchId },
+        { kind: "parameter", id: createParameterId("param_chain_depth") },
+      ],
+      [`body_chain${suffix}`],
+    );
+  }
+  for (const [id, name, value] of [
+    [DUP_DX, "dupDx", length(25)],
+    [DUP_DY, "dupDy", length(0)],
+    [DUP_DZ, "dupDz", length(0)],
+    [DUP_COUNT, "dupCount", dimensionless(1)],
+    [DUP_AXIS, "dupAxis", dimensionless(3)],
+    [DUP_ANGLE, "dupAngle", angle(0)],
+  ] as const) {
+    document = chained(addDocumentParameter(document, { id, name, value }));
+  }
+  document = chained(
+    addBody(document, {
+      id: createBodyId("body_chain_c1"),
+      name: "copy 1",
+    }),
+  );
+  document = chainFeature(
+    document,
+    DUP_FEATURE,
+    "duplicate",
+    [
+      { kind: "feature", id: createFeatureId("feat_chain_extrude1") },
+      { kind: "parameter", id: DUP_DX },
+      { kind: "parameter", id: DUP_DY },
+      { kind: "parameter", id: DUP_DZ },
+      { kind: "parameter", id: DUP_COUNT },
+      { kind: "parameter", id: DUP_AXIS },
+      { kind: "parameter", id: DUP_ANGLE },
+    ],
+    ["body_chain_c1"],
+  );
+  const union = (
+    featureId: string,
+    targetFeature: ReturnType<typeof createFeatureId>,
+    toolFeatures: readonly ReturnType<typeof createFeatureId>[],
+  ): void => {
+    document = chained(
+      addBody(document, {
+        id: createBodyId(`body_${featureId}`),
+        name: `union ${featureId}`,
+      }),
+    );
+    document = chainFeature(
+      document,
+      createFeatureId(featureId),
+      "union",
+      [
+        { kind: "feature", id: targetFeature },
+        ...toolFeatures.map((id) => ({ kind: "feature" as const, id })),
+      ],
+      [`body_${featureId}`],
+    );
+  };
+  union("feat_chain_boolean1", createFeatureId("feat_chain_extrude1"), [
+    DUP_FEATURE,
+  ]);
+  union("feat_chain_boolean2", createFeatureId("feat_chain_boolean1"), [
+    createFeatureId("feat_chain_extrude2"),
+  ]);
+  return document;
+}
+
+describe("the duplicate-to-boolean admissions (Phase 32b)", () => {
+  it("a union over a duplicate's copy admits — the copy rides consumed-only", () => {
+    const list = bodyIdsOf(duplicateChainDocument());
+    // The base brace is absorbed by union1 (its feature input); the copy is
+    // union1's COMPUTED tool — it computes for the handoff and renders
+    // nothing; both unions render, the second fusing union1's output with
+    // the second brace.
+    // Union1 itself is union2's computed target — it computes consumed-only
+    // too; only the chain's tip renders plain.
+    expect(list).toEqual([
+      { bodyId: "body_chain_c1", kind: "duplicate", consumedOnly: true },
+      {
+        bodyId: "body_feat_chain_boolean1",
+        kind: "boolean",
+        consumedOnly: true,
+      },
+      { bodyId: "body_feat_chain_boolean2", kind: "boolean" },
+    ]);
+  });
+
+  it("a multi-tool boolean composes EVERY declared tool — none drops", () => {
+    let document = duplicateChainDocument();
+    document = chained(
+      addBody(document, {
+        id: createBodyId("body_feat_chain_multi"),
+        name: "union multi",
+      }),
+    );
+    document = chained(
+      addFeature(document, {
+        id: createFeatureId("feat_chain_boolean_multi"),
+        kind: "union",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_chain_boolean2") },
+          { kind: "feature", id: DUP_FEATURE },
+          { kind: "feature", id: createFeatureId("feat_chain_extrude1") },
+          { kind: "feature", id: createFeatureId("feat_chain_extrude2") },
+        ],
+        outputs: [createBodyId("body_feat_chain_multi")],
+      }),
+    );
+    const list = bodyIdsOf(document);
+    expect(list).toEqual([
+      { bodyId: "body_chain_c1", kind: "duplicate", consumedOnly: true },
+      {
+        bodyId: "body_feat_chain_boolean1",
+        kind: "boolean",
+        consumedOnly: true,
+      },
+      {
+        bodyId: "body_feat_chain_boolean2",
+        kind: "boolean",
+        consumedOnly: true,
+      },
+      { bodyId: "body_feat_chain_multi", kind: "boolean" },
+    ]);
+    const multi = documentSceneBodies(document, new Set(), null).find(
+      (entry) => entry.bodyId === "body_feat_chain_multi",
+    );
+    if (multi === undefined || multi.scene.kind !== "boolean") {
+      throw new Error("the multi-tool union lost its scene");
+    }
+    // The commit keeps THREE tools (the copy, brace one, brace two); the
+    // request carries all three operand sources.
+    expect(multi.scene.request.tools).toHaveLength(3);
+    expect(multi.scene.request.tools[0]).toEqual({
+      kind: "computed",
+      bodyId: "body_chain_c1",
+    });
+  });
+});

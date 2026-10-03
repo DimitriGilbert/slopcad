@@ -414,10 +414,14 @@ function ManagerExpressionInput({
     if (token === null) return;
     // The inserted selection is the BARE identifier — the grammar's own
     // token: the editor edits the exact text the commit parses, so the live
-    // preview and the field validator judge the committed artifact.
-    const next = `${inputValue.slice(0, token.start)}${name}${inputValue.slice(token.end)}`;
+    // preview and the field validator judge the committed artifact. A
+    // NEGATED token (`-$par`, the scanner's own span) re-emits its minus:
+    // the token spans the sign, so dropping it would silently flip the
+    // reference's sign in the committed expression (Phase 32b).
+    const sign = token.negated ? "-" : "";
+    const next = `${inputValue.slice(0, token.start)}${sign}${name}${inputValue.slice(token.end)}`;
     setInputValue(next);
-    setCaret(token.start + name.length);
+    setCaret(token.start + sign.length + name.length);
     field.onChange(next);
     lastSyncedValueRef.current = next;
     setIsOpen(false);

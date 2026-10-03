@@ -443,6 +443,20 @@ describe("CadParameterManager expression editing", () => {
     expect(screen.getByText("= 26 mm", { exact: true })).toBeTruthy();
   });
 
+  it("keeps a negated reference's sign through the pick (Phase 32b)", () => {
+    mountManager();
+    const input = openEditor("plateHeight");
+
+    // The scanner's negated token spans the leading "-": typing "-" then
+    // the trigger opens the list over "-$w", and the pick must RE-EMIT the
+    // sign — the committed expression reads "-width", not "width".
+    fireEvent.change(input, { target: { value: "-$w" } });
+    expect(input.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: "$width" }));
+    expect(input.value).toBe("-width");
+    expect(screen.getByText("= -8 mm", { exact: true })).toBeTruthy();
+  });
+
   it("excludes the edited variable from its own suggestions", () => {
     mountManager();
     const input = openEditor("width");

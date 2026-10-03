@@ -391,11 +391,15 @@ describe("boolean document reader", () => {
     expect(request.bodyId).toBe(BODY_RESULT);
     // The operands ride their OWN extrusions (the derivation default):
     // the plate 40×20 and the 20×10 tool inside it.
-    if (request.target.kind !== "extrude" || request.tool.kind !== "extrude") {
+    if (
+      request.target.kind !== "extrude" ||
+      request.tools[0]?.kind !== "extrude"
+    ) {
       throw new Error("the plain-extrude operands must derive");
     }
     expect(request.target.request.distanceMm).toBe(10);
-    expect(request.tool.request.distanceMm).toBe(10);
+    expect(request.tools).toHaveLength(1);
+    expect(request.tools[0]?.request.distanceMm).toBe(10);
   });
 
   it("finds each body's producing feature (the first-producer rule)", () => {
@@ -425,7 +429,8 @@ describe("boolean document reader", () => {
     expect(first.operation).toBe("subtract");
     expect(first.bodyId).toBe(BODY_RESULT);
     expect(first.target.kind).toBe("extrude");
-    expect(first.tool.kind).toBe("extrude");
+    expect(first.tools).toHaveLength(1);
+    expect(first.tools[0]?.kind).toBe("extrude");
     // The second subtract consumes the FIRST's output: its target rides
     // the computed solid of that body, its tool derives.
     const second = requests[1];
@@ -433,7 +438,8 @@ describe("boolean document reader", () => {
     expect(second.operation).toBe("subtract");
     expect(second.bodyId).toBe(BODY_RESULT_2);
     expect(second.target).toEqual({ kind: "computed", bodyId: BODY_RESULT });
-    expect(second.tool.kind).toBe("extrude");
+    expect(second.tools).toHaveLength(1);
+    expect(second.tools[0]?.kind).toBe("extrude");
     // The singular reader stays the plural's head.
     expect(documentBooleanSceneRequest(document)?.bodyId).toBe(BODY_RESULT);
   });
@@ -448,7 +454,8 @@ describe("boolean document reader", () => {
     // computed solid — a re-derivation from the raw block extrusion would
     // erase the window.
     expect(request.target).toEqual({ kind: "computed", bodyId: BODY_HOLE });
-    expect(request.tool.kind).toBe("extrude");
+    expect(request.tools).toHaveLength(1);
+    expect(request.tools[0]?.kind).toBe("extrude");
   });
 
   it("skips a boolean whose operand no longer resolves — the rest render", () => {

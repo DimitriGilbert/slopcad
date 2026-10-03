@@ -249,7 +249,7 @@ function fallbackSourcesOf(
     case "boolean":
       return [
         fallbackSourceOf(scene.request.target),
-        fallbackSourceOf(scene.request.tool),
+        ...scene.request.tools.map((tool) => fallbackSourceOf(tool)),
       ];
     case "thread":
     case "rib":

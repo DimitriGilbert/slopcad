@@ -304,6 +304,14 @@ const TAUGHT = {
     chapter: "io-import-export",
     cues: ["formats", "obj"],
   },
+  "duplicate-transform": {
+    chapter: "iot-applied-var",
+    cues: ["posts-turn", "posts-two"],
+    scope:
+      "partial — extrude-sourced duplicates with $-referenced step/angle " +
+      "fields and a world-z half turn re-driven by the demos; the count " +
+      "literal stays at 1 and the iterative duplicate-of-a-copy is not walked",
+  },
 };
 
 /**
