@@ -58,6 +58,8 @@ import {
   type CadModelTreeAssemblyNode,
 } from "@slopcad/ui/components/cad/cad-model-tree";
 
+import { useAssemblyWebMcpTools } from "../webmcp/assembly-tools";
+
 /** The plate soup both bodies share (the Phase 50 fixture's, verbatim). */
 const BOX_TESSELLATION = {
   positions: [
@@ -177,6 +179,16 @@ export function AssemblyMotionWorkbenchPage(): ReactElement {
   useEffect(() => {
     setHydrated(true);
   }, []);
+
+  // The agent surface (Phase 2.2): the pattern/mate/joint doors over this
+  // page's own document, plus the cross-document seam the resolution walk
+  // (and the interference read on a page with seams) consumes.
+  useAssemblyWebMcpTools({
+    commit: setDocument,
+    document: () => document,
+    interference: null,
+    resolveDocument: DOCUMENT_SEAM,
+  });
 
   const joint = useMemo(
     () =>

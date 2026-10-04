@@ -210,7 +210,8 @@ const TREE = '[data-slot="cad-model-tree"]';
 const PROPERTY = '[data-slot="cad-property-panel"]';
 const TOOLBAR = '[data-slot="cad-toolbar"]';
 
-/** The eight workbench WebMCP tools the complete page registers (Phase 7). */
+/** The eleven workbench WebMCP tools the complete page registers (Phase 7
+ * + Phase 2.1 capture + the Phase 2.2 read tools). */
 const WORKBENCH_WEBMCP_TOOLS = [
   "cad_get_document_summary",
   "cad_list_commands",
@@ -220,6 +221,32 @@ const WORKBENCH_WEBMCP_TOOLS = [
   "cad_redo",
   "cad_apply_commands",
   "cad_measure",
+  "cad_capture_views",
+  "cad_get_document",
+  "cad_get_diagnostics",
+] as const;
+
+/** The ten assembly WebMCP tools the mutable assembly pages (Phase 2.2)
+ * register — `/workbench-assembly` and `/workbench-assembly-motion`. */
+const ASSEMBLY_WEBMCP_TOOLS = [
+  "cad_get_document",
+  "cad_get_diagnostics",
+  "cad_assembly_add_occurrence",
+  "cad_assembly_remove_occurrence",
+  "cad_assembly_pattern",
+  "cad_assembly_add_mate",
+  "cad_assembly_remove_mate",
+  "cad_assembly_add_joint",
+  "cad_assembly_remove_joint",
+  "cad_assembly_check_interference",
+] as const;
+
+/** The read-only assembly set the interference fixture page (Phase 2.2)
+ * registers — its document is the fixture's constant, so no mutator mints. */
+const ASSEMBLY_READONLY_WEBMCP_TOOLS = [
+  "cad_get_document",
+  "cad_get_diagnostics",
+  "cad_assembly_check_interference",
 ] as const;
 
 /** The projects WebMCP tools the authenticated pages register (Phase 8). */
@@ -3322,11 +3349,11 @@ test("s26c the TSX model exchange: import a .tsx model, export TSX, round-trip t
   });
 });
 
-test("s27 the WebMCP agent surface: registry snapshots on the workbench and the projects pages", async ({
+test("s27 the WebMCP agent surface: registry snapshots on the workbench, projects, and assembly pages", async ({
   sessionPage: page,
 }) => {
   await stage("s27 webmcp agent surface", async () => {
-    // THE WORKBENCH SNAPSHOT: the eight CAD tools the complete page
+    // THE WORKBENCH SNAPSHOT: the eleven CAD tools the complete page
     // mounts, each with a JSON object input schema and honest usage
     // annotations (the seam is snapshot-only — see readWebMcpSnapshot).
     await openComplete(page);
@@ -3345,6 +3372,9 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench and the 
     expect(
       annotationsOf(workbenchTools, "cad_get_document_summary"),
     ).toMatchObject({ readOnlyHint: true });
+    expect(annotationsOf(workbenchTools, "cad_capture_views")).toMatchObject({
+      readOnlyHint: true,
+    });
     extra("webmcp-workbench-surface");
 
     // THE PROJECTS SNAPSHOT: the three workspace tools the authenticated
@@ -3370,6 +3400,60 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench and the 
       consequentialHint: true,
     });
     extra("webmcp-projects-surface");
+
+    // THE ASSEMBLY SNAPSHOTS (Phase 2.2): the two mutable assembly pages
+    // register the ten-tool set (reads + the occurrence/pattern/mate/joint
+    // doors + the interference report); the interference fixture's document
+    // is the page's constant, so it registers the reads and the report only.
+    await page.goto("/workbench-assembly");
+    await expect(page.locator("#assembly-workbench-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_WEBMCP_TOOLS]);
+    const assemblyTools = await readWebMcpSnapshot(page);
+    for (const tool of assemblyTools) {
+      expect(schemaTypeOf(tool)).toBe("object");
+    }
+    expect(annotationsOf(assemblyTools, "cad_get_document")).toMatchObject({
+      readOnlyHint: true,
+    });
+    expect(
+      annotationsOf(assemblyTools, "cad_assembly_add_occurrence"),
+    ).toMatchObject({ consequentialHint: true });
+    extra("webmcp-assembly-surface");
+
+    await page.goto("/workbench-assembly-motion");
+    await expect(page.locator("#assembly-motion-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_WEBMCP_TOOLS]);
+    extra("webmcp-assembly-motion-surface");
+
+    await page.goto("/workbench-assembly-interference");
+    await expect(page.locator("#interference-workbench-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_READONLY_WEBMCP_TOOLS]);
+    const interferenceTools = await readWebMcpSnapshot(page);
+    expect(
+      annotationsOf(interferenceTools, "cad_assembly_check_interference"),
+    ).toMatchObject({ readOnlyHint: true });
+    extra("webmcp-assembly-interference-surface");
   });
 });
 
