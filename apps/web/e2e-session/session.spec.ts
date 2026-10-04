@@ -210,7 +210,8 @@ const TREE = '[data-slot="cad-model-tree"]';
 const PROPERTY = '[data-slot="cad-property-panel"]';
 const TOOLBAR = '[data-slot="cad-toolbar"]';
 
-/** The eight workbench WebMCP tools the complete page registers (Phase 7). */
+/** The eleven workbench WebMCP tools the complete page registers (Phase 7
+ * + Phase 2.1 capture + the Phase 2.2 read tools). */
 const WORKBENCH_WEBMCP_TOOLS = [
   "cad_get_document_summary",
   "cad_list_commands",
@@ -220,6 +221,32 @@ const WORKBENCH_WEBMCP_TOOLS = [
   "cad_redo",
   "cad_apply_commands",
   "cad_measure",
+  "cad_capture_views",
+  "cad_get_document",
+  "cad_get_diagnostics",
+] as const;
+
+/** The ten assembly WebMCP tools the mutable assembly pages (Phase 2.2)
+ * register — `/workbench-assembly` and `/workbench-assembly-motion`. */
+const ASSEMBLY_WEBMCP_TOOLS = [
+  "cad_get_document",
+  "cad_get_diagnostics",
+  "cad_assembly_add_occurrence",
+  "cad_assembly_remove_occurrence",
+  "cad_assembly_pattern",
+  "cad_assembly_add_mate",
+  "cad_assembly_remove_mate",
+  "cad_assembly_add_joint",
+  "cad_assembly_remove_joint",
+  "cad_assembly_check_interference",
+] as const;
+
+/** The read-only assembly set the interference fixture page (Phase 2.2)
+ * registers — its document is the fixture's constant, so no mutator mints. */
+const ASSEMBLY_READONLY_WEBMCP_TOOLS = [
+  "cad_get_document",
+  "cad_get_diagnostics",
+  "cad_assembly_check_interference",
 ] as const;
 
 /** The projects WebMCP tools the authenticated pages register (Phase 8). */
@@ -277,6 +304,132 @@ const SESSION_USER = {
   email: `session-e2e-${Date.now()}-${Math.round(Math.random() * 1e6)}@slopcad.dev`,
   password: "supercalifragilistic",
 };
+
+// ---------------------------------------------------------------------------
+// The agent-chat walk's loopback fixture (PLAN-AGENT-CHAT Phase 6, B1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The loopback agent-fixture server the harness's supervised webServer
+ * boots (`e2e-session/scripts/`): the real production code is pointed at
+ * it via `MODEL_CATALOG_URL` (catalog refresh) and
+ * `OPENAI_COMPATIBLE_BASE_URL` (client-direct runs AND the server relay),
+ * so the walk exercises real code paths with zero external network.
+ */
+const AGENT_FIXTURE_URL =
+  process.env.AGENT_FIXTURE_URL ?? "http://127.0.0.1:3213";
+
+/** The BYO key the walk configures in the browser (never crosses to us). */
+const AGENT_FIXTURE_USER_KEY = "user-loopback-key";
+
+/** One chat-completions request the loopback fixture recorded. */
+interface AgentFixtureCall {
+  readonly index: number;
+  readonly authorization: string | null;
+  readonly model: string;
+  readonly roles: readonly string[];
+  readonly declaredTools: boolean;
+}
+
+/** One scripted fixture response (exactly the control API's accepted shapes). */
+type AgentFixtureResponse =
+  | { readonly kind: "text"; readonly text: string }
+  | {
+      readonly kind: "tool-call";
+      readonly name: string;
+      readonly input: unknown;
+    }
+  | {
+      readonly kind: "http-error";
+      readonly status: number;
+      readonly message: string;
+    };
+
+/** REPLACES the fixture's scripted queue — stages never inherit scripts. */
+async function scriptAgentResponses(
+  page: Page,
+  responses: readonly AgentFixtureResponse[],
+): Promise<void> {
+  const response = await page.request.post(`${AGENT_FIXTURE_URL}/__script`, {
+    data: { replace: true, responses },
+  });
+  expect(response.ok()).toBeTruthy();
+}
+
+/** The fixture server's recorded chat-completions calls, in order. */
+async function agentFixtureCalls(page: Page): Promise<AgentFixtureCall[]> {
+  const response = await page.request.get(`${AGENT_FIXTURE_URL}/__calls`);
+  expect(response.ok()).toBeTruthy();
+  const payload: unknown = await response.json();
+  const calls = (payload as { calls?: unknown }).calls;
+  return Array.isArray(calls) ? (calls as AgentFixtureCall[]) : [];
+}
+
+/**
+ * The signed-in session's synced conversation titles, through the REAL
+ * tRPC list over the session's own cookies (the Phase 3.4 sync push's
+ * server-side evidence). Empty until the opt-in sync lands rows.
+ */
+async function syncedConversationTitles(page: Page): Promise<string[]> {
+  const response = await page.request.get("/api/trpc/agentConversations.list");
+  if (!response.ok()) {
+    return [];
+  }
+  const payload: unknown = await response.json();
+  return collectTitles(payload);
+}
+
+/** Deep-collects `title` strings off id-carrying objects (the dto's shape). */
+function collectTitles(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectTitles(entry));
+  }
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const record = value as Record<string, unknown>;
+  const titles =
+    typeof record.title === "string" && typeof record.id === "string"
+      ? [record.title]
+      : [];
+  return [...titles, ...Object.values(record).flatMap(collectTitles)];
+}
+
+/** The boot plate's analytic volume with a ⌀`d` bore (mm³). */
+const bootPlateVolumeWithHole = (d: number): number =>
+  30 * 20 * 10 - Math.PI * (d / 2) ** 2 * 10;
+
+/**
+ * Waits until the chat panel's persistence work is visibly settled: the
+ * sync line GONE, twice with a beat between (the line can transiently
+ * hide between two ops of one completion pass). With the opt-in sync on,
+ * every conversation append rides the outbox and this line is the UI's
+ * own "there is unsynced work" signal — the store commits at run
+ * completion, so navigating while work is pending can tear an in-flight
+ * OPFS write (the resume then finds the conversation but not its rows).
+ */
+async function waitForAgentSyncSettled(page: Page): Promise<void> {
+  const line = page.getByTestId("agent-chat-sync-status");
+  const hidden = async (): Promise<boolean> =>
+    (await line.count()) === 0 || (await line.isVisible()) === false;
+  await expect.poll(hidden, { timeout: 15_000 }).toBe(true);
+  await page.waitForTimeout(400);
+  await expect.poll(hidden, { timeout: 15_000 }).toBe(true);
+}
+
+/** The serialized `parameter.set` the walk's tool call applies (⌀11 mm). */
+const AGENT_SET_HOLE_11 = {
+  formatVersion: 1,
+  type: "parameter.set",
+  id: "param_hole_diameter",
+  value: { dimension: "length", unit: "mm", value: 11 },
+} as const;
+
+/** A deliberately malformed command (wrong format version — D9's chip). */
+const AGENT_BAD_COMMAND = {
+  ...AGENT_SET_HOLE_11,
+  formatVersion: 99,
+} as const;
 
 // ---------------------------------------------------------------------------
 // The stages
@@ -3322,11 +3475,11 @@ test("s26c the TSX model exchange: import a .tsx model, export TSX, round-trip t
   });
 });
 
-test("s27 the WebMCP agent surface: registry snapshots on the workbench and the projects pages", async ({
+test("s27 the WebMCP agent surface: registry snapshots on the workbench, projects, and assembly pages", async ({
   sessionPage: page,
 }) => {
   await stage("s27 webmcp agent surface", async () => {
-    // THE WORKBENCH SNAPSHOT: the eight CAD tools the complete page
+    // THE WORKBENCH SNAPSHOT: the eleven CAD tools the complete page
     // mounts, each with a JSON object input schema and honest usage
     // annotations (the seam is snapshot-only — see readWebMcpSnapshot).
     await openComplete(page);
@@ -3345,6 +3498,9 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench and the 
     expect(
       annotationsOf(workbenchTools, "cad_get_document_summary"),
     ).toMatchObject({ readOnlyHint: true });
+    expect(annotationsOf(workbenchTools, "cad_capture_views")).toMatchObject({
+      readOnlyHint: true,
+    });
     extra("webmcp-workbench-surface");
 
     // THE PROJECTS SNAPSHOT: the three workspace tools the authenticated
@@ -3370,6 +3526,60 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench and the 
       consequentialHint: true,
     });
     extra("webmcp-projects-surface");
+
+    // THE ASSEMBLY SNAPSHOTS (Phase 2.2): the two mutable assembly pages
+    // register the ten-tool set (reads + the occurrence/pattern/mate/joint
+    // doors + the interference report); the interference fixture's document
+    // is the page's constant, so it registers the reads and the report only.
+    await page.goto("/workbench-assembly");
+    await expect(page.locator("#assembly-workbench-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_WEBMCP_TOOLS]);
+    const assemblyTools = await readWebMcpSnapshot(page);
+    for (const tool of assemblyTools) {
+      expect(schemaTypeOf(tool)).toBe("object");
+    }
+    expect(annotationsOf(assemblyTools, "cad_get_document")).toMatchObject({
+      readOnlyHint: true,
+    });
+    expect(
+      annotationsOf(assemblyTools, "cad_assembly_add_occurrence"),
+    ).toMatchObject({ consequentialHint: true });
+    extra("webmcp-assembly-surface");
+
+    await page.goto("/workbench-assembly-motion");
+    await expect(page.locator("#assembly-motion-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_WEBMCP_TOOLS]);
+    extra("webmcp-assembly-motion-surface");
+
+    await page.goto("/workbench-assembly-interference");
+    await expect(page.locator("#interference-workbench-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_READONLY_WEBMCP_TOOLS]);
+    const interferenceTools = await readWebMcpSnapshot(page);
+    expect(
+      annotationsOf(interferenceTools, "cad_assembly_check_interference"),
+    ).toMatchObject({ readOnlyHint: true });
+    extra("webmcp-assembly-interference-surface");
   });
 });
 
@@ -4372,6 +4582,463 @@ test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports
     }
 
     extra("viewer-share-embed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The agent chat walk (PLAN-AGENT-CHAT Phase 6): ONE serial user, the real
+// production server, the real SQLite file, and the loopback agent fixture
+// (see the fixture block near the top) — client-direct runs against the
+// scripted OpenAI-compatible endpoint, the catalog refresh against the
+// fixture's trimmed models.dev JSON, the relay against the same endpoint
+// with the ENV key. Zero external network, zero page.route seams.
+// ---------------------------------------------------------------------------
+
+test("s34 agent chat: the right-sidebar view (D16), settings, and the four palette commands", async ({
+  sessionPage: page,
+}) => {
+  await stage("s34 agent chat view + settings + palette commands", async () => {
+    await openComplete(page);
+    const dock = page.getByTestId("workbench-panels-dock");
+    await expect(dock).toHaveAttribute("data-agent-view", "sidebar");
+    await expect(page.getByTestId("right-sidebar-view-switch")).toBeVisible();
+
+    // D16: the segmented switch flips the dock to the chat; the panels
+    // column is hidden, never unmounted.
+    await page.getByTestId("right-sidebar-view-chat").click();
+    await expect(dock).toHaveAttribute("data-agent-view", "chat");
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+
+    // D5: unconfigured is honest — the composer is disabled WITH a reason
+    // and the empty state points at settings.
+    const composer = page.getByLabel("Chat message");
+    await expect(composer).toBeDisabled();
+    await expect(page.getByTestId("agent-chat-empty")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Pick a provider and a model in agent settings — nothing is preselected.",
+      ),
+    ).toBeVisible();
+
+    // THE FOUR PALETTE COMMANDS (the manifest entries this phase adds):
+    // the toggle round-trips the view through the menu row itself.
+    await runCommand(page, COMPLETE_ROOT, "agent-chat-toggle");
+    await expect(dock).toHaveAttribute("data-agent-view", "sidebar");
+    await runCommand(page, COMPLETE_ROOT, "agent-chat-toggle");
+    await expect(dock).toHaveAttribute("data-agent-view", "chat");
+    cover("agent-chat-toggle");
+
+    // The settings sheet opens through its palette row; the seeded catalog
+    // (zero network) feeds the picker for a NAMED provider, and the model
+    // is chosen through it — nothing preselected, nothing typed by hand.
+    await runCommand(page, COMPLETE_ROOT, "agent-settings");
+    const dialog = page.getByTestId("agent-settings-dialog");
+    await expect(dialog).toBeVisible();
+    cover("agent-settings");
+    await page.getByLabel("Provider", { exact: true }).click();
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click();
+    const modelField = page.getByLabel("Model", { exact: true });
+    await modelField.click();
+    // The catalog option buttons carry the model id beneath the label.
+    const catalogOption = dialog.locator("button:has(span.text-xs)").first();
+    await expect(catalogOption).toBeVisible();
+    await catalogOption.click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(dialog).toBeHidden();
+    extra("agent-settings-catalog-picker");
+
+    // D7 + the palette refresh command: force-refresh the configured named
+    // provider against the loopback fixture's models.dev JSON — the REAL
+    // refresh path runs (fetch → filter → replace rows), and the sheet
+    // reports the outcome.
+    await runCommand(page, COMPLETE_ROOT, "agent-catalog-refresh");
+    cover("agent-catalog-refresh");
+    await runCommand(page, COMPLETE_ROOT, "agent-settings");
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("agent-settings-refresh-row")).toContainText(
+      "Catalog refetched.",
+    );
+
+    // D14: reconfigure onto the BYO endpoint — the endpoint's OWN /models
+    // list (browser-direct, the user's key, CORS against the loopback)
+    // feeds the picker; sync is opted in for the persistence stages.
+    await page.getByLabel("Provider", { exact: true }).click();
+    await page
+      .getByRole("option", { name: "OpenAI-compatible endpoint" })
+      .click();
+    await page.getByPlaceholder("sk-…").fill(AGENT_FIXTURE_USER_KEY);
+    await page.getByLabel("Endpoint base URL").fill(`${AGENT_FIXTURE_URL}/v1`);
+    // The raw model id field remembers the openai choice from the first
+    // save and would OVERRIDE the picker (D5's explicit-string rule), so
+    // it is emptied for the endpoint's own model to be the pick.
+    await page.getByLabel("Model id", { exact: true }).fill("");
+    await page.getByTestId("agent-settings-refetch-endpoint").click();
+    // The picker's dropdown opens on focus; its options arrive from the
+    // re-fetched endpoint list (async, debounced). The remembered Model
+    // field still carries the openai pick, which would FILTER the endpoint
+    // list — it is cleared so the empty query lists the endpoint's models.
+    await modelField.fill("");
+    await modelField.click();
+    const endpointOption = dialog.getByRole("button", {
+      name: "fixture-primary",
+      exact: true,
+    });
+    await expect(endpointOption).toBeVisible();
+    await endpointOption.click();
+    await page
+      .getByRole("switch", { name: "Sync conversations to the server" })
+      .click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(dialog).toBeHidden();
+
+    // Configured (D5): the composer opens and the model slot names the
+    // provider + model pair the picker chose.
+    await expect(composer).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: "Open agent settings" }),
+    ).toContainText("openai-compatible · fixture-primary");
+    extra("agent-settings-endpoint-picker");
+  });
+});
+
+test("s35 agent client-direct run: a scripted tool call changes the real document", async ({
+  sessionPage: page,
+}) => {
+  await stage("s35 agent tool loop on the real store", async () => {
+    // A fresh boot plate (⌀8 bore); the chat view persisted from s34.
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    await expect
+      .poll(async () =>
+        Number(await rootAttribute(page, "data-cad-rendered-volume")),
+      )
+      .toBeCloseTo(BOOT_PLATE_VOLUME, -1);
+
+    // The scripted wire: a model-emitted cad_apply_commands tool call,
+    // then the text turn the continuation (with the tool result) answers.
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_apply_commands",
+        input: { commands: [AGENT_SET_HOLE_11] },
+      },
+      { kind: "text", text: "The hole diameter is now 11 mm." },
+    ]);
+    const callBaseline = (await agentFixtureCalls(page)).length;
+    await page
+      .getByLabel("Chat message")
+      .fill("Set the hole diameter to 11 mm.");
+    await page.getByRole("button", { name: "Send message" }).click();
+
+    // The request side renders the applied command (D4's display-only diff).
+    await expect(
+      page.getByTestId("agent-tool-call-part").first(),
+    ).toContainText("Apply 1 command");
+    await expect(page.getByTestId("agent-command-row").first()).toContainText(
+      "param_hole_diameter = 11 mm",
+    );
+    // The loop auto-continued and the assistant's final text arrived.
+    await expect(
+      page.getByText("The hole diameter is now 11 mm."),
+    ).toBeVisible();
+
+    // THE DOCUMENT CHANGED through the real store and the real command
+    // path: the settled volume is the boot plate with the ⌀11 bore.
+    await expect
+      .poll(async () =>
+        Number(await rootAttribute(page, "data-cad-rendered-volume")),
+      )
+      .toBeCloseTo(bootPlateVolumeWithHole(11), -1);
+    await waitForRootSettle(page, COMPLETE_ROOT);
+
+    // The wire proves the loop: call #1 declared the tools and carried the
+    // USER's key (D1 — the browser called the endpoint itself); call #2
+    // fed the executed tool's result back as a tool-role message.
+    const runCalls = (await agentFixtureCalls(page)).slice(callBaseline);
+    expect(runCalls).toHaveLength(2);
+    expect(runCalls[0]?.declaredTools).toBe(true);
+    expect(runCalls[0]?.authorization).toBe(`Bearer ${AGENT_FIXTURE_USER_KEY}`);
+    expect(runCalls[1]?.roles).toContain("tool");
+    await waitForAgentSyncSettled(page);
+    extra("agent-client-tool-loop");
+  });
+});
+
+test("s36 agent image feedback: cad_capture_views single view, then multi-angle (D10)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s36 agent capture views", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    // The OPFS resume is async (worker + WASM under SwiftShader): the
+    // prior conversation's tail must be back BEFORE the next send, or the
+    // controller's documented live-work-wins fence would start a second
+    // conversation for the incoming message.
+    await expect(page.getByText("The hole diameter is now 11 mm.")).toBeVisible(
+      { timeout: 15_000 },
+    );
+
+    // ONE view — the common case. The capture runs the page's own camera
+    // overlay + frame-settle + live-canvas machinery under SwiftShader.
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_capture_views",
+        input: { views: [{ preset: "iso" }] },
+      },
+      { kind: "text", text: "Captured the isometric view." },
+    ]);
+    await page
+      .getByLabel("Chat message")
+      .fill("Capture the current model from the iso view.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByTestId("agent-view-label")).toHaveText("iso");
+    await expect(page.getByTestId("agent-capture-gallery")).toBeVisible();
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(1);
+
+    // SEVERAL angles in ONE call (D10's option): the four standard views,
+    // frame-settled per view, the user's camera restored on exit.
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_capture_views",
+        input: {
+          views: [
+            { preset: "front" },
+            { preset: "top" },
+            { preset: "right" },
+            { preset: "iso" },
+          ],
+        },
+      },
+      { kind: "text", text: "Captured four angles in one call." },
+    ]);
+    await page
+      .getByLabel("Chat message")
+      .fill("Capture front, top, right, and iso in one call.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(
+      page.getByText("Captured four angles in one call."),
+    ).toBeVisible();
+    // 1 (previous gallery) + 4 (this run) images, the gallery's summary
+    // naming all four captured views in order.
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(5);
+    const gallery = page.getByTestId("agent-capture-gallery").last();
+    await expect(gallery).toContainText(
+      "Captured 4 views: view-front.png, view-top.png, view-right.png, view-iso.png.",
+    );
+    await expect(gallery.getByTestId("agent-captured-view")).toHaveCount(4);
+    // The restored camera leaves the scene settled.
+    await waitForRootSettle(page, COMPLETE_ROOT);
+    await waitForAgentSyncSettled(page);
+    extra("agent-capture-views");
+  });
+});
+
+test("s37 agent tool errors: the deliberately bad command surfaces the D9 diagnostics", async ({
+  sessionPage: page,
+}) => {
+  await stage("s37 agent diagnostics + error turn", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    // The resumed conversation's tail (see s36): one conversation, resumed
+    // before the next send.
+    await expect(
+      page.getByText("Captured four angles in one call."),
+    ).toBeVisible({ timeout: 15_000 });
+    // A fresh page load boots the ⌀8 plate (the s35 edit lived in that
+    // page's store); the transcript, not the document, is what persists.
+    const settledVolume = Number(
+      await rootAttribute(page, "data-cad-rendered-volume"),
+    );
+    expect(settledVolume).toBeCloseTo(BOOT_PLATE_VOLUME, -1);
+
+    // A deliberately malformed command (wrong format version): the strict
+    // parser refuses, NOTHING applies, and the refusal surfaces BOTH as
+    // the refused row on the request side and as the structured error part
+    // rendered by the diagnostics chip (code + message, severity-colored).
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_apply_commands",
+        input: { commands: [AGENT_BAD_COMMAND] },
+      },
+      { kind: "text", text: "That command was refused; nothing was applied." },
+    ]);
+    await page
+      .getByLabel("Chat message")
+      .fill("Apply this deliberately malformed command.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    const refusedRow = page.locator(
+      '[data-testid="agent-command-row"][data-refused="true"]',
+    );
+    await expect(refusedRow).toContainText("formatVersion 1");
+    const chip = page.getByTestId("agent-diagnostic-chip");
+    await expect(chip).toHaveAttribute("data-severity", "error");
+    await expect(chip).toContainText("command/version-unsupported");
+    await expect(chip).toContainText("formatVersion 1");
+    await expect(
+      page.getByText("That command was refused; nothing was applied."),
+    ).toBeVisible();
+    // The document was NOT mutated by the refused batch.
+    await expect
+      .poll(async () =>
+        Number(await rootAttribute(page, "data-cad-rendered-volume")),
+      )
+      .toBeCloseTo(BOOT_PLATE_VOLUME, -1);
+    extra("agent-diagnostics-chip");
+
+    // THE ERROR TURN: a provider failure on the next run surfaces as the
+    // run's error line (never silent, never fake success). A 400 — the
+    // OpenAI SDK auto-retries 5xx, which would burn the one scripted
+    // response and then hit the fixture's loud unscripted 500.
+    await scriptAgentResponses(page, [
+      {
+        kind: "http-error",
+        status: 400,
+        message: "fixture provider exploded",
+      },
+    ]);
+    await page.getByLabel("Chat message").fill("This one will fail upstream.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    const errorLine = page.getByTestId("agent-chat-error");
+    await expect(errorLine).toBeVisible();
+    await expect(errorLine).toContainText("fixture provider exploded");
+    await waitForAgentSyncSettled(page);
+    extra("agent-error-turn");
+  });
+});
+
+test("s38 agent chat persistence: drag-resize persists, view switch and reload restore (D16/D3)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s38 agent resize + persistence + sync push", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    // The resumed conversation's tail (see s36): the bad-command exchange.
+    await expect(
+      page.getByText("Apply this deliberately malformed command."),
+    ).toBeVisible({ timeout: 15_000 });
+    const dock = page.getByTestId("workbench-panels-dock");
+    const dockWidth = async (): Promise<number> =>
+      dock.evaluate((element) => element.getBoundingClientRect().width);
+    const widthBefore = await dockWidth();
+
+    // DRAG-RESIZE (D16): pointer capture on the separator handle, dragged
+    // left — the right-anchored dock widens.
+    const handleBox = await page
+      .getByTestId("right-sidebar-resize-handle")
+      .boundingBox();
+    if (handleBox === null) throw new Error("the resize handle has no box");
+    const handleY = handleBox.y + handleBox.height / 2;
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleY);
+    await page.mouse.down();
+    await page.mouse.move(handleBox.x - 120, handleY, { steps: 8 });
+    await page.mouse.up();
+    const widthDragged = await dockWidth();
+    expect(widthDragged).toBeGreaterThan(widthBefore);
+
+    // RELOAD: the size persists, the chat view persists, and the whole
+    // transcript restores from the OPFS-backed store (the 3.1 spike's
+    // contract — one context, reload round-trip).
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    await expect
+      .poll(dockWidth, { timeout: 15_000 })
+      .toBeCloseTo(widthDragged, 0);
+    await expect(
+      page.getByText("The hole diameter is now 11 mm."),
+    ).toBeVisible();
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(5);
+
+    // VIEW SWITCH away and back: the panels return with their state (the
+    // fresh boot's ⌀8 parameter) and the chat restores its transcript.
+    await page.getByTestId("right-sidebar-view-panels").click();
+    await expect(dock).toHaveAttribute("data-agent-view", "sidebar");
+    await expect(page.getByTestId("agent-chat-panel")).toHaveCount(0);
+    await expect(page.getByLabel("holeDiameter", { exact: true })).toHaveValue(
+      "8",
+    );
+    await page.getByTestId("right-sidebar-view-chat").click();
+    await expect(dock).toHaveAttribute("data-agent-view", "chat");
+    await expect(
+      page.getByText("The hole diameter is now 11 mm."),
+    ).toBeVisible();
+    extra("agent-sidebar-resize-persistence");
+
+    // SYNC PUSH (D3, opt-in since s34): the local conversation reached the
+    // server through the real tRPC mutations — titled by its first user
+    // message, listed for the signed-in session user.
+    await expect
+      .poll(async () => syncedConversationTitles(page), { timeout: 15_000 })
+      .toContain("Set the hole diameter to 11 mm.");
+    extra("agent-sync-push");
+  });
+});
+
+test("s39 agent conversation clear: local rows and the synced server copy", async ({
+  sessionPage: page,
+}) => {
+  await stage("s39 agent conversation clear", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+
+    // The clear rides its palette row (the manifest command), not the
+    // header button.
+    await runCommand(page, COMPLETE_ROOT, "agent-conversation-clear");
+    cover("agent-conversation-clear");
+    await expect(page.getByText("The hole diameter is now 11 mm.")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(0);
+    await expect(page.getByTestId("agent-chat-header")).toContainText(
+      "Agent chat",
+    );
+
+    // The synced server copy went with it (the outbox's delete drain).
+    await expect
+      .poll(async () => syncedConversationTitles(page), { timeout: 15_000 })
+      .toEqual([]);
+    await waitForAgentSyncSettled(page);
+    extra("agent-conversation-clear");
+  });
+});
+
+test("s40 agent server mode: the real relay against the loopback (env key, never the user's)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s40 agent server relay", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+
+    // Server mode (D2/D13): the option exists for this signed-in user
+    // under the harness's AGENT_SERVER_AI_ALLOW_ALL posture; the relay is
+    // the REAL server function calling the loopback with the ENV pair.
+    await runCommand(page, COMPLETE_ROOT, "agent-settings");
+    const dialog = page.getByTestId("agent-settings-dialog");
+    await expect(dialog).toBeVisible();
+    await page.getByLabel("Mode", { exact: true }).click();
+    await page.getByRole("option", { name: "Server (slopcad relay)" }).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(dialog).toBeHidden();
+
+    const callBaseline = (await agentFixtureCalls(page)).length;
+    await scriptAgentResponses(page, [
+      { kind: "text", text: "Server-side reply through the real relay." },
+    ]);
+    await page.getByLabel("Chat message").fill("Answer from the server relay.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(
+      page.getByText("Server-side reply through the real relay."),
+    ).toBeVisible();
+
+    // The provider call was made by the RELAY with the ENV key — and the
+    // user's browser-stored key never crossed to our server (D1/D2).
+    const relayCalls = (await agentFixtureCalls(page)).slice(callBaseline);
+    expect(relayCalls).toHaveLength(1);
+    expect(relayCalls[0]?.authorization).toBe("Bearer fixture-env-key");
+    expect(relayCalls[0]?.model).toBe("fixture-primary");
+    extra("agent-server-relay");
   });
 });
 

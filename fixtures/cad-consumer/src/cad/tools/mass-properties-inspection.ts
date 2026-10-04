@@ -21,6 +21,18 @@ export interface MassPropertiesReadoutInput {
   readonly volume: number | undefined;
   /** The scene measurement's kernel surface area (mm²), or `undefined`. */
   readonly area: number | undefined;
+  /**
+   * The document scene's per-body measurements (Phase 16): when present,
+   * the readout answers for EVERY body the settled scene measured — the
+   * selected body's OWN kernel volume and area — instead of the
+   * single-scene aggregate.
+   */
+  readonly measuredBodies?:
+    | ReadonlyMap<
+        string,
+        { readonly volume: number; readonly area: number | undefined }
+      >
+    | undefined;
 }
 
 /** The readout the Measurement block's Volume/Area rows render. */
@@ -45,11 +57,23 @@ export function massPropertiesReadout(
     volumeText: null,
     areaText: null,
   };
+  const body = selectedBoundsBody(input.selected, input.features);
+  if (body === undefined) return nothing;
+  // The document scene: the selected body's own kernel measurement.
+  const measured = input.measuredBodies?.get(String(body));
+  if (measured !== undefined) {
+    return {
+      volumeText: `${formatVolume(volume(measured.volume))} mm³`,
+      areaText:
+        measured.area === undefined
+          ? null
+          : `${formatSurfaceArea(area(measured.area))} mm²`,
+    };
+  }
   if (input.volume === undefined || input.sceneBodyId === undefined) {
     return nothing;
   }
-  const body = selectedBoundsBody(input.selected, input.features);
-  if (body === undefined || body !== input.sceneBodyId) {
+  if (body !== input.sceneBodyId) {
     return nothing;
   }
   return {

@@ -69,6 +69,10 @@ import {
   type IsolatedPair,
   type PreparedSnapshotExport,
 } from "./interference-panel";
+import {
+  INTERFERENCE_TOLERANCE_MM3,
+  useAssemblyWebMcpTools,
+} from "../webmcp/assembly-tools";
 
 /** An axis-aligned box's triangle soup: 24 vertices, per-face normals. */
 function boxTessellation(
@@ -319,7 +323,7 @@ function runInterferenceCheck(
     instances: resolution.instances,
     boundsOf: (bodyId) => LOCAL_BOUNDS.get(bodyId),
     intersectVolume: boxIntersectionVolume,
-    tolerance: 0.001,
+    tolerance: INTERFERENCE_TOLERANCE_MM3,
   });
   return report.ok ? report.value : null;
 }
@@ -419,6 +423,21 @@ export function InterferenceWorkbenchPage(): ReactElement {
   useEffect(() => {
     setHydrated(true);
   }, []);
+
+  // The agent surface (Phase 2.2): reads and the interference report only —
+  // this page's document is the fixture's constant, so no mutator mints.
+  // The seams are the page's own analytic box kernel (the exact binding the
+  // report panel's run button drives).
+  useAssemblyWebMcpTools({
+    commit: null,
+    document: () => document,
+    interference: {
+      boundsOf: (bodyId) => LOCAL_BOUNDS.get(bodyId),
+      intersectVolume: boxIntersectionVolume,
+      meshOf: (bodyId) => MESH_BY_BODY.get(bodyId),
+    },
+    resolveDocument: null,
+  });
 
   const labelOf = useMemo(() => {
     const names = new Map<string, string>();

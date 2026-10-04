@@ -129,6 +129,46 @@
       ]
     },
     {
+      "name": "bubble",
+      "type": "registry:component",
+      "title": "Bubble",
+      "description": "Chat bubble primitives (group, bubble, content) with muted/ghost variants over Base UI's render element.",
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/bubble.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "message",
+      "type": "registry:component",
+      "title": "Message",
+      "description": "Chat message layout primitives (group, message, content) that align assistant and user turns inside a transcript.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/message.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "message-scroller",
+      "type": "registry:component",
+      "title": "Message Scroller",
+      "description": "Scroll-managed transcript container over @shadcn/react's message-scroller primitives: per-message scroll anchoring, a jump-to-latest button, and stickiness handling while streaming.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["@shadcn/react", "cn", "lucide-react"],
+      "files": [
+        {
+          "path": "src/components/message-scroller.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "popover",
       "type": "registry:component",
       "title": "Popover",
@@ -628,6 +668,196 @@
           "path": "src/examples/plate-workbench/manifold-wasm.d.ts",
           "type": "registry:lib",
           "target": "src/examples/plate-workbench/manifold-wasm.d.ts"
+        }
+      ]
+    },
+    {
+      "name": "agent-chat-panel",
+      "type": "registry:block",
+      "title": "Agent Chat Panel",
+      "description": "One installable agent chat surface on TanStack AI: the transcript with typed part renderers (markdown text, thinking, tool calls with readable CAD command diffs and capture galleries, diagnostics chips), the composer with its configured-until-open gate, the persistence controller, and the BYOK provider runtime (browser-direct OpenAI/Anthropic/Google/OpenRouter/openai-compatible) plus the keyless server-relay handler. Honest boundary: the host injects every dynamic thing as props - the agent config, the tool surface (name/description/zod schema plus executor), the persistence store (or null for ephemeral chat), the session slot, the document-summary getter, and optionally the whole transport (fetch, relay URL, or an adapter factory). The component never imports the host's stores or RPC client; nothing - provider, model, endpoint - is ever preselected.",
+      "registryDependencies": [
+        "@slopcad/bubble",
+        "@slopcad/button",
+        "@slopcad/input-group",
+        "@slopcad/message",
+        "@slopcad/message-scroller"
+      ],
+      "dependencies": [
+        "@slopcad/cad-core",
+        "@tanstack/ai",
+        "@tanstack/ai-anthropic",
+        "@tanstack/ai-client",
+        "@tanstack/ai-gemini",
+        "@tanstack/ai-openai",
+        "@tanstack/ai-openrouter",
+        "@tanstack/ai-react",
+        "cn",
+        "lucide-react",
+        "react-markdown",
+        "remark-gfm",
+        "zod"
+      ],
+      "files": [
+        {
+          "path": "src/agent/chat/agent-chat-panel.tsx",
+          "type": "registry:block",
+          "target": "src/agent/chat/agent-chat-panel.tsx"
+        },
+        {
+          "path": "src/agent/chat/agent-chat-controller.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/agent-chat-controller.ts"
+        },
+        {
+          "path": "src/agent/chat/composer-gate.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/composer-gate.ts"
+        },
+        {
+          "path": "src/agent/chat/status-lines.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/status-lines.ts"
+        },
+        {
+          "path": "src/agent/chat/prompt-form.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/prompt-form.tsx"
+        },
+        {
+          "path": "src/agent/chat/spinner.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/spinner.tsx"
+        },
+        {
+          "path": "src/agent/chat/safe-http-url.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/safe-http-url.ts"
+        },
+        {
+          "path": "src/agent/chat/session-slot.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/session-slot.ts"
+        },
+        {
+          "path": "src/agent/chat/parts/busy.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/busy.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/decoders.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/parts/decoders.ts"
+        },
+        {
+          "path": "src/agent/chat/parts/diagnostics-chip.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/diagnostics-chip.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/media-parts.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/media-parts.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/message-parts.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/message-parts.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/part-types.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/parts/part-types.ts"
+        },
+        {
+          "path": "src/agent/chat/parts/structured-output-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/structured-output-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/subagent-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/subagent-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/text-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/text-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/thinking-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/thinking-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/tool-call-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/tool-call-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/tool-result-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/tool-result-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/ui-resource-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/ui-resource-part.tsx"
+        },
+        {
+          "path": "src/agent/use-agent-chat.ts",
+          "type": "registry:lib",
+          "target": "src/agent/use-agent-chat.ts"
+        },
+        {
+          "path": "src/agent/model-options.ts",
+          "type": "registry:lib",
+          "target": "src/agent/model-options.ts"
+        },
+        {
+          "path": "src/agent/tools.ts",
+          "type": "registry:lib",
+          "target": "src/agent/tools.ts"
+        },
+        {
+          "path": "src/agent/relay.ts",
+          "type": "registry:lib",
+          "target": "src/agent/relay.ts"
+        },
+        {
+          "path": "src/agent/config/store.ts",
+          "type": "registry:lib",
+          "target": "src/agent/config/store.ts"
+        },
+        {
+          "path": "src/agent/providers/index.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/index.ts"
+        },
+        {
+          "path": "src/agent/providers/openai.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/openai.ts"
+        },
+        {
+          "path": "src/agent/providers/anthropic.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/anthropic.ts"
+        },
+        {
+          "path": "src/agent/providers/google.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/google.ts"
+        },
+        {
+          "path": "src/agent/providers/openrouter.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/openrouter.ts"
+        },
+        {
+          "path": "src/agent/providers/openai-compatible.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/openai-compatible.ts"
         }
       ]
     }

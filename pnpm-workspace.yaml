@@ -4,6 +4,12 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: true
+  # Phase 3.1 spike: the node-env test adapter for TanStack DB collections
+  # (@tanstack/node-db-sqlite-persistence) runs on better-sqlite3, whose
+  # prebuilt native binding needs its install script. Scoped approval only
+  # — @journeyapps/wa-sqlite's postinstall (PowerSync dynamic-core
+  # download) stays ignored per adr-agent-chat.md.
+  better-sqlite3: true
 catalog:
   "@libsql/client": 0.17.4
   "@testing-library/dom": ^10.4.1
