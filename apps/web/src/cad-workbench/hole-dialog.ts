@@ -21,6 +21,14 @@ import {
 export interface StructuredHoleSubmission {
   /** The structured specification (every field; the type selects roles). */
   readonly spec: StructuredHoleSpec;
+  /**
+   * Role name → `$name` reference to an EXISTING document parameter
+   * (Phase 21). A role named here commits no `parameter.create` — the
+   * feature input references the existing parameter by its resolved id, and
+   * the spec's own number for that role is inert (the dialog's default).
+   * Roles absent from the map behave exactly as before.
+   */
+  readonly parameterRefs?: Readonly<Record<string, string>>;
   /** The parameter position (mm, in-plane) — unused with a positions sketch. */
   readonly positionXMm: number;
   readonly positionYMm: number;
@@ -69,9 +77,17 @@ export type StructuredHoleValidation =
 export function validateStructuredHoleSubmission(
   submission: StructuredHoleSubmission,
 ): StructuredHoleValidation {
-  const problem = structuredHoleProblem(submission.spec);
-  if (problem !== null) {
-    return { ok: false, code: problem.code, message: problem.message };
+  // The shared battery judges the spec's own numbers; with a `$name`
+  // reference present those numbers are inert (the referenced parameter's
+  // live value is what the kernel judges at regeneration), so the battery
+  // runs only on the all-literals path — the mixed case's cross-role
+  // relations are regeneration's verdict, never the form's guess.
+  const hasReferences = Object.keys(submission.parameterRefs ?? {}).length > 0;
+  if (!hasReferences) {
+    const problem = structuredHoleProblem(submission.spec);
+    if (problem !== null) {
+      return { ok: false, code: problem.code, message: problem.message };
+    }
   }
   if (submission.positionsSketchId === null) {
     if (

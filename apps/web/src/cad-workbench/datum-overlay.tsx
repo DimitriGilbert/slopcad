@@ -31,6 +31,7 @@ import {
 import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
 
 import { sessionDatumResolverOf } from "./datum";
+import { sessionComputedFacesOf } from "./extrude";
 
 /** Glyph sizing, in millimetres (projected through the spec camera). */
 const PLANE_HALF_SIZE_MM = 12;
@@ -50,9 +51,20 @@ interface DatumMarker {
   readonly direction?: readonly [number, number, number];
 }
 
-/** Extracts the overlay markers of a document's datums (resolved ones only). */
-function markersOf(document: CadDocument): readonly DatumMarker[] {
-  const resolver = sessionDatumResolverOf(document);
+/**
+ * Extracts the overlay markers of a document's datums (resolved ones only)
+ * against one projection: the computed-face source derived from it lets a
+ * datum anchored on a COMPUTED body (a boolean cavity floor, a holed
+ * face) resolve — the same planes the marker is drawn over.
+ */
+function markersOf(
+  document: CadDocument,
+  projection: RenderProjection,
+): readonly DatumMarker[] {
+  const resolver = sessionDatumResolverOf(
+    document,
+    sessionComputedFacesOf(document, projection) ?? undefined,
+  );
   const markers: DatumMarker[] = [];
   for (const datum of document.datums) {
     const payload = parseDatumPayload(datum.datum);
@@ -274,7 +286,10 @@ export function CadDatumOverlay({
   readonly document: CadDocument;
   readonly projection: RenderProjection;
 }): ReactElement {
-  const markers = useMemo(() => markersOf(document), [document]);
+  const markers = useMemo(
+    () => markersOf(document, projection),
+    [document, projection],
+  );
   const frameRef = useRef<SVGSVGElement | null>(null);
   const [frame, setFrame] = useState<{
     readonly width: number;

@@ -52,6 +52,8 @@ export const SKETCH_DIAGNOSTIC_CODES = {
   constraintValueInvalid: "sketch/constraint-value-invalid",
   constraintReferenceMalformed: "sketch/constraint-reference-malformed",
   constraintUnsupported: "sketch/constraint-unsupported",
+  dimensionBindingUnresolved: "sketch/dimension-binding-unresolved",
+  dimensionBindingInvalid: "sketch/dimension-binding-invalid",
   underConstrained: "sketch/under-constrained",
   constraintsRedundant: "sketch/constraints-redundant",
   constraintsConflicting: "sketch/constraints-conflicting",

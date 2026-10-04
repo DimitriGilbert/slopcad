@@ -39,6 +39,7 @@ import {
   valueIn,
   type AnyDimensionalValue,
   type CadDocument,
+  type FeatureRecord,
 } from "@slopcad/cad-core";
 import type {
   ProfileRevolveAxisInput,
@@ -184,17 +185,17 @@ function angleParameterRad(value: AnyDimensionalValue): number | null {
 }
 
 /**
- * Reads the document's first revolve feature into its worker-scene request,
- * resolving the profile through the same path the executor bridge uses.
- * `null` when the document carries no revolve feature or the feature's
- * inputs no longer resolve — callers render the prior scene rather than
- * fabricate geometry.
+ * Reads ONE revolve feature into its worker-scene request, resolving the
+ * profile through the same path the executor bridge uses. `null` when the
+ * feature's inputs no longer resolve — callers render the prior scene
+ * rather than fabricate geometry. The per-feature extraction the document
+ * readers share (`documentRevolveRequest` here, the document-scene
+ * builder's per-body requests in `./document-scene`).
  */
-export function documentRevolveRequest(
+export function revolveSceneRequestOfFeature(
   document: CadDocument,
+  feature: FeatureRecord,
 ): RevolveSceneRequest | null {
-  const feature = document.features.find((entry) => entry.kind === "revolve");
-  if (feature === undefined) return null;
   const sketchRef = feature.inputs.find((ref) => ref.kind === "sketch");
   const parameterRefs = feature.inputs.filter(
     (ref) => ref.kind === "parameter",
@@ -233,4 +234,18 @@ export function documentRevolveRequest(
     placement: resolved.value.placement,
     bodyId,
   };
+}
+
+/**
+ * Reads the document's first revolve feature into its worker-scene request.
+ * `null` when the document carries no revolve feature or the feature's
+ * inputs no longer resolve — callers render the prior scene rather than
+ * fabricate geometry.
+ */
+export function documentRevolveRequest(
+  document: CadDocument,
+): RevolveSceneRequest | null {
+  const feature = document.features.find((entry) => entry.kind === "revolve");
+  if (feature === undefined) return null;
+  return revolveSceneRequestOfFeature(document, feature);
 }

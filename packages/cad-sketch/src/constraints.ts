@@ -85,10 +85,12 @@
 import {
   type AngleValue,
   type LengthValue,
+  type ParameterId,
   type ParseResult,
   fail,
   ok,
   parseDimensionalValue,
+  parseParameterId,
   serializeDimensionalValue,
   valueIn,
 } from "@slopcad/cad-core";
@@ -264,12 +266,28 @@ export interface PerpendicularConstraint extends ConstraintBase {
   readonly at?: SplineEndSelection;
 }
 
-/** Two point targets must lie `value` mm apart. */
+/**
+ * Two point targets must lie `value` mm apart.
+ *
+ * ## The parameter binding (all six dimensional kinds)
+ *
+ * A dimensional constraint carries an optional `parameterId`: when present
+ * the constraint is BOUND to a document parameter and its effective value
+ * resolves from a caller-supplied parameter lookup at solve/profile time
+ * (see `dimension-bindings.ts`) instead of from the stored literal. The
+ * stored `value` remains and always satisfies the kind's range rules — it
+ * is the literal the constraint last held (its authoring value or the last
+ * literal set), kept so the serialized record stays a self-contained v2
+ * payload. Absent `parameterId` = the plain literal constraint, exactly as
+ * every sketch before bindings serialized.
+ */
 export interface DistanceConstraint extends ConstraintBase {
   readonly kind: "distance";
   readonly first: PointTarget;
   readonly second: PointTarget;
   readonly value: LengthValue;
+  /** The document parameter the dimension is bound to, when bound. */
+  readonly parameterId?: ParameterId;
 }
 
 /**
@@ -284,6 +302,8 @@ export interface AngleConstraint extends ConstraintBase {
   readonly value: AngleValue;
   /** The spline operand's end whose tangent the row addresses; `"end"`. */
   readonly at?: SplineEndSelection;
+  /** The document parameter the dimension is bound to, when bound. */
+  readonly parameterId?: ParameterId;
 }
 
 /**
@@ -295,6 +315,8 @@ export interface RadiusConstraint extends ConstraintBase {
   readonly kind: "radius";
   readonly entity: SketchEntityId;
   readonly value: LengthValue;
+  /** The document parameter the dimension is bound to, when bound. */
+  readonly parameterId?: ParameterId;
 }
 
 /** A radial entity's diameter must equal `value` (2× the radius). */
@@ -302,6 +324,8 @@ export interface DiameterConstraint extends ConstraintBase {
   readonly kind: "diameter";
   readonly entity: SketchEntityId;
   readonly value: LengthValue;
+  /** The document parameter the dimension is bound to, when bound. */
+  readonly parameterId?: ParameterId;
 }
 
 /** Two lines must have equal lengths, or two circles/arcs equal radii. */
@@ -402,6 +426,8 @@ export interface DistanceXConstraint extends ConstraintBase {
   readonly first: PointTarget;
   readonly second: PointTarget;
   readonly value: LengthValue;
+  /** The document parameter the dimension is bound to, when bound. */
+  readonly parameterId?: ParameterId;
 }
 
 /**
@@ -413,6 +439,8 @@ export interface DistanceYConstraint extends ConstraintBase {
   readonly first: PointTarget;
   readonly second: PointTarget;
   readonly value: LengthValue;
+  /** The document parameter the dimension is bound to, when bound. */
+  readonly parameterId?: ParameterId;
 }
 
 /** Union of every sketch constraint. */
@@ -754,6 +782,56 @@ export function createDistanceYConstraint(
   return { id, kind: "distanceY", first, second, value };
 }
 
+/**
+ * The document parameter a dimensional constraint is bound to, or `null`
+ * when the constraint is a plain literal (or not dimensional at all). The
+ * one read seam for the binding — the solver's compile step refuses
+ * constraints where this is non-null (bindings resolve before solving, see
+ * `dimension-bindings.ts`), and presentation/command layers branch on it.
+ */
+export function boundDimensionParameterId(
+  constraint: SketchConstraint,
+): ParameterId | null {
+  switch (constraint.kind) {
+    case "distance":
+      return constraint.parameterId ?? null;
+    case "angle":
+      return constraint.parameterId ?? null;
+    case "radius":
+      return constraint.parameterId ?? null;
+    case "diameter":
+      return constraint.parameterId ?? null;
+    case "distanceX":
+      return constraint.parameterId ?? null;
+    case "distanceY":
+      return constraint.parameterId ?? null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Parses a serialized constraint's optional `parameterId` binding field:
+ * absent means "no binding"; a present value must be a valid parameter id.
+ */
+function parseOptionalParameterBinding(
+  input: unknown,
+  whole: unknown,
+): ParseResult<ParameterId | undefined, SketchConstraintError> {
+  if (input === undefined) return ok(undefined);
+  const parsed = parseParameterId(input);
+  if (!parsed.ok) {
+    return fail(
+      constraintError(
+        SKETCH_DIAGNOSTIC_CODES.constraintMalformed,
+        `A constraint's parameter binding must be a valid parameter id: ${parsed.error.message}`,
+        whole,
+      ),
+    );
+  }
+  return ok(parsed.value);
+}
+
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
 }
@@ -1057,12 +1135,20 @@ export function parseSketchConstraint(
       if (!second.ok) return second;
       const value = parsePositiveLengthValue("distance", input.value);
       if (!value.ok) return value;
+      const parameterId = parseOptionalParameterBinding(
+        input.parameterId,
+        input,
+      );
+      if (!parameterId.ok) return parameterId;
       return ok({
         id: id.value,
         kind: "distance",
         first: first.value,
         second: second.value,
         value: value.value,
+        ...(parameterId.value === undefined
+          ? {}
+          : { parameterId: parameterId.value }),
       });
     }
     case "angle": {
@@ -1074,22 +1160,22 @@ export function parseSketchConstraint(
       if (!value.ok) return value;
       const at = parseOptionalSplineEnd(input.at, input);
       if (!at.ok) return at;
-      return at.value === undefined
-        ? ok({
-            id: id.value,
-            kind: "angle",
-            first: first.value,
-            second: second.value,
-            value: value.value,
-          })
-        : ok({
-            id: id.value,
-            kind: "angle",
-            first: first.value,
-            second: second.value,
-            value: value.value,
-            at: at.value,
-          });
+      const parameterId = parseOptionalParameterBinding(
+        input.parameterId,
+        input,
+      );
+      if (!parameterId.ok) return parameterId;
+      return ok({
+        id: id.value,
+        kind: "angle",
+        first: first.value,
+        second: second.value,
+        value: value.value,
+        ...(at.value === undefined ? {} : { at: at.value }),
+        ...(parameterId.value === undefined
+          ? {}
+          : { parameterId: parameterId.value }),
+      });
     }
     case "radius":
     case "diameter": {
@@ -1097,11 +1183,19 @@ export function parseSketchConstraint(
       if (!entity.ok) return entity;
       const value = parsePositiveLengthValue(input.kind, input.value);
       if (!value.ok) return value;
+      const parameterId = parseOptionalParameterBinding(
+        input.parameterId,
+        input,
+      );
+      if (!parameterId.ok) return parameterId;
       return ok({
         id: id.value,
         kind: input.kind,
         entity: entity.value,
         value: value.value,
+        ...(parameterId.value === undefined
+          ? {}
+          : { parameterId: parameterId.value }),
       });
     }
     case "equal": {
@@ -1230,12 +1324,20 @@ export function parseSketchConstraint(
       if (!second.ok) return second;
       const value = parseSignedLengthValue(input.kind, input.value);
       if (!value.ok) return value;
+      const parameterId = parseOptionalParameterBinding(
+        input.parameterId,
+        input,
+      );
+      if (!parameterId.ok) return parameterId;
       return ok({
         id: id.value,
         kind: input.kind,
         first: first.value,
         second: second.value,
         value: value.value,
+        ...(parameterId.value === undefined
+          ? {}
+          : { parameterId: parameterId.value }),
       });
     }
   }
@@ -1293,38 +1395,74 @@ export function serializeSketchConstraint(
         second: constraint.second,
       };
     case "distance":
-      return {
-        id: constraint.id,
-        kind: constraint.kind,
-        first: serializePointTarget(constraint.first),
-        second: serializePointTarget(constraint.second),
-        value: serializeDimensionalValue(constraint.value),
-      };
-    case "angle":
-      return constraint.at === undefined
+      return constraint.parameterId === undefined
         ? {
             id: constraint.id,
             kind: constraint.kind,
-            first: constraint.first,
-            second: constraint.second,
+            first: serializePointTarget(constraint.first),
+            second: serializePointTarget(constraint.second),
             value: serializeDimensionalValue(constraint.value),
           }
         : {
             id: constraint.id,
             kind: constraint.kind,
-            first: constraint.first,
-            second: constraint.second,
+            first: serializePointTarget(constraint.first),
+            second: serializePointTarget(constraint.second),
             value: serializeDimensionalValue(constraint.value),
-            at: constraint.at,
+            parameterId: constraint.parameterId,
           };
+    case "angle":
+      return constraint.at === undefined
+        ? constraint.parameterId === undefined
+          ? {
+              id: constraint.id,
+              kind: constraint.kind,
+              first: constraint.first,
+              second: constraint.second,
+              value: serializeDimensionalValue(constraint.value),
+            }
+          : {
+              id: constraint.id,
+              kind: constraint.kind,
+              first: constraint.first,
+              second: constraint.second,
+              value: serializeDimensionalValue(constraint.value),
+              parameterId: constraint.parameterId,
+            }
+        : constraint.parameterId === undefined
+          ? {
+              id: constraint.id,
+              kind: constraint.kind,
+              first: constraint.first,
+              second: constraint.second,
+              value: serializeDimensionalValue(constraint.value),
+              at: constraint.at,
+            }
+          : {
+              id: constraint.id,
+              kind: constraint.kind,
+              first: constraint.first,
+              second: constraint.second,
+              value: serializeDimensionalValue(constraint.value),
+              at: constraint.at,
+              parameterId: constraint.parameterId,
+            };
     case "radius":
     case "diameter":
-      return {
-        id: constraint.id,
-        kind: constraint.kind,
-        entity: constraint.entity,
-        value: serializeDimensionalValue(constraint.value),
-      };
+      return constraint.parameterId === undefined
+        ? {
+            id: constraint.id,
+            kind: constraint.kind,
+            entity: constraint.entity,
+            value: serializeDimensionalValue(constraint.value),
+          }
+        : {
+            id: constraint.id,
+            kind: constraint.kind,
+            entity: constraint.entity,
+            value: serializeDimensionalValue(constraint.value),
+            parameterId: constraint.parameterId,
+          };
     case "tangent":
       return {
         id: constraint.id,
@@ -1388,13 +1526,22 @@ export function serializeSketchConstraint(
       };
     case "distanceX":
     case "distanceY":
-      return {
-        id: constraint.id,
-        kind: constraint.kind,
-        first: serializePointTarget(constraint.first),
-        second: serializePointTarget(constraint.second),
-        value: serializeDimensionalValue(constraint.value),
-      };
+      return constraint.parameterId === undefined
+        ? {
+            id: constraint.id,
+            kind: constraint.kind,
+            first: serializePointTarget(constraint.first),
+            second: serializePointTarget(constraint.second),
+            value: serializeDimensionalValue(constraint.value),
+          }
+        : {
+            id: constraint.id,
+            kind: constraint.kind,
+            first: serializePointTarget(constraint.first),
+            second: serializePointTarget(constraint.second),
+            value: serializeDimensionalValue(constraint.value),
+            parameterId: constraint.parameterId,
+          };
   }
 }
 

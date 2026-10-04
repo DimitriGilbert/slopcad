@@ -1,11 +1,16 @@
 /**
  * Public entry of `@slopcad/cad-components`, the reusable parametric CAD
- * components (Phase 32). Every component is independently importable —
- * from this entry or its own subpath (`@slopcad/cad-components/nema17-mount`)
- * — and the package depends only on the public cad-core and cad-kernel
- * surfaces: the serialized component contract for metadata, and the
- * kernel-neutral execution surface for geometry. No React, no DOM, no
- * database, no concrete kernel backend.
+ * components (Phase 32) and the parametric viewer's core (the final
+ * registry phase). Every component is independently importable — from
+ * this entry or its own subpath (`@slopcad/cad-components/nema17-mount`)
+ * — and everything exported here depends only on the public cad-core and
+ * cad-kernel surfaces: the serialized component contract for metadata, and
+ * the kernel-neutral execution surface for geometry. No React, no DOM, no
+ * database, no concrete kernel backend. (The viewer's TSX composition is
+ * deliberately NOT re-exported here — it is a registry artifact with React
+ * and the public cad-react model API as its surfaces, imported from its
+ * own subpath `@slopcad/cad-components/viewer/parametric-cad-viewer` or
+ * installed through the shadcn registry.)
  */
 
 // -- The 32.1 contract -----------------------------------------------------
@@ -106,3 +111,20 @@ export const PHASE32_COMPONENTS: readonly CadComponent[] = [
   arduinoMount,
   enclosure,
 ];
+
+// -- The parametric viewer core (the final registry phase) ------------------
+
+export type {
+  ViewerBody,
+  ViewerPersistedState,
+  ViewerProjectionBuild,
+  ViewerSourceLoad,
+  ViewerSourceSummary,
+} from "./viewer/parametric-viewer-core";
+export {
+  frameViewerCamera,
+  loadViewerSource,
+  projectViewerBodies,
+  serializeViewerSession,
+  viewerTitleOf,
+} from "./viewer/parametric-viewer-core";

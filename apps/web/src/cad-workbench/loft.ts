@@ -29,6 +29,7 @@ import {
   valueIn,
   type AnyDimensionalValue,
   type CadDocument,
+  type FeatureRecord,
 } from "@slopcad/cad-core";
 import type {
   ProfileExtrudeInput,
@@ -160,13 +161,14 @@ export interface LoftSceneRequest {
  * with its station parameter (matched by declared position among the
  * parameter inputs — the bridge's layout). `null` when the feature's inputs
  * no longer resolve — callers render the prior scene rather than fabricate
- * geometry.
+ * geometry. The per-feature extraction the document readers share
+ * (`documentLoftRequest` here, the document-scene builder's per-body
+ * requests in `./document-scene`).
  */
-export function documentLoftRequest(
+export function loftSceneRequestOfFeature(
   document: CadDocument,
+  feature: FeatureRecord,
 ): LoftSceneRequest | null {
-  const feature = document.features.find((entry) => entry.kind === "loft");
-  if (feature === undefined) return null;
   const sketchRefs = feature.inputs.filter((ref) => ref.kind === "sketch");
   const parameterRefs = feature.inputs.filter(
     (ref) => ref.kind === "parameter",
@@ -205,4 +207,18 @@ export function documentLoftRequest(
   }
   if (placement === null) return null;
   return { sections, placement, bodyId };
+}
+
+/**
+ * Reads the document's FIRST loft feature into its worker-scene request.
+ * `null` when the document carries no loft feature or the feature's inputs
+ * no longer resolve — callers render the prior scene rather than fabricate
+ * geometry.
+ */
+export function documentLoftRequest(
+  document: CadDocument,
+): LoftSceneRequest | null {
+  const feature = document.features.find((entry) => entry.kind === "loft");
+  if (feature === undefined) return null;
+  return loftSceneRequestOfFeature(document, feature);
 }

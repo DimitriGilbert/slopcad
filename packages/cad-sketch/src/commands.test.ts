@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { length } from "@slopcad/cad-core";
+import { length, type ParameterId } from "@slopcad/cad-core";
 
 import {
   SKETCH_COMMAND_ERROR_CODES,
@@ -467,5 +467,142 @@ describe("sketch session undo/redo", () => {
     expect(committed.ok).toBe(true);
     if (!committed.ok) return;
     expect(redoSketchSession(committed.value).ok).toBe(false);
+  });
+});
+
+describe("sketch.dimension.set parameter bindings", () => {
+  const parameterId = "param_boardL" as ParameterId;
+
+  it("binds a dimension to a parameter, keeping the stored literal", () => {
+    const applied = applySketchCommand(baseSketch(), {
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      parameterId,
+    });
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    const distance = applied.value.constraints.find(
+      (constraint) => constraint.id === distanceId,
+    );
+    expect(distance).toMatchObject({
+      kind: "distance",
+      parameterId,
+      value: { value: 60 },
+    });
+    // Re-binding to another parameter replaces it (idempotent replace).
+    const rebound = applySketchCommand(applied.value, {
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      parameterId: "param_other" as ParameterId,
+    });
+    expect(rebound.ok).toBe(true);
+    if (!rebound.ok) return;
+    expect(
+      rebound.value.constraints.find(
+        (constraint) => constraint.id === distanceId,
+      ),
+    ).toMatchObject({ parameterId: "param_other" });
+  });
+
+  it("unbinds when a literal is set on a bound dimension", () => {
+    const bound = applySketchCommand(baseSketch(), {
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      parameterId,
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    const unbound = applySketchCommand(bound.value, {
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      value: length(80),
+    });
+    expect(unbound.ok).toBe(true);
+    if (!unbound.ok) return;
+    const distance = unbound.value.constraints.find(
+      (constraint) => constraint.id === distanceId,
+    );
+    expect(distance).toMatchObject({ kind: "distance", value: { value: 80 } });
+    expect("parameterId" in (distance ?? {})).toBe(false);
+    // And the serialization carries no binding key (the canonical literal).
+    const serialized = serializeSketchCommand({
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      value: length(80),
+    });
+    expect("parameterId" in serialized).toBe(false);
+  });
+
+  it("refuses the bound form on non-dimensional and unknown constraints", () => {
+    const notDimensional = applySketchCommand(baseSketch(), {
+      type: "sketch.dimension.set",
+      constraintId: horizontalId,
+      parameterId,
+    });
+    expect(notDimensional).toMatchObject({
+      ok: false,
+      error: { code: SKETCH_COMMAND_ERROR_CODES.notDimensional },
+    });
+    const unknown = applySketchCommand(baseSketch(), {
+      type: "sketch.dimension.set",
+      constraintId: createSketchConstraintId("skcon_ghost"),
+      parameterId,
+    });
+    expect(unknown).toMatchObject({
+      ok: false,
+      error: { code: SKETCH_COMMAND_ERROR_CODES.constraintUnknown },
+    });
+  });
+
+  it("round-trips the bound wire form and serializes it canonically", () => {
+    const command = {
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      parameterId,
+    } as const;
+    const serialized = serializeSketchCommand(command);
+    expect(serialized).toEqual({
+      formatVersion: 2,
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      parameterId,
+    });
+    const parsed = parseSketchCommand(serialized);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(serializeSketchCommand(parsed.value)).toEqual(serialized);
+  });
+
+  it("rejects mixed and malformed binding payloads at parse", () => {
+    const both = parseSketchCommand({
+      formatVersion: 2,
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      value: { dimension: "length", unit: "mm", value: 60 },
+      parameterId,
+    });
+    expect(both).toMatchObject({
+      ok: false,
+      error: { code: SKETCH_COMMAND_ERROR_CODES.malformed },
+    });
+    const badId = parseSketchCommand({
+      formatVersion: 2,
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+      parameterId: "not-a-parameter-id",
+    });
+    expect(badId).toMatchObject({
+      ok: false,
+      error: { code: SKETCH_COMMAND_ERROR_CODES.malformed },
+    });
+    const neither = parseSketchCommand({
+      formatVersion: 2,
+      type: "sketch.dimension.set",
+      constraintId: distanceId,
+    });
+    expect(neither).toMatchObject({
+      ok: false,
+      error: { code: SKETCH_COMMAND_ERROR_CODES.malformed },
+    });
   });
 });

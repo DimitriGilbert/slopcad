@@ -7,7 +7,11 @@
 
 import { threadId } from "node:worker_threads";
 import { beforeAll, describe, expect, it } from "vitest";
-import { CAD_NATIVE_FORMAT_VERSION } from "@slopcad/cad-core";
+import {
+  CAD_NATIVE_FORMAT_VERSION,
+  parseNativeCadDocumentFromString,
+} from "@slopcad/cad-core";
+import { compileToNative } from "@slopcad/cad-jsx";
 import { createFakeKernel } from "@slopcad/cad-kernel";
 import {
   createManifoldRuntime,
@@ -15,6 +19,11 @@ import {
   type ManifoldRuntime,
 } from "@slopcad/cad-kernel-manifold";
 
+import {
+  HUB_MOUNT_DOCUMENT_ID,
+  HubMountModel,
+  runCadJsxExample,
+} from "./cadjsx/hub-mount";
 import { runComponentsExample } from "./components/components";
 import { runCustomAdapterExample } from "./kernel/custom-adapter";
 import { KERNEL_CAPABILITY_ROWS } from "./kernel/capabilities";
@@ -340,5 +349,62 @@ describe("guide example: helix and thread through the bridge (Phase 40)", () => 
     expect(summary.threadVolumeMm3).toBeLessThan(
       summary.threadRodVolumeMm3 - summary.threadToolVolumeMm3 * 0.5,
     );
+  });
+});
+
+describe("guide example: JSX-authored models (cad-jsx)", () => {
+  it("compiles the hub mount to native text that reopens with the authored graph", () => {
+    // The direct emission: compile the model component here and reopen
+    // the string through cad-core's native parser — the same parse the
+    // documents save path applies to `nativeContent` payloads.
+    const native = compileToNative(HubMountModel(), {
+      documentId: HUB_MOUNT_DOCUMENT_ID,
+    });
+    expect(native.ok).toBe(true);
+    if (!native.ok) throw new Error(native.error.message);
+    const reopened = parseNativeCadDocumentFromString(native.value);
+    expect(reopened.ok).toBe(true);
+    if (!reopened.ok) throw new Error(reopened.error.message);
+    expect(reopened.value.document.id).toBe(HUB_MOUNT_DOCUMENT_ID);
+    expect(
+      reopened.value.document.features.map((feature) => feature.kind),
+    ).toEqual(["extrude", "revolve", "loft", "subtract", "union"]);
+    expect(reopened.value.document.bodies.map((body) => body.id)).toEqual([
+      "body_plate",
+      "body_ring",
+      "body_boss",
+      "body_cleared",
+      "body_mount",
+    ]);
+    // One compile = one committed transaction in the persisted log.
+    expect(reopened.value.history.entries).toHaveLength(1);
+  });
+
+  it("reports the guide's numbers: validator clean, resave byte-identical", () => {
+    const summary = runCadJsxExample();
+    expect(summary.documentId).toBe(HUB_MOUNT_DOCUMENT_ID);
+    expect(summary.formatVersion).toBe(CAD_NATIVE_FORMAT_VERSION);
+    expect(summary.featureKinds).toEqual([
+      "extrude",
+      "revolve",
+      "loft",
+      "subtract",
+      "union",
+    ]);
+    expect(summary.bodyIds).toEqual([
+      "body_plate",
+      "body_ring",
+      "body_boss",
+      "body_cleared",
+      "body_mount",
+    ]);
+    // The plate's height parameter plus the revolve's angle and axis and
+    // the loft's two stations: five document parameters in all.
+    expect(summary.parameterCount).toBe(5);
+    expect(summary.reopenedTransactionCount).toBe(1);
+    expect(summary.validatorIssues).toBe(0);
+    expect(summary.resaveIdentical).toBe(true);
+    expect(summary.textBytes).toBeGreaterThan(0);
+    expect(summary.commandCount).toBeGreaterThan(0);
   });
 });

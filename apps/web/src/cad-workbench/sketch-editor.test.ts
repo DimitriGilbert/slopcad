@@ -1343,6 +1343,13 @@ describe("the point drawing tool (Phase 42)", () => {
     }
     expect(command.entity.kind).toBe("point");
     expect(command.entity).toMatchObject({ x: 12, y: -8 });
+    // The placed point is a REFERENCE, committed pinned: the entities
+    // module's own convention ("fixing one entity — conventionally a
+    // construction point — is how sketches become fully constrained").
+    // Unpinned, a bound-dimension re-solve resolves the sketch's free
+    // translation direction onto whichever operand elimination pivots on
+    // first, sliding the anchored corner instead of growing the far one.
+    expect(command.entity).toMatchObject({ fixed: true });
     expect(placed.state.gesture.kind).toBe("none");
     expect(placed.state.selectedEntityIds).toEqual([command.entity.id]);
   });

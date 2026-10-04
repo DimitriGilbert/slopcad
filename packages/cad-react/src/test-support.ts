@@ -31,6 +31,10 @@ export const TEST_BODY_ID: BodyId = createBodyId("body_plate");
 export const TEST_WIDTH_PARAMETER: ParameterId =
   createParameterId("param_width");
 
+/** The test document's height parameter id (the expression tests' driver). */
+export const TEST_HEIGHT_PARAMETER: ParameterId =
+  createParameterId("param_height");
+
 interface DocumentResult {
   readonly ok: boolean;
   readonly value?: { readonly document: CadDocument };
@@ -47,8 +51,8 @@ function requireDocumentOk(result: DocumentResult, what: string): CadDocument {
 }
 
 /**
- * Builds the test session: body `body_plate` and parameter `width = 10mm`,
- * no features. Deterministic (explicit ids).
+ * Builds the test session: body `body_plate` and parameters `width = 10mm`
+ * and `height = 5mm`, no features. Deterministic (explicit ids).
  */
 export function createTestSession(): CadSession {
   let document = createDocument(createDocumentId("doc_test"));
@@ -63,6 +67,14 @@ export function createTestSession(): CadSession {
       value: length(10),
     }),
     "the width parameter",
+  );
+  document = requireDocumentOk(
+    addDocumentParameter(document, {
+      id: TEST_HEIGHT_PARAMETER,
+      name: "height",
+      value: length(5),
+    }),
+    "the height parameter",
   );
   return createSession(document);
 }

@@ -27,6 +27,14 @@ export interface RibCutInput {
   readonly thicknessMm: number;
 }
 
+/**
+ * The form's rib submission (Phase 21): the thickness is a literal number
+ * or a `$name` reference to an existing document parameter.
+ */
+export interface RibCutInputRef {
+  readonly thicknessMm: number | string;
+}
+
 /** The form's defaults: a 2 mm rib. */
 export const RIB_DEFAULTS: RibCutInput = { thicknessMm: 2 };
 

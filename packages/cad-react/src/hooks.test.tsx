@@ -22,6 +22,8 @@ import {
   createFeatureId,
   length,
   MEASURE_TOOL_ID,
+  parseExpression,
+  printExpression,
   SELECT_TOOL_ID,
   serializeTransaction,
   type CadDocument,
@@ -244,18 +246,22 @@ describe("useCadParameters", () => {
     expect(renders.count).toBe(2);
   });
 
-  it("evaluates text expressions against the document and commits the canonical value", () => {
+  it("commits a text expression as the stored expression; the document recomputes the value", () => {
     const store = createTestStore();
+    const parsed = parseExpression("height * 4");
+    if (!parsed.ok) {
+      throw new Error(`Test expression rejected: ${parsed.error.message}`);
+    }
     function ExpressionProbe(): ReactNode {
       const api = useCadParameters();
       return (
         <button
           type="button"
           onClick={() => {
-            api.setValueFromExpression(TEST_WIDTH_PARAMETER, "width * 2");
+            api.setValueFromExpression(TEST_WIDTH_PARAMETER, "height * 4");
           }}
         >
-          double
+          quadruple
         </button>
       );
     }
@@ -265,24 +271,74 @@ describe("useCadParameters", () => {
         <ExpressionProbe />
       </CadProvider>,
     );
-    fireEvent.click(view.getByText("double"));
+    fireEvent.click(view.getByText("quadruple"));
+    // The probe reads the recomputed cache: the domain evaluated the stored
+    // expression in the same application that stored it (height 5 × 4).
     expect(
       view.container
         .querySelector('[data-testid="parameters-probe"]')
         ?.getAttribute("data-width-mm"),
     ).toBe("20");
     expect(store.commandLog).toHaveLength(1);
+    // The commit IS the expression payload — the serialized AST, no value.
     expect(store.commandLog[0]).toEqual(
       serializeTransaction({
         commands: [
           {
             type: "parameter.set",
             id: TEST_WIDTH_PARAMETER,
-            value: length(20),
+            expression: parsed.value,
           },
         ],
       }),
     );
+    const width = store.getDocument().parameters.parameters[0];
+    const expression = width?.expression ?? null;
+    expect(expression === null ? null : printExpression(expression)).toBe(
+      "height * 4",
+    );
+    expect(width?.value.value).toBe(20);
+  });
+
+  it("surfaces a cycle refusal verbatim and issues nothing", () => {
+    const store = createTestStore();
+    function CycleProbe(): ReactNode {
+      const api = useCadParameters();
+      // `width = width * 2` is a one-node cycle: the gate refuses it.
+      const outcome = api.setValueFromExpression(
+        TEST_WIDTH_PARAMETER,
+        "width * 2",
+      );
+      return (
+        <div
+          data-testid="cycle-probe"
+          data-code={outcome.ok ? "" : outcome.error.code}
+          data-cause-code={
+            outcome.ok || !("cause" in outcome.error)
+              ? ""
+              : (outcome.error.cause?.code ?? "")
+          }
+        />
+      );
+    }
+    const view = render(
+      <CadProvider store={store}>
+        <CycleProbe />
+      </CadProvider>,
+    );
+    const reported = view.container.querySelector(
+      '[data-testid="cycle-probe"]',
+    );
+    // The transaction carries the refusal as its structured cause, and the
+    // document is untouched.
+    expect(reported?.getAttribute("data-code")).toBe(
+      "transaction/command-failed",
+    );
+    expect(reported?.getAttribute("data-cause-code")).toBe("parameter/cycle");
+    expect(store.commandLog).toHaveLength(0);
+    const width = store.getDocument().parameters.parameters[0];
+    expect(width?.expression ?? null).toBeNull();
+    expect(width?.value.value).toBe(10);
   });
 
   it("rejects malformed expressions structurally and issues nothing", () => {

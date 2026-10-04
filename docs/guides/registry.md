@@ -8,11 +8,11 @@ Nothing is on npm (owner decree); nothing is published anywhere.
 
 ## The three source registries
 
-| Registry                                | Items                                                                                                                                                          |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/ui/registry.json`             | 16 shadcn primitives, Formedible, the 11 `cad-*` components, the `plate-workbench` example block                                                               |
-| `packages/cad-components/registry.json` | `component-contract`, `component-kernel`, `cad-component`, `context-kernel`, `nema17-mount`, `arduino-mount`, `enclosure`, the `nema17-assembly-example` block |
-| `apps/web/registry.json`                | the 7 headless tools: 4 inspection (`bounds`, `distance`, `mass-properties`, `radius`) + 3 feature (`extrude`, `revolve`, `hole`)                              |
+| Registry                                | Items                                                                                                                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/ui/registry.json`             | 16 shadcn primitives, Formedible, the 11 `cad-*` components, the `plate-workbench` example block                                                                                                  |
+| `packages/cad-components/registry.json` | `component-contract`, `component-kernel`, `cad-component`, `context-kernel`, `nema17-mount`, `arduino-mount`, `enclosure`, the `nema17-assembly-example` block, the `parametric-cad-viewer` block |
+| `apps/web/registry.json`                | the 7 headless tools: 4 inspection (`bounds`, `distance`, `mass-properties`, `radius`) + 3 feature (`extrude`, `revolve`, `hole`)                                                                 |
 
 ## The pipeline
 
@@ -50,6 +50,53 @@ published. The reference consumer therefore:
 
 Real published packages would need none of this; the fixture documents
 it in `fixtures/cad-consumer/README.md`.
+
+## The parametric viewer block
+
+`parametric-cad-viewer` (authored in `packages/cad-components`, final
+phase) is one installable answer to "a component that draws the part and
+the Formedible for the variables": the CAD viewport on the left, the
+parameter panel's edit-mode Formedible form on the right.
+
+```tsx
+import { ParametricCadViewer } from "@/cad/viewer/parametric-cad-viewer";
+
+<ParametricCadViewer
+  nativeText={nativeDocumentText}
+  bodies={[{ bodyId, tessellation }]} // your kernel's tessellate() output
+  rebuild={async ({ document }) => rederiveBodies(document)}
+/>;
+```
+
+- `nativeText` — the part's native document text, parsed by the format's
+  own full parser; its parameters become the form's fields.
+- `bodies` — the part's tessellated bodies (`null` while your kernel
+  works). The block projects them through the public cad-core projection
+  path and frames a deterministic home camera from the part's own bounds
+  (or your `camera` prop).
+- Edits — every applied edit commits a real `parameter.set` transaction
+  over a real public `createCadStore`: the domain's single interpreter
+  re-evaluates expressions and dependents. `onDocumentChange` emits the
+  edited session's canonical native text; `rebuild` receives it and
+  returns fresh tessellations, which the block re-renders (stale rebuilds
+  are dropped, rejected ones surface verbatim in the status region).
+
+**The honest capability boundary:** the block renders and edits; it does
+not evaluate geometry. The native format's feature graph is
+host-interpreted (the workbench's worker-backed engine), and no public
+package exposes that evaluation — so re-derivation after an edit is the
+consumer's side of the loop (`rebuild`, or `onDocumentChange` with your
+own scheduling). Without `rebuild` the block is emit-only: parameter
+edits update the document and fire the callback, and the rendered
+geometry stays at the tessellations you supplied — no faked re-drive.
+Bring your own kernel (the main-thread Manifold kernel the
+`plate-workbench` block drives is one documented path).
+
+The pure half (`parametric-viewer-core`: parse, summary, projection,
+camera framing, re-serialization) is React-free and unit-tested in
+`@slopcad/cad-components`; the composition is a thin TSX over that core
+plus the two registry items it declares as dependencies
+(`@slopcad/cad-viewport`, `@slopcad/cad-parameter-panel`).
 
 ## Provenance
 

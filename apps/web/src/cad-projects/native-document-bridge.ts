@@ -22,6 +22,7 @@ import {
   type CadSession,
   type FeatureRollbackPoint,
   type NativeCadDocument,
+  type ParameterMetadataValue,
   type RegenerationStateMap,
 } from "@slopcad/cad-core";
 
@@ -56,6 +57,8 @@ export type ParsedNativeSession =
       readonly session: CadSession;
       readonly document: CadDocument;
       readonly scene: WorkbenchSceneKind;
+      /** The document-level metadata (the shareable display title lives here). */
+      readonly metadata: Readonly<Record<string, ParameterMetadataValue>>;
       /**
        * The persisted rollback marker (null when the file carries none), so
        * a reopened document executes the same parked timeline that was
@@ -85,6 +88,7 @@ export function parseNativeTextToSession(text: string): ParsedNativeSession {
       history: parsed.value.history,
     }),
     document: parsed.value.document,
+    metadata: parsed.value.metadata,
     scene: sceneKindOfDocument(parsed.value.document),
     rollback: parsed.value.rollback,
   };

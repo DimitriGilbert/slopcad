@@ -15,12 +15,14 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DuplicateSubmission } from "./duplicate";
 import type { HoleFormValues } from "./feature-forms";
 import type { StructuredHoleSubmission } from "./hole-dialog";
-import type { ThreadCutInput } from "./thread";
+import type { ThreadCutInputRef } from "./thread";
 
 import {
   CurveFeatureForm,
+  DuplicateFeatureForm,
   HoleFeatureForm,
   MirrorFeatureForm,
   PatternFeatureForm,
@@ -80,8 +82,8 @@ async function pickDesignation(designation: string): Promise<void> {
 
 describe("ThreadFeatureForm: the designation picker fills the linked numbers", () => {
   it("fills major diameter and pitch on a pick, keeps hand edits, and never persists the designation", async () => {
-    const onThread = vi.fn<(specification: ThreadCutInput) => void>();
-    render(<ThreadFeatureForm onThread={onThread} />);
+    const onThread = vi.fn<(specification: ThreadCutInputRef) => void>();
+    render(<ThreadFeatureForm onThread={onThread} parameterNames={[]} />);
 
     // The defaults are the M6 row: 6 / 1.
     expect(numberFieldValue(/^Major diameter/)).toBe("6");
@@ -120,8 +122,8 @@ describe("ThreadFeatureForm: the designation picker fills the linked numbers", (
   });
 
   it("refills the numbers on every NEW pick (fine rows overwrite a hand edit)", async () => {
-    const onThread = vi.fn<(specification: ThreadCutInput) => void>();
-    render(<ThreadFeatureForm onThread={onThread} />);
+    const onThread = vi.fn<(specification: ThreadCutInputRef) => void>();
+    render(<ThreadFeatureForm onThread={onThread} parameterNames={[]} />);
 
     // Pick the fine M8x1 row: 8 / 1.
     await pickDesignation("M8x1");
@@ -174,7 +176,14 @@ async function pickSelectOption(
 describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
   it("renders the straight type's schema fields and hides the other types'", () => {
     const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
-    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    render(
+      <HoleFeatureForm
+        datumAxes={[]}
+        onHole={onHole}
+        parameterNames={[]}
+        sketches={[]}
+      />,
+    );
     // The straight type's load-bearing fields are present…
     expect(screen.getByLabelText(/^Diameter/)).toBeDefined();
     expect(screen.getByLabelText(/^Depth/)).toBeDefined();
@@ -190,7 +199,14 @@ describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
 
   it("reveals the counterbore fields when the type selects them", async () => {
     const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
-    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    render(
+      <HoleFeatureForm
+        datumAxes={[]}
+        onHole={onHole}
+        parameterNames={[]}
+        sketches={[]}
+      />,
+    );
     expect(screen.queryByLabelText(/Counterbore/)).toBeNull();
     await pickSelectOption(0, "Counterbore");
     await waitFor(() => {
@@ -203,7 +219,14 @@ describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
 
   it("fills the threaded type's numbers from the ISO designation picker", async () => {
     const onHole = vi.fn<(submission: StructuredHoleSubmission) => void>();
-    render(<HoleFeatureForm datumAxes={[]} onHole={onHole} sketches={[]} />);
+    render(
+      <HoleFeatureForm
+        datumAxes={[]}
+        onHole={onHole}
+        parameterNames={[]}
+        sketches={[]}
+      />,
+    );
     await pickSelectOption(0, "Threaded");
     await waitFor(() => {
       expect(screen.getByLabelText(/Thread major/)).toBeDefined();
@@ -223,6 +246,7 @@ describe("HoleFeatureForm: the schema-driven structured hole dialog", () => {
         datumAxes={[]}
         onHole={onHole}
         onValuesChange={onValuesChange}
+        parameterNames={[]}
         sketches={[]}
       />,
     );
@@ -390,5 +414,94 @@ describe("CurveFeatureForm: the curve module's field list (Phase 47)", () => {
     expect(submitted.name).toBe("spine guide");
     expect(submitted.kind).toBe("interpolated-spline");
     expect(submitted.pointsText).toContain("20, 0, 20");
+  });
+});
+
+describe("DuplicateFeatureForm: the source picker and the $-able numbers", () => {
+  const BODIES = [
+    { id: "body_a", name: "pad 1" },
+    { id: "body_b", name: "copy 1" },
+  ];
+
+  function sourceTrigger(): HTMLElement {
+    const trigger = document.querySelector<HTMLElement>(
+      "[data-slot=select-trigger]",
+    );
+    if (trigger === null) throw new Error("the source trigger is absent");
+    return trigger;
+  }
+
+  async function pickSource(name: string): Promise<void> {
+    fireEvent.click(sourceTrigger());
+    await waitFor(() => {
+      expect(document.querySelector("[data-slot=select-item]")).not.toBeNull();
+    });
+    const item = [...document.querySelectorAll("[data-slot=select-item]")].find(
+      (element) => element.textContent === name,
+    );
+    if (item === undefined) throw new Error(`the source ${name} is absent`);
+    fireEvent.pointerDown(item, { pointerType: "mouse" });
+    fireEvent.click(item, { detail: 1, pointerType: "mouse" });
+  }
+
+  it("renders the defaults and submits the picked body with the literal numbers", async () => {
+    const onDuplicate = vi.fn<(specification: DuplicateSubmission) => void>();
+    render(
+      <DuplicateFeatureForm
+        bodies={BODIES}
+        onDuplicate={onDuplicate}
+        parameterNames={[]}
+      />,
+    );
+    expect(numberFieldValue(/Step x/)).toBe("15");
+    expect(numberFieldValue(/Step y/)).toBe("0");
+    expect(numberFieldValue(/Step z/)).toBe("0");
+    expect(numberFieldValue(/Step rotation/)).toBe("0");
+    expect(numberFieldValue(/Copies/)).toBe("3");
+
+    await pickSource("copy 1");
+    editNumberField(/Step y/, "8");
+    editNumberField(/Step rotation/, "90");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onDuplicate).toHaveBeenCalledTimes(1));
+    expect(onDuplicate.mock.calls[0]?.[0]).toEqual({
+      sourceBodyId: "body_b",
+      dxMm: 15,
+      dyMm: 8,
+      dzMm: 0,
+      axis: 3,
+      angleDeg: 90,
+      count: 3,
+    });
+  });
+
+  it("passes a $name token through and blocks an unknown one", async () => {
+    const onDuplicate = vi.fn<(specification: DuplicateSubmission) => void>();
+    const first = render(
+      <DuplicateFeatureForm
+        bodies={BODIES}
+        onDuplicate={onDuplicate}
+        parameterNames={["spacing"]}
+      />,
+    );
+    editNumberField(/Step x/, "$spacing");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onDuplicate).toHaveBeenCalledTimes(1));
+    expect(onDuplicate.mock.calls[0]?.[0].dxMm).toBe("$spacing");
+    first.unmount();
+
+    // An unknown token never reaches the handler: the field's own
+    // validation blocks the submit.
+    const refused = vi.fn<(specification: DuplicateSubmission) => void>();
+    render(
+      <DuplicateFeatureForm
+        bodies={BODIES}
+        onDuplicate={refused}
+        parameterNames={["spacing"]}
+      />,
+    );
+    editNumberField(/Copies/, "$nope");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(refused).not.toHaveBeenCalled();
   });
 });

@@ -1,24 +1,69 @@
 import { readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import type { Download, Page } from "@playwright/test";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import { join } from "node:path";
+import type { Page } from "@playwright/test";
 import { expect, test as base } from "@playwright/test";
-import type { SettleAnchor } from "../e2e-render/helpers";
 
 import {
   dispatchedCount,
-  faceWithNormal,
   readFaceAnchors,
   waitForImportedMeshSettled,
   waitForSettledScene,
 } from "../e2e-render/helpers";
-import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
+import { createCadWorkbenchSession } from "../src/cad-workbench/session";
+import { serializeSessionToNativeText } from "../src/cad-projects/native-document-bridge";
+import { VIEWER_FRAME_HEADERS } from "../src/viewer/viewer-frame-policy";
+import {
+  decodeNativeFromShare,
+  encodeNativeForShare,
+} from "../src/viewer/share-codec";
 import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
 import { CHAIN_FILLET_DEFAULT_RADIUS_MM } from "../src/cad-workbench/chain";
 import {
   HOLE_DEFAULT_DEPTH_MM,
   HOLE_DEFAULT_DIAMETER_MM,
 } from "../src/cad-workbench/hole";
+import {
+  activateSketchTool,
+  annotationsOf,
+  assertPngs,
+  cameraAttribute,
+  cameraMode,
+  clickCanvasPoint,
+  closeCommandMenu,
+  collectDownloads,
+  COMPLETE,
+  COMPLETE_ROOT,
+  DIALOG,
+  drawAndExtrudeRod,
+  drawPathSpine,
+  drawProfileSquare,
+  drawRectangle,
+  enterSketchMode,
+  holeLastExtrusion,
+  OCCT_ROOT,
+  openCommandMenu,
+  openComplete,
+  openDialogViaMenu,
+  readMenuRowIds,
+  readTimeline,
+  readWebMcpSnapshot,
+  RECT,
+  REDO_BUTTON,
+  rootAttribute,
+  runCommand,
+  saveSketch,
+  saveThrowawaySketch,
+  schemaTypeOf,
+  SKETCH,
+  submitDialogAndSettle,
+  UNDO_BUTTON,
+  undoRedoCheckpoint,
+  VIEWPORT_COMPLETE,
+  volumeNear,
+  waitForRootSettle,
+} from "./helpers";
 
 /**
  * The EXHAUSTIVE ONE-SESSION journey — one user, one browser context, the
@@ -85,6 +130,7 @@ const PLANNED_ROUTES: readonly string[] = [
   "/render",
   "/io",
   "/projects",
+  "/viewer",
 ];
 
 /** The one-process ledger (one worker, serial mode — no cross-process races). */
@@ -159,24 +205,29 @@ test.describe.configure({ mode: "serial" });
 // Shared constants and step-library helpers (the existing suites' surfaces)
 // ---------------------------------------------------------------------------
 
-const COMPLETE_ROOT = "workbench-complete-root";
-const OCCT_ROOT = "workbench-complete-occt-root";
-const COMPLETE = `#${COMPLETE_ROOT}`;
 const OCCT = `#${OCCT_ROOT}`;
-const SKETCH = "#sketch-root";
 const TREE = '[data-slot="cad-model-tree"]';
 const PROPERTY = '[data-slot="cad-property-panel"]';
 const TOOLBAR = '[data-slot="cad-toolbar"]';
-const UNDO_BUTTON = 'button[aria-label="Undo"]';
-const REDO_BUTTON = 'button[aria-label="Redo"]';
-const DIALOG = '[data-testid="feature-form-dialog"]';
-const VIEWPORT_COMPLETE = "workbench-complete-viewport";
 
-/** The sketch rectangle the create journeys draw (workplane mm). */
-const RECT = { x0: 10, y0: 10, x1: 30, y1: 25 } as const;
+/** The eight workbench WebMCP tools the complete page registers (Phase 7). */
+const WORKBENCH_WEBMCP_TOOLS = [
+  "cad_get_document_summary",
+  "cad_list_commands",
+  "cad_run_command",
+  "cad_set_parameter",
+  "cad_undo",
+  "cad_redo",
+  "cad_apply_commands",
+  "cad_measure",
+] as const;
 
-/** Relative volume tolerance (the workbench suite's documented band). */
-const VOLUME_REL_TOLERANCE = 0.005;
+/** The projects WebMCP tools the authenticated pages register (Phase 8). */
+const PROJECTS_WEBMCP_TOOLS = [
+  "projects_list",
+  "projects_create",
+  "open_document",
+] as const;
 
 /** The boot plate's analytic volume (30 × 20 × 10 with the ⌀8 bore). */
 const BOOT_PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 16 * 10;
@@ -219,321 +270,6 @@ const PLATE_60_VOLUME = 60 * 40 * 10;
 const PLATE_WITH_HOLE_VOLUME = PLATE_60_VOLUME - Math.PI * 25 * 10;
 const TRIMMED_AREA = 10 * 20;
 const THICKENED_SHEET_VOLUME = TRIMMED_AREA * 2;
-
-/** True when `value` matches `expected` inside the documented band. */
-function volumeNear(value: number, expected: number): boolean {
-  return Math.abs(value - expected) <= expected * VOLUME_REL_TOLERANCE;
-}
-
-/** A workplane mm point → canvas-element CSS pixel point. */
-function canvasPoint(x: number, y: number): { x: number; y: number } {
-  return {
-    x: SKETCH_CANVAS.origin.x + x * SKETCH_CANVAS.scale,
-    y: SKETCH_CANVAS.origin.y - y * SKETCH_CANVAS.scale,
-  };
-}
-
-/** Clicks the sketch canvas at a workplane mm point. */
-async function clickCanvasPoint(
-  page: Page,
-  x: number,
-  y: number,
-): Promise<void> {
-  await page
-    .locator(`${SKETCH} [data-sketch-surface]`)
-    .click({ position: canvasPoint(x, y) });
-}
-
-/** Activates a sketch tool through the sketch toolbar. */
-async function activateSketchTool(page: Page, toolId: string): Promise<void> {
-  await page.locator(`[data-sketch-tool-id="${toolId}"]`).click();
-  await expect(page.locator(SKETCH)).toHaveAttribute(
-    "data-sketch-tool",
-    toolId,
-  );
-}
-
-/** The complete workbench re-shows its hint on every page load: dismiss it.
- * The hint mounts AFTER the settle stamp (a delayed getting-started float),
- * so the dismissal waits briefly for it instead of racing the mount — and
- * bounded, so a hint-free page never stalls. */
-async function dismissHint(page: Page): Promise<void> {
-  const dismiss = page.locator('[data-testid="workbench-sketch-hint-dismiss"]');
-  try {
-    await dismiss.click({ timeout: 3_000 });
-    await page.waitForTimeout(150);
-  } catch {
-    // The hint did not mount on this load (already dismissed this session).
-  }
-}
-
-/** Opens a complete workbench route and waits for the settled first scene. */
-async function openComplete(
-  page: Page,
-  rootId: string = COMPLETE_ROOT,
-): Promise<string> {
-  await page.goto(
-    rootId === OCCT_ROOT ? "/workbench-complete-occt" : "/workbench-complete",
-  );
-  await dismissHint(page);
-  return waitForSettledScene(page, rootId);
-}
-
-/** Waits until the complete workbench root's settle stamp agrees. */
-async function waitForRootSettle(
-  page: Page,
-  rootId: string,
-  anchor?: SettleAnchor,
-): Promise<string> {
-  return waitForSettledScene(page, rootId, anchor);
-}
-
-/** The parsed feature-timeline surface. */
-interface TimelineSurface {
-  readonly rollback: unknown;
-  readonly entries: readonly {
-    readonly id: string;
-    readonly kind: string;
-    readonly status: string;
-    readonly diagnostics?: readonly { readonly message: string }[];
-  }[];
-  readonly executed: readonly string[];
-}
-
-/** One read of the complete workbench's machine surface. */
-async function readTimeline(
-  page: Page,
-  rootId: string,
-): Promise<TimelineSurface> {
-  const raw = await page
-    .locator(`#${rootId}`)
-    .getAttribute("data-feature-timeline")
-    .then((value) => value ?? "{}");
-  return JSON.parse(raw) as TimelineSurface;
-}
-
-/** One camera attribute off the viewport's machine surface. */
-async function cameraMode(page: Page): Promise<string> {
-  return (
-    (await page
-      .locator(`#${VIEWPORT_COMPLETE} [data-camera-mode]`)
-      .first()
-      .getAttribute("data-camera-mode")) ?? ""
-  );
-}
-
-/** One named camera attribute off the viewport container. */
-async function cameraAttribute(page: Page, name: string): Promise<string> {
-  return (
-    (await page
-      .locator(`#${VIEWPORT_COMPLETE} [data-camera-${name}]`)
-      .first()
-      .getAttribute(`data-camera-${name}`)) ?? ""
-  );
-}
-
-/** One root attribute off the complete workbench root. */
-async function rootAttribute(page: Page, name: string): Promise<string> {
-  return (await page.locator(COMPLETE).getAttribute(name)) ?? "";
-}
-
-/** Opens the command menu (Ctrl+K) on a complete workbench. */
-async function openCommandMenu(page: Page, rootId: string): Promise<void> {
-  await page.keyboard.press("ControlOrMeta+k");
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-command-menu-open",
-    "true",
-  );
-}
-
-/** Closes the command menu with Escape. */
-async function closeCommandMenu(page: Page, rootId: string): Promise<void> {
-  await page.keyboard.press("Escape");
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-command-menu-open",
-    "false",
-  );
-}
-
-/** Reads every rendered command-menu row id (menu left OPEN). */
-async function readMenuRowIds(page: Page): Promise<string[]> {
-  const rows = page.locator("[data-cad-command-id]");
-  const count = await rows.count();
-  const ids: string[] = [];
-  for (let index = 0; index < count; index += 1) {
-    ids.push((await rows.nth(index).getAttribute("data-cad-command-id")) ?? "");
-  }
-  return ids;
-}
-
-/** Runs one command through the menu row (the user's always-reachable path). */
-async function runCommand(
-  page: Page,
-  rootId: string,
-  id: string,
-): Promise<void> {
-  await openCommandMenu(page, rootId);
-  await page.locator(`[data-cad-command-id="${id}"]`).click();
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-command-menu-open",
-    "false",
-  );
-}
-
-/**
- * Opens a feature dialog through its EXACT command-menu row (Ctrl+K →
- * row click — never a fuzzy query: "helix" ranks the curve command's
- * keywords too, and the top row is not stable across document states).
- * The ids are the checklist's own command targets.
- */
-async function openDialogViaMenu(
-  page: Page,
-  rootId: string,
-  commandId: string,
-): Promise<void> {
-  await openCommandMenu(page, rootId);
-  await page.locator(`[data-cad-command-id="${commandId}"]`).click();
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-command-menu-open",
-    "false",
-  );
-  await expect(page.locator(DIALOG)).toBeVisible();
-}
-
-/** Submits the open feature dialog and settles the re-dispatched scene. */
-async function submitDialogAndSettle(
-  page: Page,
-  rootId: string,
-  name: string,
-): Promise<string> {
-  const before = await dispatchedCount(page, rootId);
-  await page.locator(DIALOG).getByRole("button", { name }).click();
-  await expect(page.locator(DIALOG)).toBeHidden();
-  return waitForRootSettle(page, rootId, { afterDispatch: before });
-}
-
-/** Enters sketch mode from the complete workbench's model workspace. */
-async function enterSketchMode(
-  page: Page,
-  rootId: string = COMPLETE_ROOT,
-): Promise<void> {
-  await page.locator('[data-testid="complete-mode-toggle"]').click();
-  await expect(page.locator(SKETCH)).toBeVisible();
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-sketch-mode",
-    "sketch",
-  );
-}
-
-/** Saves the current drawing as a standalone sketch record. */
-async function saveSketch(
-  page: Page,
-  rootId: string = COMPLETE_ROOT,
-): Promise<void> {
-  await page.locator('[data-testid="sketch-save"]').click();
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-sketch-mode",
-    "model",
-  );
-}
-
-/** Saves a throwaway line sketch: the sketch-feature command rows gate on
- * a pool of >= 2 sketches (complete-workbench's canAuthorSketchFeatures),
- * so a fresh document needs a second record before the row is enabled. */
-async function saveThrowawaySketch(page: Page, rootId: string): Promise<void> {
-  await enterSketchMode(page, rootId);
-  await activateSketchTool(page, "line");
-  await clickCanvasPoint(page, 40, 40);
-  await clickCanvasPoint(page, 45, 45);
-  await saveSketch(page, rootId);
-}
-
-/** Draws the journey rectangle (two corner picks) and pins the entity. */
-async function drawRectangle(page: Page): Promise<void> {
-  await activateSketchTool(page, "rectangle");
-  await clickCanvasPoint(page, RECT.x0, RECT.y0);
-  await clickCanvasPoint(page, RECT.x1, RECT.y1);
-  const entities = JSON.parse(
-    (await page.locator(SKETCH).getAttribute("data-sketch-entities")) ?? "[]",
-  ) as { kind: string }[];
-  expect(entities.filter((entity) => entity.kind === "rectangle").length).toBe(
-    1,
-  );
-}
-
-/** Draws the ±10 profile square (the sweep/loft profile). */
-async function drawProfileSquare(page: Page): Promise<void> {
-  await activateSketchTool(page, "rectangle");
-  await clickCanvasPoint(page, -10, -10);
-  await clickCanvasPoint(page, 10, 10);
-}
-
-/** Draws the straight spine (0,0) → (0,40) with the line tool. */
-async function drawPathSpine(page: Page): Promise<void> {
-  await activateSketchTool(page, "line");
-  await clickCanvasPoint(page, 0, 0);
-  await clickCanvasPoint(page, 0, 40);
-}
-
-/** Draws and extrudes the ⌀6 rod (the sketch extrude's default depth). */
-async function drawAndExtrudeRod(page: Page, rootId: string): Promise<string> {
-  await enterSketchMode(page, rootId === OCCT_ROOT ? OCCT_ROOT : COMPLETE_ROOT);
-  await activateSketchTool(page, "circle");
-  await clickCanvasPoint(page, 0, 0);
-  await clickCanvasPoint(page, 3, 0);
-  await page.locator('[data-testid="sketch-extrude"]').click();
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-scene-kind",
-    "extrude",
-  );
-  return waitForRootSettle(page, rootId);
-}
-
-/** The plain-hole dialog journey on the last extrusion (the bridge verb). */
-async function holeLastExtrusion(page: Page, rootId: string): Promise<string> {
-  const before = await dispatchedCount(page, rootId);
-  await page.locator('[data-testid="complete-hole"]').click();
-  await expect(page.locator(`#${rootId}`)).toHaveAttribute(
-    "data-scene-kind",
-    "hole",
-  );
-  return waitForRootSettle(page, rootId, { afterDispatch: before });
-}
-
-/** One undo/redo checkpoint: the last feature leaves and returns. */
-async function undoRedoCheckpoint(
-  page: Page,
-  rootId: string,
-  featureKind: string,
-): Promise<void> {
-  const entriesBefore = (await readTimeline(page, rootId)).entries.length;
-  await page.locator(UNDO_BUTTON).click();
-  await page.waitForFunction(
-    ({ id, count }) =>
-      (
-        JSON.parse(
-          document.getElementById(id)?.getAttribute("data-feature-timeline") ??
-            "{}",
-        ) as { entries: unknown[] }
-      ).entries.length ===
-      count - 1,
-    { id: rootId, count: entriesBefore },
-  );
-  await page.locator(REDO_BUTTON).click();
-  await page.waitForFunction(
-    ({ id, count, kind }) => {
-      const timeline = JSON.parse(
-        document.getElementById(id)?.getAttribute("data-feature-timeline") ??
-          "{}",
-      ) as { entries: readonly { kind: string }[] };
-      return (
-        timeline.entries.length === count &&
-        timeline.entries.some((entry) => entry.kind === kind)
-      );
-    },
-    { id: rootId, count: entriesBefore, kind: featureKind },
-  );
-}
 
 /** The session user identity (a fresh public-flow sign-up per run). */
 const SESSION_USER = {
@@ -592,7 +328,11 @@ test("s02 the plain workbench models and history round-trips", async ({
     const extruded = await waitForRootSettle(page, "workbench-root", {
       afterDispatch: before,
     });
-    const analytic = CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
+    // Phase 16 document-scene semantics: the applied scene IS the applied
+    // document — the boot plate renders as one body BESIDE the new pad, so
+    // the settle is the DOCUMENT volume (plate + pad).
+    const analytic =
+      BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
     expect(
       volumeNear(Number(extruded), analytic),
       `extruded ${extruded} vs analytic ${String(analytic)}`,
@@ -1198,7 +938,9 @@ test("s06b extrude the profile and cut the plain hole", async ({
     const extruded = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: before,
     });
-    const analytic = CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
+    // The document scene renders the boot plate beside the pad (Phase 16).
+    const analytic =
+      BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
     expect(volumeNear(Number(extruded), analytic)).toBe(true);
 
     // THE PLAIN HOLE bridge cuts the new extrusion.
@@ -1225,9 +967,15 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
   await stage("s07 sketch-on-face", async () => {
     await openComplete(page);
 
-    // The base extrusion (the s06 create journey's analytic pad).
+    // The base extrusion: the same 20×15 rectangle the create journeys
+    // draw, parked at x ∈ [40,60] — BESIDE the boot plate's footprint.
+    // Phase 16 document-scene re-baseline: the plate renders beside the
+    // pad now, and a pad overlapping the plate's footprint would put the
+    // two top faces coplanar (the face pick could not distinguish them).
     await enterSketchMode(page);
-    await drawRectangle(page);
+    await activateSketchTool(page, "rectangle");
+    await clickCanvasPoint(page, 40, 10);
+    await clickCanvasPoint(page, 60, 25);
     const before = await dispatchedCount(page, COMPLETE_ROOT);
     await page.locator('[data-testid="sketch-extrude"]').click();
     await expect(page.locator(COMPLETE)).toHaveAttribute(
@@ -1238,11 +986,32 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
       afterDispatch: before,
     });
     const baseAnalytic = CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM);
-    expect(volumeNear(Number(baseVolume), baseAnalytic)).toBe(true);
+    // The document scene renders the boot plate beside the base pad
+    // (Phase 16).
+    expect(
+      volumeNear(Number(baseVolume), BOOT_PLATE_VOLUME + baseAnalytic),
+    ).toBe(true);
 
-    // SELECT the driving face through the published anchor surface.
+    // SELECT the driving face through the published anchor surface. The
+    // document scene carries the plate's faces too, so the search filters
+    // to the base extrusion's own top face.
     const anchors = await readFaceAnchors(page, COMPLETE_ROOT);
-    const top = faceWithNormal(anchors, [0, 0, 1]);
+    const topMatches = Object.entries(anchors).filter(([key, anchor]) => {
+      if (!key.startsWith("body_extrude/")) return false;
+      if (anchor.normal === null) return false;
+      return (
+        Math.abs(anchor.normal[0]) <= 0.05 &&
+        Math.abs(anchor.normal[1]) <= 0.05 &&
+        Math.abs(anchor.normal[2] - 1) <= 0.05
+      );
+    });
+    expect(topMatches.length, "exactly one top face on the base pad").toBe(1);
+    const topEntry = topMatches[0];
+    if (topEntry === undefined) throw new Error("unreachable: top asserted");
+    const top = {
+      faceIndex: Number(topEntry[0].split("/")[1]),
+      anchor: topEntry[1],
+    };
     await page
       .locator(`#${VIEWPORT_COMPLETE} canvas`)
       .click({ position: { x: top.anchor.point[0], y: top.anchor.point[1] } });
@@ -1275,7 +1044,11 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
     const padded = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: beforePad,
     });
-    expect(volumeNear(Number(padded), baseAnalytic * 2)).toBe(true);
+    // The pad composition unions base + pad (the base body is absorbed);
+    // the document scene renders the boot plate beside them (Phase 16).
+    expect(
+      volumeNear(Number(padded), BOOT_PLATE_VOLUME + baseAnalytic * 2),
+    ).toBe(true);
 
     // EDIT THE DRIVING FACE: the datum origin lifts and the pad follows.
     const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
@@ -1284,7 +1057,9 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
     const edited = await waitForRootSettle(page, COMPLETE_ROOT, {
       afterDispatch: beforeEdit,
     });
-    expect(volumeNear(Number(edited), baseAnalytic * 2.5)).toBe(true);
+    expect(
+      volumeNear(Number(edited), BOOT_PLATE_VOLUME + baseAnalytic * 2.5),
+    ).toBe(true);
     const datums = JSON.parse(
       (await page.locator(COMPLETE).getAttribute("data-datums")) ?? "[]",
     ) as { resolved: boolean; origin: readonly [number, number, number] }[];
@@ -1727,61 +1502,6 @@ test("s10b datum geometry and 3D curves with their history", async ({
   });
 });
 
-/**
- * Collects `expected` downloads produced by `run` (bounded poll).
- *
- * HISTORY (probed, this habitat): the camera-series commands wait per frame
- * on `data-rendered-frames`, and that ledger used to advance on document
- * settles only — camera-only applications never re-settled the document, so
- * every frame burned its internal 10s degrade before the capture (~90s for
- * the 8-frame turntable, ~45s for the isometric; output was still correct).
- * The ledger now counts COMMITTED camera renders too (the scene's
- * camera-settle probe → the host's `noteRenderedFrame`), so each frame
- * completes as soon as its camera actually rendered — seconds per series.
- * The budgets stay as bounded caps over the fast path, not a license to
- * degrade again.
- */
-async function collectDownloads(
-  page: Page,
-  run: () => Promise<void>,
-  expected: number,
-  budgetMs: number,
-): Promise<Download[]> {
-  const downloads: Download[] = [];
-  const collector = (download: Download): void => {
-    downloads.push(download);
-  };
-  page.on("download", collector);
-  try {
-    await run();
-    await expect
-      .poll(() => downloads.length, { timeout: budgetMs })
-      .toBe(expected);
-  } finally {
-    page.off("download", collector);
-  }
-  return downloads;
-}
-
-/** Asserts every download is a PNG, in `names` order, all bytes distinct. */
-async function assertPngs(
-  downloads: Download[],
-  names: string[],
-): Promise<void> {
-  const shas = new Set<string>();
-  const actual: string[] = [];
-  for (const download of downloads) {
-    actual.push(download.suggestedFilename());
-    const path = await download.path();
-    if (path === null) throw new Error("download has no path");
-    const bytes = await readFile(path);
-    expect(bytes.subarray(1, 4).toString("ascii")).toBe("PNG");
-    shas.add(createHash("sha256").update(bytes).digest("hex"));
-  }
-  expect(actual).toEqual(names);
-  expect(shas.size).toBe(names.length);
-}
-
 test("s11 snapshot exports: PNG, the 8-frame turntable, and the isometric series", async ({
   sessionPage: page,
 }) => {
@@ -1894,9 +1614,11 @@ test("s12 OCCT sweep and loft land on the analytic volumes", async ({
     const swept = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeSweep,
     });
+    // The document scene renders the boot plate beside the swept tube
+    // (Phase 16).
     expect(
-      volumeNear(Number(swept), SWEEP_VOLUME),
-      `swept ${swept} vs analytic ${String(SWEEP_VOLUME)}`,
+      volumeNear(Number(swept), BOOT_PLATE_VOLUME + SWEEP_VOLUME),
+      `swept ${swept} vs analytic ${String(BOOT_PLATE_VOLUME + SWEEP_VOLUME)}`,
     ).toBe(true);
     cover("sweep-feature");
     await undoRedoCheckpoint(page, OCCT_ROOT, "sweep");
@@ -1926,7 +1648,10 @@ test("s12b OCCT loft lands on the Simpson volume and re-drives", async ({
     const lofted = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeLoft,
     });
-    expect(volumeNear(Number(lofted), LOFT_VOLUME_20)).toBe(true);
+    // The boot plate rides beside the loft (Phase 16 document scene).
+    expect(volumeNear(Number(lofted), BOOT_PLATE_VOLUME + LOFT_VOLUME_20)).toBe(
+      true,
+    );
 
     // The station edit re-drives to the Simpson volume at 50 mm.
     const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
@@ -1935,7 +1660,9 @@ test("s12b OCCT loft lands on the Simpson volume and re-drives", async ({
     const redriven = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeEdit,
     });
-    expect(volumeNear(Number(redriven), LOFT_VOLUME_50)).toBe(true);
+    expect(
+      volumeNear(Number(redriven), BOOT_PLATE_VOLUME + LOFT_VOLUME_50),
+    ).toBe(true);
     cover("loft-feature");
   });
 });
@@ -1968,9 +1695,12 @@ test("s13 OCCT helix and thread land inside the derived bands", async ({
     const helical = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeHelix,
     });
+    // The document volume: the boot plate rides beside the screw (the
+    // band covers the plate's documented bore deficit too).
+    const helixDocument = BOOT_PLATE_VOLUME + HELIX_OCCT;
     expect(
-      Math.abs(Number(helical) - HELIX_OCCT) / HELIX_OCCT,
-      `helical ${helical} vs derived ${String(HELIX_OCCT)}`,
+      Math.abs(Number(helical) - helixDocument) / helixDocument,
+      `helical ${helical} vs derived ${String(helixDocument)}`,
     ).toBeLessThan(2e-3);
     cover("helix-feature");
   });
@@ -1994,9 +1724,16 @@ test("s13b OCCT thread inside the derived band and its re-drive", async ({
     const threaded = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeThread }),
     );
-    expect(threaded).toBeGreaterThanOrEqual(ROD_VOLUME - THREAD_TOOL_VOLUME);
+    // The document volume: the boot plate AND s13's helix body are part
+    // of this document (the stage continues the same session), and the
+    // document scene renders every lineage — plate + helix + the threaded
+    // rod (the thread output absorbs its base).
+    const threadDocument = BOOT_PLATE_VOLUME + HELIX_OCCT + ROD_VOLUME;
+    expect(threaded).toBeGreaterThanOrEqual(
+      threadDocument - THREAD_TOOL_VOLUME,
+    );
     expect(threaded).toBeLessThanOrEqual(
-      ROD_VOLUME - THREAD_TOOL_VOLUME * 0.83,
+      threadDocument - THREAD_TOOL_VOLUME * 0.83,
     );
     const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("threadLength1", { exact: true }).fill("8");
@@ -2087,14 +1824,17 @@ test("s14 OCCT draft, rib, scale, thicken, and split land on the analytic volume
     const drafted = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeDraft,
     });
-    expect(volumeNear(Number(drafted), DRAFT_VOLUME)).toBe(true);
+    // The boot plate rides beside the frustum (Phase 16 document scene).
+    expect(volumeNear(Number(drafted), BOOT_PLATE_VOLUME + DRAFT_VOLUME)).toBe(
+      true,
+    );
     const beforeFlat = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("extrudeTaper1", { exact: true }).fill("0");
     await page.getByRole("button", { name: "Apply" }).click();
     const flat = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeFlat,
     });
-    expect(volumeNear(Number(flat), ROD_VOLUME)).toBe(true);
+    expect(volumeNear(Number(flat), BOOT_PLATE_VOLUME + ROD_VOLUME)).toBe(true);
     cover("draft-taper-feature");
   });
 });
@@ -2121,8 +1861,9 @@ test("s14b OCCT rib unions and re-drives", async ({ sessionPage: page }) => {
     const ribbed = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeRib }),
     );
-    expect(ribbed).toBeGreaterThan(ROD_VOLUME);
-    expect(ribbed).toBeLessThanOrEqual(ROD_VOLUME + 20);
+    // The document volume: the boot plate rides beside the ribbed rod.
+    expect(ribbed).toBeGreaterThan(BOOT_PLATE_VOLUME + ROD_VOLUME);
+    expect(ribbed).toBeLessThanOrEqual(BOOT_PLATE_VOLUME + ROD_VOLUME + 20);
     const beforeRibEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("ribThickness", { exact: true }).fill("4");
     await page.getByRole("button", { name: "Apply" }).click();
@@ -2152,14 +1893,21 @@ test("s14c OCCT scale doubles cubically", async ({ sessionPage: page }) => {
     const scaled = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeScale,
     });
-    expect(volumeNear(Number(scaled), ROD_VOLUME * 8)).toBe(true);
+    // The document volume: the boot plate is NOT scaled — the scale
+    // feature rebuilds its base into its own output body, which the
+    // document scene renders beside the plate (Phase 16).
+    expect(volumeNear(Number(scaled), BOOT_PLATE_VOLUME + ROD_VOLUME * 8)).toBe(
+      true,
+    );
     const beforeScaleEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("scaleFactor", { exact: true }).fill("3");
     await page.getByRole("button", { name: "Apply" }).click();
     const bigger = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeScaleEdit,
     });
-    expect(volumeNear(Number(bigger), ROD_VOLUME * 27)).toBe(true);
+    expect(
+      volumeNear(Number(bigger), BOOT_PLATE_VOLUME + ROD_VOLUME * 27),
+    ).toBe(true);
     cover("scale-feature");
   });
 });
@@ -2183,7 +1931,10 @@ test("s14d OCCT thicken hollows to the exact shell", async ({
     const hollowed = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeThicken,
     });
-    expect(volumeNear(Number(hollowed), THICKEN_VOLUME)).toBe(true);
+    // The boot plate rides beside the shell (Phase 16 document scene).
+    expect(
+      volumeNear(Number(hollowed), BOOT_PLATE_VOLUME + THICKEN_VOLUME),
+    ).toBe(true);
     cover("thicken-shell-feature");
   });
 });
@@ -2214,14 +1965,19 @@ test("s14e OCCT split keeps the analytic half", async ({
     const split = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeSplit,
     });
-    expect(volumeNear(Number(split), SPLIT_VOLUME)).toBe(true);
+    // The boot plate rides beside the kept half (Phase 16 document scene).
+    expect(volumeNear(Number(split), BOOT_PLATE_VOLUME + SPLIT_VOLUME)).toBe(
+      true,
+    );
     const beforeFlip = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("splitSide", { exact: true }).fill("-1");
     await page.getByRole("button", { name: "Apply" }).click();
     const flipped = await waitForRootSettle(page, OCCT_ROOT, {
       afterDispatch: beforeFlip,
     });
-    expect(volumeNear(Number(flipped), SPLIT_VOLUME)).toBe(true);
+    expect(volumeNear(Number(flipped), BOOT_PLATE_VOLUME + SPLIT_VOLUME)).toBe(
+      true,
+    );
     cover("split-body-feature");
   });
 });
@@ -2277,6 +2033,11 @@ test("s15 OCCT structured holes land on the derived volumes", async ({
       Math.PI * 16 * (6 - tip) +
       (Math.PI * 16 * tip) / 3 +
       Math.PI * (49 - 16) * 3;
+    // The document volume: the boot plate renders beside the drilled plate
+    // (Phase 16). The band covers the boot plate's documented bore deficit
+    // (≈0.08% of its own volume), which the tighter feature-only band
+    // could not.
+    const counterboreDocument = BOOT_PLATE_VOLUME + plateVolume - cboreRemoved;
     const before = await dispatchedCount(page, OCCT_ROOT);
     await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
     await expect(page.locator(DIALOG)).toBeHidden();
@@ -2285,9 +2046,8 @@ test("s15 OCCT structured holes land on the derived volumes", async ({
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: before }),
     );
     expect(
-      Math.abs(counterbored - (plateVolume - cboreRemoved)) /
-        (plateVolume - cboreRemoved),
-    ).toBeLessThanOrEqual(1e-4);
+      Math.abs(counterbored - counterboreDocument) / counterboreDocument,
+    ).toBeLessThanOrEqual(2e-3);
 
     // The depth edit re-drives deeper.
     const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
@@ -2300,10 +2060,10 @@ test("s15 OCCT structured holes land on the derived volumes", async ({
       Math.PI * 16 * (8 - tip) +
       (Math.PI * 16 * tip) / 3 +
       Math.PI * (49 - 16) * 3;
+    const deepDocument = BOOT_PLATE_VOLUME + plateVolume - deepRemoved;
     expect(
-      Math.abs(reDriven - (plateVolume - deepRemoved)) /
-        (plateVolume - deepRemoved),
-    ).toBeLessThanOrEqual(1e-4);
+      Math.abs(reDriven - deepDocument) / deepDocument,
+    ).toBeLessThanOrEqual(2e-3);
     expect(reDriven).toBeLessThan(counterbored);
     cover("structured-hole-feature");
   });
@@ -2357,10 +2117,13 @@ test("s15b the positions sketch cuts many holes from one feature", async ({
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeMany }),
     );
     const straightRemoved = Math.PI * 16 * (6 - tip) + (Math.PI * 16 * tip) / 3;
+    // The document volume: the boot plate rides beside the drilled plate
+    // (Phase 16); the band covers its documented bore deficit.
+    const twoHoleDocument =
+      BOOT_PLATE_VOLUME + plateVolume - 2 * straightRemoved;
     expect(
-      Math.abs(twoHoles - (plateVolume - 2 * straightRemoved)) /
-        (plateVolume - 2 * straightRemoved),
-    ).toBeLessThanOrEqual(1e-4);
+      Math.abs(twoHoles - twoHoleDocument) / twoHoleDocument,
+    ).toBeLessThanOrEqual(2e-3);
   });
 });
 
@@ -2388,7 +2151,11 @@ test("s16 OCCT pattern, path pattern, mirror, booleans, and the moved body", asy
         afterDispatch: beforePattern,
       }),
     );
-    expect(volumeNear(patterned, 2 * ROD_VOLUME)).toBe(true);
+    // The document volume: the boot plate rides beside the pattern
+    // (Phase 16 document scene).
+    expect(volumeNear(patterned, BOOT_PLATE_VOLUME + 2 * ROD_VOLUME)).toBe(
+      true,
+    );
     const beforePatternEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("patternCount1", { exact: true }).fill("5");
     await page.getByLabel("patternSpacing1", { exact: true }).fill("30");
@@ -2398,7 +2165,7 @@ test("s16 OCCT pattern, path pattern, mirror, booleans, and the moved body", asy
         afterDispatch: beforePatternEdit,
       }),
     );
-    expect(volumeNear(redriven, 4 * ROD_VOLUME)).toBe(true);
+    expect(volumeNear(redriven, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(true);
     cover("feature-pattern");
   });
 });
@@ -2429,7 +2196,10 @@ test("s16b OCCT path pattern repeats along a saved path", async ({
     const pathPatterned = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforePath }),
     );
-    expect(volumeNear(pathPatterned, 4 * ROD_VOLUME)).toBe(true);
+    // The boot plate rides beside the path pattern (Phase 16).
+    expect(volumeNear(pathPatterned, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(
+      true,
+    );
     cover("path-pattern-feature");
   });
 });
@@ -2466,7 +2236,8 @@ test("s16c OCCT mirror merges and re-drives standalone", async ({
     const mirrored = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeMirror }),
     );
-    expect(volumeNear(mirrored, 2 * ROD_VOLUME)).toBe(true);
+    // The boot plate rides beside the mirror (Phase 16 document scene).
+    expect(volumeNear(mirrored, BOOT_PLATE_VOLUME + 2 * ROD_VOLUME)).toBe(true);
     const beforeMirrorEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("mirrorMerge", { exact: true }).fill("1");
     await page.getByRole("button", { name: "Apply" }).click();
@@ -2475,7 +2246,7 @@ test("s16c OCCT mirror merges and re-drives standalone", async ({
         afterDispatch: beforeMirrorEdit,
       }),
     );
-    expect(volumeNear(standalone, ROD_VOLUME)).toBe(true);
+    expect(volumeNear(standalone, BOOT_PLATE_VOLUME + ROD_VOLUME)).toBe(true);
     cover("mirror-feature");
   });
 });
@@ -2523,7 +2294,11 @@ test("s16d OCCT boolean subtract at the analytic volume", async ({
         afterDispatch: beforeSubtract,
       }),
     );
-    expect(volumeNear(subtracted, PLATE_WITH_HOLE_VOLUME)).toBe(true);
+    // The document volume: the boolean output absorbs its operands and
+    // the boot plate rides beside it (Phase 16 document scene).
+    expect(
+      volumeNear(subtracted, BOOT_PLATE_VOLUME + PLATE_WITH_HOLE_VOLUME),
+    ).toBe(true);
     await expect(
       page
         .locator(
@@ -2575,7 +2350,9 @@ test("s16e OCCT boolean union sums the slab", async ({ sessionPage: page }) => {
     const united = Number(
       await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeUnion }),
     );
-    expect(volumeNear(united, PLATE_60_VOLUME)).toBe(true);
+    // The document volume: the union absorbs both operands; the boot
+    // plate rides beside it (Phase 16 document scene).
+    expect(volumeNear(united, BOOT_PLATE_VOLUME + PLATE_60_VOLUME)).toBe(true);
     cover("boolean-commands");
   });
 });
@@ -2600,6 +2377,90 @@ test("s16f the moved body keeps its volume", async ({ sessionPage: page }) => {
     const moved = await waitForRootSettle(page, OCCT_ROOT);
     expect(volumeNear(Number(moved), Number(rodVolume))).toBe(true);
     cover("body-management-move");
+  });
+});
+
+test("s16g OCCT duplicate & transform: cumulative copies, re-drive, refusal, iterative", async ({
+  sessionPage: page,
+}) => {
+  await stage("s16g duplicate & transform", async () => {
+    // THE LADDER (the defaults): the rod duplicates ×3 with a 15 mm x-step
+    // — cumulative T^i, the copies at 15/30/45 beside the UNCONSUMED
+    // source (the document volume sums four rods over the boot plate).
+    await openComplete(page, OCCT_ROOT);
+    await drawAndExtrudeRod(page, OCCT_ROOT);
+    await openDialogViaMenu(page, OCCT_ROOT, "duplicate");
+    const beforeLadder = await dispatchedCount(page, OCCT_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    await expect(page.locator(OCCT)).toHaveAttribute(
+      "data-scene-kind",
+      "duplicate",
+    );
+    const ladder = Number(
+      await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeLadder }),
+    );
+    expect(volumeNear(ladder, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(true);
+    const ladderTimeline = await readTimeline(page, OCCT_ROOT);
+    expect(ladderTimeline.entries.at(-1)?.kind).toBe("duplicate");
+    expect(ladderTimeline.entries.at(-1)?.status).not.toBe("failed");
+
+    // THE $VAR RE-DRIVE: the step rides the auto-created `duplicateDx`
+    // parameter — editing it in the panel re-derives every copy on the
+    // next dispatch (15 → 25 mm steps; the sum is overlap-blind, the
+    // movement pin lives in the kernel suite and the visual pass).
+    const beforeStep = await dispatchedCount(page, OCCT_ROOT);
+    await page.getByLabel("duplicateDx", { exact: true }).fill("25");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const restepped = Number(
+      await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeStep }),
+    );
+    expect(volumeNear(restepped, BOOT_PLATE_VOLUME + 4 * ROD_VOLUME)).toBe(
+      true,
+    );
+
+    // THE CORNER (iterative + $ref): duplicate COPY 1 — the source pool
+    // accepts an earlier duplicate's copy — with the step referencing
+    // `$duplicateDx` (the bare reference rides the existing parameter) and
+    // a 90° z-rotation: copy 1 stands east, its three T^i copies land at
+    // 90/180/270° — four bodies at the quadrants. Three new rods over the
+    // ladder document.
+    await openDialogViaMenu(page, OCCT_ROOT, "duplicate");
+    await page.locator(`${DIALOG} [data-slot=select-trigger]`).nth(0).click();
+    await page.getByRole("option", { name: "copy 1", exact: true }).click();
+    await page.getByLabel("Step x (mm)").fill("$duplicateDx");
+    await page.getByLabel("Step y (mm)").fill("0");
+    await page.getByLabel("Step z (mm)").fill("0");
+    await page.getByLabel("Step rotation (deg)").fill("90");
+    const beforeCorner = await dispatchedCount(page, OCCT_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    const corner = Number(
+      await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeCorner }),
+    );
+    expect(volumeNear(corner, BOOT_PLATE_VOLUME + 7 * ROD_VOLUME)).toBe(true);
+
+    // THE IDENTITY REFUSAL: a zero step and a zero angle is the structured
+    // refusal — the dialog stays open with the error verbatim, the
+    // timeline is unchanged, and Escape closes without committing.
+    await openDialogViaMenu(page, OCCT_ROOT, "duplicate");
+    const refusalTimeline = await readTimeline(page, OCCT_ROOT);
+    await page.getByLabel("Step x (mm)").fill("0");
+    await page.getByLabel("Step y (mm)").fill("0");
+    await page.getByLabel("Step z (mm)").fill("0");
+    await page.getByLabel("Step rotation (deg)").fill("0");
+    await page.getByLabel("Copies").fill("1");
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    const refusal = page.locator('[data-testid="feature-form-error"]');
+    await expect(refusal).toBeVisible();
+    await expect(refusal).toContainText("identity");
+    // The refusal commits nothing: the timeline is unchanged.
+    const afterRefusal = await readTimeline(page, OCCT_ROOT);
+    expect(afterRefusal.entries.length).toBe(refusalTimeline.entries.length);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(DIALOG)).toBeHidden();
+    cover("duplicate-transform");
+    extra("duplicate-transform-stage");
   });
 });
 
@@ -2667,8 +2528,12 @@ test("s17b OCCT surface thicken, offset, and knit", async ({
       OCCT_ROOT,
       "Thicken sheet",
     );
+    // The document volume: the boot plate rides beside the sheet bodies
+    // (Phase 16 document scene).
     expect(
-      Math.abs(Number(thickened) - THICKENED_SHEET_VOLUME),
+      Math.abs(
+        Number(thickened) - (BOOT_PLATE_VOLUME + THICKENED_SHEET_VOLUME),
+      ),
       `thickened ${thickened}`,
     ).toBeLessThanOrEqual(THICKENED_SHEET_VOLUME * 0.002);
     cover("surface-thicken-op");
@@ -3301,8 +3166,13 @@ test("s26b model, save v2, reload, reopen, and walk the history", async ({
     const extruded = await waitForSettledScene(page, "workbench-root", {
       afterDispatch: before,
     });
+    // The projects route boots the same fixture-plate session, and the
+    // document scene renders the plate beside the new pad (Phase 16).
     expect(
-      volumeNear(Number(extruded), CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM)),
+      volumeNear(
+        Number(extruded),
+        BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM),
+      ),
     ).toBe(true);
     await page.locator('[data-testid="persistence-save"]').click();
     await expect(bar).toHaveAttribute("data-live-version", "2");
@@ -3317,8 +3187,13 @@ test("s26b model, save v2, reload, reopen, and walk the history", async ({
       "extrude",
     );
     const reopened = await waitForSettledScene(page, "workbench-root");
+    // The persisted document restores its content — plate beside pad, the
+    // same document volume (Phase 16).
     expect(
-      volumeNear(Number(reopened), CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM)),
+      volumeNear(
+        Number(reopened),
+        BOOT_PLATE_VOLUME + CHAIN_PAD_VOLUME(EXTRUDE_DEFAULT_DEPTH_MM),
+      ),
     ).toBe(true);
     await expect(
       page.locator(`${TREE} [data-node-key="feature|feat_extrude"]`),
@@ -3339,6 +3214,1164 @@ test("s26b model, save v2, reload, reopen, and walk the history", async ({
     await expect(
       page.locator(`${TREE} [data-node-key="feature|feat_extrude"]`),
     ).toHaveCount(0);
+  });
+});
+
+test("s26c the TSX model exchange: import a .tsx model, export TSX, round-trip the held bytes", async ({
+  sessionPage: page,
+}) => {
+  await stage("s26c tsx model exchange", async () => {
+    // The TSX import crosses the session-gated server endpoint, so this
+    // stage rides AFTER the journey's sign-up (s26) — the earlier io
+    // stages (s09*) run pre-auth through their in-browser paths. The
+    // fixture is the guide's hub-mount shape, committed with the harness.
+    await openComplete(page);
+
+    // IMPORT: the dialog's file chooser sends the .tsx fixture to the
+    // app server's loader; the returned native document enters the
+    // session through the SAME apply path an opened document takes.
+    await page.locator('[data-testid="complete-import"]').click();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-import-dialog-open",
+      "true",
+    );
+    await expect(page.locator('[data-cad-import-format="tsx"]')).toBeAttached();
+    await page.getByTestId("cad-import-file").setInputFiles({
+      buffer: readFileSync(
+        new URL("./fixtures/hub-mount.model.tsx", import.meta.url),
+      ),
+      mimeType: "text/plain",
+      name: "hub-mount.model.tsx",
+    });
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-import-dialog-open",
+      "false",
+    );
+    // The model LANDED: the tree shows the imported features and the
+    // joined mount body, and the timeline carries the fixture's five
+    // features in authored order (polled — the dispatch follows the
+    // store's replaceSession asynchronously).
+    await expect(
+      page.locator(`${TREE} [data-node-key="feature|feat_mount"]`),
+    ).toBeVisible();
+    await expect(
+      page.locator(`${TREE} [data-node-key="body|body_mount"]`),
+    ).toBeVisible();
+    await expect
+      .poll(async () => {
+        const timeline = await readTimeline(page, COMPLETE_ROOT);
+        return timeline.entries.map((entry) => entry.kind).join(",");
+      })
+      .toBe("extrude,revolve,loft,subtract,union");
+    await waitForSettledScene(page, COMPLETE_ROOT);
+    extra("tsx-model-import");
+
+    // EXPORT: the TSX format generates the document's model source in the
+    // browser and holds it; the entry's download serves those bytes.
+    await page.locator('[data-testid="complete-export"]').click();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-export-dialog-open",
+      "true",
+    );
+    await page.getByTestId("cad-export-run-tsx").click();
+    const entry = page.locator('[data-cad-export-entry="tsx"]');
+    await expect(entry).toContainText("full document round-trip");
+    const downloads = await collectDownloads(
+      page,
+      () => page.getByTestId("cad-export-download-tsx").click(),
+      1,
+      15_000,
+    );
+    const exported = await downloads[0]?.path();
+    if (exported === undefined) throw new Error("the TSX export did not land");
+    const source = await readFile(exported, "utf8");
+    // The generated file carries the model's structural markers: the
+    // compiler's inverse of the imported document (parameters first,
+    // sketches at their first consumer, the feature DAG behind <Use>).
+    expect(source).toContain("Generated by `generateTsx`");
+    expect(source).toContain('from "@slopcad/cad-jsx"');
+    expect(source).toContain("<Parameter");
+    expect(source).toContain("<Sketch");
+    expect(source).toContain("<Extrude");
+    expect(source).toContain("<Revolve");
+    expect(source).toContain("<Loft");
+    expect(source).toContain("<Subtract");
+    expect(source).toContain("<Union");
+    expect(source).toContain('feature={"feat_plate"}');
+    expect(source).not.toContain("DECLINED RECORDS");
+    await page.keyboard.press("Escape");
+    extra("tsx-model-export");
+
+    // THE ROUND TRIP: the held TSX re-imports through the same server
+    // loader and re-lands the identical timeline (the export's own proof
+    // it recompiles).
+    await page.locator('[data-testid="complete-import"]').click();
+    await page.getByTestId("cad-import-held-tsx").click();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-import-dialog-open",
+      "false",
+    );
+    await expect
+      .poll(async () => {
+        const roundTripped = await readTimeline(page, COMPLETE_ROOT);
+        return roundTripped.entries.map((entry) => entry.kind).join(",");
+      })
+      .toBe("extrude,revolve,loft,subtract,union");
+    await waitForSettledScene(page, COMPLETE_ROOT);
+    extra("tsx-model-round-trip");
+  });
+});
+
+test("s27 the WebMCP agent surface: registry snapshots on the workbench and the projects pages", async ({
+  sessionPage: page,
+}) => {
+  await stage("s27 webmcp agent surface", async () => {
+    // THE WORKBENCH SNAPSHOT: the eight CAD tools the complete page
+    // mounts, each with a JSON object input schema and honest usage
+    // annotations (the seam is snapshot-only — see readWebMcpSnapshot).
+    await openComplete(page);
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...WORKBENCH_WEBMCP_TOOLS]);
+    const workbenchTools = await readWebMcpSnapshot(page);
+    for (const tool of workbenchTools) {
+      expect(schemaTypeOf(tool)).toBe("object");
+    }
+    expect(annotationsOf(workbenchTools, "cad_run_command")).toMatchObject({
+      consequentialHint: true,
+    });
+    expect(
+      annotationsOf(workbenchTools, "cad_get_document_summary"),
+    ).toMatchObject({ readOnlyHint: true });
+    extra("webmcp-workbench-surface");
+
+    // THE PROJECTS SNAPSHOT: the three workspace tools the authenticated
+    // pages mount (the user is signed in since s26), same honesty rules.
+    await page.goto("/projects");
+    await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...PROJECTS_WEBMCP_TOOLS]);
+    const projectsTools = await readWebMcpSnapshot(page);
+    for (const tool of projectsTools) {
+      expect(schemaTypeOf(tool)).toBe("object");
+    }
+    expect(annotationsOf(projectsTools, "projects_list")).toMatchObject({
+      readOnlyHint: true,
+    });
+    expect(annotationsOf(projectsTools, "projects_create")).toMatchObject({
+      consequentialHint: true,
+    });
+    expect(annotationsOf(projectsTools, "open_document")).toMatchObject({
+      consequentialHint: true,
+    });
+    extra("webmcp-projects-surface");
+  });
+});
+
+test("s28 parameter references: the $-token autocomplete drives and re-drives a draft extrude", async ({
+  sessionPage: page,
+}) => {
+  await stage("s28 $param autocomplete + re-drive", async () => {
+    // THE FEATURE (Phase 21): a value field accepts `$varname` with a
+    // clickable autocomplete over the document's existing parameters. The
+    // boot plate's `holeDiameter` (a length parameter, 8 mm after s05's
+    // undo) is the existing var: the draft extrude's DISTANCE references
+    // it, and editing the parameter re-drives BOTH features it drives.
+    await openComplete(page);
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await saveSketch(page);
+    await saveThrowawaySketch(page, COMPLETE_ROOT);
+    const base = Number(await waitForRootSettle(page, COMPLETE_ROOT));
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+
+    // The profile: the fresh rectangle (20 × 15 = 300 mm²) — picked
+    // explicitly; the throwaway line sketch is not a profile.
+    await page.locator(`${DIALOG} [role="combobox"]`).nth(0).click();
+    await page.getByRole("option", { name: "sketch 1", exact: true }).click();
+
+    // THE AUTOCOMPLETE: typing `$` opens the document's parameter list;
+    // clicking the row inserts the full `$holeDiameter` into the field.
+    const distance = page.getByLabel("Distance (mm)");
+    await distance.click();
+    await distance.fill("$");
+    const plateHeightRow = page.getByRole("option", {
+      name: "$holeDiameter",
+    });
+    await expect(plateHeightRow).toBeVisible();
+    await plateHeightRow.click();
+    await expect(distance).toHaveValue("$holeDiameter");
+    // Taper 0: the plain prism (the extrude kind's universal path).
+    await page.getByLabel("Draft taper (deg)").fill("0");
+
+    // SUBMIT: the field resolves against the document's parameters — the
+    // feature input references the EXISTING parameter (no auto-created
+    // depth literal) — and the geometry lands at exactly 300 × 8 mm³.
+    const before = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-scene-kind",
+      "extrude",
+    );
+    const referenced = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, { afterDispatch: before }),
+    );
+    const referencedPadVolume = (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * 8;
+    expect(volumeNear(referenced, base + referencedPadVolume)).toBe(true);
+    const timeline = await readTimeline(page, COMPLETE_ROOT);
+    const draftEntry = timeline.entries.at(-1);
+    expect(draftEntry?.kind).toBe("extrude");
+    expect(draftEntry?.status).not.toBe("failed");
+
+    // THE RE-DRIVE: editing the referenced parameter in the panel re-drives
+    // the extrude (8 → 12 mm of pad) AND the plate's bore (⌀8 → ⌀12) — one
+    // parameter, both features follow on the next dispatch.
+    const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.getByLabel("holeDiameter", { exact: true }).fill("12");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeEdit,
+      }),
+    );
+    const boredPlateVolume = 30 * 20 * 10 - Math.PI * 36 * 10;
+    expect(
+      volumeNear(redriven, boredPlateVolume + referencedPadVolume * 1.5),
+    ).toBe(true);
+    expect(redriven).not.toBe(referenced);
+    extra("parameter-reference-autocomplete");
+  });
+});
+
+test("s29 stored parameter expressions: the panel commits the expression, re-drives dependents, and refuses a cycle", async ({
+  sessionPage: page,
+}) => {
+  await stage(
+    "s29 panel expression commits + transitive re-drive + cycle",
+    async () => {
+      // THE FEATURE (Phase 22): an expression field commits the EXPRESSION
+      // itself (`parameter.set` with a serialized AST), the document
+      // re-derives the parameter's cached value and recomputes its dependents
+      // in the same commit, and a closing cycle is refused with the chain
+      // named. The boot document's expression pair is the stage's cast:
+      // `volumeHint` and `boreRadius`, both defined over `holeDiameter`.
+      await openComplete(page);
+      const panel = page.locator('[data-slot="cad-parameter-panel"]');
+      const apply = page.getByRole("button", { name: "Apply" });
+      const volumeHintField = page.getByLabel("volumeHint", { exact: true });
+      const boreRadiusField = page.getByLabel("boreRadius", { exact: true });
+      await expect(volumeHintField).toHaveValue("holeDiameter * 2");
+      await expect(boreRadiusField).toHaveValue("holeDiameter / 2");
+      // The stage opens on a FRESH boot (the navigation above rebuilt the
+      // boot document): holeDiameter = 8, the boot caches match, and the
+      // previews re-evaluate live: 8 × 2 = 16.
+      await expect(panel.getByText("= 16 mm", { exact: true })).toBeVisible();
+
+      /** The root's serialized command log (the machine surface). */
+      const readLog = async (): Promise<
+        readonly { readonly commands: readonly Record<string, unknown>[] }[]
+      > =>
+        JSON.parse(
+          (await page
+            .locator(`#${COMPLETE_ROOT}`)
+            .getAttribute("data-command-log")) ?? "[]",
+        ) as readonly {
+          readonly commands: readonly Record<string, unknown>[];
+        }[];
+
+      /** The machine log's committed-command count across transactions. */
+      const logLength = async (): Promise<number> =>
+        (await readLog()).reduce(
+          (total, entry) => total + entry.commands.length,
+          0,
+        );
+
+      // LEG 1 — the panel commits the expression: volumeHint :=
+      // holeDiameter + 6mm (the unit literal keeps the addition
+      // same-dimension — the domain refuses length + dimensionless). The
+      // commit rides the vocabulary's expression payload (the serialized
+      // AST, no value) and re-derives the cache (8 + 6 = 14) in the same
+      // application.
+      await volumeHintField.fill("holeDiameter + 6mm");
+      await apply.click();
+      await expect(volumeHintField).toHaveValue("holeDiameter + 6mm");
+      await expect(panel.getByText("= 14 mm", { exact: true })).toBeVisible();
+      const legOne = await readLog();
+      const legOneCommand = legOne.at(-1)?.commands.at(-1);
+      expect(legOneCommand?.type).toBe("parameter.set");
+      expect(legOneCommand?.id).toBe("param_volume_hint");
+      expect(legOneCommand?.value).toBeUndefined();
+      expect(legOneCommand?.expression).toMatchObject({
+        kind: "binary",
+        left: { kind: "identifier", name: "holeDiameter" },
+        operator: "+",
+        right: { kind: "unitLiteral", value: 6, unit: "mm" },
+      });
+
+      // LEG 2 — chain a second expression onto the first: boreRadius :=
+      // volumeHint / 2. Its preview line evaluates against the CACHED
+      // environment, so `= 7 mm` (14 / 2) is reachable only because leg 1's
+      // commit re-derived volumeHint's cache — the transitive proof.
+      await boreRadiusField.fill("volumeHint / 2");
+      await apply.click();
+      await expect(boreRadiusField).toHaveValue("volumeHint / 2");
+      await expect(panel.getByText("= 7 mm", { exact: true })).toBeVisible();
+
+      // THE CYCLE — pointing volumeHint back at boreRadius closes the loop.
+      // The field evaluator only validates parse/evaluate (it passes here),
+      // so the refusal arrives from the commit and surfaces verbatim in the
+      // panel's alert region — with the closing chain named. The machine log
+      // is pinned through the refusal too: its length, captured before the
+      // attempt, must survive unchanged (the ui suite's commandLog-length-0
+      // guarantee, on the harness surface).
+      const logBeforeCycle = await logLength();
+      await volumeHintField.fill("boreRadius * 2");
+      await apply.click();
+      const cycleAlert = page.locator("[data-cad-param-panel-error]");
+      await expect(cycleAlert).toBeVisible();
+      expect(await cycleAlert.textContent()).toContain("parameter/cycle");
+      expect(await cycleAlert.textContent()).toContain(
+        "volumeHint → boreRadius → volumeHint",
+      );
+      // The refused commit was a never-happened commit: the stored
+      // expressions are exactly what the DAG held, and nothing was issued.
+      await expect(volumeHintField).toHaveValue("boreRadius * 2");
+      await expect(boreRadiusField).toHaveValue("volumeHint / 2");
+      expect(await logLength()).toBe(logBeforeCycle);
+
+      // Restore: retyping volumeHint's stored expression makes the submit a
+      // no-op for it — the alert clears on the next submit, and nothing is
+      // issued.
+      await volumeHintField.fill("holeDiameter + 6mm");
+      await apply.click();
+      await expect(cycleAlert).toHaveCount(0);
+      await expect(panel.getByText("= 14 mm", { exact: true })).toBeVisible();
+
+      // THE RE-DRIVE: editing `holeDiameter` — the literal both stored
+      // expressions read — re-drives the panel's displayed value through the
+      // stored expression (volumeHint 8 + 6 → 10 + 6 = 16) and re-settles
+      // the boot plate at the new bore (the dispatch effect follows the
+      // document identity, and the plate scene consumes the stored hole
+      // diameter). The literal edit is a value-only commit, so boreRadius's
+      // displayed line keeps reading volumeHint's cache (14 / 2 = 7) — the
+      // domain's documented caching rule; the next expression commit
+      // re-derives it.
+      const before = await dispatchedCount(page, COMPLETE_ROOT);
+      await page.getByLabel("holeDiameter", { exact: true }).fill("10");
+      await apply.click();
+      const redriven = Number(
+        await waitForRootSettle(page, COMPLETE_ROOT, {
+          afterDispatch: before,
+        }),
+      );
+      await expect(panel.getByText("= 16 mm", { exact: true })).toBeVisible();
+      await expect(panel.getByText("= 7 mm", { exact: true })).toBeVisible();
+      expect(volumeNear(redriven, 30 * 20 * 10 - Math.PI * 25 * 10)).toBe(true);
+      extra("parameter-expression-commit");
+    },
+  );
+});
+
+test("s30 variable manager: create, live autocomplete, expression switch, clear, refused self-cycle", async ({
+  sessionPage: page,
+}) => {
+  await stage("s30 variable manager", async () => {
+    // THE FEATURE (Phase 23): the parameter panel's manage mode — the
+    // management surface for document parameters riding the vocabulary's
+    // `parameter.create` and the expression/clear forms of `parameter.set`.
+    // One variable, `caseHeight`, walks the whole life: created as a 10 mm
+    // literal, consumed from a feature dialog's `$` autocomplete, switched
+    // to `holeDiameter + 2mm` through the manager's own autocomplete,
+    // re-driven by its reference, cleared back to a literal, and finally
+    // refused a self-cycle with the chain named. LEG 6 adds the Phase 30
+    // input-contract negatives: a NEGATIVE literal (`-25mm`) created
+    // directly in the create form (the previously-refused input), a
+    // `-$caseDepth` dialog reference typed through the autocomplete (the
+    // sign riding the token), the feature landing on the negated
+    // auto-parameter, and the re-drive through it when the source variable
+    // moves.
+    await openComplete(page);
+    const panel = page.locator('[data-slot="cad-parameter-panel"]');
+
+    /** The root's serialized command log (the machine surface). */
+    const readLog = async (): Promise<
+      readonly { readonly commands: readonly Record<string, unknown>[] }[]
+    > =>
+      JSON.parse(
+        (await page
+          .locator(`#${COMPLETE_ROOT}`)
+          .getAttribute("data-command-log")) ?? "[]",
+      ) as readonly {
+        readonly commands: readonly Record<string, unknown>[];
+      }[];
+
+    /** The machine log's committed-command count across transactions. */
+    const logLength = async (): Promise<number> =>
+      (await readLog()).reduce(
+        (total, entry) => total + entry.commands.length,
+        0,
+      );
+
+    const manageToggle = page.getByRole("button", {
+      name: "Manage variables",
+    });
+    const doneToggle = page.getByRole("button", { name: "Done", exact: true });
+    await manageToggle.click();
+
+    // The manager's rows (name + quantity + actions), located by variable.
+    const caseRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ hasText: "caseHeight" });
+
+    // LEG 1 — CREATE: `caseHeight` as a 10 mm literal. The commit is
+    // `parameter.create` (the vocabulary's create form: name + quantity in
+    // the domain's unit grammar), and the row appears from the live
+    // collection.
+    await panel.getByLabel("Name", { exact: true }).fill("caseHeight");
+    await panel.getByLabel("Value", { exact: true }).fill("10mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(caseRow).toBeVisible();
+    await expect(caseRow).toContainText("10 mm");
+    const createCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(createCommand?.type).toBe("parameter.create");
+    expect(createCommand?.name).toBe("caseHeight");
+    expect(createCommand?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 10,
+    });
+    // The form reset for the next variable.
+    await expect(panel.getByLabel("Name", { exact: true })).toHaveValue("");
+
+    // LEG 2 — THE FEATURE-DIALOG AUTOCOMPLETE DERIVES LIVE: the fresh
+    // variable is immediately consumable as `$caseHeight` in a feature
+    // form's `$` autocomplete (the draft extrude's Distance). The draft
+    // command authoring gate needs two sketch records, so the stage draws
+    // the profile rectangle plus the throwaway line sketch (s28's
+    // precedent — neither is extruded; the dialog is asserted, then
+    // dismissed).
+    await doneToggle.click();
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await saveSketch(page);
+    await saveThrowawaySketch(page, COMPLETE_ROOT);
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+    const distance = page.getByLabel("Distance (mm)");
+    await distance.click();
+    await distance.fill("$case");
+    await expect(
+      page.getByRole("option", { name: "$caseHeight" }),
+    ).toBeVisible();
+    // Close without submitting: the first Escape dismisses the open
+    // autocomplete, the second the dialog (one may do both — dismiss until
+    // gone).
+    await page.keyboard.press("Escape");
+    if (await page.locator(DIALOG).isVisible()) {
+      await page.keyboard.press("Escape");
+    }
+    await expect(page.locator(DIALOG)).toBeHidden();
+
+    // LEG 3 — EXPRESSION SWITCH through the manager's `$` autocomplete:
+    // `caseHeight := holeDiameter + 2mm`. The suggestions exclude the
+    // edited variable itself, a clicked row inserts the grammar's bare
+    // identifier, and the live preview evaluates the current text.
+    await manageToggle.click();
+    await caseRow.getByRole("button", { name: "Set expression" }).click();
+    const caseEditor = panel.getByLabel("caseHeight", { exact: true });
+    await expect(caseEditor).toHaveValue("10");
+    await caseEditor.fill("$hol");
+    await panel.getByRole("option", { name: "$holeDiameter" }).click();
+    await expect(caseEditor).toHaveValue("holeDiameter");
+    await caseEditor.fill("holeDiameter + 2mm");
+    // The preview: the boot's holeDiameter is 8, so 8 + 2.
+    await expect(caseRow.getByText("= 10 mm", { exact: true })).toBeVisible();
+    const logBeforeExpression = await logLength();
+    await caseRow.getByRole("button", { name: "Apply" }).click();
+    // Success closes the editor; the row reads the derived quantity and its
+    // direct reference; the commit was the expression payload (the AST, no
+    // value).
+    await expect(caseEditor).toHaveCount(0);
+    await expect(caseRow.getByText("= 10 mm", { exact: true })).toBeVisible();
+    await expect(caseRow).toContainText("depends on holeDiameter");
+    const expressionCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(expressionCommand?.type).toBe("parameter.set");
+    expect(expressionCommand?.value).toBeUndefined();
+    expect(expressionCommand?.expression).toMatchObject({
+      kind: "binary",
+      left: { kind: "identifier", name: "holeDiameter" },
+      operator: "+",
+      right: { kind: "unitLiteral", value: 2, unit: "mm" },
+    });
+    expect((await logLength()) - logBeforeExpression).toBe(1);
+
+    // THE RE-DRIVE: editing the referenced literal (8 → 12) re-derives
+    // caseHeight in the same commit — the edit-in-place form serves the
+    // literal; the plate scene follows the new bore.
+    await doneToggle.click();
+    const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.getByLabel("holeDiameter", { exact: true }).fill("12");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeEdit,
+      }),
+    );
+    expect(volumeNear(redriven, 30 * 20 * 10 - Math.PI * 36 * 10)).toBe(true);
+
+    // LEG 4 — CLEAR back to literal: the vocabulary's clear-null form lands
+    // on the expression's live evaluated quantity (12 + 2 = 14).
+    await manageToggle.click();
+    await expect(caseRow.getByText("= 14 mm", { exact: true })).toBeVisible();
+    await caseRow.getByRole("button", { name: "Make literal" }).click();
+    await expect(caseRow).toContainText("14 mm");
+    const clearCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(clearCommand?.type).toBe("parameter.set");
+    expect(clearCommand?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 14,
+    });
+    expect(clearCommand?.expression).toBeNull();
+
+    // LEG 5 — THE REFUSED SELF-CYCLE: `caseHeight := caseHeight`, typed (the
+    // self row is never suggested). The commit refuses with the closing
+    // chain in the panel's alert region, and the machine log pins the
+    // never-happened commit.
+    const logAfterClear = await logLength();
+    await caseRow.getByRole("button", { name: "Set expression" }).click();
+    const cycleEditor = panel.getByLabel("caseHeight", { exact: true });
+    await cycleEditor.fill("caseHeight");
+    await caseRow.getByRole("button", { name: "Apply" }).click();
+    const cycleAlert = page.locator("[data-cad-param-panel-error]");
+    await expect(cycleAlert).toBeVisible();
+    expect(await cycleAlert.textContent()).toContain("parameter/cycle");
+    expect(await cycleAlert.textContent()).toContain("caseHeight → caseHeight");
+    expect(await logLength()).toBe(logAfterClear);
+
+    // LEG 6 — THE PHASE 30 NEGATIVES. (a) A NEGATIVE literal `-25mm` lands
+    // directly in the create form — the input the literal-seed gate refused
+    // before the widened rule (any identifier-free expression evaluating to
+    // a finite quantity).
+    // The row is pinned by its NAME SPAN (exact text): a plain hasText
+    // would also catch the dependent row's `depends on caseDepth` line.
+    const depthRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ has: page.getByText("caseDepth", { exact: true }) });
+    await panel.getByLabel("Name", { exact: true }).fill("caseDepth");
+    await panel.getByLabel("Value", { exact: true }).fill("-25mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(depthRow).toBeVisible();
+    await expect(depthRow).toContainText("-25 mm");
+    const depthCreate = (await readLog()).at(-1)?.commands.at(-1);
+    expect(depthCreate?.type).toBe("parameter.create");
+    expect(depthCreate?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: -25,
+    });
+
+    // (b) THE NEGATED DIALOG REFERENCE: typing `-$` opens the autocomplete
+    // (the sign rides the token), clicking the row inserts `-$caseDepth`,
+    // and the submission emits the negated auto-parameter — a fresh
+    // `parameter.create` whose defining expression is `-caseDepth` — with
+    // the feature input referencing IT. The draft reuses LEG 2's rectangle
+    // ("sketch 1", 20 × 15 = 300 mm²); the boot plate reads
+    // 30·20·10 − π·12²/4·10 at this point (LEG 3's ⌀12 bore), and the pad
+    // sits clear of it, so the volume pin is exact.
+    await doneToggle.click();
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+    await page.locator(`${DIALOG} [role="combobox"]`).nth(0).click();
+    await page.getByRole("option", { name: "sketch 1", exact: true }).click();
+    const negatedDistance = page.getByLabel("Distance (mm)");
+    await negatedDistance.click();
+    // The token opens on `-$` (the sign rides it); the stage narrows with
+    // the partial because the suggestion list caps at 8 in document order.
+    await negatedDistance.fill("-$ca");
+    await expect(
+      page.getByRole("option", { name: "$caseDepth" }),
+    ).toBeVisible();
+    await page.getByRole("option", { name: "$caseDepth" }).click();
+    await expect(negatedDistance).toHaveValue("-$caseDepth");
+    await page.getByLabel("Draft taper (deg)").fill("0");
+    const beforeNegated = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
+    await expect(page.locator(DIALOG)).toBeHidden();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-scene-kind",
+      "extrude",
+    );
+    const negatedVolume = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeNegated,
+      }),
+    );
+    const boredPlate = 30 * 20 * 10 - Math.PI * 36 * 10;
+    expect(volumeNear(negatedVolume, boredPlate + 300 * 25)).toBe(true);
+    const negatedLog = await readLog();
+    const negatedCommands = negatedLog.at(-1)?.commands ?? [];
+    const negatedCreate = negatedCommands.find(
+      (command) =>
+        command.type === "parameter.create" && command.name === "extrudeDepth1",
+    );
+    expect(negatedCreate).toMatchObject({
+      type: "parameter.create",
+      name: "extrudeDepth1",
+      // The seed is the negation of the source's current value (−25 → +25);
+      // the defining expression re-derives the same quantity.
+      value: { dimension: "length", unit: "mm", value: 25 },
+      expression: {
+        kind: "unary",
+        operator: "-",
+        operand: { kind: "identifier", name: "caseDepth" },
+      },
+    });
+    const negatedTimeline = await readTimeline(page, COMPLETE_ROOT);
+    expect(negatedTimeline.entries.at(-1)?.kind).toBe("extrude");
+    expect(negatedTimeline.entries.at(-1)?.status).not.toBe("failed");
+
+    // (c) THE RE-DRIVE: editing the source variable through the expression
+    // arm (a constant expression with the unit attached — a bare `-30`
+    // would be dimensionless; the commit that runs the topological
+    // recompute; the panel's literal arm is the value-only form, which
+    // leaves driven caches stale by the domain's documented rule)
+    // re-derives the negated auto-parameter (−(−30 mm) = +30 mm) and the
+    // feature moves with it. The manager's rows show both ends of the DAG:
+    // caseDepth at −30 mm and extrudeDepth1 at `= 30 mm`, depends on
+    // caseDepth.
+    await manageToggle.click();
+    await depthRow.getByRole("button", { name: "Set expression" }).click();
+    const depthEditor = panel.getByLabel("caseDepth", { exact: true });
+    await expect(depthEditor).toHaveValue("-25");
+    await depthEditor.fill("-30mm");
+    const beforeRedrive = await dispatchedCount(page, COMPLETE_ROOT);
+    await depthRow.getByRole("button", { name: "Apply" }).click();
+    await expect(depthEditor).toHaveCount(0);
+    await expect(depthRow).toContainText("-30 mm");
+    await expect(depthRow).toContainText("= -30 mm");
+    const redrivenRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ has: page.getByText("extrudeDepth1", { exact: true }) });
+    await expect(redrivenRow).toContainText("= 30 mm");
+    await expect(redrivenRow).toContainText("depends on caseDepth");
+    const redriveCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(redriveCommand?.type).toBe("parameter.set");
+    expect(redriveCommand?.expression).toMatchObject({
+      kind: "unary",
+      operator: "-",
+      operand: { kind: "unitLiteral", value: 30, unit: "mm" },
+    });
+    const redrivenVolume = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeRedrive,
+      }),
+    );
+    expect(volumeNear(redrivenVolume, boredPlate + 300 * 30)).toBe(true);
+
+    extra("parameter-negated-reference");
+  });
+});
+
+test("s31 variable manager rename + delete: the rewrite is visible and the refusal names the blockers", async ({
+  sessionPage: page,
+}) => {
+  await stage("s31 variable rename + delete", async () => {
+    // THE FEATURE (Phase 24): the manager completes the variable lifecycle —
+    // `parameter.rename` rewrites every stored expression referencing the
+    // old name in the SAME commit (the dependent's stored AST and its
+    // `depends on` line move to the new name; its evaluated value does not
+    // move), and `parameter.delete` refuses while referenced — naming the
+    // blockers — then deletes cleanly once they are cleared. The cast: a
+    // literal base `shelfWidth` (20 mm) and `shelfDepth` defined over it
+    // (`shelfWidth / 2`, cached 10 mm).
+    await openComplete(page);
+    const panel = page.locator('[data-slot="cad-parameter-panel"]');
+
+    /** The root's serialized command log (the machine surface). */
+    const readLog = async (): Promise<
+      readonly { readonly commands: readonly Record<string, unknown>[] }[]
+    > =>
+      JSON.parse(
+        (await page
+          .locator(`#${COMPLETE_ROOT}`)
+          .getAttribute("data-command-log")) ?? "[]",
+      ) as readonly {
+        readonly commands: readonly Record<string, unknown>[];
+      }[];
+
+    /** The machine log's committed-command count across transactions. */
+    const logLength = async (): Promise<number> =>
+      (await readLog()).reduce(
+        (total, entry) => total + entry.commands.length,
+        0,
+      );
+
+    /** The management row whose NAME TEXT is exactly `name` (a `depends on` line can mention another variable's name). */
+    const rowOf = (name: string) =>
+      panel
+        .locator('[data-slot="cad-parameter-row"]')
+        .filter({ has: page.getByText(name, { exact: true }) });
+
+    const manageToggle = page.getByRole("button", {
+      name: "Manage variables",
+    });
+    const doneToggle = page.getByRole("button", { name: "Done", exact: true });
+    await manageToggle.click();
+
+    // LEG 1 — CREATE the cast: `shelfWidth` = 20mm literal, then `shelfDepth`
+    // defined over it (`shelfWidth / 2`). The define re-derives the cache in
+    // the same application, so the row reads the derived 10 mm and its
+    // direct reference.
+    await panel.getByLabel("Name", { exact: true }).fill("shelfWidth");
+    await panel.getByLabel("Value", { exact: true }).fill("20mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(rowOf("shelfWidth")).toBeVisible();
+    await panel.getByLabel("Name", { exact: true }).fill("shelfDepth");
+    await panel.getByLabel("Value", { exact: true }).fill("0mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    await expect(rowOf("shelfDepth")).toBeVisible();
+    await rowOf("shelfDepth")
+      .getByRole("button", { name: "Set expression" })
+      .click();
+    const depthEditor = panel.getByLabel("shelfDepth", { exact: true });
+    await depthEditor.fill("shelfWidth / 2");
+    await rowOf("shelfDepth").getByRole("button", { name: "Apply" }).click();
+    await expect(depthEditor).toHaveCount(0);
+    await expect(
+      rowOf("shelfDepth").getByText("= 10 mm", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      rowOf("shelfDepth").getByText("depends on shelfWidth"),
+    ).toBeVisible();
+
+    // LEG 2 — THE RENAME: `shelfWidth` → `caseWidth` through the row's
+    // rename editor. The commit is `parameter.rename`; the dependent's
+    // stored expression is rewritten in the same application — its
+    // `depends on` line moves to the new name while the evaluated value
+    // stays exactly 10 mm (the rewrite is name-isomorphic).
+    await rowOf("shelfWidth").getByRole("button", { name: "Rename" }).click();
+    const renameField = panel.getByLabel("New name", { exact: true });
+    await renameField.fill("caseWidth");
+    await rowOf("shelfWidth").getByRole("button", { name: "Apply" }).click();
+    await expect(renameField).toHaveCount(0);
+    await expect(rowOf("caseWidth")).toBeVisible();
+    await expect(rowOf("shelfWidth")).toHaveCount(0);
+    await expect(
+      rowOf("shelfDepth").getByText("depends on caseWidth"),
+    ).toBeVisible();
+    await expect(
+      rowOf("shelfDepth").getByText("= 10 mm", { exact: true }),
+    ).toBeVisible();
+    const renameCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(renameCommand?.type).toBe("parameter.rename");
+    expect(renameCommand?.name).toBe("caseWidth");
+
+    // THE FEATURE-DIALOG AUTOCOMPLETE DERIVES LIVE: the NEW name is the
+    // vocabulary — `$case` lists `$caseWidth`, and the OLD name is gone
+    // from the grammar (no `$shelfWidth` row exists to pick). The draft
+    // command authoring gate needs two sketch records (s28/s30's
+    // precedent — neither is extruded; the dialog is asserted, then
+    // dismissed).
+    await doneToggle.click();
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await saveSketch(page);
+    await saveThrowawaySketch(page, COMPLETE_ROOT);
+    await openDialogViaMenu(page, COMPLETE_ROOT, "draft");
+    const distance = page.getByLabel("Distance (mm)");
+    await distance.click();
+    await distance.fill("$case");
+    await expect(
+      page.getByRole("option", { name: "$caseWidth" }),
+    ).toBeVisible();
+    await expect(page.getByRole("option", { name: "$shelfWidth" })).toHaveCount(
+      0,
+    );
+    await page.keyboard.press("Escape");
+    if (await page.locator(DIALOG).isVisible()) {
+      await page.keyboard.press("Escape");
+    }
+    await expect(page.locator(DIALOG)).toBeHidden();
+
+    // LEG 3 — THE REFUSED DELETE: `caseWidth` is still read by shelfDepth's
+    // stored expression. Arming issues nothing; the confirm is refused with
+    // `document/in-use` naming the blocker (the dependent, by name), and
+    // the row survives.
+    await manageToggle.click();
+    const logBeforeRefusal = await logLength();
+    await rowOf("caseWidth").getByRole("button", { name: "Delete" }).click();
+    await expect(
+      rowOf("caseWidth").getByRole("button", { name: "Confirm delete" }),
+    ).toBeVisible();
+    expect(await logLength()).toBe(logBeforeRefusal);
+    await rowOf("caseWidth")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    const refusal = page.locator("[data-cad-param-panel-error]");
+    await expect(refusal).toBeVisible();
+    expect(await refusal.textContent()).toContain("document/in-use");
+    expect(await refusal.textContent()).toContain("shelfDepth");
+    expect(await logLength()).toBe(logBeforeRefusal);
+    await expect(rowOf("caseWidth")).toBeVisible();
+
+    // LEG 4 — CLEAR THE BLOCKER: making `shelfDepth` a literal drops the
+    // reference (its evaluated quantity lands, the depends line is gone),
+    // and the base now deletes cleanly.
+    await rowOf("shelfDepth")
+      .getByRole("button", { name: "Make literal" })
+      .click();
+    await expect(
+      rowOf("shelfDepth").getByText("10 mm", { exact: true }),
+    ).toBeVisible();
+    await expect(rowOf("shelfDepth").getByText(/depends on/)).toHaveCount(0);
+    await expect(refusal).toHaveCount(0);
+    await rowOf("caseWidth").getByRole("button", { name: "Delete" }).click();
+    await rowOf("caseWidth")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    await expect(rowOf("caseWidth")).toHaveCount(0);
+    const deleteCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(deleteCommand?.type).toBe("parameter.delete");
+    expect(deleteCommand?.id).toBe(renameCommand?.id);
+
+    // LEG 5 — THE UNREFERENCED DEPENDENT DELETES CLEANLY: nothing reads
+    // `shelfDepth` (and its own definition is a literal now), so the
+    // two-click confirm removes the row without a refusal.
+    await rowOf("shelfDepth").getByRole("button", { name: "Delete" }).click();
+    await rowOf("shelfDepth")
+      .getByRole("button", { name: "Confirm delete" })
+      .click();
+    await expect(rowOf("shelfDepth")).toHaveCount(0);
+    const lastCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(lastCommand?.type).toBe("parameter.delete");
+    expect(lastCommand?.id).not.toBe(deleteCommand?.id);
+
+    extra("parameter-manager-rename-delete");
+  });
+});
+
+test("s32 sketch dimensions bind to variables: the $-autocomplete re-drives the sketch and the solid", async ({
+  sessionPage: page,
+}) => {
+  await stage("s32 sketch dimension binding", async () => {
+    // THE FEATURE (Phase 26a — the owner's commission: "I need to be able
+    // to set the size of my perfboard"): a sketch dimension takes `$boardL`
+    // as its value through the inspector's `$`-autocomplete, the binding
+    // re-drives the LIVE sketch when the variable edits, and the case
+    // extruded from that sketch re-drives downstream — one variable moving
+    // drawn geometry and solid in the same commit.
+    await openComplete(page);
+    const panel = page.locator('[data-slot="cad-parameter-panel"]');
+
+    /** The root's serialized command log (the machine surface). */
+    const readLog = async (): Promise<
+      readonly { readonly commands: readonly Record<string, unknown>[] }[]
+    > =>
+      JSON.parse(
+        (await page
+          .locator(`#${COMPLETE_ROOT}`)
+          .getAttribute("data-command-log")) ?? "[]",
+      ) as readonly {
+        readonly commands: readonly Record<string, unknown>[];
+      }[];
+
+    /** The sketch session's serialized command log (data-sketch-commands). */
+    const sketchLog = async (): Promise<readonly Record<string, unknown>[]> =>
+      JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-commands")) ??
+          "[]",
+      ) as readonly Record<string, unknown>[];
+
+    // LEG 1 — CAST THE VARIABLE: `boardL` = 26 mm (deliberately NOT the
+    // drawn width — the binding must visibly re-drive the sketch).
+    await page.getByRole("button", { name: "Manage variables" }).click();
+    await panel.getByLabel("Name", { exact: true }).fill("boardL");
+    await panel.getByLabel("Value", { exact: true }).fill("26mm");
+    await panel.getByRole("button", { name: "Create variable" }).click();
+    const boardRow = panel
+      .locator('[data-slot="cad-parameter-row"]')
+      .filter({ hasText: "boardL" });
+    await expect(boardRow).toBeVisible();
+    const createCommand = (await readLog()).at(-1)?.commands.at(-1);
+    expect(createCommand?.type).toBe("parameter.create");
+    expect(createCommand?.name).toBe("boardL");
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+
+    // LEG 2 — DRAW AND DIMENSION: the journey rectangle, then a distanceX
+    // across it (left edge midpoint → right edge midpoint = the drawn
+    // width, 20). The new constraint auto-selects, so the inspector's
+    // dimension field reads the literal.
+    await enterSketchMode(page);
+    await drawRectangle(page);
+    await activateSketchTool(page, "distanceX");
+    await clickCanvasPoint(page, RECT.x0, (RECT.y0 + RECT.y1) / 2);
+    await clickCanvasPoint(page, RECT.x1, (RECT.y0 + RECT.y1) / 2);
+    const field = page.getByLabel("Dimension (mm)");
+    await expect(field).toHaveValue("20");
+
+    // LEG 3 — THE BINDING: type `$board`, pick `$boardL` from the live
+    // autocomplete, apply. The commit is the BOUND `sketch.dimension.set`
+    // (parameterId, no value), the inspector row names the binding, and the
+    // sketch RE-SOLVES against the variable: the readout reads 26 mm and
+    // the solved geometry spans 26 — the drawn 20 is gone.
+    await field.click();
+    await field.fill("$board");
+    await page.getByRole("option", { name: "$boardL" }).click();
+    await expect(field).toHaveValue("$boardL");
+    await page
+      .locator(`${SKETCH} form`)
+      .getByRole("button", { name: "Apply" })
+      .click();
+    const boundCommand = (await sketchLog()).at(-1);
+    expect(boundCommand?.type).toBe("sketch.dimension.set");
+    expect(String(boundCommand?.parameterId)).toMatch(/^param_/);
+    expect(boundCommand?.value).toBeUndefined();
+    await expect(
+      page
+        .locator(`${SKETCH} [data-slot="cad-sketch-inspector"]`)
+        .getByText("distanceX $boardL"),
+    ).toBeVisible();
+    await expect(page.locator(SKETCH)).toHaveAttribute(
+      "data-sketch-dimensions",
+      /Δx 26 mm/,
+    );
+    const spanOfSolved = async (): Promise<number> => {
+      const solved = JSON.parse(
+        (await page.locator(SKETCH).getAttribute("data-sketch-solved")) ?? "[]",
+      ) as { kind: string; x1?: number; x2?: number }[];
+      const xs = solved
+        .filter((entity) => entity.kind === "line")
+        .flatMap((line) => [line.x1 ?? 0, line.x2 ?? 0]);
+      return Math.max(...xs) - Math.min(...xs);
+    };
+    expect(await spanOfSolved()).toBeCloseTo(26, 3);
+
+    // LEG 4 — THE DANGLING ATTEMPT IS REFUSED: `$nope` names no variable;
+    // the field gate names it the moment it is typed and the Apply button
+    // disables — an unknown token cannot leave the field, and nothing
+    // commits. (The feature dialogs' expressionNumber gate, same rule.)
+    const sketchLogLength = (await sketchLog()).length;
+    await field.click();
+    await field.fill("$nope");
+    await expect(page.getByText('Unknown parameter "nope".')).toBeVisible();
+    await expect(
+      page.locator(`${SKETCH} form`).getByRole("button", { name: "Apply" }),
+    ).toBeDisabled();
+    expect((await sketchLog()).length).toBe(sketchLogLength);
+
+    // LEG 5 — THE CASE: extrude the bound sketch (auto-exits to the model
+    // workspace). The document scene settles at the boot plate + the case
+    // at the CURRENT variable: 26 × 15 × 10.
+    const beforeExtrude = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.locator('[data-testid="sketch-extrude"]').click();
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-sketch-mode",
+      "model",
+    );
+    const extruded = await waitForRootSettle(page, COMPLETE_ROOT, {
+      afterDispatch: beforeExtrude,
+    });
+    expect(
+      volumeNear(
+        Number(extruded),
+        BOOT_PLATE_VOLUME + 26 * 15 * EXTRUDE_DEFAULT_DEPTH_MM,
+      ),
+    ).toBe(true);
+
+    // LEG 6 — THE DOWNSTREAM RE-DRIVE: edit `boardL` 26 → 40 in the
+    // manager. The bound sketch re-solves at profile time, the extrusion
+    // re-derives, and the settled volume follows — the perfboard resized by
+    // one variable edit, no new sketch.
+    const beforeEdit = await dispatchedCount(page, COMPLETE_ROOT);
+    await page.getByLabel("boardL", { exact: true }).fill("40");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = await waitForRootSettle(page, COMPLETE_ROOT, {
+      afterDispatch: beforeEdit,
+    });
+    expect(
+      volumeNear(
+        Number(redriven),
+        BOOT_PLATE_VOLUME + 40 * 15 * EXTRUDE_DEFAULT_DEPTH_MM,
+      ),
+    ).toBe(true);
+
+    extra("sketch-dimension-binding");
+  });
+});
+
+test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports, and embeds", async ({
+  sessionPage: page,
+  baseURL,
+}) => {
+  await stage("s33 viewer", async () => {
+    // The shared document is REAL: the workbench boot session serialized
+    // through the native bridge — five literal variables, two expression
+    // variables, and the plate whose volume the pins below derive from.
+    const nativeText = serializeSessionToNativeText(
+      createCadWorkbenchSession(),
+      new Map(),
+      null,
+    );
+    const payload = await encodeNativeForShare(nativeText);
+    const sharePayloadUrl = `/viewer#${payload}`;
+
+    // LEG 1 — THE SHARE PAGE: the link opens the public viewer, the part
+    // settles, and the site chrome is around it.
+    await page.goto(sharePayloadUrl);
+    walk("/viewer");
+    const settled = await waitForSettledScene(page, "viewer-root");
+    expect(volumeNear(Number(settled), BOOT_PLATE_VOLUME)).toBe(true);
+    await expect(page.locator("header")).toHaveCount(1);
+
+    // LEG 2 — THE VARIABLES FORM: literals as number fields, expressions
+    // with their `= quantity` preview line.
+    await expect(page.getByLabel("holeDiameter", { exact: true })).toHaveValue(
+      "8",
+    );
+    await expect(page.getByText("= 16 mm")).toBeVisible();
+    expect(await page.getByTestId("viewer-summary").textContent()).toContain(
+      "5 literal variables",
+    );
+
+    // LEG 3 — THE RE-DRIVE: an edit commits parameter.set through the SAME
+    // store path the workbench panel uses; the plate re-derives.
+    const beforeEdit = await dispatchedCount(page, "viewer-root");
+    await page.getByLabel("holeDiameter", { exact: true }).fill("12");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const redriven = await waitForSettledScene(page, "viewer-root", {
+      afterDispatch: beforeEdit,
+    });
+    expect(volumeNear(Number(redriven), 30 * 20 * 10 - Math.PI * 36 * 10)).toBe(
+      true,
+    );
+
+    // LEG 4 — THE EXPRESSION PATH: a committed rewrite previews its new
+    // quantity; an unknown identifier refuses inline and blocks the
+    // commit (nothing ships).
+    const hintField = page.getByLabel("volumeHint", { exact: true });
+    await hintField.fill("holeDiameter * 3");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page.getByText("= 36 mm")).toBeVisible();
+    await hintField.fill("nope * 2");
+    await expect(page.getByText('Unknown identifier "nope".')).toBeVisible();
+    await expect(page.getByRole("button", { name: "Apply" })).toBeDisabled();
+    // The preview line follows the COMMITTED expression (the field's
+    // inline verdict is the live part); restoring the text and committing
+    // is what moves the preview.
+    await hintField.fill("holeDiameter * 2");
+    await page.getByRole("button", { name: "Apply" }).click();
+    await expect(page.getByText("= 24 mm")).toBeVisible();
+
+    // LEG 5 — THE SHARE LINK: copies the LIVE document (the two edits
+    // included) and the fragment decodes back to a real native document.
+    await page
+      .context()
+      .grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.getByTestId("viewer-share").click();
+    await expect(page.getByTestId("viewer-action")).toContainText(
+      "share link copied",
+    );
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied.startsWith(`${baseURL}/viewer#1`)).toBe(true);
+    const decoded = await decodeNativeFromShare(
+      copied.slice(copied.indexOf("#")),
+    );
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) {
+      const reparsed = JSON.parse(decoded.text) as {
+        document: { parameters: { parameters: { name: string }[] } };
+      };
+      expect(reparsed.document.parameters.parameters.length).toBe(7);
+    }
+
+    // LEG 6 — THE STANDALONE EXPORT: one self-contained HTML lands with
+    // the site chrome, the viewer bundle, and the native variable inside.
+    const downloads = await collectDownloads(
+      page,
+      async () => {
+        await page.getByTestId("viewer-export").click();
+        await expect(page.getByTestId("viewer-action")).toContainText(
+          "standalone HTML downloaded",
+        );
+      },
+      1,
+      20_000,
+    );
+    const download = downloads[0];
+    if (download === undefined) throw new Error("the export never landed");
+    expect(download.suggestedFilename()).toMatch(/\.html$/);
+    const downloadPath = await download.path();
+    if (downloadPath === null) throw new Error("download has no path");
+    const bytes = await readFile(downloadPath);
+    // Size honesty: the renderer and the kernel travel inside — the file
+    // is multi-megabyte by construction.
+    expect(bytes.length).toBeGreaterThan(500_000);
+    const html = bytes.toString("utf8");
+    expect(html.startsWith("<!doctype html>")).toBe(true);
+    expect(html).toContain('window["__SLOPCAD_NATIVE__"] = ');
+    expect(html).toContain('window["__SLOPCAD_TITLE__"] = ');
+    expect(html).toContain("holeDiameter");
+    expect(html).toContain("<style>");
+
+    // LEG 7 — THE EMBED: the scoped header guarantee on the route, then a
+    // REAL host page framing the viewer (?embed=1, no site bar) whose
+    // part settles and whose form renders inside the frame. The header is
+    // the policy module's value verbatim (scheme allow, not `*` — the
+    // spec's `*` refuses opaque-origin embedders). The HOST is a local
+    // file (an opaque origin, genuinely cross-origin to the app): a
+    // data:-URL host would be refused by Chromium's local-network-access
+    // checks — a dev-only artifact of framing a loopback server that no
+    // real embedding site (public http/https) ever hits.
+    const embedResponse = await page.request.get(`${baseURL}/viewer?embed=1`);
+    expect(embedResponse.headers()["content-security-policy"]).toBe(
+      VIEWER_FRAME_HEADERS["content-security-policy"],
+    );
+    const embedUrl = `${baseURL}/viewer?embed=1#${payload}`;
+    const hostPage = `<!doctype html><html><body style="margin:0"><iframe id="embed" src="${embedUrl}" style="width:960px;height:640px;border:1px solid #ccc"></iframe></body></html>`;
+    const hostPath = join(
+      os.tmpdir(),
+      `slopcad-session-embed-${String(Date.now())}.html`,
+    );
+    await writeFile(hostPath, hostPage, "utf8");
+    try {
+      await page.goto(`file://${hostPath}`);
+      const frame = page.frameLocator("#embed");
+      // The pristine shared document again: the embed proof is the link
+      // exactly as a third site receives it.
+      const frameRoot = frame.locator("#viewer-root");
+      await expect(frameRoot).toBeVisible();
+      await expect(frame.locator("header")).toHaveCount(0);
+      await expect(frame.getByTestId("viewer-title")).toContainText("doc_");
+      await expect
+        .poll(
+          async () => {
+            const volume = await frameRoot.getAttribute("data-volume");
+            const rendered = await frameRoot.getAttribute(
+              "data-cad-rendered-volume",
+            );
+            return (
+              volume !== null &&
+              volume !== "" &&
+              volume !== "…" &&
+              volume === rendered
+            );
+          },
+          { timeout: 25_000 },
+        )
+        .toBe(true);
+      await expect(
+        frame.getByLabel("holeDiameter", { exact: true }),
+      ).toHaveValue("8");
+    } finally {
+      await rm(hostPath, { force: true });
+    }
+
+    extra("viewer-share-embed");
   });
 });
 

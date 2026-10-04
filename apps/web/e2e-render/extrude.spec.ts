@@ -28,6 +28,12 @@ import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
  *  - SCREENSHOT BASELINE — the settled extrude scene is byte-stable across
  *    two independent browser journeys.
  *
+ * Phase 16 document-scene semantics: the applied scene IS the applied
+ * document — the boot plate renders as one body BESIDE the new pad (the
+ * owner fix "CAD software lets you control what you see"), so every
+ * settled volume is the DOCUMENT volume (plate + pad) and the scene
+ * bounds are the union of both bodies' extents.
+ *
  * Machine surfaces: `data-sketch-extrude` (the action's outcome),
  * `data-scene-kind`, `data-scene-bounds`, `data-scene-extents`, and the
  * shared settle surface (`data-volume`, `data-cad-rendered-volume`). Click
@@ -55,6 +61,10 @@ const DEFAULT_DEPTH_MM = EXTRUDE_DEFAULT_DEPTH_MM;
 /** The analytic volume of the extruded rectangle (mm³). */
 const RECT_VOLUME = (depth: number): number =>
   (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * depth;
+
+/** The boot plate's analytic volume (30×20×10 with the ⌀8 through bore) —
+ *  the document scene renders it beside the pad. */
+const PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 4 ** 2 * 10;
 
 /** Relative volume tolerance (the render suite's documented Manifold band). */
 const VOLUME_REL_TOLERANCE = 0.005;
@@ -170,17 +180,19 @@ test("sketch → extrude produces the real solid at the analytic volume, byte-st
 }, testInfo) => {
   const volume = await runRectangleExtrudeJourney(page);
 
-  // GEOMETRY SEMANTICS: settled volume within the documented band of the
-  // analytic width×height×depth (Manifold's polygon extrusion of a
-  // rectangle is exact up to float, far inside the band).
-  const analytic = RECT_VOLUME(DEFAULT_DEPTH_MM);
+  // GEOMETRY SEMANTICS: the settled DOCUMENT volume within the documented
+  // band of plate + pad (Manifold's polygon extrusion of a rectangle is
+  // exact up to float, far inside the band).
+  const analytic = PLATE_VOLUME + RECT_VOLUME(DEFAULT_DEPTH_MM);
   const settled = Number(volume);
   expect(
     Math.abs(settled - analytic) / analytic,
     `volume ${settled} vs analytic ${analytic}`,
   ).toBeLessThan(VOLUME_REL_TOLERANCE);
   const scene = await readSceneSurface(page);
-  expect(scene.extents).toBe("20.000 × 15.000 × 10.000");
+  // The union bounds: the plate [0,30]×[0,20]×[0,10] and the pad
+  // [10,30]×[10,25]×[0,10] span [0,30]×[0,25]×[0,10] together.
+  expect(scene.extents).toBe("30.000 × 25.000 × 10.000");
   expect(scene.bounds.min[2]).toBe(0);
   expect(scene.bounds.max[2]).toBe(10);
 
@@ -221,7 +233,7 @@ test("a negative parameter edit flips the extrusion below the plane at unchanged
 }) => {
   const volume = await runRectangleExtrudeJourney(page);
   const settled = Number(volume);
-  const analytic = RECT_VOLUME(DEFAULT_DEPTH_MM);
+  const analytic = PLATE_VOLUME + RECT_VOLUME(DEFAULT_DEPTH_MM);
   expect(Math.abs(settled - analytic) / analytic).toBeLessThan(
     VOLUME_REL_TOLERANCE,
   );
@@ -243,8 +255,10 @@ test("a negative parameter edit flips the extrusion below the plane at unchanged
     VOLUME_REL_TOLERANCE,
   );
   const scene = await readSceneSurface(page);
+  // The flipped pad spans [−10, 0]; the union with the plate [0, 10]
+  // spans the full height.
   expect(scene.bounds.min[2]).toBe(-10);
-  expect(scene.bounds.max[2]).toBe(0);
+  expect(scene.bounds.max[2]).toBe(10);
 });
 
 test("an open chain refuses the extrude with a structured failure and no scene change", async ({
@@ -294,12 +308,13 @@ test("a positive parameter edit regenerates the solid at the new distance", asyn
       afterDispatch: beforeEdit,
     }),
   );
-  const analytic = RECT_VOLUME(15);
+  const analytic = PLATE_VOLUME + RECT_VOLUME(15);
   expect(
     Math.abs(regenerated - analytic) / analytic,
     `regenerated ${regenerated} vs analytic ${analytic}`,
   ).toBeLessThan(VOLUME_REL_TOLERANCE);
   const scene = await readSceneSurface(page);
-  expect(scene.extents).toBe("20.000 × 15.000 × 15.000");
+  // The union bounds grow with the pad: [0,30]×[0,25]×[0,15].
+  expect(scene.extents).toBe("30.000 × 25.000 × 15.000");
   expect(scene.bounds.max[2]).toBe(15);
 });

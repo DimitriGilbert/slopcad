@@ -66,6 +66,7 @@ import {
   curveRecordProblems,
   parseSerializedCurve,
 } from "./curve";
+import { extractExpressionDependencies } from "./expression";
 import {
   FEATURE_HISTORY_ERROR_CODES,
   reorderFeatureRecords,
@@ -128,9 +129,11 @@ import {
   type ParameterInput,
   parseParameterCollection,
   removeParameter,
+  renameParameter,
   serializeParameterCollection,
   type SerializedParameterCollection,
 } from "./parameter";
+import { findParameterCycle, parameterCycleError } from "./parameter-graph";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 import { CAD_DOCUMENT_FORMAT_VERSION } from "./version";
 
@@ -1750,23 +1753,113 @@ export function addDocumentParameter(
 }
 
 /**
- * Removes a document-level parameter. Refused with `in-use` while any feature
- * declares the parameter as an input; unknown ids surface the collection's
- * `parameter/not-found`.
+ * The structured blockers of a parameter deletion: the names of the OTHER
+ * parameters whose stored expressions read it, and the features whose
+ * declared inputs consume it. Carried on the refusal's `input` so the
+ * command surface (and any host above it) can render each blocker class
+ * precisely, and pinned by the delete-command tests.
+ */
+export interface ParameterDeleteBlockers {
+  /** Names of the parameters whose stored expressions reference the target. */
+  readonly variables: readonly string[];
+  /** The features whose inputs consume the target, with their kinds. */
+  readonly features: readonly {
+    readonly id: FeatureId;
+    readonly kind: string;
+  }[];
+}
+
+/**
+ * Renames a document-level parameter through the collection machinery:
+ * the name moves AND every stored expression identifier referencing the old
+ * name is rewritten to the new one in the same pure transition (feature
+ * inputs reference parameters BY ID, so they are untouched — the rewrite is
+ * expression-lexical only). The collection's structured failures (not-found,
+ * name rules, uniqueness) propagate unchanged.
+ *
+ * The rewrite is graph-preserving by name isomorphism — every reference
+ * still resolves through the same names to the same ids — so a rename
+ * cannot close a cycle that did not already exist; the one reachable corner
+ * is a pre-existing DANGLING reference (a name no parameter owned until
+ * this rename gave it one, possible only through the bulk substrate or the
+ * parse boundary, never the command vocabulary). The cycle guard here turns
+ * that corner into the structured `parameter/cycle` refusal — with the
+ * closing chain named — instead of a silently-cycling document.
+ */
+export function renameDocumentParameter(
+  document: CadDocument,
+  id: ParameterId,
+  name: string,
+): ParseResult<CadDocument, DocumentError | ParameterError> {
+  const renamed = renameParameter(document.parameters, id, name);
+  if (!renamed.ok) return renamed;
+  const cycle = findParameterCycle(renamed.value);
+  if (cycle !== null) {
+    return fail(
+      parameterCycleError(cycle, renamed.value, "Renaming this parameter"),
+    );
+  }
+  return ok(Object.freeze({ ...document, parameters: renamed.value }));
+}
+
+/**
+ * Removes a document-level parameter. Refused with `in-use` while ANY
+ * reference remains, naming every blocker in the one structured refusal:
+ * the parameters whose stored expressions read it (by name) and the
+ * features whose declared inputs consume it (by id and kind) — the
+ * expression readers are the vocabulary the expression variables render,
+ * the feature consumers the `document/in-use` guard has always enforced.
+ * Configurations keep their own later guard (`configuration-in-use`, the
+ * same order the body/feature removals use). Unknown ids surface the
+ * collection's `parameter/not-found`.
  */
 export function removeDocumentParameter(
   document: CadDocument,
   id: ParameterId,
 ): ParseResult<CadDocument, DocumentError | ParameterError> {
-  const blocking = document.features.find((feature) =>
-    feature.inputs.some((ref) => ref.kind === "parameter" && ref.id === id),
-  );
-  if (blocking !== undefined) {
+  const target = getParameter(document.parameters, id);
+  const variables =
+    target === undefined
+      ? []
+      : document.parameters.parameters
+          .filter(
+            (parameter) =>
+              parameter.id !== id &&
+              parameter.expression !== null &&
+              extractExpressionDependencies(parameter.expression).has(
+                target.name,
+              ),
+          )
+          .map((parameter) => parameter.name);
+  const features = document.features
+    .filter((feature) =>
+      feature.inputs.some((ref) => ref.kind === "parameter" && ref.id === id),
+    )
+    .map((feature) => ({ id: feature.id, kind: feature.kind }));
+  if (target !== undefined && (variables.length > 0 || features.length > 0)) {
+    const parts: string[] = [];
+    if (variables.length > 0) {
+      parts.push(
+        variables.length === 1
+          ? `the variable "${String(variables[0])}" reads it in its stored expression`
+          : `the variables ${variables.map((name) => `"${name}"`).join(", ")} read it in their stored expressions`,
+      );
+    }
+    if (features.length > 0) {
+      parts.push(
+        features.length === 1
+          ? `the feature "${String(features[0]?.id)}" (${String(features[0]?.kind)}) consumes it as an input`
+          : `the features ${features.map((feature) => `"${feature.id}" (${feature.kind})`).join(", ")} consume it as inputs`,
+      );
+    }
     return fail(
       docError(
         DOCUMENT_ERROR_CODES.inUse,
-        `Parameter "${id}" is referenced by feature "${blocking.id}".`,
-        id,
+        `Parameter "${target.name}" is still referenced: ${parts.join("; ")}.`,
+        Object.freeze({
+          variables,
+          features,
+        }) satisfies ParameterDeleteBlockers,
       ),
     );
   }

@@ -451,4 +451,23 @@ describe("validateStructuredHoleSubmission (the action battery)", () => {
       expect(position.message).toContain("finite");
     }
   });
+
+  it("skips the spec battery for referenced roles (Phase 21) but keeps the domains", () => {
+    // The diameter is a `$name` reference: its inert spec slot carries the
+    // default, so the shared battery (which would judge that number) must
+    // NOT run — the cross-role relations are regeneration's verdict.
+    const referenced = validateStructuredHoleSubmission({
+      ...submission(),
+      parameterRefs: { diameter: "$caseHeight" },
+    });
+    expect(referenced.ok).toBe(true);
+    // The submission's own domains (positions, axis) still hold on the
+    // reference path.
+    const withBadAxis = validateStructuredHoleSubmission({
+      ...submission(),
+      parameterRefs: { diameter: "$caseHeight" },
+      axis: 9,
+    });
+    expect(withBadAxis.ok).toBe(false);
+  });
 });

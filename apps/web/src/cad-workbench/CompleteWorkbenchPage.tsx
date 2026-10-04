@@ -47,6 +47,9 @@ import type { ImportedObjMesh } from "@slopcad/cad-io/obj-import";
 import { importStl } from "@slopcad/cad-io/stl-import";
 import type { ImportedStlMesh } from "@slopcad/cad-io/stl-import";
 import type { ImportedThreeMfMesh } from "@slopcad/cad-io/three-mf-import";
+// The TSX model surface: the pure, browser-safe document → TSX generator
+// (cad-core records and string building only — verified no node APIs).
+import { generateTsx } from "@slopcad/cad-jsx";
 import { formatBoundsExtents } from "@slopcad/cad-core";
 import { bootWorkerChannel, WorkerRequestFailure } from "@slopcad/cad-kernel";
 import type { WorkerClient } from "@slopcad/cad-kernel";
@@ -56,12 +59,15 @@ import type {
   CadImportFormatOption,
   CadImportOutcome,
 } from "@slopcad/ui/components/cad/cad-io-dialog";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
+import type { FixtureRenderState } from "../render-fixture/fixture-session";
 import type { ThreeMfImportResponse } from "../io-fixture/io-protocol";
+import type { ImportTsxResponse } from "../io-fixture/import-tsx-endpoint";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CadImportPreview, CadWorkbenchIo } from "./complete-workbench";
 import type { WorkbenchEngine } from "./workbench-engine";
 
+import { parseNativeTextToSession } from "../cad-projects/native-document-bridge";
+import { documentSceneTessellation } from "./document-scene";
 import {
   buildImportedMeshState,
   type ImportedMeshState,
@@ -77,7 +83,11 @@ import {
   type ImportedBrepState,
 } from "../io-fixture/io-brep";
 import { importIgesBytes, type ImportedIgesState } from "../io-fixture/io-iges";
-import { CompleteCadWorkbench } from "./complete-workbench";
+import {
+  CompleteCadWorkbench,
+  CompleteWorkbenchStatusBar,
+} from "./complete-workbench";
+import { WorkbenchShareBar } from "./share-viewer-bar";
 import { WorkbenchStoreProvider } from "./workbench-engine";
 
 /** The export title the 3MF exporter stamps (round-trips the import). */
@@ -103,6 +113,13 @@ const EXPORT_FORMATS: readonly CadExportFormatOption[] = [
     description: "The render projection as a glTF scene, one node per body.",
     meta: "scene / binary",
   },
+  {
+    id: "tsx",
+    label: "TSX",
+    description:
+      "The document as a @slopcad/cad-jsx model (parameters, sketches, feature DAG); generated in the browser.",
+    meta: "model / source",
+  },
 ];
 
 /** The importable formats, with the honest channel each one uses. */
@@ -120,6 +137,14 @@ const IMPORT_FORMATS: readonly CadImportFormatOption[] = [
     description: "Parsed by the app server (the importer is Node-targeted).",
     extensions: [".3mf"],
     meta: "mesh / server",
+  },
+  {
+    id: "tsx",
+    label: "TSX",
+    description:
+      "A @slopcad/cad-jsx model, compiled on the app server into the document.",
+    extensions: [".tsx"],
+    meta: "model / server",
   },
   {
     id: "obj",
@@ -156,6 +181,8 @@ interface HeldExport {
   readonly bytes: Uint8Array;
   readonly triangles: number;
   readonly downloadUrl: string;
+  /** The honest detail line, when the format's readout is not triangles. */
+  readonly detail?: string;
 }
 
 /** The union of every adapter's successful-import state. */
@@ -431,15 +458,73 @@ function CompleteWorkbenchBody({
     [adoptPreview],
   );
 
+  /**
+   * Imports one TSX model source: the app server's canonical loader
+   * compiles it to the native document text, which then enters the
+   * session through the SAME apply path an opened document takes (the
+   * persistence bridge's parse → `replaceSession`) — no parallel write
+   * path, and no mesh preview (the document itself IS the result).
+   */
+  const importTsxSource = useCallback(
+    async (engine: WorkbenchEngine, source: string): Promise<void> => {
+      setImportPending(true);
+      try {
+        const response = await fetch("/api/io/import-tsx", {
+          body: source,
+          method: "POST",
+        });
+        const payload = (await response.json()) as ImportTsxResponse;
+        if (!payload.ok) {
+          setImportError(`${payload.code}: ${payload.message}`);
+          return;
+        }
+        const parsed = parseNativeTextToSession(payload.native);
+        if (!parsed.ok) {
+          setImportError(`tsx-import/native-parse: ${parsed.error}`);
+          return;
+        }
+        engine.store.replaceSession(parsed.session);
+        engine.setActiveScene(parsed.scene);
+        engine.setRollback(parsed.rollback ?? null);
+        setImportError("");
+        setImportOutcome({
+          detail: `document applied: ${String(parsed.document.features.length)} features, ${String(parsed.document.bodies.length)} bodies`,
+          extents: "see model tree",
+          formatId: "tsx",
+          triangles: 0,
+          volume: "n/a (document import)",
+        });
+      } catch (error) {
+        setImportError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setImportPending(false);
+      }
+    },
+    [],
+  );
+
+  const importTsxFile = useCallback(
+    async (engine: WorkbenchEngine, file: File): Promise<void> => {
+      try {
+        const text = await file.text();
+        await importTsxSource(engine, text);
+      } catch (error) {
+        setImportError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [importTsxSource],
+  );
+
   /** Routes one imported file by its extension (the /io fixture's rule). */
   const importFiles = useCallback(
-    (files: readonly File[]): void => {
+    (files: readonly File[], engine: WorkbenchEngine): void => {
       const file = files[0];
       if (file === undefined) return;
       const name = file.name.toLowerCase();
       const isStep = name.endsWith(".step") || name.endsWith(".stp");
       const isBrep = name.endsWith(".brep");
       const isIges = name.endsWith(".igs") || name.endsWith(".iges");
+      const isTsx = name.endsWith(".tsx");
       // DXF/SVG are SKETCH exchange: they import into the ACTIVE sketch's
       // session (the sketch workspace's own import control), never into the
       // mesh pipeline. From this model-mode dialog there is no active
@@ -452,6 +537,7 @@ function CompleteWorkbenchBody({
         !isStep &&
         !isBrep &&
         !isIges &&
+        !isTsx &&
         !isSketchExchange
       ) {
         setImportError(`unsupported file type: ${file.name}`);
@@ -461,6 +547,10 @@ function CompleteWorkbenchBody({
         setImportError(
           "sketch-import/no-active-sketch: DXF and SVG import into the active sketch — enter sketch mode and use the sketch workspace's import control.",
         );
+        return;
+      }
+      if (isTsx) {
+        void importTsxFile(engine, file);
         return;
       }
       file
@@ -493,6 +583,7 @@ function CompleteWorkbenchBody({
       importObjBytes,
       importStlBytes,
       importStepBytes,
+      importTsxFile,
     ],
   );
 
@@ -509,20 +600,33 @@ function CompleteWorkbenchBody({
         if (heldExport === undefined) continue;
         exportEntries.push({
           byteCount: heldExport.bytes.length,
-          detail: `${String(heldExport.triangles)} triangles`,
+          detail:
+            heldExport.detail ?? `${String(heldExport.triangles)} triangles`,
           downloadName: `model.${format.id}`,
           downloadUrl: heldExport.downloadUrl,
           formatId: format.id,
         });
       }
       const heldImports = [...held.entries()]
-        .filter(([formatId]) => formatId === "stl" || formatId === "3mf")
+        .filter(
+          ([formatId]) =>
+            formatId === "stl" || formatId === "3mf" || formatId === "tsx",
+        )
         .map(([formatId, heldExport]) => ({
           byteCount: heldExport.bytes.length,
           formatId,
           onImport: () => {
             if (formatId === "stl") {
               importStlBytes(heldExport.bytes);
+              return;
+            }
+            if (formatId === "tsx") {
+              // The held TSX round-trips through the same server compile
+              // as a picked file — the export's own proof it recompiles.
+              void importTsxSource(
+                engine,
+                new TextDecoder().decode(heldExport.bytes),
+              );
               return;
             }
             import3MfBytes(heldExport.bytes).catch((error: unknown) => {
@@ -547,17 +651,60 @@ function CompleteWorkbenchBody({
           setImportOutcome(null);
         },
         onExport: (formatId: string) => {
-          const applied: PlateRenderState | null =
+          if (formatId === "tsx") {
+            // TSX exports the DOCUMENT as a @slopcad/cad-jsx model — a
+            // pure client-side generation (the generator is browser-safe:
+            // cad-core records and string building, no server round-trip).
+            const document = engine.documentApi.document;
+            const generated = generateTsx(document, {
+              documentId: document.id,
+            });
+            if (!generated.ok) {
+              setExportError(
+                `${generated.error.code}: ${generated.error.message}`,
+              );
+              return;
+            }
+            const bytes = new TextEncoder().encode(generated.value.source);
+            const url = URL.createObjectURL(new Blob([bytes]));
+            objectUrlsRef.current = [...objectUrlsRef.current, url];
+            setHeld((current) => {
+              const next = new Map(current);
+              const previous = next.get("tsx");
+              if (previous !== undefined)
+                URL.revokeObjectURL(previous.downloadUrl);
+              next.set("tsx", {
+                bytes,
+                detail:
+                  generated.value.declines.length > 0
+                    ? `${String(generated.value.declines.length)} declined records`
+                    : "full document round-trip",
+                downloadUrl: url,
+                triangles: 0,
+              });
+              return next;
+            });
+            setExportError("");
+            return;
+          }
+          const applied: FixtureRenderState | null =
             engine.applied?.state ?? null;
           if (applied === null) return;
           if (formatId !== "stl" && formatId !== "3mf" && formatId !== "glb") {
             return;
           }
+          // The document scene carries per-body soups: the mesh exporters
+          // consume ONE indexed soup, so the rendered bodies merge in
+          // document order (the projection itself feeds GLB either way).
+          const soup =
+            "tessellation" in applied.measurement
+              ? applied.measurement.tessellation
+              : documentSceneTessellation(applied.measurement.bodies);
           const result =
             formatId === "stl"
-              ? exportStlBinary(applied.measurement.tessellation)
+              ? exportStlBinary(soup)
               : formatId === "3mf"
-                ? exportThreeMf(applied.measurement.tessellation, {
+                ? exportThreeMf(soup, {
                     title: EXPORT_TITLE,
                   })
                 : // GLB exports the RENDER PROJECTION — the renderer-neutral
@@ -586,7 +733,9 @@ function CompleteWorkbenchBody({
           });
           setExportError("");
         },
-        onImportFiles: importFiles,
+        onImportFiles: (files: readonly File[]) => {
+          importFiles(files, engine);
+        },
         preview,
       };
     },
@@ -599,6 +748,7 @@ function CompleteWorkbenchBody({
       importOutcome,
       importPending,
       importStlBytes,
+      importTsxSource,
       preview,
     ],
   );
@@ -608,6 +758,22 @@ function CompleteWorkbenchBody({
   // the /io fixture remains the GLTFLoader reference surface.
 
   return (
-    <CompleteCadWorkbench backend={backend} io={buildIo} rootId={rootId} />
+    <CompleteCadWorkbench
+      backend={backend}
+      io={buildIo}
+      rootId={rootId}
+      slots={{
+        // The share control rides the status row's free right end (the
+        // strip keeps its surface ids through the exported default): a
+        // page-level bar row would consume layout height and shift the
+        // sketch canvas the tutorial driver maps workplane clicks onto.
+        statusBar: ({ engine }) => (
+          <div className="border-border flex items-center border-t">
+            <CompleteWorkbenchStatusBar className="min-w-0 flex-1 border-t-0" />
+            <WorkbenchShareBar engine={engine} />
+          </div>
+        ),
+      }}
+    />
   );
 }

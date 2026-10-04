@@ -105,6 +105,15 @@ export {
   type ComponentsExampleSummary,
 } from "./components/components";
 
+// -- CAD JSX (authoring) ------------------------------------------------------
+
+export {
+  HubMountModel,
+  HUB_MOUNT_DOCUMENT_ID,
+  runCadJsxExample,
+  type CadJsxExampleSummary,
+} from "./cadjsx/hub-mount";
+
 // -- React (jsdom; the /docs page does not import this module) ---------------
 
 export {

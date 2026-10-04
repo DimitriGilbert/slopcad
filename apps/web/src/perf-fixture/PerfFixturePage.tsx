@@ -30,10 +30,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { CadScene } from "@slopcad/cad-r3f";
-import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
 import {
   bootRenderFixtureSession,
+  type FixtureRenderState,
   type RenderFixtureSession,
 } from "../render-fixture/fixture-session";
 import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
@@ -91,7 +91,7 @@ export function PerfFixturePage(): ReactElement {
     samples: {},
   });
   const [applied, setApplied] = useState<{
-    readonly state: PlateRenderState;
+    readonly state: FixtureRenderState;
     readonly revision: number;
   } | null>(null);
 

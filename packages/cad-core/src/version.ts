@@ -73,8 +73,47 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * reader would silently drop the standalone section and counter —
  * configuration rows are data the old reader cannot carry, so the
  * envelope stamp is the gate.
+ *
+ * v7 (Phase 22): the command vocabulary grew expression payloads —
+ * `parameter.set` can carry a defining-expression AST (and its
+ * `expression: null` clear form), and `parameter.create` can carry one
+ * beside its value. The envelope's own sections are unchanged — the
+ * document substrate has serialized parameter expressions since Phase 5 —
+ * but the TRANSACTION LOG is no longer old-reader-faithful: an old reader
+ * parsing an expression-bearing `parameter.set` drops the unknown field
+ * and replays a different document (its log/head replay check would refuse
+ * the file with a confusing history mismatch). The version moves so the gate
+ * is the predictable migration refusal, not a corrupted replay; the
+ * v6→v7 migration is the identity (v6 content is valid v7 content).
+ *
+ * v8 (Phase 24): the command vocabulary grew the parameter lifecycle —
+ * `parameter.rename` and `parameter.delete` are new command types. The
+ * envelope's own sections are unchanged (the document substrate has carried
+ * parameter names and expression ASTs since Phase 5, and a rename or delete
+ * is expressed entirely in the transaction log), but the LOG is no longer
+ * old-reader-faithful in the strict-gate sense: a v7 reader handed a
+ * v7-stamped file carrying the new commands refuses deep in replay at its
+ * command-type check (`command/type-unknown`) — after parsing the envelope,
+ * the document, and part of the history — instead of at the version gate.
+ * The version moves so the stamp keeps the refusal at the migration gate,
+ * where it is the documented, predictable behavior; the v7→v8 migration is
+ * the identity (v7 content is valid v8 content — an old file simply carries
+ * none of the new types).
+ *
+ * v9 (Phase 60): the feature vocabulary grew the `duplicate` kind — one
+ * feature input (the source body) plus six parameters, and one output body
+ * PER COPY. The envelope's own sections are unchanged (features are
+ * free-form kind strings at the substrate layer), but the replay is no
+ * longer old-reader-faithful in the sense that matters: a `feature.create`
+ * of kind `duplicate` replays through an old reader into a document whose
+ * feature the old executor refuses at its kind check — a multi-output
+ * feature the old reader cannot build, silently degraded at regeneration
+ * time instead of predictably at load. The version moves so the stamp keeps
+ * that refusal at the migration gate; the v8→v9 migration is the identity
+ * (v8 content is valid v9 content — an old file carries no `duplicate`
+ * features, since the writer that emits one stamps v9).
  */
-export const CAD_NATIVE_FORMAT_VERSION = 6;
+export const CAD_NATIVE_FORMAT_VERSION = 9;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

@@ -35,6 +35,7 @@ import { AppPage, PageHeader } from "@/components/app/page";
 import { ProjectCard } from "@/components/app/project-card";
 import { plural } from "@/utils/format";
 import { useTRPC } from "@/utils/trpc";
+import { useProjectsWebMcpTools } from "@/webmcp/projects-tools";
 
 export const Route = createFileRoute("/_auth/projects/")({
   head: () => ({
@@ -52,6 +53,7 @@ function ProjectsPage(): ReactElement {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const projectsQuery = useQuery(trpc.projects.list.queryOptions());
+  useProjectsWebMcpTools();
 
   const createMutation = useMutation(
     trpc.projects.create.mutationOptions({

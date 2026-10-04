@@ -20,6 +20,7 @@ import {
   createStaleResultCoordinator,
   bootWorkerChannel,
   WorkerRequestFailure,
+  type ComputationOutcome,
 } from "@slopcad/cad-kernel";
 import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
 import type {
@@ -46,13 +47,18 @@ import type {
 import type { BooleanSceneRequest } from "../cad-workbench/boolean";
 import type { MoveBodySceneRequest } from "../cad-workbench/move-body";
 import type { SheetSceneRequest } from "../cad-workbench/surface-scene";
+import type { DocumentBodySceneRequest } from "../cad-workbench/document-scene";
 
 import {
   computePlateRenderState,
+  documentSceneRenderState,
+  type DocumentSceneRenderState,
   type SectionDisplayRequest,
   extrudeRenderState,
   type PlateRenderState,
 } from "./plate-render-scene";
+import { bootFixtureWorker } from "./fixture-worker-boot";
+import { computeDocumentScene } from "../worker-fixture/document-scene";
 import { computeExtrudeScene } from "../worker-fixture/extrude-scene";
 import { computeRevolveScene } from "../worker-fixture/revolve-scene";
 import { computeSweepScene } from "../worker-fixture/sweep-scene";
@@ -87,6 +93,26 @@ import {
 const VIEWPORT_CSS_WIDTH = 800;
 const VIEWPORT_CSS_HEIGHT = 520;
 
+/**
+ * Every render state the session can settle: the single-solid scenes'
+ * {@link PlateRenderState} or the document scene's multi-body state
+ * (Phase 16 — the applied scene IS the document). Both carry the same
+ * settle-surface contract: `measurement.volume` is the volume the viewport
+ * provably renders.
+ */
+export type FixtureRenderState = PlateRenderState | DocumentSceneRenderState;
+
+/**
+ * Narrows an applied state to the single-solid scenes' plate state: the
+ * aggregate document measurement has no single tessellation (it is split
+ * per body), so the tessellation's presence is the honest discriminator.
+ */
+export function isPlateRenderState(
+  state: FixtureRenderState,
+): state is PlateRenderState {
+  return "tessellation" in state.measurement;
+}
+
 /** The wired session a booted fixture exposes. */
 export interface RenderFixtureSession {
   /**
@@ -99,6 +125,19 @@ export interface RenderFixtureSession {
   dispatch(
     holeDiameterMm: number,
     section?: SectionDisplayRequest | null,
+  ): void;
+  /**
+   * Dispatches the DOCUMENT scene (Phase 16 owner fix): one computation
+   * over the applied document's body list — the FULL applied document,
+   * one mesh per rendered body, the aggregate measurement summing exactly
+   * what renders. Per-body kernel refusals do not fail the pass: each is
+   * reported through `onSceneOutcome` (the timeline's verdict seam), and
+   * the refused lineage renders its embedded base fallback. The settle
+   * stamp equals the sum of the rendered bodies.
+   */
+  dispatchDocument(
+    bodies: readonly DocumentBodySceneRequest[],
+    renderableBodyIds: ReadonlySet<string>,
   ): void;
   /**
    * Dispatches the Phase 26.1 extrude computation: the REAL kernel executes
@@ -312,7 +351,7 @@ export function completionJson(completion: ToolCompletion): string {
  * and keep the authored frame (their canvas IS that size — byte-stable).
  */
 export function faceAnchorSurface(
-  renderState: PlateRenderState,
+  renderState: FixtureRenderState,
   viewport: { readonly width: number; readonly height: number } = {
     width: VIEWPORT_CSS_WIDTH,
     height: VIEWPORT_CSS_HEIGHT,
@@ -364,7 +403,12 @@ export function faceAnchorSurface(
  */
 export type FixtureSessionBackend = "manifold" | "occt";
 
-/** The feature-backed scene kinds a dispatch can carry a verdict for. */
+/**
+ * The feature-backed scene kinds a dispatch can carry a verdict for. The
+ * document scene (Phase 16) reports per-body verdicts across the whole
+ * vocabulary, the fixture plate included — a refused plate body maps onto
+ * its owning feature like any other scene body.
+ */
 export type FeatureSceneKind =
   | "extrude"
   | "revolve"
@@ -381,9 +425,11 @@ export type FeatureSceneKind =
   | "patternFeature"
   | "patternPath"
   | "mirror"
+  | "duplicate"
   | "hole"
   | "pad"
-  | "sheet";
+  | "sheet"
+  | "plate";
 
 /**
  * One feature-backed scene dispatch's worker verdict — the seam a host uses
@@ -454,6 +500,14 @@ export interface BootRenderFixtureSessionOptions {
    */
   readonly backend?: FixtureSessionBackend;
   /**
+   * Overrides the default worker construction (the bundler-hosted module
+   * workers of `./fixture-worker-boot`). The viewer's standalone export
+   * passes its inlined blob worker — a `file://`-opened single HTML cannot
+   * fetch a classic module-worker file, but the session protocol is
+   * identical either way.
+   */
+  readonly workerFactory?: () => Worker;
+  /**
    * Receives every feature-backed scene dispatch's worker verdict —
    * success when the scene settles, the structured refusal when the
    * kernel declines (e.g. Manifold's `kernel/unsupported-operation` for
@@ -473,36 +527,30 @@ export interface BootRenderFixtureSessionOptions {
  */
 export function bootRenderFixtureSession(
   targets: FixtureSurfaceTargets,
-  onApplied: (state: PlateRenderState, revision: number) => void,
+  onApplied: (state: FixtureRenderState, revision: number) => void,
   options: BootRenderFixtureSessionOptions = {},
 ): RenderFixtureSession {
   let errorText = "";
   // The crash-settling boot (Phase 35 hardening): a dead thread settles
   // in-flight requests (worker/transport-closed) instead of hanging, and
   // the crash lands on the same error surface as computation failures.
-  // The worker URLs stay INLINE string literals per branch — the bundler
-  // statically rewrites exactly that form into its worker chunks, so a
-  // variable indirection here would silently break the worker emission.
+  // The default construction lives in ./fixture-worker-boot so the viewer's
+  // standalone build can alias it out entirely (a file:// standalone boots
+  // its inlined worker through `workerFactory`); the URLs there stay INLINE
+  // string literals per branch — the bundler statically rewrites exactly
+  // that form into its worker chunks, so a variable indirection would
+  // silently break the worker emission.
   const backend = options.backend ?? "manifold";
   const boot = bootWorkerChannel(
-    backend === "occt"
-      ? new Worker(
-          new URL("../worker-fixture/occt-worker-entry.ts", import.meta.url),
-          { type: "module" },
-        )
-      : new Worker(
-          new URL(
-            "../worker-fixture/manifold-worker-entry.ts",
-            import.meta.url,
-          ),
-          { type: "module" },
-        ),
+    options.workerFactory !== undefined
+      ? options.workerFactory()
+      : bootFixtureWorker(backend),
     (failure) => {
       errorText = `worker channel failed (${failure.kind}): ${failure.message}`;
       writeSurface();
     },
   );
-  const coordinator = createStaleResultCoordinator<PlateRenderState>({
+  const coordinator = createStaleResultCoordinator<FixtureRenderState>({
     client: boot.client,
   });
   const counters = { dispatched: 0, settled: 0 };
@@ -616,6 +664,73 @@ export function bootRenderFixtureSession(
           writeSurface();
         });
     },
+    dispatchDocument(
+      bodies: readonly DocumentBodySceneRequest[],
+      renderableBodyIds: ReadonlySet<string>,
+    ): void {
+      counters.dispatched += 1;
+      errorText = "";
+      writeSurface();
+      coordinator
+        .update(async (context) =>
+          documentSceneRenderState(
+            await computeDocumentScene(context, bodies, renderableBodyIds),
+          ),
+        )
+        .then(
+          (outcome: ComputationOutcome<FixtureRenderState>) => {
+            if (outcome.outcome === "applied") {
+              const measurement = outcome.result.measurement;
+              if (
+                "failures" in measurement &&
+                measurement.failures.length > 0
+              ) {
+                // The per-body refusals land on the error surface in
+                // application order — the same verbatim text a whole-scene
+                // failure would carry — before the settle publishes it.
+                errorText = measurement.failures
+                  .map((failure) => failureText(failure.failure))
+                  .join("; ");
+              }
+            }
+            settle();
+            if (outcome.outcome !== "applied") return;
+            // A dropped (superseded) computation reports nothing — the
+            // dispatch that superseded it carries the verdicts.
+            const measurement = outcome.result.measurement;
+            if (!("failures" in measurement)) return;
+            // The per-body verdicts: each refused body's structured
+            // refusal lands on the timeline's verdict seam (the last
+            // outcome wins the chip). A fully built document reports the
+            // success once, clearing any prior refusal — and the error
+            // surface resets with the next dispatch above.
+            if (measurement.failures.length > 0) {
+              for (const failure of measurement.failures) {
+                options.onSceneOutcome?.({
+                  ok: false,
+                  scene: failure.scene,
+                  bodyId: failure.bodyId,
+                  text: failureText(failure.failure),
+                });
+              }
+              return;
+            }
+            const last = bodies[bodies.length - 1];
+            if (last !== undefined) {
+              options.onSceneOutcome?.({
+                ok: true,
+                scene: last.scene.kind,
+                bodyId: last.bodyId,
+              });
+            }
+          },
+          (failure: unknown) => {
+            counters.settled += 1;
+            errorText = failureText(failure);
+            writeSurface();
+          },
+        );
+    },
     dispatchExtrude(request: ExtrudeSceneRequest, bodyId: string): void {
       counters.dispatched += 1;
       errorText = "";
@@ -654,7 +769,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeHoleScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeHoleScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(
           settleWithVerdict("hole", bodyId),
@@ -667,7 +785,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computePadScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computePadScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(settleWithVerdict("pad", bodyId), failWithVerdict("pad", bodyId));
     },
@@ -852,7 +973,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeBooleanScene(context, request),
+            (await computeBooleanScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -868,7 +989,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeMoveBodyScene(context, request),
+            (await computeMoveBodyScene(context, request)).measurement,
             bodyId,
           ),
         )

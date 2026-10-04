@@ -32,10 +32,17 @@ import { EXTRUDE_DEFAULT_DEPTH_MM } from "../src/cad-workbench/SketchMode";
  *  - POSITION REGENERATION — a position edit sliding the hole out over the
  *    side face changes the removed volume by the exact circular segment;
  *  - NO-OP GUARD — a hole moved off the body settles with the structured
- *    "removed no material" refusal on the error surface, the previous
- *    scene untouched (the silent-subtract trap, refused);
+ *    "removed no material" refusal on the error surface, and the refused
+ *    hole's lineage renders its base fallback (the un-holed pad — the
+ *    last valid state of that lineage, Phase 16 document-scene
+ *    semantics);
  *  - SCREENSHOT BASELINE — the settled hole scene is byte-stable across
  *    two independent browser journeys.
+ *
+ * Phase 16 document-scene semantics: the applied scene IS the applied
+ * document — the boot plate renders as one body BESIDE the pad (and its
+ * holes), so every settled volume is the DOCUMENT volume (plate + the
+ * holed pad) and the scene bounds are the union.
  *
  * Machine surfaces: `data-scene-kind`, `data-scene-bounds`, `data-error`,
  * `data-in-flight`, and the shared settle surface (`data-volume`,
@@ -61,6 +68,10 @@ const RECT = {
 const PAD_VOLUME =
   (RECT.x1 - RECT.x0) * (RECT.y1 - RECT.y0) * EXTRUDE_DEFAULT_DEPTH_MM;
 const PAD_THICKNESS = EXTRUDE_DEFAULT_DEPTH_MM;
+
+/** The boot plate's analytic volume (30×20×10 with the ⌀8 through bore) —
+ *  the document scene renders it beside the pad. */
+const PLATE_VOLUME = 30 * 20 * 10 - Math.PI * 4 ** 2 * 10;
 
 /** Relative volume tolerance (the render suite's documented Manifold band). */
 const VOLUME_REL_TOLERANCE = 0.005;
@@ -181,16 +192,18 @@ test("sketch → extrude → hole settles at the analytic pad-minus-cylinder vol
 }) => {
   const volume = await runHoleJourney(page);
 
-  // GEOMETRY SEMANTICS: the settled volume within the documented band of
-  // the analytic pad − π·r²·depth (the defaults: Ø8, blind 4 mm).
-  const analytic = blindVolume(HOLE_DEFAULT_DIAMETER_MM, HOLE_DEFAULT_DEPTH_MM);
+  // GEOMETRY SEMANTICS: the settled DOCUMENT volume within the documented
+  // band of plate + (pad − π·r²·depth) — the defaults: Ø8, blind 4 mm.
+  const analytic =
+    PLATE_VOLUME + blindVolume(HOLE_DEFAULT_DIAMETER_MM, HOLE_DEFAULT_DEPTH_MM);
   const settled = Number(volume);
   expect(
     Math.abs(settled - analytic) / analytic,
     `volume ${settled} vs analytic ${analytic}`,
   ).toBeLessThan(VOLUME_REL_TOLERANCE);
 
-  // A hole removes interior material: the pad's bounds survive.
+  // A hole removes interior material: the union bounds keep the document's
+  // height (plate and pad share the [0,10] span).
   const bounds = await readSceneBounds(page);
   expect(bounds.min[2]).toBe(0);
   expect(bounds.max[2]).toBe(PAD_THICKNESS);
@@ -233,7 +246,7 @@ test("a diameter edit regenerates the hole at the new analytic volume", async ({
   const regenerated = Number(
     await waitForSettledScene(page, "workbench-root", { afterDispatch }),
   );
-  const analytic = blindVolume(12, HOLE_DEFAULT_DEPTH_MM);
+  const analytic = PLATE_VOLUME + blindVolume(12, HOLE_DEFAULT_DEPTH_MM);
   expect(
     Math.abs(regenerated - analytic) / analytic,
     `regenerated ${regenerated} vs analytic ${analytic}`,
@@ -248,7 +261,7 @@ test("a depth edit reaching the thickness drills through", async ({ page }) => {
   const regenerated = Number(
     await waitForSettledScene(page, "workbench-root", { afterDispatch }),
   );
-  const analytic = throughVolume(HOLE_DEFAULT_DIAMETER_MM);
+  const analytic = PLATE_VOLUME + throughVolume(HOLE_DEFAULT_DIAMETER_MM);
   expect(
     Math.abs(regenerated - analytic) / analytic,
     `regenerated ${regenerated} vs analytic ${analytic}`,
@@ -278,6 +291,7 @@ test("a position edit slides the hole out over the side face", async ({
     radius * radius * Math.acos(inFace / radius) -
     inFace * Math.sqrt(radius * radius - inFace * inFace);
   const analytic =
+    PLATE_VOLUME +
     PAD_VOLUME -
     (Math.PI * radius * radius - segmentArea) * HOLE_DEFAULT_DEPTH_MM;
   expect(
@@ -289,8 +303,9 @@ test("a position edit slides the hole out over the side face", async ({
 test("a hole moved off the body fails structured instead of silently no-oping", async ({
   page,
 }) => {
-  const volume = await runHoleJourney(page);
-  const settled = Number(volume);
+  // The journey's own settled volume is asserted by the analytics above;
+  // the no-op guard only needs the refusal and the fallback state.
+  await runHoleJourney(page);
 
   // NO-OP GUARD: holeX far past the +x face — the tool is disjoint, the
   // subtract would return the pad UNCHANGED, and the post-condition
@@ -301,9 +316,16 @@ test("a hole moved off the body fails structured instead of silently no-oping", 
     /removed no material/,
   );
   await expect(page.locator(ROOT)).toHaveAttribute("data-in-flight", "0");
+  // Phase 16 semantics: the scene never freezes on refused pixels — the
+  // refused hole's lineage renders its BASE fallback (the un-holed pad,
+  // the last valid state of that lineage), so the document volume is
+  // plate + plain pad.
   const afterFailureText = await page
     .locator(ROOT)
     .getAttribute("data-volume")
     .then((value) => value ?? "");
-  expect(Number(afterFailureText)).toBe(settled);
+  expect(
+    Math.abs(Number(afterFailureText) - (PLATE_VOLUME + PAD_VOLUME)) /
+      (PLATE_VOLUME + PAD_VOLUME),
+  ).toBeLessThan(VOLUME_REL_TOLERANCE);
 });

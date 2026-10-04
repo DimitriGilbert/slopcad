@@ -12,6 +12,11 @@
  *   translation (and, when the form authored one, the world-axis
  *   rotation the Phase 44 bridge growth carries — rotation-capable
  *   kernels only, the transform contract's own gate).
+ * - DUPLICATE (Phase 60): the source body's solid and ONE
+ *   `solid.transform` per copy scene — the copy's place comes from the
+ *   bridge's shared `planDuplicateInstances` (the analytic T^ordinal of
+ *   the translate-then-rotate step), and the result solid is keyed by
+ *   the copy's body id so a later duplicate of a copy composes from it.
  */
 
 import { angle, length } from "@slopcad/cad-core";
@@ -20,11 +25,57 @@ import type { PlateMeasurement } from "./plate-scene";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
 import type { BooleanSceneRequest } from "../cad-workbench/boolean";
 import type { MoveBodySceneRequest } from "../cad-workbench/move-body";
+import type { DuplicateSceneRequest } from "../cad-workbench/duplicate";
+import type { SceneOperand } from "../cad-workbench/extrude";
 
 const mm = (value: number) => length(value, "mm");
 
 /** The no-op post-conditions' relative floor (the thread scene's value). */
 const NOOP_EPSILON_RELATIVE = 1e-9;
+
+/**
+ * A composition scene's result: the measurement every dispatch consumes,
+ * plus the composed solid — the document pass keys it by the body id so a
+ * later consumer composes from this body's CURRENT geometry (the
+ * real-CAD operand semantics the document scene's evaluation pass
+ * carries).
+ */
+export interface ComposedSceneResult {
+  readonly measurement: PlateMeasurement;
+  readonly solid: WorkerSolidId;
+}
+
+/** The pass's computed solids, keyed by operand body id. */
+export type ComputedSolids = ReadonlyMap<string, WorkerSolidId>;
+
+/** The empty handoff of the single-scene dispatches (no pass, no map). */
+export const NO_COMPUTED_SOLIDS: ComputedSolids = new Map();
+
+/**
+ * Resolves one operand's solid: a plain-extrude derivation re-extrudes
+ * (the established path, byte-identical for every plain-extrude flow); a
+ * computed reference looks the body's scene output up in the pass's map.
+ * A missing computed solid rejects the scene — the operand's own
+ * composition refused earlier in the pass, and fabricating a replacement
+ * would lie.
+ */
+export async function operandSolid(
+  context: ComputationContext,
+  operand: SceneOperand,
+  computed: ComputedSolids,
+  role: string,
+): Promise<WorkerSolidId> {
+  if (operand.kind === "extrude") {
+    return (await extrudeOperand(context, operand.request)).solid;
+  }
+  const solid = computed.get(operand.bodyId);
+  if (solid === undefined) {
+    throw new Error(
+      `operand-unavailable: the ${role} body's computed solid is not in this pass — the feature that produced it refused or was never computed. Fix or remove that feature.`,
+    );
+  }
+  return solid;
+}
 
 /** Extrudes one operand of the boolean scene (the shared first step). */
 async function extrudeOperand(
@@ -61,24 +112,39 @@ async function measure(
 }
 
 /**
- * The boolean: the target and tool extrusions combined by the picked
- * operation. A structured kernel rejection or a degenerate combination
- * (a union that added nothing — coincident operands; a subtract that
- * removed nothing — a disjoint tool) rejects the computation, the
- * composed features' own guards.
+ * The boolean: the target and tool solids combined by the picked
+ * operation — EVERY declared tool rides (the kernel's boolean operations
+ * are n-ary, and a multi-tool commit keeps every tool the author picked).
+ * Each operand rides its source — a plain-extrude derivation re-extrudes
+ * (the established flows, byte-identical), a computed reference consumes
+ * the body's current solid from the document pass. A structured kernel
+ * rejection or a degenerate combination (a union that added nothing —
+ * coincident operands; a subtract that removed nothing — a disjoint tool)
+ * rejects the computation, the composed features' own guards.
  */
 export async function computeBooleanScene(
   context: ComputationContext,
   request: BooleanSceneRequest,
-): Promise<PlateMeasurement> {
-  const target = await extrudeOperand(context, request.target);
-  const tool = await extrudeOperand(context, request.tool);
+  computed: ComputedSolids = NO_COMPUTED_SOLIDS,
+): Promise<ComposedSceneResult> {
+  const targetSolid = await operandSolid(
+    context,
+    request.target,
+    computed,
+    "target",
+  );
+  const toolSolids: WorkerSolidId[] = [];
+  for (const [index, tool] of request.tools.entries()) {
+    toolSolids.push(
+      await operandSolid(context, tool, computed, `tool ${String(index + 1)}`),
+    );
+  }
   const targetVolume = await context.request("solid.volume", {
-    solid: target.solid,
+    solid: targetSolid,
   });
   if (request.operation === "union") {
     const merged = await context.request("solid.union", {
-      operands: [target.solid, tool.solid],
+      operands: [targetSolid, ...toolSolids],
     });
     const after = await context.request("solid.volume", {
       solid: merged.solid,
@@ -88,12 +154,15 @@ export async function computeBooleanScene(
         "union/no-op: the tool adds no material beyond the target — the operands already overlap completely. Pick distinct bodies.",
       );
     }
-    return measure(context, merged.solid);
+    return {
+      measurement: await measure(context, merged.solid),
+      solid: merged.solid,
+    };
   }
   if (request.operation === "subtract") {
     const cut = await context.request("solid.subtract", {
-      target: target.solid,
-      tools: [tool.solid],
+      target: targetSolid,
+      tools: toolSolids,
     });
     const after = await context.request("solid.volume", { solid: cut.solid });
     if (after.volume >= targetVolume.volume * (1 - NOOP_EPSILON_RELATIVE)) {
@@ -106,10 +175,10 @@ export async function computeBooleanScene(
         "subtract/removed-everything: the tool swallows the whole target — position it to leave material behind.",
       );
     }
-    return measure(context, cut.solid);
+    return { measurement: await measure(context, cut.solid), solid: cut.solid };
   }
   const common = await context.request("solid.intersect", {
-    operands: [target.solid, tool.solid],
+    operands: [targetSolid, ...toolSolids],
   });
   const after = await context.request("solid.volume", {
     solid: common.solid,
@@ -119,7 +188,10 @@ export async function computeBooleanScene(
       "intersect/empty: the operands share no material — the honest result is the empty solid, and the scene refuses to settle a viewport on nothing. Reposition the operands to overlap.",
     );
   }
-  return measure(context, common.solid);
+  return {
+    measurement: await measure(context, common.solid),
+    solid: common.solid,
+  };
 }
 
 /**
@@ -127,14 +199,17 @@ export async function computeBooleanScene(
  * the optional world-axis rotation — rotation-capable kernels only, the
  * transform contract's own gate; a structured refusal from a
  * non-rotating kernel crosses back through the ordinary failure path).
+ * The base rides its operand source — the derivation re-extrudes, a
+ * computed reference consumes the body's current solid from the pass.
  */
 export async function computeMoveBodyScene(
   context: ComputationContext,
   request: MoveBodySceneRequest,
-): Promise<PlateMeasurement> {
-  const extruded = await extrudeOperand(context, request.base);
+  computed: ComputedSolids = NO_COMPUTED_SOLIDS,
+): Promise<ComposedSceneResult> {
+  const baseSolid = await operandSolid(context, request.base, computed, "base");
   const moved = await context.request("solid.transform", {
-    solid: extruded.solid,
+    solid: baseSolid,
     translation: {
       x: mm(request.offsetMm[0]),
       y: mm(request.offsetMm[1]),
@@ -149,5 +224,51 @@ export async function computeMoveBodyScene(
           },
         }),
   });
-  return measure(context, moved.solid);
+  return {
+    measurement: await measure(context, moved.solid),
+    solid: moved.solid,
+  };
+}
+
+/**
+ * The duplicate (Phase 60): ONE transform per copy scene — the request
+ * carries that copy's place from the bridge's shared
+ * `planDuplicateInstances` plan (the analytic T^ordinal of the step
+ * transform), the base rides its operand source (a plain extrusion
+ * re-extrudes, a computed reference — another composition's output or an
+ * earlier duplicate's own copy — consumes the pass's solid). The result
+ * solid is keyed by the copy's body id, so a later duplicate of a copy
+ * (the verb's iterative use) composes from it.
+ */
+export async function computeDuplicateScene(
+  context: ComputationContext,
+  request: DuplicateSceneRequest,
+  computed: ComputedSolids = NO_COMPUTED_SOLIDS,
+): Promise<ComposedSceneResult> {
+  const baseSolid = await operandSolid(
+    context,
+    request.base,
+    computed,
+    "duplicate source",
+  );
+  const placed = await context.request("solid.transform", {
+    solid: baseSolid,
+    translation: {
+      x: mm(request.translationMm[0]),
+      y: mm(request.translationMm[1]),
+      z: mm(request.translationMm[2]),
+    },
+    ...(request.rotation === undefined
+      ? {}
+      : {
+          rotation: {
+            axis: request.rotation.axis,
+            angle: angle(request.rotation.angleRad),
+          },
+        }),
+  });
+  return {
+    measurement: await measure(context, placed.solid),
+    solid: placed.solid,
+  };
 }

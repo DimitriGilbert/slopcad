@@ -11,6 +11,8 @@ apps/web ── everything below (the composition root)
   │                  cad-kernel, cad-kernel-manifold) — never kernel internals
   ├── @slopcad/cad-r3f ── cad-react + cad-core + three/R3F (peer)
   ├── @slopcad/cad-react ── cad-core only (+ react peer)
+  ├── @slopcad/cad-jsx ── cad-core only (+ react peer; esbuild for the
+  │                      Node-only TSX loader)
   ├── @slopcad/cad-components ── cad-core + cad-kernel (no kernel backend!)
   ├── @slopcad/cad-io ── cad-core + cad-kernel
   ├── @slopcad/cad-sketch ── cad-core only
@@ -31,7 +33,15 @@ The rules, verbatim from the dependency map:
 - `packages/ui` → public React/R3F APIs only; never kernel internals.
 - No CAD package → `@slopcad/db`, `@slopcad/auth`, `@slopcad/api`, or the app.
 
-Two later-phase additions sit on top of this map:
+Three later-phase additions sit on top of this map:
+
+**The JSX compiler adds a declarative authoring layer.**
+`@slopcad/cad-jsx` sits directly above `cad-core` only: authored React
+element trees compile deterministically to the command vocabulary — no
+second parametric representation. The Node-only TSX loader
+(`@slopcad/cad-jsx/loader`, esbuild + `node:vm`) is deliberately not
+re-exported from the package index, so browser bundles never pull it
+(see `docs/guides/cad-jsx.md`).
 
 **The renderer stays prop-driven (Phase 14).** `cad-r3f`'s `CadScene` and
 `CadModel` take the projection, selection, and pick callbacks as explicit

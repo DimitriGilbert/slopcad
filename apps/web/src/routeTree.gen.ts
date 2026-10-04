@@ -19,6 +19,7 @@ import { Route as PerfRouteImport } from './routes/perf'
 import { Route as RenderRouteImport } from './routes/render'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
+import { Route as ViewerRouteImport } from './routes/viewer'
 import { Route as WorkbenchRouteImport } from './routes/workbench'
 import { Route as WorkbenchAnalysisRouteImport } from './routes/workbench-analysis'
 import { Route as WorkbenchAssemblyRouteImport } from './routes/workbench-assembly'
@@ -38,6 +39,7 @@ import { Route as AuthProjectsIndexRouteImport } from './routes/_auth/projects.i
 import { Route as AuthProjectsProjectIdRouteImport } from './routes/_auth/projects.$projectId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiIoImport3mfRouteImport } from './routes/api/io/import-3mf'
+import { Route as ApiIoImportTsxRouteImport } from './routes/api/io/import-tsx'
 import { Route as ApiTrpcSplatRouteImport } from './routes/api/trpc/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -87,6 +89,11 @@ const SpikeRoute = SpikeRouteImport.update({
 const UiViewportRoute = UiViewportRouteImport.update({
   id: '/ui-viewport',
   path: '/ui-viewport',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ViewerRoute = ViewerRouteImport.update({
+  id: '/viewer',
+  path: '/viewer',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkbenchRoute = WorkbenchRouteImport.update({
@@ -185,6 +192,11 @@ const ApiIoImport3mfRoute = ApiIoImport3mfRouteImport.update({
   path: '/api/io/import-3mf',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiIoImportTsxRoute = ApiIoImportTsxRouteImport.update({
+  id: '/api/io/import-tsx',
+  path: '/api/io/import-tsx',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
   id: '/api/trpc/$',
   path: '/api/trpc/$',
@@ -201,6 +213,7 @@ export interface FileRoutesByFullPath {
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
+  '/viewer': typeof ViewerRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
@@ -219,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
+  '/api/io/import-tsx': typeof ApiIoImportTsxRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/projects/': typeof AuthProjectsIndexRoute
 }
@@ -232,6 +246,7 @@ export interface FileRoutesByTo {
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
+  '/viewer': typeof ViewerRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
@@ -250,6 +265,7 @@ export interface FileRoutesByTo {
   '/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
+  '/api/io/import-tsx': typeof ApiIoImportTsxRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/projects': typeof AuthProjectsIndexRoute
 }
@@ -265,6 +281,7 @@ export interface FileRoutesById {
   '/render': typeof RenderRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
+  '/viewer': typeof ViewerRoute
   '/workbench': typeof WorkbenchRoute
   '/workbench-analysis': typeof WorkbenchAnalysisRoute
   '/workbench-assembly': typeof WorkbenchAssemblyRoute
@@ -283,6 +300,7 @@ export interface FileRoutesById {
   '/_auth/projects/$projectId': typeof AuthProjectsProjectIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/io/import-3mf': typeof ApiIoImport3mfRoute
+  '/api/io/import-tsx': typeof ApiIoImportTsxRoute
   '/api/trpc/$': typeof ApiTrpcSplatRoute
   '/_auth/projects/': typeof AuthProjectsIndexRoute
 }
@@ -298,6 +316,7 @@ export interface FileRouteTypes {
     | '/render'
     | '/spike'
     | '/ui-viewport'
+    | '/viewer'
     | '/workbench'
     | '/workbench-analysis'
     | '/workbench-assembly'
@@ -316,6 +335,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId'
     | '/api/auth/$'
     | '/api/io/import-3mf'
+    | '/api/io/import-tsx'
     | '/api/trpc/$'
     | '/projects/'
   fileRoutesByTo: FileRoutesByTo
@@ -329,6 +349,7 @@ export interface FileRouteTypes {
     | '/render'
     | '/spike'
     | '/ui-viewport'
+    | '/viewer'
     | '/workbench'
     | '/workbench-analysis'
     | '/workbench-assembly'
@@ -347,6 +368,7 @@ export interface FileRouteTypes {
     | '/projects/$projectId'
     | '/api/auth/$'
     | '/api/io/import-3mf'
+    | '/api/io/import-tsx'
     | '/api/trpc/$'
     | '/projects'
   id:
@@ -361,6 +383,7 @@ export interface FileRouteTypes {
     | '/render'
     | '/spike'
     | '/ui-viewport'
+    | '/viewer'
     | '/workbench'
     | '/workbench-analysis'
     | '/workbench-assembly'
@@ -379,6 +402,7 @@ export interface FileRouteTypes {
     | '/_auth/projects/$projectId'
     | '/api/auth/$'
     | '/api/io/import-3mf'
+    | '/api/io/import-tsx'
     | '/api/trpc/$'
     | '/_auth/projects/'
   fileRoutesById: FileRoutesById
@@ -394,6 +418,7 @@ export interface RootRouteChildren {
   RenderRoute: typeof RenderRoute
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
+  ViewerRoute: typeof ViewerRoute
   WorkbenchRoute: typeof WorkbenchRoute
   WorkbenchAnalysisRoute: typeof WorkbenchAnalysisRoute
   WorkbenchAssemblyRoute: typeof WorkbenchAssemblyRoute
@@ -409,6 +434,7 @@ export interface RootRouteChildren {
   ComponentsComponentIdRoute: typeof ComponentsComponentIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiIoImport3mfRoute: typeof ApiIoImport3mfRoute
+  ApiIoImportTsxRoute: typeof ApiIoImportTsxRoute
   ApiTrpcSplatRoute: typeof ApiTrpcSplatRoute
 }
 
@@ -482,6 +508,13 @@ declare module '@tanstack/react-router' {
       path: '/ui-viewport'
       fullPath: '/ui-viewport'
       preLoaderRoute: typeof UiViewportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/viewer': {
+      id: '/viewer'
+      path: '/viewer'
+      fullPath: '/viewer'
+      preLoaderRoute: typeof ViewerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/workbench': {
@@ -617,6 +650,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiIoImport3mfRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/io/import-tsx': {
+      id: '/api/io/import-tsx'
+      path: '/api/io/import-tsx'
+      fullPath: '/api/io/import-tsx'
+      preLoaderRoute: typeof ApiIoImportTsxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/trpc/$': {
       id: '/api/trpc/$'
       path: '/api/trpc/$'
@@ -656,6 +696,7 @@ const rootRouteChildren: RootRouteChildren = {
   RenderRoute: RenderRoute,
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
+  ViewerRoute: ViewerRoute,
   WorkbenchRoute: WorkbenchRoute,
   WorkbenchAnalysisRoute: WorkbenchAnalysisRoute,
   WorkbenchAssemblyRoute: WorkbenchAssemblyRoute,
@@ -671,6 +712,7 @@ const rootRouteChildren: RootRouteChildren = {
   ComponentsComponentIdRoute: ComponentsComponentIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiIoImport3mfRoute: ApiIoImport3mfRoute,
+  ApiIoImportTsxRoute: ApiIoImportTsxRoute,
   ApiTrpcSplatRoute: ApiTrpcSplatRoute,
 }
 export const routeTree = rootRouteImport

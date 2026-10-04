@@ -20,12 +20,35 @@ import { ThemeToggle } from "./theme-toggle";
 /** Route prefixes that own their top chrome (no app bar above them). */
 const SELF_CHROMED_ROUTES = ["/docs"] as const;
 
+/**
+ * The viewer route's embed flag: `/viewer?embed=1` is the iframe target —
+ * the embeddable share surface ships without the site bar so the host page
+ * frames the instrument, not the site. Flag-scoped, not path-scoped: the
+ * ordinary /viewer share page keeps the full chrome. The router hands the
+ * search in parsed object form and its default parser may realize the
+ * flag as either the string or the number `1`; the /viewer route's own
+ * search validator realizes it as a boolean. All are the one flag.
+ */
+function embeddedViewer(pathname: string, search: unknown): boolean {
+  if (pathname !== "/viewer") return false;
+  if (typeof search === "string") {
+    return new URLSearchParams(search).get("embed") === "1";
+  }
+  return (
+    typeof search === "object" &&
+    search !== null &&
+    "embed" in search &&
+    (search.embed === "1" || search.embed === 1 || search.embed === true)
+  );
+}
+
 export default function Header() {
   const location = useLocation();
   const selfChromed = SELF_CHROMED_ROUTES.some((prefix) =>
     location.pathname.startsWith(prefix),
   );
   if (selfChromed) return null;
+  if (embeddedViewer(location.pathname, location.search)) return null;
 
   const links = [
     { to: "/", label: "Home" },

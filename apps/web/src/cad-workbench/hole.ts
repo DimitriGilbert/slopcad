@@ -66,9 +66,9 @@ import { valueIn } from "@slopcad/cad-core";
 import type { StructuredHoleSpec } from "@slopcad/cad-kernel";
 import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
 import { parseSketch } from "@slopcad/cad-sketch";
-import type { ExtrudeSceneRequest } from "./extrude";
+import type { SceneOperand } from "./extrude";
 
-import { extrudeSceneRequestOfFeature } from "./extrude";
+import { sceneOperandOfBody } from "./extrude";
 import { resolveSessionDatumAxis } from "./datum";
 
 /** The diameter a hole action creates its diameter parameter with (mm). */
@@ -95,8 +95,14 @@ export interface HoleCutInput {
 
 /** The worker-scene payload the document's holes execute as. */
 export interface HoleSceneRequest {
-  /** The base extrusion the holes are cut from. */
-  readonly base: ExtrudeSceneRequest;
+  /**
+   * The base's operand source: a plain extrusion rides its own derivation
+   * (the established composition, byte-identical), a composition's output
+   * (pad, boolean, moved body) references the computed solid the document
+   * pass hands over — a hole drilled into a consumed body cuts its CURRENT
+   * geometry, never a re-derivation that would erase the earlier features.
+   */
+  readonly base: SceneOperand;
   /** One entry per hole feature, in document order (flat or structured). */
   readonly holes: readonly HoleSceneEntry[];
 }
@@ -205,25 +211,34 @@ function parameterLengthMmOf(
 }
 
 /**
- * The target feature ref of one hole feature (its single feature/body
- * input), or `null` when the layout is malformed.
+ * The target ref of one hole feature (its single feature/body input), or
+ * `null` when the layout is malformed.
  */
-function holeTargetIdOf(feature: FeatureRecord): string | null {
+function holeTargetRefOf(
+  feature: FeatureRecord,
+): { readonly kind: string; readonly id: string } | null {
   const targetRefs = feature.inputs.filter(
     (ref) => ref.kind === "feature" || ref.kind === "body",
   );
   const target = targetRefs[0];
-  return target === undefined ? null : target.id;
+  return target ?? null;
+}
+
+/** The target ref's id (the same-base comparison's key). */
+function holeTargetIdOf(feature: FeatureRecord): string | null {
+  return holeTargetRefOf(feature)?.id ?? null;
 }
 
 /**
  * Reads the document's hole features into the worker-scene request: the
- * FIRST hole's target picks the base extrusion, every hole must cut that
- * same base, and each hole's five numbers ride in document order. The
- * rendered body is the LAST hole feature's output (the newest cut).
- * `null` when the document carries no hole feature, the base no longer
- * resolves, or any hole's inputs no longer resolve — callers render the
- * prior scene rather than fabricate geometry.
+ * FIRST hole's target picks the base — its operand source resolved through
+ * `sceneOperandOfBody` (a plain extrusion's derivation, or a composition
+ * output's computed solid) — every hole must cut that same base, and each
+ * hole's five numbers ride in document order. The rendered body is the
+ * LAST hole feature's output (the newest cut). `null` when the document
+ * carries no hole feature, the base no longer resolves, or any hole's
+ * inputs no longer resolve — callers render the prior scene rather than
+ * fabricate geometry.
  */
 export function documentHoleSceneRequest(
   document: CadDocument,
@@ -235,12 +250,14 @@ export function documentHoleSceneRequest(
   const firstHole = holeFeatures[0];
   if (firstHole === undefined || lastHole === undefined) return null;
   const baseId = holeTargetIdOf(firstHole);
-  if (baseId === null) return null;
-  const baseFeature = document.features.find(
-    (entry) => entry.kind === "extrude" && entry.id === baseId,
-  );
-  if (baseFeature === undefined) return null;
-  const base = extrudeSceneRequestOfFeature(document, baseFeature);
+  const baseRef = holeTargetRefOf(firstHole);
+  if (baseId === null || baseRef === null) return null;
+  const baseBodyId =
+    baseRef.kind === "body"
+      ? baseRef.id
+      : document.features.find((entry) => entry.id === baseRef.id)?.outputs[0];
+  if (baseBodyId === undefined) return null;
+  const base = sceneOperandOfBody(document, baseBodyId);
   if (base === null) return null;
   const holes: HoleSceneEntry[] = [];
   for (const holeFeature of holeFeatures) {

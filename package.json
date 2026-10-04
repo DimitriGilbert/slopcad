@@ -47,6 +47,8 @@
     "docker:logs": "docker compose logs -f",
     "test:docs": "pnpm --filter web test:docs",
     "test:matrix": "pnpm --filter web test:matrix",
+    "tutorial:record": "pnpm --filter web tutorial:record",
+    "tutorial:cut": "pnpm --filter web tutorial:cut",
     "audit:command-surface": "node scripts/command-surface-audit.mjs",
     "webkit:deps": "bash scripts/webkit-user-deps.sh"
   },

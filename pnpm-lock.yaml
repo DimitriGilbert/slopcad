@@ -150,6 +150,9 @@ importers:
       '@slopcad/cad-io':
         specifier: workspace:*
         version: link:../../packages/cad-io
+      '@slopcad/cad-jsx':
+        specifier: workspace:*
+        version: link:../../packages/cad-jsx
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../../packages/cad-kernel
@@ -210,6 +213,9 @@ importers:
       dotenv:
         specifier: 'catalog:'
         version: 17.4.2
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       libsql:
         specifier: 'catalog:'
         version: 0.5.29
@@ -378,6 +384,9 @@ importers:
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel
+      '@slopcad/cad-react':
+        specifier: workspace:*
+        version: link:../cad-react
     devDependencies:
       '@slopcad/cad-jscad':
         specifier: workspace:*
@@ -388,9 +397,15 @@ importers:
       '@slopcad/config':
         specifier: workspace:*
         version: link:../config
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.18
       '@vitest/coverage-istanbul':
         specifier: 'catalog:'
         version: 4.1.11(vitest@4.1.11)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.8
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -459,6 +474,37 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: 'catalog:'
         version: 4.1.11(vitest@4.1.11)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.1)(@vitest/coverage-istanbul@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  packages/cad-jsx:
+    dependencies:
+      '@slopcad/cad-core':
+        specifier: workspace:*
+        version: link:../cad-core
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+    devDependencies:
+      '@slopcad/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.18
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.11(vitest@4.1.11)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.8
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -718,6 +764,9 @@ importers:
       '@slopcad/cad-jscad':
         specifier: workspace:*
         version: link:../cad-jscad
+      '@slopcad/cad-jsx':
+        specifier: workspace:*
+        version: link:../cad-jsx
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel

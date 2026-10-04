@@ -44,12 +44,31 @@ const CIRCLE_SAMPLES = 48;
 /** How far the axis line stands off past the entry face (mm). */
 const AXIS_STANDOFF_MM = 1.5;
 
+/**
+ * The literal magnitude of one hole value — `null` for a `$name` reference
+ * (the parameter's live magnitude is the document's, not the form's; the
+ * ghost draws NOTHING rather than guess it).
+ */
+function literalMm(value: number | string): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 /** The hole type's ENTRY radius (mm) — the footprint the ghost circles. */
-function entryRadiusMm(values: HoleFormValues): number {
-  if (values.holeType === "counterbore") return values.cboreDiameterMm / 2;
-  if (values.holeType === "countersink") return values.csinkDiameterMm / 2;
-  if (values.holeType === "threaded") return values.threadMajorMm / 2;
-  return values.diameterMm / 2;
+function entryRadiusMm(values: HoleFormValues): number | null {
+  if (values.holeType === "counterbore") {
+    const mm = literalMm(values.cboreDiameterMm);
+    return mm === null ? null : mm / 2;
+  }
+  if (values.holeType === "countersink") {
+    const mm = literalMm(values.csinkDiameterMm);
+    return mm === null ? null : mm / 2;
+  }
+  if (values.holeType === "threaded") {
+    const mm = literalMm(values.threadMajorMm);
+    return mm === null ? null : mm / 2;
+  }
+  const mm = literalMm(values.diameterMm);
+  return mm === null ? null : mm / 2;
 }
 
 type Vec3 = readonly [number, number, number];
@@ -146,7 +165,8 @@ export function CadHolePreviewGhost({
         values.axis === "x" ? 1 : values.axis === "y" ? 2 : 3,
       );
     }
-    // The positions: the picked sketch's points, else the parameter pair.
+    // The positions: the picked sketch's points, else the parameter pair —
+    // a `$name` reference has no literal magnitude, so the ghost declines.
     let positions: readonly { readonly x: number; readonly y: number }[];
     if (values.positionsSketchId !== "") {
       const resolved = sketchPointsResolverOf(document)(
@@ -155,7 +175,10 @@ export function CadHolePreviewGhost({
       if (!resolved.ok) return [];
       positions = resolved.points;
     } else {
-      positions = [{ x: values.positionXMm, y: values.positionYMm }];
+      const x = literalMm(values.positionXMm);
+      const y = literalMm(values.positionYMm);
+      if (x === null || y === null) return [];
+      positions = [{ x, y }];
     }
     // The entry face's plane: the bounds' extreme projection along the axis.
     let entry = -Infinity;
@@ -170,7 +193,8 @@ export function CadHolePreviewGhost({
       }
     }
     const radius = entryRadiusMm(values);
-    const depth = values.depthMm;
+    const depth = literalMm(values.depthMm);
+    if (radius === null || depth === null) return [];
     return positions.map((position): HoleGlyph => {
       // The entry-plane circle centre: the position offset onto the axis
       // line, lifted to the entry plane.

@@ -375,7 +375,11 @@ describe("serializeCommand / parseCommand", () => {
       value: length(1, "in"),
     };
     const serialized = serializeCommand(command);
-    expect(serialized.type === "parameter.set" && serialized.value).toEqual({
+    expect(
+      serialized.type === "parameter.set" &&
+        "value" in serialized &&
+        serialized.value,
+    ).toEqual({
       dimension: "length",
       unit: "mm",
       value: 25.4,

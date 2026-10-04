@@ -1751,7 +1751,22 @@ function validateCommandShape(
         "A parameter.set command needs a valid parameter id.",
       );
     }
-    validateDimensionalShape(input.value, `${path}.value`, issues);
+    // The Phase 22 expression forms, mirroring the strict parser: absent
+    // (value-only set), null (clear — the literal it lands on is required),
+    // or an AST (define — a value beside it is the rejected ambiguity).
+    if (input.expression === undefined || input.expression === null) {
+      validateDimensionalShape(input.value, `${path}.value`, issues);
+      return;
+    }
+    if (input.value !== undefined) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        path,
+        "A parameter.set command cannot carry both a literal value and a defining expression.",
+      );
+    }
+    validateExpressionShape(input.expression, `${path}.expression`, issues);
     return;
   }
   if (type === "parameter.create") {
@@ -1766,6 +1781,32 @@ function validateCommandShape(
     }
     validateNameShape(input.name, `${path}.name`, "parameter.create", issues);
     validateDimensionalShape(input.value, `${path}.value`, issues);
+    // The optional defining expression (null/absent both validate clean —
+    // the shape validator's tolerance, and the parser refuses null here).
+    validateExpressionShape(input.expression, `${path}.expression`, issues);
+    return;
+  }
+  if (type === "parameter.rename") {
+    if (!parseParameterId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A parameter.rename command needs a valid parameter id.",
+      );
+    }
+    validateNameShape(input.name, `${path}.name`, "parameter.rename", issues);
+    return;
+  }
+  if (type === "parameter.delete") {
+    if (!parseParameterId(input.id).ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}.id`,
+        "A parameter.delete command needs a valid parameter id.",
+      );
+    }
     return;
   }
   if (type === "body.create") {

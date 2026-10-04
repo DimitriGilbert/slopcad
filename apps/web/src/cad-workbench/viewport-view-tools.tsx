@@ -339,7 +339,15 @@ export function CadViewportViewTools({
       ) : null}
       <div
         aria-label="View tools"
-        className="bg-background/95 border-border pointer-events-auto absolute right-3 bottom-3 flex w-[104px] flex-col gap-1.5 rounded-md border p-1.5 shadow-lg shadow-black/25"
+        className={`bg-background/95 border-border absolute right-3 bottom-3 flex w-[200px] flex-col gap-1.5 rounded-md border p-1.5 shadow-lg shadow-black/25 ${
+          // While the zoom window is armed its full-viewport layer owns the
+          // gesture: the panel stands down (no pointer events, visually
+          // receded) so a rectangle drawn over it still commits instead of
+          // dropping its pointerup on a button.
+          zoomWindowArmed
+            ? "pointer-events-none opacity-50"
+            : "pointer-events-auto"
+        }`}
         data-testid="viewport-view-panel"
         role="group"
       >
@@ -441,7 +449,10 @@ export function CadViewportViewTools({
             </Button>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-1">
+        {/* The icon verbs keep their natural compact size in one centered
+            row — the panel is wide enough that a stretched 2×2 grid would
+            read as four empty bars. */}
+        <div className="flex justify-center gap-1">
           <Button
             aria-label="Fit the view to the model bounds"
             data-testid="view-fit"
@@ -538,7 +549,7 @@ export function CadViewportViewTools({
             </Button>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-1">
+        <div className="flex justify-center gap-1">
           <Button
             aria-label="Toggle first/third-angle convention"
             data-testid="view-convention-toggle"

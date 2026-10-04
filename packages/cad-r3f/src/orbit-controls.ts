@@ -17,9 +17,13 @@
  *
  * ## The clamps (why each exists)
  *
- * - **Elevation** is clamped to keep the camera from flipping under the
- *   floor and through the pole. The seed elevation is always inside its
- *   own clamp window — a spec camera seeded below the documented band
+ * - **Elevation** is clamped just short of the pole in BOTH directions —
+ *   the same epsilon each way. A camera exactly on its pole looks along
+ *   its own up, and `lookAt` degenerates there, so the window stops just
+ *   short of it; inside the window the orbit is free, running through the
+ *   horizon and below the ground plane (standard CAD orbit: the model is
+ *   visible from underneath). The seed elevation is always inside its
+ *   own clamp window — a spec camera seeded outside the documented band
  *   stays reachable exactly where it is, and only user gestures respect
  *   the band — so seeding can never move the view.
  * - **Distance** is clamped well inside the scene's clip planes
@@ -41,8 +45,12 @@ import type { RenderCamera, RenderVector3 } from "@slopcad/cad-core";
 /** Pointer travel (CSS px) under which a gesture stays a click (a pick). */
 export const CAD_ORBIT_DRAG_THRESHOLD_PX = 4;
 
-/** Lowest user-orbit elevation above the ground plane, in degrees. */
-export const CAD_ORBIT_MIN_ELEVATION_DEG = 5;
+/**
+ * Lowest user-orbit elevation, in degrees: below the horizon by the same
+ * margin the maximum stops short of the pole above, so the orbit runs
+ * freely under the ground plane and never flips at either pole.
+ */
+export const CAD_ORBIT_MIN_ELEVATION_DEG = -88;
 
 /** Highest user-orbit elevation (short of the pole flip), in degrees. */
 export const CAD_ORBIT_MAX_ELEVATION_DEG = 88;
@@ -90,7 +98,7 @@ export interface OrbitState {
   targetZ: number;
   /** Angle around the pole, radians. */
   azimuthRad: number;
-  /** Angle above the ground plane, radians (clamped). */
+  /** Angle from the ground plane, radians (clamped short of ±90°). */
   elevationRad: number;
   /** Eye distance to the target, millimetres (clamped). */
   distanceMm: number;
@@ -114,7 +122,10 @@ export interface OrbitState {
   seedElevationRad: number;
 }
 
-/** The elevation clamp window: contains the seed by construction. */
+/**
+ * The elevation clamp window — the pole-avoidance band, widened as needed
+ * to contain the seed by construction (seeding never moves the view).
+ */
 function elevationClamp(state: OrbitState): {
   readonly min: number;
   readonly max: number;
@@ -248,7 +259,8 @@ function orbitForward(state: OrbitState): readonly [number, number, number] {
 /**
  * Orbits by pointer travel, in CSS pixels: rightward drags swing the view
  * around the pole, downward drags raise the eye — the drag-the-model
- * convention. The elevation lands inside the clamp window.
+ * convention. The elevation lands inside the clamp window, free to run
+ * through the horizon and below the ground plane.
  */
 export function orbitByPixels(
   state: OrbitState,
@@ -333,7 +345,7 @@ export interface SceneCameraStateSnapshot {
   readonly projection: "perspective" | "orthographic";
   /** Angle around the pole, degrees (0–360, normalized). */
   readonly azimuthDeg: number;
-  /** Angle above the ground plane, degrees. */
+  /** Angle from the ground plane, degrees (negative below the horizon). */
   readonly elevationDeg: number;
   /** Eye distance to the target, millimetres. */
   readonly distanceMm: number;

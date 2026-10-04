@@ -107,17 +107,13 @@ import { CadPropertyPanel } from "@slopcad/ui/components/cad/cad-property-panel"
 import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
-import type {
-  DatumId,
-  RenderCamera,
-  RenderProjection,
-} from "@slopcad/cad-core";
+import type { RenderCamera, RenderProjection } from "@slopcad/cad-core";
 import type { FixtureSessionBackendId } from "../render-fixture/session-backend";
 import type { CurveAuthoring } from "./curves";
 import type { LoftSectionChoice } from "./loft";
-import type { ThreadCutInput } from "./thread";
 import { clippingPlanesOf } from "@slopcad/cad-r3f";
 
+import { useWorkbenchWebMcpTools } from "../webmcp/workbench-tools";
 import { completionJson } from "../render-fixture/fixture-session";
 import {
   CAD_FEATURE_FORM_LABELS,
@@ -136,6 +132,7 @@ import {
   SplitFeatureForm,
   BooleanFeatureForm,
   MoveBodyFeatureForm,
+  DuplicateFeatureForm,
   BodyRenameForm,
   type CadFeatureBodyOption,
   ThreadFeatureForm,
@@ -150,6 +147,7 @@ import {
   type CadFeatureSketchOption,
   type HoleFormValues,
 } from "./feature-forms";
+import { duplicateSourceOptions } from "./duplicate";
 import { CadCurveOverlay } from "./curve-overlay";
 import { CadDatumOverlay } from "./datum-overlay";
 import { CadHolePreviewGhost } from "./hole-ghost";
@@ -177,6 +175,7 @@ import {
 } from "./feature-timeline-strip";
 import { WorkbenchMeasurementSection } from "./measurement-section";
 import { honestSceneFallback } from "./scene-fallback";
+import { sceneOperandOfBody } from "./extrude";
 import { SketchMode } from "./SketchMode";
 import { useWorkbenchEngine, type WorkbenchEngine } from "./workbench-engine";
 
@@ -270,6 +269,33 @@ export interface CadWorkbenchSlots {
   readonly statusBar?: CadWorkbenchSlot;
   /** The import/export dialogs (portal-mounted). */
   readonly ioDialogs?: CadWorkbenchSlot;
+}
+
+/**
+ * The composition's default status strip: the settled scene's live
+ * readouts (status, volume, tool, selection, commands, error) on the
+ * machine's fixed surface ids. Exported so a host page supplying a
+ * `statusBar` slot can KEEP this strip verbatim — one source of truth
+ * for the ids the session writer targets — while laying its own content
+ * beside it (the share bar rides the status row; the bare route grows no
+ * layout row of its own and its pinned canvas geometry stays put).
+ */
+export function CompleteWorkbenchStatusBar({
+  className,
+}: {
+  /** Merged onto the strip (a host row lays it out beside its own content). */
+  readonly className?: string;
+}): ReactElement {
+  return (
+    <CadStatusBar
+      className={className}
+      surfaceIds={{
+        statusId: "workbench-complete-status",
+        volumeId: "workbench-complete-volume",
+        errorId: "workbench-complete-error",
+      }}
+    />
+  );
 }
 
 /** Props of {@link CompleteCadWorkbench}. */
@@ -385,6 +411,7 @@ export function CompleteCadWorkbench({
     handleSplit,
     handleBoolean,
     handleMoveBody,
+    handleDuplicate,
     handleBodyAppearance,
     handleBodyRename,
     handleBodyVisibility,
@@ -432,6 +459,7 @@ export function CompleteCadWorkbench({
     | "curve"
     | "boolean"
     | "moveBody"
+    | "duplicate"
     | null
   >(null);
   // The Phase 44 body rename dialog: which body's rename form is open.
@@ -746,21 +774,30 @@ export function CompleteCadWorkbench({
   }[] = workbenchDocument.bodies
     .filter((body) => body.kind === "sheet")
     .map((body) => ({ id: body.id, name: body.name }));
-  // The body pool the boolean form picks from (Phase 44): the bodies an
-  // EXTRUDE outputs — the boolean scene's operand contract
-  // (`documentBooleanSceneRequest` pairs every operand with its own
-  // extrusion, so any other producer — the seeded document's translate
-  // and rotate bodies — cannot pair and the scene would silently keep
-  // the prior render), name verbatim — the sketch pool's discipline.
+  // The live parameter names the feature dialogs' `$`-token autocomplete
+  // offers (Phase 21): every document parameter, name verbatim — a
+  // submitted `$name` resolves against THIS list, so the suggestions can
+  // never promise a reference the document cannot resolve.
+  const parameterNameOptions: readonly string[] =
+    workbenchDocument.parameters.parameters.map((parameter) => parameter.name);
+  // The body pool the boolean form picks from (Phase 44): the bodies whose
+  // producer carries a computable scene (`sceneOperandOfBody` — a plain
+  // extrusion's output, or a composition's: pad, hole, boolean, moved
+  // body, whose computed solid the document pass hands the boolean scene).
+  // Any other producer — the seeded document's translate and rotate
+  // bodies, sheets — declines the operand and the scene would silently
+  // keep the prior render, so it stays out of the pool, name verbatim —
+  // the sketch pool's discipline.
   const featureProducedBodies: readonly CadFeatureBodyOption[] =
     workbenchDocument.bodies.flatMap((body) =>
-      workbenchDocument.features.some(
-        (feature) =>
-          feature.kind === "extrude" && feature.outputs.includes(body.id),
-      )
+      sceneOperandOfBody(workbenchDocument, body.id) !== null
         ? [{ id: body.id, name: body.name }]
         : [],
     );
+  // The duplicate dialog's source pool (Phase 60): the SAME computable-body
+  // predicate, read through the duplicate module's own reader — a copy of
+  // a copy is legal input, the verb's iterative use.
+  const duplicateBodies = duplicateSourceOptions(workbenchDocument);
   // The body the rename dialog is renaming (its current name seeds the form).
   const renameBody =
     renameBodyId === null
@@ -783,13 +820,9 @@ export function CompleteCadWorkbench({
   };
 
   /** Runs the create-sheet submission, surfacing the refusal and closing on success. */
-  const submitCreateSheet = (submission: {
-    readonly datumId: DatumId;
-    readonly uMinMm: number;
-    readonly uMaxMm: number;
-    readonly vMinMm: number;
-    readonly vMaxMm: number;
-  }): void => {
+  const submitCreateSheet = (
+    submission: Parameters<typeof handleCreateSheet>[0],
+  ): void => {
     const outcome = handleCreateSheet(submission);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
@@ -813,7 +846,7 @@ export function CompleteCadWorkbench({
   /** Runs the thicken-surface submission, surfacing the refusal and closing on success. */
   const submitThickenSurface = (submission: {
     readonly sheetId: string;
-    readonly thicknessMm: number;
+    readonly thicknessMm: number | string;
     readonly side: 1 | -1;
   }): void => {
     const outcome = handleThickenSurface({
@@ -827,7 +860,7 @@ export function CompleteCadWorkbench({
   /** Runs the knit-surface submission, surfacing the refusal and closing on success. */
   const submitKnitSurface = (submission: {
     readonly sheetIds: readonly string[];
-    readonly toleranceMm: number;
+    readonly toleranceMm: number | string;
   }): void => {
     const outcome = handleKnitSurface({
       ...submission,
@@ -840,7 +873,7 @@ export function CompleteCadWorkbench({
   /** Runs the offset-surface submission, surfacing the refusal and closing on success. */
   const submitOffsetSurface = (submission: {
     readonly sheetId: string;
-    readonly distanceMm: number;
+    readonly distanceMm: number | string;
   }): void => {
     const outcome = handleOffsetSurface({
       ...submission,
@@ -851,62 +884,50 @@ export function CompleteCadWorkbench({
   };
 
   /** Runs the helix submission, surfacing the refusal and closing on success. */
-  const submitHelix = (
-    sketchId: string,
-    authoring: {
-      readonly radiusMm: number;
-      readonly pitchMm: number;
-      readonly turns: number;
-      readonly handedness: 1 | -1;
-      readonly startAngleRad: number;
-      readonly taperMm: number;
-    },
-    datumAxisId: string | null,
-  ): void => {
-    const outcome = handleHelix(sketchId, authoring, datumAxisId);
+  const submitHelix = (...args: Parameters<typeof handleHelix>): void => {
+    const outcome = handleHelix(...args);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the thread submission, surfacing the refusal and closing on success. */
-  const submitThread = (specification: ThreadCutInput): void => {
+  const submitThread = (
+    specification: Parameters<typeof handleThread>[0],
+  ): void => {
     const outcome = handleThread(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the draft submission, surfacing the refusal and closing on success. */
-  const submitDraft = (specification: {
-    readonly sketchId: string;
-    readonly distanceMm: number;
-    readonly taperDeg: number;
-  }): void => {
+  const submitDraft = (
+    specification: Parameters<typeof handleDraft>[0],
+  ): void => {
     const outcome = handleDraft(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the rib submission, surfacing the refusal and closing on success. */
-  const submitRib = (specification: {
-    readonly sketchId: string;
-    readonly thicknessMm: number;
-  }): void => {
+  const submitRib = (specification: Parameters<typeof handleRib>[0]): void => {
     const outcome = handleRib(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the scale submission, surfacing the refusal and closing on success. */
-  const submitScale = (specification: { readonly factor: number }): void => {
+  const submitScale = (
+    specification: Parameters<typeof handleScale>[0],
+  ): void => {
     const outcome = handleScale(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
 
   /** Runs the thicken submission, surfacing the refusal and closing on success. */
-  const submitThicken = (specification: {
-    readonly thicknessMm: number;
-  }): void => {
+  const submitThicken = (
+    specification: Parameters<typeof handleThicken>[0],
+  ): void => {
     const outcome = handleThicken(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
@@ -943,6 +964,15 @@ export function CompleteCadWorkbench({
     } | null;
   }): void => {
     const outcome = handleMoveBody(specification);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs the duplicate submission (Phase 60), surfacing the refusal. */
+  const submitDuplicate = (
+    specification: Parameters<typeof handleDuplicate>[0],
+  ): void => {
+    const outcome = handleDuplicate(specification);
     setFeatureOutcome(outcome);
     if (outcome.ok) setFeatureDialog(null);
   };
@@ -1031,7 +1061,8 @@ export function CompleteCadWorkbench({
         | "datum"
         | "curve"
         | "boolean"
-        | "moveBody",
+        | "moveBody"
+        | "duplicate",
     ): void => {
       setFeatureOutcome(null);
       if (kind === "hole") {
@@ -1360,6 +1391,17 @@ export function CompleteCadWorkbench({
         },
       },
       {
+        disabled: duplicateBodies.length === 0,
+        group: "Workspace",
+        id: "duplicate",
+        keywords:
+          "duplicate copy transform translate rotate array repeat instances iterative create",
+        label: "Duplicate & transform a body",
+        run: () => {
+          openFeatureDialog("duplicate");
+        },
+      },
+      {
         group: "Workspace",
         id: "create-datum",
         keywords: "datum plane axis point coordinate system reference create",
@@ -1444,6 +1486,7 @@ export function CompleteCadWorkbench({
     applied,
     canAuthorSketchFeatures,
     clearSelection,
+    duplicateBodies.length,
     exportIsometricSeries,
     exportSnapshotPng,
     exportTurntableSeries,
@@ -1467,6 +1510,11 @@ export function CompleteCadWorkbench({
     toolsApi,
     viewSession.userCamera,
   ]);
+
+  // The WebMCP binding (Phase 7): the eight workbench tools registered for
+  // the page's lifetime — always in the internal registry, mirrored to
+  // `document.modelContext` when the browser exposes the agent surface.
+  useWorkbenchWebMcpTools({ commands, engine });
 
   // -- Default pieces (each exactly what its slot replaces) -----------------
 
@@ -1991,15 +2039,7 @@ export function CompleteCadWorkbench({
     />
   );
 
-  const defaultStatusBar = (
-    <CadStatusBar
-      surfaceIds={{
-        statusId: "workbench-complete-status",
-        volumeId: "workbench-complete-volume",
-        errorId: "workbench-complete-error",
-      }}
-    />
-  );
+  const defaultStatusBar = <CompleteWorkbenchStatusBar />;
 
   const hasIo = io !== undefined;
   const defaultIoDialogs = !hasIo ? null : (
@@ -2686,6 +2726,7 @@ export function CompleteCadWorkbench({
           importSketchFiles
           onRevolve={handleRevolve}
           onSaveSketch={handleSaveSketch}
+          parameters={workbenchDocument.parameters}
         />
       ) : null}
       {/* The workspace: an edge-to-edge machine bed. Tree dock flush
@@ -2875,9 +2916,12 @@ export function CompleteCadWorkbench({
                                                           "moveBody"
                                                         ? CAD_FEATURE_FORM_LABELS.moveBodyTitle
                                                         : featureDialog ===
-                                                            "curve"
-                                                          ? CURVE_FORM_LABELS.title
-                                                          : DATUM_FORM_LABELS.title}
+                                                            "duplicate"
+                                                          ? CAD_FEATURE_FORM_LABELS.duplicateTitle
+                                                          : featureDialog ===
+                                                              "curve"
+                                                            ? CURVE_FORM_LABELS.title
+                                                            : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -2919,14 +2963,19 @@ export function CompleteCadWorkbench({
                                                   ? CAD_FEATURE_FORM_LABELS.booleanHint
                                                   : featureDialog === "moveBody"
                                                     ? CAD_FEATURE_FORM_LABELS.moveBodyHint
-                                                    : featureDialog === "curve"
-                                                      ? CURVE_FORM_LABELS.hint
-                                                      : DATUM_FORM_LABELS.hint}
+                                                    : featureDialog ===
+                                                        "duplicate"
+                                                      ? CAD_FEATURE_FORM_LABELS.duplicateHint
+                                                      : featureDialog ===
+                                                          "curve"
+                                                        ? CURVE_FORM_LABELS.hint
+                                                        : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "surface-create" ? (
               <CreateSheetForm
                 datums={datumPlaneOptions}
                 onCreateSheet={submitCreateSheet}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "surface-trim" ? (
               <TrimSurfaceForm
@@ -2937,16 +2986,19 @@ export function CompleteCadWorkbench({
               <ThickenSurfaceForm
                 sheets={sheetOptions}
                 onThickenSurface={submitThickenSurface}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "surface-knit" ? (
               <KnitSurfaceForm
                 sheets={sheetOptions}
                 onKnit={submitKnitSurface}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "surface-offset" ? (
               <OffsetSurfaceForm
                 sheets={sheetOptions}
                 onOffset={submitOffsetSurface}
+                parameterNames={parameterNameOptions}
               />
             ) : featureDialog === "sweep" ? (
               <SweepFeatureForm
@@ -2959,21 +3011,36 @@ export function CompleteCadWorkbench({
               <HelixFeatureForm
                 datumAxes={datumAxisOptions}
                 onHelix={submitHelix}
+                parameterNames={parameterNameOptions}
                 sketches={sketchOptions}
               />
             ) : featureDialog === "thread" ? (
-              <ThreadFeatureForm onThread={submitThread} />
+              <ThreadFeatureForm
+                onThread={submitThread}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "draft" ? (
               <DraftFeatureForm
                 onDraft={submitDraft}
+                parameterNames={parameterNameOptions}
                 sketches={sketchOptions}
               />
             ) : featureDialog === "rib" ? (
-              <RibFeatureForm onRib={submitRib} sketches={sketchOptions} />
+              <RibFeatureForm
+                onRib={submitRib}
+                parameterNames={parameterNameOptions}
+                sketches={sketchOptions}
+              />
             ) : featureDialog === "scale" ? (
-              <ScaleFeatureForm onScale={submitScale} />
+              <ScaleFeatureForm
+                onScale={submitScale}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "thicken" ? (
-              <ThickenFeatureForm onThicken={submitThicken} />
+              <ThickenFeatureForm
+                onThicken={submitThicken}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "split" ? (
               <SplitFeatureForm
                 datumPlanes={datumPlaneOptions}
@@ -2984,6 +3051,7 @@ export function CompleteCadWorkbench({
                 datumAxes={datumAxisOptions}
                 onHole={submitStructuredHole}
                 onValuesChange={setHoleDialogValues}
+                parameterNames={parameterNameOptions}
                 sketches={sketchOptions}
               />
             ) : featureDialog === "pattern" ? (
@@ -3005,6 +3073,12 @@ export function CompleteCadWorkbench({
               />
             ) : featureDialog === "moveBody" ? (
               <MoveBodyFeatureForm onMoveBody={submitMoveBody} />
+            ) : featureDialog === "duplicate" ? (
+              <DuplicateFeatureForm
+                bodies={duplicateBodies}
+                onDuplicate={submitDuplicate}
+                parameterNames={parameterNameOptions}
+              />
             ) : featureDialog === "curve" ? (
               <CurveFeatureForm onCreateCurve={submitCurve} />
             ) : (

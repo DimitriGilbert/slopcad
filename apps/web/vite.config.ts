@@ -4,6 +4,8 @@ import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 
+import { VIEWER_FRAME_HEADERS } from "./src/viewer/viewer-frame-policy";
+
 export default defineConfig({
   // `host: true` binds 0.0.0.0 so the dev/preview servers are reachable
   // over the LAN from other devices (owner request). Config-level so every
@@ -17,6 +19,15 @@ export default defineConfig({
   },
   preview: {
     host: true,
+  },
+  // esbuild must stay EXTERNAL in the server build: the /api/io/import-tsx
+  // route reaches it through @slopcad/cad-jsx's loader (workspace source,
+  // so the bundler would otherwise inline the whole package — and esbuild's
+  // own guard refuses to run bundled, locating its binary relative to the
+  // API file). apps/web declares the same pinned version so the external
+  // import resolves at runtime from this package's node_modules.
+  ssr: {
+    external: ["esbuild"],
   },
   // Module workers: the kernel worker entries are ES modules with
   // bundle-split imports (`@slopcad/cad-kernel-manifold`'s
@@ -35,7 +46,17 @@ export default defineConfig({
     // workers, fonts) to .gz and .br at build time — the node-server preset
     // only serves them with Content-Encoding when precompressed; without it
     // a multi-MB workbench payload ships raw over the internet.
-    nitro({ preset: "node-server", compressPublicAssets: true }),
+    // routeRules: the /viewer route carries the frame policy headers (see
+    // viewer-frame-policy) — the route-scoped embeddability guarantee, kept
+    // to exactly this path so no global relaxation ever leaks to the rest
+    // of the site.
+    nitro({
+      preset: "node-server",
+      compressPublicAssets: true,
+      routeRules: {
+        "/viewer": { headers: { ...VIEWER_FRAME_HEADERS } },
+      },
+    }),
     viteReact(),
   ],
 });

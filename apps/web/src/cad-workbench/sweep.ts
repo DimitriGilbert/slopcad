@@ -33,6 +33,7 @@
 
 import type {
   CadDocument,
+  FeatureRecord,
   ParseFailure,
   SketchDocumentId,
 } from "@slopcad/cad-core";
@@ -50,7 +51,7 @@ import {
 import type { SweepPathSegment } from "@slopcad/cad-sketch";
 import { parseSketch, resolveSweepPath } from "@slopcad/cad-sketch";
 
-import { sketchProfileResolverOf } from "./extrude";
+import { resolveDocumentSketch, sketchProfileResolverOf } from "./extrude";
 
 /**
  * Maps one resolved sketch path segment onto the kernel contract's local
@@ -103,7 +104,14 @@ export function sketchPathResolverOf(
       };
       return { ok: false, error: failure };
     }
-    const path = resolveSweepPath(sketch.value.entities);
+    // Parameter-bound path sketches re-solve against the CURRENT document
+    // parameters, exactly like the profile seam; unbound paths ride the
+    // stored coordinates verbatim.
+    const resolved = resolveDocumentSketch(document, sketch.value);
+    if (!resolved.ok) {
+      return { ok: false, error: resolved.error };
+    }
+    const path = resolveSweepPath(resolved.value.entities);
     if (!path.ok) {
       const failure: ParseFailure = {
         code: path.error.code,
@@ -174,17 +182,17 @@ export interface SweepSceneRequest {
 }
 
 /**
- * Reads the document's FIRST sweep feature into its worker-scene request,
- * resolving both sketches through the same paths the executor bridge uses.
- * `null` when the document carries no sweep feature or the feature's inputs
- * no longer resolve — callers render the prior scene rather than fabricate
- * geometry.
+ * Reads ONE sweep feature into its worker-scene request, resolving both
+ * sketches through the same paths the executor bridge uses. `null` when
+ * the feature's inputs no longer resolve — callers render the prior scene
+ * rather than fabricate geometry. The per-feature extraction the document
+ * readers share (`documentSweepRequest` here, the document-scene builder's
+ * per-body requests in `./document-scene`).
  */
-export function documentSweepRequest(
+export function sweepSceneRequestOfFeature(
   document: CadDocument,
+  feature: FeatureRecord,
 ): SweepSceneRequest | null {
-  const feature = document.features.find((entry) => entry.kind === "sweep");
-  if (feature === undefined) return null;
   const sketchRefs = feature.inputs.filter((ref) => ref.kind === "sketch");
   const bodyId = feature.outputs[0];
   const profileRef = sketchRefs[0];
@@ -207,4 +215,18 @@ export function documentSweepRequest(
     placement: profile.value.placement,
     bodyId,
   };
+}
+
+/**
+ * Reads the document's FIRST sweep feature into its worker-scene request.
+ * `null` when the document carries no sweep feature or the feature's inputs
+ * no longer resolve — callers render the prior scene rather than fabricate
+ * geometry.
+ */
+export function documentSweepRequest(
+  document: CadDocument,
+): SweepSceneRequest | null {
+  const feature = document.features.find((entry) => entry.kind === "sweep");
+  if (feature === undefined) return null;
+  return sweepSceneRequestOfFeature(document, feature);
 }

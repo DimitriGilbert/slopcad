@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Reusable parametric CAD components (Phase 32): a serializable component contract plus parameterized components built exclusively on the public cad-core and cad-kernel surfaces. Database-free, React-free, and kernel-neutral — components build through the kernel-neutral execution surface, so the same component runs against any conforming kernel (directly in tests, or over the worker protocol in a browser).",
+  "description": "Reusable parametric CAD components (Phase 32) plus the parametric viewer registry block (final phase): a serializable component contract, parameterized components, and the viewer's pure core, built exclusively on the public cad-core and cad-kernel surfaces. The component model stays database-free, React-free, and kernel-neutral — components build through the kernel-neutral execution surface, so the same component runs against any conforming kernel (directly in tests, or over the worker protocol in a browser). The viewer's TSX composition (subpath ./viewer/parametric-cad-viewer, distributed through the shadcn registry, not the package entry) additionally builds on the public @slopcad/cad-react model API with React as a peer.",
   "exports": {
     ".": {
       "default": "./src/index.ts"
@@ -20,13 +20,19 @@
   },
   "dependencies": {
     "@slopcad/cad-core": "workspace:*",
-    "@slopcad/cad-kernel": "workspace:*"
+    "@slopcad/cad-kernel": "workspace:*",
+    "@slopcad/cad-react": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
   },
   "devDependencies": {
     "@slopcad/cad-jscad": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",
     "@slopcad/config": "workspace:*",
+    "@types/react": "catalog:",
     "@vitest/coverage-istanbul": "catalog:",
+    "react": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

@@ -483,3 +483,62 @@ export function extractExpressionDependencies(
   walk(node);
   return names;
 }
+
+/**
+ * A pure, structural identifier rename: every identifier node whose `name`
+ * equals `from` is replaced by one carrying `to`; every other node keeps its
+ * identity where nothing below it changed, so an AST with no matching
+ * identifier renames to ITSELF (callers can compare by reference to skip
+ * work). A rename to the same name (`from === to`) is the identity outright:
+ * the node returns untouched, so even matching identifiers keep referential
+ * identity on the no-op. Function names never match: a call's `callee` is a
+ * structurally distinct field pinned to the reserved function set, while the
+ * rename targets identifier NODES only — and parameter names are validated
+ * non-reserved, so a parameter name and a callee can never even collide as
+ * strings.
+ */
+export function renameExpressionIdentifier(
+  node: ExpressionNode,
+  from: string,
+  to: string,
+): ExpressionNode {
+  if (from === to) return node;
+  switch (node.kind) {
+    case "number":
+    case "unitLiteral":
+      return node;
+    case "identifier":
+      return node.name === from
+        ? Object.freeze({ kind: "identifier", name: to })
+        : node;
+    case "unary": {
+      const operand = renameExpressionIdentifier(node.operand, from, to);
+      return operand === node.operand
+        ? node
+        : Object.freeze({ kind: "unary", operator: node.operator, operand });
+    }
+    case "binary": {
+      const left = renameExpressionIdentifier(node.left, from, to);
+      const right = renameExpressionIdentifier(node.right, from, to);
+      return left === node.left && right === node.right
+        ? node
+        : Object.freeze({
+            kind: "binary",
+            operator: node.operator,
+            left,
+            right,
+          });
+    }
+    case "call": {
+      let changed = false;
+      const args = node.args.map((arg) => {
+        const renamed = renameExpressionIdentifier(arg, from, to);
+        changed = changed || renamed !== arg;
+        return renamed;
+      });
+      return changed
+        ? Object.freeze({ kind: "call", callee: node.callee, args })
+        : node;
+    }
+  }
+}

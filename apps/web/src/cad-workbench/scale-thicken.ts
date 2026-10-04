@@ -19,6 +19,14 @@ export interface ScaleInput {
   readonly factor: number;
 }
 
+/**
+ * The form's scale submission (Phase 21): the factor is a literal number or
+ * a `$name` reference to an existing document parameter.
+ */
+export interface ScaleInputRef {
+  readonly factor: number | string;
+}
+
 /** The form's defaults: a uniform ×2. */
 export const SCALE_DEFAULTS: ScaleInput = { factor: 2 };
 
@@ -26,6 +34,14 @@ export const SCALE_DEFAULTS: ScaleInput = { factor: 2 };
 export interface ThickenInput {
   /** The wall thickness (mm, strictly positive). */
   readonly thicknessMm: number;
+}
+
+/**
+ * The form's thicken submission (Phase 21): the thickness is a literal
+ * number or a `$name` reference to an existing document parameter.
+ */
+export interface ThickenInputRef {
+  readonly thicknessMm: number | string;
 }
 
 /** The form's defaults: 2 mm walls. */

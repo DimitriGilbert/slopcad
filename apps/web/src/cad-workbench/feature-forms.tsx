@@ -21,9 +21,11 @@
 import { useFormedible } from "@slopcad/ui/components/formedible/hooks/use-formedible";
 import { createDatumId, type DatumId } from "@slopcad/cad-core";
 import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/lib/types";
+import { expressionNumberProblem } from "@slopcad/ui/components/formedible/fields/expression-number-field";
 import { useRef, type ReactElement } from "react";
 import { DATUM_FORMAT_VERSION } from "@slopcad/cad-core";
 import {
+  DUPLICATE_COUNT_LIMIT,
   HOLE_TYPE_VALUES,
   ISO_METRIC_THREAD_TABLE,
   isoMetricThreadByDesignation,
@@ -39,19 +41,20 @@ import {
 } from "./curves";
 import { BOOLEAN_DEFAULTS, type BooleanOperation } from "./boolean";
 import { MOVE_BODY_DEFAULTS } from "./move-body";
+import { DUPLICATE_DEFAULTS, type DuplicateSubmission } from "./duplicate";
 import { HELIX_DEFAULTS } from "./helix";
 import {
   THREAD_DEFAULTS,
   THREAD_MODE_VALUES,
-  type ThreadCutInput,
+  type ThreadCutInputRef,
 } from "./thread";
-import { RIB_DEFAULTS, type RibCutInput } from "./rib";
+import { RIB_DEFAULTS, type RibCutInputRef } from "./rib";
 import {
   SCALE_DEFAULTS,
   THICKEN_DEFAULTS,
-  type ScaleInput,
+  type ScaleInputRef,
   type SplitInput,
-  type ThickenInput,
+  type ThickenInputRef,
 } from "./scale-thicken";
 import {
   STRUCTURED_HOLE_DEFAULTS,
@@ -64,6 +67,52 @@ import {
   type PatternFeatureInput,
   type PatternPathInput,
 } from "./pattern";
+
+/**
+ * The expression-number field's validation (Phase 21): a literal number
+ * passes the role's gate — the exact messages the plain number fields
+ * carried — and a `$name` token must name a parameter in the live document
+ * list (the structured refusal names it verbatim). One call per role; the
+ * gate and the message stay the form's domain data.
+ */
+function expressionNumberValidation(
+  parameterNames: readonly string[],
+  gate: (value: number) => boolean,
+  message: string,
+): (value: unknown) => string | null {
+  return (value) =>
+    expressionNumberProblem(value, {
+      parameterNames,
+      acceptsNumber: gate,
+      message,
+    });
+}
+
+/**
+ * The expression-number field for one numeric role: today's number field
+ * (mono, required, the role's finite gate and message) plus the `$`-token
+ * autocomplete over the document's live parameter names.
+ */
+function expressionNumberField<TValues extends Record<string, unknown>>(
+  name: string,
+  label: string,
+  parameterNames: readonly string[],
+  gate: (value: number) => boolean,
+  message: string,
+): FormedibleFieldConfig<TValues> {
+  return {
+    name,
+    required: true,
+    type: "expressionNumber",
+    label,
+    inputClassName: "font-mono",
+    expressionNumberConfig: { parameterNames },
+    validation: expressionNumberValidation(parameterNames, gate, message),
+  };
+}
+
+/** The finite-number gate most roles share. */
+const FINITE = (value: number): boolean => Number.isFinite(value);
 
 /** One pickable sketch: the document record's id and its name. */
 export interface CadFeatureSketchOption {
@@ -191,6 +240,18 @@ export interface CadFeatureFormLabels {
   readonly moveBodyAxisZ: string;
   readonly moveBodyAngle: string;
   readonly moveBodyHint: string;
+  readonly duplicateTitle: string;
+  readonly duplicateSource: string;
+  readonly duplicateDx: string;
+  readonly duplicateDy: string;
+  readonly duplicateDz: string;
+  readonly duplicateAxis: string;
+  readonly duplicateAxisX: string;
+  readonly duplicateAxisY: string;
+  readonly duplicateAxisZ: string;
+  readonly duplicateAngle: string;
+  readonly duplicateCount: string;
+  readonly duplicateHint: string;
   readonly renameBodyTitle: string;
   readonly renameBodyName: string;
   readonly submit: string;
@@ -332,6 +393,19 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   moveBodyAngle: "Rotation angle (deg)",
   moveBodyHint:
     "The move translates the latest extrusion by the offsets; the optional rotation turns it about the world axis through the origin first (rotation-capable kernels only).",
+  duplicateTitle: "Duplicate & transform a body",
+  duplicateSource: "Source body",
+  duplicateDx: "Step x (mm)",
+  duplicateDy: "Step y (mm)",
+  duplicateDz: "Step z (mm)",
+  duplicateAxis: "Rotation axis",
+  duplicateAxisX: "X axis",
+  duplicateAxisY: "Y axis",
+  duplicateAxisZ: "Z axis",
+  duplicateAngle: "Step rotation (deg)",
+  duplicateCount: "Copies",
+  duplicateHint:
+    "Each copy steps the translation, then rotates about the world axis through the origin — cumulative, so three 15 mm steps land at 15/30/45 and three 90° turns land a body at every quadrant. The source stays; the copies are new bodies (duplicate one of them again to keep going).",
   renameBodyTitle: "Rename a body",
   renameBodyName: "Name",
   submit: "Create",
@@ -740,15 +814,15 @@ export function CurveFeatureForm({
   );
 }
 
-/** Form values of the helix form. */
+/** Form values of the helix form (spine values: literal or `$name`). */
 export interface HelixFormValues extends Record<string, unknown> {
   readonly profileSketchId: string;
-  readonly radiusMm: number;
-  readonly pitchMm: number;
-  readonly turns: number;
+  readonly radiusMm: number | string;
+  readonly pitchMm: number | string;
+  readonly turns: number | string;
   readonly handedness: string;
-  readonly startAngleDeg: number;
-  readonly taperMm: number;
+  readonly startAngleDeg: number | string;
+  readonly taperMm: number | string;
   readonly datumAxisId: string;
 }
 
@@ -760,47 +834,39 @@ export interface CadFeatureDatumOption {
 
 /**
  * The helix form: the meridian profile sketch, the six spine numbers, and
- * the optional datum axis. Submission routes through the engine's helix
- * action — the same validation seam every create action rides — and a
- * structured refusal surfaces verbatim in the dialog's error region.
+ * the optional datum axis. The spine numbers are expression-number fields —
+ * a `$name` value references the document's parameter (the start angle's
+ * degree→radian conversion is a LITERAL-only step; a reference already
+ * carries the angle). Submission routes through the engine's helix action —
+ * the same validation seam every create action rides — and a structured
+ * refusal surfaces verbatim in the dialog's error region.
  */
 export function HelixFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
   onHelix,
   sketches,
   datumAxes,
+  parameterNames,
 }: {
   readonly labels?: CadFeatureFormLabels;
   readonly onHelix: (
     sketchId: string,
     authoring: {
-      readonly radiusMm: number;
-      readonly pitchMm: number;
-      readonly turns: number;
+      readonly radiusMm: number | string;
+      readonly pitchMm: number | string;
+      readonly turns: number | string;
       readonly handedness: 1 | -1;
-      readonly startAngleRad: number;
-      readonly taperMm: number;
+      readonly startAngleRad: number | string;
+      readonly taperMm: number | string;
     },
     datumAxisId: string | null,
   ) => void;
   readonly sketches: readonly CadFeatureSketchOption[];
   readonly datumAxes: readonly CadFeatureDatumOption[];
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
-  const numberField = (
-    name: keyof HelixFormValues & string,
-    label: string,
-  ): FormedibleFieldConfig<HelixFormValues> => ({
-    name,
-    required: true,
-    type: "number",
-    label,
-    inputClassName: "font-mono",
-    validation: (value) =>
-      typeof value === "number" && Number.isFinite(value)
-        ? null
-        : "Enter a finite number.",
-  });
   const fields: readonly FormedibleFieldConfig<HelixFormValues>[] = [
     {
       name: "profileSketchId",
@@ -810,9 +876,27 @@ export function HelixFeatureForm({
       type: "select",
       label: labels.helixProfile,
     },
-    numberField("radiusMm", labels.helixRadius),
-    numberField("pitchMm", labels.helixPitch),
-    numberField("turns", labels.helixTurns),
+    expressionNumberField(
+      "radiusMm",
+      labels.helixRadius,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
+    expressionNumberField(
+      "pitchMm",
+      labels.helixPitch,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
+    expressionNumberField(
+      "turns",
+      labels.helixTurns,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
     {
       name: "handedness",
       options: [
@@ -823,8 +907,20 @@ export function HelixFeatureForm({
       type: "select",
       label: labels.helixHandedness,
     },
-    numberField("startAngleDeg", labels.helixStartAngle),
-    numberField("taperMm", labels.helixTaper),
+    expressionNumberField(
+      "startAngleDeg",
+      labels.helixStartAngle,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
+    expressionNumberField(
+      "taperMm",
+      labels.helixTaper,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
     {
       name: "datumAxisId",
       options: [
@@ -861,7 +957,12 @@ export function HelixFeatureForm({
             pitchMm: value.pitchMm,
             turns: value.turns,
             handedness: value.handedness === "left" ? -1 : 1,
-            startAngleRad: (value.startAngleDeg * Math.PI) / 180,
+            // The degree→radian conversion is a literal-only step: a
+            // `$name` reference already carries the angle itself.
+            startAngleRad:
+              typeof value.startAngleDeg === "number"
+                ? (value.startAngleDeg * Math.PI) / 180
+                : value.startAngleDeg,
             taperMm: value.taperMm,
           },
           value.datumAxisId === "" ? null : value.datumAxisId,
@@ -883,9 +984,9 @@ export function HelixFeatureForm({
 /** Form values of the thread form. */
 export interface ThreadFormValues extends Record<string, unknown> {
   readonly designation: string;
-  readonly majorDiameterMm: number;
-  readonly pitchMm: number;
-  readonly lengthMm: number;
+  readonly majorDiameterMm: number | string;
+  readonly pitchMm: number | string;
+  readonly lengthMm: number | string;
   readonly mode: string;
   readonly handedness: string;
   readonly axis: string;
@@ -895,20 +996,24 @@ export interface ThreadFormValues extends Record<string, unknown> {
  * The thread form: the ISO designation picker (the table fills the major
  * diameter and pitch; the numbers stay editable — the designation is a
  * picker, never persisted state), the thread length, mode, handedness,
- * and the world axis. The picker's fill rides the form's own change hook:
- * a designation CHANGE copies the table row's two numbers into the
- * fields through the form API (`form.setFieldValue`), and nothing else —
- * a hand edit after a pick is just another field change the hook
- * ignores, so it persists until the next pick. Submission routes
- * through the engine's thread action; a structured refusal surfaces
- * verbatim in the dialog's error region.
+ * and the world axis. The three lengths are expression-number fields — a
+ * `$name` value references the document's parameter. The picker's fill
+ * rides the form's own change hook: a designation CHANGE copies the table
+ * row's two numbers into the fields through the form API
+ * (`form.setFieldValue`), and nothing else — a hand edit after a pick is
+ * just another field change the hook ignores, so it persists until the
+ * next pick. Submission routes through the engine's thread action; a
+ * structured refusal surfaces verbatim in the dialog's error region.
  */
 export function ThreadFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
   onThread,
+  parameterNames,
 }: {
   readonly labels?: CadFeatureFormLabels;
-  readonly onThread: (specification: ThreadCutInput) => void;
+  readonly onThread: (specification: ThreadCutInputRef) => void;
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
   const fields: readonly FormedibleFieldConfig<ThreadFormValues>[] = [
@@ -922,39 +1027,27 @@ export function ThreadFeatureForm({
       type: "select",
       label: labels.threadDesignation,
     },
-    {
-      name: "majorDiameterMm",
-      required: true,
-      type: "number",
-      label: labels.threadMajor,
-      inputClassName: "font-mono",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value)
-          ? null
-          : "Enter a finite number.",
-    },
-    {
-      name: "pitchMm",
-      required: true,
-      type: "number",
-      label: labels.threadPitch,
-      inputClassName: "font-mono",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value)
-          ? null
-          : "Enter a finite number.",
-    },
-    {
-      name: "lengthMm",
-      required: true,
-      type: "number",
-      label: labels.threadLength,
-      inputClassName: "font-mono",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value)
-          ? null
-          : "Enter a finite number.",
-    },
+    expressionNumberField(
+      "majorDiameterMm",
+      labels.threadMajor,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
+    expressionNumberField(
+      "pitchMm",
+      labels.threadPitch,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
+    expressionNumberField(
+      "lengthMm",
+      labels.threadLength,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
     {
       name: "mode",
       options: [
@@ -1053,22 +1146,28 @@ export function ThreadFeatureForm({
 /** Form values of the rib form. */
 export interface RibFormValues extends Record<string, unknown> {
   readonly profileSketchId: string;
-  readonly thicknessMm: number;
+  readonly thicknessMm: number | string;
 }
 
 /**
- * The rib form: the cross-section sketch picker plus the thickness.
- * Submission routes through the engine's rib action; a structured refusal
- * surfaces verbatim in the dialog's error region.
+ * The rib form: the cross-section sketch picker plus the thickness (an
+ * expression-number field — a `$name` value references the document's
+ * parameter). Submission routes through the engine's rib action; a
+ * structured refusal surfaces verbatim in the dialog's error region.
  */
 export function RibFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
   onRib,
   sketches,
+  parameterNames,
 }: {
   readonly labels?: CadFeatureFormLabels;
-  readonly onRib: (specification: RibCutInput & { sketchId: string }) => void;
+  readonly onRib: (
+    specification: RibCutInputRef & { sketchId: string },
+  ) => void;
   readonly sketches: readonly CadFeatureSketchOption[];
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
   const fields: readonly FormedibleFieldConfig<RibFormValues>[] = [
@@ -1080,17 +1179,13 @@ export function RibFeatureForm({
       type: "select",
       label: labels.ribProfile,
     },
-    {
-      name: "thicknessMm",
-      required: true,
-      type: "number",
-      label: labels.ribThickness,
-      inputClassName: "font-mono",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value)
-          ? null
-          : "Enter a thickness in millimetres.",
-    },
+    expressionNumberField(
+      "thicknessMm",
+      labels.ribThickness,
+      parameterNames,
+      FINITE,
+      "Enter a thickness in millimetres.",
+    ),
   ];
   const form = useFormedible<RibFormValues>({
     fields,
@@ -1114,19 +1209,17 @@ export function RibFeatureForm({
   );
 }
 
-/** Form values of the scale form. */
+/** Form values of the scale form (the factor: literal or `$name`). */
 export interface ScaleFormValues extends Record<string, unknown> {
-  readonly factor: number;
+  readonly factor: number | string;
 }
-
-/** The scale form: one uniform factor against the latest extrusion. */
 /** Form values of the create-sheet form (Phase 49 surface tab). */
 export interface CreateSheetFormValues extends Record<string, unknown> {
   readonly datumId: string;
-  readonly uMinMm: number;
-  readonly uMaxMm: number;
-  readonly vMinMm: number;
-  readonly vMaxMm: number;
+  readonly uMinMm: number | string;
+  readonly uMaxMm: number | string;
+  readonly vMinMm: number | string;
+  readonly vMaxMm: number | string;
 }
 
 /** A datum-plane option the surface forms pick from. */
@@ -1141,31 +1234,45 @@ export interface SurfaceSheetOption {
   readonly name: string;
 }
 
-const numberField = (label: string, hint: string) => ({
-  required: true,
-  type: "number" as const,
-  label,
-  inputClassName: "font-mono",
-  validation: (value: unknown) =>
-    typeof value === "number" && Number.isFinite(value) ? null : hint,
-});
+/**
+ * The surface tab's expression-number field: the shared finite gate and the
+ * document's live parameter names (the `$`-token suggestions).
+ */
+function expressionSurfaceField<TValues extends Record<string, unknown>>(
+  name: string,
+  label: string,
+  parameterNames: readonly string[],
+  hint: string,
+): FormedibleFieldConfig<TValues> {
+  return expressionNumberField<TValues>(
+    name,
+    label,
+    parameterNames,
+    FINITE,
+    hint,
+  );
+}
 
 /**
  * The surface tab's create-sheet form (Phase 49): a datum plane base and
- * the plane patch's u/v bounds — the datum-bound base sheet.
+ * the plane patch's u/v bounds (each an expression-number field — a `$name`
+ * value references the document's parameter) — the datum-bound base sheet.
  */
 export function CreateSheetForm({
   datums,
   onCreateSheet,
+  parameterNames,
 }: {
   readonly datums: readonly SurfaceDatumOption[];
   readonly onCreateSheet: (submission: {
     readonly datumId: DatumId;
-    readonly uMinMm: number;
-    readonly uMaxMm: number;
-    readonly vMinMm: number;
-    readonly vMaxMm: number;
+    readonly uMinMm: number | string;
+    readonly uMaxMm: number | string;
+    readonly vMinMm: number | string;
+    readonly vMaxMm: number | string;
   }) => void;
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const fields: readonly FormedibleFieldConfig<CreateSheetFormValues>[] = [
     {
@@ -1180,22 +1287,30 @@ export function CreateSheetForm({
           ? null
           : "Pick the datum plane the patch binds to.",
     },
-    {
-      name: "uMinMm",
-      ...numberField("u min (mm)", "Enter a finite u minimum."),
-    },
-    {
-      name: "uMaxMm",
-      ...numberField("u max (mm)", "Enter a finite u maximum."),
-    },
-    {
-      name: "vMinMm",
-      ...numberField("v min (mm)", "Enter a finite v minimum."),
-    },
-    {
-      name: "vMaxMm",
-      ...numberField("v max (mm)", "Enter a finite v maximum."),
-    },
+    expressionSurfaceField(
+      "uMinMm",
+      "u min (mm)",
+      parameterNames,
+      "Enter a finite u minimum.",
+    ),
+    expressionSurfaceField(
+      "uMaxMm",
+      "u max (mm)",
+      parameterNames,
+      "Enter a finite u maximum.",
+    ),
+    expressionSurfaceField(
+      "vMinMm",
+      "v min (mm)",
+      parameterNames,
+      "Enter a finite v minimum.",
+    ),
+    expressionSurfaceField(
+      "vMaxMm",
+      "v max (mm)",
+      parameterNames,
+      "Enter a finite v maximum.",
+    ),
   ];
   const form = useFormedible<CreateSheetFormValues>({
     fields,
@@ -1313,7 +1428,7 @@ export function TrimSurfaceForm({
 /** Form values of the thicken-surface form (Phase 49 surface tab). */
 export interface ThickenSurfaceFormValues extends Record<string, unknown> {
   readonly sheetId: string;
-  readonly thicknessMm: number;
+  readonly thicknessMm: number | string;
   readonly side: "1" | "-1";
 }
 
@@ -1321,13 +1436,16 @@ export interface ThickenSurfaceFormValues extends Record<string, unknown> {
 export function ThickenSurfaceForm({
   sheets,
   onThickenSurface,
+  parameterNames,
 }: {
   readonly sheets: readonly SurfaceSheetOption[];
   readonly onThickenSurface: (submission: {
     readonly sheetId: string;
-    readonly thicknessMm: number;
+    readonly thicknessMm: number | string;
     readonly side: 1 | -1;
   }) => void;
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const fields: readonly FormedibleFieldConfig<ThickenSurfaceFormValues>[] = [
     {
@@ -1342,10 +1460,12 @@ export function ThickenSurfaceForm({
           ? null
           : "Pick the sheet body to thicken.",
     },
-    {
-      name: "thicknessMm",
-      ...numberField("Thickness (mm)", "Enter a finite wall thickness."),
-    },
+    expressionSurfaceField(
+      "thicknessMm",
+      "Thickness (mm)",
+      parameterNames,
+      "Enter a finite wall thickness.",
+    ),
     {
       name: "side",
       required: true,
@@ -1387,19 +1507,22 @@ export function ThickenSurfaceForm({
 /** Form values of the knit-surface form (Phase 49 surface tab). */
 export interface KnitSurfaceFormValues extends Record<string, unknown> {
   readonly sheets: readonly { readonly sheetId: string }[];
-  readonly toleranceMm: number;
+  readonly toleranceMm: number | string;
 }
 
 /** The surface tab's knit form: two or more sheets sewn at a tolerance. */
 export function KnitSurfaceForm({
   sheets,
   onKnit,
+  parameterNames,
 }: {
   readonly sheets: readonly SurfaceSheetOption[];
   readonly onKnit: (submission: {
     readonly sheetIds: readonly string[];
-    readonly toleranceMm: number;
+    readonly toleranceMm: number | string;
   }) => void;
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const fields: readonly FormedibleFieldConfig<KnitSurfaceFormValues>[] = [
     {
@@ -1433,13 +1556,12 @@ export function KnitSurfaceForm({
       type: "array",
       label: "Sheets to sew (in order)",
     },
-    {
-      name: "toleranceMm",
-      ...numberField(
-        "Sewing tolerance (mm)",
-        "Enter a finite sewing tolerance.",
-      ),
-    },
+    expressionSurfaceField(
+      "toleranceMm",
+      "Sewing tolerance (mm)",
+      parameterNames,
+      "Enter a finite sewing tolerance.",
+    ),
   ];
   const first = sheets[0]?.id ?? "";
   const second = sheets[1]?.id ?? sheets[0]?.id ?? "";
@@ -1469,19 +1591,22 @@ export function KnitSurfaceForm({
 /** Form values of the offset-surface form (Phase 49 surface tab). */
 export interface OffsetSurfaceFormValues extends Record<string, unknown> {
   readonly sheetId: string;
-  readonly distanceMm: number;
+  readonly distanceMm: number | string;
 }
 
 /** The surface tab's offset form: a sheet and a signed offset distance. */
 export function OffsetSurfaceForm({
   sheets,
   onOffset,
+  parameterNames,
 }: {
   readonly sheets: readonly SurfaceSheetOption[];
   readonly onOffset: (submission: {
     readonly sheetId: string;
-    readonly distanceMm: number;
+    readonly distanceMm: number | string;
   }) => void;
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const fields: readonly FormedibleFieldConfig<OffsetSurfaceFormValues>[] = [
     {
@@ -1496,13 +1621,12 @@ export function OffsetSurfaceForm({
           ? null
           : "Pick the sheet body to offset.",
     },
-    {
-      name: "distanceMm",
-      ...numberField(
-        "Offset distance (mm, signed)",
-        "Enter a finite, non-zero offset distance.",
-      ),
-    },
+    expressionSurfaceField(
+      "distanceMm",
+      "Offset distance (mm, signed)",
+      parameterNames,
+      "Enter a finite, non-zero offset distance.",
+    ),
   ];
   const form = useFormedible<OffsetSurfaceFormValues>({
     fields,
@@ -1527,26 +1651,30 @@ export function OffsetSurfaceForm({
   );
 }
 
+/**
+ * The scale form: one uniform factor (an expression-number field — a
+ * `$name` value references the document's parameter) against the latest
+ * extrusion.
+ */
 export function ScaleFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
   onScale,
+  parameterNames,
 }: {
   readonly labels?: CadFeatureFormLabels;
-  readonly onScale: (specification: ScaleInput) => void;
+  readonly onScale: (specification: ScaleInputRef) => void;
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
   const fields: readonly FormedibleFieldConfig<ScaleFormValues>[] = [
-    {
-      name: "factor",
-      required: true,
-      type: "number",
-      label: labels.scaleFactor,
-      inputClassName: "font-mono",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value) && value > 0
-          ? null
-          : "Enter a finite, strictly positive factor.",
-    },
+    expressionNumberField(
+      "factor",
+      labels.scaleFactor,
+      parameterNames,
+      (value) => Number.isFinite(value) && value > 0,
+      "Enter a finite, strictly positive factor.",
+    ),
   ];
   const form = useFormedible<ScaleFormValues>({
     fields,
@@ -1568,32 +1696,33 @@ export function ScaleFeatureForm({
   );
 }
 
-/** Form values of the thicken form. */
+/** Form values of the thicken form (the thickness: literal or `$name`). */
 export interface ThickenFormValues extends Record<string, unknown> {
-  readonly thicknessMm: number;
+  readonly thicknessMm: number | string;
 }
 
-/** The thicken form: one wall thickness against the latest extrusion. */
+/** The thicken form: one wall thickness (an expression-number field — a
+ * `$name` value references the document's parameter) against the latest
+ * extrusion. */
 export function ThickenFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
   onThicken,
+  parameterNames,
 }: {
   readonly labels?: CadFeatureFormLabels;
-  readonly onThicken: (specification: ThickenInput) => void;
+  readonly onThicken: (specification: ThickenInputRef) => void;
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
   const fields: readonly FormedibleFieldConfig<ThickenFormValues>[] = [
-    {
-      name: "thicknessMm",
-      required: true,
-      type: "number",
-      label: labels.thickenThickness,
-      inputClassName: "font-mono",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value) && value > 0
-          ? null
-          : "Enter a finite, strictly positive thickness.",
-    },
+    expressionNumberField(
+      "thicknessMm",
+      labels.thickenThickness,
+      parameterNames,
+      (value) => Number.isFinite(value) && value > 0,
+      "Enter a finite, strictly positive thickness.",
+    ),
   ];
   const form = useFormedible<ThickenFormValues>({
     fields,
@@ -1688,47 +1817,38 @@ export function SplitFeatureForm({
   );
 }
 
-/** Form values of the draft-extrude form. */
+/** Form values of the draft-extrude form (values: literal or `$name`). */
 export interface DraftFormValues extends Record<string, unknown> {
   readonly profileSketchId: string;
-  readonly distanceMm: number;
-  readonly taperDeg: number;
+  readonly distanceMm: number | string;
+  readonly taperDeg: number | string;
 }
 /**
  * The draft-extrude form: the saved profile sketch, the signed distance,
  * and the taper angle — the Phase 41 third input of the extrude feature.
- * Submission routes through the engine's draft action; a structured
- * refusal (an unresolvable profile, a taper past the collapse) surfaces
- * verbatim in the dialog's error region.
+ * Both values are expression-number fields — a `$name` value references the
+ * document's parameter, and the regeneration loop re-reads it on every
+ * dispatch. Submission routes through the engine's draft action; a
+ * structured refusal (an unresolvable profile, an unknown parameter, a
+ * taper past the collapse) surfaces verbatim in the dialog's error region.
  */
 export function DraftFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
   onDraft,
   sketches,
+  parameterNames,
 }: {
   readonly labels?: CadFeatureFormLabels;
   readonly onDraft: (specification: {
     readonly sketchId: string;
-    readonly distanceMm: number;
-    readonly taperDeg: number;
+    readonly distanceMm: number | string;
+    readonly taperDeg: number | string;
   }) => void;
   readonly sketches: readonly CadFeatureSketchOption[];
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
-  const numberField = (
-    name: keyof DraftFormValues & string,
-    label: string,
-  ): FormedibleFieldConfig<DraftFormValues> => ({
-    name,
-    required: true,
-    type: "number",
-    label,
-    inputClassName: "font-mono",
-    validation: (value) =>
-      typeof value === "number" && Number.isFinite(value)
-        ? null
-        : "Enter a finite number.",
-  });
   const fields: readonly FormedibleFieldConfig<DraftFormValues>[] = [
     {
       name: "profileSketchId",
@@ -1738,8 +1858,20 @@ export function DraftFeatureForm({
       type: "select",
       label: labels.draftProfile,
     },
-    numberField("distanceMm", labels.draftDistance),
-    numberField("taperDeg", labels.draftTaper),
+    expressionNumberField(
+      "distanceMm",
+      labels.draftDistance,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
+    expressionNumberField(
+      "taperDeg",
+      labels.draftTaper,
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
   ];
   const form = useFormedible<DraftFormValues>({
     fields,
@@ -1773,19 +1905,19 @@ export function DraftFeatureForm({
 export interface HoleFormValues extends Record<string, unknown> {
   readonly holeType: string;
   readonly designation: string;
-  readonly diameterMm: number;
-  readonly depthMm: number;
-  readonly tipAngleDeg: number;
-  readonly cboreDiameterMm: number;
-  readonly cboreDepthMm: number;
-  readonly csinkDiameterMm: number;
-  readonly csinkAngleDeg: number;
-  readonly taperAngleDeg: number;
-  readonly threadMajorMm: number;
-  readonly threadPitchMm: number;
+  readonly diameterMm: number | string;
+  readonly depthMm: number | string;
+  readonly tipAngleDeg: number | string;
+  readonly cboreDiameterMm: number | string;
+  readonly cboreDepthMm: number | string;
+  readonly csinkDiameterMm: number | string;
+  readonly csinkAngleDeg: number | string;
+  readonly taperAngleDeg: number | string;
+  readonly threadMajorMm: number | string;
+  readonly threadPitchMm: number | string;
   readonly positionsSketchId: string;
-  readonly positionXMm: number;
-  readonly positionYMm: number;
+  readonly positionXMm: number | string;
+  readonly positionYMm: number | string;
   readonly axis: string;
   readonly datumAxisId: string;
 }
@@ -1801,9 +1933,13 @@ export interface HoleFormValues extends Record<string, unknown> {
  * pitch through the thread form's change-hook discipline; the positions
  * picker chooses the parameter position or a sketch's point entities (one
  * feature, many holes); the axis picker chooses a world axis or a datum
- * axis (the helix form's precedent). Submission routes through the
- * engine's structured hole action; a structured refusal surfaces verbatim
- * in the dialog's error region.
+ * axis (the helix form's precedent). Phase 21: the numeric roles are
+ * expression-number fields — a `$name` value references the document's
+ * parameter, submitted as the role's `parameterRefs` entry (the spec slot
+ * carries the inert role default; the referenced parameter's live value is
+ * what the kernel judges). Submission routes through the engine's
+ * structured hole action; a structured refusal surfaces verbatim in the
+ * dialog's error region.
  */
 export function HoleFeatureForm({
   labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
@@ -1811,6 +1947,7 @@ export function HoleFeatureForm({
   onValuesChange,
   sketches,
   datumAxes,
+  parameterNames,
 }: {
   readonly labels?: CadFeatureFormLabels;
   readonly onHole: (submission: StructuredHoleSubmission) => void;
@@ -1818,6 +1955,8 @@ export function HoleFeatureForm({
   readonly onValuesChange?: (values: HoleFormValues) => void;
   readonly sketches: readonly CadFeatureSketchOption[];
   readonly datumAxes: readonly CadFeatureDatumOption[];
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
 }): ReactElement {
   const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
   const typeValue = (raw: string): number =>
@@ -1875,15 +2014,17 @@ export function HoleFeatureForm({
   ): FormedibleFieldConfig<HoleFormValues> => ({
     name: roleNumberFieldOf(role),
     required: true,
-    type: "number",
+    type: "expressionNumber",
     label: roleLabels[role] ?? role,
     inputClassName: "font-mono",
+    expressionNumberConfig: { parameterNames },
     conditional: (values) =>
       (roleApplicability.get(role) ?? []).includes(typeValue(values.holeType)),
-    validation: (value) =>
-      typeof value === "number" && Number.isFinite(value)
-        ? null
-        : "Enter a finite number.",
+    validation: expressionNumberValidation(
+      parameterNames,
+      FINITE,
+      "Enter a finite number.",
+    ),
   });
   const fields: readonly FormedibleFieldConfig<HoleFormValues>[] = [
     {
@@ -1936,26 +2077,30 @@ export function HoleFeatureForm({
     {
       name: "positionXMm",
       required: true,
-      type: "number",
+      type: "expressionNumber",
       label: labels.holePositionX,
       inputClassName: "font-mono",
+      expressionNumberConfig: { parameterNames },
       conditional: (values) => values.positionsSketchId === "",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value)
-          ? null
-          : "Enter a finite in-plane coordinate.",
+      validation: expressionNumberValidation(
+        parameterNames,
+        FINITE,
+        "Enter a finite in-plane coordinate.",
+      ),
     },
     {
       name: "positionYMm",
       required: true,
-      type: "number",
+      type: "expressionNumber",
       label: labels.holePositionY,
       inputClassName: "font-mono",
+      expressionNumberConfig: { parameterNames },
       conditional: (values) => values.positionsSketchId === "",
-      validation: (value) =>
-        typeof value === "number" && Number.isFinite(value)
-          ? null
-          : "Enter a finite in-plane coordinate.",
+      validation: expressionNumberValidation(
+        parameterNames,
+        FINITE,
+        "Enter a finite in-plane coordinate.",
+      ),
     },
     {
       name: "datumAxisId",
@@ -2018,22 +2163,87 @@ export function HoleFeatureForm({
         form.form.setFieldValue("threadPitchMm", size.pitchMm);
       },
       onSubmit: ({ value }) => {
+        // The Phase 21 references: a `$name` field value becomes the ROLE's
+        // parameterRefs entry, and its spec slot carries the inert role
+        // default (the referenced parameter's live value is what commits —
+        // the handler skips the creation for referenced roles).
+        const parameterRefs: Record<string, string> = {};
+        const roleSpecValue = (
+          role: string,
+          numeric: number | string,
+          fallback: number,
+        ): number => {
+          if (typeof numeric === "string") {
+            parameterRefs[role] = numeric;
+            return fallback;
+          }
+          return numeric;
+        };
         onHole({
           spec: {
             type: typeValue(value.holeType),
-            diameterMm: value.diameterMm,
-            depthMm: value.depthMm,
-            tipAngleDeg: value.tipAngleDeg,
-            cboreDiameterMm: value.cboreDiameterMm,
-            cboreDepthMm: value.cboreDepthMm,
-            csinkDiameterMm: value.csinkDiameterMm,
-            csinkAngleDeg: value.csinkAngleDeg,
-            taperAngleDeg: value.taperAngleDeg,
-            threadMajorMm: value.threadMajorMm,
-            threadPitchMm: value.threadPitchMm,
+            diameterMm: roleSpecValue(
+              "diameter",
+              value.diameterMm,
+              STRUCTURED_HOLE_DEFAULTS.spec.diameterMm,
+            ),
+            depthMm: roleSpecValue(
+              "depth",
+              value.depthMm,
+              STRUCTURED_HOLE_DEFAULTS.spec.depthMm,
+            ),
+            tipAngleDeg: roleSpecValue(
+              "tipAngle",
+              value.tipAngleDeg,
+              STRUCTURED_HOLE_DEFAULTS.spec.tipAngleDeg,
+            ),
+            cboreDiameterMm: roleSpecValue(
+              "cboreDiameter",
+              value.cboreDiameterMm,
+              STRUCTURED_HOLE_DEFAULTS.spec.cboreDiameterMm,
+            ),
+            cboreDepthMm: roleSpecValue(
+              "cboreDepth",
+              value.cboreDepthMm,
+              STRUCTURED_HOLE_DEFAULTS.spec.cboreDepthMm,
+            ),
+            csinkDiameterMm: roleSpecValue(
+              "csinkDiameter",
+              value.csinkDiameterMm,
+              STRUCTURED_HOLE_DEFAULTS.spec.csinkDiameterMm,
+            ),
+            csinkAngleDeg: roleSpecValue(
+              "csinkAngle",
+              value.csinkAngleDeg,
+              STRUCTURED_HOLE_DEFAULTS.spec.csinkAngleDeg,
+            ),
+            taperAngleDeg: roleSpecValue(
+              "taperAngle",
+              value.taperAngleDeg,
+              STRUCTURED_HOLE_DEFAULTS.spec.taperAngleDeg,
+            ),
+            threadMajorMm: roleSpecValue(
+              "threadMajor",
+              value.threadMajorMm,
+              STRUCTURED_HOLE_DEFAULTS.spec.threadMajorMm,
+            ),
+            threadPitchMm: roleSpecValue(
+              "threadPitch",
+              value.threadPitchMm,
+              STRUCTURED_HOLE_DEFAULTS.spec.threadPitchMm,
+            ),
           },
-          positionXMm: value.positionXMm,
-          positionYMm: value.positionYMm,
+          positionXMm: roleSpecValue(
+            "positionX",
+            value.positionXMm,
+            STRUCTURED_HOLE_DEFAULTS.positionXMm,
+          ),
+          positionYMm: roleSpecValue(
+            "positionY",
+            value.positionYMm,
+            STRUCTURED_HOLE_DEFAULTS.positionYMm,
+          ),
+          ...(Object.keys(parameterRefs).length > 0 ? { parameterRefs } : {}),
           axis: value.axis === "x" ? 1 : value.axis === "y" ? 2 : 3,
           positionsSketchId:
             value.positionsSketchId === "" ? null : value.positionsSketchId,
@@ -2616,6 +2826,140 @@ export function MoveBodyFeatureForm({
   return (
     <form.Form
       aria-label={labels.moveBodyTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the duplicate form (the numbers: literal or `$name`). */
+export interface DuplicateFormValues extends Record<string, unknown> {
+  readonly sourceBodyId: string;
+  readonly dxMm: number | string;
+  readonly dyMm: number | string;
+  readonly dzMm: number | string;
+  readonly axis: string;
+  readonly angleDeg: number | string;
+  readonly count: number | string;
+}
+
+/**
+ * The Phase 60 duplicate & transform form: the source body (the relaxed
+ * computable-body pool — a copy of a copy is legal input), the per-step
+ * translation (mm), the world-axis rotation selector with its angle, and
+ * the copy count — every number an expression-number field, so a `$name`
+ * value references the document's parameter and re-drives with it (the
+ * Phase 21/30 machinery). Submission routes through the engine's
+ * duplicate action; a structured refusal — the identity transform and the
+ * over-cap count among them — surfaces verbatim in the dialog's error
+ * region.
+ */
+export function DuplicateFeatureForm({
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onDuplicate,
+  bodies,
+  parameterNames,
+}: {
+  readonly labels?: CadFeatureFormLabels;
+  readonly onDuplicate: (specification: DuplicateSubmission) => void;
+  /** The computable bodies the source picks from (name verbatim). */
+  readonly bodies: readonly CadFeatureBodyOption[];
+  /** The document's live parameter names (the `$`-token suggestions). */
+  readonly parameterNames: readonly string[];
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const fields: readonly FormedibleFieldConfig<DuplicateFormValues>[] = [
+    {
+      name: "sourceBodyId",
+      options: bodies.map((body) => ({ value: body.id, label: body.name })),
+      placeholder: labels.duplicateSource,
+      required: true,
+      type: "select",
+      label: labels.duplicateSource,
+    },
+    expressionNumberField(
+      "dxMm",
+      labels.duplicateDx,
+      parameterNames,
+      FINITE,
+      "Enter a finite step in millimetres.",
+    ),
+    expressionNumberField(
+      "dyMm",
+      labels.duplicateDy,
+      parameterNames,
+      FINITE,
+      "Enter a finite step in millimetres.",
+    ),
+    expressionNumberField(
+      "dzMm",
+      labels.duplicateDz,
+      parameterNames,
+      FINITE,
+      "Enter a finite step in millimetres.",
+    ),
+    {
+      name: "axis",
+      options: [
+        { value: "1", label: labels.duplicateAxisX },
+        { value: "2", label: labels.duplicateAxisY },
+        { value: "3", label: labels.duplicateAxisZ },
+      ],
+      required: true,
+      type: "select",
+      label: labels.duplicateAxis,
+    },
+    expressionNumberField(
+      "angleDeg",
+      labels.duplicateAngle,
+      parameterNames,
+      FINITE,
+      "Enter a finite angle in degrees.",
+    ),
+    expressionNumberField(
+      "count",
+      labels.duplicateCount,
+      parameterNames,
+      (value) =>
+        Number.isInteger(value) && value >= 1 && value <= DUPLICATE_COUNT_LIMIT,
+      `Enter a whole copy count between 1 and ${String(DUPLICATE_COUNT_LIMIT)}.`,
+    ),
+  ];
+  const form = useFormedible<DuplicateFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: {
+        sourceBodyId: bodies[0]?.id ?? "",
+        dxMm: DUPLICATE_DEFAULTS.dxMm,
+        dyMm: DUPLICATE_DEFAULTS.dyMm,
+        dzMm: DUPLICATE_DEFAULTS.dzMm,
+        axis:
+          DUPLICATE_DEFAULTS.axis === 2
+            ? "2"
+            : DUPLICATE_DEFAULTS.axis === 1
+              ? "1"
+              : "3",
+        angleDeg: DUPLICATE_DEFAULTS.angleDeg,
+        count: DUPLICATE_DEFAULTS.count,
+      },
+      onSubmit: ({ value }) => {
+        onDuplicate({
+          sourceBodyId: value.sourceBodyId,
+          dxMm: value.dxMm,
+          dyMm: value.dyMm,
+          dzMm: value.dzMm,
+          axis: value.axis === "1" ? 1 : value.axis === "2" ? 2 : 3,
+          angleDeg: value.angleDeg,
+          count: value.count,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={labels.duplicateTitle}
       className="space-y-3"
       noValidate
     />

@@ -17,6 +17,10 @@ export default tseslint.config(
       "**/e2e-artifacts/**",
       "**/routeTree.gen.ts",
       "**/*.gen.ts",
+      // The standalone viewer's COMPILED bundle (vite.standalone.config's
+      // output lands in the app's public directory so the site serves it
+      // like any asset) — build output, not source.
+      "**/public/viewer-standalone/**",
     ],
   },
   js.configs.recommended,
@@ -70,6 +74,9 @@ export default tseslint.config(
       "packages/ui/**/*.{ts,tsx}",
       "packages/cad-r3f/**/*.{ts,tsx}",
       "packages/cad-react/**/*.{ts,tsx}",
+      // The viewer composition: the one React file in cad-components (the
+      // package's component model itself stays React-free).
+      "packages/cad-components/src/viewer/**",
     ],
     rules: reactHooks.configs.recommended.rules,
   },

@@ -131,18 +131,68 @@ describe("orbit gestures", () => {
   });
 
   it("keeps a below-band seed reachable (seeding never moves the view)", () => {
-    // A spec camera seeded 2° below the documented band (an unusual but
-    // legal view): the clamp window must contain it, so the first orbit
-    // gesture does not snap the camera.
+    // A spec camera seeded below the documented band — nearly under the
+    // target, an unusual but legal view: the clamp window must contain
+    // it, so the first orbit gesture does not snap the camera.
     const state = createOrbitState({
       ...seedFixture(),
-      position: [44, -30, 8],
+      position: [15.5, 10, -95],
     });
     const seedElevationDeg = (state.elevationRad * 180) / Math.PI;
     expect(seedElevationDeg).toBeLessThan(CAD_ORBIT_MIN_ELEVATION_DEG);
     orbitByPixels(state, 0, 10);
     expect((state.elevationRad * 180) / Math.PI).toBeGreaterThanOrEqual(
       seedElevationDeg - 1e-9,
+    );
+  });
+
+  it("orbits freely through the horizon and below the ground plane", () => {
+    const state = createOrbitState(seedFixture());
+    // A long downward stroke: the elevation must pass through the
+    // horizon and land well below it — the underside of the model is a
+    // first-class viewpoint, not a dead zone.
+    orbitByPixels(state, 0, -1_500);
+    const elevationDeg = (state.elevationRad * 180) / Math.PI;
+    expect(elevationDeg).toBeLessThan(-45);
+    expect(elevationDeg).toBeGreaterThanOrEqual(CAD_ORBIT_MIN_ELEVATION_DEG);
+    // ...and the eye really is underneath its target (z-up world):
+    // below −45°, the vertical drop dominates the horizontal offset.
+    const [x, y, z] = orbitPosition(state);
+    expect(z).toBeLessThan(state.targetZ);
+    expect(Math.hypot(x - state.targetX, y - state.targetY)).toBeLessThan(
+      Math.abs(z - state.targetZ),
+    );
+  });
+
+  it("crosses the horizon continuously — no jump, no flip", () => {
+    const state = createOrbitState(seedFixture());
+    // Equal strokes must produce equal elevation steps all the way down:
+    // the clamp is a boundary, not a discontinuity.
+    const radiansPerPixel = state.verticalFovRad / state.viewportHeight;
+    const stepPx = 40;
+    let previous = state.elevationRad;
+    let landedBelow = false;
+    for (let step = 0; step < 40; step += 1) {
+      orbitByPixels(state, 0, -stepPx);
+      const expected = previous - stepPx * radiansPerPixel;
+      expect(state.elevationRad).toBeCloseTo(expected, 9);
+      if (state.elevationRad < 0) landedBelow = true;
+      previous = state.elevationRad;
+    }
+    expect(landedBelow).toBe(true);
+  });
+
+  it("stops just short of the nadir pole (the up-vector never degenerates)", () => {
+    const state = createOrbitState(seedFixture());
+    orbitByPixels(state, 0, -100_000);
+    const elevationDeg = (state.elevationRad * 180) / Math.PI;
+    expect(elevationDeg).toBeCloseTo(CAD_ORBIT_MIN_ELEVATION_DEG, 6);
+    expect(Math.abs(elevationDeg)).toBeLessThan(90);
+    // The keyboard path obeys the same window.
+    orbitByKeys(state, 0, -CAD_ORBIT_KEY_STEP_DEG);
+    expect((state.elevationRad * 180) / Math.PI).toBeCloseTo(
+      CAD_ORBIT_MIN_ELEVATION_DEG,
+      6,
     );
   });
 

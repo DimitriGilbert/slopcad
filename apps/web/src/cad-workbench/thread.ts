@@ -37,6 +37,21 @@ export interface ThreadCutInput {
   readonly axis: number;
 }
 
+/**
+ * The form's thread submission (Phase 21): the three lengths are a literal
+ * number or a `$name` reference to an existing document parameter; the
+ * mode/handedness/axis selectors are always literals (the form's selects).
+ */
+export interface ThreadCutInputRef {
+  readonly majorDiameterMm: number | string;
+  readonly pitchMm: number | string;
+  readonly lengthMm: number | string;
+  readonly mode: number;
+  readonly handedness: number;
+  /** The world-axis selector (1 = X, 2 = Y, 3 = Z); unused with a datum. */
+  readonly axis: number;
+}
+
 /** The form's defaults: an M6×1 external thread, 6 mm long, right-handed. */
 export const THREAD_DEFAULTS: ThreadCutInput = {
   majorDiameterMm: 6,
@@ -56,36 +71,62 @@ export type ThreadValidation =
  * Refuses the impossible thread submissions BEFORE any commit (the sweep
  * action's validation seam): the roadmap's named declines — zero pitch,
  * zero major diameter (zero radius), negative length — plus the mode and
- * handedness domains.
+ * handedness domains. Composed from the per-role gates below so the Phase
+ * 21 reference path (a `$name` length skips its literal battery, the
+ * selectors never do) shares the exact messages and order.
  */
 export function validateThreadSubmission(
   input: ThreadCutInput,
 ): ThreadValidation {
-  if (input.majorDiameterMm <= 0) {
+  const major = validateThreadLength("majorDiameterMm", input.majorDiameterMm);
+  if (!major.ok) return major;
+  const pitch = validateThreadLength("pitchMm", input.pitchMm);
+  if (!pitch.ok) return pitch;
+  const threadLength = validateThreadLength("lengthMm", input.lengthMm);
+  if (!threadLength.ok) return threadLength;
+  return validateThreadSelectors(input);
+}
+
+/** The thread length role a literal gate judges. */
+export type ThreadLengthRole = "majorDiameterMm" | "pitchMm" | "lengthMm";
+
+/** One thread length's literal gate (the shared battery's exact message). */
+export function validateThreadLength(
+  role: ThreadLengthRole,
+  mm: number,
+): ThreadValidation {
+  if (mm > 0) return { ok: true };
+  if (role === "majorDiameterMm") {
     return {
       ok: false,
       code: "kernel/parameter-invalid",
-      message: `The thread's major diameter must be strictly positive (got ${String(input.majorDiameterMm)} mm).`,
+      message: `The thread's major diameter must be strictly positive (got ${String(mm)} mm).`,
     };
   }
-  if (input.pitchMm <= 0) {
+  if (role === "pitchMm") {
     return {
       ok: false,
       code: "kernel/parameter-invalid",
-      message: `The thread's pitch must be strictly positive (got ${String(input.pitchMm)} mm) — a zero pitch is not a thread.`,
+      message: `The thread's pitch must be strictly positive (got ${String(mm)} mm) — a zero pitch is not a thread.`,
     };
   }
-  if (input.lengthMm <= 0) {
-    return {
-      ok: false,
-      code: "kernel/parameter-invalid",
-      message: `The thread's length must be strictly positive (got ${String(input.lengthMm)} mm).`,
-    };
-  }
+  return {
+    ok: false,
+    code: "kernel/parameter-invalid",
+    message: `The thread's length must be strictly positive (got ${String(mm)} mm).`,
+  };
+}
+
+/** The thread's selector domains (always literals — the form's own selects). */
+export function validateThreadSelectors(selectors: {
+  readonly mode: number;
+  readonly handedness: number;
+  readonly axis: number;
+}): ThreadValidation {
   if (
-    input.mode !== THREAD_MODE_VALUES.external &&
-    input.mode !== THREAD_MODE_VALUES.internal &&
-    input.mode !== THREAD_MODE_VALUES.cosmetic
+    selectors.mode !== THREAD_MODE_VALUES.external &&
+    selectors.mode !== THREAD_MODE_VALUES.internal &&
+    selectors.mode !== THREAD_MODE_VALUES.cosmetic
   ) {
     return {
       ok: false,
@@ -93,14 +134,14 @@ export function validateThreadSubmission(
       message: "The thread's mode must be external, internal, or cosmetic.",
     };
   }
-  if (input.handedness !== 1 && input.handedness !== -1) {
+  if (selectors.handedness !== 1 && selectors.handedness !== -1) {
     return {
       ok: false,
       code: "kernel/feature-input-invalid",
       message: "The thread's handedness must be right (+1) or left (-1).",
     };
   }
-  if (input.axis !== 1 && input.axis !== 2 && input.axis !== 3) {
+  if (selectors.axis !== 1 && selectors.axis !== 2 && selectors.axis !== 3) {
     return {
       ok: false,
       code: "kernel/feature-input-invalid",

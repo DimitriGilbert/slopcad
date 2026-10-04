@@ -2,8 +2,9 @@
  * Independence and public-API tests (Phase 32, phase-level): the three
  * components are independently usable — importing one never loads the
  * others — and every module in the package builds exclusively on public
- * slopcad surfaces (cad-core's and cad-kernel's package entries, plus
- * this package's own modules), never on kernel/worker internals.
+ * slopcad surfaces (cad-core's, cad-kernel's, and — for the viewer
+ * composition's React side — cad-react's package entries, plus this
+ * package's own modules), never on kernel/worker internals.
  *
  * This file deliberately uses DYNAMIC imports for each component subpath:
  * its own module graph carries none of them, so each import proves the
@@ -36,6 +37,7 @@ const PUBLIC_EXTERNAL_SURFACES: ReadonlySet<string> = new Set([
   "@slopcad/cad-core",
   "@slopcad/cad-kernel",
   "@slopcad/cad-kernel/opaque",
+  "@slopcad/cad-react",
 ]);
 
 const COMPONENT_FILES = [
@@ -115,6 +117,8 @@ describe("public-APIs-only import graph", () => {
       "component-kernel.ts",
       "context-kernel.ts",
       "component-fixtures.ts",
+      "viewer/parametric-viewer-core.ts",
+      "viewer/parametric-cad-viewer.tsx",
       ...COMPONENT_FILES,
     ];
     for (const file of files) {
@@ -138,6 +142,8 @@ describe("public-APIs-only import graph", () => {
       "component-kernel.ts",
       "context-kernel.ts",
       "component-fixtures.ts",
+      "viewer/parametric-viewer-core.ts",
+      "viewer/parametric-cad-viewer.tsx",
       ...COMPONENT_FILES,
     ];
     for (const file of files) {
@@ -155,6 +161,29 @@ describe("public-APIs-only import graph", () => {
           `${file} must not import worker internals (${specifier})`,
         ).toBe(false);
       }
+    }
+  });
+
+  it("the viewer composition's registry-alias imports are exactly its declared sibling items", async () => {
+    // The TSX imports the viewport and the parameter panel through the
+    // consumer's `@/` alias (the shadcn distribution convention): those
+    // resolve in an installed consumer against the sibling items the
+    // block's registryDependencies pull in, and at authoring time against
+    // the SAME files in packages/ui (the tsconfig path mapping). Every
+    // other import must stay public-package or relative — the alias is a
+    // bounded bridge, not an opening.
+    const allowed = new Set([
+      "@/components/cad/cad-viewport",
+      "@/components/cad/cad-parameter-panel",
+    ]);
+    for (const specifier of await importsOf(
+      "viewer/parametric-cad-viewer.tsx",
+    )) {
+      if (!specifier.startsWith("@/")) continue;
+      expect(
+        allowed.has(specifier),
+        `viewer/parametric-cad-viewer.tsx imports an undeclared registry sibling (${specifier})`,
+      ).toBe(true);
     }
   });
 });

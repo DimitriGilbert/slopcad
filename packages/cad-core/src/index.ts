@@ -225,6 +225,7 @@ export {
   MAX_EXPRESSION_IDENTIFIER_LENGTH,
   parseExpressionAst,
   printExpression,
+  renameExpressionIdentifier,
 } from "./expression";
 export type {
   ExpressionParseError,
@@ -286,6 +287,7 @@ export {
   parseParameter,
   parseParameterCollection,
   removeParameter,
+  renameParameter,
   serializeParameter,
   serializeParameterCollection,
   updateParameterExpression,
@@ -294,8 +296,11 @@ export {
 } from "./parameter";
 export {
   findParameterCycle,
+  installParameterExpression,
   parameterDependencyEdges,
+  parameterCycleError,
 } from "./parameter-graph";
+export type { ParameterExpressionCommit } from "./parameter-graph";
 export type {
   CadCommand,
   CadCommandType,
@@ -404,6 +409,7 @@ export type {
   DocumentParameterAddResult,
   DocumentParameterInput,
   FeatureAddResult,
+  ParameterDeleteBlockers,
   FeatureInputKind,
   FeatureInputRef,
   FeatureRecord,
@@ -468,6 +474,7 @@ export {
   removeBody,
   removeDocumentParameter,
   removeFeature,
+  renameDocumentParameter,
   reorderFeature,
   serializeCadDocument,
   updateFeature,

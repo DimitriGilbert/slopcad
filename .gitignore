@@ -73,5 +73,10 @@ temp
 /vision-shots/
 apps/vision-shots/
 
+# Tutorial recordings (video + caption tracks, regenerated per recording;
+# only docs/tutorials/chapters.json is committed)
+docs/tutorials/media/
+
 # Local-only compose overrides (host port mappings etc.).
 docker-compose.override.yml
+apps/web/public/viewer-standalone/

@@ -26,13 +26,20 @@ import { SKETCH_CANVAS } from "../src/cad-workbench/sketch-editor";
  *    `radius/not-cylindrical`; a body reference declines
  *    `radius/unresolvable-reference` (a body is a composition of faces,
  *    not one circle); with no selection the row shows nothing;
- *  - GROUND TRUTH — the sketch → revolve journey (rectangle (0,0)→(30,25),
+ *  - GROUND TRUTH — the sketch → revolve journey (rectangle (5,0)→(45,25),
  *    full sweep about X) produces the radius-25 cylinder; its wall face —
  *    the one curved face, published with a `null` mean normal — displays
  *    `R 25.000 mm` with its diameter dual `⌀ 50.000 mm` through the
  *    least-squares fit (the kernel's revolution vertices lie ON the true
  *    cylinder, so the fit reproduces the exact radius; the precision label
  *    `fit` says so on the source line);
+ *
+ * Phase 16 document-scene re-baseline: the profile spans [5,45] along the
+ * axis (not [0,30]) so neither cap is coplanar with the boot plate's end
+ * faces — the plate renders BESIDE the cylinder now, the tube (r25) fully
+ * contains it, and the wall is the outermost surface at its own pick
+ * point. The cap decline is asserted through the cylinder's OWN +x cap
+ * (a body-filtered anchor, the wallFace twin).
  *  - UNITS — the value and its unit render as one readout, both
  *    presentations, three decimals.
  *
@@ -56,8 +63,9 @@ const SKETCH = "#sketch-root";
 const MODE_TOGGLE = '[data-testid="workbench-mode-toggle"]';
 const REVOLVE_BUTTON = '[data-testid="sketch-revolve"]';
 
-/** The revolved rectangle: workplane (0,0) → (30,25) — a radius-25 cylinder. */
-const RECT = { x0: 0, y0: 0, x1: 30, y1: 25 } as const;
+/** The revolved rectangle: workplane (5,0) → (45,25) — a radius-25
+ *  cylinder spanning x ∈ [5,45] (the Phase 16 re-baseline, above). */
+const RECT = { x0: 5, y0: 0, x1: 45, y1: 25 } as const;
 
 /** The radius readout the Measurement block displays, as data. */
 async function readRadius(page: Page): Promise<string> {
@@ -246,7 +254,24 @@ test("the selected cylindrical face displays its known radius with its diameter 
   await saveArtifact("radius-revolve-wall.png", await page.screenshot());
 
   // HONESTY on the same scene: a planar cap face declines, structured.
-  const cap = faceWithNormal(revAnchors, CAP_NORMAL);
+  // The cylinder's OWN +x cap — the document scene carries the plate's +x
+  // face with the same normal, so the search filters by body.
+  const capMatches = Object.entries(revAnchors).filter(([key, anchor]) => {
+    if (!key.startsWith(`${REVOLVE_BODY_ID}/`)) return false;
+    if (anchor.normal === null) return false;
+    return (
+      Math.abs(anchor.normal[0] - CAP_NORMAL[0]) <= 0.05 &&
+      Math.abs(anchor.normal[1] - CAP_NORMAL[1]) <= 0.05 &&
+      Math.abs(anchor.normal[2] - CAP_NORMAL[2]) <= 0.05
+    );
+  });
+  expect(capMatches.length, "exactly one +x cap on the cylinder").toBe(1);
+  const capEntry = capMatches[0];
+  if (capEntry === undefined) throw new Error("unreachable: cap asserted");
+  const cap = {
+    faceIndex: Number(capEntry[0].split("/")[1]),
+    anchor: capEntry[1],
+  };
   await clickFace(page, cap.anchor);
   await waitForSelectionFrame(
     page,

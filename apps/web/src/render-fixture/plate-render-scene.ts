@@ -32,6 +32,7 @@ import {
   WorkerRequestFailure,
   type ComputationContext,
 } from "@slopcad/cad-kernel";
+import type { DocumentSceneMeasurement } from "../worker-fixture/document-scene";
 import type { ExtrudeSceneRequest } from "../worker-fixture/extrude-scene";
 
 import {
@@ -259,6 +260,52 @@ export function extrudeRenderState(
     measurement,
     projection: unwrap(
       createRenderProjection([object], extrudeCamera(measurement.bounds)),
+    ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The document scene assembly (Phase 16 owner fix)
+// ---------------------------------------------------------------------------
+
+/**
+ * The document scene's render state: one render object per rendered body
+ * (the stable `rend_*` ids derive from the body ids, exactly like the
+ * imported-STEP assembly) under the bounds-fitted home-view camera — for a
+ * single rendered body that camera IS the per-scene camera, so a
+ * single-body document scene is byte-identical to its feature-scene twin.
+ * The measurement is the document aggregate (the sum over the rendered
+ * bodies — the settle surface's truth); a document scene carries no
+ * section face measurements (the plate scene's own concern).
+ */
+export interface DocumentSceneRenderState {
+  readonly measurement: DocumentSceneMeasurement;
+  readonly projection: RenderProjection;
+  readonly section?: undefined;
+}
+
+/**
+ * Assembles the document scene's render state from the computation's
+ * aggregate. Pure — the same measurement always yields the same
+ * projection bytes.
+ */
+export function documentSceneRenderState(
+  measurement: DocumentSceneMeasurement,
+): DocumentSceneRenderState {
+  const objects = measurement.bodies.map((body) =>
+    unwrap(
+      projectTessellation(
+        createBodyId(body.bodyId),
+        body.measurement.tessellation,
+        undefined,
+        body.openShell === true,
+      ),
+    ),
+  );
+  return {
+    measurement,
+    projection: unwrap(
+      createRenderProjection(objects, extrudeCamera(measurement.bounds)),
     ),
   };
 }
