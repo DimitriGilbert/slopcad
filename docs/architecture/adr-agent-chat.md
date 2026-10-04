@@ -656,3 +656,31 @@ closed at the relay boundary (`apps/web/src/agent/relay.ts`):
   client fetcher always sends the config store's (normalized, ≥ 1)
   value; a stored bound above 25 is refused loudly by the relay's 400
   rather than silently clamped.
+
+## Phase 4 UI notes (2026-10-04)
+
+One SSR render fallback exists on `/workbench-complete` and it is
+PRE-EXISTING, not a Phase 4 regression: during server render, a Base UI
+Tooltip `fastComponent` hits the `use-sync-external-store` shim against
+a second React instance inlined via the `@react-three/fiber` chunk. The
+phase-wide validator reproduced the failure byte-identical at commit
+`adf8bb3` in a clean worktree, and it fires on non-agent routes too —
+nothing the chat mounts changes it. TanStack Start serves the
+client-render fallback shell harmlessly (the route hydrates and renders
+normally), so the fallback is recorded here and left alone. Phase 4's
+own UI ships with counter-measures already in code, so none of its
+surface widens the gap:
+
+- Browser storage is read only AFTER hydration: `view-state.ts`
+  (`apps/web/src/agent/chat/`) applies the persisted sidebar view in an
+  effect, and `right-sidebar-size.ts` (`apps/web/src/cad-workbench/`)
+  applies the stored width the same way — the first render never
+  depends on stored state, so persistence cannot cause a hydration
+  mismatch.
+- `session-slot.ts` passes the slot's own getter as the SERVER snapshot
+  of its `useSyncExternalStore` (null during SSR — no panel mounts
+  server-side), so server-rendered workbench routes never hit React's
+  missing-getServerSnapshot error.
+- The settings sheet (`agent-settings.tsx`) mounts ONLY while open (the
+  io dialogs' `if (!open) return null` pattern), so the closed state
+  runs no provider or catalog queries from hidden UI.

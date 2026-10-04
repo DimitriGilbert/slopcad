@@ -1,0 +1,45 @@
+/*
+ * Scroll utilities vendored for the chat surface — exactly the gaps the
+ * `shadcn/tailwind.css` import (plus tw-animate-css) leaves open. Every rule
+ * here is consumed by the message-scroller viewport class string in
+ * `packages/ui/src/components/message-scroller.tsx` and the chat components
+ * built on it. Deliberately NOT redefined (already ship with
+ * `shadcn/tailwind.css`): `shimmer`, `scroll-fade-b` (and its `@property`
+ * reveal machinery), `no-scrollbar`.
+ *
+ * The `data-autoscrolling` variant tracks the boolean attribute the
+ * `@shadcn/react` message-scroller primitive toggles on its root/viewport
+ * while it is programmatically scrolling (`toggleAttribute`), following the
+ * same non-"false" convention as the other `data-*` variants in
+ * `shadcn/tailwind.css`.
+ */
+
+@custom-variant data-autoscrolling {
+  &:where([data-autoscrolling]:not([data-autoscrolling="false"])) {
+    @slot;
+  }
+}
+
+/* Explicit thin scrollbar opt-in (the app's base layer also thins every
+ * scrollbar globally; this keeps the scroller's intent self-contained). */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+/* Reserve the scrollbar gutter so auto-scroll flows don't shift layout when
+ * the scrollbar appears/disappears. */
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+
+/* Fully hide the scrollbar (applied via `data-autoscrolling:` while the
+ * scroller is program-scrolling). Same mechanics as `no-scrollbar`, under the
+ * name the scroller's class string already uses. */
+@utility scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

@@ -809,7 +809,9 @@ function historyMove(store: CadStore, move: "undo" | "redo") {
  * The workbench mount: registers the workbench tool set for the page's
  * lifetime, reading the LIVE engine, command vocabulary, and viewport
  * capture surface. One call from the workbench-complete composition — no
- * restructuring, no extra surfaces.
+ * restructuring, no extra surfaces. Returns the minted entries so the
+ * page can hand the SAME binding (entries + the registry executor) to
+ * the agent chat's tools surface — one tool set, two consumers.
  */
 export function useWorkbenchWebMcpTools({
   capture,
@@ -819,7 +821,7 @@ export function useWorkbenchWebMcpTools({
   readonly capture: WorkbenchCaptureSurface;
   readonly commands: readonly CadCommandDescriptor[];
   readonly engine: WorkbenchEngine;
-}): void {
+}): readonly WebMcpToolEntry[] {
   // The latest engine + vocabulary + capture surface: handlers read
   // through this ref because the entries (and their spec registration)
   // are minted once per mount. `rootId` is read at mint — every caller's
@@ -851,4 +853,5 @@ export function useWorkbenchWebMcpTools({
     }),
   );
   useWebMcpTools(entries);
+  return entries;
 }
