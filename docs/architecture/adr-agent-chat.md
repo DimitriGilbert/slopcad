@@ -180,6 +180,25 @@ location}`) and surface in the SAME UI surfaces users already get —
   provider's policy and theirs to enforce). Phase 1.2 verifies the header
   plumbing and records any remaining uncertainty back here; first live
   confirmation happens at real use.
+- Phase 1.2 plumbing verification (adapter sources + node tests driving the
+  real SDK wire path with an injected transport, 2026-10-04): OpenAI and
+  OpenAI-compatible pass `dangerouslyAllowBrowser` and `fetch` straight into
+  `new OpenAI(...)` (verified: the bare library factory throws in a
+  browser-like environment without the flag; the factories never do);
+  Anthropic's `anthropic-dangerous-direct-browser-access` header and `fetch`
+  pass through `ClientOptions` (verified on the wire, alongside
+  `x-api-key`); Gemini needs no flag, and its fetch override point is
+  `httpOptions.fetch` — not a top-level `fetch` (verified honored by the
+  Google GenAI SDK's streaming path). One contradiction of
+  `docs/research/tanstack-ai.md` §3 found and resolved: OpenRouter's config
+  extends `@openrouter/sdk`'s `SDKOptions`, which has NO `fetch` field — the
+  injection point is `httpClient`, and `request()` is the only surface the
+  SDK base ever calls on it; `HTTPClient` itself is nominal over private
+  fields in a transitive package pnpm forbids importing, so the factory
+  injects a structural `{ request }` client with a single documented
+  assertion. Also noted: OpenRouter takes `serverURL`, not `baseURL`.
+  Remaining uncertainty (unchanged): live CORS behavior per provider is
+  first confirmed at real use.
 - Server mode degrades loudly, never sideways: a missing per-provider env
   key is a structured per-provider refusal naming the provider — never a
   silent switch to another provider.

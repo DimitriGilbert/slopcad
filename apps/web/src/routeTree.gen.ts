@@ -32,6 +32,7 @@ import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
+import { Route as ApiAgentRelayRouteImport } from './routes/api/agent-relay'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ComponentsComponentIdRouteImport } from './routes/components.$componentId'
 import { Route as AuthDocumentsDocumentIdRouteImport } from './routes/_auth/documents.$documentId'
@@ -157,6 +158,11 @@ const AuthDashboardRoute = AuthDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AuthRouteRoute,
 } as any)
+const ApiAgentRelayRoute = ApiAgentRelayRouteImport.update({
+  id: '/api/agent-relay',
+  path: '/api/agent-relay',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiHealthRoute = ApiHealthRouteImport.update({
   id: '/api/health',
   path: '/api/health',
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/api/agent-relay': typeof ApiAgentRelayRoute
   '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
@@ -259,6 +266,7 @@ export interface FileRoutesByTo {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/api/agent-relay': typeof ApiAgentRelayRoute
   '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
@@ -294,6 +302,7 @@ export interface FileRoutesById {
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
+  '/api/agent-relay': typeof ApiAgentRelayRoute
   '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/_auth/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
@@ -329,6 +338,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/api/agent-relay'
     | '/api/health'
     | '/components/$componentId'
     | '/documents/$documentId'
@@ -362,6 +372,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/api/agent-relay'
     | '/api/health'
     | '/components/$componentId'
     | '/documents/$documentId'
@@ -396,6 +407,7 @@ export interface FileRouteTypes {
     | '/worker-fillet'
     | '/worker-occt'
     | '/_auth/dashboard'
+    | '/api/agent-relay'
     | '/api/health'
     | '/components/$componentId'
     | '/_auth/documents/$documentId'
@@ -430,6 +442,7 @@ export interface RootRouteChildren {
   WorkerRoute: typeof WorkerRoute
   WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
+  ApiAgentRelayRoute: typeof ApiAgentRelayRoute
   ApiHealthRoute: typeof ApiHealthRoute
   ComponentsComponentIdRoute: typeof ComponentsComponentIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -601,6 +614,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthDashboardRouteImport
       parentRoute: typeof AuthRouteRoute
     }
+    '/api/agent-relay': {
+      id: '/api/agent-relay'
+      path: '/api/agent-relay'
+      fullPath: '/api/agent-relay'
+      preLoaderRoute: typeof ApiAgentRelayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/health': {
       id: '/api/health'
       path: '/api/health'
@@ -708,6 +728,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkerRoute: WorkerRoute,
   WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,
+  ApiAgentRelayRoute: ApiAgentRelayRoute,
   ApiHealthRoute: ApiHealthRoute,
   ComponentsComponentIdRoute: ComponentsComponentIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

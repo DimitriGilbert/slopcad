@@ -171,6 +171,9 @@ importers:
       '@slopcad/cad-sketch':
         specifier: workspace:*
         version: link:../../packages/cad-sketch
+      '@slopcad/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@slopcad/docs-examples':
         specifier: workspace:*
         version: link:../../packages/docs-examples

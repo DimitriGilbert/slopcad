@@ -44,6 +44,7 @@
     "@slopcad/cad-r3f": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
     "@slopcad/cad-sketch": "workspace:*",
+    "@slopcad/db": "workspace:*",
     "@slopcad/docs-examples": "workspace:*",
     "@slopcad/env": "workspace:*",
     "@slopcad/ui": "workspace:*",
