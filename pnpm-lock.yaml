@@ -901,6 +901,9 @@ importers:
       '@shadcn/react':
         specifier: ^0.2.1
         version: 0.2.1(@types/react@19.2.18)(react@19.2.8)
+      '@slopcad/cad-core':
+        specifier: workspace:*
+        version: link:../cad-core
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel
@@ -913,6 +916,27 @@ importers:
       '@slopcad/cad-react':
         specifier: workspace:*
         version: link:../cad-react
+      '@tanstack/ai':
+        specifier: ^0.64.0
+        version: 0.64.0(zod@4.5.4)
+      '@tanstack/ai-anthropic':
+        specifier: ^0.19.4
+        version: 0.19.4(@tanstack/ai@0.64.0(zod@4.5.4))(zod@4.5.4)
+      '@tanstack/ai-client':
+        specifier: ^0.36.1
+        version: 0.36.1(zod@4.5.4)
+      '@tanstack/ai-gemini':
+        specifier: ^0.34.2
+        version: 0.34.2(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(@tanstack/ai@0.64.0(zod@4.5.4))
+      '@tanstack/ai-openai':
+        specifier: ^0.26.0
+        version: 0.26.0(@tanstack/ai@0.64.0(zod@4.5.4))(ws@8.21.3)(zod@4.5.4)
+      '@tanstack/ai-openrouter':
+        specifier: ^0.20.2
+        version: 0.20.2(@tanstack/ai@0.64.0(zod@4.5.4))
+      '@tanstack/ai-react':
+        specifier: ^0.29.4
+        version: 0.29.4(@tanstack/ai@0.64.0(zod@4.5.4))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(zod@4.5.4)
       '@tanstack/react-form':
         specifier: ^1.33.5
         version: 1.33.5(@tanstack/react-start@1.168.49(crossws@0.4.12(srvx@0.11.22))(esbuild@0.28.2)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rolldown@1.2.7)(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))(webpack@5.97.1(esbuild@0.28.2)))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -943,6 +967,12 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.8(react@19.2.8)
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.18)(react@19.2.8)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
       shadcn:
         specifier: ^4.16.0
         version: 4.21.0(typescript@6.0.3)

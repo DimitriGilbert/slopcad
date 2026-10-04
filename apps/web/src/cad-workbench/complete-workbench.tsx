@@ -112,16 +112,16 @@ import type { FixtureSessionBackendId } from "../render-fixture/session-backend"
 import type { CurveAuthoring } from "./curves";
 import type { LoftSectionChoice } from "./loft";
 import { clippingPlanesOf } from "@slopcad/cad-r3f";
-import type { AgentToolsSurface } from "../agent/tools";
+import type { AgentToolsSurface } from "@slopcad/ui/agent/tools";
+import {
+  createAgentChatSessionSlot,
+  useAgentChatSession,
+} from "@slopcad/ui/agent/chat/session-slot";
 
 import { useWorkbenchWebMcpTools } from "../webmcp/workbench-tools";
 import { executeWebMcpTool } from "../webmcp/registry";
 import { completionJson } from "../render-fixture/fixture-session";
 import { createAgentChatCommands } from "../agent/chat/chat-commands";
-import {
-  createAgentChatSessionSlot,
-  useAgentChatSession,
-} from "../agent/chat/session-slot";
 import { useAgentChatView } from "../agent/chat/view-state";
 import { WorkbenchRightSidebar } from "./right-sidebar";
 import {

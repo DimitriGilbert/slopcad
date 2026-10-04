@@ -39,16 +39,17 @@ import {
   EmptyTitle,
 } from "@slopcad/ui/components/empty";
 import type { NamedProviderId } from "@slopcad/api/providers";
-import type { AgentToolsSurface } from "../tools";
-import type { AgentConfig } from "../config/store";
+import { AGENT_CONVERSATION_TITLE_MAX_LENGTH } from "@slopcad/api/limits";
+import type { AgentToolsSurface } from "@slopcad/ui/agent/tools";
+import type { AgentConfig } from "@slopcad/ui/agent/config/store";
 import type { AgentChatStore } from "../persistence/store";
 import type { AgentSyncTransport } from "../persistence/sync";
-import type { AgentChatSessionSlot } from "./session-slot";
+import type { AgentChatSessionSlot } from "@slopcad/ui/agent/chat/session-slot";
+import { AGENT_PROVIDER_IDS } from "@slopcad/ui/agent/providers";
+import { AgentChatPanel } from "@slopcad/ui/agent/chat/agent-chat-panel";
 
-import { AGENT_PROVIDER_IDS } from "../providers";
 import { openBrowserAgentChatStore } from "../persistence/browser";
 import { executeWebMcpTool, subscribeWebMcpTools } from "../../webmcp/registry";
-import { AgentChatPanel } from "./agent-chat-panel";
 import { namedCatalogProviderOf } from "./agent-settings-form";
 
 import { useTRPC } from "@/utils/trpc";
@@ -309,6 +310,7 @@ export function AgentChatSidebarView({
   return (
     <AgentChatPanel
       config={config}
+      conversationTitleMaxLength={AGENT_CONVERSATION_TITLE_MAX_LENGTH}
       emptyState={emptyState}
       getDocumentSummary={getDocumentSummary}
       onForceRefreshCatalog={handleForceRefreshCatalog}

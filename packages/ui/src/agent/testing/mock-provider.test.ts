@@ -17,11 +17,11 @@ import { EventType } from "@tanstack/ai";
 import type { StreamChunk, ToolCallResultEvent, UIMessage } from "@tanstack/ai";
 import { ChatClient } from "@tanstack/ai-client";
 
-import { defineWebMcpTool, type WebMcpToolEntry } from "../../webmcp/registry";
 import {
   createAgentTools,
   parseAgentToolRefusal,
-  type AgentWebMcpExecutor,
+  type AgentToolEntry,
+  type AgentToolExecutor,
 } from "../tools";
 import {
   createMockProvider,
@@ -101,19 +101,18 @@ function scriptedConversation(): readonly MockScriptTurn[] {
 }
 
 /** The apply-commands registry entry (the bridge test's echo pattern). */
-function applyCommandsEntry(): WebMcpToolEntry {
-  return defineWebMcpTool({
+function applyCommandsEntry(): AgentToolEntry {
+  return {
     description: "Apply CAD commands (mock-provider test).",
     inputSchema: z.object({ commands: z.array(z.string()).min(1) }),
     name: "cad_apply_commands",
-    execute: (input) => ({ applied: input.commands.length }),
-  });
+  };
 }
 
 /** A recording executor that answers `{ applied: <command count> }`. */
 function recordingApplyExecutor(): {
   readonly calls: { input: unknown; name: string }[];
-  readonly execute: AgentWebMcpExecutor;
+  readonly execute: AgentToolExecutor;
 } {
   const calls: { input: unknown; name: string }[] = [];
   return {

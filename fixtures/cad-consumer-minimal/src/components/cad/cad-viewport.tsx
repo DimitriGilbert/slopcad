@@ -140,6 +140,14 @@ export interface CadViewportProps {
   readonly renderQuality?: SceneRenderQualityProp;
   /** Fires once per projection change, on its first settled demand frame. */
   readonly onSettled?: () => void;
+  /**
+   * Fires once per committed camera state that actually rendered (a
+   * user-camera overlay application, a restored spec), on its first
+   * settled demand frame — never per pointer move, and never for the
+   * frame that settled a projection (that frame's {@link onSettled}
+   * already covers its camera). The camera-series render ledger rides it.
+   */
+  readonly onCameraSettled?: () => void;
   /** Fires when new selection content reached a rendered frame. */
   readonly onSelectionRendered?: (selectionKey: string) => void;
   /** Explicit click-pick surface (prop-driven mode, see the precedence rule). */
@@ -202,6 +210,7 @@ export function CadViewport({
   renderQuality,
   onHover,
   onUserCamera,
+  onCameraSettled,
   onPick,
   onPickDown,
   onPickUp,
@@ -452,6 +461,7 @@ export function CadViewport({
           lightRig={lightRig}
           renderQuality={renderQuality}
           onCameraState={handleCameraState}
+          onCameraSettled={onCameraSettled}
           onSelectionRendered={onSelectionRendered}
           onSettled={onSettled}
           // The wrapper counts commits for the machine surface; it must

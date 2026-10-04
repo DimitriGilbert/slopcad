@@ -212,6 +212,22 @@ export function ComponentPreviewPage({
               </Link>
             </li>
           ))}
+          <li>
+            <Link
+              className="border-border bg-card/60 hover:border-input hover:bg-muted flex h-full flex-col gap-2 rounded-lg border p-4 transition-colors"
+              to="/components/$componentId"
+              params={{ componentId: "agent-chat" }}
+            >
+              <span className="text-primary font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+                agent-chat-panel
+              </span>
+              <span className="text-sm font-medium">Agent Chat</span>
+              <span className="text-muted-foreground line-clamp-3 text-xs leading-relaxed">
+                The agent-chat registry item demoed live with a stub transport —
+                the shipped panel, not a CAD component.
+              </span>
+            </Link>
+          </li>
         </ul>
       </div>
     );

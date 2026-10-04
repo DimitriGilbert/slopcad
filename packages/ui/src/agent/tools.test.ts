@@ -6,8 +6,10 @@
  * outcomes — success values and `{ ok: false, code, message }` refusals —
  * into what TanStack AI's client-tool path turns into complete and error
  * result parts. The registry surface is mocked exactly as production
- * supplies it: descriptors built with `defineWebMcpTool` plus an executor
- * answering `WebMcpToolExecutionResult`s.
+ * supplies it: plain `AgentToolEntry` descriptors (name, description, zod
+ * input schema) plus an executor answering `AgentToolExecutionResult`s —
+ * the app's richer `WebMcpToolEntry` rows (with their server-side execute)
+ * satisfy the same structural contract.
  */
 
 import { describe, expect, it } from "vitest";
@@ -15,17 +17,14 @@ import { z } from "zod";
 import type { ToolExecutionContext } from "@tanstack/ai";
 
 import {
-  defineWebMcpTool,
-  type WebMcpToolEntry,
-  type WebMcpToolExecutionResult,
-} from "../webmcp/registry";
-import {
   AgentToolRefusalError,
   createAgentTools,
   parseAgentToolRefusal,
+  type AgentToolEntry,
+  type AgentToolExecutionResult,
+  type AgentToolExecutor,
   type AgentToolProgress,
   type AgentToolsSurface,
-  type AgentWebMcpExecutor,
 } from "./tools";
 
 /** One executor call as the recording mock saw it. */
@@ -44,8 +43,8 @@ function recordingExecutor(
     name: string,
     input: unknown,
     index: number,
-  ) => WebMcpToolExecutionResult,
-): { readonly execute: AgentWebMcpExecutor; readonly calls: RecordedCall[] } {
+  ) => AgentToolExecutionResult,
+): { readonly execute: AgentToolExecutor; readonly calls: RecordedCall[] } {
   const calls: RecordedCall[] = [];
   return {
     calls,
@@ -58,7 +57,7 @@ function recordingExecutor(
 }
 
 /** The registry's success arm over one JSON value. */
-function okResult(value: unknown): WebMcpToolExecutionResult {
+function okResult(value: unknown): AgentToolExecutionResult {
   return { ok: true, result: JSON.stringify(value) };
 }
 
@@ -76,19 +75,17 @@ function capturedImage(label: string): {
 }
 
 /** An echo entry: answers the parsed input back (the executor is what runs). */
-function echoEntry(): WebMcpToolEntry {
-  return defineWebMcpTool({
+function echoEntry(): AgentToolEntry {
+  return {
     description: "Echo the input back (bridge test).",
     inputSchema: z.object({ value: z.string() }),
     name: "cad_echo",
-    execute: (input) => ({ got: input.value, ok: true }),
-  });
+  };
 }
 
 /** The capture entry with the real tool's input contract (bridge test). */
-function captureEntry(): WebMcpToolEntry {
-  return defineWebMcpTool({
-    annotations: { readOnlyHint: true },
+function captureEntry(): AgentToolEntry {
+  return {
     description: "Capture PNG images of the current model (bridge test).",
     inputSchema: z.object({
       views: z
@@ -101,10 +98,7 @@ function captureEntry(): WebMcpToolEntry {
         .max(16),
     }),
     name: "cad_capture_views",
-    // Never invoked by the bridge — the injected executor is the seam that
-    // runs; production binds `executeWebMcpTool` over the registered entry.
-    execute: () => ({ images: [], ok: true }),
-  });
+  };
 }
 
 /** One bridged tool, exactly as `createAgentTools` produces it. */
@@ -275,7 +269,7 @@ describe("bridged execution", () => {
 
   it("preserves location when the failure carries one", async () => {
     const { execute } = recordingExecutor(() => {
-      const failure: WebMcpToolExecutionResult & {
+      const failure: AgentToolExecutionResult & {
         readonly location?: unknown;
       } = {
         code: "document/mate-unresolved",
@@ -326,7 +320,7 @@ describe("cad_capture_views bridging", () => {
       name: string,
       input: unknown,
       index: number,
-    ) => WebMcpToolExecutionResult,
+    ) => AgentToolExecutionResult,
   ): { calls: RecordedCall[]; tool: BridgedTool } {
     const { calls, execute } = recordingExecutor(respond);
     return { calls, tool: oneTool({ execute, tools: [captureEntry()] }) };
@@ -336,7 +330,7 @@ describe("cad_capture_views bridging", () => {
   function respondOneView(
     name: string,
     input: unknown,
-  ): WebMcpToolExecutionResult {
+  ): AgentToolExecutionResult {
     expect(name).toBe("cad_capture_views");
     const view = (input as { views: [{ preset?: string }] }).views[0];
     return okResult({

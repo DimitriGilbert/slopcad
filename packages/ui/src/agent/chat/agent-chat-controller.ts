@@ -33,14 +33,57 @@
  *
  * The controller is framework-free and node-testable: the chat arrives
  * as {@link AgentChatSurface} — the exact subset of the hook's return it
- * drives — and the store is the Phase 3.4 interface itself, so tests
- * mock both at their seams.
+ * drives — and the store is the {@link AgentChatPersistenceStore}
+ * structural contract (the slopcad app's Phase 3.4 interface satisfies it
+ * verbatim), so tests mock both at their seams.
  */
 
 import type { UIMessage } from "@tanstack/ai";
 import type { ChatClientState } from "@tanstack/ai-client";
-import { AGENT_CONVERSATION_TITLE_MAX_LENGTH } from "@slopcad/api/limits";
-import type { AgentChatStore } from "../persistence/store";
+import type { AgentChatSyncStatus } from "./status-lines";
+
+/** One persisted conversation, as the controller's lifecycle needs it. */
+export interface AgentChatConversationSummary {
+  /** The row id the store minted (the host owns the id space). */
+  readonly id: string;
+  /** The conversation's title as saved. */
+  readonly title: string;
+}
+
+/** One conversation plus its resumed messages, in order. */
+export interface AgentChatPersistedConversation {
+  readonly conversation: AgentChatConversationSummary;
+  readonly messages: readonly UIMessage[];
+}
+
+/**
+ * The persistence surface the controller drives (D12's host-injected
+ * store). Structural on purpose: the slopcad app passes its Phase 3.4
+ * `AgentChatStore` (OPFS-backed with opt-in tRPC sync) verbatim — its row
+ * types carry more fields than this summary — and a registry consumer
+ * implements whatever persistence they own against this shape. `null` at
+ * the panel seam means ephemeral chat: nothing persists.
+ */
+export interface AgentChatPersistenceStore {
+  /** Creates a conversation row (the host validates titles its own way). */
+  createConversation(title: string): Promise<AgentChatConversationSummary>;
+  /** Persists one message and stamps the conversation's `updatedAt`. */
+  appendMessage(conversationId: string, message: UIMessage): Promise<unknown>;
+  /** The resume read: conversation + messages in order, or null. */
+  loadConversation(
+    conversationId: string,
+  ): Promise<AgentChatPersistedConversation | null>;
+  /** All conversations, newest-updated first. */
+  listConversations(): Promise<readonly AgentChatConversationSummary[]>;
+  /** Clears the conversation's rows; returns whether it existed. */
+  deleteConversation(conversationId: string): Promise<boolean>;
+  /** Explicit sync drain/retry; a no-op status when the host has no sync. */
+  syncNow(): Promise<AgentChatSyncStatus>;
+  getSyncStatus(): AgentChatSyncStatus;
+  onSyncStatusChange(
+    listener: (status: AgentChatSyncStatus) => void,
+  ): () => void;
+}
 
 /**
  * The chat seam: the subset of the Phase 3.3 hook's return the
@@ -72,13 +115,21 @@ export interface AgentChatControllerSnapshot {
 export interface AgentChatControllerDeps {
   /** Reads the live chat surface (the panel routes its hook through this). */
   readonly getChat: () => AgentChatSurface;
-  /** The Phase 3.4 store; `null` = ephemeral chat, nothing persists. */
-  readonly store: AgentChatStore | null;
+  /** The host-injected persistence store; `null` = ephemeral chat. */
+  readonly store: AgentChatPersistenceStore | null;
   /**
    * Titles lazily created conversations from the transcript; the default
-   * uses the first user message's text, bounded by the store's own limit.
+   * uses the first user message's text, bounded by
+   * {@link AgentChatControllerDeps.titleMaxLength} when the host sets one.
    */
   readonly titleOf?: (messages: readonly UIMessage[]) => string;
+  /**
+   * The host's title bound (Phase 5's registry lift): the slopcad app
+   * passes its `AGENT_CONVERSATION_TITLE_MAX_LENGTH` (the tRPC create
+   * route's zod bound); absent means the default title is unbounded — a
+   * host whose store has no title limit leaves it out.
+   */
+  readonly titleMaxLength?: number;
 }
 
 /** The lifecycle surface the panel (and the session it reports) drives. */
@@ -105,24 +156,31 @@ export interface AgentChatController {
   readonly subscribe: (listener: () => void) => () => void;
 }
 
-/** The default title: the first user message's text, store-bounded. */
-function defaultTitle(messages: readonly UIMessage[]): string {
-  for (const message of messages) {
-    if (message.role !== "user") {
-      continue;
-    }
-    let text = "";
-    for (const part of message.parts) {
-      if (part.type === "text") {
-        text += part.content;
+/**
+ * The default title factory bound to the host's optional title limit: the
+ * first user message's text, sliced to the bound when one was injected.
+ */
+function defaultTitleBoundTo(
+  maxLength: number | undefined,
+): (messages: readonly UIMessage[]) => string {
+  return (messages) => {
+    for (const message of messages) {
+      if (message.role !== "user") {
+        continue;
+      }
+      let text = "";
+      for (const part of message.parts) {
+        if (part.type === "text") {
+          text += part.content;
+        }
+      }
+      const trimmed = text.trim();
+      if (trimmed.length > 0) {
+        return maxLength === undefined ? trimmed : trimmed.slice(0, maxLength);
       }
     }
-    const trimmed = text.trim();
-    if (trimmed.length > 0) {
-      return trimmed.slice(0, AGENT_CONVERSATION_TITLE_MAX_LENGTH);
-    }
-  }
-  return "Agent conversation";
+    return "Agent conversation";
+  };
 }
 
 /** Reads one line of an unknown thrown value, for the surfaced error. */
@@ -143,7 +201,7 @@ export function createAgentChatController(
   deps: AgentChatControllerDeps,
 ): AgentChatController {
   const store = deps.store;
-  const titleOf = deps.titleOf ?? defaultTitle;
+  const titleOf = deps.titleOf ?? defaultTitleBoundTo(deps.titleMaxLength);
   let started = false;
   let conversationId: string | null = null;
   let conversationTitle: string | null = null;

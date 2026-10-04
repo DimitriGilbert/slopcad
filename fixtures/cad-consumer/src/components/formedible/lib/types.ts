@@ -36,7 +36,8 @@ export type FormedibleFieldType =
   | "duration"
   | "location"
   | "masked"
-  | "maskedInput";
+  | "maskedInput"
+  | "expressionNumber";
 
 export type NormalizedFieldType = Exclude<
   FormedibleFieldType,
@@ -202,6 +203,27 @@ export interface FormedibleAutocompleteConfig {
   readonly loadingText?: string;
 }
 
+export interface FormedibleExpressionNumberConfig {
+  /**
+   * Parameter-reference number field configuration.
+   *
+   * The field accepts a plain finite number (the number field's exact
+   * semantics — the consumer's validation gates judge it unchanged) or a
+   * `$name` token — optionally negated, `-$name` — referencing a document
+   * parameter. The `$`-token autocomplete offers `parameterNames`; pass the
+   * document's LIVE parameter list so the suggestions always match what a
+   * submission can resolve. A token whose parameter is absent from the list
+   * is a field-level error (see the field module's `expressionNumberProblem`
+   * validator); what a negated token means at commit is the consumer's
+   * resolution seam.
+   */
+  readonly parameterNames?: readonly string[];
+  /** Maximum suggestions rendered at once; defaults to 8. */
+  readonly maxResults?: number;
+  /** Dropdown text when no name matches the active token; defaults to "No parameters". */
+  readonly noOptionsText?: string;
+}
+
 export interface FormedibleMaskedInputPipeResult {
   readonly value: string;
   readonly indexesOfPipedChars: readonly number[];
@@ -364,6 +386,8 @@ export interface FormedibleFieldConfig<
   readonly numberConfig?: FormedibleNumberConfig;
   /** Native datalist suggestions for text-like and number inputs. */
   readonly datalist?: readonly FormedibleFieldOption[];
+  /** Parameter-reference number field configuration (the `expressionNumber` type). */
+  readonly expressionNumberConfig?: FormedibleExpressionNumberConfig;
   readonly help?: ReactNode | FormedibleHelpConfig;
   /**
    * Legacy email configuration; accepted and ignored at runtime. It was never
@@ -451,6 +475,8 @@ export interface NormalizedFieldConfig<
   readonly numberConfig?: FormedibleNumberConfig;
   /** Native datalist suggestions for text-like and number inputs. */
   readonly datalist?: readonly FormedibleFieldOption[];
+  /** Parameter-reference number field configuration (the `expressionNumber` type). */
+  readonly expressionNumberConfig?: FormedibleExpressionNumberConfig;
   readonly help?: ReactNode | FormedibleHelpConfig;
   /**
    * Legacy email configuration; accepted and ignored at runtime. It was never
@@ -820,6 +846,7 @@ export interface FormedibleFieldComponentProps<
   readonly textareaConfig?: FormedibleTextareaConfig;
   readonly passwordConfig?: FormediblePasswordConfig;
   readonly numberConfig?: FormedibleNumberConfig;
+  readonly expressionNumberConfig?: FormedibleExpressionNumberConfig;
   readonly dateConfig?: FormedibleDateConfig<TFormValues>;
   readonly sliderConfig?: FormedibleSliderConfig;
   readonly ratingConfig?: FormedibleRatingConfig;

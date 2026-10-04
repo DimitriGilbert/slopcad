@@ -6,9 +6,11 @@
  * takes an injectable `fetch` transport — no call site may use a
  * non-injected fetch.
  *
- * The provider-id universe lives in `@slopcad/api/providers` (the shared
- * single source) and is re-exported as `AGENT_PROVIDER_IDS` below — no
- * provider-id list is restated here. The only other provider strings under
+ * The provider-id universe (D6) is declared HERE — the registry item's own
+ * copy, external-dependency-free by the registry's rules. The slopcad app
+ * keeps its single source in `@slopcad/api/providers`; the app-side parity
+ * test (`apps/web/src/agent/provider-id-parity.test.ts`) fails the build if
+ * the two lists ever drift apart. The only other provider strings under
  * `providers/` are the dispatch switch's `case` labels, which the compiler
  * pins to the `AgentProviderId` union exhaustively.
  */
@@ -32,22 +34,38 @@ export {
   type OpenRouterAdapterConfig,
 } from "./openrouter";
 
-import { PROVIDER_IDS, type ProviderId } from "@slopcad/api/providers";
-
 import { createAnthropicAdapter } from "./anthropic";
 import { createGoogleAdapter } from "./google";
 import { createOpenAiCompatibleAdapter } from "./openai-compatible";
 import { createOpenaiAdapter } from "./openai";
 import { createOpenRouterAdapter } from "./openrouter";
 
-/**
- * The five catalog provider ids — the picker's provider universe (D6),
- * re-exported from the shared single source so consumers keep one name
- * and one list.
- */
-export const AGENT_PROVIDER_IDS = PROVIDER_IDS;
+/** The BYO-endpoint provider — never catalog-backed (D14). */
+export const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible";
 
-export type AgentProviderId = ProviderId;
+/**
+ * The providers whose models the models.dev catalog lists (D14) — every
+ * supported id except the BYO-endpoint one.
+ */
+export const NAMED_PROVIDER_IDS = [
+  "openai",
+  "anthropic",
+  "google",
+  "openrouter",
+] as const;
+
+/** A provider whose models the models.dev catalog lists. */
+export type NamedAgentProviderId = (typeof NAMED_PROVIDER_IDS)[number];
+
+/**
+ * The five catalog provider ids — the picker's provider universe (D6).
+ */
+export const AGENT_PROVIDER_IDS = [
+  ...NAMED_PROVIDER_IDS,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+] as const;
+
+export type AgentProviderId = (typeof AGENT_PROVIDER_IDS)[number];
 
 /** Any adapter produced by the per-provider factories; each satisfies `chat()`. */
 export type AgentProviderAdapter =

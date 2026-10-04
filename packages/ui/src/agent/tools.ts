@@ -58,31 +58,63 @@ import type {
   SchemaInput,
   ToolExecutionContext,
 } from "@tanstack/ai";
-import type {
-  WebMcpExecuteOptions,
-  WebMcpToolEntry,
-  WebMcpToolExecutionResult,
-} from "../webmcp/registry";
+import type { ZodType } from "zod";
 
 /**
- * The executor seam: the registry's own execution signature
- * (`executeWebMcpTool`'s), injected so tests drive the bridge with a mock
- * and production passes the real registry function.
+ * The host's tool-execution options: the caller's abort signal. The
+ * registry item's structural copy of the slopcad app's webMCP
+ * `WebMcpExecuteOptions`.
  */
-export type AgentWebMcpExecutor = (
+export interface AgentToolExecuteOptions {
+  readonly signal: AbortSignal;
+}
+
+/**
+ * One bound tool the bridge consumes: its identity, model-facing
+ * description, and the zod input schema the model's arguments validate
+ * against. Structural on purpose (D12): the slopcad app passes its webMCP
+ * `WebMcpToolEntry` rows verbatim — their extra fields (`title`,
+ * `annotations`, the server-side `execute`) are invisible here — and any
+ * host with zod-schemed tools satisfies it the same way.
+ */
+export interface AgentToolEntry {
+  /** 1-128 characters of `[A-Za-z0-9._-]` (the webMCP spec's name rule). */
+  readonly name: string;
+  /** What the tool does — the model-facing description. */
+  readonly description: string;
+  /** The input's zod schema; its JSON Schema form is what agents see. */
+  readonly inputSchema: ZodType;
+}
+
+/**
+ * The structured outcome of one tool execution: a JSON-stringified success
+ * value, or the never-thrown refusal `{ ok: false, code, message }` (D9 —
+ * optionally carrying a diagnostic `location`, read leniently in
+ * {@link parseAgentToolRefusal}'s inputs).
+ */
+export type AgentToolExecutionResult =
+  | { readonly ok: true; readonly result: string }
+  | { readonly ok: false; readonly code: string; readonly message: string };
+
+/**
+ * The executor seam: the host's execution function (the slopcad app's
+ * `executeWebMcpTool` signature), injected so tests drive the bridge with a
+ * mock and the host passes its real registry function.
+ */
+export type AgentToolExecutor = (
   name: string,
   input: unknown,
-  options: WebMcpExecuteOptions,
-) => Promise<WebMcpToolExecutionResult>;
+  options: AgentToolExecuteOptions,
+) => Promise<AgentToolExecutionResult>;
 
 /**
- * The page-agnostic binding the bridge consumes: the bound webMCP tool set
- * (the page-mounted registry content — entries carry the zod input schemas)
+ * The page-agnostic binding the bridge consumes: the bound tool set
+ * (the host-mounted registry content — entries carry the zod input schemas)
  * plus the executor that runs them.
  */
 export interface AgentToolsSurface {
-  readonly tools: readonly WebMcpToolEntry[];
-  readonly execute: AgentWebMcpExecutor;
+  readonly tools: readonly AgentToolEntry[];
+  readonly execute: AgentToolExecutor;
 }
 
 /**
@@ -240,7 +272,7 @@ interface CapturedViewImage {
  * with the model-facing issue list.
  */
 function captureViewsStepInputs(
-  entry: WebMcpToolEntry,
+  entry: AgentToolEntry,
   input: unknown,
 ): readonly unknown[] | null {
   if (entry.name !== CAPTURE_VIEWS_TOOL_NAME) return null;
@@ -329,7 +361,7 @@ async function executeThroughRegistry(
   input: unknown,
   signal: AbortSignal,
 ): Promise<unknown> {
-  const options: WebMcpExecuteOptions = { signal };
+  const options: AgentToolExecuteOptions = { signal };
   const result = await surface.execute(name, input, options);
   if (!result.ok) {
     // The registry's failure arm is closed (`{ ok, code, message }`); the
@@ -364,7 +396,7 @@ async function executeThroughRegistry(
  */
 async function runBridgedTool(
   surface: AgentToolsSurface,
-  entry: WebMcpToolEntry,
+  entry: AgentToolEntry,
   input: unknown,
   context: ToolExecutionContext<unknown> | undefined,
 ): Promise<unknown> {

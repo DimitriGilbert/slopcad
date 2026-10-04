@@ -18,9 +18,10 @@
 import type { UIMessage } from "@tanstack/ai";
 import type { ChatClientState } from "@tanstack/ai-client";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentChatStore } from "../persistence/store";
-import type { AgentConversationRow } from "../persistence/rows";
-import type { AgentChatSurface } from "./agent-chat-controller";
+import type {
+  AgentChatPersistenceStore,
+  AgentChatSurface,
+} from "./agent-chat-controller";
 
 import { createAgentChatController } from "./agent-chat-controller";
 
@@ -51,9 +52,22 @@ function fakeChat() {
   return { chat, state };
 }
 
+/**
+ * One conversation-shaped row the store double can hold — the app row's
+ * shape (the `updatedAt` the double sorts by, the `serverId` the sync
+ * story carries), a strict superset of the controller's summary contract.
+ */
+interface ConversationRow {
+  readonly id: string;
+  readonly title: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly serverId: string | null;
+}
+
 /** One conversation-shaped row the store double can hold. */
 interface HeldConversation {
-  readonly row: AgentConversationRow;
+  readonly row: ConversationRow;
   readonly messages: UIMessage[];
 }
 
@@ -82,7 +96,7 @@ function fakeStore(seed: HeldConversation[] = []) {
     seed.map((held) => [held.row.id, held]),
   );
   const createConversation = vi.fn((title: string) => {
-    const row: AgentConversationRow = {
+    const row: ConversationRow = {
       id: `conv-${String(conversations.size + 1)}`,
       title,
       createdAt: "2026-10-04T12:00:00.000Z",
@@ -113,7 +127,7 @@ function fakeStore(seed: HeldConversation[] = []) {
   const deleteConversation = vi.fn((conversationId: string) =>
     Promise.resolve(conversations.delete(conversationId)),
   );
-  const store: AgentChatStore = {
+  const store: AgentChatPersistenceStore = {
     appendMessage: (conversationId, message) =>
       appendMessage(conversationId, message),
     createConversation: (title) => createConversation(title),
@@ -266,7 +280,23 @@ describe("receiveMessages (append on message completion)", () => {
     expect(controller.getSnapshot().conversationTitle).toBe("extrude the base");
   });
 
-  it("bounds the derived title to the store's own limit", async () => {
+  it("bounds the derived title to the injected host limit", async () => {
+    const { chat } = fakeChat();
+    const doubles = fakeStore();
+    const controller = createAgentChatController({
+      getChat: () => chat,
+      store: doubles.store,
+      titleMaxLength: 200,
+    });
+    await controller.start();
+
+    controller.receiveMessages([textMessage("u1", "x".repeat(500), "user")]);
+    await settle();
+
+    expect(doubles.createConversation.mock.calls[0]?.[0]).toHaveLength(200);
+  });
+
+  it("leaves the derived title unbounded when no host limit is injected", async () => {
     const { chat } = fakeChat();
     const doubles = fakeStore();
     const controller = createAgentChatController({
@@ -278,9 +308,7 @@ describe("receiveMessages (append on message completion)", () => {
     controller.receiveMessages([textMessage("u1", "x".repeat(500), "user")]);
     await settle();
 
-    expect(
-      doubles.createConversation.mock.calls[0]?.[0].length,
-    ).toBeLessThanOrEqual(200);
+    expect(doubles.createConversation.mock.calls[0]?.[0]).toHaveLength(500);
   });
 
   it("appends each message exactly once, in order, to one conversation", async () => {
@@ -613,10 +641,10 @@ describe("newConversation / clearConversation", () => {
   it("never adopts a conversation whose create landed after the detach", async () => {
     const { chat } = fakeChat();
     const doubles = fakeStore();
-    let resolveCreate: ((row: AgentConversationRow) => void) | undefined;
+    let resolveCreate: ((row: ConversationRow) => void) | undefined;
     doubles.createConversation.mockImplementationOnce(
       () =>
-        new Promise<AgentConversationRow>((resolve) => {
+        new Promise<ConversationRow>((resolve) => {
           resolveCreate = resolve;
         }),
     );

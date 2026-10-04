@@ -30,16 +30,18 @@ import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/lib/types";
 import { z } from "zod";
 import type { NamedProviderId } from "@slopcad/api/providers";
-
-import { AGENT_PROVIDER_IDS, type AgentProviderId } from "../providers";
+import {
+  AGENT_PROVIDER_IDS,
+  type AgentProviderId,
+} from "@slopcad/ui/agent/providers";
 import {
   DEFAULT_MAX_ITERATIONS,
   type AgentChatMode,
   type AgentConfig,
   type AgentReasoningSelection,
-} from "../config/store";
-import { AGENT_BASE_INSTRUCTION } from "../use-agent-chat";
-import { safeHttpUrl } from "./safe-http-url";
+} from "@slopcad/ui/agent/config/store";
+import { AGENT_BASE_INSTRUCTION } from "@slopcad/ui/agent/use-agent-chat";
+import { safeHttpUrl } from "@slopcad/ui/agent/chat/safe-http-url";
 
 /** The relay's own bound on the loop strategy (docs/research §8). */
 export const AGENT_MAX_ITERATIONS_CEILING = 25;

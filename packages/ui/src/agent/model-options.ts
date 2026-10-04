@@ -4,7 +4,7 @@
  * `reasoning_options` entry plus a user-chosen value into that provider's
  * NATIVE TanStack AI `modelOptions` object — verbatim, with no normalized
  * enum and no custom mapping layer. The offered values live in the catalog
- * (`ModelReasoningOption` from `@slopcad/db`); this module only wraps the
+ * (the `AgentModelReasoningOption` structural type below); this module only wraps the
  * chosen value in the provider's own shape.
  *
  * Native shapes, verified against the installed adapter type definitions
@@ -39,8 +39,23 @@
  * case.
  */
 
-import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import type { AgentProviderId } from "./providers";
+
+/**
+ * One models.dev `reasoning_options` entry, as the model catalog hands it
+ * to the picker (D8). This is the registry item's own structural copy —
+ * the slopcad app's Drizzle schema type in
+ * `@slopcad/db/schema/model-catalog` is identical by assignability at the
+ * app boundary (the app passes catalog rows straight through), which
+ * `check-types` enforces on every call site.
+ */
+export interface AgentModelReasoningOption {
+  type: "effort" | "budget_tokens" | "toggle";
+  /** Offered values for `effort`-type options, e.g. `["low","medium","high"]`. */
+  values?: string[];
+  /** Minimum for `budget_tokens`-type options. */
+  min?: number;
+}
 
 /** OpenAI Responses API: `modelOptions.reasoning.effort`. */
 export interface OpenAiModelOptions {
@@ -81,7 +96,7 @@ export type AgentModelOptions =
  * unlisted value, or a catalog entry without values).
  */
 function offeredEffort(
-  option: ModelReasoningOption,
+  option: AgentModelReasoningOption,
   value: string | number,
 ): string | undefined {
   if (option.type !== "effort" || typeof value !== "string") {
@@ -96,7 +111,7 @@ function offeredEffort(
  * type, non-integer, or a catalog entry without a minimum).
  */
 function offeredBudget(
-  option: ModelReasoningOption,
+  option: AgentModelReasoningOption,
   value: string | number,
 ): number | undefined {
   if (option.type !== "budget_tokens" || typeof value !== "number") {
@@ -110,7 +125,7 @@ function offeredBudget(
 
 /** OpenAI: `reasoning.effort` (Responses API), catalog-gated. */
 export function buildOpenAiModelOptions(
-  option: ModelReasoningOption,
+  option: AgentModelReasoningOption,
   value: string | number,
 ): OpenAiModelOptions | undefined {
   const effort = offeredEffort(option, value);
@@ -123,7 +138,7 @@ export function buildOpenAiModelOptions(
  * adapter accepts on the respective model generations.
  */
 export function buildAnthropicModelOptions(
-  option: ModelReasoningOption,
+  option: AgentModelReasoningOption,
   value: string | number,
 ): AnthropicBudgetTokensModelOptions | AnthropicEffortModelOptions | undefined {
   const budget = offeredBudget(option, value);
@@ -136,7 +151,7 @@ export function buildAnthropicModelOptions(
 
 /** Gemini: `thinkingConfig.thinkingLevel` (uppercase enum key), catalog-gated. */
 export function buildGeminiModelOptions(
-  option: ModelReasoningOption,
+  option: AgentModelReasoningOption,
   value: string | number,
 ): GeminiModelOptions | undefined {
   const thinkingLevel = offeredEffort(option, value);
@@ -147,7 +162,7 @@ export function buildGeminiModelOptions(
 
 /** OpenRouter: `reasoning.effort` (OpenRouter's own normalization), catalog-gated. */
 export function buildOpenRouterModelOptions(
-  option: ModelReasoningOption,
+  option: AgentModelReasoningOption,
   value: string | number,
 ): OpenRouterModelOptions | undefined {
   const effort = offeredEffort(option, value);
@@ -168,7 +183,7 @@ export function buildOpenRouterModelOptions(
  */
 export function buildAgentModelOptions(
   provider: AgentProviderId,
-  option: ModelReasoningOption,
+  option: AgentModelReasoningOption,
   value: string | number,
 ): AgentModelOptions | undefined {
   switch (provider) {

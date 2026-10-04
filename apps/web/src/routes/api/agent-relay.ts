@@ -14,8 +14,10 @@ import { auth } from "@slopcad/auth";
 import { db } from "@slopcad/db";
 import { env } from "@slopcad/env/server";
 import { createFileRoute } from "@tanstack/react-router";
-
-import { handleAgentRelayRequest, type AgentRelayDeps } from "@/agent/relay";
+import {
+  handleAgentRelayRequest,
+  type AgentRelayDeps,
+} from "@slopcad/ui/agent/relay";
 
 const deps: AgentRelayDeps = {
   getSession: (headers) => auth.api.getSession({ headers }),

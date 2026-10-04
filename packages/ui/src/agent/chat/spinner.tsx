@@ -7,7 +7,7 @@
  * by agent progress lines ("Searching the web for '…'…") and busy buttons.
  */
 
-import { cn } from "@slopcad/ui/lib/utils";
+import { cn } from "cn";
 import { Loader2Icon } from "lucide-react";
 import * as React from "react";
 

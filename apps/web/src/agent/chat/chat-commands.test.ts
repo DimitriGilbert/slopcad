@@ -11,6 +11,10 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import {
+  createAgentChatSessionSlot,
+  type AgentChatSession,
+} from "@slopcad/ui/agent/chat/session-slot";
 
 import {
   AGENT_CATALOG_REFRESH_COMMAND_ID,
@@ -20,10 +24,6 @@ import {
   AGENT_SETTINGS_COMMAND_ID,
   createAgentChatCommands,
 } from "./chat-commands";
-import {
-  createAgentChatSessionSlot,
-  type AgentChatSession,
-} from "./session-slot";
 
 /** A scripted live session double. */
 function session(overrides: Partial<AgentChatSession> = {}): AgentChatSession {

@@ -98,6 +98,7 @@ function buildFieldComponentProps<TFormValues extends FormedibleFormValues>(
     textareaConfig: fieldConfig.textareaConfig,
     passwordConfig: fieldConfig.passwordConfig,
     numberConfig: fieldConfig.numberConfig,
+    expressionNumberConfig: fieldConfig.expressionNumberConfig,
     dateConfig: fieldConfig.dateConfig,
     sliderConfig: fieldConfig.sliderConfig,
     ratingConfig: fieldConfig.ratingConfig,

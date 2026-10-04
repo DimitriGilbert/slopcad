@@ -16,8 +16,8 @@
  *   immediately and round-trips.
  *
  * The stored API keys are the user's own BYOK secrets and only ever travel
- * from this store into the client-direct provider factories
- * (`apps/web/src/agent/providers`) — the relay fetcher (Phase 1.5) takes no
+ * from this store into the client-direct provider factories (`../providers`)
+ * — the relay fetcher (Phase 1.5) takes no
  * key parameter at all, so no key ever reaches the slopcad server (D1).
  *
  * The storage backend is injectable (the same seam pattern as the provider

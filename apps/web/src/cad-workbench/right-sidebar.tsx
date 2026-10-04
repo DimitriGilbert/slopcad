@@ -34,17 +34,17 @@ import type { CadDocument } from "@slopcad/cad-core";
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import { MessageSquareTextIcon, PanelsTopLeftIcon } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
-import type { AgentToolsSurface } from "../agent/tools";
-import type { AgentChatSessionSlot } from "../agent/chat/session-slot";
+import type { AgentToolsSurface } from "@slopcad/ui/agent/tools";
+import type { AgentChatSessionSlot } from "@slopcad/ui/agent/chat/session-slot";
 import type { AgentChatView } from "../agent/chat/view-state";
-
 import {
   createAgentConfigStore,
   getBrowserAgentConfigStorage,
   isAgentConfigured,
   type AgentConfig,
   type AgentConfigSetResult,
-} from "../agent/config/store";
+} from "@slopcad/ui/agent/config/store";
+
 import { AgentSettingsSheet } from "../agent/chat/agent-settings";
 import {
   agentConfigPatchFromSettingsValues,

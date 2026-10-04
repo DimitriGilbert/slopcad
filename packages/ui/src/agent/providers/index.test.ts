@@ -4,10 +4,12 @@
  * Provider index contract (PLAN-AGENT-CHAT Phase 1.2): the provider-id
  * universe is exactly the five catalog ids (D6), and the dispatch builds a
  * matching text adapter per id — refusing `openai-compatible` without a
- * baseURL.
+ * baseURL. The cross-check against the slopcad app's
+ * `@slopcad/api/providers` single source lives app-side
+ * (`apps/web/src/agent/provider-id-parity.test.ts`) — the registry copy
+ * may not import workspace packages.
  */
 
-import { PROVIDER_IDS } from "@slopcad/api/providers";
 import { describe, expect, it } from "vitest";
 
 import { AGENT_PROVIDER_IDS, createAgentProviderAdapter } from "./index";
@@ -24,10 +26,6 @@ describe("AGENT_PROVIDER_IDS", () => {
       "openrouter",
       "openai-compatible",
     ]);
-  });
-
-  it("derives from the @slopcad/api/providers single source", () => {
-    expect([...AGENT_PROVIDER_IDS]).toEqual([...PROVIDER_IDS]);
   });
 });
 

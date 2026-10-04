@@ -11,12 +11,10 @@
  * never silent (D3).
  */
 
-import type { UIMessage } from "@tanstack/ai";
 import { describe, expect, it } from "vitest";
-import type { AgentSyncStatus } from "../persistence/sync";
 import type { AgentChatMessage } from "./parts/part-types";
+import type { AgentChatSyncStatus } from "./status-lines";
 
-import { messageToRow, rowToMessage } from "../persistence/rows";
 import {
   AGENT_PENDING_LINE,
   agentPendingStatusLine,
@@ -125,40 +123,11 @@ describe("agentPendingStatusLine", () => {
     expect(agentPendingStatusLine({ busy: false, messages })).toBeNull();
     expect(agentPendingStatusLine({ busy: false, messages: [] })).toBeNull();
   });
-
-  it("derives identically after the persistence round-trip (parts are the history)", () => {
-    const original: readonly UIMessage[] = [
-      userMessage("u1", "extrude the base"),
-      assistantMessage("a1", [
-        { type: "text", content: "Applying." },
-        {
-          arguments: "{}",
-          id: "call-1",
-          name: "cad_apply_commands",
-          state: "input-complete",
-          type: "tool-call",
-        },
-      ]),
-    ];
-    // The exact write/read path the store's resume uses: parts persist
-    // verbatim, so the same derivation holds for the revived transcript.
-    const revived = original.map((message, index) =>
-      rowToMessage(messageToRow(message, "conv-1", index + 1)),
-    );
-
-    expect(agentPendingStatusLine({ busy: true, messages: revived })).toBe(
-      agentPendingStatusLine({ busy: true, messages: original }),
-    );
-    expect(
-      agentPendingStatusLine({ busy: false, messages: revived }),
-    ).toBeNull();
-    expect(revived[1]?.parts).toEqual(original[1]?.parts);
-  });
 });
 
 describe("formatAgentSyncStatus", () => {
   /** The quiet status — nothing may render for it. */
-  const quiet: AgentSyncStatus = {
+  const quiet: AgentChatSyncStatus = {
     state: "idle",
     pending: 0,
     failure: null,
@@ -184,7 +153,18 @@ describe("formatAgentSyncStatus", () => {
   });
 
   it("surfaces a failure's stalled op and error, never silently", () => {
-    const failed: AgentSyncStatus = {
+    // The APP's richer failure shape (ids the line never reads) — proving
+    // the structural contract accepts it verbatim.
+    const failed: {
+      state: "failed";
+      pending: number;
+      failure: {
+        conversationId: string;
+        error: unknown;
+        kind: "append-message";
+        messageId: string | null;
+      };
+    } = {
       state: "failed",
       pending: 1,
       failure: {

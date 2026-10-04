@@ -72,7 +72,6 @@ import type {
 import { useChat } from "@tanstack/ai-react";
 import type { UseChatReturn } from "@tanstack/ai-react";
 import { useMemo } from "react";
-import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 
 import {
   createAgentProviderAdapter,
@@ -83,6 +82,7 @@ import { isAgentConfigured, type AgentConfig } from "./config/store";
 import {
   buildAgentModelOptions,
   type AgentModelOptions,
+  type AgentModelReasoningOption,
 } from "./model-options";
 
 /** The agent's bridged client tool (the Phase 2.3 bridge's element type). */
@@ -193,7 +193,7 @@ export function agentToolCatalogue(
  */
 export function resolveAgentModelOptions(
   config: AgentConfig,
-  reasoningOption: ModelReasoningOption | undefined,
+  reasoningOption: AgentModelReasoningOption | undefined,
 ): AgentModelOptions | undefined {
   if (!isAgentConfigured(config) || config.reasoning === null) {
     return undefined;
@@ -269,7 +269,7 @@ export interface AgentChatTransportInput {
   /** The bridged client tools (the page-mounted webMCP binding). */
   readonly tools: ReadonlyArray<AnyClientTool>;
   /** The selected model's catalog `reasoning_options` entry, when it declares one. */
-  readonly reasoningOption?: ModelReasoningOption;
+  readonly reasoningOption?: AgentModelReasoningOption;
 }
 
 /** Injectable seams, the provider factories' convention. */
@@ -454,11 +454,19 @@ export interface UseAgentChatInput {
   /** The bridged client tools (the page-mounted webMCP binding). */
   readonly tools: ReadonlyArray<AnyClientTool>;
   /** The selected model's catalog `reasoning_options` entry, when it declares one. */
-  readonly reasoningOption?: ModelReasoningOption;
+  readonly reasoningOption?: AgentModelReasoningOption;
   /** Injectable HTTP transport (tests, the session e2e); defaults to the global `fetch`. */
   readonly fetch?: typeof globalThis.fetch;
   /** The relay endpoint override; defaults to `"/api/agent-relay"`. */
   readonly relayUrl?: string;
+  /**
+   * Injectable adapter factory (the D12 host seam): replaces the Phase 1.2
+   * provider dispatch for the client-direct transport — a host that owns its
+   * own model plumbing (or a demo with a scripted transport) supplies the
+   * adapter; the provider factories' config (`apiKey`/`baseURL`/`fetch`)
+   * still arrive validated, but no provider SDK is called.
+   */
+  readonly createAdapter?: AgentChatTransportDeps["createAdapter"];
 }
 
 /**
@@ -478,6 +486,7 @@ export function useAgentChat(
   const { config, documentSummary, reasoningOption, tools } = input;
   const fetchOverride = input.fetch;
   const relayUrl = input.relayUrl;
+  const createAdapter = input.createAdapter;
   const transport = useMemo(
     () =>
       createAgentChatTransport(
@@ -485,9 +494,18 @@ export function useAgentChat(
         {
           ...(fetchOverride === undefined ? {} : { fetch: fetchOverride }),
           ...(relayUrl === undefined ? {} : { relayUrl }),
+          ...(createAdapter === undefined ? {} : { createAdapter }),
         },
       ),
-    [config, documentSummary, fetchOverride, reasoningOption, relayUrl, tools],
+    [
+      config,
+      createAdapter,
+      documentSummary,
+      fetchOverride,
+      reasoningOption,
+      relayUrl,
+      tools,
+    ],
   );
   return useChat({ ...transport, tools });
 }

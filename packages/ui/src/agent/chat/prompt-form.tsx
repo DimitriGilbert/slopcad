@@ -8,7 +8,8 @@
  * or provider, the host owns that affordance (D5: nothing preselected, raw
  * string always typable elsewhere). Also adds a disabled-with-reason state so
  * the composer can block sending until the agent is configured, and rides the
- * `@slopcad/ui` input-group primitives. Zero AI-SDK / AI-Gateway imports.
+ * registry's input-group primitives (installed as a sibling item). Zero
+ * AI-SDK / AI-Gateway imports.
  *
  * Kept from the template: Enter sends, Shift+Enter newlines, IME composition
  * guarded (`isComposing`), and one button morphing ArrowUp "Send" ↔ Square
@@ -17,12 +18,13 @@
 
 import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import * as React from "react";
+
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
-} from "@slopcad/ui/components/input-group";
+} from "../../components/input-group";
 
 const disabledReasonId = "prompt-form-disabled-reason";
 

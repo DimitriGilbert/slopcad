@@ -20,8 +20,33 @@
  *   failed sync is never silent.
  */
 
-import type { AgentSyncStatus } from "../persistence/sync";
 import type { AgentChatMessage } from "./parts/part-types";
+
+/**
+ * One surfaced sync failure, as the chat's line renders it: which outbox
+ * operation stalled and the thrown value. The registry item's structural
+ * copy of the slopcad app's `AgentSyncFailure` — the app's richer row
+ * (conversation/message ids) passes through assignably.
+ */
+export interface AgentChatSyncFailure {
+  readonly kind:
+    | "create-conversation"
+    | "append-message"
+    | "delete-conversation"
+    | "unexpected";
+  readonly error: unknown;
+}
+
+/**
+ * The typed sync status the chat UI shows — never a throw. Structural copy
+ * of the app's `AgentSyncStatus`: `pending` counts queued outbox ops,
+ * `failure` is the op that stalled the queue when `state === "failed"`.
+ */
+export interface AgentChatSyncStatus {
+  readonly state: "idle" | "syncing" | "failed";
+  readonly pending: number;
+  readonly failure: AgentChatSyncFailure | null;
+}
 
 /** Everything the pending-line derivation needs. */
 export interface AgentPendingStatusLineInput {
@@ -102,7 +127,7 @@ function errorText(error: unknown): string {
 }
 
 /** The human noun of one sync op kind, for the failure line. */
-function syncOpNoun(status: AgentSyncStatus): string {
+function syncOpNoun(status: AgentChatSyncStatus): string {
   switch (status.failure?.kind) {
     case "create-conversation":
       return "conversation create";
@@ -120,7 +145,9 @@ function syncOpNoun(status: AgentSyncStatus): string {
  * rendered) only for the true quiet state — idle with an empty queue;
  * everything else surfaces, failures foremost.
  */
-export function formatAgentSyncStatus(status: AgentSyncStatus): string | null {
+export function formatAgentSyncStatus(
+  status: AgentChatSyncStatus,
+): string | null {
   if (status.state === "syncing") {
     return status.pending > 0
       ? `Syncing conversation (${String(status.pending)} ops left)…`

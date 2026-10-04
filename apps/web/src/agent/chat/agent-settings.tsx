@@ -41,12 +41,17 @@ import {
   DialogTitle,
 } from "@slopcad/ui/components/dialog";
 import { useFormedible } from "@slopcad/ui/components/formedible/hooks/use-formedible";
-import type { AgentConfig } from "../config/store";
-import type { AgentConfigSetResult } from "../config/store";
+import type {
+  AgentConfig,
+  AgentConfigSetResult,
+} from "@slopcad/ui/agent/config/store";
 import type { AgentCatalogRefresh } from "./workbench-chat-view";
+import {
+  AGENT_PROVIDER_IDS,
+  type AgentProviderId,
+} from "@slopcad/ui/agent/providers";
+import { listOpenAiCompatibleModels } from "@slopcad/ui/agent/providers/openai-compatible";
 
-import { AGENT_PROVIDER_IDS, type AgentProviderId } from "../providers";
-import { listOpenAiCompatibleModels } from "../providers/openai-compatible";
 import {
   agentSettingsSchema,
   agentSettingsValuesFromConfig,

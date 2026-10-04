@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
+import type { AgentModelReasoningOption } from "./model-options";
 
 import {
   buildAgentModelOptions,
@@ -19,22 +19,22 @@ import {
   buildOpenRouterModelOptions,
 } from "./model-options";
 
-const OPENAI_EFFORT: ModelReasoningOption = {
+const OPENAI_EFFORT: AgentModelReasoningOption = {
   type: "effort",
   values: ["minimal", "low", "medium", "high"],
 };
 
-const ANTHROPIC_BUDGET: ModelReasoningOption = {
+const ANTHROPIC_BUDGET: AgentModelReasoningOption = {
   type: "budget_tokens",
   min: 1024,
 };
 
-const ANTHROPIC_EFFORT: ModelReasoningOption = {
+const ANTHROPIC_EFFORT: AgentModelReasoningOption = {
   type: "effort",
   values: ["low", "medium", "high", "xhigh", "max"],
 };
 
-const GEMINI_LEVELS: ModelReasoningOption = {
+const GEMINI_LEVELS: AgentModelReasoningOption = {
   type: "effort",
   values: ["LOW", "MEDIUM", "HIGH"],
 };
@@ -144,7 +144,7 @@ describe("buildAgentModelOptions", () => {
   });
 
   it("offers nothing for toggle-type catalog entries on any provider", () => {
-    const toggle: ModelReasoningOption = { type: "toggle" };
+    const toggle: AgentModelReasoningOption = { type: "toggle" };
     for (const provider of [
       "openai",
       "anthropic",

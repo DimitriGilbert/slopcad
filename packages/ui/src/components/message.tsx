@@ -1,4 +1,4 @@
-import { cn } from "@slopcad/ui/lib/utils";
+import { cn } from "cn";
 import * as React from "react";
 
 function MessageGroup({ className, ...props }: React.ComponentProps<"div">) {

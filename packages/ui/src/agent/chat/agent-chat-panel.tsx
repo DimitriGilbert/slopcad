@@ -28,11 +28,14 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { ReactElement, ReactNode } from "react";
-import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import { MessageSquarePlusIcon, Settings2Icon, Trash2Icon } from "lucide-react";
-import { Button } from "@slopcad/ui/components/button";
-import { Bubble, BubbleContent } from "@slopcad/ui/components/bubble";
-import { Message, MessageContent } from "@slopcad/ui/components/message";
+import type { AgentModelReasoningOption } from "../model-options";
+import type { AgentConfig } from "../config/store";
+import type { AgentChatPersistenceStore } from "./agent-chat-controller";
+import type { AgentChatSyncStatus } from "./status-lines";
+import type { AgentChatMessage } from "./parts/part-types";
+import type { AgentChatSessionSlot } from "./session-slot";
+
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -40,14 +43,11 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-} from "@slopcad/ui/components/message-scroller";
-import type { AgentConfig } from "../config/store";
-import type { AgentChatStore } from "../persistence/store";
-import type { AgentSyncStatus } from "../persistence/sync";
-import type { AgentChatMessage } from "./parts/part-types";
-import type { AgentChatSessionSlot } from "./session-slot";
-
-import { useAgentChat } from "../use-agent-chat";
+} from "../../components/message-scroller";
+import { Message, MessageContent } from "../../components/message";
+import { Bubble, BubbleContent } from "../../components/bubble";
+import { Button } from "../../components/button";
+import { useAgentChat, type AgentChatTransportDeps } from "../use-agent-chat";
 import { createAgentTools, type AgentToolsSurface } from "../tools";
 import { createAgentChatController } from "./agent-chat-controller";
 import { agentComposerGate, agentModelSummary } from "./composer-gate";
@@ -65,13 +65,17 @@ export interface AgentChatPanelProps {
   /** The host's webMCP binding, bridged here into the chat's client tools. */
   readonly toolsSurface: AgentToolsSurface;
   /** The selected model's catalog `reasoning_options` entry, when it declares one. */
-  readonly reasoningOption?: ModelReasoningOption;
+  readonly reasoningOption?: AgentModelReasoningOption;
   /** Opens the host's agent settings surface (the composer's model slot). */
   readonly onOpenSettings: () => void;
   /** Force-refreshes the host's model catalog (the palette command's target). */
   readonly onForceRefreshCatalog: () => void;
-  /** The Phase 3.4 persistence handle; `null` = ephemeral, nothing persists. */
-  readonly store: AgentChatStore | null;
+  /**
+   * The host-injected persistence handle (D12); `null` = ephemeral,
+   * nothing persists. The slopcad app passes its Phase 3.4 store, which
+   * satisfies the structural contract.
+   */
+  readonly store: AgentChatPersistenceStore | null;
   /** The slot the panel reports its live session into (palette commands). */
   readonly sessionSlot: AgentChatSessionSlot | null;
   /**
@@ -83,6 +87,19 @@ export interface AgentChatPanelProps {
   readonly fetch?: typeof globalThis.fetch;
   /** The relay endpoint override; defaults to `"/api/agent-relay"`. */
   readonly relayUrl?: string;
+  /**
+   * Injectable adapter factory (D12's transport injection): replaces the
+   * provider dispatch for client-direct runs — the host that owns its model
+   * plumbing (or a demo with a scripted transport) supplies the adapter and
+   * no provider SDK is called.
+   */
+  readonly createAdapter?: AgentChatTransportDeps["createAdapter"];
+  /**
+   * The host's conversation-title bound (Phase 5's registry lift): the
+   * slopcad app passes `AGENT_CONVERSATION_TITLE_MAX_LENGTH`; absent means
+   * lazily created titles are unbounded.
+   */
+  readonly conversationTitleMaxLength?: number;
 }
 
 /** One readable line out of an unknown thrown value. */
@@ -113,6 +130,8 @@ function userTextOf(message: AgentChatMessage): string {
  */
 export function AgentChatPanel({
   config,
+  conversationTitleMaxLength,
+  createAdapter,
   emptyState,
   fetch: fetchOverride,
   getDocumentSummary,
@@ -135,6 +154,7 @@ export function AgentChatPanel({
     ...(reasoningOption === undefined ? {} : { reasoningOption }),
     ...(fetchOverride === undefined ? {} : { fetch: fetchOverride }),
     ...(relayUrl === undefined ? {} : { relayUrl }),
+    ...(createAdapter === undefined ? {} : { createAdapter }),
     tools,
   });
 
@@ -150,8 +170,11 @@ export function AgentChatPanel({
       createAgentChatController({
         getChat: () => chatRef.current,
         store,
+        ...(conversationTitleMaxLength === undefined
+          ? {}
+          : { titleMaxLength: conversationTitleMaxLength }),
       }),
-    [store],
+    [conversationTitleMaxLength, store],
   );
   const snapshot = useSyncExternalStore(
     controller.subscribe,
@@ -174,7 +197,9 @@ export function AgentChatPanel({
   }, [controller, chat.messages, chat.status]);
 
   // Surface the store's sync status (failures never silent, D3).
-  const [syncStatus, setSyncStatus] = useState<AgentSyncStatus | null>(null);
+  const [syncStatus, setSyncStatus] = useState<AgentChatSyncStatus | null>(
+    null,
+  );
   useEffect(() => {
     if (store === null) {
       setSyncStatus(null);

@@ -2,7 +2,12 @@
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/lib/types";
 import { describe, expect, it } from "vitest";
-import type { AgentProviderId } from "../providers";
+import type { AgentProviderId } from "@slopcad/ui/agent/providers";
+import {
+  DEFAULT_MAX_ITERATIONS,
+  type AgentConfig,
+} from "@slopcad/ui/agent/config/store";
+import { AGENT_BASE_INSTRUCTION } from "@slopcad/ui/agent/use-agent-chat";
 
 import {
   agentConfigPatchFromSettingsValues,
@@ -18,8 +23,6 @@ import {
   type AgentSettingsFieldsDeps,
   type AgentSettingsValues,
 } from "./agent-settings-form";
-import { DEFAULT_MAX_ITERATIONS, type AgentConfig } from "../config/store";
-import { AGENT_BASE_INSTRUCTION } from "../use-agent-chat";
 
 /** The unconfigured config: the store's own defaults, verbatim in spirit. */
 function unconfiguredConfig(): AgentConfig {

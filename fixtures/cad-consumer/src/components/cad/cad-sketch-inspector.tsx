@@ -2,6 +2,10 @@ import { useMemo, useState } from "react";
 import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
+import {
+  expressionNumberProblem,
+  expressionNumberTokenName,
+} from "../formedible/fields/expression-number-field";
 import { useFormedible } from "../formedible/hooks/use-formedible";
 
 /** Merges label overrides over the documented defaults, memoized. */
@@ -40,6 +44,13 @@ export interface CadSketchInspectorDimension {
   readonly unit: string;
   /** Decimal places to display. */
   readonly decimals: number;
+  /**
+   * The parameter NAME the dimension is bound to, when the host resolved
+   * the binding — the field then defaults to the `$name` token instead of
+   * the cached literal magnitude. A binding the host cannot name (a
+   * dangling parameter) stays unnamed: the field falls back to the literal.
+   */
+  readonly parameterName?: string;
 }
 
 /** One structured diagnostic in the feed. */
@@ -170,10 +181,17 @@ export interface CadSketchInspectorProps {
    * selection is not dimensional (the hint renders instead).
    */
   readonly dimension: CadSketchInspectorDimension | null;
-  /** The dimension apply surface; receives the canonical magnitude. */
+  /**
+   * The document's parameter names the dimension field's `$`-autocomplete
+   * offers. When provided the field accepts a literal number OR a `$name`
+   * token (the submitted string resolves on the host); when omitted the
+   * field is the plain number field, exactly as before.
+   */
+  readonly parameterNames?: readonly string[];
+  /** The dimension apply surface; receives a literal number or a `$name`. */
   readonly onEditDimension?: (
     constraintId: string,
-    value: number,
+    value: number | string,
   ) => CadSketchDimensionApplyOutcome;
   /** The structured diagnostics feed, most severe first. */
   readonly diagnostics: readonly CadSketchInspectorDiagnostic[];
@@ -228,8 +246,8 @@ const SOLVE_CLASSES: Readonly<Record<CadSketchSolveStatus, string>> =
     failed: "text-destructive font-medium",
   });
 
-/** The inspector's form values: one number field keyed by constraint id. */
-type DimensionFormValues = Record<string, number | undefined>;
+/** The inspector's form values: one value field keyed by constraint id. */
+type DimensionFormValues = Record<string, number | string | undefined>;
 
 /**
  * The sketch inspector: solver readout, constraint list, dimension editor,
@@ -248,6 +266,7 @@ export function CadSketchInspector({
   onConvert,
   onEditDimension,
   onSelectConstraint,
+  parameterNames,
   selectedConstraintId,
   solveStatus,
 }: CadSketchInspectorProps) {
@@ -265,24 +284,42 @@ export function CadSketchInspector({
   const formConfig = useMemo(() => {
     const name =
       dimension === null ? "idle" : `value:${dimension.constraintId}`;
+    const boundToken =
+      dimension?.parameterName === undefined
+        ? undefined
+        : `$${dimension.parameterName}`;
     const defaultValue =
       dimension === null
         ? undefined
-        : Number(dimension.value.toFixed(dimension.decimals));
+        : (boundToken ?? Number(dimension.value.toFixed(dimension.decimals)));
     const fields: FormedibleFieldConfig<DimensionFormValues>[] =
       dimension === null
         ? []
         : [
-            {
-              name,
-              type: "number",
-              label: `${labels.dimensionHeading} (${dimension.unit})`,
-              inputClassName: "font-mono",
-              validation: (value) =>
-                typeof value === "number" && Number.isFinite(value)
-                  ? null
-                  : labels.dimensionValueInvalid,
-            },
+            parameterNames === undefined
+              ? {
+                  name,
+                  type: "number",
+                  label: `${labels.dimensionHeading} (${dimension.unit})`,
+                  inputClassName: "font-mono",
+                  validation: (value) =>
+                    typeof value === "number" && Number.isFinite(value)
+                      ? null
+                      : labels.dimensionValueInvalid,
+                }
+              : {
+                  name,
+                  type: "expressionNumber",
+                  label: `${labels.dimensionHeading} (${dimension.unit})`,
+                  inputClassName: "font-mono",
+                  expressionNumberConfig: { parameterNames },
+                  validation: (value) =>
+                    expressionNumberProblem(value, {
+                      parameterNames,
+                      acceptsNumber: Number.isFinite,
+                      message: labels.dimensionValueInvalid,
+                    }),
+                },
           ];
     return {
       name,
@@ -292,15 +329,29 @@ export function CadSketchInspector({
         setApplyFailure(undefined);
         if (dimension === null || onEditDimension === undefined) return;
         const submitted = value[name];
-        if (typeof submitted !== "number" || !Number.isFinite(submitted))
+        if (typeof submitted === "number" && Number.isFinite(submitted)) {
+          const outcome = onEditDimension(dimension.constraintId, submitted);
+          if (!outcome.ok) {
+            setApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
+          }
           return;
-        const outcome = onEditDimension(dimension.constraintId, submitted);
-        if (!outcome.ok) {
-          setApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
+        }
+        // The token gate is the grammar's own, not a `$`-prefix sniff: the
+        // negated form (`-$name`, Phase 30) reaches the apply surface too —
+        // which owns the per-kind semantics (it refuses where the domain's
+        // binding rules say so) and surfaces the refusal verbatim below.
+        if (
+          typeof submitted === "string" &&
+          expressionNumberTokenName(submitted) !== null
+        ) {
+          const outcome = onEditDimension(dimension.constraintId, submitted);
+          if (!outcome.ok) {
+            setApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
+          }
         }
       },
     };
-  }, [dimension, labels, onEditDimension]);
+  }, [dimension, labels, onEditDimension, parameterNames]);
 
   const dimensionForm = useFormedible<DimensionFormValues>({
     fields: formConfig.fields,

@@ -19,7 +19,7 @@
  */
 
 import type { CadCommandDescriptor } from "@slopcad/ui/components/cad/cad-command-menu";
-import type { AgentChatSession } from "./session-slot";
+import type { AgentChatSession } from "@slopcad/ui/agent/chat/session-slot";
 
 import { nextAgentChatView, type AgentChatView } from "./view-state";
 

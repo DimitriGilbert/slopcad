@@ -29,7 +29,7 @@ import type {
 } from "@tanstack/ai-client";
 import { ChatClient } from "@tanstack/ai-client";
 import { z } from "zod";
-import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
+import type { AgentModelReasoningOption } from "./model-options";
 
 import { DEFAULT_MAX_ITERATIONS, type AgentConfig } from "./config/store";
 import {
@@ -47,9 +47,12 @@ import {
   API_KEY_SCAN_EXEMPT_ROOT_KEYS,
   findApiKeyLikeFields,
 } from "./relay";
-import { createAgentTools, type AgentWebMcpExecutor } from "./tools";
+import {
+  createAgentTools,
+  type AgentToolEntry,
+  type AgentToolExecutor,
+} from "./tools";
 import { createMockProvider } from "./testing/mock-provider";
-import { defineWebMcpTool, type WebMcpToolEntry } from "../webmcp/registry";
 
 /** Collects every chunk of a stream, in order. */
 async function collect(
@@ -151,19 +154,18 @@ function recordingFetch(respond: () => Response): {
 }
 
 /** The apply-commands registry entry (the bridge tests' echo pattern). */
-function applyCommandsEntry(): WebMcpToolEntry {
-  return defineWebMcpTool({
+function applyCommandsEntry(): AgentToolEntry {
+  return {
     description: "Apply CAD commands (runtime hook test).",
     inputSchema: z.object({ commands: z.array(z.string()).min(1) }),
     name: "cad_apply_commands",
-    execute: (input) => ({ applied: input.commands.length }),
-  });
+  };
 }
 
 /** A recording executor that answers `{ applied: <command count> }`. */
 function recordingApplyExecutor(): {
   readonly calls: { input: unknown; name: string }[];
-  readonly execute: AgentWebMcpExecutor;
+  readonly execute: AgentToolExecutor;
 } {
   const calls: { input: unknown; name: string }[] = [];
   return {
@@ -186,7 +188,7 @@ function recordingApplyExecutor(): {
 }
 
 /** The bridged tool set every transport test binds. */
-function bridgedTools(executor: AgentWebMcpExecutor): readonly AgentChatTool[] {
+function bridgedTools(executor: AgentToolExecutor): readonly AgentChatTool[] {
   return createAgentTools({
     execute: executor,
     tools: [applyCommandsEntry()],
@@ -442,11 +444,11 @@ describe("assembleAgentSystemPrompt", () => {
 });
 
 describe("resolveAgentModelOptions", () => {
-  const effortOption: ModelReasoningOption = {
+  const effortOption: AgentModelReasoningOption = {
     type: "effort",
     values: ["low", "high"],
   };
-  const budgetOption: ModelReasoningOption = {
+  const budgetOption: AgentModelReasoningOption = {
     type: "budget_tokens",
     min: 1024,
   };
@@ -585,7 +587,7 @@ describe("client-direct transport (the browser-resident chat() loop)", () => {
     adapter: ScriptedTextAdapter,
     config: AgentConfig,
     tools: readonly AgentChatTool[] = [],
-    reasoningOption: ModelReasoningOption | undefined = undefined,
+    reasoningOption: AgentModelReasoningOption | undefined = undefined,
   ): ChatTransport {
     return createAgentChatTransport(
       {
@@ -768,7 +770,7 @@ describe("server-relay transport (the keyless SSE fetcher)", () => {
   function relayTransportWith(
     config: AgentConfig,
     respond: () => Response,
-    reasoningOption: ModelReasoningOption | undefined = undefined,
+    reasoningOption: AgentModelReasoningOption | undefined = undefined,
   ): { calls: RecordedFetchCall[]; transport: ChatTransport } {
     const recorded = recordingFetch(respond);
     return {

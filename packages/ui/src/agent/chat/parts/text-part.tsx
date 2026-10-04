@@ -30,8 +30,9 @@ import {
 import { CheckIcon, CopyIcon } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Button } from "@slopcad/ui/components/button";
 import type { AgentChatMessagePart } from "./part-types";
+
+import { Button } from "../../../components/button";
 
 /** Concatenates an element tree's text content (the code string to display/copy). */
 function nodeText(node: ReactNode): string {
