@@ -47,8 +47,14 @@ Vercel's UI message stream would need a translation layer (mapping in
    relay included). Server-emitted mode: the server calls the provider
    with its own env-configured keys; user keys are never used server-side.
    The relay endpoint's input schema has no key field — a zod refine plus
-   a handler guard reject key-bearing payloads with 400, and the client
-   relay fetcher takes no key parameter; a unit test proves it.
+   a handler guard reject key-bearing message payloads with 400, and the
+   client relay fetcher takes no key parameter; a unit test proves it.
+   `modelOptions` is exempt from that deep credential scan BY STRUCTURE:
+   the field accepts only a closed per-provider union of the native D8
+   shapes (unknown fields 400, leaves bounded), so Anthropic's
+   `thinking.budget_tokens` crosses verbatim while the scan keeps
+   flagging `token`-fragment names inside `messages` (details in "Relay
+   input contract" below).
 
 2. **Storage follows the mode.** (D3) Server-emitted chat persists to the
    server DB (`agent_conversations`/`agent_messages`, Drizzle/SQLite).
@@ -165,11 +171,12 @@ location}`) and surface in the SAME UI surfaces users already get —
   written against TanStack's part model; if raw event constructors are
   needed and `@tanstack/ai` does not re-export them, `@ag-ui/core` is
   added explicitly via pnpm.
-- wa-sqlite worker+WASM through vite/nitro is UNPROVEN until the Phase
+- wa-sqlite worker+WASM through vite/nitro was UNPROVEN until the Phase
   3.1 spike: `openBrowserWASQLiteOPFSDatabase` spawns a worker and loads
   WASM, and neither the production bundle path nor OPFS inside the
-  session harness's headless Chromium is demonstrated yet; the spike must
-  also identify the node-env test adapter for TanStack DB collections.
+  session harness's headless Chromium was demonstrated yet; the spike
+  also had to identify the node-env test adapter for TanStack DB
+  collections. PROVEN — see "Persistence spike results".
   For the record: pnpm currently ignores `@journeyapps/wa-sqlite`'s
   postinstall (a PowerSync dynamic-core download); the shipped `dist`
   WASM builds cover the TanStack OPFS adapter's needs, and the spike
@@ -226,6 +233,9 @@ location}`) and surface in the SAME UI surfaces users already get —
   | `@tanstack/browser-db-sqlite-persistence` | ^0.2.28  |
 
   Transitive peer auto-resolved by pnpm: `@journeyapps/wa-sqlite` 1.7.2.
+  Phase 3.1 additions (devDependencies of `web`, test adapter only — see
+  "Persistence spike results"): `@tanstack/node-db-sqlite-persistence` ^0.2.28,
+  `better-sqlite3` ^13.0.3, `@types/better-sqlite3` ^9.6.0.
 
 ## D11 gap audit (Phase 2.1, 2026-10-04)
 
@@ -442,3 +452,207 @@ diagnostic losslessly encoded as JSON in its message —
 it back; the Phase 4.3 error-part renderer (and the bridge's tests)
 recover `code` and `location` through it instead of rendering an
 opaque error string.
+
+## Persistence spike results (Phase 3.1, 2026-10-04)
+
+All three questions of PLAN §3.1 are PROVEN on this repo's real pipeline.
+No D3 fallback is needed: client chat persistence proceeds on
+`openBrowserWASQLiteOPFSDatabase` + `createBrowserWASQLitePersistence`
+(Phase 3.4), with `@tanstack/node-db-sqlite-persistence` injected as the
+node-env test adapter. Names verified against the INSTALLED packages
+(`@tanstack/browser-db-sqlite-persistence` 0.2.28, `@tanstack/db`
+0.11.3, `@journeyapps/wa-sqlite` 1.7.2 — the research doc's "2.0.6"
+was a research-snapshot version; 1.7.2 is what pnpm resolved against
+the peer range `^1.4.1`, and it is what all evidence below ran on).
+One correction to `docs/research/tanstack-ai.md` §12's example: the
+local-only flow is NOT bare `createCollection(persistedCollectionOptions(
+…))` + preload only — writes go through `createTransaction` with
+`collection.utils.acceptMutations(transaction)` awaited inside
+`mutationFn` (API gotchas recorded below).
+
+### (a) Browser adapter through the production vite/nitro build — PASS
+
+How the package actually ships (read from
+`node_modules/@tanstack/browser-db-sqlite-persistence/dist`): the
+package entry imports a PREBUILT worker, not a Vite `?worker` module —
+`dist/esm/opfs-worker.js` wraps
+`new Worker(new URL("../assets/opfs-worker-accoEoax.js", import.meta.url).href)`
+(a classic, IIFE worker), and that asset is fully self-contained: the
+wa-sqlite WASM is EMBEDDED in the JS as an emscripten base64 payload
+(`AGFzbQ…`), so there is no separate `.wasm` to serve and no postinstall
+product required. The `?worker` import exists only in the package's
+`src/` tree, which the exports map never resolves to.
+
+Reproduction (scaffolding since removed from the tree; recipe is this
+list): create `apps/web/src/routes/opfs-spike.tsx` exporting a
+`createFileRoute("/opfs-spike")` component that, in a `useEffect`,
+calls `openBrowserWASQLiteOPFSDatabase({ databaseName:
+"slopcad-opfs-spike.sqlite" })`, wraps it in
+`createBrowserWASQLitePersistence`, builds a local-only collection via
+`persistedCollectionOptions` (`id: "spike-opfs-roundtrip"`, `getKey`,
+`schemaVersion: 1`), `preload()`s, and inserts one `{ id, token }` row
+through `createTransaction` + `await collection.utils.acceptMutations(
+transaction)` + `tx.mutate(() => collection.insert(…))` + `await
+tx.when("settled")`, writing `{phase: "inserted"|"persisted", count,
+token}` into a `<pre data-spike-result>` (on reload a non-empty
+collection reports `"persisted"` with the stored token). Then:
+
+```
+pnpm --filter web build
+ls apps/web/.output/public/assets/ | grep opfs
+# → opfs-spike-B2qqUmFk.js (276.15 kB client chunk)
+# → opfs-worker-accoEoax-B2IN8tCs.js (1,698,634 bytes)
+cmp apps/web/.output/public/assets/opfs-worker-accoEoax-B2IN8tCs.js \
+  apps/web/node_modules/@tanstack/browser-db-sqlite-persistence/dist/assets/opfs-worker-accoEoax.js
+# → byte-identical (no exit output)
+grep -o 'new Worker[^)]*' apps/web/.output/public/assets/opfs-spike-B2qqUmFk.js
+# → new Worker(``+new URL(`/assets/opfs-worker-accoEoax-B2IN8tCs.js`,``+import.meta.url).href,{name:e?.name})
+```
+
+Vite rewrote the dependency's relative worker URL to the absolutized
+hashed asset and emitted the worker verbatim (byte-identical, WASM
+embedded); nitro produced both the client chunk and an SSR chunk for
+the route (`.output/server/_ssr/opfs-spike-*.mjs`) — the SSR build
+tolerates the import because nothing worker-touching executes at module
+scope. Runtime load is proven by (b), which ran this exact built route.
+
+### (b) OPFS in the headless-Chromium harness environment — PASS
+
+Boot the built output and probe it with Playwright's chromium using the
+session harness's launch args
+(`--use-angle=swiftshader --enable-unsafe-swiftshader`), one context,
+1280×720, DPR 1 — mirroring `apps/web/playwright.session.config.ts`:
+
+```
+cd apps/web && PORT=3299 node --env-file-if-exists=.env .output/server/index.mjs
+# poll http://localhost:3299/opfs-spike until HTTP 200
+node .opfs-spike-probe.mjs   # chromium.launch headless, same args; script since removed
+# FIRST LOAD: {"phase":"inserted","count":1,"token":"opfs-mutv2crn-skv8a3dhof"}
+# RELOAD:     {"phase":"persisted","count":1,"token":"opfs-mutv2crn-skv8a3dhof"}
+# OPFS SPIKE: PASS
+curl -s -o /dev/null -w "%{http_code} %{size_download}" \
+  http://localhost:3299/assets/opfs-worker-accoEoax-B2IN8tCs.js   # → 200 1698634
+```
+
+localhost satisfies the secure-context requirement; the wa-sqlite
+OPFSCoopSyncVFS read the SAME row back after a full page reload inside
+the worker — storage genuinely hit OPFS, not memory (a reload is a
+fresh JS context; the worker and WASM were re-fetched from the built
+assets). Scope note, deliberately honest: persistence is proven across
+a RELOAD within one browser context — the session harness's exact
+model (one user, one context); cross-launch durability was not probed
+(Playwright's default fresh profiles are storage-isolated), but OPFS is
+disk-backed per origin, so a reload round-trip is the harness-relevant
+guarantee Phase 6 tests.
+
+### (c) Node-env test adapter — PASS
+
+The exact package is the official `@tanstack/node-db-sqlite-persistence`
+0.2.28 (`createNodeSQLitePersistence`, re-exporting
+`persistedCollectionOptions`) over a real `better-sqlite3` database —
+NOT a `:memory:` wa-sqlite VFS path (running wa-sqlite in node would
+need `@journeyapps/wa-sqlite` added explicitly, and pnpm isolation
+forbids the current transitive). Both added via pnpm per D15:
+
+```
+pnpm --filter web add -D @tanstack/node-db-sqlite-persistence  # → ^0.2.28
+pnpm --filter web add -D better-sqlite3                        # → ^13.0.3
+```
+
+`better-sqlite3` is explicit because the adapter takes a constructed
+`Database` instance (`database:` option) and re-exports no constructor;
+it ships no bundled types, so `@types/better-sqlite3` rides along the
+same way (`pnpm --filter web add -D @types/better-sqlite3`). Three
+honest notes: (1) the native binding needs the install script —
+pnpm 10 blocks build scripts by default, so
+`pnpm-workspace.yaml`'s `allowBuilds` map (the repo's existing esbuild/
+sharp mechanism) gains a scoped `better-sqlite3: true` — the wa-sqlite
+postinstall STAYS ignored per the Phase 0 posture; the binding is
+prebuilt (`prebuild-install || node-gyp rebuild`, no toolchain
+assumption beyond node-gyp). (2) the adapter depends on
+`better-sqlite3@^12` while our explicit devDep resolved `^13.0.3`, so
+two copies live in the store; the database instance crosses the
+boundary structurally and the round-trip below runs green on 13 —
+acceptable under D15's no-pinning rule, revisit only if a major
+diverges. (3) `@types/better-sqlite3`'s latest is the v9-era ^9.6.0
+(no peer declarations); its typings cover the constructor surface the
+test uses, and `pnpm install` is warning-free as of this writing.
+
+Standing evidence (KEPT, runs in `pnpm test`):
+`apps/web/src/agent/persistence/node-adapter.spike.test.ts` — a
+persisted-collection round-trip over a temp-FILE database where each
+open mints a fresh `new Database(path)` + persistence + collection:
+writer inserts, a second independent instance preloads the same row
+back (plus a collection-id isolation check — the `id` IS the SQLite
+table). File-backed rather than `:memory:` on purpose: reopening the
+file proves the same durable-write contract the browser OPFS adapter
+must satisfy; `:memory:` was separately smoke-verified to work for
+fast, disposable suites if Phase 3.4 ever wants cheaper tests.
+
+### API facts for Phase 3.4 (verified against @tanstack/db 0.11.3)
+
+- Local-only writes: `const tx = createTransaction({ mutationFn: async
+({ transaction }) => { await collection.utils.acceptMutations(
+transaction) } })` → `tx.mutate(() => collection.insert(row))` →
+  `await tx.when("settled")`. The `await` on `acceptMutations` is
+  load-bearing: without it the transaction settles before the
+  persist+confirm lands and the optimistic row is not yet visible.
+- `tx.mutate` AUTO-COMMITS (autoCommit defaults true); calling
+  `tx.commit()` afterwards throws "no longer pending" — reserve
+  `commit()` for `autoCommit: false`.
+- `collection.toArray` is a GETTER (an array property), not a method —
+  `collection.toArray.map(…)`, never `collection.toArray()`.
+  `await collection.toArrayWhenReady()` and `stateWhenReady()` exist
+  for first-sync-aware reads.
+- The local-only persisted collection id MUST be the stable string id
+  (the SQLite table name) — a random id silently abandons data every
+  reload (shipped skill doc's "CRITICAL" mistake; pinned by the
+  isolation test above).
+- Single-tab wiring (`SingleProcessCoordinator` semantics) is the
+  default; multi-tab needs `new BrowserCollectionCoordinator({ dbName
+})` passed to `createBrowserWASQLitePersistence` and disposed on
+  shutdown — a Phase 3.4+ decision, not needed for the single-context
+  session harness.
+
+## Relay input contract (Phase 3 fix, 2026-10-04)
+
+The Phase 3.3 runtime hook surfaced two gaps in the Phase 1.5 relay: the
+D1 deep credential scan (field-NAME based, fragment list including
+`token`) rejected Anthropic's D8-native `thinking.budget_tokens`
+selection — so a server-mode Anthropic budget 400'd at the relay — and
+the server run ignored the user's `maxIterations` setting. Both are
+closed at the relay boundary (`apps/web/src/agent/relay.ts`):
+
+- **`modelOptions` is closed per provider.** The open `record` became a
+  closed union of the native shapes — the OpenAI-wire `reasoning.effort`
+  (accepted for openai, openai-compatible, and openrouter alike, though
+  the builder emits it only for openai/openrouter — openai-compatible
+  offers no effort control, D8), Anthropic
+  `thinking.{type, budget_tokens}` ∪ `output_config.effort`, Gemini
+  `thinkingConfig.thinkingLevel` — every branch a strict object (an
+  unknown field anywhere under `modelOptions` → 400) with bounded leaves
+  (strings ≤ 64 chars; `budget_tokens` an integer in [1024, 2 000 000],
+  1024 being the installed adapter's own floor), so no key VALUE can
+  ride a legal field name either. D1 is satisfied by structure; D8 by
+  taking the native shapes verbatim — a shape native to a provider other
+  than the request's `provider` is still a 400.
+- **The deep scan exempts exactly the root `modelOptions` subtree.** The
+  zod refine and the raw-JSON handler guard both scan the payload with
+  that single positional exemption; `messages` (and anything nested)
+  stays under the full deep scan, so a `token`-fragment field inside a
+  message is still refused with 400 before any database work. The
+  exemption is structural, never lexical: `budget_tokens` as a field
+  NAME inside `messages` remains a finding. Pinned from both sides: a
+  native Anthropic budget body now streams end-to-end and reaches the
+  provider wire verbatim (through the real adapter + real `chat()` under
+  an injected transport), while a direct `findApiKeyLikeFields` pin
+  keeps flagging `token`-fragment fields inside messages — and the
+  client-side body-contract test parses the fetcher's exact emitted body
+  against the relay's own schema with the same exemption.
+- **`maxIterations` rides the contract.** An optional integer 1..25;
+  omitted, `chat()`'s own library default (5 model turns — the engine's
+  fallback, not a copy of it) applies. Present, the handler binds it
+  onto the server-side run as `agentLoopStrategy: maxIterations(n)`. The
+  client fetcher always sends the config store's (normalized, ≥ 1)
+  value; a stored bound above 25 is refused loudly by the relay's 400
+  rather than silently clamped.

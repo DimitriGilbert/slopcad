@@ -10,9 +10,21 @@
  * User keys never cross to the server (D1). The input schema has no key
  * field and is strict against unknown top-level fields; on top of that, a
  * deep field-name scan rejects any payload carrying apiKey-like FIELD names
- * anywhere in the body with 400 — twice, deliberately: once as a zod
+ * in the message history with 400 — twice, deliberately: once as a zod
  * refine on the parsed value and once as a handler guard over the raw JSON
  * (which answers before any database work and names the offending field).
+ * The ONE scan exemption is the top-level `modelOptions` subtree: it is
+ * structure-validated by a CLOSED per-provider schema (D8's verbatim
+ * native shapes — unknown fields refused, leaf values bounded), which is
+ * how Anthropic's native `thinking.budget_tokens` crosses the relay even
+ * though its field NAME carries the scan's `token` fragment. The exemption
+ * is positional and structural, never lexical: a `token`-fragment field
+ * name inside `messages` stays a refusal.
+ *
+ * The caller's loop bound rides the same contract: an optional integer
+ * `maxIterations` (1..25) the handler binds onto the server-side `chat()`
+ * run as its `agentLoopStrategy`; omitted, the engine's own library
+ * default (5 model turns) applies.
  *
  * Gate order (every refusal is the io endpoints' structured envelope
  * `{ ok: false, code, message }`):
@@ -37,9 +49,10 @@
  * package's import-time database singleton and without any network.
  */
 
-import { chat, toServerSentEventsResponse } from "@tanstack/ai";
+import { chat, maxIterations, toServerSentEventsResponse } from "@tanstack/ai";
 import type { UIMessage } from "@tanstack/ai";
 import { z } from "zod";
+import type { AgentModelOptions } from "./model-options";
 
 import {
   AGENT_PROVIDER_IDS,
@@ -61,20 +74,139 @@ const relayMessageSchema = z.looseObject({
   parts: z.looseObject({ type: z.string().min(1) }).array(),
 });
 
+/**
+ * The relay's iteration-bound ceiling: the client fetcher sends the config
+ * store's loop bound and the handler binds it onto the server-side run.
+ * 25 model turns is the deliberate ceiling — more is a runaway, not a
+ * conversation.
+ */
+const AGENT_RELAY_MAX_ITERATIONS = 25;
+
+/**
+ * Leaf bounds for the closed `modelOptions` shapes: no key VALUE can ride
+ * inside a legal field name either — strings stay too short for any real
+ * credential, and the budget is integer-bounded.
+ */
+const MODEL_OPTIONS_STRING_MAX_LENGTH = 64;
+
+/**
+ * Anthropic's own floor, verified against the installed adapter
+ * (`@tanstack/ai-anthropic`'s `validateTextProviderOptions`: budget
+ * "must be at least 1024").
+ */
+const MODEL_OPTIONS_BUDGET_TOKENS_MIN = 1024;
+
+/** Generous beyond any current model's output ceiling, but bounded. */
+const MODEL_OPTIONS_BUDGET_TOKENS_MAX = 2_000_000;
+
+const effortSchema = z.string().min(1).max(MODEL_OPTIONS_STRING_MAX_LENGTH);
+const budgetTokensSchema = z
+  .number()
+  .int()
+  .min(MODEL_OPTIONS_BUDGET_TOKENS_MIN)
+  .max(MODEL_OPTIONS_BUDGET_TOKENS_MAX);
+
+/**
+ * `reasoning.effort` — the OpenAI-wire shape the schema accepts for
+ * openai, openai-compatible, and openrouter alike; the Phase 1.3
+ * builder emits it only for openai/openrouter (openai-compatible
+ * offers no effort control, D8).
+ */
+const reasoningEffortModelOptionsSchema = z.strictObject({
+  reasoning: z.strictObject({ effort: effortSchema }),
+});
+
+/** Anthropic extended thinking (budget mode): `thinking.{type, budget_tokens}` (D8). */
+const anthropicBudgetModelOptionsSchema = z.strictObject({
+  thinking: z.strictObject({
+    budget_tokens: budgetTokensSchema,
+    type: z.literal("enabled"),
+  }),
+});
+
+/** Anthropic adaptive thinking (Opus 4.6+): `output_config.effort` (D8). */
+const anthropicEffortModelOptionsSchema = z.strictObject({
+  output_config: z.strictObject({ effort: effortSchema }),
+});
+
+/** Anthropic's two native shapes (budget mode and adaptive effort). */
+const anthropicModelOptionsSchema = z.union([
+  anthropicBudgetModelOptionsSchema,
+  anthropicEffortModelOptionsSchema,
+]);
+
+/** Gemini level-based thinking: `thinkingConfig.thinkingLevel` (D8). */
+const geminiModelOptionsSchema = z.strictObject({
+  thinkingConfig: z.strictObject({ thinkingLevel: effortSchema }),
+});
+
+/**
+ * The CLOSED `modelOptions` universe: exactly the native shapes the
+ * Phase 1.3 builder (`model-options.ts`) can emit — verbatim (D8),
+ * nothing more. Every branch is a strict object, so an unknown field at
+ * ANY depth under `modelOptions` is refused, and the bounded leaves mean
+ * no field VALUE can be a credential either (D1 by structure).
+ */
+const agentNativeModelOptionsSchema = z.union([
+  reasoningEffortModelOptionsSchema,
+  anthropicBudgetModelOptionsSchema,
+  anthropicEffortModelOptionsSchema,
+  geminiModelOptionsSchema,
+]);
+
+/** One provider's own closed shape(s) — the dispatch-switch convention. */
+function nativeModelOptionsSchemaFor(provider: AgentProviderId) {
+  switch (provider) {
+    case "openai":
+    case "openai-compatible":
+    case "openrouter":
+      return reasoningEffortModelOptionsSchema;
+    case "anthropic":
+      return anthropicModelOptionsSchema;
+    case "google":
+      return geminiModelOptionsSchema;
+  }
+}
+
 /** The relay's entire accepted input — provably keyless (D1). */
 export const agentRelayInputSchema = z
   .strictObject({
     provider: z.enum(AGENT_PROVIDER_IDS),
     modelId: z.string().min(1),
-    modelOptions: z.record(z.string(), z.unknown()).optional(),
+    modelOptions: agentNativeModelOptionsSchema.optional(),
+    maxIterations: z
+      .number()
+      .int()
+      .min(1)
+      .max(AGENT_RELAY_MAX_ITERATIONS)
+      .optional(),
     messages: z.array(relayMessageSchema).min(1),
   })
   .superRefine((value, ctx) => {
+    // The per-provider half of the closed universe: a shape native to SOME
+    // provider may still not ride another provider's run — the builder
+    // emits the chosen provider's own shape, so anything else is a
+    // malformed client.
+    if (value.modelOptions !== undefined) {
+      const native = nativeModelOptionsSchemaFor(value.provider).safeParse(
+        value.modelOptions,
+      );
+      if (!native.success) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["modelOptions"],
+          message: `modelOptions must be the ${value.provider} provider's native shape (reasoning.effort | thinking.budget_tokens | output_config.effort | thinkingConfig.thinkingLevel).`,
+        });
+      }
+    }
     // The zod half of D1's double guard: the strict top-level object keeps
-    // unknown FIELDS out of the parsed value, and this refine keeps
-    // credential-bearing fields out of the open (loose) message/part
-    // objects inside it.
-    for (const finding of findApiKeyLikeFields(value)) {
+    // unknown FIELDS out of the parsed value, the closed schema above is
+    // the modelOptions subtree's structural proof (the scan's one
+    // exemption), and this refine keeps credential-bearing fields out of
+    // the open (loose) message/part objects inside it.
+    for (const finding of findApiKeyLikeFields(value, "$", {
+      exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
+    })) {
       ctx.addIssue({
         code: "custom",
         message: `Client API keys never cross to the server: credential field "${finding.field}" at ${finding.path}.`,
@@ -82,7 +214,7 @@ export const agentRelayInputSchema = z
     }
   });
 
-/** The parsed relay input — the four fields, and never a key. */
+/** The parsed relay input — the five fields, and never a key. */
 export type AgentRelayInput = z.output<typeof agentRelayInputSchema>;
 
 /**
@@ -122,6 +254,28 @@ export interface ApiKeyLikeFinding {
   readonly path: string;
 }
 
+/** Options for {@link findApiKeyLikeFields}. */
+export interface ApiKeyLikeScanOptions {
+  /**
+   * Keys of the ROOT object (path `$`) whose subtrees are exempt from the
+   * scan — their structure is validated elsewhere. The exemption is
+   * positional: fields of the same name at any deeper path are NOT exempt.
+   */
+  readonly exemptRootKeys?: readonly string[];
+}
+
+/**
+ * The ONE root the relay's credential scan exempts: the top-level
+ * `modelOptions` subtree. Its schema is closed per provider (unknown
+ * fields refused, leaves bounded), so D1 holds by STRUCTURE there — which
+ * is what lets Anthropic's native `budget_tokens` field name through, a
+ * name whose `token` fragment the scan must keep flagging everywhere
+ * else, chiefly inside `messages`. Exported so the client-side
+ * body-contract tests scan the fetcher's emitted body with exactly the
+ * relay's own posture.
+ */
+export const API_KEY_SCAN_EXEMPT_ROOT_KEYS = ["modelOptions"] as const;
+
 /**
  * Deeply scans a JSON payload for apiKey-like FIELD names (never values —
  * a user typing a key into chat is their own text; the D1 invariant is
@@ -130,21 +284,27 @@ export interface ApiKeyLikeFinding {
 export function findApiKeyLikeFields(
   value: unknown,
   path: string = "$",
+  options: ApiKeyLikeScanOptions = {},
 ): ApiKeyLikeFinding[] {
   const findings: ApiKeyLikeFinding[] = [];
   if (Array.isArray(value)) {
     for (const [index, item] of value.entries()) {
-      findings.push(...findApiKeyLikeFields(item, `${path}[${String(index)}]`));
+      findings.push(
+        ...findApiKeyLikeFields(item, `${path}[${String(index)}]`, options),
+      );
     }
     return findings;
   }
   if (value !== null && typeof value === "object") {
     for (const [key, child] of Object.entries(value)) {
+      if (path === "$" && options.exemptRootKeys?.includes(key) === true) {
+        continue;
+      }
       const childPath = `${path}.${key}`;
       if (isApiKeyLikeFieldName(key)) {
         findings.push({ field: key, path: childPath });
       }
-      findings.push(...findApiKeyLikeFields(child, childPath));
+      findings.push(...findApiKeyLikeFields(child, childPath, options));
     }
   }
   return findings;
@@ -312,7 +472,11 @@ export async function handleAgentRelayRequest(
 
   // The handler half of D1's double guard — over the RAW payload, so the
   // refusal fires before any database work and names the offending field.
-  const keyFindings = findApiKeyLikeFields(payload);
+  // The same single modelOptions exemption applies: that subtree's proof
+  // is its closed structure (checked by the schema next), never the scan.
+  const keyFindings = findApiKeyLikeFields(payload, "$", {
+    exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
+  });
   if (keyFindings.length > 0) {
     const fields = [...new Set(keyFindings.map((finding) => finding.field))]
       .map((field) => `"${field}"`)
@@ -379,10 +543,16 @@ export async function handleAgentRelayRequest(
   // intentionally WIDER type than UIMessage's literal part union (Phase 3
   // forward-compat), so the types cannot overlap by construction; at
   // runtime chat() consumes the UIMessage wire format verbatim and
-  // converts it itself. The SDKs perform no runtime validation of
-  // providerOptions either.
+  // converts it itself. The modelOptions widening rides the same bridge:
+  // the typed local first PINS the closed schema's output to the Phase
+  // 1.3 builder's own union (one source of truth), then crosses to the
+  // adapters' providerOptions because the relay's shapes keep
+  // effort/thinkingLevel as bounded strings (the catalog is the single
+  // source of offered values, D8) while each SDK narrows them to literal
+  // unions per model.
   const messages = input.messages as unknown as UIMessage[];
-  const modelOptions = input.modelOptions as
+  const nativeModelOptions: AgentModelOptions | undefined = input.modelOptions;
+  const modelOptions = nativeModelOptions as unknown as
     AgentProviderModelOptions | undefined;
 
   // A client disconnect aborts the upstream provider call instead of
@@ -400,6 +570,12 @@ export async function handleAgentRelayRequest(
     chat({
       adapter,
       messages,
+      // The caller's loop bound (1..25) becomes the engine's own stop
+      // rule; omitted, chat()'s library default — maxIterations(5) —
+      // applies (the engine's own fallback, not a copy of it here).
+      ...(input.maxIterations === undefined
+        ? {}
+        : { agentLoopStrategy: maxIterations(input.maxIterations) }),
       ...(modelOptions === undefined ? {} : { modelOptions }),
       abortController,
     }),

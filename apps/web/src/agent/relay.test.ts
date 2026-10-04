@@ -6,25 +6,34 @@
  * The agent relay handler's tests (PLAN-AGENT-CHAT Phase 1.5): the D1
  * key-rejection (both layers — the handler guard over raw JSON and the
  * zod refine over the parsed value — plus the schema's strict top-level
- * object and its provably keyless field set), the D13 access gate (the
- * INJECTED `isServerAiAllowed` resolver refusing → 403 with the
+ * object and its provably keyless field set), the Phase 3 closed
+ * per-provider modelOptions universe (D8's native shapes verbatim,
+ * unknown fields refused, bounded leaves, provider-correlated — the fix
+ * that lets Anthropic's `thinking.budget_tokens` stream end-to-end while
+ * the scan keeps flagging `token`-fragment names inside `messages`), the
+ * maxIterations contract (1..25 bound onto the server run's loop
+ * strategy; omitted ⇒ the library's own default), the D13 access gate
+ * (the INJECTED `isServerAiAllowed` resolver refusing → 403 with the
  * transport untouched, granting → stream; the D13 matrix itself lives in
  * `@slopcad/api`'s user-options suite — here only the gate ORDER is
  * proven: every 401, D1, and schema-400 test also asserts the resolver
- * was never called), the D6 missing-env-key refusal naming the provider (and
- * never touching the transport — with an EMPTY-string key counting as
- * missing, consistent with the picker's provider list), the streaming
+ * was never called), the D6 missing-env-key refusal naming the provider
+ * (and never touching the transport — with an EMPTY-string key counting
+ * as missing, consistent with the picker's provider list), the streaming
  * happy path: the REAL Phase 1.2 adapter + the REAL `chat()` +
  * `toServerSentEventsResponse`, driven through an injected transport
  * that answers a scripted OpenAI-compatible SSE body — zero network, the
- * same discipline as the provider factory suites — and the abort path:
- * a client disconnect must abort the upstream provider call's signal.
+ * same discipline as the provider factory suites — and the abort path: a
+ * client disconnect must abort the upstream provider call's signal.
  */
 
+import type { AgentLoopState, AgentLoopStrategy } from "@tanstack/ai";
+import type * as TanstackAi from "@tanstack/ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   agentRelayInputSchema,
+  API_KEY_SCAN_EXEMPT_ROOT_KEYS,
   findApiKeyLikeFields,
   handleAgentRelayRequest,
   isApiKeyLikeFieldName,
@@ -33,6 +42,38 @@ import {
   type AgentRelayEnvKeys,
   type AgentRelayFailure,
 } from "./relay";
+
+/** The slice of chat()'s options the loop-strategy tests read back. */
+interface RecordedChatOptions {
+  readonly agentLoopStrategy?: AgentLoopStrategy;
+}
+
+/**
+ * A params-recording spy AROUND the real `chat()`: every test still drives
+ * the real run (the factory delegates to the implementation it wraps), and
+ * the recorded options are how the maxIterations binding is proven — the
+ * strategy function the handler actually bound, not a mock's echo.
+ */
+const recordedChatOptions = vi.hoisted(() => [] as RecordedChatOptions[]);
+
+vi.mock("@tanstack/ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof TanstackAi>();
+  return {
+    ...actual,
+    chat: (options: unknown) => {
+      recordedChatOptions.push({
+        agentLoopStrategy:
+          typeof options === "object" &&
+          options !== null &&
+          "agentLoopStrategy" in options
+            ? (options as { agentLoopStrategy?: AgentLoopStrategy })
+                .agentLoopStrategy
+            : undefined,
+      });
+      return actual.chat(options as Parameters<typeof actual.chat>[0]);
+    },
+  };
+});
 
 const USER_ID = "user-relay-test";
 const MODEL_ID = "raw-model-id";
@@ -67,7 +108,7 @@ function validBody(): {
   return {
     provider: "openai-compatible",
     modelId: MODEL_ID,
-    modelOptions: { reasoning_effort: "low" },
+    modelOptions: { reasoning: { effort: "low" } },
     messages: [
       {
         id: "m1",
@@ -119,6 +160,72 @@ function compatibleSseFetch(): {
   return { fetch, calls };
 }
 
+/**
+ * A scripted Anthropic Messages SSE answer (the provider suite's fixture
+ * shape) — the transport the native-budget end-to-end test injects, so the
+ * real Anthropic adapter's wire path runs with zero network.
+ */
+const anthropicSseBody = [
+  "event: message_start",
+  `data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"${MODEL_ID}","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}`,
+  "",
+  "event: content_block_start",
+  'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+  "",
+  "event: content_block_delta",
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}',
+  "",
+  "event: content_block_stop",
+  'data: {"type":"content_block_stop","index":0}',
+  "",
+  "event: message_delta",
+  'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}',
+  "",
+  "event: message_stop",
+  'data: {"type":"message_stop"}',
+  "",
+  "",
+].join("\n");
+
+/** A recording transport answering Anthropic's SSE shape. */
+function anthropicSseFetch(): {
+  fetch: typeof globalThis.fetch;
+  calls: RecordedFetchCall[];
+} {
+  const calls: RecordedFetchCall[] = [];
+  const fetch = (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    calls.push({ input, init });
+    return Promise.resolve(
+      new Response(anthropicSseBody, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+  };
+  return { fetch, calls };
+}
+
+/** The JSON body a recorded provider call carried (init or Request input). */
+async function transportJsonBody(
+  call: RecordedFetchCall | undefined,
+): Promise<Record<string, unknown>> {
+  if (call === undefined) throw new Error("transport was not called");
+  const raw = call.init?.body;
+  const text =
+    typeof raw === "string"
+      ? raw
+      : call.input instanceof Request
+        ? await call.input.clone().text()
+        : undefined;
+  if (text === undefined) {
+    throw new Error("the transport call carried no JSON body");
+  }
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
 interface DepsOverrides {
   readonly session?: () => Promise<{ user: { id: string } } | null>;
   readonly envKeys?: AgentRelayEnvKeys;
@@ -164,14 +271,28 @@ async function readFailure(
   return { code: payload.code, message: payload.message };
 }
 
-describe("relay input schema (D1: no key field exists)", () => {
-  it("accepts a valid body with exactly the four fields", () => {
-    const parsed = agentRelayInputSchema.safeParse(validBody());
+describe("relay input schema (D1: no key field exists; D8: closed modelOptions)", () => {
+  it("accepts a valid body with all five contract fields", () => {
+    const parsed = agentRelayInputSchema.safeParse({
+      ...validBody(),
+      maxIterations: 7,
+    });
     expect(parsed.success).toBe(true);
   });
 
-  it("provably has no key field: the schema's field set is exactly the four inputs", () => {
+  it("accepts the minimal body with both optional fields omitted", () => {
+    const body = validBody();
+    const parsed = agentRelayInputSchema.safeParse({
+      messages: body.messages,
+      modelId: body.modelId,
+      provider: body.provider,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("provably has no key field: the schema's field set is exactly the five inputs", () => {
     expect(Object.keys(agentRelayInputSchema.shape).sort()).toEqual([
+      "maxIterations",
       "messages",
       "modelId",
       "modelOptions",
@@ -185,6 +306,99 @@ describe("relay input schema (D1: no key field exists)", () => {
       apiKey: "sk-client",
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it("accepts each provider's native modelOptions shape verbatim (D8)", () => {
+    const native: Array<[string, Record<string, unknown>]> = [
+      ["openai", { reasoning: { effort: "high" } }],
+      ["openai-compatible", { reasoning: { effort: "low" } }],
+      ["openrouter", { reasoning: { effort: "max" } }],
+      ["anthropic", { thinking: { budget_tokens: 2048, type: "enabled" } }],
+      ["anthropic", { output_config: { effort: "xhigh" } }],
+      ["google", { thinkingConfig: { thinkingLevel: "HIGH" } }],
+    ];
+    for (const [provider, modelOptions] of native) {
+      const parsed = agentRelayInputSchema.safeParse({
+        ...validBody(),
+        modelOptions,
+        provider,
+      });
+      expect(parsed.success, provider).toBe(true);
+    }
+  });
+
+  it("rejects an unknown modelOptions field anywhere in the subtree (the closed universe)", () => {
+    for (const modelOptions of [
+      { temperature: 0.2 },
+      // `summary` is a real SDK field but NOT one the Phase 1.3 builder
+      // emits — "exactly what it can emit, nothing more".
+      { reasoning: { effort: "high", summary: "auto" } },
+      { reasoning: { effort: "high" }, apiKey: "sk-client" },
+    ]) {
+      const parsed = agentRelayInputSchema.safeParse({
+        ...validBody(),
+        modelOptions,
+      });
+      expect(parsed.success, JSON.stringify(modelOptions)).toBe(false);
+    }
+  });
+
+  it("rejects a native shape riding the wrong provider", () => {
+    const parsed = agentRelayInputSchema.safeParse({
+      ...validBody(),
+      modelOptions: { thinking: { budget_tokens: 2048, type: "enabled" } },
+      provider: "google",
+    });
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(
+      parsed.error.issues.some((issue) => issue.path[0] === "modelOptions"),
+    ).toBe(true);
+  });
+
+  it("bounds every leaf so no key VALUE can ride a legal field name", () => {
+    // A 65-char string — shorter than any real credential — is refused.
+    expect(
+      agentRelayInputSchema.safeParse({
+        ...validBody(),
+        modelOptions: { reasoning: { effort: "x".repeat(65) } },
+      }).success,
+    ).toBe(false);
+    const budgetBody = (budget_tokens: number) => ({
+      ...validBody(),
+      modelOptions: { thinking: { budget_tokens, type: "enabled" } },
+      provider: "anthropic",
+    });
+    // Anthropic's own floor (1024), a bounded ceiling, and integers only.
+    expect(agentRelayInputSchema.safeParse(budgetBody(1023)).success).toBe(
+      false,
+    );
+    expect(agentRelayInputSchema.safeParse(budgetBody(2_000_001)).success).toBe(
+      false,
+    );
+    expect(agentRelayInputSchema.safeParse(budgetBody(1.5)).success).toBe(
+      false,
+    );
+    expect(agentRelayInputSchema.safeParse(budgetBody(1024)).success).toBe(
+      true,
+    );
+  });
+
+  it("bounds maxIterations to an integer 1..25 (omitted means the library default)", () => {
+    for (const maxIterations of [1, 25]) {
+      expect(
+        agentRelayInputSchema.safeParse({ ...validBody(), maxIterations })
+          .success,
+        String(maxIterations),
+      ).toBe(true);
+    }
+    for (const maxIterations of [0, 26, 2.5, "3", null]) {
+      expect(
+        agentRelayInputSchema.safeParse({ ...validBody(), maxIterations })
+          .success,
+        String(maxIterations),
+      ).toBe(false);
+    }
   });
 
   it("the zod refine rejects a credential field nested in the open message objects", () => {
@@ -244,6 +458,37 @@ describe("apiKey-like field detection", () => {
     expect(findApiKeyLikeFields(body)).toEqual([
       { field: "token", path: "$.messages[0].parts[0].metadata.token" },
     ]);
+  });
+
+  it("still flags the token fragment — including Anthropic's native budget_tokens name itself", () => {
+    // The Phase 3 collision, pinned at the source: `budget_tokens` IS an
+    // apiKey-like name to the scan (that is exactly why modelOptions is
+    // exempt by STRUCTURE at the relay, never by whitelisting the word).
+    expect(isApiKeyLikeFieldName("budget_tokens")).toBe(true);
+    expect(isApiKeyLikeFieldName("sessionToken")).toBe(true);
+  });
+
+  it("exempts ONLY the root modelOptions: a budget_tokens-named field inside messages stays a finding", () => {
+    const body = validBody();
+    firstMessage(body).parts = [
+      { type: "text", content: "hi", budget_tokens: 2048 },
+    ];
+    // The root modelOptions subtree is skipped (structure-validated by the
+    // closed schema instead) …
+    expect(
+      findApiKeyLikeFields(body, "$", {
+        exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
+      }),
+    ).toEqual(
+      // … but the same field NAME inside the message history is flagged —
+      // the scan's continuing duty.
+      [
+        {
+          field: "budget_tokens",
+          path: "$.messages[0].parts[0].budget_tokens",
+        },
+      ],
+    );
   });
 });
 
@@ -395,18 +640,32 @@ describe("handleAgentRelayRequest: D1 key rejection", () => {
     expect(isServerAiAllowed).not.toHaveBeenCalled();
   });
 
-  it("rejects a key nested in modelOptions with 400", async () => {
+  it("rejects a token-fragment credential field inside a message part with 400 (the raw-JSON guard keeps scanning messages)", async () => {
+    const body = validBody();
+    firstMessage(body).parts = [
+      { type: "text", content: "hi", sessionToken: "t-client" },
+    ];
+    const { deps, isServerAiAllowed } = relayDeps();
+    const response = await handleAgentRelayRequest(relayRequest(body), deps);
+    expect(response.status).toBe(400);
+    const failure = await readFailure(response);
+    expect(failure.code).toBe("agent-relay/client-key-rejected");
+    expect(failure.message).toContain("sessionToken");
+    expect(isServerAiAllowed).not.toHaveBeenCalled();
+  });
+
+  it("refuses a key inside modelOptions through the closed schema — the scan exemption is not a hole", async () => {
     const { deps, isServerAiAllowed } = relayDeps();
     const response = await handleAgentRelayRequest(
       relayRequest({
         ...validBody(),
-        modelOptions: { temperature: 0.2, apiKey: "sk-client" },
+        modelOptions: { reasoning: { effort: "low" }, apiKey: "sk-client" },
       }),
       deps,
     );
     expect(response.status).toBe(400);
     const failure = await readFailure(response);
-    expect(failure.code).toBe("agent-relay/client-key-rejected");
+    expect(failure.code).toBe("agent-relay/invalid-input");
     expect(isServerAiAllowed).not.toHaveBeenCalled();
   });
 });
@@ -483,7 +742,14 @@ describe("handleAgentRelayRequest: missing env key (D6)", () => {
       envKeys: { openAiKey: SERVER_KEY },
     });
     const response = await handleAgentRelayRequest(
-      relayRequest({ ...validBody(), provider: "anthropic" }),
+      // modelOptions omitted: the baseline's `reasoning` shape is native
+      // to the openai family, and this test switches to anthropic (the
+      // closed universe would rightly refuse the foreign shape first).
+      relayRequest({
+        ...validBody(),
+        modelOptions: undefined,
+        provider: "anthropic",
+      }),
       deps,
     );
     expect(response.status).toBe(422);
@@ -511,6 +777,104 @@ describe("handleAgentRelayRequest: missing env key (D6)", () => {
 });
 
 describe("handleAgentRelayRequest: streaming passthrough", () => {
+  it("streams a native Anthropic budget_tokens selection end-to-end (the Phase 3 collision, closed)", async () => {
+    const transport = anthropicSseFetch();
+    const { deps } = relayDeps({
+      envKeys: { anthropicKey: SERVER_KEY },
+      fetch: transport.fetch,
+    });
+    const response = await handleAgentRelayRequest(
+      relayRequest({
+        ...validBody(),
+        modelOptions: { thinking: { budget_tokens: 2048, type: "enabled" } },
+        provider: "anthropic",
+      }),
+      deps,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const body = await response.text();
+    expect(body).toContain("hi");
+
+    // The provider call went to the Anthropic Messages endpoint with the
+    // SERVER's env key, and the native budget shape reached the wire
+    // VERBATIM — the exact field name the old open scan's `token`
+    // fragment used to reject. (Host asserted by path only: the SDK honors
+    // an ANTHROPIC_BASE_URL env override, and the injected transport
+    // means no network either way.)
+    expect(transport.calls).toHaveLength(1);
+    const call = transport.calls[0];
+    if (call === undefined) throw new Error("transport was not called");
+    const url =
+      typeof call.input === "string" || call.input instanceof URL
+        ? call.input.toString()
+        : call.input.url;
+    expect(url).toContain("/v1/messages");
+    const headers =
+      typeof call.input === "string" || call.input instanceof URL
+        ? new Headers(call.init?.headers)
+        : call.input.headers;
+    expect(headers.get("x-api-key")).toBe(SERVER_KEY);
+    const wireBody = await transportJsonBody(call);
+    expect(wireBody.thinking).toEqual({
+      budget_tokens: 2048,
+      type: "enabled",
+    });
+  });
+
+  it("binds the caller's maxIterations onto the server run's agent loop strategy", async () => {
+    const { deps } = relayDeps();
+    const response = await handleAgentRelayRequest(
+      relayRequest({ ...validBody(), maxIterations: 3 }),
+      deps,
+    );
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+
+    // The strategy the handler actually bound onto chat(): it stops the
+    // model-turn loop exactly at the caller's bound.
+    const strategy = recordedChatOptions.at(-1)?.agentLoopStrategy;
+    expect(strategy).toBeTypeOf("function");
+    if (strategy === undefined)
+      throw new Error("chat() ran without a strategy");
+    const loopState = (iterationCount: number): AgentLoopState => ({
+      finishReason: "tool_calls",
+      iterationCount,
+      lastTurnToolCallCount: 1,
+      messages: [],
+      toolCallCount: 1,
+    });
+    expect(strategy(loopState(2))).toBe(true);
+    expect(strategy(loopState(3))).toBe(false);
+  });
+
+  it("leaves agentLoopStrategy unset when maxIterations is omitted — the library's own default (5) applies", async () => {
+    const { deps } = relayDeps();
+    const response = await handleAgentRelayRequest(
+      relayRequest(validBody()),
+      deps,
+    );
+    expect(response.status).toBe(200);
+    await response.body?.cancel();
+    expect(recordedChatOptions.at(-1)?.agentLoopStrategy).toBeUndefined();
+  });
+
+  it("rejects out-of-range maxIterations with 400 before consulting access", async () => {
+    for (const maxIterations of [0, 26, 2.5]) {
+      const { deps, isServerAiAllowed } = relayDeps();
+      const response = await handleAgentRelayRequest(
+        relayRequest({ ...validBody(), maxIterations }),
+        deps,
+      );
+      expect(response.status, String(maxIterations)).toBe(400);
+      const failure = await readFailure(response);
+      expect(failure.code).toBe("agent-relay/invalid-input");
+      expect(failure.message).toContain("maxIterations");
+      expect(isServerAiAllowed).not.toHaveBeenCalled();
+    }
+  });
+
   it("streams the real chat() run back as SSE from the env-keyed adapter", async () => {
     const transport = compatibleSseFetch();
     const { deps } = relayDeps({ fetch: transport.fetch });
