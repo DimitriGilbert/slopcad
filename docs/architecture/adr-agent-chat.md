@@ -684,3 +684,49 @@ surface widens the gap:
 - The settings sheet (`agent-settings.tsx`) mounts ONLY while open (the
   io dialogs' `if (!open) return null` pattern), so the closed state
   runs no provider or catalog queries from hidden UI.
+
+## Phase 6 walk findings (2026-10-04, fixed in-phase)
+
+The session walk (loopback fixture, real production server + SQLite)
+surfaced three real Phase 3/4 defects against the INSTALLED framework
+versions; all three were fixed at the cause:
+
+1. **Tool-result parts carry no `name` on the live path.** The framework
+   builds a `tool-result` part as
+   `{ type, toolCallId, content, state, outcome?, error? }` — no tool
+   NAME. The Phase 4.3 renderer keyed its per-tool arms (the
+   `cad_capture_views` gallery, the apply-commands diff title) on
+   `part.name`, which is unset outside hand-built test parts, so the
+   gallery never rendered. `message-parts.tsx` now resolves a result's
+   tool name from its sibling tool-call part (same `toolCallId`, same
+   message — the engine stamps the result onto the assistant message
+   that holds the call) and hands it to the renderer.
+2. **The interrupt-resolution arm delivers thrown refusals as CONTENT.**
+   `@tanstack/ai-client` 0.36.1 has two client-tool arms: the direct
+   `onToolCall` one maps a thrown error into an error-state
+   `ToolResultPart` (what Phase 2.3's bridge design assumed), while the
+   interrupt-resolution one (the run the browser actually takes after a
+   RUN_FINISHED client-tool interrupt) hands the thrown text over as the
+   result's CONTENT on a complete part. The renderer now decodes
+   refusal-shaped content with `parseAgentToolRefusal` and renders the
+   D9 diagnostics chip in BOTH arms.
+3. **`useChat` never rebinds a changed transport.** The client memo keys
+   on the thread id alone (`@tanstack/ai-react` 0.29.4 `use-chat.js`) —
+   later `connection`/`fetcher` identities are ignored — so a
+   client→server mode switch silently kept calling the provider
+   browser-direct (user key and all), and the mount-time system prompt
+   context was frozen forever. `use-agent-chat.ts` now (a) reads every
+   run-scoped input through live getters (prompt, model options, config
+   resolve per `connect()`/fetch), and (b) mints a new thread id — the
+   one sanctioned rebuild trigger — when the transport CURRENCY flips,
+   seeded with the live transcript so the swap loses no history.
+
+One designed behavior the harness must respect (recorded here so no
+later phase "fixes" it): the chat controller's `start()` resume loses to
+live work by design ("a send or a lifecycle button raced the resume:
+live work wins") — a send that beats the async OPFS resume starts a NEW
+conversation. The walk therefore waits for the resumed transcript's tail
+before each send, and waits for the sync line (the UI's unsynced-work
+signal) to settle before navigating: the store commits at run
+completion, and a reload mid-commit can tear the write (the resume then
+finds the conversation row but not its messages).

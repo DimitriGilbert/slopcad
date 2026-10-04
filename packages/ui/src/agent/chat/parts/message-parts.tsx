@@ -39,6 +39,25 @@ export interface AgentMessagePartsProps {
 }
 
 /**
+ * Resolves a tool-result part's tool name from its sibling tool-call part:
+ * the framework's wire shape identifies a result by `toolCallId` alone
+ * (`part.name` is unset on the live path — the tool-call part of the SAME
+ * call carries the name), and the engine stamps the result onto the
+ * assistant message that holds the call, so the sibling is in `parts`.
+ */
+function toolNameOfResult(
+  parts: readonly AgentChatMessagePart[],
+  part: Extract<AgentChatMessagePart, { type: "tool-result" }>,
+): string | undefined {
+  for (const candidate of parts) {
+    if (candidate.type === "tool-call" && candidate.id === part.toolCallId) {
+      return candidate.name;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Merges runs of adjacent text parts into single parts so markdown renders
  * as one document (non-text parts break the run). Returns a new array; the
  * input is never mutated.
@@ -62,6 +81,7 @@ export function mergeTextParts(
 
 /** Renders one part through the exhaustive switch. */
 function renderPart(
+  parts: readonly AgentChatMessagePart[],
   part: AgentChatMessagePart,
   streaming: boolean,
 ): ReactElement | null {
@@ -73,7 +93,12 @@ function renderPart(
     case "tool-call":
       return <AgentToolCallPart part={part} />;
     case "tool-result":
-      return <AgentToolResultPart part={part} />;
+      return (
+        <AgentToolResultPart
+          part={part}
+          toolName={toolNameOfResult(parts, part)}
+        />
+      );
     case "image":
       return <AgentImagePart part={part} />;
     case "audio":
@@ -106,7 +131,7 @@ export function AgentMessageParts({
   return (
     <>
       {mergeTextParts(parts).map((part, index) => {
-        const rendered = renderPart(part, streaming);
+        const rendered = renderPart(parts, part, streaming);
         return rendered === null ? null : (
           <div key={index} className="flex w-full min-w-0 flex-col">
             {rendered}

@@ -12,7 +12,10 @@
  *   severity-colored diagnostics chip — code, message, and location — in the
  *   same visual language as the timeline and viewport chips. Non-refusal
  *   error text (any other producer) renders as a plain destructive line;
- *   cancelled/denied outcomes render quiet, not loud.
+ *   cancelled/denied outcomes render quiet, not loud. A COMPLETE result
+ *   whose string content parses as a refusal renders the same chip: the
+ *   framework's interrupt-resolution arm hands a thrown refusal's text over
+ *   as result CONTENT instead of an error state.
  * - everything else renders the generic answer: collapsed JSON for string
  *   content, text + media for multimodal content.
  *
@@ -42,6 +45,13 @@ import { parseAgentToolRefusal } from "../../tools";
 /** Everything the tool-result renderer takes. */
 export interface AgentToolResultPartProps {
   readonly part: AgentChatToolResultPart;
+  /**
+   * The called tool's name, resolved from the sibling tool-call part by the
+   * dispatcher: the framework's wire shape carries a tool-result's identity
+   * as `toolCallId` only — `part.name` is unset on the live path, so the
+   * per-tool renderers (the capture gallery) key on THIS.
+   */
+  readonly toolName?: string;
 }
 
 /** The `cad_capture_views` gallery: summary line + captioned images (D10). */
@@ -210,8 +220,9 @@ function ToolErrorBody({
 /** Renders one tool-result part against its state machine. */
 export function AgentToolResultPart({
   part,
+  toolName,
 }: AgentToolResultPartProps): ReactElement {
-  const name = part.name ?? "tool";
+  const name = toolName ?? part.name ?? "tool";
   switch (part.state) {
     case "streaming":
       return <PartStatusLine>{`Running ${name}\u2026`}</PartStatusLine>;
@@ -220,6 +231,26 @@ export function AgentToolResultPart({
     case "complete":
       if (name === CAPTURE_VIEWS_TOOL) {
         return <CaptureGallery content={part.content} />;
+      }
+      // A COMPLETE result whose string content IS a refusal: the framework
+      // has two client-tool arms — the direct one maps a thrown error into
+      // an error-state part, while the interrupt-resolution one (the run
+      // the browser actually takes) hands the thrown text over as the
+      // result's CONTENT. Both carry the D9 diagnostic, so both render the
+      // chip — {@link parseAgentToolRefusal} is the refusal detector, and a
+      // success payload never carries its `{ code, message }` shape.
+      if (typeof part.content === "string") {
+        const refusal = parseAgentToolRefusal(part.content);
+        if (refusal !== null) {
+          return (
+            <AgentDiagnosticsChip
+              code={refusal.code}
+              location={refusal.location}
+              message={refusal.message}
+              severity="error"
+            />
+          );
+        }
       }
       return <GenericResultBody content={part.content} />;
     default: {

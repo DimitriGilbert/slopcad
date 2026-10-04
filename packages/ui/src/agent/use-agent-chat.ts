@@ -71,7 +71,7 @@ import type {
 } from "@tanstack/ai-client";
 import { useChat } from "@tanstack/ai-react";
 import type { UseChatReturn } from "@tanstack/ai-react";
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   createAgentProviderAdapter,
@@ -293,13 +293,10 @@ function createClientDirectConnection(
   input: AgentChatTransportInput,
   deps: AgentChatTransportDeps,
 ): ConnectConnectionAdapter {
-  const { config } = input;
-  const systemPrompt = assembleAgentSystemPrompt({
-    documentSummary: input.documentSummary,
-    toolCatalogue: agentToolCatalogue(input.tools),
-    userPrompt: config.systemPrompt,
-  });
-  const modelOptions = resolveAgentModelOptions(config, input.reasoningOption);
+  // Everything run-scoped is derived INSIDE connect(): the connection
+  // object outlives many runs, and the hook (its only production caller)
+  // hands it live-read getters — a prompt or model options snapshot taken
+  // here would freeze the first render's context into every later run.
   const createAdapter = deps.createAdapter ?? createAgentProviderAdapter;
   const transport = deps.fetch ?? globalThis.fetch;
   return {
@@ -309,6 +306,16 @@ function createClientDirectConnection(
       abortSignal: AbortSignal | undefined,
       runContext: RunAgentInputContext | undefined,
     ) {
+      const { config } = input;
+      const systemPrompt = assembleAgentSystemPrompt({
+        documentSummary: input.documentSummary,
+        toolCatalogue: agentToolCatalogue(input.tools),
+        userPrompt: config.systemPrompt,
+      });
+      const modelOptions = resolveAgentModelOptions(
+        config,
+        input.reasoningOption,
+      );
       const { adapterConfig, provider } = clientAdapterBinding(
         config,
         transport,
@@ -375,19 +382,24 @@ function createRelayFetcher(
   input: AgentChatTransportInput,
   deps: AgentChatTransportDeps,
 ): ChatFetcher {
-  const { config } = input;
   const relayUrl = deps.relayUrl ?? "/api/agent-relay";
   const transport = deps.fetch ?? globalThis.fetch;
-  const systemPrompt = assembleAgentSystemPrompt({
-    documentSummary: input.documentSummary,
-    toolCatalogue: agentToolCatalogue(input.tools),
-    userPrompt: config.systemPrompt,
-  });
-  const modelOptions = resolveAgentModelOptions(config, input.reasoningOption);
   return async (
     request: ChatFetcherInput,
     options: ChatFetcherOptions,
   ): Promise<Response> => {
+    // As in the client connection: per-request derivation, never a
+    // snapshot — the fetcher outlives settings edits and document changes.
+    const { config } = input;
+    const systemPrompt = assembleAgentSystemPrompt({
+      documentSummary: input.documentSummary,
+      toolCatalogue: agentToolCatalogue(input.tools),
+      userPrompt: config.systemPrompt,
+    });
+    const modelOptions = resolveAgentModelOptions(
+      config,
+      input.reasoningOption,
+    );
     if (!isAgentConfigured(config)) {
       throw new AgentChatUnconfiguredError(
         "The agent is not configured: pick a provider and a model (nothing is ever preselected) before sending.",
@@ -473,39 +485,98 @@ export interface UseAgentChatInput {
  * The agent chat runtime hook (Phase 3.3): binds transport, prompt, native
  * model options, and the config's loop bound onto `useChat` and returns the
  * useChat surface unchanged — `stop` and `reload` (retry) ride through as-is.
- * The transport is memoized on the objects the page supplies; the page owns
- * the config's identity (state or a store subscription), because useChat
- * recreates the chat client whenever its connection changes. The tools type
- * is the bridge's concrete element type (not a generic): useChat's context
- * inference needs the concrete tool set to prove no runtime context is
- * required, and the Phase 2.3 bridge's `.client()` executors take none.
+ *
+ * ## The client-rebuild contract (verified against @tanstack/ai-react
+ * 0.29.4's `use-chat`)
+ *
+ * `useChat` constructs its `ChatClient` ONCE per `threadId` — the client
+ * memo keys on the thread id alone, and later `connection`/`fetcher`
+ * identity changes are never applied to the live client. A transport that
+ * silently kept the mount-time object would freeze the first render's mode
+ * (a client→server switch would keep calling the provider browser-direct,
+ * keys and all) and its first render's prompt context forever. The hook
+ * therefore does two things:
+ *
+ * - the transport's closures read the LIVE inputs through per-field
+ *   getters over a latest-ref (`config`, `documentSummary`, … are resolved
+ *   at every `connect()`/fetch, never snapshotted), so ordinary input
+ *   changes need no new client at all;
+ * - a transport-currency change (the `connection` XOR `fetcher` arm — the
+ *   mode switch — or an injected seam) mints a NEW thread id, which is the
+ * one sanctioned rebuild trigger, seeded with the live transcript
+ * (`initialMessages`) so the swap never loses history.
  */
 export function useAgentChat(
   input: UseAgentChatInput,
 ): UseChatReturn<readonly AgentChatTool[]> {
-  const { config, documentSummary, reasoningOption, tools } = input;
+  const { config, tools } = input;
   const fetchOverride = input.fetch;
   const relayUrl = input.relayUrl;
   const createAdapter = input.createAdapter;
-  const transport = useMemo(
-    () =>
-      createAgentChatTransport(
-        { config, documentSummary, reasoningOption, tools },
-        {
-          ...(fetchOverride === undefined ? {} : { fetch: fetchOverride }),
-          ...(relayUrl === undefined ? {} : { relayUrl }),
-          ...(createAdapter === undefined ? {} : { createAdapter }),
-        },
-      ),
-    [
-      config,
-      createAdapter,
-      documentSummary,
-      fetchOverride,
-      reasoningOption,
-      relayUrl,
-      tools,
-    ],
+
+  // The latest-ref the transport's getter-input reads through.
+  const inputRef = useRef(input);
+  inputRef.current = input;
+
+  // The getter-input: one stable object whose fields resolve per read, so
+  // the memoized transport stays identity-stable while its behavior stays
+  // live. The transport rebuilds only when the CURRENCY changes (the mode
+  // arm) or an injected seam does.
+  const transportMode = config.mode;
+  const liveInput = useMemo<AgentChatTransportInput>(
+    () => ({
+      get config() {
+        return inputRef.current.config;
+      },
+      get documentSummary() {
+        return inputRef.current.documentSummary;
+      },
+      get reasoningOption() {
+        return inputRef.current.reasoningOption;
+      },
+      get tools() {
+        return inputRef.current.tools;
+      },
+    }),
+    [],
   );
-  return useChat({ ...transport, tools });
+  const transport = useMemo<ChatTransport>(() => {
+    const deps: AgentChatTransportDeps = {
+      ...(fetchOverride === undefined ? {} : { fetch: fetchOverride }),
+      ...(relayUrl === undefined ? {} : { relayUrl }),
+      ...(createAdapter === undefined ? {} : { createAdapter }),
+    };
+    // The same arm switch `createAgentChatTransport` performs, inlined so
+    // the mode is a TEXTUAL input of this memo: the currency must flip the
+    // transport's identity (a new client follows), while everything the
+    // arms read stays live through the getter-input.
+    return transportMode === "server"
+      ? { fetcher: createRelayFetcher(liveInput, deps) }
+      : { connection: createClientDirectConnection(liveInput, deps) };
+  }, [createAdapter, fetchOverride, liveInput, relayUrl, transportMode]);
+
+  // The rebuild trigger: a new thread id per transport identity, minted in
+  // the render-phase state adjustment (React's adjust-state-when-props-
+  // change pattern) so the client swap happens before anything renders.
+  const [clientThreadId, setClientThreadId] = useState(
+    () => `slopcad-agent-${globalThis.crypto.randomUUID()}`,
+  );
+  const transportRef = useRef(transport);
+  if (transportRef.current !== transport) {
+    transportRef.current = transport;
+    setClientThreadId(`slopcad-agent-${globalThis.crypto.randomUUID()}`);
+  }
+
+  // The transcript seed for a rebuild: the messages as of the previous
+  // render (the currency change comes from a settings save, which never
+  // touches the transcript). Ignored while the thread id is unchanged.
+  const transcriptSeedRef = useRef<readonly UIMessage[]>([]);
+  const chat = useChat({
+    ...transport,
+    initialMessages: [...transcriptSeedRef.current],
+    threadId: clientThreadId,
+    tools,
+  });
+  transcriptSeedRef.current = chat.messages;
+  return chat;
 }

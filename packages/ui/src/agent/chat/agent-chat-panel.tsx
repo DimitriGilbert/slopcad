@@ -146,8 +146,9 @@ export function AgentChatPanel({
   // The bridged client tools: one bridge per host-supplied surface.
   const tools = useMemo(() => createAgentTools(toolsSurface), [toolsSurface]);
   // The runtime hook (Phase 3.3). The document summary is read per render
-  // through the getter; equal strings keep the memoized transport stable
-  // (string deps compare by value), a changed document re-binds it.
+  // through the getter and consumed through the hook's live getter-input,
+  // so the memoized transport stays identity-stable across document
+  // changes — only a transport-currency change re-binds it.
   const chat = useAgentChat({
     config,
     documentSummary: getDocumentSummary(),
