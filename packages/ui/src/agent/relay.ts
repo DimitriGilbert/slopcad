@@ -30,15 +30,19 @@
  * `{ ok: false, code, message }`):
  *
  * 1. session — Better Auth, injected lookup — 401
- * 2. key-bearing payload — 400, D1's absolute refusal
- * 3. input schema — 400
- * 4. server-AI access (D13): the injected `isServerAiAllowed` resolver —
+ * 2. body size — the io endpoints' two-step cap (a declared oversize
+ *    `content-length` refused 413 before a byte is read, then an
+ *    incrementally cancelled read past `AGENT_RELAY_MAX_BODY_BYTES`) — 413
+ * 3. key-bearing payload — 400, D1's absolute refusal
+ * 4. input schema — 400; this gate also owns the scan's depth bound, so a
+ *    hostile deep-nested body is a structured 400, never a 500
+ * 5. server-AI access (D13): the injected `isServerAiAllowed` resolver —
  *    `@slopcad/api/user-options`'s single implementation (the caller's
  *    `user_options` row `agent.server-ai = "true"` OR the instance env
  *    `AGENT_SERVER_AI_ALLOW_ALL`) — 403
- * 5. the provider's env key (D6): present, else 422 naming the provider
+ * 6. the provider's env key (D6): present, else 422 naming the provider
  *    and its missing env var(s) — NEVER a fallback to another provider
- * 6. the real Phase 1.2 adapter + the real `chat()` + SSE. No mock seam
+ * 7. the real Phase 1.2 adapter + the real `chat()` + SSE. No mock seam
  *    exists in this path: the e2e harness points
  *    `OPENAI_COMPATIBLE_BASE_URL` at a loopback SSE server and exercises
  *    exactly this code (docs/architecture/adr-agent-chat.md).
@@ -62,16 +66,57 @@ import {
 } from "./providers";
 
 /**
+ * The most messages one relay request may carry. A conversation grows one
+ * user+assistant pair per turn, so 512 messages is far beyond any real
+ * session's history — while bounding the schema walk, the credential
+ * scan, and the provider payload the history rides to.
+ */
+const AGENT_RELAY_MAX_MESSAGES = 512;
+
+/**
+ * The most parts one relay message may carry — the same per-message bound
+ * the api package enforces on appended messages
+ * (`AGENT_MESSAGE_MAX_PARTS`, packages/api/src/limits.ts) and the
+ * workbench's persistence store rejects beyond. packages/ui cannot import
+ * @slopcad/api (dependency direction), so the number is pinned here with
+ * that cross-reference as its source of truth; if the api bound ever
+ * moves, this one moves with it.
+ */
+const AGENT_RELAY_MAX_MESSAGE_PARTS = 256;
+
+/**
+ * The longest acceptable `modelId` — catalog ids ("gpt-4o",
+ * "anthropic/claude-opus-4.6", openrouter's "vendor/model:variant") are
+ * tens of characters, so 128 is generous headroom over any real model id.
+ */
+const AGENT_RELAY_MODEL_ID_MAX_LENGTH = 128;
+
+/**
+ * The longest acceptable message part `type` — real part types ("text",
+ * "file", tool and data variants) are short tags, the same posture as the
+ * closed modelOptions' 64-character leaf bound.
+ */
+const AGENT_RELAY_PART_TYPE_MAX_LENGTH = 64;
+
+/**
  * One chat message as the browser sends it — TanStack AI's `UIMessage`
  * wire shape. `parts` (and the message itself) stay deliberately open:
  * typed exhaustiveness belongs to the Phase 3 parts model, and the relay
  * forwards the client's own history, so unknown part types ride through
- * to the adapter untouched.
+ * to the adapter untouched. Open does not mean unbounded: the message
+ * count, per-message part count, part type length, and `modelId` are all
+ * bounded so a single request cannot multiply provider spend or scan
+ * work arbitrarily (the D13 gate bounds turns, not input size).
  */
 const relayMessageSchema = z.looseObject({
   id: z.string().min(1),
   role: z.enum(["system", "user", "assistant"]),
-  parts: z.looseObject({ type: z.string().min(1) }).array(),
+  parts: z
+    .looseObject({
+      type: z.string().min(1).max(AGENT_RELAY_PART_TYPE_MAX_LENGTH),
+    })
+    .array()
+    .max(AGENT_RELAY_MAX_MESSAGE_PARTS),
 });
 
 /**
@@ -172,7 +217,10 @@ function nativeModelOptionsSchemaFor(provider: AgentProviderId) {
 export const agentRelayInputSchema = z
   .strictObject({
     provider: z.enum(AGENT_PROVIDER_IDS),
-    modelId: z.string().min(1),
+    modelId: z
+      .string()
+      .min(1)
+      .max(AGENT_RELAY_MODEL_ID_MAX_LENGTH),
     modelOptions: agentNativeModelOptionsSchema.optional(),
     maxIterations: z
       .number()
@@ -180,7 +228,7 @@ export const agentRelayInputSchema = z
       .min(1)
       .max(AGENT_RELAY_MAX_ITERATIONS)
       .optional(),
-    messages: z.array(relayMessageSchema).min(1),
+    messages: z.array(relayMessageSchema).min(1).max(AGENT_RELAY_MAX_MESSAGES),
   })
   .superRefine((value, ctx) => {
     // The per-provider half of the closed universe: a shape native to SOME
@@ -203,10 +251,23 @@ export const agentRelayInputSchema = z
     // unknown FIELDS out of the parsed value, the closed schema above is
     // the modelOptions subtree's structural proof (the scan's one
     // exemption), and this refine keeps credential-bearing fields out of
-    // the open (loose) message/part objects inside it.
-    for (const finding of findApiKeyLikeFields(value, "$", {
-      exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
-    })) {
+    // the open (loose) message/part objects inside it. The scan is
+    // depth-bounded; over-deep payloads become a schema issue here so a
+    // direct safeParse caller gets a 400-shaped refusal, never a thrown
+    // depth error.
+    let scanFindings: ApiKeyLikeFinding[];
+    try {
+      scanFindings = findApiKeyLikeFields(value, "$", {
+        exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
+      });
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message: `The payload nests deeper than the relay's ${String(API_KEY_SCAN_MAX_DEPTH)}-level scan bound.`,
+      });
+      return;
+    }
+    for (const finding of scanFindings) {
       ctx.addIssue({
         code: "custom",
         message: `Client API keys never cross to the server: credential field "${finding.field}" at ${finding.path}.`,
@@ -254,6 +315,35 @@ export interface ApiKeyLikeFinding {
   readonly path: string;
 }
 
+/**
+ * The deepest container nesting the credential scan descends into. Real
+ * relay payloads bottom out a handful of levels deep (message → part →
+ * metadata), so 64 is orders of magnitude beyond any legitimate history —
+ * while capping the scan's work on a hostile body, whose JSON may nest
+ * far deeper than any recursive walk should follow.
+ */
+export const API_KEY_SCAN_MAX_DEPTH = 64;
+
+/**
+ * Thrown by {@link findApiKeyLikeFields} when a payload nests deeper than
+ * {@link API_KEY_SCAN_MAX_DEPTH} (or a caller-supplied `maxDepth`).
+ * Callers catch it and answer 400 — the scan never recurses past the
+ * bound, so a hostile payload cannot overflow the stack into an
+ * unhandled RangeError/500.
+ */
+export class ApiKeyScanDepthError extends Error {
+  /** The depth bound that was exceeded. */
+  readonly maxDepth: number;
+
+  constructor(maxDepth: number) {
+    super(
+      `The payload nests deeper than the credential scan's ${String(maxDepth)}-level bound.`,
+    );
+    this.name = "ApiKeyScanDepthError";
+    this.maxDepth = maxDepth;
+  }
+}
+
 /** Options for {@link findApiKeyLikeFields}. */
 export interface ApiKeyLikeScanOptions {
   /**
@@ -262,6 +352,12 @@ export interface ApiKeyLikeScanOptions {
    * positional: fields of the same name at any deeper path are NOT exempt.
    */
   readonly exemptRootKeys?: readonly string[];
+  /**
+   * The deepest container nesting the scan descends into; deeper payloads
+   * throw {@link ApiKeyScanDepthError}. Defaults to
+   * {@link API_KEY_SCAN_MAX_DEPTH}.
+   */
+  readonly maxDepth?: number;
 }
 
 /**
@@ -279,7 +375,10 @@ export const API_KEY_SCAN_EXEMPT_ROOT_KEYS = ["modelOptions"] as const;
 /**
  * Deeply scans a JSON payload for apiKey-like FIELD names (never values —
  * a user typing a key into chat is their own text; the D1 invariant is
- * that the client SOFTWARE must never send keys as fields).
+ * that the client SOFTWARE must never send keys as fields). Depth-bounded:
+ * the walk refuses to recurse past the scan's depth bound and throws
+ * {@link ApiKeyScanDepthError} instead of following a hostile payload
+ * until the stack overflows.
  */
 export function findApiKeyLikeFields(
   value: unknown,
@@ -287,26 +386,34 @@ export function findApiKeyLikeFields(
   options: ApiKeyLikeScanOptions = {},
 ): ApiKeyLikeFinding[] {
   const findings: ApiKeyLikeFinding[] = [];
-  if (Array.isArray(value)) {
-    for (const [index, item] of value.entries()) {
-      findings.push(
-        ...findApiKeyLikeFields(item, `${path}[${String(index)}]`, options),
-      );
-    }
-    return findings;
-  }
-  if (value !== null && typeof value === "object") {
-    for (const [key, child] of Object.entries(value)) {
-      if (path === "$" && options.exemptRootKeys?.includes(key) === true) {
-        continue;
+  const maxDepth = options.maxDepth ?? API_KEY_SCAN_MAX_DEPTH;
+  const visit = (node: unknown, nodePath: string, depth: number): void => {
+    if (Array.isArray(node)) {
+      if (depth >= maxDepth) {
+        throw new ApiKeyScanDepthError(maxDepth);
       }
-      const childPath = `${path}.${key}`;
-      if (isApiKeyLikeFieldName(key)) {
-        findings.push({ field: key, path: childPath });
+      for (const [index, item] of node.entries()) {
+        visit(item, `${nodePath}[${String(index)}]`, depth + 1);
       }
-      findings.push(...findApiKeyLikeFields(child, childPath, options));
+      return;
     }
-  }
+    if (node !== null && typeof node === "object") {
+      if (depth >= maxDepth) {
+        throw new ApiKeyScanDepthError(maxDepth);
+      }
+      for (const [key, child] of Object.entries(node)) {
+        if (nodePath === "$" && options.exemptRootKeys?.includes(key) === true) {
+          continue;
+        }
+        const childPath = `${nodePath}.${key}`;
+        if (isApiKeyLikeFieldName(key)) {
+          findings.push({ field: key, path: childPath });
+        }
+        visit(child, childPath, depth + 1);
+      }
+    }
+  };
+  visit(value, path, 0);
   return findings;
 }
 
@@ -440,6 +547,61 @@ export interface AgentRelayDeps {
 export type AgentProviderModelOptions =
   AgentProviderAdapter["~types"]["providerOptions"];
 
+/**
+ * The largest relay request body the handler buffers, in bytes: 16 MiB.
+ * Chat histories legitimately carry multi-MiB base64 image parts — the api
+ * package bounds ONE appended message's serialized parts at 10 MiB
+ * (`AGENT_MESSAGE_PARTS_MAX_SERIALIZED_LENGTH`, packages/api/src/limits.ts)
+ * — so the cap sits one step above that per-message bound to admit a real
+ * multi-message history, while keeping the handler's buffering,
+ * JSON.parse, and credential scan proportional to something bounded.
+ * packages/ui cannot import @slopcad/api (dependency direction), so the
+ * number lives here with that cross-reference as its rationale.
+ */
+export const AGENT_RELAY_MAX_BODY_BYTES = 16 * 1024 * 1024;
+
+/** The outcome of an incrementally capped body read. */
+type CappedBodyRead =
+  | { readonly overCap: false; readonly bytes: Uint8Array }
+  | { readonly overCap: true; readonly received: number };
+
+/**
+ * Buffers the request body chunk by chunk — never one unbounded
+ * `arrayBuffer()` — aborting the read the moment the running byte count
+ * passes the cap (the reader is cancelled so the transport stops sending).
+ * The io endpoints' two-step body gate's second half
+ * (import-tsx-endpoint.ts / import-3mf-endpoint.ts), mirrored here because
+ * the relay's POST body is equally caller-chosen and nothing upstream
+ * bounds it.
+ */
+async function readCappedBody(request: Request): Promise<CappedBodyRead> {
+  if (request.body === null) {
+    return { overCap: false, bytes: new Uint8Array(0) };
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    received += value.byteLength;
+    if (received > AGENT_RELAY_MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      return { overCap: true, received };
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { overCap: false, bytes };
+}
+
 function relayFailure(status: number, code: string, message: string): Response {
   const payload: AgentRelayFailure = { ok: false, code, message };
   return Response.json(payload, { status });
@@ -459,9 +621,37 @@ export async function handleAgentRelayRequest(
     );
   }
 
+  // The io endpoints' two-step body gate, mirrored byte for byte: a
+  // declared oversize length is refused before a byte is read, then the
+  // read itself is capped incrementally so an under-declared or
+  // chunked body cannot buffer past the cap either.
+  const declaredLengthHeader = request.headers.get("content-length");
+  if (declaredLengthHeader !== null) {
+    const declaredLength = Number(declaredLengthHeader);
+    if (
+      Number.isFinite(declaredLength) &&
+      declaredLength > AGENT_RELAY_MAX_BODY_BYTES
+    ) {
+      return relayFailure(
+        413,
+        "agent-relay/payload-too-large",
+        `The relay request body exceeds the limit of ${String(AGENT_RELAY_MAX_BODY_BYTES)} bytes (declared ${declaredLengthHeader}).`,
+      );
+    }
+  }
+
+  const body = await readCappedBody(request);
+  if (body.overCap) {
+    return relayFailure(
+      413,
+      "agent-relay/payload-too-large",
+      `The relay request body exceeds the limit of ${String(AGENT_RELAY_MAX_BODY_BYTES)} bytes (received ${String(body.received)}).`,
+    );
+  }
+
   let payload: unknown;
   try {
-    payload = await request.json();
+    payload = JSON.parse(new TextDecoder().decode(body.bytes)) as unknown;
   } catch {
     return relayFailure(
       400,
@@ -474,9 +664,24 @@ export async function handleAgentRelayRequest(
   // refusal fires before any database work and names the offending field.
   // The same single modelOptions exemption applies: that subtree's proof
   // is its closed structure (checked by the schema next), never the scan.
-  const keyFindings = findApiKeyLikeFields(payload, "$", {
-    exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
-  });
+  // The scan is depth-bounded: a hostile deep-nested body throws
+  // ApiKeyScanDepthError, answered with a structured 400 — never an
+  // unhandled RangeError bubbling out of the handler as a 500.
+  let keyFindings: ApiKeyLikeFinding[];
+  try {
+    keyFindings = findApiKeyLikeFields(payload, "$", {
+      exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
+    });
+  } catch (error) {
+    if (error instanceof ApiKeyScanDepthError) {
+      return relayFailure(
+        400,
+        "agent-relay/payload-too-deep",
+        `The relay request body nests deeper than the relay's ${String(error.maxDepth)}-level scan bound; refusing it.`,
+      );
+    }
+    throw error;
+  }
   if (keyFindings.length > 0) {
     const fields = [...new Set(keyFindings.map((finding) => finding.field))]
       .map((field) => `"${field}"`)

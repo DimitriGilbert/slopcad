@@ -212,6 +212,47 @@ describe("mediaSourceSrc", () => {
       }),
     ).toBeNull();
   });
+
+  it("allowlists the data arm's mime, refusing the producer-controlled types that mint navigations", () => {
+    // The mirror of the url-arm refusal above: the SAME untrusted text/html
+    // must not render through the data arm either (the document renderer's
+    // anchor is the one navigational sink).
+    expect(
+      mediaSourceSrc({
+        type: "data",
+        value: "PHNjcmlwdD54PC9zY3JpcHQ+",
+        mimeType: "text/html",
+      }),
+    ).toBeNull();
+    expect(
+      mediaSourceSrc({ type: "data", value: "aGk=", mimeType: "text/plain" }),
+    ).toBeNull();
+    // The allowlisted families pass: the renderers' element arms.
+    expect(
+      mediaSourceSrc({ type: "data", value: "aGk=", mimeType: "image/png" }),
+    ).toBe("data:image/png;base64,aGk=");
+    expect(
+      mediaSourceSrc({ type: "data", value: "aGk=", mimeType: "audio/mpeg" }),
+    ).toBe("data:audio/mpeg;base64,aGk=");
+    expect(
+      mediaSourceSrc({ type: "data", value: "aGk=", mimeType: "video/mp4" }),
+    ).toBe("data:video/mp4;base64,aGk=");
+    // The one exact document type browsers render natively.
+    expect(
+      mediaSourceSrc({
+        type: "data",
+        value: "aGVsbG8=",
+        mimeType: "application/pdf",
+      }),
+    ).toBe("data:application/pdf;base64,aGVsbG8=");
+    expect(
+      mediaSourceSrc({
+        type: "data",
+        value: "aGVsbG8=",
+        mimeType: "application/zip",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("json display helpers", () => {
@@ -224,5 +265,14 @@ describe("json display helpers", () => {
   it("stringifies untyped payloads deterministically", () => {
     expect(stableJson({ b: 1, a: 2 })).toBe('{\n  "b": 1,\n  "a": 2\n}');
     expect(stableJson(undefined)).toBe("undefined");
+  });
+
+  it("renders the placeholder instead of throwing on wire-deep payloads", () => {
+    // The asymmetry band from the verified report: JSON.parse still accepts
+    // ~5000 nesting levels where JSON.stringify already throws (RangeError
+    // from ~4500) — reachable straight from streamed tool `arguments`.
+    const deep = parseLooseJson(`${"[".repeat(5000)}1${"]".repeat(5000)}`);
+    expect(Array.isArray(deep)).toBe(true);
+    expect(stableJson(deep)).toBe("[unrenderable JSON]");
   });
 });
