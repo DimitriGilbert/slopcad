@@ -131,6 +131,7 @@ describe("formatAgentSyncStatus", () => {
     state: "idle",
     pending: 0,
     failure: null,
+    stall: null,
   };
 
   it("renders nothing for the true quiet state", () => {
@@ -164,6 +165,7 @@ describe("formatAgentSyncStatus", () => {
         kind: "append-message";
         messageId: string | null;
       };
+      stall: null;
     } = {
       state: "failed",
       pending: 1,
@@ -173,6 +175,7 @@ describe("formatAgentSyncStatus", () => {
         kind: "append-message",
         messageId: "m-9",
       },
+      stall: null,
     };
     const line = formatAgentSyncStatus(failed);
     expect(line).toContain("message append");
@@ -189,6 +192,7 @@ describe("formatAgentSyncStatus", () => {
         error: "boom",
         messageId: null,
       },
+      stall: null,
     };
     expect(
       formatAgentSyncStatus({
@@ -208,5 +212,88 @@ describe("formatAgentSyncStatus", () => {
         failure: { ...base.failure, kind: "unexpected" },
       }),
     ).toContain("Sync failed at sync");
+  });
+
+  it("surfaces a terminal stall with its why, never silently", () => {
+    expect(
+      formatAgentSyncStatus({
+        ...quiet,
+        state: "stalled",
+        pending: 2,
+        stall: {
+          kind: "unsyncable-message",
+          reason: "conversation-deleted-remotely",
+        },
+      }),
+    ).toBe(
+      "2 change(s) cannot sync — the conversation was deleted on the server.",
+    );
+    expect(
+      formatAgentSyncStatus({
+        ...quiet,
+        state: "stalled",
+        pending: 1,
+        stall: { kind: "unsyncable-message", reason: "parts-too-large" },
+      }),
+    ).toBe(
+      "1 change(s) cannot sync — a message exceeds the server's size limit.",
+    );
+    expect(
+      formatAgentSyncStatus({
+        ...quiet,
+        state: "stalled",
+        pending: 1,
+        stall: { kind: "orphan-message" },
+      }),
+    ).toBe(
+      "1 change(s) cannot sync — a queued message's conversation no longer exists locally.",
+    );
+  });
+
+  it("accepts the app's richer stall shape (ids the line never reads)", () => {
+    // The app's AgentSyncStallReason rows carry conversation/message ids —
+    // proving the structural contract accepts them verbatim.
+    const appStalled: {
+      state: "stalled";
+      pending: number;
+      failure: null;
+      stall:
+        | {
+            readonly kind: "unsyncable-message";
+            readonly conversationId: string;
+            readonly messageId: string;
+            readonly reason:
+              "conversation-deleted-remotely" | "parts-too-large";
+          }
+        | {
+            readonly kind: "orphan-message";
+            readonly conversationId: string;
+            readonly messageId: string;
+          };
+    } = {
+      state: "stalled",
+      pending: 3,
+      failure: null,
+      stall: {
+        kind: "unsyncable-message",
+        conversationId: "conv-1",
+        messageId: "m-1",
+        reason: "parts-too-large",
+      },
+    };
+    expect(formatAgentSyncStatus(appStalled)).toBe(
+      "3 change(s) cannot sync — a message exceeds the server's size limit.",
+    );
+  });
+
+  it("renders a generic stall why when the verdict is missing (defensive)", () => {
+    expect(
+      formatAgentSyncStatus({
+        ...quiet,
+        state: "stalled",
+        pending: 4,
+        stall: null,
+      }),
+    ).toBe("4 change(s) cannot sync — no further detail is available.");
   });
 });

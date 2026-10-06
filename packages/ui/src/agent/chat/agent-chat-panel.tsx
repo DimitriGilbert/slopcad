@@ -388,7 +388,7 @@ export function AgentChatPanel({
               aria-label="Retry the last agent message"
               onClick={() => {
                 setSendError(null);
-                void chat.reload();
+                void controller.retryRun();
               }}
               size="xs"
               type="button"
