@@ -4,15 +4,18 @@
  * primitives, honest capability flags, kernel-computed normals (presence,
  * unit length, crease splitting), semantic fixtures with analytic
  * expectations, structured error paths including cross-kernel handles,
- * determinism across instances, and WASM disposal hygiene.
+ * determinism across instances, WASM disposal hygiene, and the eager
+ * deletion of every intermediate the operations construct (spy-probed on
+ * the engine's own embind prototypes).
  *
  * The WASM runtime is initialized once in a top-level `beforeAll`; every
  * test uses fresh kernel instances from it.
  */
 
 import { evaluateWire } from "@slopcad/cad-kernel";
-import { beforeAll, describe, expect, it } from "vitest";
-import { type LengthValue, length } from "@slopcad/cad-core";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { Manifold } from "manifold-3d";
+import { type LengthValue, angle, length } from "@slopcad/cad-core";
 import {
   assertAreaClose,
   assertBoundsEqual,
@@ -21,6 +24,7 @@ import {
   assertVolumeLessThan,
   createFakeKernel,
   expectKernelFailure,
+  type GeometryKernel,
   KERNEL_ERROR_CODES,
   type KernelSolid,
   tessellationTriangleCount,
@@ -40,11 +44,14 @@ import {
 import {
   createManifoldKernel,
   MANIFOLD_KERNEL_CAPABILITIES,
+  MANIFOLD_NORMALS_MIN_SHARP_ANGLE_DEGREES,
   manifoldKernelFromRuntime,
+  MANIFOLD_REVOLVE_CIRCULAR_SEGMENTS,
 } from "./manifold-kernel";
 import {
-  type ManifoldRuntime,
   createManifoldRuntime,
+  type ManifoldRuntime,
+  RUNTIME_BRAND,
 } from "./manifold-runtime";
 
 let runtime: ManifoldRuntime;
@@ -71,6 +78,63 @@ function box(
     }),
     "createBox",
   );
+}
+
+/**
+ * The embind prototypes that instance calls resolve through (probed on
+ * manifold-3d@3.5.3): the registered geometry methods (`transform`,
+ * `translate`) are own properties of the class prototype, and `delete`
+ * lives one level up on the shared handle prototype. Spying on the
+ * runtime's `Manifold` export itself would miss every instance call —
+ * the hygiene tests target these objects instead.
+ */
+interface EmbindSpyTargets {
+  classProto: {
+    transform: Manifold["transform"];
+    translate: Manifold["translate"];
+  };
+  handleProto: { delete: Manifold["delete"] };
+}
+
+/** Runtime guard for the registered-geometry-method prototype shape. */
+function isSpyClassProto(
+  value: unknown,
+): value is EmbindSpyTargets["classProto"] {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).transform === "function" &&
+    typeof (value as Record<string, unknown>).translate === "function"
+  );
+}
+
+/** Runtime guard for the shared embind handle prototype shape (`delete`). */
+function isSpyHandleProto(
+  value: unknown,
+): value is EmbindSpyTargets["handleProto"] {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Record<string, unknown>).delete === "function"
+  );
+}
+
+function embindSpyTargets(): EmbindSpyTargets {
+  const probe = runtime[RUNTIME_BRAND].Manifold.cube([1, 1, 1], false);
+  const classProto: unknown = Object.getPrototypeOf(probe);
+  probe.delete();
+  if (!isSpyClassProto(classProto)) {
+    throw new Error(
+      "Invariant violation: unexpected Manifold embind class prototype — the hygiene spies cannot target it.",
+    );
+  }
+  const handleProto: unknown = Object.getPrototypeOf(classProto);
+  if (!isSpyHandleProto(handleProto)) {
+    throw new Error(
+      "Invariant violation: unexpected Manifold embind handle prototype — the hygiene spies cannot target it.",
+    );
+  }
+  return { classProto, handleProto };
 }
 
 /** A non-finite length no typed constructor can produce: the parsed-document path. */
@@ -621,6 +685,490 @@ describe("manifold disposal hygiene", () => {
       unwrapKernelResult(kernel.bounds(union), "union bounds"),
       { min: [0, 0, 0], max: [40, 10, 10] },
     );
+  });
+});
+
+describe("manifold intermediate WASM hygiene", () => {
+  // Manifold-3d's embind wrappers are never garbage-collected (no smart
+  // pointer in manifold-3d@3.5.3, probed), so every intermediate an
+  // operation constructs must be `.delete()`d on every path — the shared
+  // per-intermediate `finally` discipline extrude, revolve, the scaled
+  // transform, and `section`'s tool chain all follow. The exact delete
+  // counts below are the
+  // adapter's constructed-intermediate counts per call: the bare-
+  // constructor probe at the start of each engine-constructor test
+  // measures (and stays clear of) the delete churn the extrude/revolve
+  // bindings perform on their own internal polygon vectors, which the
+  // adapter cannot address and the binding already frees. The injected
+  // engine faults exercise the failure paths that structured validation
+  // cannot reach (every validation failure fires before any
+  // construction).
+
+  function extrudeSquare(
+    direction: 1 | -1,
+  ): Parameters<GeometryKernel["extrude"]>[0] {
+    return {
+      loop: [
+        { kind: "line", start: [0, 0], end: [10, 0] },
+        { kind: "line", start: [10, 0], end: [10, 10] },
+        { kind: "line", start: [10, 10], end: [0, 10] },
+        { kind: "line", start: [0, 10], end: [0, 0] },
+      ],
+      height: length(5),
+      direction,
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: length(0), y: length(0), z: length(0) },
+      },
+    };
+  }
+
+  function quarterRevolve(): Parameters<GeometryKernel["revolve"]>[0] {
+    return {
+      loop: [
+        { kind: "line", start: [0, 0], end: [30, 0] },
+        { kind: "line", start: [30, 0], end: [30, 25] },
+        { kind: "line", start: [30, 25], end: [0, 25] },
+        { kind: "line", start: [0, 25], end: [0, 0] },
+      ],
+      axis: { point: [0, 0], direction: [1, 0] },
+      angle: angle(Math.PI / 2, "rad"),
+      placement: {
+        rotation: { axis: [0, 0, 1], angle: angle(0) },
+        translation: { x: length(0), y: length(0), z: length(0) },
+      },
+    };
+  }
+
+  /** A mid-height plane through a 30 × 20 × 10 box: cap 600 mm², kept half 3000 mm³. */
+  function midBoxSection(
+    target: KernelSolid,
+  ): Parameters<GeometryKernel["section"]>[0] {
+    return {
+      target,
+      origin: [length(0), length(0), length(5)],
+      normal: [0, 0, 1],
+      keepSide: 1,
+    };
+  }
+
+  it("deletes every extrude intermediate on the success path, both directions", () => {
+    const kernel = makeKernel();
+    const { handleProto } = embindSpyTargets();
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    // Binding-churn calibration (the extrude binding frees its own
+    // internal polygon vectors during the constructor call itself —
+    // measured before the probe prism's own delete).
+    const bindingPrism = runtime[RUNTIME_BRAND].Manifold.extrude(
+      [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+        ],
+      ],
+      5,
+    );
+    const bindingChurn = deleteSpy.mock.calls.length;
+    bindingPrism.delete();
+    deleteSpy.mockClear();
+    try {
+      const down = unwrapKernelResult(
+        kernel.extrude(extrudeSquare(-1)),
+        "negative extrude",
+      );
+      // The −1 direction constructs two intermediates — the raw prism and
+      // its translated copy — and frees both.
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 2);
+      deleteSpy.mockClear();
+      const up = unwrapKernelResult(
+        kernel.extrude(extrudeSquare(1)),
+        "positive extrude",
+      );
+      // The +1 direction's placement aliases the raw prism: exactly one
+      // intermediate, freed once.
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 1);
+      // The lazily-evaluated placements survived the deletes (the C++
+      // side is reference-counted): both solids stay live and measure
+      // their exact volumes.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(down), "down volume"),
+        500,
+        1e-9,
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(up), "up volume"),
+        500,
+        1e-9,
+      );
+    } finally {
+      deleteSpy.mockRestore();
+    }
+  });
+
+  it("deletes the revolve intermediate on the success path", () => {
+    const kernel = makeKernel();
+    const { handleProto } = embindSpyTargets();
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    // Binding-churn calibration (the revolve binding frees its own
+    // internal polygon vectors during the constructor call itself —
+    // measured before the probe sweep's own delete).
+    const bindingSweep = runtime[RUNTIME_BRAND].Manifold.revolve(
+      [
+        [
+          [0, 0],
+          [30, 0],
+          [30, 25],
+          [0, 25],
+        ],
+      ],
+      MANIFOLD_REVOLVE_CIRCULAR_SEGMENTS,
+      90,
+    );
+    const bindingChurn = deleteSpy.mock.calls.length;
+    bindingSweep.delete();
+    deleteSpy.mockClear();
+    try {
+      const solid = unwrapKernelResult(
+        kernel.revolve(quarterRevolve()),
+        "quarter revolve",
+      );
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 1);
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "quarter volume"),
+        (Math.PI * 25 ** 2 * 30) / 4,
+        0.001,
+      );
+    } finally {
+      deleteSpy.mockRestore();
+    }
+  });
+
+  it("deletes the scaled transform copy but never the session-owned source", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 10, 10, 10);
+    const { handleProto } = embindSpyTargets();
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    try {
+      const scaled = unwrapKernelResult(
+        kernel.transform(solid, {
+          x: length(0),
+          y: length(0),
+          z: length(0),
+          scale: 2,
+        }),
+        "scaled transform",
+      );
+      // The scale branch constructs exactly one intermediate — the scaled
+      // copy — freed once; the session-owned source stays untouched.
+      expect(deleteSpy.mock.calls.length).toBe(1);
+      deleteSpy.mockClear();
+      const moved = unwrapKernelResult(
+        kernel.transform(solid, { x: length(5), y: length(0), z: length(0) }),
+        "moved transform",
+      );
+      // The no-scale path constructs no intermediate at all.
+      expect(deleteSpy.mock.calls.length).toBe(0);
+      // Source and both results stay live and correct.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "source volume"),
+        1000,
+        1e-9,
+      );
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(scaled), "scaled bounds"),
+        { min: [0, 0, 0], max: [20, 20, 20] },
+      );
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(scaled), "scaled volume"),
+        8000,
+        1e-9,
+      );
+      assertBoundsEqual(
+        unwrapKernelResult(kernel.bounds(moved), "moved bounds"),
+        { min: [5, 0, 0], max: [15, 10, 10] },
+      );
+    } finally {
+      deleteSpy.mockRestore();
+    }
+  });
+
+  it("deletes every extrude intermediate when the placement engine call throws", () => {
+    const kernel = makeKernel();
+    const { classProto, handleProto } = embindSpyTargets();
+    const transformSpy = vi.spyOn(classProto, "transform");
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    // Binding-churn calibration (the extrude binding frees its own
+    // internal polygon vectors during the constructor call itself —
+    // measured before the probe prism's own delete).
+    const bindingPrism = runtime[RUNTIME_BRAND].Manifold.extrude(
+      [
+        [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+        ],
+      ],
+      5,
+    );
+    const bindingChurn = deleteSpy.mock.calls.length;
+    bindingPrism.delete();
+    deleteSpy.mockClear();
+    try {
+      transformSpy.mockImplementationOnce(() => {
+        throw new Error("simulated engine fault");
+      });
+      const failure = expectKernelFailure(
+        kernel.extrude(extrudeSquare(1)),
+        KERNEL_ERROR_CODES.invalidProfile,
+        "faulted positive extrude",
+      );
+      expect(failure.message).toContain("simulated engine fault");
+      // The raw prism is the +1 direction's only intermediate — freed
+      // even though the placement threw (the boundary normalizes the
+      // throw into the structured failure).
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 1);
+      deleteSpy.mockClear();
+      transformSpy.mockImplementationOnce(() => {
+        throw new Error("simulated engine fault");
+      });
+      const negativeFailure = expectKernelFailure(
+        kernel.extrude(extrudeSquare(-1)),
+        KERNEL_ERROR_CODES.invalidProfile,
+        "faulted negative extrude",
+      );
+      expect(negativeFailure.message).toContain("simulated engine fault");
+      // The −1 direction: the raw prism and its translated copy both
+      // exist by the time the placement throws — both freed.
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 2);
+    } finally {
+      deleteSpy.mockRestore();
+      transformSpy.mockRestore();
+    }
+  });
+
+  it("deletes the revolve intermediate when the placement engine call throws", () => {
+    const kernel = makeKernel();
+    const { classProto, handleProto } = embindSpyTargets();
+    const transformSpy = vi.spyOn(classProto, "transform");
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    // Binding-churn calibration (the revolve binding frees its own
+    // internal polygon vectors during the constructor call itself —
+    // measured before the probe sweep's own delete).
+    const bindingSweep = runtime[RUNTIME_BRAND].Manifold.revolve(
+      [
+        [
+          [0, 0],
+          [30, 0],
+          [30, 25],
+          [0, 25],
+        ],
+      ],
+      MANIFOLD_REVOLVE_CIRCULAR_SEGMENTS,
+      90,
+    );
+    const bindingChurn = deleteSpy.mock.calls.length;
+    bindingSweep.delete();
+    deleteSpy.mockClear();
+    try {
+      transformSpy.mockImplementationOnce(() => {
+        throw new Error("simulated engine fault");
+      });
+      const failure = expectKernelFailure(
+        kernel.revolve(quarterRevolve()),
+        KERNEL_ERROR_CODES.invalidProfile,
+        "faulted revolve",
+      );
+      expect(failure.message).toContain("simulated engine fault");
+      // The revolved sweep is the operation's only intermediate — freed
+      // even though the placement threw.
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 1);
+    } finally {
+      deleteSpy.mockRestore();
+      transformSpy.mockRestore();
+    }
+  });
+
+  it("deletes the scaled copy and keeps the source live when the translate engine call throws", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 10, 10, 10);
+    const { classProto, handleProto } = embindSpyTargets();
+    const translateSpy = vi.spyOn(classProto, "translate");
+    translateSpy.mockImplementationOnce(() => {
+      throw new Error("simulated engine fault");
+    });
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    try {
+      const failure = expectKernelFailure(
+        kernel.transform(solid, {
+          x: length(1),
+          y: length(0),
+          z: length(0),
+          scale: 2,
+        }),
+        KERNEL_ERROR_CODES.invalidLength,
+        "faulted scaled transform",
+      );
+      expect(failure.message).toContain("simulated engine fault");
+      // The scaled copy is freed despite the throw; the session-owned
+      // source handle is not, and stays measurable.
+      expect(deleteSpy.mock.calls.length).toBe(1);
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(solid), "source volume"),
+        1000,
+        1e-9,
+      );
+    } finally {
+      deleteSpy.mockRestore();
+      translateSpy.mockRestore();
+    }
+  });
+
+  it("deletes every section intermediate on the success path and keeps the cut", () => {
+    const kernel = makeKernel();
+    const target = box(kernel, 30, 20, 10);
+    const { handleProto } = embindSpyTargets();
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    // Binding-churn calibration: the section chain's own binding calls —
+    // cube, translate, transform, difference, and the tessellation's
+    // calculateNormals — may free internal vectors of their own, measured
+    // on a probe tool build before the probe handles' own deletes.
+    const ctor = runtime[RUNTIME_BRAND].Manifold;
+    const probeTarget = ctor.cube([30, 20, 10], false);
+    const probePrism = ctor.cube([60, 60, 20], false);
+    const probeShifted = probePrism.translate(-30, -30, 0);
+    const probeTool = probeShifted.transform([
+      1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 0, 0, 1,
+    ]);
+    const probeCut = ctor.difference([probeTarget, probeTool]);
+    const probeSoup = probeCut.calculateNormals(
+      0,
+      MANIFOLD_NORMALS_MIN_SHARP_ANGLE_DEGREES,
+    );
+    const bindingChurn = deleteSpy.mock.calls.length;
+    probeTarget.delete();
+    probePrism.delete();
+    probeShifted.delete();
+    probeTool.delete();
+    probeCut.delete();
+    probeSoup.delete();
+    deleteSpy.mockClear();
+    try {
+      const cut = unwrapKernelResult(
+        kernel.section(midBoxSection(target)),
+        "section",
+      );
+      // The tool chain frees its prism, shifted copy, and tool, and the
+      // tessellation frees its normals-bearing copy — four deletes; the
+      // cut itself survives as the returned solid's handle.
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 4);
+      // The surviving cut stays live and measures its kept half exactly,
+      // and the cap area reads off the same mesh.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(cut.solid), "cut volume"),
+        3000,
+        1e-9,
+      );
+      expect(cut.section.areaMm2).toBeCloseTo(600, 9);
+    } finally {
+      deleteSpy.mockRestore();
+    }
+  });
+
+  it("deletes every section intermediate when the tool placement engine call throws", () => {
+    const kernel = makeKernel();
+    const target = box(kernel, 30, 20, 10);
+    const { classProto, handleProto } = embindSpyTargets();
+    const transformSpy = vi.spyOn(classProto, "transform");
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    // Binding-churn calibration: the cube and translate bindings' own
+    // internal deletes, if any — the faulted transform never completes,
+    // so its churn is absent from the faulted call too. Measured before
+    // the probe handles' own deletes.
+    const ctor = runtime[RUNTIME_BRAND].Manifold;
+    const probePrism = ctor.cube([60, 60, 20], false);
+    const probeShifted = probePrism.translate(-30, -30, 0);
+    const bindingChurn = deleteSpy.mock.calls.length;
+    probePrism.delete();
+    probeShifted.delete();
+    deleteSpy.mockClear();
+    try {
+      transformSpy.mockImplementationOnce(() => {
+        throw new Error("simulated engine fault");
+      });
+      const failure = expectKernelFailure(
+        kernel.section(midBoxSection(target)),
+        KERNEL_ERROR_CODES.invalidLength,
+        "faulted section tool placement",
+      );
+      expect(failure.message).toContain("simulated engine fault");
+      // The prism and its shifted copy both exist by the time the
+      // placement throws — both freed by their finallys, and the boundary
+      // normalizes the throw into the structured invalid-length refusal.
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 2);
+      // The session-owned target never reached a boolean: still live.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(target), "target volume"),
+        6000,
+        1e-9,
+      );
+    } finally {
+      deleteSpy.mockRestore();
+      transformSpy.mockRestore();
+    }
+  });
+
+  it("deletes the section tool chain when the boolean engine call throws", () => {
+    const kernel = makeKernel();
+    const target = box(kernel, 30, 20, 10);
+    const { classProto, handleProto } = embindSpyTargets();
+    const transformSpy = vi.spyOn(classProto, "transform");
+    const differenceSpy = vi.spyOn(
+      runtime[RUNTIME_BRAND].Manifold,
+      "difference",
+    );
+    const deleteSpy = vi.spyOn(handleProto, "delete");
+    // Binding-churn calibration: the cube, translate, and transform
+    // bindings' own internal deletes — the faulted difference never
+    // starts, so its churn is absent from the faulted call too. Measured
+    // before the probe handles' own deletes.
+    const ctor = runtime[RUNTIME_BRAND].Manifold;
+    const probePrism = ctor.cube([60, 60, 20], false);
+    const probeShifted = probePrism.translate(-30, -30, 0);
+    const probeTool = probeShifted.transform([
+      1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 0, 0, 1,
+    ]);
+    const bindingChurn = deleteSpy.mock.calls.length;
+    probePrism.delete();
+    probeShifted.delete();
+    probeTool.delete();
+    deleteSpy.mockClear();
+    try {
+      differenceSpy.mockImplementationOnce(() => {
+        throw new Error("simulated engine fault");
+      });
+      const failure = expectKernelFailure(
+        kernel.section(midBoxSection(target)),
+        KERNEL_ERROR_CODES.invalidLength,
+        "faulted section boolean",
+      );
+      expect(failure.message).toContain("simulated engine fault");
+      // Prism, shifted copy, and tool all exist by the time the boolean
+      // throws — all three freed by their finallys.
+      expect(deleteSpy.mock.calls.length).toBe(bindingChurn + 3);
+      // The session-owned target never entered the faulted boolean: live.
+      assertVolumeClose(
+        unwrapKernelResult(kernel.volume(target), "target volume"),
+        6000,
+        1e-9,
+      );
+    } finally {
+      deleteSpy.mockRestore();
+      transformSpy.mockRestore();
+      differenceSpy.mockRestore();
+    }
   });
 });
 

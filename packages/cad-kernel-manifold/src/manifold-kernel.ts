@@ -104,6 +104,20 @@
  * WASM heap into plain arrays before deleting its temporary
  * normals-bearing manifold, so returned buffers never alias WASM memory.
  *
+ * Operation intermediates follow the same discipline eagerly, on every
+ * path: every constructed `Manifold` is deleted by a `finally` on every
+ * path on which it did not become the returned handle — extrude's prism
+ * (and its −direction translated copy), revolve's sweep, the scale
+ * branch's scaled copy, tessellate's normals-bearing copy, and section's
+ * tool prism, shifted copy, and tool die on success, on the structured-
+ * failure path, and on an engine throw the no-throw boundary normalizes,
+ * while section's cut is freed by its `finally` on the structured-failure
+ * and engine-throw paths and survives only the success path, where the
+ * returned handle owns it. Verified against manifold-3d@3.5.3: these
+ * embind wrappers carry no smart pointer, so the engine's finalizer never
+ * registers them for collection — one un-deleted intermediate per call is
+ * a permanent WASM-heap leak in the long-lived regeneration worker.
+ *
  * ## Normals
  *
  * `tessellate` asks Manifold to compute crease-aware vertex normals
@@ -458,45 +472,59 @@ export function manifoldKernelFromRuntime(
   const tessellateManifold = (manifold: Manifold): Tessellation => {
     // Kernel-computed normals: Manifold writes unit normals into property
     // channels 3-5 (numProp >= 6); everything is copied out of the WASM
-    // heap before the temporary normals-bearing manifold is deleted.
+    // heap into plain arrays before the temporary normals-bearing
+    // manifold is deleted — in a `finally`, the shared per-intermediate
+    // discipline, so a throw mid-copy frees the temporary too and the
+    // returned buffers never alias WASM memory.
     const withNormals = manifold.calculateNormals(
       0,
       MANIFOLD_NORMALS_MIN_SHARP_ANGLE_DEGREES,
     );
-    const mesh = withNormals.getMesh();
-    const numProp = mesh.numProp;
-    const vertexCount = mesh.numVert;
-    const positions: number[] = new Array<number>(vertexCount * 3);
-    const normals: number[] | undefined =
-      numProp >= 6 ? new Array<number>(vertexCount * 3) : undefined;
-    for (let v = 0; v < vertexCount; v += 1) {
-      const base = v * numProp;
-      positions[v * 3] = flatAt(mesh.vertProperties, base, "position x");
-      positions[v * 3 + 1] = flatAt(
-        mesh.vertProperties,
-        base + 1,
-        "position y",
-      );
-      positions[v * 3 + 2] = flatAt(
-        mesh.vertProperties,
-        base + 2,
-        "position z",
-      );
-      if (normals !== undefined) {
-        normals[v * 3] = flatAt(mesh.vertProperties, base + 3, "normal x");
-        normals[v * 3 + 1] = flatAt(mesh.vertProperties, base + 4, "normal y");
-        normals[v * 3 + 2] = flatAt(mesh.vertProperties, base + 5, "normal z");
+    try {
+      const mesh = withNormals.getMesh();
+      const numProp = mesh.numProp;
+      const vertexCount = mesh.numVert;
+      const positions: number[] = new Array<number>(vertexCount * 3);
+      const normals: number[] | undefined =
+        numProp >= 6 ? new Array<number>(vertexCount * 3) : undefined;
+      for (let v = 0; v < vertexCount; v += 1) {
+        const base = v * numProp;
+        positions[v * 3] = flatAt(mesh.vertProperties, base, "position x");
+        positions[v * 3 + 1] = flatAt(
+          mesh.vertProperties,
+          base + 1,
+          "position y",
+        );
+        positions[v * 3 + 2] = flatAt(
+          mesh.vertProperties,
+          base + 2,
+          "position z",
+        );
+        if (normals !== undefined) {
+          normals[v * 3] = flatAt(mesh.vertProperties, base + 3, "normal x");
+          normals[v * 3 + 1] = flatAt(
+            mesh.vertProperties,
+            base + 4,
+            "normal y",
+          );
+          normals[v * 3 + 2] = flatAt(
+            mesh.vertProperties,
+            base + 5,
+            "normal z",
+          );
+        }
       }
+      const triangleCount = mesh.numTri;
+      const indices: number[] = new Array<number>(triangleCount * 3);
+      for (let i = 0; i < triangleCount * 3; i += 1) {
+        indices[i] = flatAt(mesh.triVerts, i, "triangle index");
+      }
+      return normals === undefined
+        ? { positions, indices }
+        : { positions, indices, normals };
+    } finally {
+      withNormals.delete();
     }
-    const triangleCount = mesh.numTri;
-    const indices: number[] = new Array<number>(triangleCount * 3);
-    for (let i = 0; i < triangleCount * 3; i += 1) {
-      indices[i] = flatAt(mesh.triVerts, i, "triangle index");
-    }
-    withNormals.delete();
-    return normals === undefined
-      ? { positions, indices }
-      : { positions, indices, normals };
   };
 
   return {
@@ -786,16 +814,12 @@ export function manifoldKernelFromRuntime(
         const contour = ordered.map(
           (point: ProfilePoint2) => [point.x, point.y] as [number, number],
         );
-        // Manifold.extrude spans z ∈ [0, height]; the negative direction
-        // shifts the finished prism to [−height, 0] before placement.
-        const prism = manifoldCtor.extrude([contour], height.value);
-        const oriented =
-          input.direction === -1 ? prism.translate(0, 0, -height.value) : prism;
-        if (input.direction === -1) prism.delete();
         // Placement: one column-major 4×4 affine (rotation, then
         // translation — the contract's composition order). The engine's
         // own `Mat4` tuple type carries the WASM binding's shape, so the
         // literal needs no cast (the Phase 41 `transformScale` precedent).
+        // Computed before the engine call below so the prism is the
+        // operation's only live intermediate.
         const r = axisAngleMatrix(axis, angle);
         const mat4: Mat4 = [
           r[0]?.[0] ?? 0,
@@ -815,7 +839,31 @@ export function manifoldKernelFromRuntime(
           translation[2],
           1,
         ];
-        return ok(wrapSolid(oriented.transform(mat4)));
+        // Manifold.extrude spans z ∈ [0, height]; the negative direction
+        // shifts the finished prism to [−height, 0] before placement.
+        // `oriented` is the operation's single intermediate — the raw
+        // prism, or in the −1 direction its translated copy (the raw
+        // prism dies the moment the copy exists). The finally frees it on
+        // every path — a throw out of the engine's transform bindings
+        // included — the shared per-intermediate `finally` discipline
+        // (revolve, the scaled transform, and `section`'s tool chain
+        // construct the same way): these embind wrappers are never
+        // garbage-collected (no smart pointer in manifold-3d@3.5.3), so
+        // each un-deleted intermediate is a permanent WASM-heap leak. The
+        // engine's C++ side is reference-counted, so the lazily-evaluated
+        // placement result stays correct after the delete; it is the
+        // session-owned handle.
+        const prism = manifoldCtor.extrude([contour], height.value);
+        let oriented = prism;
+        try {
+          if (input.direction === -1) {
+            oriented = prism.translate(0, 0, -height.value);
+            prism.delete();
+          }
+          return ok(wrapSolid(oriented.transform(mat4)));
+        } finally {
+          oriented.delete();
+        }
       });
     },
 
@@ -974,18 +1022,10 @@ export function manifoldKernelFromRuntime(
         const contour = ordered.map(
           (point) => [point.x, point.y] as [number, number],
         );
-        // Manifold.revolve spins the contour about the +z axis with the
-        // profile starting at +x and sweeping counter-clockwise (probed);
-        // 63 circular segments pins the shared mesh-kernel deflection
-        // (2π/63 ≈ 0.0997 rad per chord) without touching the engine's
-        // global segment settings. The composed placement maps the engine
-        // frame onto the contract's axis frame, then applies the contract
-        // placement (see revolutionMeshTransform).
-        const revolved = manifoldCtor.revolve(
-          [contour],
-          MANIFOLD_REVOLVE_CIRCULAR_SEGMENTS,
-          (sweep * 180) / Math.PI,
-        );
+        // The composed placement maps the engine frame onto the contract's
+        // axis frame, then applies the contract placement (see
+        // revolutionMeshTransform) — computed before the engine call below
+        // so the revolved sweep is the operation's only live intermediate.
         const placement = revolutionMeshTransform(
           frame,
           positiveSide,
@@ -1012,7 +1052,27 @@ export function manifoldKernelFromRuntime(
           t[2],
           1,
         ];
-        return ok(wrapSolid(revolved.transform(mat4)));
+        // Manifold.revolve spins the contour about the +z axis with the
+        // profile starting at +x and sweeping counter-clockwise (probed);
+        // 63 circular segments pins the shared mesh-kernel deflection
+        // (2π/63 ≈ 0.0997 rad per chord) without touching the engine's
+        // global segment settings. `revolved` is an intermediate freed on
+        // every path — a throw out of the engine's transform bindings
+        // included — the same per-intermediate `finally` discipline as
+        // extrude, the scaled transform, and `section`'s tool chain (these
+        // embind wrappers are never garbage-collected); the engine's
+        // reference-counted laziness keeps the placement result, the
+        // session-owned handle, correct after the delete.
+        const revolved = manifoldCtor.revolve(
+          [contour],
+          MANIFOLD_REVOLVE_CIRCULAR_SEGMENTS,
+          (sweep * 180) / Math.PI,
+        );
+        try {
+          return ok(wrapSolid(revolved.transform(mat4)));
+        } finally {
+          revolved.delete();
+        }
       });
     },
 
@@ -1305,54 +1365,85 @@ export function manifoldKernelFromRuntime(
               : 0,
           ),
         );
+        // The tool chain builds prism → shifted → tool → cut, each step
+        // consuming the previous intermediate. Every constructed
+        // `Manifold` carries its own `finally` (the same per-intermediate
+        // discipline as extrude, revolve, and the scaled transform): a
+        // throw out of any later engine call frees the still-live
+        // intermediates exactly as the sequential deletes do on the
+        // success path — these embind wrappers are never garbage-collected
+        // (no smart pointer in manifold-3d@3.5.3), so an un-deleted
+        // intermediate is a permanent WASM-heap leak.
         const prism = manifoldCtor.cube(
           [2 * half, 2 * half, plan.toolHeightMm],
           false,
         );
-        const shifted = prism.translate(-half, -half, 0);
-        prism.delete();
-        const r = axisAngleMatrix(
-          plan.toolRotationAxis,
-          plan.toolRotationAngleRad,
-        );
-        const mat4: Mat4 = [
-          r[0]?.[0] ?? 0,
-          r[1]?.[0] ?? 0,
-          r[2]?.[0] ?? 0,
-          0,
-          r[0]?.[1] ?? 0,
-          r[1]?.[1] ?? 0,
-          r[2]?.[1] ?? 0,
-          0,
-          r[0]?.[2] ?? 0,
-          r[1]?.[2] ?? 0,
-          r[2]?.[2] ?? 0,
-          0,
-          plan.toolTranslationMm[0],
-          plan.toolTranslationMm[1],
-          plan.toolTranslationMm[2],
-          1,
-        ];
-        const tool = shifted.transform(mat4);
-        shifted.delete();
-        const cut = manifoldCtor.difference([targetManifold.value, tool]);
-        tool.delete();
-        // The section face, measured over the cut solid's own boundary:
-        // the cap triangles (every corner within the plane tolerance),
-        // summed exactly over that mesh — the mesh-tessellated-honest
-        // band the contract documents for this kernel.
-        const soup = tessellateManifold(cut);
-        const measure = capFaceMeasure(soup, origin, n);
-        if (measure === null) {
-          cut.delete();
-          return fail(
-            kernelError(
-              KERNEL_ERROR_CODES.sectionEmpty,
-              "section rejected the plane: it misses or grazes the target (no cap face lies in the plane), so there is no cross-section face to measure.",
-            ),
-          );
+        try {
+          const shifted = prism.translate(-half, -half, 0);
+          try {
+            const r = axisAngleMatrix(
+              plan.toolRotationAxis,
+              plan.toolRotationAngleRad,
+            );
+            const mat4: Mat4 = [
+              r[0]?.[0] ?? 0,
+              r[1]?.[0] ?? 0,
+              r[2]?.[0] ?? 0,
+              0,
+              r[0]?.[1] ?? 0,
+              r[1]?.[1] ?? 0,
+              r[2]?.[1] ?? 0,
+              0,
+              r[0]?.[2] ?? 0,
+              r[1]?.[2] ?? 0,
+              r[2]?.[2] ?? 0,
+              0,
+              plan.toolTranslationMm[0],
+              plan.toolTranslationMm[1],
+              plan.toolTranslationMm[2],
+              1,
+            ];
+            const tool = shifted.transform(mat4);
+            try {
+              const cut = manifoldCtor.difference([targetManifold.value, tool]);
+              // `cut` is the operation's result: the finally frees it on
+              // every path that does not hand it to the returned solid —
+              // the missed-plane refusal and an engine throw out of the
+              // tessellation included — and keeps it on the success path,
+              // where the returned handle owns it.
+              let owned = false;
+              try {
+                // The section face, measured over the cut solid's own
+                // boundary: the cap triangles (every corner within the
+                // plane tolerance), summed exactly over that mesh — the
+                // mesh-tessellated-honest band the contract documents for
+                // this kernel.
+                const soup = tessellateManifold(cut);
+                const measure = capFaceMeasure(soup, origin, n);
+                if (measure === null) {
+                  return fail(
+                    kernelError(
+                      KERNEL_ERROR_CODES.sectionEmpty,
+                      "section rejected the plane: it misses or grazes the target (no cap face lies in the plane), so there is no cross-section face to measure.",
+                    ),
+                  );
+                }
+                owned = true;
+                return ok({ solid: wrapSolid(cut), section: measure });
+              } finally {
+                if (!owned) {
+                  cut.delete();
+                }
+              }
+            } finally {
+              tool.delete();
+            }
+          } finally {
+            shifted.delete();
+          }
+        } finally {
+          prism.delete();
         }
-        return ok({ solid: wrapSolid(cut), section: measure });
       });
     },
 
@@ -1402,7 +1493,6 @@ export function manifoldKernelFromRuntime(
         // translation — the contract's p ↦ s·R·p + t order. A positive
         // factor keeps the determinant positive, so the engine's winding
         // stands untouched.
-        let scaled = manifold.value;
         if (translation.scale !== undefined) {
           if (!(translation.scale > 0) || !Number.isFinite(translation.scale)) {
             return fail(
@@ -1434,9 +1524,23 @@ export function manifoldKernelFromRuntime(
             0,
             1,
           ];
-          scaled = manifold.value.transform(scaleMatrix);
+          // The scaled copy is an intermediate this operation owns — the
+          // session-owned source handle is never freed here. The finally
+          // releases the copy on every path (a throw out of the engine's
+          // translate bindings included), the same discipline as extrude,
+          // revolve, and `section`: these embind wrappers are never
+          // garbage-collected, and the engine's reference-counted
+          // laziness keeps the translated result correct after the delete.
+          const scaled = manifold.value.transform(scaleMatrix);
+          try {
+            return ok(wrapSolid(scaled.translate(x, y, z)));
+          } finally {
+            scaled.delete();
+          }
         }
-        return ok(wrapSolid(scaled.translate(x, y, z)));
+        // The no-scale path constructs no intermediate: the translated
+        // result rides the session-owned handle itself.
+        return ok(wrapSolid(manifold.value.translate(x, y, z)));
       });
     },
 
