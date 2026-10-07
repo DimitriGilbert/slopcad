@@ -9,7 +9,10 @@
  * The model set walks the vocabulary's breadth: primitives and booleans,
  * the sketch-driven producers (extrude, revolve, loft), the guide's hub
  * mount (parameters, shared `<Use>` references, a `<Body>` capture), a
- * shared-input model (one feature consumed by two later features), and a
+ * shared-input model (one feature consumed by two later features), a
+ * sketch holding ADJACENT rectangles (the chained-lines fold must keep
+ * every one), a feature whose output body carries a foreign id with a
+ * coincidental display name (the `<Body>` wrapper must survive), and a
  * document carrying non-representable records — where the generator must
  * decline each one in its structured ledger (never silently drop).
  */
@@ -156,6 +159,62 @@ function sharedInput(): ReactElement {
 }
 
 /**
+ * Adjacent rectangles in one sketch: the compiler emits each rectangle as
+ * four chained lines plus the rect entity, back to back — the generator's
+ * fold must re-fold exactly each rectangle's own lines.
+ */
+function adjacentRectangles(): ReactElement {
+  return createElement(
+    Fragment,
+    null,
+    createElement(
+      Sketch,
+      { id: "skd_pair" },
+      createElement(Rectangle, { id: "skent_a", x1: 0, y1: 0, x2: 10, y2: 10 }),
+      createElement(Rectangle, {
+        id: "skent_b",
+        x1: 20,
+        y1: 0,
+        x2: 30,
+        y2: 10,
+      }),
+    ),
+    createElement(
+      Sketch,
+      { id: "skd_triple" },
+      createElement(Rectangle, { id: "skent_c", x1: 0, y1: 0, x2: 4, y2: 4 }),
+      createElement(Rectangle, {
+        id: "skent_d",
+        x1: 10,
+        y1: 0,
+        x2: 14,
+        y2: 4,
+      }),
+      createElement(Rectangle, {
+        id: "skent_e",
+        x1: 20,
+        y1: 0,
+        x2: 24,
+        y2: 4,
+      }),
+    ),
+  );
+}
+
+/** A feature whose output body carries a foreign id with a coincidental name. */
+function foreignBodyId(): ReactElement {
+  return createElement(
+    Fragment,
+    null,
+    createElement(
+      Body,
+      { id: "body_pad-base", name: "pad" },
+      createElement(Box, { id: "feat_pad", width: 10, depth: 10, height: 5 }),
+    ),
+  );
+}
+
+/**
  * The byte comparison after normalizing EXACTLY the fields the pipeline
  * legitimately regenerates: the document id and the metadata block. Every
  * other byte — records, history transactions, cursor — must be identical.
@@ -170,10 +229,14 @@ function normalized(text: string): string {
   return JSON.stringify(parsed);
 }
 
-/** Runs one model through the full round trip and returns the two texts. */
+/** Runs one model through the full round trip and returns the two texts plus the source. */
 async function roundTrip(
   model: ReactElement,
-): Promise<{ readonly n1: string; readonly n2: string }> {
+): Promise<{
+  readonly n1: string;
+  readonly n2: string;
+  readonly source: string;
+}> {
   const native = compileToNative(model);
   if (!native.ok) {
     throw new Error(
@@ -204,7 +267,11 @@ async function roundTrip(
   expect(() =>
     parseNativeCadDocumentFromString(recompiled.value),
   ).not.toThrow();
-  return { n1: native.value, n2: recompiled.value };
+  return {
+    n1: native.value,
+    n2: recompiled.value,
+    source: generated.value.source,
+  };
 }
 
 describe("generateTsx round-trips byte-identically", () => {
@@ -220,6 +287,26 @@ describe("generateTsx round-trips byte-identically", () => {
 
   it("shared-input model (one feature consumed by two later features)", async () => {
     const { n1, n2 } = await roundTrip(sharedInput());
+    expect(normalized(n2)).toBe(normalized(n1));
+  });
+
+  it("a sketch holding two and three adjacent rectangles (every one survives)", async () => {
+    const { n1, n2, source } = await roundTrip(adjacentRectangles());
+    // Every rectangle reappears as its own <Rectangle> element — an
+    // adjacent rectangle must never fold the previous one's plan away.
+    for (const id of ["skent_a", "skent_b", "skent_c", "skent_d", "skent_e"]) {
+      expect(source).toContain(`id={"${id}"}`);
+    }
+    expect((source.match(/<Rectangle/g) ?? []).length).toBe(5);
+    expect(normalized(n2)).toBe(normalized(n1));
+  });
+
+  it("a foreign output-body id with a coincidental name keeps its <Body> wrapper", async () => {
+    const { n1, n2, source } = await roundTrip(foreignBodyId());
+    // The wrapper is what reproduces the body's foreign id; omitting it
+    // (name equality alone) would silently mint the derived `body_pad`.
+    expect(source).toContain("<Body");
+    expect(source).toContain('id={"body_pad-base"}');
     expect(normalized(n2)).toBe(normalized(n1));
   });
 

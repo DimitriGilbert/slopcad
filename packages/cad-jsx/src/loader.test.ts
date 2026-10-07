@@ -223,6 +223,22 @@ describe("compileTsxSource structured refusals", () => {
     );
     expect("path" in failure).toBe(true);
   });
+
+  it("surfaces a self-referencing children array as the depth guard's refusal", async () => {
+    const failure = await expectFailure(
+      "const ring = [];\nring.push(ring);\nexport default createElement(Fragment, null, ring);\n",
+      "cadjsx/tree-too-deep",
+    );
+    expect(failure.message).toContain("maximum depth of 100");
+  });
+
+  it("surfaces a cyclic component prop as the structured props refusal", async () => {
+    const failure = await expectFailure(
+      'const data = { label: "loop" };\ndata.self = data;\nfunction Cyclic() {\n  return <Box width={1} depth={1} height={1} />;\n}\nexport default <Cyclic data={data} />;\n',
+      "cadjsx/props-invalid",
+    );
+    expect(failure.message).toContain("data.self");
+  });
 });
 
 describe("compileTsxSource sandbox escape regression (verified report 8, finding 1)", () => {

@@ -62,7 +62,7 @@
  * separately (the sandbox's budget does not cover it). Runaway model
  * recursion is additionally guarded: a stack overflow surfaces through
  * the same structured refusal, and the compiler's own walk caps tree
- * depth.
+ * depth across elements, arrays, and prop data.
  *
  * Node-only by design (esbuild + `node:vm`); the package index never
  * re-exports this module, so browser bundles stay clean (import it as
@@ -705,7 +705,22 @@ export async function compileTsxSource(
         "The model's default export rendered to something that is not a React element.",
     });
   }
-  const native = compileToNative(outcome.element, nativeOptions);
+  // The compile walk caps tree depth (elements, arrays, and prop data
+  // alike), so a domain failure surfaces as a structured error above.
+  // Anything that still throws here — e.g. a stack overflow in a
+  // structural read the caps do not cover — must not escape the loader:
+  // it surfaces through the same structured refusal as the evaluation
+  // phase.
+  let native: ParseResult<string, CadJsxCompileError | NativeEmitError>;
+  try {
+    native = compileToNative(outcome.element, nativeOptions);
+  } catch (error) {
+    return fail({
+      code: TSX_LOAD_ERROR_CODES.evaluationFailed,
+      input: source,
+      message: `The model threw while being compiled: ${messageOf(error)}`,
+    });
+  }
   if (!native.ok) return fail(native.error);
   return ok(native.value);
 }
