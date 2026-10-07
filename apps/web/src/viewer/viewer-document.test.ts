@@ -17,7 +17,14 @@ import {
 } from "./viewer-document";
 
 const session = createCadWorkbenchSession();
-const nativeText = serializeSessionToNativeText(session, new Map(), null);
+const nativeText = serializeSessionToNativeText(
+  session,
+  new Map(),
+  null,
+  {},
+  null,
+  new Set(),
+);
 
 describe("loadViewerDocument", () => {
   it("loads the workbench session's native text with the honest split", () => {

@@ -13,7 +13,9 @@
  * - SAVE — serializes the live session through the native-document bridge
  *   (the format's canonical text; the server re-validates it with the
  *   format's own parser before it can become a version row) and appends
- *   exactly one `document_version`;
+ *   exactly one `document_version`; the document-level metadata and the
+ *   drawing the load held ride through untouched, so a drawing document
+ *   (the Open links route every document here) stays a drawing document;
  * - HISTORY — the versions popover lists every persisted save; picking one
  *   loads that version's bytes through the same open path and PINS it (an
  *   explicit version choice survives background refetches of the latest
@@ -27,7 +29,11 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import type { CadDocument } from "@slopcad/cad-core";
+import type {
+  CadDocument,
+  DrawingDocument,
+  ParameterMetadataValue,
+} from "@slopcad/cad-core";
 import { useCadDocument, useCadStore } from "@slopcad/cad-react";
 import { Button } from "@slopcad/ui/components/button";
 import {
@@ -124,6 +130,24 @@ interface PersistenceMilestones {
   pinned: boolean;
 }
 
+/**
+ * The document-level fields the live model session does not carry, held
+ * from the load and passed back through Save untouched: the Open links
+ * route every document to this workbench, so a drawing document saved
+ * here must keep its drawing (and its metadata) instead of appending a
+ * version that silently drops them (the review fix for the save-path
+ * data loss).
+ */
+interface PersistedExtras {
+  readonly metadata: Readonly<Record<string, ParameterMetadataValue>>;
+  readonly drawing: DrawingDocument | null;
+}
+
+const EMPTY_PERSISTED_EXTRAS: PersistedExtras = {
+  metadata: {},
+  drawing: null,
+};
+
 function PersistenceBar({
   engine,
   documentId,
@@ -149,6 +173,9 @@ function PersistenceBar({
     liveVersion: 0,
     pinned: false,
   });
+  // Held beside the milestones (a ref, for the same reasons): the extras
+  // Save re-emits are load state, never render state.
+  const persistedExtrasRef = useRef<PersistedExtras>(EMPTY_PERSISTED_EXTRAS);
   const [liveVersion, setLiveVersion] = useState(0);
   const [loaded, setLoaded] = useState(false);
 
@@ -160,11 +187,27 @@ function PersistenceBar({
         return;
       }
       store.replaceSession(parsed.session);
+      // The whole-document adoption door's reseed: the loaded document can
+      // carry engine-convention ids (an engine-authored save does), and the
+      // per-mount counters must mint past them — the same discipline the
+      // TSX import path applies.
+      engine.reseedAuthoringCounters();
       engine.setActiveScene(parsed.scene);
       // The persisted marker rides with the content: a reopened document
       // executes the same parked timeline that was saved (and a marker-free
       // file clears whatever the previously loaded content left behind).
       engine.setRollback(parsed.rollback ?? null);
+      // The persisted suppression rides the same way: the reopened document
+      // shows the same suppressed timeline chips that were saved (and a
+      // field-free payload restores an empty set).
+      engine.setSuppressed(parsed.suppressedFeatures);
+      // The document-level extras ride the same way: held from the load so
+      // Save re-emits exactly what was persisted — never a `drawing: null`
+      // rewrite of a drawing document.
+      persistedExtrasRef.current = {
+        metadata: parsed.metadata,
+        drawing: parsed.drawing,
+      };
       milestonesRef.current = {
         loadedFrom: text,
         savedDocument: parsed.document,
@@ -194,6 +237,7 @@ function PersistenceBar({
           ...milestonesRef.current,
           loadedFrom: "",
         };
+        persistedExtrasRef.current = EMPTY_PERSISTED_EXTRAS;
         setLoaded(true);
       }
       return;
@@ -253,6 +297,11 @@ function PersistenceBar({
         store.getSession(),
         engine.regenerationStates ?? new Map(),
         engine.rollback,
+        persistedExtrasRef.current.metadata,
+        persistedExtrasRef.current.drawing,
+        // The live suppressed set: the save persists the suppression the
+        // timeline chips hold, so the reopen restores it verbatim.
+        engine.suppressed,
       ),
     });
   };

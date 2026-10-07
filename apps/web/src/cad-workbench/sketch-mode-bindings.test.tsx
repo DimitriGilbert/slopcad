@@ -6,12 +6,21 @@
  * a binding reads the parameter's value verbatim, so the sign cannot ride
  * it), a literal submit unbinding, and the live re-drive — re-rendering with
  * an edited parameter collection re-solves the bound dimension so the solved
- * geometry follows without any sketch command. Machine surfaces carry the
- * assertions (data-sketch-commands, data-sketch-dimensions,
+ * geometry follows without any sketch command. The Delete/Backspace origin
+ * guard is pinned here too: those keys typed into the inspector's fields
+ * keep their text-editing meaning (no preventDefault, no command) while the
+ * same keys from the canvas still run delete-selection. Machine surfaces
+ * carry the assertions (data-sketch-commands, data-sketch-dimensions,
  * data-sketch-solved), exactly like the browser battery.
  */
 
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   addParameter,
@@ -287,5 +296,91 @@ describe("SketchMode parameter-bound dimensions", () => {
     });
     expect(document.body.textContent).toContain("sign would silently drop");
     expect(root().getAttribute("data-sketch-commands")).toBe(commandsBefore);
+  });
+});
+
+describe("SketchMode Delete/Backspace origin guard", () => {
+  /**
+   * A real Cancelable KeyboardEvent dispatched at `target` and bubbled
+   * through the sketch root (the same path a user's keystroke takes).
+   * Returns whether the root's handler cancelled the default — the input
+   * case must NOT cancel (the text deletion stays the field's), the canvas
+   * case must (the shortcut owns the key there).
+   */
+  function fireRootKeydown(target: Element, key: string): boolean {
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key,
+    });
+    act(() => {
+      target.dispatchEvent(event);
+    });
+    return event.defaultPrevented;
+  }
+
+  /** A dimensioned line: the auto-selected distanceX constraint has the
+      inspector's expression field mounted, and the constraint is the
+      selection — exactly the state whose Backspace used to destroy it. */
+  async function mountDimensionedLine(): Promise<{
+    readonly field: HTMLInputElement;
+    readonly root: () => Element;
+  }> {
+    const mounted = mount(20);
+    fireEvent.click(mounted.toolButton("line"));
+    fireCanvasPick(0, 0);
+    fireCanvasPick(20, 0);
+    await waitFor(() => {
+      expect(
+        JSON.parse(mounted.root().getAttribute("data-sketch-entities") ?? "[]"),
+      ).toHaveLength(1);
+    });
+    fireEvent.click(mounted.toolButton("distanceX"));
+    fireCanvasPick(0, 0);
+    fireCanvasPick(20, 0);
+    await waitFor(() => {
+      expect(mounted.root().getAttribute("data-sketch-selection")).toContain(
+        "skcon_distance",
+      );
+    });
+    const field = document.querySelector(
+      '[data-slot="cad-sketch-inspector"] input[type="text"]',
+    );
+    if (!(field instanceof HTMLInputElement)) {
+      throw new Error("the expression dimension field must be mounted");
+    }
+    return { field, root: mounted.root };
+  }
+
+  it("keeps Backspace/Delete in the dimension field for text editing", async () => {
+    const { field, root } = await mountDimensionedLine();
+    const commandsBefore = root().getAttribute("data-sketch-commands");
+    for (const key of ["Backspace", "Delete"]) {
+      expect(fireRootKeydown(field, key)).toBe(false);
+    }
+    // Nothing dispatched and nothing deleted: the command log is unchanged
+    // and the constraint under edit keeps the selection.
+    expect(root().getAttribute("data-sketch-commands")).toBe(commandsBefore);
+    expect(root().getAttribute("data-sketch-selection")).toContain(
+      "skcon_distance",
+    );
+  });
+
+  it("deletes the selected constraint from the canvas, exactly as before", async () => {
+    const { root } = await mountDimensionedLine();
+    const surface = document.querySelector("[data-sketch-surface]");
+    if (surface === null) throw new Error("the sketch canvas must be mounted");
+    // The canvas origin cancels the default and runs the shortcut.
+    expect(fireRootKeydown(surface, "Backspace")).toBe(true);
+    await waitFor(() => {
+      const log = JSON.parse(
+        root().getAttribute("data-sketch-commands") ?? "[]",
+      ) as readonly { readonly type: string }[];
+      expect(log.at(-1)?.type).toBe("sketch.constraint.delete");
+    });
+    const selection = JSON.parse(
+      root().getAttribute("data-sketch-selection") ?? "{}",
+    ) as { readonly constraintId: string | null };
+    expect(selection.constraintId).toBeNull();
   });
 });

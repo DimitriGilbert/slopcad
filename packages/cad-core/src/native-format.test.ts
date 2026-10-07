@@ -1388,6 +1388,143 @@ describe("the optional rollback field (Phase 20)", () => {
   });
 });
 
+describe("the optional suppressedFeatures field", () => {
+  it("round-trips a suppressed set byte-stably and omits the field when empty", () => {
+    const suppressed: NativeCadDocument = {
+      ...buildNative(),
+      suppressedFeatures: new Set([PLATE_FEATURE]),
+    };
+    const text = nativeText(suppressed);
+    const parsed = requireOk(
+      parseNativeCadDocumentFromString(text),
+      "parsing the suppressing native document",
+    );
+    expect(parsed.suppressedFeatures).toEqual(new Set([PLATE_FEATURE]));
+    // The parsed document re-serializes to identical bytes (the sorted
+    // emission makes the parse's set insertion order irrelevant).
+    expect(nativeText(parsed)).toBe(text);
+
+    // Suppression-free documents carry NO suppressedFeatures key: the
+    // pre-field byte form is unchanged, and a field-free payload parses to
+    // an empty set (every old file lands here).
+    const plainText = nativeText(buildNative());
+    const plainJson = JSON.parse(plainText) as Record<string, unknown>;
+    expect(Object.keys(plainJson)).not.toContain("suppressedFeatures");
+    const parsedPlain = requireOk(
+      parseNativeCadDocumentFromString(plainText),
+      "parsing the suppression-free native document",
+    );
+    expect(parsedPlain.suppressedFeatures).toEqual(new Set());
+  });
+
+  it("emits the ids sorted, whatever the insertion order", () => {
+    const base = requireOk(
+      parseNativeCadDocumentFromString(nativeText()),
+      "the parse",
+    );
+    const hole = base.document.features[1]?.id;
+    if (hole === undefined) throw new Error("The test lost the hole feature.");
+    const first = serializeNativeCadDocument({
+      ...base,
+      suppressedFeatures: new Set([PLATE_FEATURE, hole]),
+    });
+    const second = serializeNativeCadDocument({
+      ...base,
+      suppressedFeatures: new Set([hole, PLATE_FEATURE]),
+    });
+    expect(first.suppressedFeatures).toEqual(
+      [String(PLATE_FEATURE), String(hole)].sort(),
+    );
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  });
+
+  it("clamps stale ids out at save time instead of persisting them", () => {
+    // The production reach mirrors the stale rollback marker: the engine's
+    // suppressed set is page-level state a document regression (an undo)
+    // can outlive; serializing it verbatim would emit a file the parser
+    // refuses with native-format/suppression-unknown-feature.
+    const partial: NativeCadDocument = {
+      ...buildNative(),
+      suppressedFeatures: new Set([
+        PLATE_FEATURE,
+        createFeatureId("feat_was_deleted"),
+      ]),
+    };
+    const serialized = serializeNativeCadDocument(partial);
+    expect(serialized.suppressedFeatures).toEqual([PLATE_FEATURE]);
+    // An ALL-stale set serializes without the field at all.
+    const allStale: NativeCadDocument = {
+      ...buildNative(),
+      suppressedFeatures: new Set([createFeatureId("feat_was_deleted")]),
+    };
+    expect(Object.keys(serializeNativeCadDocument(allStale))).not.toContain(
+      "suppressedFeatures",
+    );
+  });
+
+  it("rejects a set naming a feature the document does not have", () => {
+    // The serializer clamps stale ids out (the clamp pin above), so the
+    // rejection this pins is the PARSER's own: a foreign or hand-edited
+    // file that carries one. The field is injected directly, never through
+    // the serializer.
+    const input = JSON.parse(nativeText()) as Record<string, unknown>;
+    input.suppressedFeatures = [createFeatureId("feat_ghost")];
+    const parsed = parseNativeCadDocument(input);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error("expected a rejection");
+    expect(parsed.error.code).toBe(
+      NATIVE_FORMAT_ERROR_CODES.suppressionUnknownFeature,
+    );
+  });
+
+  it("rejects a mis-shaped field, structurally", () => {
+    const notAnArray = JSON.parse(nativeText()) as Record<string, unknown>;
+    notAnArray.suppressedFeatures = "feat_plate";
+    const parsed = parseNativeCadDocument(notAnArray);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) throw new Error("expected a rejection");
+    expect(parsed.error.code).toBe(NATIVE_FORMAT_ERROR_CODES.malformed);
+    const entryNotAnId = JSON.parse(nativeText()) as Record<string, unknown>;
+    entryNotAnId.suppressedFeatures = [42];
+    const parsedEntries = parseNativeCadDocument(entryNotAnId);
+    expect(parsedEntries.ok).toBe(false);
+    if (parsedEntries.ok) throw new Error("expected a rejection");
+    expect(parsedEntries.error.code).toBe(NATIVE_FORMAT_ERROR_CODES.malformed);
+  });
+
+  it("validates the field's shape and membership without replay", () => {
+    const suppressed: NativeCadDocument = {
+      ...buildNative(),
+      suppressedFeatures: new Set([PLATE_FEATURE]),
+    };
+    expect(
+      validateNativeCadDocument(JSON.parse(nativeText(suppressed))),
+    ).toEqual({
+      valid: true,
+      formatVersion: CAD_NATIVE_FORMAT_VERSION,
+      issues: [],
+    });
+    const ghost = JSON.parse(nativeText()) as Record<string, unknown>;
+    ghost.suppressedFeatures = ["feat_ghost"];
+    const validation = validateNativeCadDocument(ghost);
+    expect(validation.valid).toBe(false);
+    expect(validation.issues.map((entry) => entry.code)).toContain(
+      NATIVE_FORMAT_ISSUE_CODES.suppressionUnknownFeature,
+    );
+    const misShaped = JSON.parse(nativeText()) as Record<string, unknown>;
+    misShaped.suppressedFeatures = "suppressed";
+    const misShapedValidation = validateNativeCadDocument(misShaped);
+    expect(misShapedValidation.valid).toBe(false);
+    expect(
+      misShapedValidation.issues.some(
+        (entry) =>
+          entry.path === "suppressedFeatures" &&
+          entry.code === "native-format/field-invalid",
+      ),
+    ).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Serializer/parser symmetry and validator agreement (the review fixes)
 // ---------------------------------------------------------------------------

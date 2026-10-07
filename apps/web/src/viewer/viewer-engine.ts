@@ -94,6 +94,12 @@ interface AppliedRenderState {
   readonly revision: number;
 }
 
+/**
+ * The viewer's suppression contribution to every re-share: none — it has
+ * no suppression surface (see the loop comment at the `rollback` state).
+ */
+const NO_SUPPRESSED_FEATURES: ReadonlySet<FeatureId> = new Set();
+
 /** The previous inputs the derivation effect diffs against. */
 interface DerivationPrevious {
   /** The load epoch the baseline was taken at (a session swap reruns all). */
@@ -176,7 +182,8 @@ export function useViewerEngine(
 
   // The persisted authoring state that survives the file boundary: the
   // rollback marker (a shared parked timeline reopens parked). Suppression
-  // is engine-side session state and has no share representation.
+  // persists in the format too, but the viewer renders the whole timeline
+  // and has no suppression surface, so its re-shares carry an empty set.
   const [rollback, setRollback] = useState<FeatureRollbackPoint | null>(null);
   // The load epoch: bumped by every `adopt`, it forces the derivation's
   // next pass to run the FULL timeline (a whole-session swap cannot diff).
@@ -210,6 +217,12 @@ export function useViewerEngine(
         // view; before the first pass there is nothing to persist.
         regenerationStates ?? new Map(),
         rollback,
+        // The viewer session holds no document-level extras: a re-shared
+        // or exported part persists neither metadata, a drawing, nor a
+        // suppressed set.
+        {},
+        null,
+        NO_SUPPRESSED_FEATURES,
       ),
     [regenerationStates, rollback, store],
   );

@@ -4426,6 +4426,9 @@ test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports
       createCadWorkbenchSession(),
       new Map(),
       null,
+      {},
+      null,
+      new Set(),
     );
     const payload = await encodeNativeForShare(nativeText);
     const sharePayloadUrl = `/viewer#${payload}`;
