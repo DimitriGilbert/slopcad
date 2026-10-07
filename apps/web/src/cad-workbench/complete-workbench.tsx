@@ -2924,7 +2924,11 @@ export function CompleteCadWorkbench({
           `use-sync-external-store` shim, whose CJS factory re-requires
           `react` at runtime (a second React instance beside the bundled one
           the SSR renderer drives) → "Invalid hook call" → the whole route
-          degrades to the client-only shell. */}
+          degrades to the client-only shell. (The bundler-level cure has
+          since landed: vite.config.ts aliases the shim subpaths onto the
+          single bundled React, so a stray server-mounted Root no longer
+          explodes — the discipline stands regardless: a closed dialog has
+          nothing to render server-side.) */}
       {featureDialog !== null ? (
         <Dialog
           onOpenChange={(open) => {
