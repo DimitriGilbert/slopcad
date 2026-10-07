@@ -1,13 +1,16 @@
 # slopcad internals for the in-app AI agent — a factual map
 
-Researched 2026-10-04 on branch `agent-surface` (tip `adf8bb3`). Everything below was read
-from the shipped code; every claim names a file, line numbers where load-bearing.
+Researched 2026-10-04 on branch `agent-surface` (tip `adf8bb3`); counts and the agent-surface
+state re-verified 2026-10-06 on `fixes/review-2026-10-06` (tip `c014e99`). Everything below was
+read from the shipped code; every claim names a file, line numbers where load-bearing.
 
-**Executive summary.** slopcad already has a working, tested agent tool layer: the WebMCP
-registry (`apps/web/src/webmcp/`) exposes 11 zod-schema'd tools (8 CAD + 3 projects) through a
-host-agnostic registry whose `executeWebMcpTool(name, input)` is a ready-made, validated,
-never-throws execution seam an in-app chat agent can call directly — no re-plumbing needed.
-The command palette is 35 nullary descriptors built in `complete-workbench.tsx:1105` (dispatch
+**Executive summary.** slopcad has a working, tested agent tool layer: the WebMCP
+registry (`apps/web/src/webmcp/`) exposes 14 zod-schema'd tools on the main workbench surface
+(11 workbench + 3 projects; the assembly workbenches add 10 more registrations — 22 distinct
+tool names repo-wide) through a host-agnostic registry whose `executeWebMcpTool(name, input)`
+is a ready-made, validated, never-throws execution seam an in-app chat agent can call
+directly — no re-plumbing needed.
+The command palette is 35 nullary descriptors built in `complete-workbench.tsx:1132` (dispatch
 = `command.run()`, no parametrized by-id store action); parametrized writes must instead ride
 `parseCommand` → `store.applyTransaction` (the same path `cad_apply_commands` uses). The
 document model is a single immutable `CadDocument` behind a custom (non-zustand) `CadStore`
@@ -18,10 +21,13 @@ today — single snapshot, 8-frame turntable, 4-view isometric — over a three.
 renders are a small extension of `snapshot-export.ts`. Errors are structured
 (`{severity, code, message, location}` diagnostics + `ParseResult` refusals) surfaced via
 status-bar alert, timeline chips, and toasts — an agent tool can report through the same
-objects. An in-app chat is otherwise greenfield: no LLM/AI/chat dependency or code exists
-anywhere; the prior "agent-surface" phases shipped cad-jsx, WebMCP, and tutorial videos, and
-the server side (tRPC router factory + TanStack Start routes + Better Auth session + Drizzle
-migrations) is small and convention-following.
+objects. The in-app chat agent is SHIPPED (`PLAN-AGENT-CHAT.md` phases 1–6, all committed):
+the chat panel lives in `apps/web/src/agent/chat/` over the `@tanstack/ai*` packages, and
+`/api/agent-relay` (`apps/web/src/routes/api/agent-relay.ts`) does the session-gated,
+env-keyed provider calls server-side, with tRPC routers (`agent-conversations`,
+`model-catalog`) persisting through Drizzle. The prior "agent-surface" phases shipped
+cad-jsx, WebMCP, and tutorial videos, and the server side (tRPC router factory + TanStack
+Start routes + Better Auth session + Drizzle migrations) is small and convention-following.
 
 ## 1. webMCP support (recently added)
 
@@ -38,15 +44,24 @@ annotations?, execute })` — `registry.ts:128-141`. `registerWebMcpTool` eagerl
 - Execution: `executeWebMcpTool(name, input, options)` (`registry.ts:212-245`) — parse →
   handler → `JSON.stringify`; never throws; structured failures
   `webmcp/unknown-tool`, `webmcp/invalid-input`, `webmcp/tool-failure` (`registry.ts:97-102`).
-- Exposed tools (11):
-  - Workbench (8, `workbench-tools.ts:179-415`, mounted at `complete-workbench.tsx:1517`):
+- Exposed tools — 14 on the main workbench surface, 22 distinct names repo-wide:
+  - Workbench (11, `workbench-tools.ts:512-805`, mounted at `complete-workbench.tsx:1560`):
     `cad_get_document_summary`, `cad_list_commands`, `cad_run_command` (by id, nullary),
     `cad_set_parameter` (number or expression string), `cad_undo`, `cad_redo`,
     `cad_apply_commands` (batch of serialized commands, strict `parseCommand`, ONE atomic
-    `store.applyTransaction`), `cad_measure` (volume/area/bounds from the settled scene).
-  - Projects (3, `projects-tools.ts:119-199`, mounted in
+    `store.applyTransaction`), `cad_measure` (volume/area/bounds from the settled scene),
+    `cad_capture_views` (snapshot/turntable/isometric PNG), `cad_get_document`,
+    `cad_get_diagnostics`.
+  - Projects (3, `projects-tools.ts:120-157`, mounted in
     `routes/_auth/dashboard.tsx:43` and `routes/_auth/projects.index.tsx:56`):
     `projects_list`, `projects_create` (reuses the form's zod schema verbatim), `open_document`.
+  - Assembly workbenches (10 registrations — 8 distinct new names plus per-route re-binds of
+    `cad_get_document`/`cad_get_diagnostics`; `assembly-tools.ts:285-710`, mounted via
+    `useAssemblyWebMcpTools` in `assembly-workbench.tsx:181`,
+    `assembly-motion-workbench.tsx:186`, `interference-workbench.tsx:431`):
+    `cad_assembly_check_interference`, `cad_assembly_add_occurrence`,
+    `cad_assembly_remove_occurrence`, `cad_assembly_pattern`, `cad_assembly_add_mate`,
+    `cad_assembly_remove_mate`, `cad_assembly_add_joint`, `cad_assembly_remove_joint`.
 - Test/inspection seam: `window.__slopcadWebMcpTools()` returns a snapshot (no handlers);
   installed once per page (`use-webmcp-tools.ts:124-141`). Deliberately execution-free (ADR §5).
 - Reusability verdict for an in-app agent: HIGH. `defineWebMcpTool` entries + `webMcpToolSnapshot()`
@@ -59,8 +74,8 @@ annotations?, execute })` — `registry.ts:128-141`. `registerWebMcpTool` eagerl
 ## 2. Command surface manifest
 
 - UI source of truth: the `commands` useMemo in
-  `apps/web/src/cad-workbench/complete-workbench.tsx:1105-1512` — 35 `CadCommandDescriptor`s
-  (ids at lines 1130-1476): tool arming (`tool-*`), history (`undo`, `redo`, `clear-rollback`),
+  `apps/web/src/cad-workbench/complete-workbench.tsx:1132-1552` — 35 `CadCommandDescriptor`s
+  (ids at lines 1144-1503): tool arming (`tool-*`), history (`undo`, `redo`, `clear-rollback`),
   workspace/feature verbs (`sketch`, `surface-*`, `hole`, `sweep`, `loft`, `helix`, `draft`,
   `rib`, `scale`, `thicken`, `split`, `pattern`, `pattern-path`, `mirror`, `thread`,
   `sketch-on-face`, `boolean`, `move-body`, `duplicate`, `create-datum`, `create-curve`),
@@ -72,9 +87,9 @@ run(): void }` — `packages/ui/src/components/cad/cad-command-menu.tsx:88-103`.
 - The palette (`CadCommandMenu`, cmdk-based, self-ranked search) renders them; dispatch is
   literally `command.run()` after closing (`cad-command-menu.tsx:296-299`).
 - The durable manifest is the Phase 60 audit data
-  `apps/web/e2e-workbench/command-surface.checklist.json`: 53 entries
+  `apps/web/e2e-workbench/command-surface.checklist.json`: 57 entries
   `{id, phase, capability, route, kind: "command"|"command-panel"|"panel", target?, keywords?}`
-  plus documented declines; kept honest against `ROADMAP-CAD-PARITY.md` by
+  plus 2 documented declines; kept honest against `ROADMAP-CAD-PARITY.md` by
   `scripts/command-surface-audit.mjs` (`pnpm audit:command-surface`), and against the DOM by
   `apps/web/e2e-workbench/command-surface.spec.ts` (menu rows == command entries, both
   directions).
@@ -149,7 +164,7 @@ run(): void }` — `packages/ui/src/components/cad/cad-command-menu.tsx:88-103`.
 - PNG export EXISTS (`apps/web/src/cad-workbench/snapshot-export.ts`): the scene renders on a
   deterministic `preserveDrawingBuffer: true` canvas at DPR 1, so `canvas.toBlob` captures
   settled pixels (`captureViewportPng`, lines 92-100). Three commands in the palette
-  (`complete-workbench.tsx:1447-1483`): single snapshot; turntable series (8 × 45° about z,
+  (`complete-workbench.tsx:1474-1510`): single snapshot; turntable series (8 × 45° about z,
   `turntableCameras`, lines 119-154); isometric series (front/top/right/iso via
   `standardViewCamera`, lines 169-181). Series drives each camera through the session's
   user-camera overlay, waits for the `data-rendered-frames` ledger
@@ -221,18 +236,30 @@ code: "<domain>/<name>", message, location: { primary: CadId, ... } }`
 
 ## 7. Existing AI/agent scaffolding
 
-- Branch: `agent-surface` (up to date with origin). Recent commits are WebMCP, cad-jsx,
-  parameters, tutorials — no chat/LLM work (see `git log`).
 - What EXISTS for agents: the WebMCP layer (section 1), the agent skill
-  `skills/slopcad-cad-jsx/SKILL.md`, the plan document `ROADMAP-AGENT-SURFACE.md` (15 phases,
-  0–14: cad-jsx, WebMCP, tutorial studio — an in-app chat agent is NOT among the planned
-  phases; its laws A1–A6 bind: tools drive the same domain paths, no second API, no API keys
-  in the WebMCP surface), and the ADR `docs/architecture/adr-webmcp.md`.
-- What is GREENFIELD: grep for `anthropic|openai|@ai-sdk|langchain|llm|chat` across
-  `apps/web/src`, `packages/*`, all `package.json`, and `pnpm-workspace.yaml` finds nothing —
-  no LLM SDK, no provider settings, no chat UI, no server endpoint, no key store. Session
-  handling for any provider calls would be new tRPC surface (the roadmap's "no server
-  endpoint" ruling scoped the WEBMCP surface, not a future chat backend).
+  `skills/slopcad-cad-jsx/SKILL.md`, the plan documents `ROADMAP-AGENT-SURFACE.md` (15
+  phases, 0–14: cad-jsx, WebMCP, tutorial studio; its laws A1–A6 bind the WEBMCP surface:
+  tools drive the same domain paths, no second API, no API keys there) and
+  `PLAN-AGENT-CHAT.md` (phases 1–6, all committed and validated), and the ADRs
+  `docs/architecture/adr-webmcp.md` and `docs/architecture/adr-agent-chat.md`.
+- The in-app agent chat is SHIPPED (PLAN-AGENT-CHAT):
+  - Chat UI: `apps/web/src/agent/chat/` — `workbench-chat-view.tsx`
+    (`AgentChatSidebarView`, mounted in the workbench's right dock via
+    `cad-workbench/right-sidebar.tsx`), `chat-commands.ts`, `agent-settings.tsx`
+    (provider/model settings), `view-state.ts`.
+  - Transport: the `@tanstack/ai*` packages — all seven in both `apps/web/package.json` and
+    `packages/ui/package.json` (`ai`, `ai-anthropic`, `ai-client`, `ai-gemini`, `ai-openai`,
+    `ai-openrouter`, `ai-react`).
+  - Server: `POST /api/agent-relay` (`apps/web/src/routes/api/agent-relay.ts`, handler in
+    `@slopcad/ui/agent/relay`) — Better Auth session gate, the per-user `isServerAiAllowed`
+    check, and provider keys from `@slopcad/env` (`OPENAI_KEY`, `ANTHROPIC_KEY`,
+    `GOOGLE_KEY`, `OPENROUTER_KEY`, `OPENAI_COMPATIBLE_KEY`/`_BASE_URL`). Provider calls
+    stay server-side, so the unit-test fetch guard is respected by construction.
+  - Persistence: tRPC routers `agent-conversations` and `model-catalog`
+    (`packages/api/src/routers/`, with `packages/api/src/providers.ts` for the provider
+    registry) over the
+    Drizzle tables in `packages/db/src/schema/` (`agent.ts`: `agentConversations`,
+    `agentMessages`; `model-catalog.ts`) — migration `0002_broad_sentinels.sql`.
 
 ## 8. Formedible forms
 
@@ -251,8 +278,9 @@ resetOnSuccess, submitLabel, submitButtonClassName })` (lines 67-79);
 - Feature dialogs use the same pattern with richer field types
   (`apps/web/src/cad-workbench/feature-forms.tsx` — selects, ordered rows, an
   `expression-number-field` that validates `$`-expressions); refusals surface verbatim in the
-  dialog's error region. An "AI provider settings" form should be exactly: zod schema + field
-  list + `useFormedible`, mounted in a dialog or a settings route.
+  dialog's error region. The shipped "AI provider settings" form is exactly this pattern:
+  zod schema + field list + `useFormedible`
+  (`apps/web/src/agent/chat/agent-settings.tsx` + `agent-settings-form.ts`).
 
 ## 9. Server side
 
@@ -312,14 +340,16 @@ projects: createProjectsRouter({ db }), documents: createDocumentsRouter({ db })
 
 ## 11. Testing constraints
 
-- Gate: `pnpm run verify` (check-types → lint → test → build) before declaring done; no CI,
+- Gate: `pnpm run verify` (check-types → lint → format:check → test → build) before
+  declaring done; no CI,
   ever (`TEST-ALIGNMENT-PLAN.md` §1 D5, D7; `AGENTS.md`). Browser e2e is the session harness
   `pnpm test:session` (`apps/web/e2e-session/`, Playwright, ONE context, serial, 1280×720
   DPR 1, SwiftShader, video on, production build).
 - No live network in unit tests — runtime-enforced: `fetch` is stubbed to THROW
   "TEST FORBIDS LIVE NETWORK" in `apps/web/src/test-setup.ts` and
   `packages/api/src/test-setup.ts`. Any client-side LLM call will fail tests unless mocked;
-  prefer server-side provider calls (tRPC procedure) and mock the procedure in unit tests.
+  provider calls stay server-side (the shipped `/api/agent-relay` route) — mock the handler
+  deps in unit tests.
 - No real database: `createInMemoryDb()` + committed migrations (`TEST-ALIGNMENT-PLAN.md`
   §2.8); no env validation at import time (`SKIP_ENV_VALIDATION=1` in every `test-setup.ts`).
 - jsdom only where React/DOM is under test: `apps/web`, `packages/ui`, `packages/cad-r3f`,
@@ -341,10 +371,10 @@ projects: createProjectsRouter({ db }), documents: createDocumentsRouter({ db })
   that must "fillet with r=3" needs new tool handlers over `parseCommand`+`applyTransaction`
   (and the feature-dialog logic they mirror), not palette reuse. Dialog-only flows (sketch
   editing, `sketch-on-face`) have no non-UI path at all.
-- **Auth for provider keys is greenfield**: the WebMCP ADR rules out API keys for that
-  surface; a chat backend needs a new tRPC router + env package entries
-  (`packages/env`) + DB table (with migration) — all conventional but all new, and the
-  unit-test fetch guard forces provider calls server-side.
+- **Provider keys are server-side env keys, gated**: the WebMCP ADR still rules out API keys
+  for that surface; the chat backend's keys live in `@slopcad/env`, and every relay call
+  passes the `isServerAiAllowed` gate (`agent-relay.ts`) — server-side by construction, so
+  the unit-test fetch guard holds.
 - **Per-route tool registration lifetime**: tools bind/unbind per page mount
   (`use-webmcp-tools.ts:149-151`); an app-shell chat panel needs either a shell-level binding
   or cross-route state for document tools, since the CadStore lives inside the workbench
@@ -356,9 +386,10 @@ projects: createProjectsRouter({ db }), documents: createDocumentsRouter({ db })
   DPR-1 `preserveDrawingBuffer` canvas and the frame-settle ledger; an agent screenshot tool
   must reuse `waitForRenderedFrame` or it will return stale frames. Offscreen/custom-size
   renders are untested territory (the current path only captures the live canvas).
-- **Streaming UX absent**: nothing in the stack (tRPC v11 over HTTP batch, sonner toasts)
-  currently streams tokens; streaming chat needs either subscriptions or a Start server route
-  with a ReadableStream — both new patterns for this repo.
-- **Assemblies/WebMCP mismatch**: the 8 CAD tools operate on the single open document;
-  assembly documents, drawings, and configurations have WebMCP read paths only via
-  `cad_get_document_summary` — deep assembly manipulation tools would be new work.
+- **Chat streaming bypasses tRPC**: token streaming rides the dedicated Start server route
+  `/api/agent-relay` (the server-emitted chat transport), not tRPC v11's HTTP batch — keep
+  chat streaming out of the tRPC routers.
+- **Assembly tools are scoped to the assembly workbenches**: the main workbench's CAD tools
+  operate on the single open document; `cad_assembly_*` binds only on the three assembly
+  workbench routes (section 1), and drawings/configurations still have WebMCP read paths only
+  via `cad_get_document_summary`.

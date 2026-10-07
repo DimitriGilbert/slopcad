@@ -72,7 +72,7 @@ Vercel's UI message stream would need a translation layer (mapping in
    diffs — display only. Scope (2026-10-06 review fix): client-direct mode
    ONLY — server-emitted (relay) mode is text-only. The relay's keyless
    wire contract (`{provider, modelId, modelOptions, maxIterations,
-   messages}`) declares no tools to the server-side run, so the shipped
+messages}`) declares no tools to the server-side run, so the shipped
    system prompt states that unavailability there instead of the tool
    catalogue, and the settings UI qualifies the mode as text-only.
    Wiring tool declarations through the relay contract is future work;

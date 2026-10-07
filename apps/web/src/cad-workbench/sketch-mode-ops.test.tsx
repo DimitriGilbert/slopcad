@@ -250,9 +250,7 @@ describe("SketchMode extrude outcome channel (review)", () => {
   });
 
   it("keeps the resolved verdict when the host accepts the commit", () => {
-    render(
-      <SketchMode onExtrude={() => ({ ok: true })} onExit={() => {}} />,
-    );
+    render(<SketchMode onExtrude={() => ({ ok: true })} onExit={() => {}} />);
     drawHexagon();
     const extrude = document.querySelector('[data-testid="sketch-extrude"]');
     expect(extrude).not.toBeNull();

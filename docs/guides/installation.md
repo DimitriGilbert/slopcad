@@ -28,7 +28,7 @@ Run the app:
 
 ```bash
 pnpm run dev        # every app
-pnpm run dev:web    # the web app only (port 3001)
+pnpm run dev:web    # the web app only (port 3201; DEV_PORT overrides)
 ```
 
 The browser suites are deliberately outside `verify` because they boot

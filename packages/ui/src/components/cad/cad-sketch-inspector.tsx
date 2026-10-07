@@ -371,9 +371,7 @@ function DimensionEditorForm({
         if (typeof submitted === "number" && Number.isFinite(submitted)) {
           const outcome = onEditDimension(dimension.constraintId, submitted);
           if (!outcome.ok) {
-            onApplyFailure(
-              `${outcome.error.code}: ${outcome.error.message}`,
-            );
+            onApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
           }
           return;
         }
@@ -387,14 +385,19 @@ function DimensionEditorForm({
         ) {
           const outcome = onEditDimension(dimension.constraintId, submitted);
           if (!outcome.ok) {
-            onApplyFailure(
-              `${outcome.error.code}: ${outcome.error.message}`,
-            );
+            onApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
           }
         }
       },
     };
-  }, [dimension, labels, name, onApplyFailure, onEditDimension, parameterNames]);
+  }, [
+    dimension,
+    labels,
+    name,
+    onApplyFailure,
+    onEditDimension,
+    parameterNames,
+  ]);
 
   const dimensionForm = useFormedible<DimensionFormValues>({
     fields: formConfig.fields,

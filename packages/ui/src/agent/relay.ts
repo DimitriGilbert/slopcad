@@ -217,10 +217,7 @@ function nativeModelOptionsSchemaFor(provider: AgentProviderId) {
 export const agentRelayInputSchema = z
   .strictObject({
     provider: z.enum(AGENT_PROVIDER_IDS),
-    modelId: z
-      .string()
-      .min(1)
-      .max(AGENT_RELAY_MODEL_ID_MAX_LENGTH),
+    modelId: z.string().min(1).max(AGENT_RELAY_MODEL_ID_MAX_LENGTH),
     modelOptions: agentNativeModelOptionsSchema.optional(),
     maxIterations: z
       .number()
@@ -402,7 +399,10 @@ export function findApiKeyLikeFields(
         throw new ApiKeyScanDepthError(maxDepth);
       }
       for (const [key, child] of Object.entries(node)) {
-        if (nodePath === "$" && options.exemptRootKeys?.includes(key) === true) {
+        if (
+          nodePath === "$" &&
+          options.exemptRootKeys?.includes(key) === true
+        ) {
           continue;
         }
         const childPath = `${nodePath}.${key}`;

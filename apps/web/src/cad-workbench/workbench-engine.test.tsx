@@ -292,8 +292,7 @@ let lastAdoptionError: string | null = null;
 
 /** The captured sketch-on-face outcome, or a thrown failure when absent. */
 function sketchOnFaceOutcome():
-  | { readonly ok: true }
-  | { readonly ok: false; readonly message: string } {
+  { readonly ok: true } | { readonly ok: false; readonly message: string } {
   if (lastSketchOnFace === null) {
     throw new Error("the sketch-on-face outcome is absent");
   }
@@ -313,7 +312,10 @@ function extrudeActionOutcome(): FeatureFormOutcome {
  * triangle soup — the same layout the inspection tests pin: face 0 is the
  * top face with a single +z normal.
  */
-function boxSoup(x0: number, y0: number): {
+function boxSoup(
+  x0: number,
+  y0: number,
+): {
   readonly positions: readonly number[];
   readonly indices: readonly number[];
 } {
@@ -363,13 +365,16 @@ function fabricatedSceneState(): FixtureRenderState {
     pad,
   );
   if (!padObject.ok) throw new Error("the pad tessellation refused");
-  const assembled = createRenderProjection([plateObject.value, padObject.value], {
-    kind: "perspective",
-    position: [80, -80, 80],
-    target: [30, 10, 5],
-    up: [0, 0, 1],
-    fovDeg: 40,
-  });
+  const assembled = createRenderProjection(
+    [plateObject.value, padObject.value],
+    {
+      kind: "perspective",
+      position: [80, -80, 80],
+      target: [30, 10, 5],
+      up: [0, 0, 1],
+      fovDeg: 40,
+    },
+  );
   if (!assembled.ok) throw new Error("the fabricated projection refused");
   return {
     measurement: {
@@ -751,7 +756,8 @@ function EngineHarness(): ReactElement {
             engine.reseedAuthoringCounters();
             lastAdoptionError = null;
           } catch (error: unknown) {
-            lastAdoptionError = error instanceof Error ? error.message : String(error);
+            lastAdoptionError =
+              error instanceof Error ? error.message : String(error);
           }
         }}
       >
@@ -766,7 +772,8 @@ function EngineHarness(): ReactElement {
             engine.reseedAuthoringCounters();
             lastAdoptionError = null;
           } catch (error: unknown) {
-            lastAdoptionError = error instanceof Error ? error.message : String(error);
+            lastAdoptionError =
+              error instanceof Error ? error.message : String(error);
           }
         }}
       >

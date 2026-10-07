@@ -271,13 +271,15 @@ interface RealmGates {
  * symbol — pinned React never does, and the sandbox refuses to mirror an
  * unbrandable element surface.
  */
-function realmGates(): {
-  readonly ok: true;
-  readonly gates: RealmGates;
-} | {
-  readonly ok: false;
-  readonly message: string;
-} {
+function realmGates():
+  | {
+      readonly ok: true;
+      readonly gates: RealmGates;
+    }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    } {
   const brandProbe: unknown = createElement("slopcad-cadjsx-brand-probe");
   const elementBrand =
     typeof brandProbe === "object" && brandProbe !== null
@@ -513,9 +515,7 @@ type VmRenderOutcome =
   | {
       readonly ok: false;
       readonly reason:
-        | "default-invalid"
-        | "component-threw"
-        | "component-return-invalid";
+        "default-invalid" | "component-threw" | "component-return-invalid";
       readonly text: string;
       readonly input: unknown;
     };

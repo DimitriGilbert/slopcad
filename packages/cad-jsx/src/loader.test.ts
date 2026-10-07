@@ -306,7 +306,7 @@ describe("compileTsxSource sandbox escape regression (verified report 8, finding
     expect(failure.message).toContain("ESCAPED");
   });
 
-  it("still refuses require(\"node:fs\") from model code at runtime", async () => {
+  it('still refuses require("node:fs") from model code at runtime', async () => {
     const failure = await expectFailure(
       'const fs = require("node:fs");\nexport default <Box width={1} depth={1} height={1} />;',
       TSX_LOAD_ERROR_CODES.forbiddenImport,

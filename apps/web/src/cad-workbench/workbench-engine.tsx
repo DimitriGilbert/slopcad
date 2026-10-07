@@ -1144,11 +1144,7 @@ export function useWorkbenchEngine(
       datumType: "plane",
       definition: "faceOffset",
       reference: referencePayload,
-      normalAtDefinition: [
-        pick.normal[0],
-        pick.normal[1],
-        pick.normal[2],
-      ],
+      normalAtDefinition: [pick.normal[0], pick.normal[1], pick.normal[2]],
       offsetMm: 0,
     };
     // The plane resolution runs BEFORE the commit (the review fix for the

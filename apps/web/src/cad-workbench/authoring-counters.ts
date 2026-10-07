@@ -99,12 +99,18 @@ const AUTHORING_STEMS: readonly {
       /^(?:body_thread|feat_thread|param_thread_(?:major|pitch|length|mode|handedness|axis))(\d*)$/,
   },
   { name: "rib", pattern: /^(?:body_rib|feat_rib|param_rib_thickness)(\d*)$/ },
-  { name: "scale", pattern: /^(?:body_scale|feat_scale|param_scale_factor)(\d*)$/ },
+  {
+    name: "scale",
+    pattern: /^(?:body_scale|feat_scale|param_scale_factor)(\d*)$/,
+  },
   {
     name: "thicken",
     pattern: /^(?:body_thicken|feat_thicken|param_thicken_thickness)(\d*)$/,
   },
-  { name: "split", pattern: /^(?:body_split|feat_split|param_split_side)(\d*)$/ },
+  {
+    name: "split",
+    pattern: /^(?:body_split|feat_split|param_split_side)(\d*)$/,
+  },
   {
     name: "pattern",
     pattern:
@@ -115,12 +121,14 @@ const AUTHORING_STEMS: readonly {
     pattern:
       /^(?:body_patternpath|feat_patternpath|param_patternpath_(?:count|spacing|orientation))(\d*)$/,
   },
-  { name: "mirror", pattern: /^(?:body_mirror|feat_mirror|param_mirror_merge)(\d*)$/ },
+  {
+    name: "mirror",
+    pattern: /^(?:body_mirror|feat_mirror|param_mirror_merge)(\d*)$/,
+  },
   { name: "boolean", pattern: /^(?:body_boolean|feat_boolean)(\d*)$/ },
   {
     name: "moveBody",
-    pattern:
-      /^(?:body_moved|feat_move|param_move_(?:x|y|z|axis|angle))(\d*)$/,
+    pattern: /^(?:body_moved|feat_move|param_move_(?:x|y|z|axis|angle))(\d*)$/,
   },
   {
     name: "duplicate",

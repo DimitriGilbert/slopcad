@@ -563,8 +563,8 @@ describe("apiKey-like field detection", () => {
         exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
       }),
     ).toEqual(
-    // … but the same field NAME inside the message history is flagged —
-    // the scan's continuing duty.
+      // … but the same field NAME inside the message history is flagged —
+      // the scan's continuing duty.
       [
         {
           field: "budget_tokens",
@@ -964,9 +964,7 @@ describe("handleAgentRelayRequest: body size gate (413)", () => {
     ];
     const response = await handleAgentRelayRequest(relayRequest(body), deps);
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain(
-      "text/event-stream",
-    );
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
     await response.body?.cancel();
   });
 });

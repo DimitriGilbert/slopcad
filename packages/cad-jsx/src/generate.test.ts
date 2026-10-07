@@ -230,9 +230,7 @@ function normalized(text: string): string {
 }
 
 /** Runs one model through the full round trip and returns the two texts plus the source. */
-async function roundTrip(
-  model: ReactElement,
-): Promise<{
+async function roundTrip(model: ReactElement): Promise<{
   readonly n1: string;
   readonly n2: string;
   readonly source: string;

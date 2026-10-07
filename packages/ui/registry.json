@@ -4,6 +4,20 @@
   "homepage": "https://github.com/slopcad/slopcad",
   "items": [
     {
+      "name": "attachment",
+      "type": "registry:component",
+      "title": "Attachment",
+      "description": "File attachment chip primitives (media, content, title, description, actions, trigger, group) with upload-state and orientation variants over Base UI's render element and the button item.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/attachment.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "badge",
       "type": "registry:component",
       "title": "Badge",
@@ -25,6 +39,19 @@
       "files": [
         {
           "path": "src/components/button.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "card",
+      "type": "registry:component",
+      "title": "Card",
+      "description": "Card layout primitives (header, title, description, action, content, footer) with a compact size variant and image-aware padding.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/card.tsx",
           "type": "registry:component"
         }
       ]
@@ -66,6 +93,32 @@
       "files": [
         {
           "path": "src/components/dialog.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "dropdown-menu",
+      "type": "registry:component",
+      "title": "Dropdown Menu",
+      "description": "Base UI menu primitives (trigger, content, item, checkbox/radio items, label, separator, submenu, shortcut) with anchored positioning and check indicators.",
+      "dependencies": ["@base-ui/react", "lucide-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/dropdown-menu.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "type": "registry:component",
+      "title": "Empty",
+      "description": "Empty-state primitives (header, media, title, description, content) for placeholder regions, with an icon media variant.",
+      "dependencies": ["class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/empty.tsx",
           "type": "registry:component"
         }
       ]
@@ -169,6 +222,19 @@
       ]
     },
     {
+      "name": "marker",
+      "type": "registry:component",
+      "title": "Marker",
+      "description": "Small annotation row (icon + content) with default, separator, and border variants over Base UI's render element.",
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/marker.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "popover",
       "type": "registry:component",
       "title": "Popover",
@@ -221,6 +287,19 @@
       ]
     },
     {
+      "name": "skeleton",
+      "type": "registry:component",
+      "title": "Skeleton",
+      "description": "Pulse-animated placeholder block for loading states.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/skeleton.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "slider",
       "type": "registry:component",
       "title": "Slider",
@@ -229,6 +308,19 @@
       "files": [
         {
           "path": "src/components/slider.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "sonner",
+      "type": "registry:component",
+      "title": "Sonner",
+      "description": "Sonner toaster themed through the design tokens, with lucide status icons and next-themes integration.",
+      "dependencies": ["lucide-react", "next-themes", "sonner"],
+      "files": [
+        {
+          "path": "src/components/sonner.tsx",
           "type": "registry:component"
         }
       ]
@@ -255,6 +347,19 @@
       "files": [
         {
           "path": "src/components/textarea.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "tooltip",
+      "type": "registry:component",
+      "title": "Tooltip",
+      "description": "Base UI tooltip primitives (provider, trigger, content) with anchored positioning, an arrow, and kbd-aware padding.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/tooltip.tsx",
           "type": "registry:component"
         }
       ]
@@ -483,6 +588,19 @@
       "files": [
         {
           "path": "src/components/cad/cad-command-menu.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "cad-configuration-panel",
+      "type": "registry:component",
+      "title": "CAD Configuration Panel",
+      "description": "Configuration surface for parameter-table variants: the switcher radiogroup, the per-configuration override/suppressed/hidden counts table, the Formedible create form, and the CSV import/export row — every mutation stays a host callback, the parameter panel's props discipline.",
+      "registryDependencies": ["@slopcad/button", "@slopcad/formedible"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-configuration-panel.tsx",
           "type": "registry:component"
         }
       ]
@@ -858,6 +976,11 @@
           "path": "src/agent/providers/openai-compatible.ts",
           "type": "registry:lib",
           "target": "src/agent/providers/openai-compatible.ts"
+        },
+        {
+          "path": "src/agent/testing/mock-provider.ts",
+          "type": "registry:lib",
+          "target": "src/agent/testing/mock-provider.ts"
         }
       ]
     }

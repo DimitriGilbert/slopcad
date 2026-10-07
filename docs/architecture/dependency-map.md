@@ -4,13 +4,29 @@ _Established 2026-09-15 (Phases 1 + 1.5). This is the authoritative allowed-impo
 
 ## Current workspace graph
 
+_Graph regenerated 2026-10-06 from `apps/web/package.json` (16 workspace dependencies + `@slopcad/config` as devDependency); runtime `dependencies` only — per-package devDependencies (e.g. kernel backends exercised by test suites) are omitted — and transitive names are abbreviated (`@slopcad/<name>`)._
+
 ```text
 apps/web
-  ├── @slopcad/api ──┬── @slopcad/auth ──┬── @slopcad/db ── @slopcad/env
-  │                 └── @slopcad/db     └── @slopcad/env
-  ├── @slopcad/auth
+  ├── @slopcad/api ──────────────── auth, cad-core, db, env
+  ├── @slopcad/auth ─────────────── db, env
+  ├── @slopcad/db ───────────────── env
   ├── @slopcad/env
-  └── @slopcad/ui (via tsconfig paths @slopcad/ui/*)
+  ├── @slopcad/ui (via tsconfig paths @slopcad/ui/*)
+  │     └── cad-core, cad-kernel, cad-kernel-manifold, cad-r3f, cad-react
+  ├── @slopcad/cad-core
+  ├── @slopcad/cad-kernel ───────── cad-core
+  ├── @slopcad/cad-kernel-manifold ── cad-core, cad-kernel
+  ├── @slopcad/cad-kernel-occt ──── cad-core, cad-kernel
+  ├── @slopcad/cad-react ────────── cad-core
+  ├── @slopcad/cad-r3f ──────────── cad-core, cad-react
+  ├── @slopcad/cad-sketch ───────── cad-core
+  ├── @slopcad/cad-io ───────────── cad-core, cad-kernel, cad-sketch
+  ├── @slopcad/cad-jsx ──────────── cad-core
+  ├── @slopcad/cad-components ───── cad-core, cad-kernel, cad-react
+  └── @slopcad/docs-examples ────── cad-components, cad-core, cad-io, cad-jsx, cad-jscad,
+                                   cad-kernel, cad-kernel-manifold, cad-kernel-occt,
+                                   cad-react, cad-sketch
 
 packages/config — devDependency of every package (tsconfig base, vitest factory)
 ```

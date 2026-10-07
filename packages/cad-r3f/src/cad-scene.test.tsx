@@ -462,9 +462,7 @@ describe("CadScene quality post-chain disposal", () => {
     // The memo's size keys change: the rebuild must dispose the replaced
     // chain, not merely drop it.
     fiber.state.size = { width: 640, height: 480 };
-    view.rerender(
-      <CadScene projection={PROJECTION} renderQuality="quality" />,
-    );
+    view.rerender(<CadScene projection={PROJECTION} renderQuality="quality" />);
     expect(composerDispose).toHaveBeenCalledTimes(1);
     expect(ssaoDispose).toHaveBeenCalledTimes(1);
     // Two builds, two disposals: the CURRENT chain also goes on unmount.
@@ -482,9 +480,7 @@ describe("CadScene quality post-chain disposal", () => {
     // The camera-kind swap path (the rig's set({ camera })): a new camera
     // object re-keys the memo and must dispose the replaced chain.
     fiber.state.camera = new THREE.PerspectiveCamera();
-    view.rerender(
-      <CadScene projection={PROJECTION} renderQuality="quality" />,
-    );
+    view.rerender(<CadScene projection={PROJECTION} renderQuality="quality" />);
     expect(composerDispose).toHaveBeenCalledTimes(1);
     expect(ssaoDispose).toHaveBeenCalledTimes(1);
     view.unmount();
