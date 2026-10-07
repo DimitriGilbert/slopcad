@@ -278,11 +278,16 @@ millimetres; any dimension may be authored with an explicit quantity
 (`angle(90, "deg")`, `dimensionless(4)`). The name must be a valid
 expression identifier — it is the document's identifier vocabulary.
 
-`<Body>` wraps at most one producing element (any primitive, operation,
-or `<Translate>`); that child's feature outputs the `<Body>`'s body
-instead of creating its own. A `<Body>` with no producer is a bare body
-record. A `<Translate>` wraps exactly one producing child (its child
-keeps its own body — the translate references the child's feature).
+`<Body>` captures at most one producing element (any primitive,
+operation, `<Translate>`, or `<Use feature="…"/>`); a real producer's
+feature outputs the `<Body>`'s body instead of creating its own. A
+`<Use>` claims the capture like any producer, but it shapes nothing:
+the referenced feature already owns its output body, so the captured
+body stands bare. A `<Body>` with no producer — or whose only producer
+is a `<Use>` — is therefore a bare body record. A second producer fails
+`cadjsx/body-producer-conflict`. A `<Translate>` wraps exactly one
+producing child (its child keeps its own body — the translate
+references the child's feature).
 
 The element tags are frozen, branded function values: callable only so
 JSX and `createElement` accept them as tags. They must never be invoked;

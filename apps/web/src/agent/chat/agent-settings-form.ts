@@ -11,9 +11,11 @@
  * - `provider` and the model fields default to `""`/untyped — nothing is
  *   preselected, and `""` is a real option ("Not chosen") rather than a
  *   hidden sentinel.
- * - The raw model id input is ALWAYS visible (D5's "always typable");
- *   when filled it overrides the picker — the explicit string is the more
- *   specific intent, and the picker exists to fill, not to veto it.
+ * - The raw model id input is ALWAYS visible (D5's "always typable") and
+ *   stays the resolution authority, but it is not a silent veto: the
+ *   sheet mirrors every picker change into it (`pickerMirroredRawId`),
+ *   so the saved-model prefill can never outvote a fresh pick. A
+ *   hand-typed string remains the override until the next pick.
  * - The reasoning controls offer EXACTLY the selected model's catalog
  *   `reasoning_options`: an effort select over the declared `values`, a
  *   budget number over the declared `min`; both hidden when the model
@@ -23,7 +25,10 @@
  *
  * The API key is client-only (D1): it maps into the config store's
  * per-provider map and never leaves the browser except to the chosen
- * provider's own endpoint.
+ * provider's own endpoint. The field always shows the CHOSEN provider's
+ * own stored key (`apiKeySeedFor` — the prefill and the sheet's
+ * in-form provider-switch reseed share the one lookup), and a patch
+ * never overwrites a stored key with an empty string.
  */
 
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
@@ -139,7 +144,11 @@ export type AgentSettingsValues = {
   openAiCompatibleBaseUrl: string;
   /** The picker's choice; `""` when the raw string is the only source. */
   modelId: string;
-  /** The always-visible raw model string; overrides the picker when set. */
+  /**
+   * The always-visible raw model string — the resolution authority that
+   * mirrors every picker edit (`pickerMirroredRawId`), so a hand-typed
+   * value is the override and a picker edit is never vetoed.
+   */
   rawModelId: string;
   /** An offered effort label; `""` = not chosen. */
   reasoningEffort: string;
@@ -186,16 +195,40 @@ export const agentSettingsSchema = z
     }
   });
 
+/**
+ * The stored key of the given provider, as the key FIELD should show it:
+ * that provider's own entry, or `""` — never another provider's key. The
+ * prefill and the sheet's in-form provider-switch reseed (the
+ * cross-provider leak fix) share this one lookup.
+ */
+export function apiKeySeedFor(
+  config: AgentConfig,
+  provider: AgentProviderId | null,
+): string {
+  return provider === null ? "" : (config.apiKeyByProvider[provider] ?? "");
+}
+
+/**
+ * The picker-mirror rule (the raw-veto fix): the resolver is raw-first,
+ * so every picker edit is written into the raw id field verbatim — the
+ * raw field then carries the picked id until the next pick or a
+ * hand-typed override. `null` = the picker did not move; leave the raw
+ * field alone (a raw-field edit must not be clobbered).
+ */
+export function pickerMirroredRawId(
+  previousModelId: string,
+  nextModelId: string,
+): string | null {
+  return nextModelId === previousModelId ? null : nextModelId;
+}
+
 /** Builds the form's (remembered) default values from the live config. */
 export function agentSettingsValuesFromConfig(
   config: AgentConfig,
   serverModeAllowed: boolean,
 ): AgentSettingsValues {
   return {
-    apiKey:
-      config.provider === null
-        ? ""
-        : (config.apiKeyByProvider[config.provider] ?? ""),
+    apiKey: apiKeySeedFor(config, config.provider),
     maxIterations: config.maxIterations,
     mode:
       config.mode === "server" && !serverModeAllowed ? "client" : config.mode,
@@ -256,6 +289,11 @@ export function reasoningSelectionOf(
  * keys (the store's patch is a shallow merge) and the stored system
  * prompt round-trips (an explicitly emptied prompt stays empty — that is
  * the documented "context block only" mode).
+ *
+ * The key map only ever WRITES a non-empty field: the field always shows
+ * the chosen provider's own stored key (the prefill/reseed contract), so
+ * an empty submission means "unchanged" — it can neither move a previous
+ * provider's key into the new slot nor erase a stored one.
  */
 export function agentConfigPatchFromSettingsValues(
   values: AgentSettingsValues,
@@ -270,9 +308,7 @@ export function agentConfigPatchFromSettingsValues(
   };
   if (values.provider !== "") {
     const trimmedKey = values.apiKey.trim();
-    if (trimmedKey === "") {
-      delete apiKeyByProvider[values.provider];
-    } else {
+    if (trimmedKey !== "") {
       apiKeyByProvider[values.provider] = trimmedKey;
     }
   }
@@ -339,7 +375,7 @@ function modeOptions(serverModeAllowed: boolean): readonly {
         },
         {
           description:
-            "The slopcad server calls the provider with its own keys.",
+            "The slopcad server calls the provider with its own keys. Text-only: the agent's tools are unavailable in this mode.",
           label: "Server (slopcad relay)",
           value: "server",
         },
@@ -438,7 +474,7 @@ export function createAgentSettingsFields(
       type: "text",
       label: "Model id",
       description:
-        "The exact model string sent to the provider; when filled it overrides the picker.",
+        "The exact model string sent to the provider — it follows the picker above; type here to override.",
       placeholder: "type any model id",
     },
     {

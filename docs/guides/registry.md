@@ -8,11 +8,15 @@ Nothing is on npm (owner decree); nothing is published anywhere.
 
 ## The three source registries
 
-| Registry                                | Items                                                                                                                                                                                             |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/ui/registry.json`             | 16 shadcn primitives, Formedible, the 11 `cad-*` components, the `plate-workbench` example block                                                                                                  |
-| `packages/cad-components/registry.json` | `component-contract`, `component-kernel`, `cad-component`, `context-kernel`, `nema17-mount`, `arduino-mount`, `enclosure`, the `nema17-assembly-example` block, the `parametric-cad-viewer` block |
-| `apps/web/registry.json`                | the 7 headless tools: 4 inspection (`bounds`, `distance`, `mass-properties`, `radius`) + 3 feature (`extrude`, `revolve`, `hole`)                                                                 |
+| Registry                                | Items                                                                                                                                                                                                                                       |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/ui/registry.json`             | the flat shadcn primitives (the chat-flavored `bubble`/`message`/`message-scroller` among them), Formedible, the `cad-*` component set including `cad-configuration-panel`, and the `plate-workbench` and `agent-chat-panel` example blocks |
+| `packages/cad-components/registry.json` | `component-contract`, `component-kernel`, `cad-component`, `context-kernel`, `nema17-mount`, `arduino-mount`, `enclosure`, the `nema17-assembly-example` block, the `parametric-cad-viewer` block                                           |
+| `apps/web/registry.json`                | the 8 headless tools: 4 inspection (`bounds`, `distance`, `mass-properties`, `radius`) + `datum` + 3 feature (`extrude`, `revolve`, `hole`)                                                                                                 |
+
+The table names categories, not totals — items ship over time and hard
+counts go stale. `pnpm registry:validate` is the mechanical source of
+truth for the exact item set.
 
 ## The pipeline
 

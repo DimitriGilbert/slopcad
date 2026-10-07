@@ -45,12 +45,12 @@ emits its implicit parameters, its `body.create`, and its
 
 ### Booleans and sharing
 
-| Element       | Props     | Lowers to                                                             |
-| ------------- | --------- | --------------------------------------------------------------------- |
-| `<Union>`     | children  | kind `union` — every child feature, in order (≥ 2 producing children) |
-| `<Subtract>`  | children  | kind `subtract` — the FIRST child is the base, the rest are the tools |
-| `<Intersect>` | children  | kind `intersect` — every child feature, in order                      |
-| `<Use>`       | `feature` | no commands — the reference a consumer turns into a feature input     |
+| Element       | Props     | Lowers to                                                                                                                                                                                        |
+| ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `<Union>`     | children  | kind `union` — every child feature, in order (≥ 2 producing children)                                                                                                                            |
+| `<Subtract>`  | children  | kind `subtract` — the FIRST child is the base, the rest are the tools                                                                                                                            |
+| `<Intersect>` | children  | kind `intersect` — every child feature, in order                                                                                                                                                 |
+| `<Use>`       | `feature` | no commands — the reference a consumer turns into a feature input; inside a `<Body>` it claims the body's one-producer capture (the body stands bare — the feature already owns its output body) |
 
 `<Use feature="feat_…">` is the one sharing mechanism: an element used
 more than once stays put (give it an explicit `id`) and each consumer

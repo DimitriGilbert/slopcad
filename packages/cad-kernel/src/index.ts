@@ -22,6 +22,9 @@
  *   `./worker-session` — the generic transport, the kernel-hosting server,
  *   the promise-based client, and the in-memory in-process session that
  *   wires them together (Phase 10.2).
+ * - `./worker-boot`, `./worker-boot-failure-report` — the crash-settling
+ *   worker boot (Phase 35) and the worker-side boot-failure report its
+ *   channel settles terminally on.
  * - `./revision`, `./stale-result-guard`, `./stale-result-coordinator` —
  *   the Phase 10.4 stale-result protection: the monotonic revision identity
  *   binding computations to document state, the atomic check-and-apply
@@ -457,6 +460,12 @@ export type {
   WorkerBootFailure,
   WorkerCrashPort,
 } from "./worker-boot";
+
+export {
+  parseWorkerBootFailureReport,
+  WORKER_BOOT_FAILURE_KEY,
+} from "./worker-boot-failure-report";
+export type { WorkerBootFailureReport } from "./worker-boot-failure-report";
 
 export { createWorkerServer } from "./worker-server";
 export type { WorkerServer, WorkerServerOptions } from "./worker-server";

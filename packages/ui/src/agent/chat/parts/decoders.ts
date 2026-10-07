@@ -242,16 +242,38 @@ export interface DecodedCaptureGallery {
 }
 
 /**
+ * The inline `data:` mime allowlist: only the media families the renderers
+ * embed (image, audio, video — the element arms where even script-capable
+ * subtypes like SVG stay inert) plus the one document type browsers render
+ * natively (`application/pdf`). Producer-controlled text — the `text/html`
+ * that would mint a top-level navigation through the document renderer's
+ * anchor — is refused, so the source falls to the unrenderable placeholder.
+ */
+function isRenderableDataMime(mimeType: string): boolean {
+  return (
+    mimeType.startsWith("image/") ||
+    mimeType.startsWith("audio/") ||
+    mimeType.startsWith("video/") ||
+    mimeType === "application/pdf"
+  );
+}
+
+/**
  * Renders a media source to an element-safe URL: inline base64 becomes a
- * `data:` URI, URL sources survive only as http(s) through the ported
- * template's {@link safeHttpUrl} guard (`javascript:`-style injection is
- * refused with `null`), provider file handles render nothing (opaque by
- * contract).
+ * `data:` URI only when its producer-supplied mime type passes the
+ * {@link isRenderableDataMime} allowlist, URL sources survive only as
+ * http(s) through the ported template's {@link safeHttpUrl} guard
+ * (`javascript:`-style injection is refused with `null`), provider file
+ * handles render nothing (opaque by contract).
  */
 export function mediaSourceSrc(source: ContentPartSource): string | null {
   switch (source.type) {
     case "data": {
-      if (source.mimeType.length === 0 || source.value.length === 0) {
+      if (
+        source.mimeType.length === 0 ||
+        source.value.length === 0 ||
+        !isRenderableDataMime(source.mimeType)
+      ) {
         return null;
       }
       return `data:${source.mimeType};base64,${source.value}`;
@@ -325,10 +347,20 @@ export function decodeCaptureGallery(
   return { images, summary };
 }
 
-/** Pretty, deterministic JSON for collapsed raw views of untyped payloads. */
+/**
+ * Pretty, deterministic JSON for collapsed raw views of untyped payloads.
+ * Total (the module contract — display paths never throw): stringify throws
+ * a `RangeError` past a nesting depth `JSON.parse` still accepts (~4500
+ * levels of wire data), so a failure renders the stable placeholder instead
+ * of unmounting the chat.
+ */
 export function stableJson(value: unknown): string {
-  const text = JSON.stringify(value, null, 2);
-  return text === undefined ? "undefined" : text;
+  try {
+    const text = JSON.stringify(value, null, 2);
+    return text === undefined ? "undefined" : text;
+  } catch {
+    return "[unrenderable JSON]";
+  }
 }
 
 /**

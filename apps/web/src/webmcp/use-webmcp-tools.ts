@@ -32,7 +32,6 @@ import { useEffect } from "react";
 import {
   executeWebMcpTool,
   registerWebMcpTool,
-  unregisterWebMcpTool,
   webMcpToolSnapshot,
   type WebMcpToolEntry,
   type WebMcpToolSnapshot,
@@ -117,14 +116,16 @@ function mirrorToolsToModelContext(
  * in the internal registry (ALWAYS — the source of truth), mirrors them to
  * `document.modelContext` when the API is present, and installs the
  * `window.__slopcadWebMcpTools` test seam once per page. Returns the cleanup
- * that unregisters everything and aborts the mirror registration (the
- * spec's unregistration path). Browser access is guarded, so the function
- * is safe under SSR and in non-DOM hosts.
+ * that aborts the mirror registration (the spec's unregistration path) and
+ * unregisters exactly the entries THIS call registered — through the
+ * registrations' ownership handles, so a name another host re-registered
+ * in the meantime survives this host's unmount. Browser access is guarded,
+ * so the function is safe under SSR and in non-DOM hosts.
  */
 export function bindWebMcpTools(
   entries: readonly WebMcpToolEntry[],
 ): () => void {
-  for (const entry of entries) registerWebMcpTool(entry);
+  const registrations = entries.map((entry) => registerWebMcpTool(entry));
   const mirrorController =
     typeof document === "undefined" ? null : mirrorToolsToModelContext(entries);
   if (
@@ -136,7 +137,7 @@ export function bindWebMcpTools(
   }
   return () => {
     mirrorController?.abort();
-    for (const entry of entries) unregisterWebMcpTool(entry.name);
+    for (const registration of registrations) registration.unregister();
   };
 }
 

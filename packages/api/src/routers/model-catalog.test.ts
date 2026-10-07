@@ -649,6 +649,129 @@ describe("modelCatalog router", () => {
     expect(garbage.entries).toHaveLength(PINNED_GOOGLE.length);
   });
 
+  it("keeps the last good rows, ETag, and TTL clock when a 200 body is not a provider map", async () => {
+    const { authenticated, fetchMock, advanceTo, db } =
+      await createCatalogHarness();
+    fetchMock.mockResolvedValueOnce(okResponse(fixtureText, '"etag-shape-1"'));
+    await authenticated.modelCatalog.refresh({ provider: "google" });
+
+    advanceTo(beyondTtl(PINNED_NOW));
+    fetchMock.mockClear();
+
+    // Parseable 200s that are not a models.dev provider map — an error
+    // object, a bare array, and null — are upstream failures: each keeps
+    // the cached rows and never touches the stored ETag or fetchedAt.
+    const wrongShapeBodies = [
+      {
+        etag: '"etag-garbage-1"',
+        body: JSON.stringify({ error: "rate limited" }),
+      },
+      { etag: '"etag-garbage-2"', body: "[]" },
+      { etag: '"etag-garbage-3"', body: "null" },
+    ];
+    for (const { etag, body } of wrongShapeBodies) {
+      fetchMock.mockResolvedValueOnce(okResponse(body, etag));
+      const result = await authenticated.modelCatalog.refresh({
+        provider: "google",
+      });
+      expect(result.outcome).toBe("stale-served");
+      expect(result.entries.map((entry) => entry.modelId)).toEqual([
+        ...PINNED_GOOGLE,
+      ]);
+
+      const metaRows = await db
+        .select()
+        .from(modelCatalogMeta)
+        .where(eq(modelCatalogMeta.provider, "google"));
+      expect(metaRows[0]?.etag).toBe('"etag-shape-1"');
+      expect(metaRows[0]?.fetchedAt.getTime()).toBe(PINNED_NOW.getTime());
+    }
+
+    // The rows survive every wrong-shape 200.
+    expect(
+      (await authenticated.modelCatalog.list({ provider: "google" })).map(
+        (entry) => entry.modelId,
+      ),
+    ).toEqual([...PINNED_GOOGLE]);
+  });
+
+  it("keeps prior rows and their TTL clock when a valid provider list filters to empty", async () => {
+    const { authenticated, fetchMock, advanceTo, db } =
+      await createCatalogHarness();
+    fetchMock.mockResolvedValueOnce(okResponse(fixtureText, '"etag-empty-1"'));
+    await authenticated.modelCatalog.refresh({ provider: "openai" });
+
+    advanceTo(beyondTtl(PINNED_NOW));
+    fetchMock.mockClear();
+
+    // Both empty-but-valid shapes per the filter's semantics: an empty
+    // models map and an empty models array under the provider's entry.
+    fetchMock.mockResolvedValueOnce(
+      okResponse('{"openai":{"models":{}}}', '"etag-empty-2"'),
+    );
+    const emptiedMap = await authenticated.modelCatalog.refresh({
+      provider: "openai",
+    });
+    expect(emptiedMap.outcome).toBe("stale-served");
+    expect(emptiedMap.entries.map((entry) => entry.modelId)).toEqual([
+      ...PINNED_OPENAI,
+    ]);
+
+    fetchMock.mockResolvedValueOnce(
+      okResponse('{"openai":{"models":[]}}', '"etag-empty-3"'),
+    );
+    const emptiedArray = await authenticated.modelCatalog.refresh({
+      provider: "openai",
+    });
+    expect(emptiedArray.outcome).toBe("stale-served");
+
+    // No wipe, no re-clock: the rows and the original ETag/fetchedAt
+    // survive, and both post-TTL refreshes still hit upstream because the
+    // cache window was not extended.
+    const metaRows = await db
+      .select()
+      .from(modelCatalogMeta)
+      .where(eq(modelCatalogMeta.provider, "openai"));
+    expect(metaRows[0]?.etag).toBe('"etag-empty-1"');
+    expect(metaRows[0]?.fetchedAt.getTime()).toBe(PINNED_NOW.getTime());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    expect(
+      (await authenticated.modelCatalog.list({ provider: "openai" })).map(
+        (entry) => entry.modelId,
+      ),
+    ).toEqual([...PINNED_OPENAI]);
+  });
+
+  it("records a legitimately empty catalog (meta only) when nothing is cached yet", async () => {
+    const { authenticated, fetchMock, db } = await createCatalogHarness();
+    fetchMock.mockResolvedValueOnce(
+      okResponse('{"anthropic":{"models":{}}}', '"etag-blank-1"'),
+    );
+    const result = await authenticated.modelCatalog.refresh({
+      provider: "anthropic",
+    });
+    expect(result.outcome).toBe("refetched");
+    expect(result.entries).toEqual([]);
+
+    const metaRows = await db
+      .select()
+      .from(modelCatalogMeta)
+      .where(eq(modelCatalogMeta.provider, "anthropic"));
+    expect(metaRows[0]?.etag).toBe('"etag-blank-1"');
+    expect(metaRows[0]?.fetchedAt.getTime()).toBe(PINNED_NOW.getTime());
+    expect(await authenticated.modelCatalog.providers()).toEqual(["anthropic"]);
+
+    // The recorded emptiness is cached like any fetch: inside the TTL no
+    // upstream call happens again.
+    fetchMock.mockClear();
+    const cached = await authenticated.modelCatalog.refresh({
+      provider: "anthropic",
+    });
+    expect(cached.outcome).toBe("fresh-cache");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("surfaces a typed BAD_GATEWAY only when there are no rows to serve", async () => {
     const { authenticated, fetchMock } = await createCatalogHarness();
 
@@ -663,6 +786,12 @@ describe("modelCatalog router", () => {
     ).rejects.toMatchObject({ code: "BAD_GATEWAY" });
 
     fetchMock.mockResolvedValueOnce(okResponse("<html>504</html>", '"etag-y"'));
+    await expect(
+      authenticated.modelCatalog.refresh({ provider: "anthropic" }),
+    ).rejects.toMatchObject({ code: "BAD_GATEWAY" });
+
+    // A parseable 200 that is not a provider map is a failure too.
+    fetchMock.mockResolvedValueOnce(okResponse("[]", '"etag-z"'));
     await expect(
       authenticated.modelCatalog.refresh({ provider: "anthropic" }),
     ).rejects.toMatchObject({ code: "BAD_GATEWAY" });

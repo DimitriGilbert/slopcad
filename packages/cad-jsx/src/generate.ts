@@ -28,10 +28,11 @@
  *   later feature nests as that consumer's child; a feature consumed by
  *   two or more later features stands alone and its consumers reference
  *   it through `<Use feature="…">`;
- * - a feature whose output body's name is not the compiler's derived
- *   standalone name is wrapped in `<Body id=… name=…>` (the only way the
- *   compiler can have produced that name); bare body records (no
- *   producing feature) close the model, in body order.
+ * - a feature whose output body is not exactly the compiler's derived
+ *   standalone pair — the id `body_<slug>` AND its derived name — is
+ *   wrapped in `<Body id=… name=…>` (the only way the compiler can have
+ *   produced that pair); bare body records (no producing feature) close
+ *   the model, in body order.
  *
  * A document authored in this discipline — parameters first, sketches at
  * their first consumer, features in timeline order — round-trips
@@ -364,6 +365,11 @@ function implicitParameterName(slug: string, dimension: string): string {
   return `${sanitized}${capitalized}`;
 }
 
+/** The standalone output-body id the compiler derives from a slug. */
+function standaloneBodyId(slug: string): string {
+  return `body_${slug}`;
+}
+
 /** The standalone output-body name the compiler derives from a slug. */
 function standaloneBodyName(slug: string): string {
   return slug.replace(/-/g, " ");
@@ -590,6 +596,11 @@ function planSketch(state: GenerateState, record: DocumentSketch): void {
   }[] = [];
   // The rectangle's chained-lines pattern: a rect entity plus the four
   // immediately-preceding line entities the compiler derives from it.
+  // planPositions records, per planned payload entity, the position its
+  // plan landed at in `entities`, so a rectangle's fold splices exactly
+  // the CURRENT rectangle's four line plans — adjacent rectangles keep
+  // each other's plans.
+  const planPositions: number[] = [];
   let index = 0;
   while (index < payload.entities.length) {
     const entity: unknown = payload.entities[index];
@@ -615,7 +626,7 @@ function planSketch(state: GenerateState, record: DocumentSketch): void {
     }
     if (entity.kind === "rectangle") {
       const planned = planRectangleEntity(entity, payload.entities, index);
-      if (planned === null) {
+      if (planned === null || !foldChainedLinePlans(entities, planPositions)) {
         decline(
           state,
           "sketch",
@@ -625,12 +636,13 @@ function planSketch(state: GenerateState, record: DocumentSketch): void {
         state.declinedSketches.add(record.id);
         return;
       }
-      // The four chained lines just before the rectangle are the
-      // compiler's own derivation — the single <Rectangle> re-creates
-      // them, so their individual plans fold away.
-      entities.splice(entities.length - 4, 4);
+      // The folded plans were the four chained lines just before the
+      // rectangle — the compiler's own derivation, which the single
+      // <Rectangle> re-creates. The rectangle itself is one payload
+      // entity, so the walk advances by one like any other entity.
       entities.push(planned);
-      index += 5;
+      planPositions.push(entities.length - 1);
+      index += 1;
       continue;
     }
     const planned = planPlainEntity(entity);
@@ -645,6 +657,7 @@ function planSketch(state: GenerateState, record: DocumentSketch): void {
       return;
     }
     entities.push(planned);
+    planPositions.push(entities.length - 1);
     index += 1;
   }
   const slug = slugOfId(record.id);
@@ -735,6 +748,29 @@ function planRectangleEntity(
     ],
     tag: "Rectangle",
   };
+}
+
+/**
+ * Folds one rectangle's four chained-line plans away: the plans of the
+ * four line entities immediately before it, at the positions the plan
+ * walk recorded as it pushed them — never a positional guess, so
+ * adjacent rectangles fold their own lines and keep each other's plans.
+ * Removes the four tracked plans, highest position first (lower
+ * positions survive the splices); false when the tracked ledger holds
+ * fewer than four plans, in which case the caller declines the sketch —
+ * the pattern the fold relies on does not hold.
+ */
+function foldChainedLinePlans(
+  entities: unknown[],
+  planPositions: number[],
+): boolean {
+  if (planPositions.length < 4) return false;
+  for (let offset = 0; offset < 4; offset += 1) {
+    const linePosition = planPositions.pop();
+    if (linePosition === undefined) return false;
+    entities.splice(linePosition, 1);
+  }
+  return true;
 }
 
 /** A non-rectangle entity's plan, or null when it has no element form. */
@@ -1147,7 +1183,13 @@ function planFeature(state: GenerateState, feature: FeatureRecord): void {
   state.featureBodies.add(outputBodyId);
   const slug = slugOfId(feature.id);
   state.elements.set(feature.id, {
+    // The wrapper is omitted only when the output body is EXACTLY what
+    // the recompiled model would derive for this slug — id AND name.
+    // A foreign body id with a coincidental display name must keep its
+    // wrapper, or the recompile would silently mint `body_<slug>` and
+    // diverge from the document.
     bodyWrapper:
+      outputBodyId === standaloneBodyId(slug) &&
       outputBody.name === standaloneBodyName(slug)
         ? null
         : { id: outputBodyId, name: outputBody.name },

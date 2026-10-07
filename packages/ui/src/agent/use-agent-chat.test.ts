@@ -3,13 +3,14 @@
 /**
  * The Phase 3.3 runtime hook contract (PLAN-AGENT-CHAT): transport selection
  * by mode (the useChat `connection` XOR `fetcher` currencies), system-prompt
- * assembly (user prompt + delimited context block), the native modelOptions
- * merge from Phase 1.3, the config-driven `maxIterations` loop bound, and
- * stop/retry — all against the REAL chat machinery (`@tanstack/ai-client`'s
- * ChatClient driving the transport), with the model doubled by a scripted
- * text adapter at the Phase 1.2 seam (client mode) and by the Phase 3.2
- * MockProvider serialized to SSE (server mode). No live network: every fetch
- * is injected.
+ * assembly (user prompt + delimited context block, MODE-DEPENDENT in its
+ * tool section: the catalogue in client mode, the unavailability notice in
+ * server mode), the native modelOptions merge from Phase 1.3, the
+ * config-driven `maxIterations` loop bound, and stop/retry — all against the
+ * REAL chat machinery (`@tanstack/ai-client`'s ChatClient driving the
+ * transport), with the model doubled by a scripted text adapter at the
+ * Phase 1.2 seam (client mode) and by the Phase 3.2 MockProvider serialized
+ * to SSE (server mode). No live network: every fetch is injected.
  */
 
 import { describe, expect, it } from "vitest";
@@ -36,6 +37,7 @@ import {
   AGENT_BASE_INSTRUCTION,
   AGENT_CONTEXT_END,
   AGENT_CONTEXT_START,
+  AGENT_SERVER_MODE_TOOL_NOTICE,
   agentToolCatalogue,
   assembleAgentSystemPrompt,
   createAgentChatTransport,
@@ -420,6 +422,30 @@ describe("assembleAgentSystemPrompt", () => {
       "Current document summary:\n(the document is empty)",
     );
     expect(prompt).toContain("(no tools are bound)");
+  });
+
+  it("replaces the catalogue with the server-mode unavailability notice for a null catalogue", () => {
+    const prompt = assembleAgentSystemPrompt({
+      documentSummary: SUMMARY,
+      toolCatalogue: null,
+      userPrompt: null,
+    });
+
+    // `null` is the server (relay) mode: no catalogue can be honest there,
+    // only the explicit unavailability line.
+    expect(prompt).toContain(AGENT_SERVER_MODE_TOOL_NOTICE);
+    expect(prompt).not.toContain(
+      "Tool catalogue (the only tools you may call):",
+    );
+    expect(prompt).not.toContain("(no tools are bound)");
+    // An EMPTY catalogue is client mode's real zero-tool state and stays.
+    const empty = assembleAgentSystemPrompt({
+      documentSummary: SUMMARY,
+      toolCatalogue: [],
+      userPrompt: null,
+    });
+    expect(empty).toContain("(no tools are bound)");
+    expect(empty).not.toContain(AGENT_SERVER_MODE_TOOL_NOTICE);
   });
 
   it("ships a base instruction with no model ids that frames multi-angle capture as optional", () => {
@@ -863,14 +889,12 @@ describe("server-relay transport (the keyless SSE fetcher)", () => {
       id: "slopcad-agent-system",
       parts: [
         {
+          // Server mode is text-only (D4's scope): `null` catalogue — the
+          // unavailability notice replaces the client mode's tool catalogue,
+          // even though tools ARE bound (the fetcher never ships them).
           content: assembleAgentSystemPrompt({
             documentSummary: SUMMARY,
-            toolCatalogue: [
-              {
-                description: "Apply CAD commands (runtime hook test).",
-                name: "cad_apply_commands",
-              },
-            ],
+            toolCatalogue: null,
             userPrompt: "Prefer solids.",
           }),
           type: "text",
@@ -890,6 +914,69 @@ describe("server-relay transport (the keyless SSE fetcher)", () => {
         exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
       }),
     ).toEqual([]);
+  });
+
+  it("ships a text-only system prompt: no tool catalogue, explicit tool unavailability (the modes differ)", async () => {
+    const { calls, transport } = relayTransportWith(
+      agentConfig({ mode: "server" }),
+      () => new Response('data: {"type":"RUN_FINISHED"}\n\n', { status: 200 }),
+    );
+
+    await relayFetcherOf(transport)(
+      {
+        messages: [
+          {
+            id: "u1",
+            parts: [{ content: "Add a sphere.", type: "text" }],
+            role: "user",
+          },
+        ],
+        runId: "run-1",
+        threadId: "thread-1",
+      },
+      { signal: new AbortController().signal },
+    );
+
+    const body = parsedBody(calls[0]);
+    // The wire contract stays five fields — there is no `tools` key to
+    // declare anything with, so the run cannot carry the bound tools.
+    expect(Object.keys(body).sort()).toEqual([
+      "maxIterations",
+      "messages",
+      "modelId",
+      "provider",
+    ]);
+    const messages = body.messages as Array<{
+      parts: Array<{ content: string; type: string }>;
+      role: string;
+    }>;
+    const systemContent = messages[0]?.parts[0]?.content ?? "";
+    // The catalogue the same bound tools produce in client mode is ABSENT
+    // here, replaced by the explicit unavailability line.
+    expect(systemContent).not.toContain("cad_apply_commands");
+    expect(systemContent).not.toContain(
+      "Tool catalogue (the only tools you may call):",
+    );
+    expect(systemContent).toContain(AGENT_SERVER_MODE_TOOL_NOTICE);
+    // Mode-dependence pinned from both sides: the identical inputs in
+    // client mode DO catalogue the tools and carry no notice.
+    const clientPrompt = assembleAgentSystemPrompt({
+      documentSummary: SUMMARY,
+      toolCatalogue: agentToolCatalogue(
+        bridgedTools(recordingApplyExecutor().execute),
+      ),
+      userPrompt: null,
+    });
+    expect(clientPrompt).toContain("cad_apply_commands");
+    expect(clientPrompt).not.toContain(AGENT_SERVER_MODE_TOOL_NOTICE);
+    // And the server prompt is exactly the honest assembly of those inputs.
+    expect(systemContent).toBe(
+      assembleAgentSystemPrompt({
+        documentSummary: SUMMARY,
+        toolCatalogue: null,
+        userPrompt: null,
+      }),
+    );
   });
 
   it("omits modelOptions when the config carries no reasoning selection (the loop bound still rides)", async () => {

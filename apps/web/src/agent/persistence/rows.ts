@@ -6,30 +6,33 @@
  * `docs/research/tanstack-ai.md` §12(c) says does not exist upstream and is
  * ours to write.
  *
- * Losslessness contract (pinned by `rows.test.ts`):
+ * Round-trip contract (pinned by `rows.test.ts`):
  *
- * - `messageToRow` → `rowToMessage` returns a message equal to the original
- *   for every JSON-born field, and revives `Date` values as `Date`s (a plain
- *   `JSON.parse(JSON.stringify(...))` silently degrades them to strings —
- *   TanStack's converters expect `createdAt?: Date`). Dates survive through
- *   a single-key envelope (`{ [DATE_TAG]: iso }`) written by a replacer and
- *   folded back by a reviver; the tag is deliberately namespaced so no
- *   wire-born object can collide with it.
- * - UNKNOWN part types round-trip VERBATIM: parts are serialized as a whole
- *   array, never filtered, mapped, or enumerated by type — a part shape a
- *   newer `@tanstack/ai` emits (or a custom part) persists untouched and
- *   rehydrates untouched. Known part fields (tool-call ids, image sources,
- *   error states, thinking signatures) therefore need no per-type handling
- *   here at all; that is the point.
- * - Message-level optional fields (`name`, `metadata`, `createdAt`) are
- *   preserved; `metadata` uses the same date-preserving codec.
+ * - `messageToRow` → `rowToMessage` returns the original message for every
+ *   JSON-born field, VERBATIM: parts are stored as one `JSON.stringify` of
+ *   the array and parsed back with plain `JSON.parse` — no replacer, no
+ *   reviver, no per-type handling. Any transform at this seam would need
+ *   provenance the JSON text cannot carry (an earlier date-envelope scheme
+ *   folded payload objects that happened to look like the envelope — the
+ *   reviver cannot distinguish our tag from user data), so parts and
+ *   `metadata` follow the plain JSON convention: a `Date` inside them
+ *   persists as its ISO string. That is exactly the convention the sync
+ *   wire already used and TanStack's own storage normalizes back into
+ *   Dates on load (`@tanstack/ai-client`'s message date normalizer).
+ * - Message-level fields that get REAL columns are the only revived values:
+ *   `createdAt` is a dedicated row column read back as a `Date` — provenance
+ *   is structural, not guessed from the payload text.
+ * - UNKNOWN part types round-trip VERBATIM: parts are never filtered,
+ *   mapped, or enumerated by type — a part shape a newer `@tanstack/ai`
+ *   emits (or a custom part) persists untouched and rehydrates untouched,
+ *   including objects whose shape resembles any internal envelope (there
+ *   is none anymore).
  *
- * The sync wire form ({@link messageRowPartsToWire}) is deliberately
- * DIFFERENT: the tRPC `agentConversations.append` contract
- * (`packages/api/src/routers/agent-conversations.ts`) stores `parts` as
- * opaque JSON, so the push strips our private date envelope and sends the
- * plain JSON form (Dates as ISO strings — the wire convention). The server
- * never sees slopcad-internal tagging.
+ * The sync wire form ({@link messageRowPartsToWire}) is now the SAME text:
+ * the stored parts JSON is already the plain form the tRPC
+ * `agentConversations.append` contract
+ * (`packages/api/src/routers/agent-conversations.ts`) stores verbatim in
+ * its opaque JSON column — the server never sees slopcad-internal tagging.
  *
  * Roles mirror the tRPC `append` enum exactly (`system | user | assistant`)
  * via the router's own exported type, so client rows and server rows cannot
@@ -58,11 +61,12 @@ export interface AgentConversationRow {
 }
 
 /**
- * One `agent_messages` row. `parts`/`metadata` are the date-preserving JSON
- * text this module defines; `seq` is the per-conversation monotonic
- * insertion order (TanStack collections iterate by key, not insertion, so
- * order must be carried explicitly); `syncedAt` is the outbox's per-row
- * delivery marker (null = append still queued).
+ * One `agent_messages` row. `parts`/`metadata` are plain JSON text
+ * (`JSON.stringify` of the live values — Dates as ISO strings, nothing
+ * tagged); `seq` is the per-conversation monotonic insertion order (TanStack
+ * collections iterate by key, not insertion, so order must be carried
+ * explicitly); `syncedAt` is the outbox's per-row delivery marker (null =
+ * append still queued).
  */
 export interface AgentMessageRow {
   readonly id: string;
@@ -76,56 +80,8 @@ export interface AgentMessageRow {
   readonly syncedAt: string | null;
 }
 
-/**
- * The single-key envelope a `Date` serializes into. Namespaced so a
- * wire-born part can never be mistaken for one (and checked for exactly-one
- * key on the way back).
- */
-const DATE_TAG = "__slopcadDateIso";
-
-/**
- * The `JSON.stringify` replacer that tags `Date`s. Reads the RAW property
- * through `this[key]` because stringify applies `toJSON` BEFORE the
- * replacer — by the time the replacer sees a Date it is already an ISO
- * string. (For the root call stringify wraps the value as `{ "": value }`,
- * so `this[key]` with `key === ""` covers that case too.)
- */
-function dateTagger(
-  this: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): unknown {
-  const raw = this[key];
-  return raw instanceof Date ? { [DATE_TAG]: raw.toISOString() } : value;
-}
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * The `JSON.parse` reviver: an object carrying EXACTLY the date tag (and a
- * string value) folds back into a `Date`; everything else passes through.
- */
-function dateReviver(_key: string, value: unknown): unknown {
-  if (
-    isPlainObject(value) &&
-    Object.keys(value).length === 1 &&
-    typeof value[DATE_TAG] === "string"
-  ) {
-    return new Date(value[DATE_TAG]);
-  }
-  return value;
-}
-
-/** Date-preserving encode (message-level values are JSON-born plus Dates). */
-function encodePreservingDates(value: unknown): string {
-  return JSON.stringify(value, dateTagger);
-}
-
-/** The inverse of {@link encodePreservingDates}. */
-function decodePreservingDates(text: string): unknown {
-  return JSON.parse(text, dateReviver);
 }
 
 /**
@@ -147,21 +103,22 @@ export function messageToRow(
     conversationId,
     seq,
     role: message.role,
-    parts: encodePreservingDates(message.parts),
+    parts: JSON.stringify(message.parts),
     name: message.name ?? null,
-    metadata: metadata === undefined ? null : encodePreservingDates(metadata),
+    metadata: metadata === undefined ? null : JSON.stringify(metadata),
     createdAt: (message.createdAt ?? new Date()).toISOString(),
     syncedAt: null,
   };
 }
 
 /**
- * Decodes a row's parts text and asserts it is an array (it always is for
- * rows written by {@link messageToRow}; a corrupt store fails loudly here
- * instead of feeding the chat runtime garbage).
+ * Decodes a row's parts text verbatim (plain `JSON.parse` — no reviver) and
+ * asserts it is an array (it always is for rows written by
+ * {@link messageToRow}; a corrupt store fails loudly here instead of feeding
+ * the chat runtime garbage).
  */
 function decodeParts(row: AgentMessageRow): unknown[] {
-  const decoded = decodePreservingDates(row.parts);
+  const decoded: unknown = JSON.parse(row.parts);
   if (!Array.isArray(decoded)) {
     throw new TypeError(
       `The stored parts of message "${row.id}" are not a JSON array (store corrupt?).`,
@@ -172,16 +129,17 @@ function decodeParts(row: AgentMessageRow): unknown[] {
 
 /**
  * Revives one row into a TanStack AI `UIMessage` — the resume path's
- * currency (`useChat`-shaped messages, Dates as Dates). The parts array is
- * returned exactly as stored: `unknown`-typed JSON that was a valid parts
- * array when written, re-narrowed with the array check only (the lossless
- * round-trip is the mapping's contract, pinned by tests — a per-part
- * re-validation here would be a second, drifting copy of the parts model).
+ * currency (`useChat`-shaped messages). The parts array is returned exactly
+ * as stored: `unknown`-typed JSON that was a valid parts array when written,
+ * re-narrowed with the array check only (the verbatim round-trip is the
+ * mapping's contract, pinned by tests — a per-part re-validation here would
+ * be a second, drifting copy of the parts model). The one revived Date is
+ * the row-level `createdAt` column, not anything parsed from payload text.
  */
 export function rowToMessage(row: AgentMessageRow): UIMessage {
   const parts: unknown[] = decodeParts(row);
   const metadata: unknown =
-    row.metadata === null ? undefined : decodePreservingDates(row.metadata);
+    row.metadata === null ? undefined : JSON.parse(row.metadata);
   const metadataRecord = isPlainObject(metadata) ? metadata : undefined;
   return {
     id: row.id,
@@ -194,17 +152,11 @@ export function rowToMessage(row: AgentMessageRow): UIMessage {
 }
 
 /**
- * The parts of one row in their tRPC wire form: the SAME JSON minus the
- * private date envelope — `Date`s become ISO strings, exactly what
- * `JSON.stringify` does to them and what the server's opaque JSON column
- * stores. The outbox's append op sends this, never the tagged local form.
+ * The parts of one row in their tRPC wire form. The stored parts text IS
+ * the wire form: plain JSON, exactly what the server's opaque JSON column
+ * stores — there is no private envelope to strip. The outbox's append op
+ * sends this.
  */
 export function messageRowPartsToWire(row: AgentMessageRow): unknown[] {
-  const plain: unknown = JSON.parse(JSON.stringify(decodeParts(row)));
-  if (!Array.isArray(plain)) {
-    throw new TypeError(
-      `The stored parts of message "${row.id}" did not re-serialize to an array.`,
-    );
-  }
-  return plain;
+  return decodeParts(row);
 }

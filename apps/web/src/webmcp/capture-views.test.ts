@@ -47,6 +47,16 @@ const FAKE_PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 /** The FAKE_PNG_BYTES as the real base64 encoder must produce them. */
 const FAKE_PNG_BASE64 = Buffer.from(FAKE_PNG_BYTES).toString("base64");
 
+/** The module mock's own settle answer: the requested target, or 0 off-root. */
+function defaultSettle(rootId: string, atLeast: number): Promise<number> {
+  return Promise.resolve(rootId === "capture-test-root" ? atLeast : 0);
+}
+
+/** The module mock's own encode answer: a FAKE_PNG_BYTES blob. */
+function defaultEncode(): Promise<Blob> {
+  return Promise.resolve(new Blob([FAKE_PNG_BYTES]));
+}
+
 /**
  * The snapshot module with ONLY its two DOM seams replaced: the pure
  * camera math and the base64 encoding under test stay the real module.
@@ -120,6 +130,8 @@ function renderStateOf(bodyId: string): PlateRenderState {
 function bindCaptureTools(options: {
   readonly applied: PlateRenderState | null;
   readonly convention?: "first-angle" | "third-angle";
+  /** Overrides the fixture's constant 7 (the serialization suite's live ledger). */
+  readonly renderedFrames?: () => number;
 }): { readonly harness: CaptureHarness; readonly unbind: () => void } {
   const applied: (RenderCamera | null)[] = [];
   let currentCamera: RenderCamera | null = null;
@@ -133,7 +145,7 @@ function bindCaptureTools(options: {
       capture: {
         canvas: () => (harness.canvasMounted ? FAKE_CANVAS : null),
         convention: () => options.convention ?? "third-angle",
-        renderedFrames: () => 7,
+        renderedFrames: () => options.renderedFrames?.() ?? 7,
         rootId: "capture-test-root",
         setUserCamera: (camera) => {
           currentCamera = camera;
@@ -180,7 +192,13 @@ async function runCapture(input: unknown): Promise<ToolRun> {
 }
 
 afterEach(() => {
-  vi.clearAllMocks();
+  // Full reset plus default reinstall: clearAllMocks alone would let a
+  // test's swapped implementation (the serialization suite's fake ledger,
+  // gated encodes) or an unconsumed once-queue leak into later tests.
+  vi.mocked(waitForRenderedFrame).mockReset();
+  vi.mocked(captureViewportPng).mockReset();
+  vi.mocked(waitForRenderedFrame).mockImplementation(defaultSettle);
+  vi.mocked(captureViewportPng).mockImplementation(defaultEncode);
   for (const name of webMcpToolNames()) unregisterWebMcpTool(name);
 });
 
@@ -494,6 +512,79 @@ describe("cad_capture_views (snapshot functions mocked)", () => {
       }
     };
     scan(JSON.parse(outcome.result));
+  });
+
+  it("queues a second run behind an in-flight one, never interleaved", async () => {
+    // A LIVE ledger: every settle parks the count at the waited-for
+    // target, so each run's wait targets record when it read the count.
+    let ledger = 7;
+    const bound = bindCaptureTools({
+      applied: renderStateOf("body_plate"),
+      renderedFrames: () => ledger,
+    });
+    vi.mocked(waitForRenderedFrame).mockImplementation(
+      (_rootId: string, atLeast: number) => {
+        ledger = Math.max(ledger, atLeast);
+        return Promise.resolve(atLeast);
+      },
+    );
+    // Hold the FIRST run mid-view at its encode; only that one call is
+    // gated (once), so the queued run's encodes fall through to default.
+    let releaseFirstRun!: () => void;
+    const firstRunEncode = new Promise<void>((resolve) => {
+      releaseFirstRun = resolve;
+    });
+    vi.mocked(captureViewportPng).mockImplementationOnce(() =>
+      firstRunEncode.then(() => new Blob([FAKE_PNG_BYTES])),
+    );
+    // One macrotask: the first run is parked in its gated encode and the
+    // second run is queued behind it — before any camera may move.
+    const flush = (): Promise<void> =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    try {
+      const first = runCapture({ views: [{ preset: "front" }] });
+      const second = runCapture({ views: [{ preset: "top" }] });
+      await flush();
+      // While the first run is mid-view, the second has touched nothing.
+      expect(bound.harness.applied).toHaveLength(1);
+      releaseFirstRun();
+      const [firstRun, secondRun] = await Promise.all([first, second]);
+      expect(firstRun.ok).toBe(true);
+      expect(secondRun.ok).toBe(true);
+      // The overlay saw, in order: first run's camera, first run's
+      // restore, second run's camera, second run's restore.
+      const shapeOf = (camera: RenderCamera | null): string => {
+        if (camera === null) return "restored";
+        return camera.position[2] > 10 ? "top" : "front";
+      };
+      expect(bound.harness.applied.map(shapeOf)).toEqual([
+        "front",
+        "restored",
+        "top",
+        "restored",
+      ]);
+      // The ledger proves the serialization: the second run read the
+      // count only AFTER the first run's restore settled (9), so its
+      // targets start at 10 — an interleaved run would have read 7 too
+      // and waited on the first run's own targets.
+      const waits = vi.mocked(waitForRenderedFrame).mock.calls;
+      expect(waits.map((call) => call[1])).toEqual([8, 9, 10, 11]);
+      // Each run's result labels its own camera — never the other's.
+      const namesOf = (run: ToolRun): readonly string[] => {
+        if (!run.ok) return [];
+        const payload = run.payload as {
+          readonly images: readonly { readonly name: string }[];
+        };
+        return payload.images.map((image) => image.name);
+      };
+      expect(namesOf(firstRun)).toEqual(["view-front.png"]);
+      expect(namesOf(secondRun)).toEqual(["view-top.png"]);
+    } finally {
+      releaseFirstRun();
+      bound.unbind();
+    }
   });
 
   it("derives a JSON object schema for the registry snapshot", () => {

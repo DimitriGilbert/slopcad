@@ -6,23 +6,35 @@ Scaffolded with Better-T-Stack — treat `bts.jsonc` as the stack source of trut
 
 pnpm workspaces monorepo, with Turborepo running cross-package tasks.
 
-| Path              | Package           | Purpose                                                   |
-| ----------------- | ----------------- | --------------------------------------------------------- |
-| `apps/web`        | `web`             | Fullstack TanStack Start app: UI, server routes, tRPC API |
-| `packages/api`    | `@slopcad/api`    | tRPC routers and client                                   |
-| `packages/db`     | `@slopcad/db`     | Drizzle schema + migrations (SQLite)                      |
-| `packages/auth`   | `@slopcad/auth`   | Better Auth                                               |
-| `packages/ui`     | `@slopcad/ui`     | Shared UI components (Tailwind CSS v4)                    |
-| `packages/env`    | `@slopcad/env`    | Typed environment validation                              |
-| `packages/config` | `@slopcad/config` | Shared tsconfig and build config                          |
+| Path                           | Package                        | Purpose                                                              |
+| ------------------------------ | ------------------------------ | -------------------------------------------------------------------- |
+| `apps/web`                     | `web`                          | Fullstack TanStack Start app: UI, server routes, tRPC API            |
+| `packages/api`                 | `@slopcad/api`                 | tRPC routers and client                                              |
+| `packages/auth`                | `@slopcad/auth`                | Better Auth                                                          |
+| `packages/db`                  | `@slopcad/db`                  | Drizzle schema + migrations (SQLite)                                 |
+| `packages/env`                 | `@slopcad/env`                 | Typed environment validation                                         |
+| `packages/config`              | `@slopcad/config`              | Shared tsconfig and build config                                     |
+| `packages/cad-core`            | `@slopcad/cad-core`            | CAD document model: commands, parameters, expressions, assemblies    |
+| `packages/cad-kernel`          | `@slopcad/cad-kernel`          | Geometry-kernel contract + feature-executor bridge                   |
+| `packages/cad-kernel-manifold` | `@slopcad/cad-kernel-manifold` | Manifold kernel backend (default)                                    |
+| `packages/cad-kernel-occt`     | `@slopcad/cad-kernel-occt`     | OpenCascade BREP kernel backend                                      |
+| `packages/cad-jscad`           | `@slopcad/cad-jscad`           | JSCAD reference kernel backend (pure JS, in-process)                 |
+| `packages/cad-sketch`          | `@slopcad/cad-sketch`          | 2D parametric sketch domain (entities, constraints, solver contract) |
+| `packages/cad-react`           | `@slopcad/cad-react`           | `CadStore` + React hooks over the document model                     |
+| `packages/cad-r3f`             | `@slopcad/cad-r3f`             | three.js / React Three Fiber rendering (scene, camera, picking)      |
+| `packages/cad-io`              | `@slopcad/cad-io`              | Geometry exchange adapters (STL, OBJ, 3MF, GLB, DXF, SVG)            |
+| `packages/cad-jsx`             | `@slopcad/cad-jsx`             | Deterministic JSX → CadCommand compiler                              |
+| `packages/cad-components`      | `@slopcad/cad-components`      | Reusable parametric components + registry viewer block               |
+| `packages/ui`                  | `@slopcad/ui`                  | Shared UI components (Tailwind CSS v4)                               |
+| `packages/docs-examples`       | `@slopcad/docs-examples`       | Runnable, machine-verified documentation examples                    |
 
 ## Commands
 
 Dev: `pnpm dev` (all apps), `pnpm dev:web` (web only)
 Build & typecheck: `pnpm build`, `pnpm run check-types`
 Test & quality: `pnpm test` (all unit suites via turbo), `pnpm test:session` (the browser e2e — one serial user session, self-verifying coverage), `pnpm run test:coverage`, `pnpm run lint`, `pnpm run format` / `format:check`, `pnpm run quality` (coverage → CRAP → duplication → HTML report in `reports/quality/`), `pnpm run quality:knip` (report-only). Deprecated legacy entries: `pnpm test:e2e` (old smoke) and `pnpm test:fast` (old 11-harness orchestrator) — runnable, but reach for `pnpm test:session` first
-The gate: `pnpm run verify` runs check-types → lint → test → build in one headless command — run it before declaring any work done
-Database (`packages/db`): `pnpm db:push` pushes the schema, `pnpm db:generate` generates migration SQL from the schema, `pnpm db:migrate` applies migrations, `pnpm db:studio` opens the data browser, `pnpm db:local` starts a local database
+The gate: `pnpm run verify` runs check-types → lint → format:check → test → build in one headless command — run it before declaring any work done
+Database (`packages/db`): `pnpm db:push` pushes the schema, `pnpm db:generate` generates migration SQL from the schema, `pnpm db:migrate` applies migrations, `pnpm db:studio` opens the data browser, `pnpm db:local` starts a local database. The production volume is migrate-prod-managed (migrations run at container start); `db:push`/`db:migrate` target local throwaway databases, never production
 Docker Compose: `pnpm docker:build`, `docker:up`, `docker:logs`, `docker:down`
 Per package: `pnpm --filter <name> <script>` — e.g. `pnpm --filter web dev`; across packages: `pnpm turbo run <task>`
 
@@ -38,7 +50,7 @@ No CI, ever — the headless local verification command (`pnpm verify`) is the q
 
 ## Working agreements
 
-Before reporting work done, run `pnpm run verify` (check-types, lint, tests, build in one command).
+Before reporting work done, run `pnpm run verify` (check-types, lint, format:check, tests, build in one command).
 Fix every TypeScript/LSP error your changes introduce; never silence an error — fix the cause.
 No `any`, `as any`, or `: any` — use proper types, `unknown`, inference, or validated schemas.
 With verbatimModuleSyntax on, use `import type` for type-only imports.

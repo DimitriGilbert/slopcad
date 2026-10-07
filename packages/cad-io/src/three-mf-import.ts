@@ -54,6 +54,22 @@
  * framing-validated but never decompressed, so a hostile archive pays for
  * its framing, nothing more.
  *
+ * ## Resource ceilings (the parse-stage bounds)
+ *
+ * The part-byte cap bounds inflation, not parsing: a part may legally be
+ * 512 MiB of model XML, and a DOM node per element plus giant JS arrays
+ * would amplify that into multi-GB of live heap and minutes of synchronous
+ * main-thread work. Three ceilings bound the parse itself, each enforced
+ * by arithmetic *before* the memory it guards is allocated:
+ * {@link THREE_MF_IMPORT_MAX_XML_ELEMENTS} is counted as the parser opens
+ * each element (so no DOM node past the ceiling ever exists), and
+ * {@link THREE_MF_IMPORT_MAX_VERTICES} / {@link
+ * THREE_MF_IMPORT_MAX_TRIANGLES} are counted from the parsed mesh before
+ * the `positions`/`indices` arrays are created. A legal-but-huge document
+ * past any ceiling is refused as `unsupported-structure` — legal 3MF this
+ * importer declines by policy, exactly like instancing — never an
+ * out-of-memory crash.
+ *
  * ## OPC resolution
  *
  * `[Content_Types].xml` and `_rels/.rels` are required parts. The 3D Model
@@ -173,7 +189,7 @@
  * | `count-mismatch` | repeated geometry elements present but not parseable — a `<vertex>`/`<triangle>` with a missing or lexically invalid attribute, or unexpected content among them |
  * | `non-finite-vertex` | a coordinate that parses to infinity, in its declared unit or after conversion |
  * | `degenerate-index` | an integer index that is negative, out of vertex range, or repeated within its triangle (a spec MUST) |
- * | `unsupported-structure` | the documented out-of-scope constructs above |
+ * | `unsupported-structure` | the documented out-of-scope constructs above, or a document or mesh beyond the resource ceilings (element/vertex/triangle caps) |
  */
 
 import { inflateRawSync } from "node:zlib";
@@ -276,6 +292,46 @@ function isThreeMfUnit(value: string): value is ThreeMfUnit {
 export const THREE_MF_IMPORT_MAX_PART_BYTES = 2 ** 29;
 
 /**
+ * The largest number of XML elements one parsed part may hold: 1,000,000,
+ * counted as the parser opens each element and enforced *before* the
+ * element's DOM node exists. The part-byte cap bounds inflation, not
+ * parsing: a model part of legal 30-byte `<vertex x="0" y="0" z="0"/>`
+ * text at {@link THREE_MF_IMPORT_MAX_PART_BYTES} holds ~18 million
+ * elements, and each parsed element allocates an object, an attribute
+ * `Map`, a children array, and name strings — hundreds of bytes apiece in
+ * V8 — so an uncapped parse would inflate a well-under-the-body-cap
+ * upload into multi-GB of live DOM before the first semantic check could
+ * run. Documents beyond this ceiling are legal 3MF this importer refuses
+ * by policy (`unsupported-structure`, not `malformed-xml`), exactly like
+ * the other out-of-scope constructs.
+ */
+export const THREE_MF_IMPORT_MAX_XML_ELEMENTS = 1_000_000;
+
+/**
+ * The largest vertex count one imported mesh may hold: 4,000,000, counted
+ * from the parsed `<vertices>` children and enforced before the
+ * `positions` array is allocated. At this ceiling `positions` alone is 12
+ * million f64s, which the server response then copies and stringifies
+ * again — the ceiling keeps that whole downstream pipeline bounded. In the
+ * current pipeline it sits behind
+ * {@link THREE_MF_IMPORT_MAX_XML_ELEMENTS} (every `<vertex>` is also an
+ * XML element); it stands as the mesh-level statement of the same budget —
+ * bounding `interpretModel` directly, in the terms a mesh budget is
+ * reasoned about, independent of the XML shape the mesh arrived in.
+ */
+export const THREE_MF_IMPORT_MAX_VERTICES = 4_000_000;
+
+/**
+ * The largest triangle count one imported mesh may hold: 8,000,000,
+ * counted from the parsed `<triangles>` children and enforced before the
+ * `indices` array is allocated — the vertex budget of
+ * {@link THREE_MF_IMPORT_MAX_VERTICES} stated for the index buffer. Behind
+ * {@link THREE_MF_IMPORT_MAX_XML_ELEMENTS} in the current pipeline, for
+ * the same reasons.
+ */
+export const THREE_MF_IMPORT_MAX_TRIANGLES = 8_000_000;
+
+/**
  * The successful result of importing a 3MF file: a mesh body's triangle
  * soup in canonical millimetres, the unit the model declared, and the
  * well-known metadata. Named for imported-mesh semantics — an imported
@@ -371,13 +427,18 @@ function isLegalXmlCharCode(code: number): boolean {
  * Parses `text` as an XML document and returns its root element. Throws
  * {@link ImportReject} (`malformed-xml`) on every well-formedness defect
  * the 3MF model, content-types, and relationships parts can present — see
- * the module header for the exact feature set.
+ * the module header for the exact feature set. Throws
+ * (`unsupported-structure`) when the document opens more than
+ * {@link THREE_MF_IMPORT_MAX_XML_ELEMENTS} elements: the running count is
+ * checked before each element's node is allocated, so the DOM can never
+ * grow past the ceiling.
  */
 function parseXmlDocument(text: string): XmlElement {
   const length = text.length;
   let cursor = 0;
   const stack: XmlElement[] = [];
   let root: XmlElement | undefined;
+  let elementCount = 0;
 
   const reject: (message: string) => never = (message) => {
     throw new ImportReject(THREE_MF_IMPORT_ERROR_CODES.malformedXml, message);
@@ -562,6 +623,15 @@ function parseXmlDocument(text: string): XmlElement {
   const openElement = (): void => {
     if (root !== undefined && stack.length === 0) {
       reject("content appears after the root element's end tag.");
+    }
+    elementCount += 1;
+    if (elementCount > THREE_MF_IMPORT_MAX_XML_ELEMENTS) {
+      // Before the node, its attribute Map, and its name strings exist:
+      // the ceiling is enforced on the allocation, not after it.
+      throw new ImportReject(
+        THREE_MF_IMPORT_ERROR_CODES.unsupportedStructure,
+        `the document opens more than ${THREE_MF_IMPORT_MAX_XML_ELEMENTS} XML elements, beyond this importer's parse ceiling.`,
+      );
     }
     cursor += 1; // past '<'
     const name = readName("start tag");
@@ -1270,7 +1340,14 @@ function positiveIntegerAttribute(
   return value;
 }
 
-/** Interprets the parsed model root per the core single-object case. */
+/**
+ * Interprets the parsed model root per the core single-object case. The
+ * mesh's repeated-element counts are checked against
+ * {@link THREE_MF_IMPORT_MAX_VERTICES} / {@link
+ * THREE_MF_IMPORT_MAX_TRIANGLES} before the position/index arrays exist,
+ * so a legal-but-huge mesh refuses by arithmetic and the arrays are never
+ * allocated past the ceilings.
+ */
 function interpretModel(root: XmlElement): InterpretedModel {
   const reject: (code: ThreeMfImportErrorCode, message: string) => never = (
     code,
@@ -1509,6 +1586,22 @@ function interpretModel(root: XmlElement): InterpretedModel {
     );
   }
 
+  // Resource ceilings: the repeated-element counts are checked before any
+  // position or index allocation, so a legal-but-huge mesh is refused by
+  // arithmetic — the arrays below can never grow past the ceilings.
+  let incomingVertices = 0;
+  for (const child of verticesElement.children) {
+    if (!isPrefixedName(child.name)) {
+      incomingVertices += 1;
+    }
+  }
+  if (incomingVertices > THREE_MF_IMPORT_MAX_VERTICES) {
+    reject(
+      THREE_MF_IMPORT_ERROR_CODES.unsupportedStructure,
+      `the mesh carries ${incomingVertices} <vertex> elements, beyond the ${THREE_MF_IMPORT_MAX_VERTICES}-vertex import ceiling.`,
+    );
+  }
+
   // Vertices, converted to canonical millimetres as they are read.
   const positions: number[] = [];
   for (const child of verticesElement.children) {
@@ -1541,6 +1634,19 @@ function interpretModel(root: XmlElement): InterpretedModel {
     );
   }
   const vertexCount = positions.length / 3;
+
+  let incomingTriangles = 0;
+  for (const child of trianglesElement.children) {
+    if (!isPrefixedName(child.name)) {
+      incomingTriangles += 1;
+    }
+  }
+  if (incomingTriangles > THREE_MF_IMPORT_MAX_TRIANGLES) {
+    reject(
+      THREE_MF_IMPORT_ERROR_CODES.unsupportedStructure,
+      `the mesh carries ${incomingTriangles} <triangle> elements, beyond the ${THREE_MF_IMPORT_MAX_TRIANGLES}-triangle import ceiling.`,
+    );
+  }
 
   // Triangles: file winding untouched (CCW per spec — the kernel's rule).
   const indices: number[] = [];

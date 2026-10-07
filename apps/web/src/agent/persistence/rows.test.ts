@@ -2,14 +2,15 @@
 // The mapping is pure JSON work; jsdom adds nothing.
 
 /**
- * The message ↔ row mapping's losslessness contract (PLAN-AGENT-CHAT
+ * The message ↔ row mapping's round-trip contract (PLAN-AGENT-CHAT
  * Phase 3.4): `messageToRow` → `rowToMessage` returns the original message
- * — including `Date` values (revived as Dates, not degraded to strings),
- * message-level optional fields (`name`, `metadata`), the real TanStack AI
- * part shapes (tool-call, tool-result with image content and error-state
- * refusal results, thinking), and UNKNOWN part types verbatim — plus the
- * wire form's envelope-stripping guarantee (what sync pushes to tRPC
- * carries no slopcad-internal date tagging).
+ * for every JSON-born field — the real TanStack AI part shapes (tool-call,
+ * tool-result with image content and error-state refusal results,
+ * thinking), message-level optional fields (`name`, `metadata`), and
+ * UNKNOWN part types verbatim — with parts stored and parsed as PLAIN JSON
+ * (no replacer, no reviver: an envelope-shaped payload object survives
+ * untouched), and the row-level `createdAt` column as the one revived
+ * `Date`. The wire form is the stored text itself.
  */
 
 import type { UIMessage } from "@tanstack/ai";
@@ -64,7 +65,7 @@ describe("agent persistence rows mapping", () => {
     expect(rowToMessage(row)).toEqual(original);
   });
 
-  it("round-trips the real agent-loop part shapes losslessly", () => {
+  it("round-trips the real agent-loop part shapes, Dates as ISO strings", () => {
     const original = message([
       { type: "thinking", content: "Plan the extrude.", signature: "sig-1" },
       {
@@ -98,11 +99,42 @@ describe("agent persistence rows mapping", () => {
       },
     ]);
     const revived = rowToMessage(messageToRow(original, "conv-1", 1));
-    expect(revived).toEqual(original);
-    // The part-level Date survived as a Date, not a string.
-    expect(
-      (revived.parts[2] as { createdAt?: unknown }).createdAt,
-    ).toBeInstanceOf(Date);
+    // JSON-born fields are verbatim; Dates inside parts follow the plain
+    // JSON convention (ISO strings) — no envelope, no transformation.
+    expect(revived.parts).toEqual([
+      { type: "thinking", content: "Plan the extrude.", signature: "sig-1" },
+      {
+        type: "tool-call",
+        id: "call-1",
+        name: "cad_apply_commands",
+        arguments: '{"commands":[]}',
+        input: { commands: [] },
+        state: "input-complete",
+      },
+      {
+        type: "tool-result",
+        toolCallId: "call-1",
+        name: "cad_apply_commands",
+        content: [
+          { type: "text", content: "applied" },
+          {
+            type: "image",
+            source: { type: "data", value: "aGVsbG8=", mimeType: "image/png" },
+          },
+        ],
+        state: "complete",
+        createdAt: "2026-10-04T12:00:01.500Z",
+      },
+      {
+        type: "tool-result",
+        toolCallId: "call-2",
+        content: "refused",
+        state: "error",
+        error: '{"code":"webmcp/invalid-input","message":"bad input"}',
+      },
+    ]);
+    // The one revived Date is the row-level createdAt column.
+    expect(revived.createdAt).toEqual(original.createdAt);
   });
 
   it("preserves unknown part types verbatim — nothing is filtered", () => {
@@ -120,12 +152,18 @@ describe("agent persistence rows mapping", () => {
     ]);
     const revived = rowToMessage(messageToRow(original, "conv-1", 2));
     expect(revived.parts).toHaveLength(3);
-    expect(revived.parts[1]).toEqual(unknownPart);
+    expect(revived.parts[1]).toEqual({
+      type: "future-part-from-a-newer-release",
+      payload: {
+        nested: [1, 2, 3],
+        when: "2026-10-04T12:00:02.000Z",
+      },
+    });
     expect(revived.parts[0]).toEqual({ type: "text", content: "before" });
     expect(revived.parts[2]).toEqual({ type: "text", content: "after" });
   });
 
-  it("revives Dates inside message metadata and stamps absent createdAt", () => {
+  it("keeps metadata plain JSON: Dates as ISO strings, envelope shapes verbatim", () => {
     const original = message([{ type: "text", content: "hi" }], {
       metadata: { when: new Date("2026-10-04T11:00:00.000Z"), depth: 2 },
     });
@@ -135,12 +173,45 @@ describe("agent persistence rows mapping", () => {
     expect(Number.isNaN(Date.parse(row.createdAt))).toBe(false);
     const revived = rowToMessage(row);
     expect(revived.metadata).toEqual({
-      when: new Date("2026-10-04T11:00:00.000Z"),
+      when: "2026-10-04T11:00:00.000Z",
       depth: 2,
+    });
+    // A metadata object that happens to look like the retired internal
+    // date envelope is payload data — it must survive untouched, never be
+    // folded into a Date.
+    const envelopeShaped = message([{ type: "text", content: "hi" }], {
+      metadata: { __slopcadDateIso: "2026-10-04T11:00:00.000Z" },
+    });
+    const shapedRow = messageToRow(envelopeShaped, "conv-1", 2);
+    const shapedRevived = rowToMessage(shapedRow);
+    expect(shapedRevived.metadata).toEqual({
+      __slopcadDateIso: "2026-10-04T11:00:00.000Z",
     });
   });
 
-  it("strips the private date envelope in the sync wire form", () => {
+  it("carries an envelope-shaped part payload verbatim on resume and wire", () => {
+    const payload = { __slopcadDateIso: "2026-10-04T12:00:00.000Z" };
+    const part = { type: "future-part-from-a-newer-release", payload };
+    const row = messageToRow(message([part]), "conv-1", 1);
+    const revived = rowToMessage(row);
+    const resumedPart: unknown = (revived.parts as unknown[])[0];
+    expect(resumedPart).toEqual(part);
+    expect(resumedPart).not.toBeInstanceOf(Date);
+    expect(messageRowPartsToWire(row)).toEqual([part]);
+    // The not-a-date variant too: no Date fold, no null-ing on the wire.
+    const invalid = { __slopcadDateIso: "not-a-date" };
+    const invalidPart = {
+      type: "future-part-from-a-newer-release",
+      payload: invalid,
+    };
+    const invalidRow = messageToRow(message([invalidPart]), "conv-1", 2);
+    expect(rowToMessage(invalidRow).parts[0]).toEqual(invalidPart);
+    expect(JSON.stringify(messageRowPartsToWire(invalidRow))).toBe(
+      JSON.stringify([invalidPart]),
+    );
+  });
+
+  it("stores parts as the wire form itself (Dates as ISO strings)", () => {
     const original = message([
       {
         type: "tool-result",
@@ -161,9 +232,9 @@ describe("agent persistence rows mapping", () => {
         createdAt: "2026-10-04T12:00:03.000Z",
       },
     ]);
-    // The wire form alone is envelope-free; the ROW keeps the tagged form.
-    expect(JSON.stringify(wire)).not.toContain("__slopcadDateIso");
-    expect(row.parts).toContain("__slopcadDateIso");
+    // The row text IS the wire form: plain JSON, nothing slopcad-internal.
+    expect(row.parts).not.toContain("__slopcadDateIso");
+    expect(JSON.parse(row.parts)).toEqual(wire);
   });
 
   it("refuses messages without a usable id and corrupt rows alike", () => {

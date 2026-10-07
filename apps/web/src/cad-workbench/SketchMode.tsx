@@ -108,6 +108,9 @@ import {
   type CadSketchInspectorDimension,
 } from "@slopcad/ui/components/cad/cad-sketch-inspector";
 import { CadSketchToolbar } from "@slopcad/ui/components/cad/cad-sketch-toolbar";
+// Type-only: the host commit outcome rides the extrude action's return
+// (erased at runtime — no cycle with the engine's own SketchMode import).
+import type { FeatureFormOutcome } from "./workbench-engine";
 
 import { kernelSegment } from "./extrude";
 import {
@@ -196,9 +199,15 @@ export interface SketchModeProps {
    * The Phase 26.1 extrude action: the host commits the sketch as a
    * document record, creates the extrude feature, and dispatches the real
    * kernel execution to the worker. Called only with a RESOLVED profile;
-   * resolution failures stay here as structured statuses.
+   * resolution failures stay here as structured statuses. A host may
+   * return the commit's structured outcome — a refusal overwrites the
+   * provisional "resolved" stamp on the machine's extrude outcome (never a
+   * swallowed verdict beside a silently unchanged document); void-returning
+   * hosts keep the pre-outcome behavior.
    */
-  readonly onExtrude: (submission: SketchExtrudeSubmission) => void;
+  readonly onExtrude: (
+    submission: SketchExtrudeSubmission,
+  ) => FeatureFormOutcome | void;
   /**
    * Keeps the extrude action from committing: a host whose document
    * composition ONE more extrude would invalidate (the chain workbench —
@@ -303,6 +312,31 @@ export interface SketchImportOutcome {
 
 /** The revolve axis the selector pins: a workplane axis (X or Y). */
 export type RevolveAxisId = "x" | "y";
+
+/**
+ * Whether the keyboard event was raised from an editable surface — a text
+ * input, a textarea, a `role="textbox"` element, or anything contenteditable
+ * — resolved through the composed path so shadow-rooted fields count too.
+ * The inspector's fields render inside the sketch root, and a Delete or
+ * Backspace typed into one of them must keep its native text-editing meaning
+ * instead of riding the root's delete-selection shortcut.
+ */
+const isEditableKeyboardOrigin = (
+  event: ReactKeyboardEvent<HTMLDivElement>,
+): boolean => {
+  for (const node of event.nativeEvent.composedPath()) {
+    if (!(node instanceof Element)) continue;
+    if (
+      node instanceof HTMLInputElement ||
+      node instanceof HTMLTextAreaElement
+    ) {
+      return true;
+    }
+    if (node instanceof HTMLElement && node.isContentEditable) return true;
+    if (node.getAttribute("role") === "textbox") return true;
+  }
+  return false;
+};
 
 /** The full sketch workspace: toolbar, canvas, inspector, status line. */
 export function SketchMode({
@@ -614,7 +648,9 @@ export function SketchMode({
   // loop. A resolution failure stays here — structured code on the status
   // line and the machine surface — and never reaches the document; a
   // resolved profile hands the serialized sketch plus the kernel-vocabulary
-  // loop and placement to the host.
+  // loop and placement to the host, and the host's OWN refusal (a refused
+  // document transaction) comes back through the return value and takes
+  // over the machine's extrude outcome — never a silent dead verb.
   const extrude = useCallback((): void => {
     const sketch = solveState.solved ?? session.sketch;
     const profile = resolveExtrudeProfile(sketch.entities);
@@ -636,7 +672,7 @@ export function SketchMode({
     }
     const placement = workplaneToPlacement(sketch.workplane);
     setExtrudeOutcome({ status: "resolved" });
-    onExtrude({
+    const applied = onExtrude({
       sketch: serializeSketch(sketch),
       loop: profile.value.segments.map(kernelSegment),
       placement: {
@@ -651,6 +687,25 @@ export function SketchMode({
         },
       },
     });
+    if (applied !== undefined && !applied.ok) {
+      // The host's refusal overwrites the provisional resolved stamp: the
+      // document refused the commit (an id conflict on an adopted document,
+      // say) and the machine surface reports it — the sketch stays open on
+      // the refusal instead of a resolved verdict over a dead verb.
+      setExtrudeOutcome({
+        status: "failed",
+        code: applied.code,
+        message: applied.message,
+      });
+      setEditor((current) => ({
+        ...current,
+        status: {
+          code: applied.code,
+          message: applied.message,
+          severity: "error",
+        },
+      }));
+    }
   }, [onExtrude, session.sketch, solveState.solved]);
 
   // The Phase 26.2 revolve action: resolve the CURRENT sketch exactly like
@@ -1294,6 +1349,11 @@ export function SketchMode({
       return;
     }
     if (event.key === "Delete" || event.key === "Backspace") {
+      // An editable origin (an inspector dimension field, an array count)
+      // keeps the key for its own text editing — no preventDefault, no
+      // delete-selection — so correcting a value never destroys the
+      // selected constraint or the entities a form is patterning.
+      if (isEditableKeyboardOrigin(event)) return;
       event.preventDefault();
       dispatch({ type: "delete-selection" });
     }

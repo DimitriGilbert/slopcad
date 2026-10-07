@@ -442,6 +442,14 @@ export function CompleteCadWorkbench({
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  // The configuration panel's CSV read failure (the engine never sees the
+  // file — the read dies in the panel's file input, before any CSV text
+  // exists). It rides the SAME notice region as the engine's configuration
+  // refusals and clears on the panel's next user action, mirroring the
+  // engine notice's own lifecycle.
+  const [csvImportReadError, setCsvImportReadError] = useState<string | null>(
+    null,
+  );
   // The Phase 38 feature dialog: the sweep/loft create forms. One dialog,
   // kind-switched; the last submission's structured refusal rides here (the
   // parameter panel's apply-failure precedent) and clears on the next open.
@@ -2068,14 +2076,21 @@ export function CompleteCadWorkbench({
     <CadConfigurationPanel
       configurations={configurationRows}
       activeConfigurationId={engine.activeConfigurationId}
-      notice={engine.configurationNotice}
-      onSwitch={(id) =>
+      notice={csvImportReadError ?? engine.configurationNotice}
+      onSwitch={(id) => {
+        setCsvImportReadError(null);
         engine.applyConfiguration(
           id === null ? null : createConfigurationId(id),
-        )
-      }
-      onCreate={(name) => engine.createConfiguration(name)}
-      onDelete={(id) => engine.deleteConfiguration(createConfigurationId(id))}
+        );
+      }}
+      onCreate={(name) => {
+        setCsvImportReadError(null);
+        engine.createConfiguration(name);
+      }}
+      onDelete={(id) => {
+        setCsvImportReadError(null);
+        engine.deleteConfiguration(createConfigurationId(id));
+      }}
       onExportCsv={() => {
         const csv = engine.exportParameterTableCsv();
         const blob = new Blob([csv], { type: "text/csv" });
@@ -2087,7 +2102,13 @@ export function CompleteCadWorkbench({
         URL.revokeObjectURL(url);
         return csv;
       }}
-      onImportCsv={(text) => engine.importParameterTableCsv(text)}
+      onImportCsv={(text) => {
+        // A successful read hands the surface back to the engine's own
+        // parse/commit refusals (this panel's only error region).
+        setCsvImportReadError(null);
+        engine.importParameterTableCsv(text);
+      }}
+      onImportError={setCsvImportReadError}
       className="w-full shrink-0 border-t border-border"
     />
   );
@@ -2845,9 +2866,11 @@ export function CompleteCadWorkbench({
           configurationPanel={configurationPanel}
           document={workbenchDocument}
           drawerOpen={panelsDrawerOpen}
+          mode={mode}
           onViewChange={setAgentChatView}
           parameterPanel={parameterPanel}
           propertyPanel={propertyPanel}
+          selection={selectionApi.selection}
           sessionSlot={agentChatSessionSlot}
           toolsSurface={agentToolsSurface}
           view={agentChatView}
@@ -2901,7 +2924,11 @@ export function CompleteCadWorkbench({
           `use-sync-external-store` shim, whose CJS factory re-requires
           `react` at runtime (a second React instance beside the bundled one
           the SSR renderer drives) → "Invalid hook call" → the whole route
-          degrades to the client-only shell. */}
+          degrades to the client-only shell. (The bundler-level cure has
+          since landed: vite.config.ts aliases the shim subpaths onto the
+          single bundled React, so a stray server-mounted Root no longer
+          explodes — the discipline stands regardless: a closed dialog has
+          nothing to render server-side.) */}
       {featureDialog !== null ? (
         <Dialog
           onOpenChange={(open) => {

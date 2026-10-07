@@ -31,6 +31,7 @@ import {
   createParameterId,
   createSession,
   DIAGNOSTIC_CODES,
+  DOCUMENT_ERROR_CODES,
   initialRegenerationStates,
   length,
   regenerate,
@@ -351,6 +352,33 @@ describe("CadPropertyPanel", () => {
     expect(alert?.textContent).toBe(
       "feature/unknown: the feature no longer exists",
     );
+  });
+
+  it("surfaces the store refusal's domain cause, not the transaction envelope", () => {
+    // The pad is still consumed by the hole, so the store-backed
+    // feature.delete is refused by the DOMAIN: the refusal that surfaces is
+    // the transaction's command cause (`document/in-use` and its message) —
+    // never the envelope's own `transaction/command-failed` wrapper.
+    const store = storeOf();
+    act(() => {
+      pickInStore(store, { kind: "feature", featureId: PAD_FEATURE });
+    });
+    renderInProvider(store);
+    act(() => {
+      fireEvent.click(
+        screen.getByRole("button", { name: CAD_PROPERTY_PANEL_LABELS.remove }),
+      );
+    });
+    const alert = document.querySelector("[data-cad-property-error]");
+    expect(alert?.textContent).toContain(DOCUMENT_ERROR_CODES.inUse);
+    expect(alert?.textContent).toContain("is referenced by feature");
+    expect(alert?.textContent).not.toContain("transaction/command-failed");
+    // The refused removal committed nothing.
+    expect(
+      store
+        .getSession()
+        .document.features.some((feature) => feature.id === PAD_FEATURE),
+    ).toBe(true);
   });
 
   it("omits the remove button without any remove surface", () => {

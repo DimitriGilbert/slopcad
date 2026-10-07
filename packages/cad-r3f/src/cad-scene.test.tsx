@@ -14,6 +14,9 @@
 
 import { cleanup, render } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { SSAOPass } from "three/examples/jsm/postprocessing/SSAOPass.js";
+import * as THREE from "three";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RenderCamera, RenderProjection } from "@slopcad/cad-core";
 
@@ -31,8 +34,37 @@ import {
   TEST_CAMERA,
 } from "./render-fixtures";
 
+/**
+ * The renderer surface the quality post-processor and the EffectComposer
+ * constructor touch. jsdom has no WebGL, but the post chain is pure JS
+ * until a real context realizes it (render targets and materials allocate
+ * GL resources lazily), so the disposal tests build the REAL chain against
+ * this fake and spy the pass prototypes' dispose calls.
+ */
+interface FakeGl {
+  readonly shadowMap: { enabled: boolean; type: number };
+  getPixelRatio(): number;
+  getSize(target: THREE.Vector2): THREE.Vector2;
+}
+
+/** A fake renderer sized from the mocked fiber state, DPR 1. */
+function makeFakeGl(): FakeGl {
+  return {
+    shadowMap: { enabled: false, type: 0 },
+    getPixelRatio: () => 1,
+    getSize: (target) =>
+      target.set(fiber.state.size.width, fiber.state.size.height),
+  };
+}
+
 const fiber = vi.hoisted(() => {
   const state = {
+    // The real scene objects the quality post-processor reads (a mocked
+    // three is deliberately NOT installed — see the disposal describe);
+    // undefined keeps the standard suites on the no-renderer guard path.
+    camera: undefined as THREE.Camera | undefined,
+    gl: undefined as FakeGl | undefined,
+    scene: undefined as THREE.Scene | undefined,
     size: { width: 800, height: 600 },
     set: (): void => {},
     invalidate: (): void => {},
@@ -379,5 +411,80 @@ describe("CadScene quality-mode render gate (Phase 59)", () => {
     expect(fiber.framePriorities.slice(before).includes(1)).toBe(false);
     expect(view.container.querySelector("shadowmaterial")).toBeNull();
     view.unmount();
+  });
+});
+
+describe("CadScene quality post-chain disposal", () => {
+  // The processor builds its composer chain in a memo keyed on size and
+  // camera identity: a resize or a camera-kind swap REPLACES the chain and
+  // unmount (the quality toggle) DROPS it — every replaced or dropped chain
+  // must be disposed, not stranded on the canvas context (report 13 F3).
+  // three is NOT mocked: the composer, the passes, and their render targets
+  // and materials are pure JS until a real context realizes them, so the
+  // real chain is constructed against the fake renderer and the teardown is
+  // spied on the pass prototypes. Frames never run here — the composer's
+  // render path is out of scope (that is renderer behavior, not lifecycle).
+  beforeEach(() => {
+    fiber.state.gl = makeFakeGl();
+    fiber.state.scene = new THREE.Scene();
+    fiber.state.camera = new THREE.PerspectiveCamera();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fiber.state.gl = undefined;
+    fiber.state.scene = undefined;
+    fiber.state.camera = undefined;
+  });
+
+  it("disposes the composer and the SSAO pass on unmount", () => {
+    const composerDispose = vi.spyOn(EffectComposer.prototype, "dispose");
+    const ssaoDispose = vi.spyOn(SSAOPass.prototype, "dispose");
+    const view = render(
+      <CadScene projection={PROJECTION} renderQuality="quality" />,
+    );
+    expect(composerDispose).not.toHaveBeenCalled();
+    expect(ssaoDispose).not.toHaveBeenCalled();
+    view.unmount();
+    // Both teardown halves: the composer's own dispose does NOT cascade to
+    // the SSAO pass's targets and materials (three@0.186), so the processor
+    // must release each explicitly — exactly once for the one chain built.
+    expect(composerDispose).toHaveBeenCalledTimes(1);
+    expect(ssaoDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("disposes the replaced chain when a resize rebuilds the composer", () => {
+    const composerDispose = vi.spyOn(EffectComposer.prototype, "dispose");
+    const ssaoDispose = vi.spyOn(SSAOPass.prototype, "dispose");
+    const view = render(
+      <CadScene projection={PROJECTION} renderQuality="quality" />,
+    );
+    // The memo's size keys change: the rebuild must dispose the replaced
+    // chain, not merely drop it.
+    fiber.state.size = { width: 640, height: 480 };
+    view.rerender(<CadScene projection={PROJECTION} renderQuality="quality" />);
+    expect(composerDispose).toHaveBeenCalledTimes(1);
+    expect(ssaoDispose).toHaveBeenCalledTimes(1);
+    // Two builds, two disposals: the CURRENT chain also goes on unmount.
+    view.unmount();
+    expect(composerDispose).toHaveBeenCalledTimes(2);
+    expect(ssaoDispose).toHaveBeenCalledTimes(2);
+  });
+
+  it("disposes the replaced chain when the camera identity changes", () => {
+    const composerDispose = vi.spyOn(EffectComposer.prototype, "dispose");
+    const ssaoDispose = vi.spyOn(SSAOPass.prototype, "dispose");
+    const view = render(
+      <CadScene projection={PROJECTION} renderQuality="quality" />,
+    );
+    // The camera-kind swap path (the rig's set({ camera })): a new camera
+    // object re-keys the memo and must dispose the replaced chain.
+    fiber.state.camera = new THREE.PerspectiveCamera();
+    view.rerender(<CadScene projection={PROJECTION} renderQuality="quality" />);
+    expect(composerDispose).toHaveBeenCalledTimes(1);
+    expect(ssaoDispose).toHaveBeenCalledTimes(1);
+    view.unmount();
+    expect(composerDispose).toHaveBeenCalledTimes(2);
+    expect(ssaoDispose).toHaveBeenCalledTimes(2);
   });
 });

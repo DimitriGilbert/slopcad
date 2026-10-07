@@ -30,7 +30,7 @@ import type {
   ReactElement,
   ReactNode,
 } from "react";
-import type { CadDocument } from "@slopcad/cad-core";
+import type { CadDocument, SelectionState } from "@slopcad/cad-core";
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import { MessageSquareTextIcon, PanelsTopLeftIcon } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
@@ -82,6 +82,16 @@ export interface WorkbenchRightSidebarProps {
   readonly onViewChange: (view: AgentChatView) => void;
   /** The live workbench document (the chat's context summary source). */
   readonly document: CadDocument;
+  /**
+   * The live selection state (the chat summary's selection revision
+   * signal — a store concern that does not ride the document's identity).
+   */
+  readonly selection: SelectionState;
+  /**
+   * The page-level workbench mode (the chat summary's mode revision
+   * signal — page state that does not ride the document's identity).
+   */
+  readonly mode: string;
   /** The page's bound webMCP tools + executor (M2). */
   readonly toolsSurface: AgentToolsSurface;
   /** The palette-commands slot the chat panel reports into (4.4). */
@@ -100,9 +110,11 @@ export function WorkbenchRightSidebar({
   configurationPanel,
   document,
   drawerOpen,
+  mode,
   onViewChange,
   parameterPanel,
   propertyPanel,
+  selection,
   sessionSlot,
   toolsSurface,
   view,
@@ -225,7 +237,9 @@ export function WorkbenchRightSidebar({
             <AgentChatEmptyState onOpenSettings={openSettings} />
           )
         }
+        mode={mode}
         onOpenSettings={openSettings}
+        selection={selection}
         sessionSlot={sessionSlot}
         toolsSurface={toolsSurface}
       />

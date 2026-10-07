@@ -46,6 +46,19 @@
  * `pointer-events-auto`. Pointer events originating inside the overlay
  * layer are excluded from the viewport's empty-space tool dispatch.
  *
+ * ## Gesture termination
+ *
+ * While a tool is live, every non-overlay press arms a tracked gesture;
+ * a release the container never saw — outside the viewport, or on an
+ * overlay control — is caught by window-level `pointerup`/`pointercancel`
+ * listeners that end the gesture for the active tool (a null-pick
+ * `pointer-up`, or the guarded cancel). Without this, a mouse released
+ * over page chrome strands the tool in its dragging stage, and the model
+ * keeps following mere hover. Pointer capture on the container is
+ * deliberately NOT used: capture would retarget the pointer stream away
+ * from the scene canvas (a descendant), starving the raycast-driven
+ * `pointer-move` the drag itself feeds on.
+ *
  * ## Keyboard
  *
  * The viewport container is focusable; key events on it (excluding those
@@ -306,6 +319,14 @@ export function CadViewport({
   const emptyDownRef = useRef(false);
   const overlayLayerRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * The pointer id of the live in-viewport tool gesture, or `null`. Armed
+   * by the capture-phase down (non-overlay presses while a tool is live),
+   * cleared the moment a `pointer-up` is delivered through the scene or
+   * the container — so the window fallback only ever fires for releases
+   * those handlers never saw.
+   */
+  const gesturePointerRef = useRef<number | null>(null);
 
   /**
    * Publishes the camera state on the container's machine surface
@@ -366,6 +387,56 @@ export function CadViewport({
   );
 
   const toolActive = toolsApi !== null && toolsApi.phase === "active";
+
+  /**
+   * The tools API as the native window listeners see it. The API object is
+   * rebuilt every render, so the gesture-termination effect keys on the
+   * phase only and reads dispatch/cancel through this ref — the listeners
+   * act on the phase and operations of the latest commit, never a stale
+   * closure.
+   */
+  const toolsApiRef = useRef<CadToolsApi | null>(toolsApi);
+  useEffect(() => {
+    toolsApiRef.current = toolsApi;
+  }, [toolsApi]);
+
+  /** Ends the tracked gesture for `pointerId`, cancelling the live tool. */
+  const cancelTrackedGesture = useCallback((pointerId: number): void => {
+    if (gesturePointerRef.current !== pointerId) return;
+    gesturePointerRef.current = null;
+    // Guarded and idempotent (see CadToolsApi.cancel): a gesture whose
+    // tool already reached a terminal phase is a no-op, not an error.
+    toolsApiRef.current?.cancel();
+  }, []);
+
+  // The window-level gesture termination (see "Gesture termination" in the
+  // module doc): releases and cancels the container never sees — outside
+  // the viewport, or over an overlay control — still end the live tool's
+  // gesture, so a mouse released over page chrome cannot leave the tool
+  // dragging on hover.
+  useEffect(() => {
+    if (!toolActive) return;
+    const onWindowPointerUp = (event: PointerEvent): void => {
+      if (gesturePointerRef.current !== event.pointerId) return;
+      gesturePointerRef.current = null;
+      const api = toolsApiRef.current;
+      if (api === null || api.phase !== "active") return;
+      api.dispatch(
+        toolPointerEvent("pointer-up", null, toolModifiersFromNative(event)),
+      );
+    };
+    const onWindowPointerCancel = (event: PointerEvent): void => {
+      cancelTrackedGesture(event.pointerId);
+    };
+    window.addEventListener("pointerup", onWindowPointerUp);
+    window.addEventListener("pointercancel", onWindowPointerCancel);
+    return () => {
+      gesturePointerRef.current = null;
+      window.removeEventListener("pointerup", onWindowPointerUp);
+      window.removeEventListener("pointercancel", onWindowPointerCancel);
+    };
+  }, [toolActive, cancelTrackedGesture]);
+
   const explicitInteraction =
     onPick !== undefined ||
     onPickDown !== undefined ||
@@ -389,6 +460,9 @@ export function CadViewport({
 
   const handleScenePickUp = (pick: CadPick): void => {
     pickUpRef.current = true;
+    // A release the scene resolved is delivered: the window fallback must
+    // not fire for it.
+    gesturePointerRef.current = null;
     if (toolsApi !== null && toolsApi.phase === "active") {
       toolsApi.dispatch(
         toolPointerEvent("pointer-up", pick, modifiersRef.current),
@@ -443,6 +517,10 @@ export function CadViewport({
       !insideOverlay(overlayLayerRef.current, event.target);
     if (toolActive) {
       if (onEmptySpace) {
+        // Delivered here — the window fallback must not repeat it. (A
+        // release over the overlay skips this branch ON PURPOSE: the
+        // gesture stays armed and the window fallback terminates it.)
+        gesturePointerRef.current = null;
         toolsApi?.dispatch(
           toolPointerEvent("pointer-up", null, toolModifiersFromNative(event)),
         );
@@ -454,6 +532,13 @@ export function CadViewport({
     if (onEmptySpace && emptyDownRef.current) {
       selectionApi?.clear();
     }
+  };
+
+  /** The container saw the platform take the pointer away: end the gesture. */
+  const handleContainerPointerCancel = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void => {
+    cancelTrackedGesture(event.pointerId);
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
@@ -491,10 +576,19 @@ export function CadViewport({
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onKeyUp={handleKeyUp}
+      onPointerCancel={handleContainerPointerCancel}
       onPointerDown={handleContainerPointerDown}
       onPointerDownCapture={(event) => {
         modifiersRef.current = toolModifiersFromNative(event);
         pickDownRef.current = false;
+        // Arm the window-level gesture termination for every press the
+        // overlay does not own (mesh or empty space — the arming cannot
+        // know which yet, and does not need to). An overlay press keeps
+        // the pointer with the overlay: no tracking, no fallback.
+        gesturePointerRef.current =
+          toolActive && !insideOverlay(overlayLayerRef.current, event.target)
+            ? event.pointerId
+            : null;
       }}
       onPointerUp={handleContainerPointerUp}
       onPointerUpCapture={(event) => {

@@ -24,7 +24,12 @@
  * `toServerSentEventsResponse`, driven through an injected transport
  * that answers a scripted OpenAI-compatible SSE body — zero network, the
  * same discipline as the provider factory suites — and the abort path: a
- * client disconnect must abort the upstream provider call's signal.
+ * client disconnect must abort the upstream provider call's signal. The
+ * size gates are pinned too: the io endpoints' two-step body cap (a
+ * declared oversize content-length and a mid-stream overrun both 413; a
+ * legitimate multi-MiB history still parses), the input bounds (messages,
+ * per-message parts, modelId, part type), and the credential scan's depth
+ * bound (a hostile deep-nested body is a structured 400, never a 500).
  */
 
 import type { AgentLoopState, AgentLoopStrategy } from "@tanstack/ai";
@@ -32,8 +37,11 @@ import type * as TanstackAi from "@tanstack/ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  AGENT_RELAY_MAX_BODY_BYTES,
   agentRelayInputSchema,
   API_KEY_SCAN_EXEMPT_ROOT_KEYS,
+  API_KEY_SCAN_MAX_DEPTH,
+  ApiKeyScanDepthError,
   findApiKeyLikeFields,
   handleAgentRelayRequest,
   isApiKeyLikeFieldName,
@@ -123,6 +131,26 @@ function firstMessage(body: { messages: FixtureMessage[] }): FixtureMessage {
   const message = body.messages[0];
   if (message === undefined) throw new Error("fixture message missing");
   return message;
+}
+
+/** `count` minimal legitimate messages (no credential-like field names). */
+function relayMessages(count: number): FixtureMessage[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `m${String(index)}`,
+    role: "user",
+    parts: [{ type: "text" }],
+  }));
+}
+
+/** A message part wrapped `levels` objects deep below the part itself. */
+function deepNestedPart(levels: number): Record<string, unknown> {
+  let node: Record<string, unknown> = { type: "text" };
+  for (let level = 0; level < levels; level += 1) {
+    // Every wrapper stays schema-valid (a `type` string), so base
+    // validation passes and the depth refusal comes from the scan.
+    node = { nested: node, type: "text" };
+  }
+  return node;
 }
 
 /** One recorded provider call made through the injected transport. */
@@ -413,6 +441,61 @@ describe("relay input schema (D1: no key field exists; D8: closed modelOptions)"
   });
 });
 
+describe("relay input bounds (messages, parts, modelId, part type)", () => {
+  it("bounds messages to 512: 513 refuse, 512 parse", () => {
+    const over = agentRelayInputSchema.safeParse({
+      ...validBody(),
+      messages: relayMessages(513),
+    });
+    expect(over.success).toBe(false);
+    const at = agentRelayInputSchema.safeParse({
+      ...validBody(),
+      messages: relayMessages(512),
+    });
+    expect(at.success).toBe(true);
+  });
+
+  it("bounds per-message parts to 256 — the api package's AGENT_MESSAGE_MAX_PARTS", () => {
+    const parts = (count: number): Array<Record<string, unknown>> =>
+      Array.from({ length: count }, () => ({ type: "text" }));
+    const over = validBody();
+    firstMessage(over).parts = parts(257);
+    expect(agentRelayInputSchema.safeParse(over).success).toBe(false);
+    const at = validBody();
+    firstMessage(at).parts = parts(256);
+    expect(agentRelayInputSchema.safeParse(at).success).toBe(true);
+  });
+
+  it("bounds modelId to 128 characters", () => {
+    expect(
+      agentRelayInputSchema.safeParse({
+        ...validBody(),
+        modelId: "m".repeat(129),
+      }).success,
+    ).toBe(false);
+    expect(
+      agentRelayInputSchema.safeParse({
+        ...validBody(),
+        modelId: "m".repeat(128),
+      }).success,
+    ).toBe(true);
+  });
+
+  it("bounds the part type string to 64 characters", () => {
+    const bodyWithPartType = (type: string) => {
+      const body = validBody();
+      firstMessage(body).parts = [{ type }];
+      return body;
+    };
+    expect(
+      agentRelayInputSchema.safeParse(bodyWithPartType("t".repeat(65))).success,
+    ).toBe(false);
+    expect(
+      agentRelayInputSchema.safeParse(bodyWithPartType("t".repeat(64))).success,
+    ).toBe(true);
+  });
+});
+
 describe("apiKey-like field detection", () => {
   it("marks key, apiKey, api_key, token, and authorization-style names", () => {
     for (const name of [
@@ -489,6 +572,74 @@ describe("apiKey-like field detection", () => {
         },
       ],
     );
+  });
+});
+
+describe("credential scan depth bound", () => {
+  it("scans payloads nested just under the default bound and throws past it", () => {
+    const nested = (levels: number): unknown => {
+      let node: unknown = "leaf";
+      for (let level = 0; level < levels; level += 1) {
+        node = { v: node };
+      }
+      return node;
+    };
+    // A 64-container chain bottoms out at depth 63 — still under the
+    // bound; one more level puts a container at depth 64 and refuses.
+    expect(() => findApiKeyLikeFields(nested(64))).not.toThrow();
+    expect(() => findApiKeyLikeFields(nested(65))).toThrowError(
+      ApiKeyScanDepthError,
+    );
+  });
+
+  it("honors a caller-supplied maxDepth for findings below it", () => {
+    const body = validBody();
+    firstMessage(body).parts = [
+      {
+        type: "text",
+        content: "hi",
+        metadata: { deep: { deeper: { token: "t" } } },
+      },
+    ];
+    expect(() => findApiKeyLikeFields(body, "$", { maxDepth: 7 })).toThrowError(
+      ApiKeyScanDepthError,
+    );
+    expect(findApiKeyLikeFields(body, "$", { maxDepth: 8 })).toEqual([
+      {
+        field: "token",
+        path: "$.messages[0].parts[0].metadata.deep.deeper.token",
+      },
+    ]);
+  });
+
+  it("a real message history nests far under the default bound", () => {
+    const body = validBody();
+    firstMessage(body).parts = [
+      { type: "text", content: "hi", metadata: { token: "t" } },
+    ];
+    expect(() =>
+      findApiKeyLikeFields(body, "$", {
+        exemptRootKeys: API_KEY_SCAN_EXEMPT_ROOT_KEYS,
+      }),
+    ).not.toThrow();
+  });
+
+  it("safeParse refuses an over-deep payload with an issue instead of throwing", () => {
+    const body = validBody();
+    firstMessage(body).parts = [deepNestedPart(100)];
+    type ParseResult = ReturnType<typeof agentRelayInputSchema.safeParse>;
+    let parsed: ParseResult | undefined;
+    expect(() => {
+      parsed = agentRelayInputSchema.safeParse(body);
+    }).not.toThrow();
+    expect(parsed?.success).toBe(false);
+    if (parsed?.success === false) {
+      expect(
+        parsed.error.issues.some((issue) =>
+          issue.message.includes("scan bound"),
+        ),
+      ).toBe(true);
+    }
   });
 });
 
@@ -702,6 +853,132 @@ describe("handleAgentRelayRequest: input validation", () => {
     expect((await readFailure(noMessages)).code).toBe(
       "agent-relay/invalid-input",
     );
+    expect(isServerAiAllowed).not.toHaveBeenCalled();
+  });
+
+  it("rejects over-bound messages, parts, or modelId with 400 before consulting access", async () => {
+    const { deps, isServerAiAllowed } = relayDeps();
+
+    const tooManyMessages = await handleAgentRelayRequest(
+      relayRequest({ ...validBody(), messages: relayMessages(513) }),
+      deps,
+    );
+    expect(tooManyMessages.status).toBe(400);
+    const messagesFailure = await readFailure(tooManyMessages);
+    expect(messagesFailure.code).toBe("agent-relay/invalid-input");
+    expect(messagesFailure.message).toContain("messages");
+
+    const tooManyParts = validBody();
+    firstMessage(tooManyParts).parts = Array.from({ length: 257 }, () => ({
+      type: "text",
+    }));
+    const partsResponse = await handleAgentRelayRequest(
+      relayRequest(tooManyParts),
+      deps,
+    );
+    expect(partsResponse.status).toBe(400);
+    const partsFailure = await readFailure(partsResponse);
+    expect(partsFailure.code).toBe("agent-relay/invalid-input");
+    expect(partsFailure.message).toContain("parts");
+
+    const longModelId = await handleAgentRelayRequest(
+      relayRequest({ ...validBody(), modelId: "m".repeat(129) }),
+      deps,
+    );
+    expect(longModelId.status).toBe(400);
+    const modelIdFailure = await readFailure(longModelId);
+    expect(modelIdFailure.code).toBe("agent-relay/invalid-input");
+    expect(modelIdFailure.message).toContain("modelId");
+
+    expect(isServerAiAllowed).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleAgentRelayRequest: body size gate (413)", () => {
+  it("refuses a declared oversize content-length with 413 before reading the body", async () => {
+    const { deps, isServerAiAllowed } = relayDeps();
+    const request = new Request("http://slopcad.test/api/agent-relay", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // undici preserves an explicit content-length; the declared gate
+        // must trust it and refuse without pulling a byte.
+        "content-length": String(AGENT_RELAY_MAX_BODY_BYTES + 1),
+      },
+      body: new ReadableStream({
+        pull() {
+          throw new Error("TEST: an oversize declared body must not be read");
+        },
+      }),
+      // `duplex` is required by the runtime for streaming bodies; it rides
+      // through the spread (object-literal excess checks do not).
+      ...{ duplex: "half" },
+    });
+    const response = await handleAgentRelayRequest(request, deps);
+    expect(response.status).toBe(413);
+    const failure = await readFailure(response);
+    expect(failure.code).toBe("agent-relay/payload-too-large");
+    expect(failure.message).toContain("declared");
+    expect(isServerAiAllowed).not.toHaveBeenCalled();
+  });
+
+  it("cancels an undersized-declared body's read past the cap with 413", async () => {
+    const { deps, isServerAiAllowed } = relayDeps();
+    // One 1 MiB chunk enqueued repeatedly: the running byte count passes
+    // the 16 MiB cap mid-stream, so the read must cancel (the underlying
+    // source sees it) and answer 413 — never buffer the whole thing.
+    const chunk = new Uint8Array(1024 * 1024);
+    let cancelled = false;
+    const request = new Request("http://slopcad.test/api/agent-relay", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": "16",
+      },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (let i = 0; i < 20; i += 1) {
+            controller.enqueue(chunk);
+          }
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      ...{ duplex: "half" },
+    });
+    const response = await handleAgentRelayRequest(request, deps);
+    expect(response.status).toBe(413);
+    const failure = await readFailure(response);
+    expect(failure.code).toBe("agent-relay/payload-too-large");
+    expect(failure.message).toContain("received");
+    expect(cancelled).toBe(true);
+    expect(isServerAiAllowed).not.toHaveBeenCalled();
+  });
+
+  it("parses a legitimate multi-MiB history under the cap", async () => {
+    const { deps } = relayDeps();
+    const body = validBody();
+    firstMessage(body).parts = [
+      { type: "text", content: "x".repeat(2 * 1024 * 1024) },
+    ];
+    const response = await handleAgentRelayRequest(relayRequest(body), deps);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    await response.body?.cancel();
+  });
+});
+
+describe("handleAgentRelayRequest: scan depth gate", () => {
+  it("answers a hostile deep-nested body with a structured 400, never a 500", async () => {
+    const { deps, isServerAiAllowed } = relayDeps();
+    const body = validBody();
+    firstMessage(body).parts = [deepNestedPart(100)];
+    const response = await handleAgentRelayRequest(relayRequest(body), deps);
+    expect(response.status).toBe(400);
+    const failure = await readFailure(response);
+    expect(failure.code).toBe("agent-relay/payload-too-deep");
+    expect(failure.message).toContain(String(API_KEY_SCAN_MAX_DEPTH));
     expect(isServerAiAllowed).not.toHaveBeenCalled();
   });
 });

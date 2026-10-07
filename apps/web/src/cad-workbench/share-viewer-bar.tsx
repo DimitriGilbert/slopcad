@@ -46,6 +46,14 @@ export function WorkbenchShareBar({
         store.getSession(),
         engine.regenerationStates ?? new Map(),
         engine.rollback,
+        // The share carries what the live session holds: the bare
+        // workbench boots from its authored document and never loads a
+        // file, so it persists neither metadata nor a drawing.
+        {},
+        null,
+        // The live suppressed set: a shared part keeps the suppressed
+        // timeline its sharer sees.
+        engine.suppressed,
       ),
     )
       .then((payload) =>

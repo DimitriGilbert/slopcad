@@ -958,9 +958,7 @@ test("s05d delete refusals and the command-vocabulary delete", async ({
       .locator(PROPERTY)
       .getByRole("button", { name: "Delete feature" })
       .click();
-    await expect(page.locator(PROPERTY)).toContainText(
-      "transaction/command-failed",
-    );
+    await expect(page.locator(PROPERTY)).toContainText("document/in-use");
     await expect(page.locator(PROPERTY)).toContainText(
       'referenced by feature "feat_rotate_plate"',
     );
@@ -4426,6 +4424,9 @@ test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports
       createCadWorkbenchSession(),
       new Map(),
       null,
+      {},
+      null,
+      new Set(),
     );
     const payload = await encodeNativeForShare(nativeText);
     const sharePayloadUrl = `/viewer#${payload}`;

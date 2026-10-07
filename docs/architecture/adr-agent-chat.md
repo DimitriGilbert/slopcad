@@ -69,7 +69,14 @@ Vercel's UI message stream would need a translation layer (mapping in
    (`executeWebMcpTool`) — the command paths the UI uses, executing
    directly on the existing undo stack. There is no propose-then-apply
    execution path; the chat may _display_ executed tool calls as readable
-   diffs — display only.
+   diffs — display only. Scope (2026-10-06 review fix): client-direct mode
+   ONLY — server-emitted (relay) mode is text-only. The relay's keyless
+   wire contract (`{provider, modelId, modelOptions, maxIterations,
+messages}`) declares no tools to the server-side run, so the shipped
+   system prompt states that unavailability there instead of the tool
+   catalogue, and the settings UI qualifies the mode as text-only.
+   Wiring tool declarations through the relay contract is future work;
+   until it lands, driving the model's tools requires client mode.
 
 4. **Parity is the audit criterion.** (D11) Every command-surface manifest
    capability maps to a registry tool or to a decline recorded in this
@@ -649,6 +656,25 @@ closed at the relay boundary (`apps/web/src/agent/relay.ts`):
   keeps flagging `token`-fragment fields inside messages — and the
   client-side body-contract test parses the fetcher's exact emitted body
   against the relay's own schema with the same exemption.
+- **The contract is bounded end to end.** Open does not mean unbounded:
+  the ceiling constants and their rationale live in
+  `packages/ui/src/agent/relay.ts` (the numbers below are read from
+  there, not restated as independent truth). The request body caps at
+  16 MiB (`AGENT_RELAY_MAX_BODY_BYTES`) — a declared oversize
+  `content-length` is refused 413 before a byte is read, then the
+  incremental read itself is cancelled past the cap — code
+  `agent-relay/payload-too-large`; the cap sits one step above the api
+  package's 10 MiB per-appended-message serialized-parts bound
+  (`AGENT_MESSAGE_PARTS_MAX_SERIALIZED_LENGTH`,
+  `packages/api/src/limits.ts`) so a real multi-message history still
+  fits. `messages` ≤ 512; per-message `parts` ≤ 256 — the same
+  per-message bound `AGENT_MESSAGE_MAX_PARTS` enforces in the api
+  package; `modelId` ≤ 128 characters; part `type` ≤ 64. The credential
+  scan is depth-bounded too (`API_KEY_SCAN_MAX_DEPTH`, 64 levels): a
+  payload nesting deeper than the bound is answered 400
+  (`agent-relay/payload-too-deep`) — once as a schema issue inside
+  `safeParse`, once as a handler guard over the raw JSON — never an
+  unhandled depth error surfacing as a 500.
 - **`maxIterations` rides the contract.** An optional integer 1..25;
   omitted, `chat()`'s own library default (5 model turns — the engine's
   fallback, not a copy of it) applies. Present, the handler binds it
@@ -656,10 +682,24 @@ closed at the relay boundary (`apps/web/src/agent/relay.ts`):
   client fetcher always sends the config store's (normalized, ≥ 1)
   value; a stored bound above 25 is refused loudly by the relay's 400
   rather than silently clamped.
+- **No tools field exists — server mode is text-only.** (2026-10-06
+  review fix) The five-field contract deliberately carries no tool
+  declarations (the strict schema would refuse one with 400), so the
+  server-side `chat()` runs with an empty tool set. The client relay
+  fetcher therefore ships a DIFFERENT system prompt from client mode: no
+  tool catalogue, and an explicit line that tool use is unavailable in
+  server mode — the prompt must not promise tools the run was never
+  offered. Declaring tools over the wire (name + description + JSON
+  schema — not credentials, but contract surface that must re-pass this
+  section's closed-universe scrutiny) is future work; until it lands,
+  server mode answers in text only (D4's scope note above).
 
 ## Phase 4 UI notes (2026-10-04)
 
-One SSR render fallback exists on `/workbench-complete` and it is
+**Superseded 2026-10-07 — see the update note at the end of this
+section.** The historical description:
+
+One SSR render fallback existed on `/workbench-complete` and it was
 PRE-EXISTING, not a Phase 4 regression: during server render, a Base UI
 Tooltip `fastComponent` hits the `use-sync-external-store` shim against
 a second React instance inlined via the `@react-three/fiber` chunk. The
@@ -684,6 +724,23 @@ surface widens the gap:
 - The settings sheet (`agent-settings.tsx`) mounts ONLY while open (the
   io dialogs' `if (!open) return null` pattern), so the closed state
   runs no provider or catalog queries from hidden UI.
+
+**Update (2026-10-07, commit `f2555ab`):** the fallback described above
+no longer occurs — the paragraph's "left alone" disposition is
+superseded. The root cause was structural, and never the chat: the
+router chunk inlined `use-sync-external-store/shim` (CJS) with a runtime
+`require("react")` that loaded a SECOND React instance from disk, and
+Base UI's `useStore` read that instance's null dispatcher during
+`renderToReadableStream` — throwing on every route that SSR-mounts a
+Base UI root (`/workbench-complete`, `/workbench-complete-occt`,
+`/drawings`). The fix is a vite `resolve.alias` pair
+(`apps/web/vite.config.ts`): the plain shim routes to `react` itself
+(React 19 exports the native hook) and the with-selector form —
+including zustand's `.js`-suffixed ESM specifier — to a local canonical
+implementation over the single bundled React. Zero `require("react")`
+call sites remain in the built SSR output, the routes server-render
+fully with silent logs, and the client graph is unaffected. The
+hydration counter-measures above remain accurate and stay in code.
 
 ## Phase 6 walk findings (2026-10-04, fixed in-phase)
 

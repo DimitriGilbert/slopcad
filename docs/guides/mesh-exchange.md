@@ -45,6 +45,23 @@ entries through `node:zlib`. A browser app imports 3MF through its
 server (the `/io` fixture's `/api/io/import-3mf` route is the pattern);
 export is browser-safe.
 
+Import is bounded by named resource ceilings (the constants live in
+`packages/cad-io/src/three-mf-import.ts`): a per-part inflated byte cap
+of 512 MiB, enforced before inflation so a decompression bomb never
+gets to allocate; and three parse-stage ceilings, each enforced by
+arithmetic before the memory it guards — 1,000,000 XML elements per
+part, 4,000,000 vertices, 8,000,000 triangles. A legal-but-huge
+document past any of them is refused
+`three-mf-import/unsupported-structure`: legal 3MF the importer
+declines by policy (exactly like its other out-of-scope constructs),
+never an out-of-memory crash.
+
+The viewer's share links are bounded the same way
+(`apps/web/src/viewer/share-codec.ts`): the URL fragment payload caps
+at 8 MiB of base64 and one decode inflates to at most 64 MiB of native
+text, so a crafted deflate bomb is refused by arithmetic and lands in
+the viewer's structured error state — never an out-of-memory tab.
+
 ## GLB
 
 ```ts

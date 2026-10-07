@@ -7,10 +7,10 @@
  * messages too, so they render wherever they appear.
  *
  * Every source goes through {@link mediaSourceSrc}: inline base64 becomes a
- * `data:` URI, URLs survive only as http(s) (the template `safeHttpUrl`
- * javascript: guard, kept local so the renderers stay self-contained), and
- * provider file handles render an honest placeholder instead of an element
- * that could never resolve.
+ * `data:` URI only under the render-safe mime allowlist, URLs survive only
+ * as http(s) (the template `safeHttpUrl` javascript: guard, kept local so
+ * the renderers stay self-contained), and provider file handles render an
+ * honest placeholder instead of an element that could never resolve.
  */
 
 import type { ReactElement } from "react";

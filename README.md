@@ -55,7 +55,7 @@ Then, run the development server:
 pnpm run dev
 ```
 
-Open [http://localhost:3001](http://localhost:3001) in your browser to see the fullstack application.
+Open [http://localhost:3201](http://localhost:3201) in your browser to see the fullstack application. The dev server binds port 3201; set `DEV_PORT` to override it.
 
 ## UI Customization
 
@@ -121,12 +121,26 @@ For more details, see the guide on [Deploying with Docker Compose](https://www.b
 ```
 slopcad/
 ├── apps/
-│   └── web/         # Fullstack application (React + TanStack Start)
-├── packages/
-│   ├── ui/          # Shared shadcn/ui components and styles
-│   ├── api/         # API layer / business logic
-│   ├── auth/        # Authentication configuration & logic
-│   └── db/          # Database schema & queries
+│   └── web/                 # Fullstack application (React + TanStack Start)
+└── packages/
+    ├── ui/                  # Shared shadcn/ui components and styles
+    ├── api/                 # API layer / business logic (tRPC)
+    ├── auth/                # Authentication configuration & logic
+    ├── db/                  # Database schema & queries
+    ├── env/                 # Typed environment validation
+    ├── config/              # Shared tsconfig and build config
+    ├── cad-core/            # CAD document model (commands, parameters, expressions, assemblies)
+    ├── cad-kernel/          # Geometry-kernel contract
+    ├── cad-kernel-manifold/ # Manifold kernel backend (default)
+    ├── cad-kernel-occt/     # OpenCascade BREP kernel backend
+    ├── cad-jscad/           # JSCAD reference kernel backend
+    ├── cad-sketch/          # 2D parametric sketch domain
+    ├── cad-react/           # CadStore + React hooks
+    ├── cad-r3f/             # three.js / React Three Fiber rendering
+    ├── cad-io/              # Geometry exchange (STL, OBJ, 3MF, GLB, DXF, SVG)
+    ├── cad-jsx/             # JSX → CadCommand compiler
+    ├── cad-components/      # Reusable parametric components
+    └── docs-examples/       # Runnable, machine-verified docs examples
 ```
 
 ## Available Scripts

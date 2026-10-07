@@ -16,8 +16,8 @@
  *   module's transient state.
  * - {@link formatAgentSyncStatus} renders the Phase 3.4 sync status as
  *   the visible line — idle-with-nothing-queued hides, everything else
- *   (syncing, queued work, failures with their stalled op) shows, so a
- *   failed sync is never silent.
+ *   (syncing, queued work, failures with their stalled op, terminal
+ *   stalls) shows, so a failed or stalled sync is never silent.
  */
 
 import type { AgentChatMessage } from "./parts/part-types";
@@ -38,14 +38,35 @@ export interface AgentChatSyncFailure {
 }
 
 /**
+ * Why a stalled outbox can never drain — the registry item's structural
+ * copy of the slopcad app's `AgentSyncStallReason` (the app's rows carry
+ * the conversation/message ids; this copy keeps what the line renders).
+ * `unsyncable-message` is a row the server deterministically refused
+ * (its conversation deleted remotely, or the serialized-parts bound);
+ * `orphan-message` is a row whose conversation no longer exists locally.
+ */
+export type AgentChatSyncStallReason =
+  | {
+      readonly kind: "unsyncable-message";
+      readonly reason: "conversation-deleted-remotely" | "parts-too-large";
+    }
+  | {
+      readonly kind: "orphan-message";
+    };
+
+/**
  * The typed sync status the chat UI shows — never a throw. Structural copy
- * of the app's `AgentSyncStatus`: `pending` counts queued outbox ops,
- * `failure` is the op that stalled the queue when `state === "failed"`.
+ * of the app's `AgentSyncStatus`: `pending` counts every local change not
+ * yet mirrored to the server, `failure` is the op that stopped the queue
+ * when `state === "failed"`, and `stall` is the terminal verdict when
+ * `state === "stalled"` — rows the engine can never deliver, surfaced so
+ * they are never silently dropped.
  */
 export interface AgentChatSyncStatus {
-  readonly state: "idle" | "syncing" | "failed";
+  readonly state: "idle" | "syncing" | "failed" | "stalled";
   readonly pending: number;
   readonly failure: AgentChatSyncFailure | null;
+  readonly stall: AgentChatSyncStallReason | null;
 }
 
 /** Everything the pending-line derivation needs. */
@@ -140,10 +161,24 @@ function syncOpNoun(status: AgentChatSyncStatus): string {
   }
 }
 
+/** The human "why" of a stalled queue, for the surfaced line. */
+function syncStallWhy(status: AgentChatSyncStatus): string {
+  switch (status.stall?.kind) {
+    case "unsyncable-message":
+      return status.stall.reason === "conversation-deleted-remotely"
+        ? "the conversation was deleted on the server"
+        : "a message exceeds the server's size limit";
+    case "orphan-message":
+      return "a queued message's conversation no longer exists locally";
+    default:
+      return "no further detail is available";
+  }
+}
+
 /**
  * Renders the sync status as the chat's visible line. `null` (nothing
  * rendered) only for the true quiet state — idle with an empty queue;
- * everything else surfaces, failures foremost.
+ * everything else surfaces, failures and terminal stalls foremost.
  */
 export function formatAgentSyncStatus(
   status: AgentChatSyncStatus,
@@ -157,6 +192,9 @@ export function formatAgentSyncStatus(
     return `Sync failed at ${syncOpNoun(status)}: ${errorText(
       status.failure.error,
     )} — ${String(status.pending)} op(s) still queued.`;
+  }
+  if (status.state === "stalled") {
+    return `${String(status.pending)} change(s) cannot sync — ${syncStallWhy(status)}.`;
   }
   if (status.pending > 0) {
     return `${String(status.pending)} change(s) waiting to sync.`;

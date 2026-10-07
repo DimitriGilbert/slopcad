@@ -12,6 +12,7 @@
  */
 
 import type { UIMessage } from "@tanstack/ai";
+import { AGENT_MESSAGE_PARTS_MAX_SERIALIZED_LENGTH } from "@slopcad/api/limits";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { AgentSyncTransport } from "./sync";
 
@@ -152,9 +153,28 @@ describe("agent chat store lifecycle", () => {
     await writer.appendMessage(conversation.id, message);
 
     // A FRESH persistence + collections over the same file: a reload.
+    // Parts come back verbatim as stored JSON (a Date inside a part
+    // persists as its ISO string — the JSON convention); the row-level
+    // message createdAt is the one revived Date.
     const reader = await openNodeAgentStore({}, path);
     const resumed = await reader.loadConversation(conversation.id);
-    expect(resumed?.messages).toEqual([message]);
+    expect(resumed?.messages).toEqual([
+      {
+        id: "m-1",
+        role: "assistant",
+        parts: [
+          { type: "text", content: "done" },
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            content: "ok",
+            state: "complete",
+            createdAt: "2026-10-04T12:00:05.000Z",
+          },
+        ],
+        createdAt: new Date("2026-10-04T12:00:05.000Z"),
+      },
+    ]);
   });
 
   it("lists conversations newest-updated first with the id tiebreak", async () => {
@@ -242,6 +262,112 @@ describe("agent chat store lifecycle", () => {
     await expect(
       store.appendMessage(conversation.id, oversized),
     ).rejects.toThrow(RangeError);
+  });
+
+  it("rejects over-cap serialized parts locally before anything persists", async () => {
+    const store = await openNodeAgentStore({}, database("serialized-bound"));
+    const conversation = await store.createConversation("capped");
+    const oversized: UIMessage = {
+      id: "m-cap",
+      role: "user",
+      parts: [
+        {
+          type: "text",
+          content: "x".repeat(AGENT_MESSAGE_PARTS_MAX_SERIALIZED_LENGTH),
+        },
+      ],
+    };
+    await expect(
+      store.appendMessage(conversation.id, oversized),
+    ).rejects.toThrow(RangeError);
+    // Nothing was persisted: no message row, and the conversation's
+    // updatedAt was never stamped. An accepted-but-doomed row would
+    // deterministically poison the sync outbox forever.
+    const loaded = await store.loadConversation(conversation.id);
+    expect(loaded?.messages).toEqual([]);
+    expect(loaded?.conversation.updatedAt).toBe(loaded?.conversation.createdAt);
+  });
+
+  it("serializes append against delete: no orphan row, no post-commit throw", async () => {
+    const path = database("race");
+    const store = await openNodeAgentStore(
+      {
+        sync: { transport: untouchedTransport().transport, enabled: false },
+      },
+      path,
+    );
+    const conversation = await store.createConversation("racy");
+
+    // Append called first: the whole append (insert + updatedAt stamp)
+    // runs to completion before the delete starts clearing, so both
+    // succeed and nothing survives the delete.
+    const appendPromise = store.appendMessage(
+      conversation.id,
+      textMessage("m1", "x", "user"),
+    );
+    const deletePromise = store.deleteConversation(conversation.id);
+    expect(await appendPromise).toBeDefined();
+    expect(await deletePromise).toBe(true);
+    expect(await store.loadConversation(conversation.id)).toBeNull();
+    // The backlog is empty — an orphan message row would be counted here
+    // forever (and never delivered).
+    expect((await store.syncNow()).pending).toBe(0);
+
+    // Delete called first: the append finds no conversation and fails
+    // with the typed RangeError — never a post-commit stamp crash over a
+    // message that did persist.
+    const second = await store.createConversation("racy 2");
+    const secondDelete = store.deleteConversation(second.id);
+    const secondAppend = store.appendMessage(
+      second.id,
+      textMessage("m2", "y", "user"),
+    );
+    expect(await secondDelete).toBe(true);
+    await expect(secondAppend).rejects.toThrow(RangeError);
+    expect((await store.syncNow()).pending).toBe(0);
+
+    // Durable: a reopen shows no rows and no backlog either way.
+    const reopened = await openNodeAgentStore(
+      {
+        sync: { transport: untouchedTransport().transport, enabled: false },
+      },
+      path,
+    );
+    expect(await reopened.listConversations()).toEqual([]);
+    expect((await reopened.syncNow()).pending).toBe(0);
+  });
+
+  it("removeMessages removes exactly the given ids and survives a reopen", async () => {
+    const path = database("remove-messages");
+    const store = await openNodeAgentStore({}, path);
+    const conversation = await store.createConversation("prune me");
+    await store.appendMessage(
+      conversation.id,
+      textMessage("m1", "keep", "user"),
+    );
+    await store.appendMessage(
+      conversation.id,
+      textMessage("m2", "drop", "assistant"),
+    );
+    await store.appendMessage(
+      conversation.id,
+      textMessage("m3", "drop too", "user"),
+    );
+
+    await store.removeMessages(["m2", "m3", "m-unknown"]);
+    const loaded = await store.loadConversation(conversation.id);
+    expect(loaded?.messages.map((m) => m.id)).toEqual(["m1"]);
+    expect(loaded?.conversation.id).toBe(conversation.id);
+    // Empty and already-removed inputs are no-ops, not throws.
+    await expect(store.removeMessages([])).resolves.toBeUndefined();
+    await expect(
+      store.removeMessages(["m2", "m-unknown"]),
+    ).resolves.toBeUndefined();
+    expect(await store.loadConversation(conversation.id)).not.toBeNull();
+
+    const reopened = await openNodeAgentStore({}, path);
+    const resumed = await reopened.loadConversation(conversation.id);
+    expect(resumed?.messages.map((m) => m.id)).toEqual(["m1"]);
   });
 
   it("never calls a configured transport while sync is disabled", async () => {

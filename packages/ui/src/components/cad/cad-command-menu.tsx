@@ -45,6 +45,15 @@
  * surviving score, items order by score within their group. An empty
  * query renders every command in first-seen order (the unfiltered IA).
  *
+ * Selection identity is separate from search text: cmdk highlights and
+ * Enter-dispatches by STRING EQUALITY on the item's `value`, so two
+ * commands sharing a label must not share a value — the label alone would
+ * highlight both `aria-selected` at once, trap the arrow navigation
+ * (cmdk's store guards on `Object.is`), and run the first DOM match on
+ * Enter. Each item therefore carries a unique `label + id` composite
+ * (the label leads it), while ranking keeps scoring the label + keywords
+ * haystack — search behavior is untouched.
+ *
  * All user-facing strings live in {@link CAD_COMMAND_MENU_LABELS}
  * (overridable via the `labels` prop); command labels and groups are host
  * data rendered verbatim.
@@ -297,7 +306,10 @@ export function CadCommandMenu({
                       onOpenChange(false);
                       command.run();
                     }}
-                    value={command.label}
+                    // Unique selection identity: the label leads the
+                    // composite (so the value still reads as the command),
+                    // the id breaks label ties — see the module doc.
+                    value={`${command.label} ${command.id}`}
                   >
                     <span>{command.label}</span>
                     {command.shortcut !== undefined ? (

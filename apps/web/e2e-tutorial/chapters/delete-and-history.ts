@@ -93,9 +93,7 @@ export const chapter: ChapterModule = {
     const logBeforeRefusal =
       (await page.locator(COMPLETE).getAttribute("data-command-log")) ?? "[]";
     await driver.humanClick(deleteFeature);
-    await expect(page.locator(PROPERTY)).toContainText(
-      "transaction/command-failed",
-    );
+    await expect(page.locator(PROPERTY)).toContainText("document/in-use");
     await expect(page.locator(PROPERTY)).toContainText(
       'referenced by feature "feat_rotate_plate"',
     );
@@ -105,7 +103,7 @@ export const chapter: ChapterModule = {
       logBeforeRefusal,
     );
     await driver.humanPoint(
-      page.locator(PROPERTY).getByText("transaction/command-failed"),
+      page.locator(PROPERTY).getByText("document/in-use"),
     );
     await driver.dwell();
 

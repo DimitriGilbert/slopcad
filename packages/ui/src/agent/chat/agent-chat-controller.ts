@@ -17,6 +17,9 @@
  *   failures surfaced in the snapshot (`error`, never silent) with the
  *   failed message left unpersisted so a later pass — or the at-rest
  *   `retryPersistence()` — retries exactly the unsaved tail;
+ * - `retryRun()` drives the run-error retry: reloads the last user
+ *   message and removes the persisted rows the retry's truncation
+ *   discards, so the failed partial attempt never resurrects on resume;
  * - `newConversation()` detaches (the old row stays, resumable later)
  *   and clears the transcript;
  * - `clearConversation()` deletes the active conversation's rows (the
@@ -77,6 +80,12 @@ export interface AgentChatPersistenceStore {
   listConversations(): Promise<readonly AgentChatConversationSummary[]>;
   /** Clears the conversation's rows; returns whether it existed. */
   deleteConversation(conversationId: string): Promise<boolean>;
+  /**
+   * Removes exactly the given persisted message rows in one transaction —
+   * unknown ids are ignored, conversation rows are untouched. Returns when
+   * the removal is durable.
+   */
+  removeMessages(messageIds: readonly string[]): Promise<void>;
   /** Explicit sync drain/retry; a no-op status when the host has no sync. */
   syncNow(): Promise<AgentChatSyncStatus>;
   getSyncStatus(): AgentChatSyncStatus;
@@ -93,6 +102,12 @@ export interface AgentChatSurface {
   readonly messages: readonly UIMessage[];
   readonly setMessages: (messages: UIMessage[]) => void;
   readonly clear: () => void;
+  /**
+   * The hook's run-error retry: truncates the live transcript after the
+   * last user message and re-runs it — the promise settles when the
+   * replacement run does.
+   */
+  readonly reload: () => Promise<void>;
   /**
    * The hook's run/status signal: `submitted`/`streaming` means a run is
    * live, `ready`/`error` are the completion states (a run that ended in
@@ -148,6 +163,14 @@ export interface AgentChatController {
    * unmarked for exactly this).
    */
   readonly retryPersistence: () => void;
+  /**
+   * The run-error retry (the panel's transcript Retry button): re-runs
+   * the last user message through the chat's reload, then removes the
+   * persisted rows whose ids the truncation dropped — the failed partial
+   * attempt the errored pass saved — so the persisted conversation stays
+   * exactly the transcript the user sees.
+   */
+  readonly retryRun: () => Promise<void>;
   /** Detaches from the active conversation and clears the transcript. */
   readonly newConversation: () => void;
   /** Deletes the active conversation's rows and clears the transcript. */
@@ -273,6 +296,13 @@ export function createAgentChatController(
     // fenced by a lifecycle step (stale generation) is dropped instead.
     const passGeneration = generation;
     const boundStore = store;
+    // Pass-scoped write markers the outer catch reads: the batch may be
+    // unmarked wholesale only when the pass failed before ANY write
+    // landed (the create itself rejected). A failure after a landed
+    // create or a landed append is the inner catches' territory — they
+    // have already unmarked exactly the unsaved tail.
+    let created = false;
+    let appended = 0;
     queue = queue
       .then(async () => {
         if (passGeneration !== generation) {
@@ -294,6 +324,7 @@ export function createAgentChatController(
           }
           conversationId = row.id;
           conversationTitle = row.title;
+          created = true;
           notify();
           activeId = row.id;
         }
@@ -301,6 +332,7 @@ export function createAgentChatController(
         try {
           for (const message of fresh) {
             await boundStore.appendMessage(activeId, message);
+            appended += 1;
             index += 1;
           }
         } catch (caught) {
@@ -318,6 +350,13 @@ export function createAgentChatController(
           // The rejection answers a batch the user already discarded
           // (the clear raced the write): silent, never "could not save".
           return;
+        }
+        if (!created && appended === 0) {
+          // The pass failed before anything reached the store — the
+          // create itself rejected. Release the whole batch: a stranded
+          // mark here used to make `retryPersistence` compute an empty
+          // fresh set and silently no-op while clearing the error.
+          unmark();
         }
         fail(`Could not save the conversation: ${thrownText(caught)}`);
       });
@@ -372,6 +411,47 @@ export function createAgentChatController(
       error = null;
       notify();
       persistPass(deps.getChat().messages);
+    },
+
+    retryRun: async () => {
+      const chat = deps.getChat();
+      // Snapshot before the retry truncates the live transcript.
+      const before = chat.messages.map((message) => message.id);
+      try {
+        await chat.reload();
+      } catch {
+        // A rejection here is a run failure the client has already
+        // surfaced through its own error state (`reportStreamError` runs
+        // before the BYOK re-throw) — the retry is over and there is
+        // nothing to reconcile, so the duplicate rejection is fenced.
+        return;
+      }
+      // reload() truncated the transcript after the last user message;
+      // whatever vanished from the live transcript was persisted by the
+      // errored pass and must not outlive it — remove exactly those rows
+      // so the persisted conversation is the transcript the user sees.
+      const surviving = new Set(
+        deps.getChat().messages.map((message) => message.id),
+      );
+      const vanished = before.filter((id) => !surviving.has(id));
+      if (store === null || vanished.length === 0) {
+        return;
+      }
+      const boundStore = store;
+      await boundStore.removeMessages(vanished).then(
+        () => {
+          // The rows are gone; the marks go with them so the marked set
+          // keeps meaning "ids the store holds".
+          for (const id of vanished) {
+            persistedIds.delete(id);
+          }
+        },
+        (caught: unknown) => {
+          // The discarded rows are still persisted, so the marks stay —
+          // no pass may ever double-append them. The failure surfaces.
+          fail(`Could not remove the discarded message: ${thrownText(caught)}`);
+        },
+      );
     },
 
     newConversation: () => {

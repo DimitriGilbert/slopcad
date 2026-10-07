@@ -1,8 +1,10 @@
 /**
  * The WebMCP registry's own contract: the internal source of truth for the
- * page's tools. Registration idempotency (replace by name), the snapshot's
- * handler-free shape, JSON Schema validity, toolchange notification
- * semantics, and the never-throws execution boundary.
+ * page's tools. Registration idempotency (replace by name), ownership-
+ * checked unregistration (a stale handle never deletes another host's live
+ * entry), the snapshot's handler-free shape, JSON Schema validity,
+ * toolchange notification semantics, and the never-throws execution
+ * boundary.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -97,6 +99,45 @@ describe("registration", () => {
     expect(() => probeDefinition("invalid name!")).toThrow(RangeError);
     expect(() => probeDefinition("")).toThrow(RangeError);
     expect(() => probeDefinition("slash/name")).toThrow(RangeError);
+  });
+});
+
+describe("registration ownership", () => {
+  it("returns a handle that unregisters exactly its own registration", () => {
+    const registration = registerWebMcpTool(
+      probeDefinition("registry_probe.owned"),
+    );
+    expect(registration.name).toBe("registry_probe.owned");
+    expect(webMcpToolNames()).toEqual(["registry_probe.owned"]);
+    expect(registration.unregister()).toBe(true);
+    expect(webMcpToolNames()).toEqual([]);
+    // Idempotent: the entry is already gone.
+    expect(registration.unregister()).toBe(false);
+  });
+
+  it("a stale handle is a no-op once another registration owns the name", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeWebMcpTools(listener);
+    const stale = registerWebMcpTool(probeDefinition("registry_probe.stale"));
+    registerWebMcpTool(
+      defineWebMcpTool({
+        description: "The surviving replacement.",
+        inputSchema: z.object({}),
+        name: "registry_probe.stale",
+        execute: () => ({ owner: "replacement" }),
+      }),
+    );
+    listener.mockClear();
+    // The stale handle must not delete the replacement's live entry…
+    expect(stale.unregister()).toBe(false);
+    expect(webMcpToolNames()).toEqual(["registry_probe.stale"]);
+    expect(webMcpToolSnapshot()).toHaveLength(1);
+    expect(webMcpToolSnapshot()[0]?.description).toBe(
+      "The surviving replacement.",
+    );
+    // …and a no-op is not a registry change: toolchange stays silent.
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
   });
 });
 

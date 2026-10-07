@@ -91,7 +91,11 @@ export interface AgentChatPanelProps {
    * Injectable adapter factory (D12's transport injection): replaces the
    * provider dispatch for client-direct runs — the host that owns its model
    * plumbing (or a demo with a scripted transport) supplies the adapter and
-   * no provider SDK is called.
+   * no provider SDK is called. Stability contract: referential stability is
+   * NOT required — the runtime hook holds the seam behind a latest-ref and
+   * rebuilds the transport (new thread id) only on a mode change, so an
+   * inline arrow re-created per render cannot reset a live conversation.
+   * The seam in force is the one current at the last mode-driven rebuild.
    */
   readonly createAdapter?: AgentChatTransportDeps["createAdapter"];
   /**
@@ -388,7 +392,7 @@ export function AgentChatPanel({
               aria-label="Retry the last agent message"
               onClick={() => {
                 setSendError(null);
-                void chat.reload();
+                void controller.retryRun();
               }}
               size="xs"
               type="button"
