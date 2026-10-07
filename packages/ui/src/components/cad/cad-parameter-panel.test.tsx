@@ -35,6 +35,8 @@ import {
   angle,
   parseExpression,
   printExpression,
+  setParameterCommand,
+  setParameterExpressionCommand,
   volume,
   type CadDocument,
   type CadStore,
@@ -332,6 +334,142 @@ describe("CadParameterPanel", () => {
 
     // Resubmit with the fields already at document state: the submit runs,
     // but the no-op filter issues nothing — flush the async submit with act.
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(store.commandLog).toHaveLength(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Reseed: the fields follow the committed document
+  // ---------------------------------------------------------------------------
+
+  it("re-adopts a foreign revert while no edits are unsubmitted, and Apply does not resurrect the stale value", async () => {
+    const store = buildProviderStore();
+    render(<PanelInProvider store={store} />);
+
+    // The panel's own edit lands: width 8 → 6. The submit leaves the field
+    // touched, the state that disables form-core's own defaults reseed.
+    fireEvent.change(screen.getByLabelText("width"), {
+      target: { value: "6" },
+    });
+    fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+    await waitFor(() => expect(store.commandLog).toHaveLength(1));
+    expect(await screen.findByText("Current value: 6 mm")).toBeTruthy();
+
+    // A FOREIGN commit (an undo, a manage-mode edit) reverts width to 8
+    // behind the form's back. It lands as the log's second transaction.
+    act(() => {
+      const applied = store.applyCommand(
+        setParameterCommand(WIDTH_ID, length(8)),
+      );
+      if (!applied.ok) {
+        throw new Error(`Test revert refused: ${applied.error.message}`);
+      }
+    });
+    await waitFor(() => expect(store.commandLog).toHaveLength(2));
+    const revertEntry = JSON.parse(
+      JSON.stringify(store.commandLog[1]),
+    ) as SerializedCommandLogEntry;
+    expect(revertEntry.commands[0]?.id).toBe("param_width");
+    expect(revertEntry.commands[0]?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 8,
+    });
+
+    // The field shows the REVERTED document value, not the submitted 6 —
+    // the form carried no unsubmitted edit, so the commit is adopted.
+    await waitFor(() => expect(requireInputField("width").value).toBe("8"));
+
+    // And Apply issues NOTHING: the fields hold document state, so the
+    // stale submitted value cannot be re-committed over the foreign change.
+    await act(async () => {
+      fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(store.commandLog).toHaveLength(2);
+  });
+
+  it("preserves in-progress typing on a foreign commit while clean fields adopt the committed values", async () => {
+    const store = buildProviderStore();
+    render(<PanelInProvider store={store} />);
+
+    // width is mid-edit (typed, unsubmitted) ...
+    fireEvent.change(screen.getByLabelText("width"), {
+      target: { value: "50" },
+    });
+
+    // ... when a foreign commit rewrites derivedDepth's defining
+    // expression (width * 2 → width * 3).
+    act(() => {
+      const applied = store.applyCommand(
+        setParameterExpressionCommand(
+          DERIVED_ID,
+          requireExpression("width * 3"),
+        ),
+      );
+      if (!applied.ok) {
+        throw new Error(`Test commit refused: ${applied.error.message}`);
+      }
+    });
+
+    // The typed field keeps the in-progress input; the untouched field
+    // re-adopts the committed printing of the new expression.
+    expect(requireInputField("width").value).toBe("50");
+    await waitFor(() =>
+      expect(requireInputField("derivedDepth").value).toBe("width * 3"),
+    );
+
+    // And Apply commits the TYPED width over the foreign change — the
+    // stale-document re-commit hazard this reseed rule exists for. The
+    // foreign commit is the log's first transaction; the panel's submit
+    // adds exactly one more: one `parameter.set` carrying 50 (the
+    // re-adopted expression equals the committed printing, so it issues
+    // nothing).
+    fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+    await waitFor(() => expect(store.commandLog).toHaveLength(2));
+    const typedEntry = JSON.parse(
+      JSON.stringify(store.commandLog[1]),
+    ) as SerializedCommandLogEntry;
+    expect(typedEntry.commands).toHaveLength(1);
+    expect(typedEntry.commands[0]?.type).toBe("parameter.set");
+    expect(typedEntry.commands[0]?.id).toBe("param_width");
+    expect(typedEntry.commands[0]?.value).toEqual({
+      dimension: "length",
+      unit: "mm",
+      value: 50,
+    });
+
+    // The mirror followed the commit: the typed magnitude, not the
+    // document's pre-submit 8 (and derivedDepth re-evaluates: 50 * 3).
+    expect(await screen.findByText("Current value: 50 mm")).toBeTruthy();
+  });
+
+  it("treats an identical-values foreign commit as a non-event: fields stay and Apply issues nothing", async () => {
+    const store = buildProviderStore();
+    render(<PanelInProvider store={store} />);
+
+    // A foreign commit that sets width to the value it already carries: the
+    // fields already hold the seeded document state, so the reseed's merged
+    // diff finds nothing to change — no reset churn, no visible change, no
+    // error region.
+    act(() => {
+      const applied = store.applyCommand(
+        setParameterCommand(WIDTH_ID, length(8)),
+      );
+      if (!applied.ok) {
+        throw new Error(`Test commit refused: ${applied.error.message}`);
+      }
+    });
+
+    expect(requireInputField("width").value).toBe("8");
+    expect(requireInputField("derivedDepth").value).toBe("width * 2");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    // And Apply issues nothing: the form holds document state, so the
+    // command log keeps only the foreign commit itself.
     await act(async () => {
       fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
       await new Promise((resolve) => setTimeout(resolve, 0));

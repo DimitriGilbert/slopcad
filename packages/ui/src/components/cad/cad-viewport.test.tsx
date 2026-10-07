@@ -268,6 +268,142 @@ describe("CadViewport", () => {
     expect(store.getSelection().selected).toEqual([]);
   });
 
+  it("delivers the stranded pointer-up when the release lands outside the viewport", () => {
+    const store = createCadStore({
+      session: sessionOf(),
+      tools: [registerTool(probeTool())],
+    });
+    store.armTool("probe");
+    render(
+      <CadProvider store={store}>
+        <CadViewport projection={PROJECTION} />
+      </CadProvider>,
+    );
+    // The press happens in the viewport; the release happens over foreign
+    // page chrome — no container or scene handler can see it.
+    fireEvent.pointerDown(screen.getByTestId("cad-scene-stub"), {
+      pointerId: 4,
+    });
+    fireEvent.pointerUp(window, { pointerId: 4 });
+    const surface = store.getToolSurface();
+    // The gesture TERMINATED (no drag-on-hover), with the empty-space up.
+    expect(surface.phase).toBe("active");
+    expect(surface.toolState).toEqual({
+      stage: "events",
+      events: ["pointer-down:empty", "pointer-up:empty"],
+    });
+  });
+
+  it("cancels the live tool when the tracked gesture is pointercancelled", () => {
+    const store = createCadStore({
+      session: sessionOf(),
+      tools: [registerTool(probeTool())],
+    });
+    store.armTool("probe");
+    render(
+      <CadProvider store={store}>
+        <CadViewport projection={PROJECTION} />
+      </CadProvider>,
+    );
+    fireEvent.pointerDown(screen.getByTestId("cad-scene-stub"), {
+      pointerId: 9,
+    });
+    fireEvent.pointerCancel(window, { pointerId: 9 });
+    const surface = store.getToolSurface();
+    expect(surface.phase).toBe("cancelled");
+    // The cancel replaced the up: no pointer-up ever reached the tool.
+    expect(surface.toolState).toEqual({
+      stage: "events",
+      events: ["pointer-down:empty"],
+    });
+  });
+
+  it("delivers the stranded pointer-up when the release lands on an overlay control", () => {
+    const store = createCadStore({
+      session: sessionOf(),
+      tools: [registerTool(probeTool())],
+    });
+    store.armTool("probe");
+    render(
+      <CadProvider store={store}>
+        <CadViewport
+          overlay={
+            <button type="button" data-testid="overlay-release">
+              Release here
+            </button>
+          }
+          projection={PROJECTION}
+        />
+      </CadProvider>,
+    );
+    fireEvent.pointerDown(screen.getByTestId("cad-scene-stub"), {
+      pointerId: 2,
+    });
+    // The release targets the overlay: the container's empty-space branch
+    // excludes it, and the window fallback still ends the gesture.
+    fireEvent.pointerUp(screen.getByTestId("overlay-release"), {
+      pointerId: 2,
+    });
+    const surface = store.getToolSurface();
+    expect(surface.phase).toBe("active");
+    expect(surface.toolState).toEqual({
+      stage: "events",
+      events: ["pointer-down:empty", "pointer-up:empty"],
+    });
+  });
+
+  it("leaves overlay-originated presses entirely to the overlay", () => {
+    const store = createCadStore({
+      session: sessionOf(),
+      tools: [registerTool(probeTool())],
+    });
+    store.armTool("probe");
+    render(
+      <CadProvider store={store}>
+        <CadViewport
+          overlay={
+            <button type="button" data-testid="overlay-press">
+              Press here
+            </button>
+          }
+          projection={PROJECTION}
+        />
+      </CadProvider>,
+    );
+    fireEvent.pointerDown(screen.getByTestId("overlay-press"), {
+      pointerId: 3,
+    });
+    fireEvent.pointerUp(screen.getByTestId("overlay-press"), { pointerId: 3 });
+    const surface = store.getToolSurface();
+    expect(surface.phase).toBe("active");
+    // No viewport gesture was armed: the tool's event stream is untouched.
+    expect(surface.toolState).toEqual({ stage: "events", events: [] });
+  });
+
+  it("delivers an in-viewport release exactly once (no window fallback repeat)", () => {
+    const store = createCadStore({
+      session: sessionOf(),
+      tools: [registerTool(probeTool())],
+    });
+    store.armTool("probe");
+    render(
+      <CadProvider store={store}>
+        <CadViewport projection={PROJECTION} />
+      </CadProvider>,
+    );
+    const scene = screen.getByTestId("cad-scene-stub");
+    // Down and up both inside the container: the container dispatches the
+    // empty-space up and the bubbling window event must not repeat it.
+    fireEvent.pointerDown(scene, { pointerId: 6 });
+    fireEvent.pointerUp(scene, { pointerId: 6 });
+    const surface = store.getToolSurface();
+    expect(surface.phase).toBe("active");
+    expect(surface.toolState).toEqual({
+      stage: "events",
+      events: ["pointer-down:empty", "pointer-up:empty"],
+    });
+  });
+
   it("cancels the live tool on Escape from the focused viewport", () => {
     const store = createCadStore({
       session: sessionOf(),
