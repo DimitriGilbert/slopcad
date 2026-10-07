@@ -6,7 +6,8 @@
  * the tRPC client are all alive — this module is where they meet:
  *
  * - the document summary, re-read through the REAL `cad_get_document`
- *   registry tool whenever the document object changes (the same path the
+ *   registry tool whenever the outline's inputs change — the document
+ *   object, the selection, or the workbench mode (the same path the
  *   agent itself takes — never a second summary implementation);
  * - the selected model's catalog `reasoning_options` entry, looked up
  *   from the same provider-scoped `modelCatalog.list` query the settings
@@ -26,7 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ModelCatalogRefreshOutcome } from "@slopcad/api/routers/model-catalog";
-import type { CadDocument } from "@slopcad/cad-core";
+import type { CadDocument, SelectionState } from "@slopcad/cad-core";
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import { Settings2Icon } from "lucide-react";
 import { Button } from "@slopcad/ui/components/button";
@@ -42,11 +43,12 @@ import type { NamedProviderId } from "@slopcad/api/providers";
 import { AGENT_CONVERSATION_TITLE_MAX_LENGTH } from "@slopcad/api/limits";
 import type { AgentToolsSurface } from "@slopcad/ui/agent/tools";
 import type { AgentConfig } from "@slopcad/ui/agent/config/store";
-import type { AgentChatStore } from "../persistence/store";
-import type { AgentSyncTransport } from "../persistence/sync";
 import type { AgentChatSessionSlot } from "@slopcad/ui/agent/chat/session-slot";
 import { AGENT_PROVIDER_IDS } from "@slopcad/ui/agent/providers";
 import { AgentChatPanel } from "@slopcad/ui/agent/chat/agent-chat-panel";
+import { toast } from "sonner";
+import type { AgentChatStore } from "../persistence/store";
+import type { AgentSyncTransport } from "../persistence/sync";
 
 import { openBrowserAgentChatStore } from "../persistence/browser";
 import { executeWebMcpTool, subscribeWebMcpTools } from "../../webmcp/registry";
@@ -74,6 +76,13 @@ function isRefreshOutcome(value: unknown): value is ModelCatalogRefreshOutcome {
 }
 
 /**
+ * How a FAILED refresh announces itself: the settings sheet reads the
+ * `error` note off the handle it renders; the palette dispatch (the menu
+ * closes before the command runs) announces through the app's toast.
+ */
+export type AgentCatalogRefreshNotify = "note" | "toast";
+
+/**
  * The one catalog force-refresh surface (D7) the settings sheet's button
  * and the palette command share — one mutation, one list invalidation.
  */
@@ -82,8 +91,34 @@ export interface AgentCatalogRefresh {
   readonly isPending: boolean;
   /** The last refresh's outcome, once known. */
   readonly outcome: ModelCatalogRefreshOutcome | null;
-  /** Force-refreshes the given named provider's catalog cache. */
-  readonly refresh: (provider: NamedProviderId) => void;
+  /**
+   * The last failed refresh's user-readable reason (a protected-procedure
+   * auth error, the typed staleOrError gateway error, or a transport
+   * failure); `null` while no failure is on record.
+   */
+  readonly error: string | null;
+  /**
+   * Force-refreshes the given named provider's catalog cache. `notify`
+   * picks the failure surface — `"note"` (the default) leaves the reason
+   * on this handle for the sheet to render; `"toast"` also raises it
+   * through the app toast for dispatches with no open surface.
+   */
+  readonly refresh: (
+    provider: NamedProviderId,
+    notify?: AgentCatalogRefreshNotify,
+  ) => void;
+}
+
+/**
+ * One user-readable line out of a failed refresh: the server's own
+ * message when it carries one (the typed staleOrError gateway text, the
+ * auth error), a transport line otherwise.
+ */
+function refreshFailureLine(cause: unknown): string {
+  if (cause instanceof Error && cause.message.trim() !== "") {
+    return `The catalog refresh failed: ${cause.message.trim()}`;
+  }
+  return "The catalog refresh failed — the request never reached the server.";
 }
 
 /**
@@ -91,9 +126,9 @@ export interface AgentCatalogRefresh {
  * is load-bearing: the handle flows into the chat panel's session memo
  * (and through it the palette-commands slot), so the `refresh` function
  * is ref-backed and stable across renders and the handle object is
- * re-minted ONLY when the pending/outcome state actually moves — a fresh
- * identity per render would cycle the session-slot notify against the
- * workbench's own re-renders (React's maximum-update-depth error).
+ * re-minted ONLY when the pending/outcome/error state actually moves — a
+ * fresh identity per render would cycle the session-slot notify against
+ * the workbench's own re-renders (React's maximum-update-depth error).
  */
 export function useAgentCatalogRefresh(): AgentCatalogRefresh {
   const trpc = useTRPC();
@@ -104,7 +139,7 @@ export function useAgentCatalogRefresh(): AgentCatalogRefresh {
   const mutationRef = useRef(refreshMutation);
   mutationRef.current = refreshMutation;
   const refresh = useCallback(
-    (provider: NamedProviderId) => {
+    (provider: NamedProviderId, notify: AgentCatalogRefreshNotify = "note") => {
       mutationRef.current.mutate(
         { force: true, provider },
         {
@@ -112,6 +147,15 @@ export function useAgentCatalogRefresh(): AgentCatalogRefresh {
             void queryClient.invalidateQueries({
               queryKey: trpc.modelCatalog.list.queryKey(),
             });
+          },
+          onError: (cause) => {
+            // A refresh that never produced an outcome must not idle its
+            // consumers silently: a dispatch with no open surface (the
+            // palette command) announces through the app toast; the
+            // sheet reads the handle's error note instead.
+            if (notify === "toast") {
+              toast.error(refreshFailureLine(cause));
+            }
           },
         },
       );
@@ -121,22 +165,36 @@ export function useAgentCatalogRefresh(): AgentCatalogRefresh {
   const outcome = isRefreshOutcome(refreshMutation.data?.outcome)
     ? refreshMutation.data.outcome
     : null;
+  // Derived from the mutation itself, so a new dispatch resets it the
+  // same way it resets `data` — no stale-failure bookkeeping.
+  const error = refreshMutation.isError
+    ? refreshFailureLine(refreshMutation.error)
+    : null;
   return useMemo(
-    () => ({ isPending: refreshMutation.isPending, outcome, refresh }),
-    [outcome, refresh, refreshMutation.isPending],
+    () => ({ error, isPending: refreshMutation.isPending, outcome, refresh }),
+    [error, outcome, refresh, refreshMutation.isPending],
   );
 }
 
 /**
  * Reads the compact document outline through the real `cad_get_document`
  * registry tool and keeps it as the string the panel's sync getter
- * serves. A refused read degrades to the empty summary (the system
- * prompt then carries the instruction block only) — with one retry on
- * the registry's next change: child effects run BEFORE the workbench
- * page's own binding effect, so the very first read can race the tool's
- * registration and must re-run once the toolset lands.
+ * serves. The outline reports more than the document object, and not all
+ * of it rides the document's identity: the selection is its own store
+ * concern (a selection change cannot re-render a document-only
+ * subscriber) and the workbench mode is page-level state — so both ride
+ * this effect's inputs explicitly and re-derive the summary exactly like
+ * a new document object does. A refused read degrades to the empty
+ * summary (the system prompt then carries the instruction block only) —
+ * with one retry on the registry's next change: child effects run BEFORE
+ * the workbench page's own binding effect, so the very first read can
+ * race the tool's registration and must re-run once the toolset lands.
  */
-function useDocumentSummary(document: CadDocument): () => string {
+export function useDocumentSummary(
+  document: CadDocument,
+  selection: SelectionState,
+  mode: string,
+): () => string {
   const [summary, setSummary] = useState("");
   useEffect(() => {
     let cancelled = false;
@@ -171,9 +229,10 @@ function useDocumentSummary(document: CadDocument): () => string {
         unsubscribeRetry();
       }
     };
-    // The document object's identity IS the revision signal: the engine
-    // mints a new object per committed transaction.
-  }, [document]);
+    // The revision signals, spelled out: the document object's identity
+    // (the engine mints a new object per committed transaction) plus the
+    // selection and mode, whose changes never ride that identity.
+  }, [document, mode, selection]);
   return useCallback(() => summary, [summary]);
 }
 
@@ -181,8 +240,23 @@ function useDocumentSummary(document: CadDocument): () => string {
 export interface AgentChatSidebarViewProps {
   /** The live agent config (owned by the host; settings saves land here). */
   readonly config: AgentConfig;
-  /** The live workbench document; its identity drives summary refreshes. */
+  /**
+   * The live workbench document; its identity is the summary's commit
+   * revision signal (the engine mints a new object per commit).
+   */
   readonly document: CadDocument;
+  /**
+   * The live selection state; a change re-derives the summary (the
+   * outline reports it, and it does not ride the document's identity —
+   * it is the store's own selection concern).
+   */
+  readonly selection: SelectionState;
+  /**
+   * The page-level workbench mode; a change re-derives the summary (the
+   * outline reports it, and page state never rides the document's
+   * identity).
+   */
+  readonly mode: string;
   /** The page's bound webMCP tool set + executor (M2's binding). */
   readonly toolsSurface: AgentToolsSurface;
   /** The palette-commands slot the panel reports its session into (4.4). */
@@ -200,14 +274,16 @@ export function AgentChatSidebarView({
   config,
   document,
   emptyState,
+  mode,
   onOpenSettings,
+  selection,
   sessionSlot,
   toolsSurface,
 }: AgentChatSidebarViewProps): ReactElement {
   const trpc = useTRPC();
 
   // The document summary through the real tool path.
-  const getDocumentSummary = useDocumentSummary(document);
+  const getDocumentSummary = useDocumentSummary(document, selection, mode);
 
   // The selected model's reasoning option (D8): the provider-scoped
   // catalog query, deduped with the settings sheet's by key. The
@@ -299,12 +375,13 @@ export function AgentChatSidebarView({
   // The palette command's catalog refresh target (D7): the configured
   // named provider's cache. openai-compatible has no catalog (D14 — its
   // models come from the endpoint itself), and an unconfigured agent has
-  // no scope to refresh, so those calls stay inert.
+  // no scope to refresh, so those calls stay inert. The command runs with
+  // the menu already closed, so its failure surface is the app toast.
   const handleForceRefreshCatalog = useCallback(() => {
     if (namedProvider === null) {
       return;
     }
-    catalogRefresh.refresh(namedProvider);
+    catalogRefresh.refresh(namedProvider, "toast");
   }, [catalogRefresh, namedProvider]);
 
   return (

@@ -14,7 +14,10 @@
  * stored `If-None-Match` ETag (a 304 keeps the rows and only bumps
  * `fetchedAt`), `force` bypasses the TTL, and an upstream failure serves
  * the last good rows — a typed BAD_GATEWAY surfaces only when there are
- * no rows to serve at all.
+ * no rows to serve at all. A parseable 200 only counts as good data when
+ * it is shaped like the provider's models.dev entry (an error object, a
+ * bare array, or `null` is an upstream failure like any other), and an
+ * empty filtered list never wipes or re-clocks an existing cache.
  *
  * ATTRIBUTION: the catalog data originates from models.dev (MIT License,
  * github.com/anomalyco/models.dev), cached server-side and served to
@@ -118,6 +121,22 @@ async function selectCatalogEntries(
   }));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Is a parsed 200 body shaped like a models.dev `api.json` entry for this
+ * provider — a top-level object carrying a record under the provider id?
+ * Narrowing the `models` value itself stays the filter's job; anything
+ * else here (an error object such as a rate-limit page, a bare array,
+ * `null`) is a wrong-shape body that counts as an upstream failure, never
+ * as an authoritative empty catalog.
+ */
+function isProviderMap(payload: unknown, provider: string): boolean {
+  return isRecord(payload) && isRecord(payload[provider]);
+}
+
 /**
  * Stale-on-error: an unreachable/failed upstream keeps the last good rows
  * (and their `fetchedAt`, so the next call retries). Only when there is
@@ -159,8 +178,11 @@ export function createModelCatalogRouter(deps: ModelCatalogRouterDeps) {
     /**
      * Refetches `MODEL_CATALOG_URL` for one provider: TTL-gated unless
      * `force`, ETag-revalidated (304 keeps the rows, bumps `fetchedAt`),
-     * stale-on-error upstream-side. The BYO-endpoint provider is refused
-     * with a typed error — its models are never catalog-backed (D14).
+     * stale-on-error upstream-side — including a parseable 200 whose body
+     * is not a models.dev provider map, and, over prior rows, an
+     * empty-but-valid provider list (rows kept, TTL/ETag untouched). The
+     * BYO-endpoint provider is refused with a typed error — its models
+     * are never catalog-backed (D14).
      */
     refresh: protectedProcedure
       .input(
@@ -239,21 +261,62 @@ export function createModelCatalogRouter(deps: ModelCatalogRouterDeps) {
           return staleOrError(db, provider, cause);
         }
 
+        // A parseable 200 is only authoritative when it is actually shaped
+        // like a models.dev entry for this provider; a rate-limit page's
+        // `{"error": ...}` or a bare `[]`/`null` is an upstream failure
+        // like any other and must never license a cache wipe.
+        if (!isProviderMap(payload, provider)) {
+          return staleOrError(
+            db,
+            provider,
+            `upstream responded with HTTP 200 and a body that is not a models.dev provider map for "${provider}"`,
+          );
+        }
+
         const filtered = filterProviderModels(
           provider,
           extractProviderModels(payload, provider),
           now,
         );
         const etag = response.headers.get("etag");
+
+        if (filtered.length === 0) {
+          // An empty-but-valid provider list must never wipe or re-clock
+          // an existing cache (documented choice, pinned in
+          // model-catalog.test.ts): over prior rows, a filtered-empty
+          // result is indistinguishable from a transient upstream anomaly
+          // (a reset or momentarily emptied provider entry), so the last
+          // good rows stay AND their meta row is left untouched — the
+          // cache window stays anchored at the last good fetch, so the
+          // next refresh past it retries upstream instead of serving a
+          // frozen picker for another 24h, and `force` remains the
+          // manual escape hatch. With nothing cached at all, the
+          // legitimately empty fetch is recorded (meta only — there is
+          // nothing to wipe) so such a provider neither errors nor
+          // re-hits upstream on every call.
+          const priorEntries = await selectCatalogEntries(db, provider);
+          if (priorEntries.length > 0) {
+            return { outcome: "stale-served", entries: priorEntries };
+          }
+          await db.transaction(async (tx) => {
+            await tx
+              .insert(modelCatalogMeta)
+              .values({ provider, etag, fetchedAt: now })
+              .onConflictDoUpdate({
+                target: modelCatalogMeta.provider,
+                set: { etag, fetchedAt: now },
+              });
+          });
+          return { outcome: "refetched", entries: [] };
+        }
+
         await db.transaction(async (tx) => {
           await tx
             .delete(modelCatalogEntries)
             .where(eq(modelCatalogEntries.provider, provider));
-          if (filtered.length > 0) {
-            await tx
-              .insert(modelCatalogEntries)
-              .values(filtered.map((entry) => ({ ...entry, fetchedAt: now })));
-          }
+          await tx
+            .insert(modelCatalogEntries)
+            .values(filtered.map((entry) => ({ ...entry, fetchedAt: now })));
           await tx
             .insert(modelCatalogMeta)
             .values({ provider, etag, fetchedAt: now })

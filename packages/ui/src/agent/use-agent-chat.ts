@@ -26,15 +26,20 @@
  *   parse. The server owns the loop there, so the config's own loop bound
  *   rides the contract (an integer 1..25) and the relay binds it onto the
  *   server-side run's `agentLoopStrategy` — the same config value that
- *   bounds the client-direct loop below.
+ *   bounds the client-direct loop below. The contract carries no tool
+ *   declarations (a strict schema would refuse one with 400), so a server
+ *   run is TEXT-ONLY: the shipped system prompt says so instead of
+ *   cataloguing tools the run was never offered (D4's scope).
  *
  * ## System prompt assembly (D8)
  *
  * The system prompt is the user's editable prompt from the config store plus
  * an auto-appended, delimiter-marked context block: the page's
- * `cad_get_document` summary and the tool catalogue derived from the bound
- * tool set (name + description per tool — one source of truth, no second
- * list to drift). The base instruction text lives here as
+ * `cad_get_document` summary and the tool state, which is MODE-DEPENDENT
+ * (D4's scope) — client mode derives the catalogue from the bound tool set
+ * (name + description per tool — one source of truth, no second list to
+ * drift), while server mode replaces the catalogue with an explicit line
+ * that tool use is unavailable. The base instruction text lives here as
  * {@link AGENT_BASE_INSTRUCTION} — the DEFAULT value of the user's editable
  * prompt until they change it, and fully replaceable via config: a stored
  * prompt replaces it wholesale, and an explicitly EMPTY stored prompt strips
@@ -118,6 +123,16 @@ export const AGENT_CONTEXT_START = "<slopcad-agent-context>";
 /** The context block's closing delimiter. */
 export const AGENT_CONTEXT_END = "</slopcad-agent-context>";
 
+/**
+ * The server mode's tool line (D4's scope): the relay's five-field wire
+ * contract carries no tool declarations, so a server-side run cannot
+ * execute tools. It replaces the client mode's tool catalogue in the
+ * context block — the prompt stays honest about what the run can do
+ * instead of promising tools the model was never offered.
+ */
+export const AGENT_SERVER_MODE_TOOL_NOTICE =
+  "Tool use is unavailable in server mode: this run carries no tool declarations, so it cannot change the model — reply in text only.";
+
 /** Everything the prompt assembly needs, all of it page-supplied. */
 export interface AgentSystemPromptInput {
   /**
@@ -128,11 +143,16 @@ export interface AgentSystemPromptInput {
   readonly userPrompt: string | null;
   /** The page's `cad_get_document` summary of the current document. */
   readonly documentSummary: string;
-  /** The catalogue derived from the bound tool set. */
-  readonly toolCatalogue: readonly AgentChatToolDescriptor[];
+  /**
+   * The catalogue derived from the bound tool set — or `null` in server
+   * (relay) mode: the wire contract declares no tools, so the context block
+   * states the unavailability ({@link AGENT_SERVER_MODE_TOOL_NOTICE})
+   * instead of listing tools the run cannot call (D4's scope).
+   */
+  readonly toolCatalogue: readonly AgentChatToolDescriptor[] | null;
 }
 
-/** Renders the auto-appended context block: summary + tool catalogue, delimited. */
+/** Renders the auto-appended context block: summary + tool state, delimited. */
 function agentContextBlock(input: AgentSystemPromptInput): string {
   const lines = [
     AGENT_CONTEXT_START,
@@ -144,12 +164,19 @@ function agentContextBlock(input: AgentSystemPromptInput): string {
       ? "(the document is empty)"
       : input.documentSummary,
     "",
-    "Tool catalogue (the only tools you may call):",
-    ...(input.toolCatalogue.length === 0
-      ? ["(no tools are bound)"]
-      : input.toolCatalogue.map(
-          (tool) => `- ${tool.name}: ${tool.description}`,
-        )),
+    // Mode-dependent tool state (D4's scope): `null` is the server mode —
+    // no catalogue can be honest there, only the unavailability line. An
+    // EMPTY catalogue is client mode's real zero-tool state and stays.
+    ...(input.toolCatalogue === null
+      ? [AGENT_SERVER_MODE_TOOL_NOTICE]
+      : [
+          "Tool catalogue (the only tools you may call):",
+          ...(input.toolCatalogue.length === 0
+            ? ["(no tools are bound)"]
+            : input.toolCatalogue.map(
+                (tool) => `- ${tool.name}: ${tool.description}`,
+              )),
+        ]),
     AGENT_CONTEXT_END,
   ];
   return lines.join("\n");
@@ -159,7 +186,9 @@ function agentContextBlock(input: AgentSystemPromptInput): string {
  * Assembles the agent system prompt: the user's editable prompt (or the base
  * instruction while never edited) above the auto-appended, delimited context
  * block. An empty or whitespace-only user prompt yields the context block
- * alone; a stored prompt replaces the base instruction wholesale.
+ * alone; a stored prompt replaces the base instruction wholesale. A `null`
+ * tool catalogue renders the server mode's unavailability notice instead of
+ * a catalogue section.
  */
 export function assembleAgentSystemPrompt(
   input: AgentSystemPromptInput,
@@ -393,7 +422,11 @@ function createRelayFetcher(
     const { config } = input;
     const systemPrompt = assembleAgentSystemPrompt({
       documentSummary: input.documentSummary,
-      toolCatalogue: agentToolCatalogue(input.tools),
+      // Server mode is text-only (D4's scope): the relay's five-field wire
+      // contract declares no tools, so the prompt states the unavailability
+      // instead of cataloguing tools the server-side run cannot call. The
+      // bound tools stay client-mode-only — they never cross this fetcher.
+      toolCatalogue: null,
       userPrompt: config.systemPrompt,
     });
     const modelOptions = resolveAgentModelOptions(
@@ -467,16 +500,27 @@ export interface UseAgentChatInput {
   readonly tools: ReadonlyArray<AnyClientTool>;
   /** The selected model's catalog `reasoning_options` entry, when it declares one. */
   readonly reasoningOption?: AgentModelReasoningOption;
-  /** Injectable HTTP transport (tests, the session e2e); defaults to the global `fetch`. */
+  /**
+   * Injectable HTTP transport (tests, the session e2e); defaults to the
+   * global `fetch`. Held behind the hook's latest-ref: changing it does not
+   * rebuild the transport (only the mode does).
+   */
   readonly fetch?: typeof globalThis.fetch;
-  /** The relay endpoint override; defaults to `"/api/agent-relay"`. */
+  /**
+   * The relay endpoint override; defaults to `"/api/agent-relay"`. Held
+   * behind the hook's latest-ref: changing it does not rebuild the
+   * transport (only the mode does).
+   */
   readonly relayUrl?: string;
   /**
    * Injectable adapter factory (the D12 host seam): replaces the Phase 1.2
    * provider dispatch for the client-direct transport — a host that owns its
    * own model plumbing (or a demo with a scripted transport) supplies the
    * adapter; the provider factories' config (`apiKey`/`baseURL`/`fetch`)
-   * still arrive validated, but no provider SDK is called.
+   * still arrive validated, but no provider SDK is called. Referential
+   * stability is NOT required: the factory rides the hook's latest-ref and
+   * is read at transport (re)build time, so an inline arrow cannot reset a
+   * live conversation (only the mode rebuilds).
    */
   readonly createAdapter?: AgentChatTransportDeps["createAdapter"];
 }
@@ -502,26 +546,30 @@ export interface UseAgentChatInput {
  *   at every `connect()`/fetch, never snapshotted), so ordinary input
  *   changes need no new client at all;
  * - a transport-currency change (the `connection` XOR `fetcher` arm — the
- *   mode switch — or an injected seam) mints a NEW thread id, which is the
- * one sanctioned rebuild trigger, seeded with the live transcript
- * (`initialMessages`) so the swap never loses history.
+ *   mode switch) mints a NEW thread id, which is the one sanctioned
+ *   rebuild trigger, seeded with the live transcript (`initialMessages`)
+ *   so the swap never loses history. The injected seams (`createAdapter`,
+ *   `fetch`, `relayUrl`) are NOT rebuild triggers: they ride the same
+ *   latest-ref as the run-scoped inputs and are read at transport
+ *   (re)build time, so an unstable prop identity — one inline arrow in a
+ *   host render — can never rebuild the client mid-run; the seam in force
+ *   is the one current at the last mode-driven rebuild.
  */
 export function useAgentChat(
   input: UseAgentChatInput,
 ): UseChatReturn<readonly AgentChatTool[]> {
   const { config, tools } = input;
-  const fetchOverride = input.fetch;
-  const relayUrl = input.relayUrl;
-  const createAdapter = input.createAdapter;
 
-  // The latest-ref the transport's getter-input reads through.
+  // The latest-ref the transport's getter-input and seams read through.
   const inputRef = useRef(input);
   inputRef.current = input;
 
   // The getter-input: one stable object whose fields resolve per read, so
   // the memoized transport stays identity-stable while its behavior stays
-  // live. The transport rebuilds only when the CURRENCY changes (the mode
-  // arm) or an injected seam does.
+  // live. The transport rebuilds ONLY on a currency change (the mode arm):
+  // the injected seams (`createAdapter`, `fetch`, `relayUrl`) ride the same
+  // latest-ref, so a caller-side unstable identity can never mint a new
+  // thread id mid-conversation.
   const transportMode = config.mode;
   const liveInput = useMemo<AgentChatTransportInput>(
     () => ({
@@ -540,20 +588,34 @@ export function useAgentChat(
     }),
     [],
   );
+  // The getter-deps: the injectable seams resolve per read through the same
+  // latest-ref as `liveInput` — the object itself is mount-stable, so the
+  // seams bind whatever identity is current at the (mode-driven) rebuild,
+  // and an unstable prop identity between rebuilds changes nothing.
+  const liveDeps = useMemo<AgentChatTransportDeps>(
+    () => ({
+      get createAdapter() {
+        return inputRef.current.createAdapter;
+      },
+      get fetch() {
+        return inputRef.current.fetch;
+      },
+      get relayUrl() {
+        return inputRef.current.relayUrl;
+      },
+    }),
+    [],
+  );
   const transport = useMemo<ChatTransport>(() => {
-    const deps: AgentChatTransportDeps = {
-      ...(fetchOverride === undefined ? {} : { fetch: fetchOverride }),
-      ...(relayUrl === undefined ? {} : { relayUrl }),
-      ...(createAdapter === undefined ? {} : { createAdapter }),
-    };
     // The same arm switch `createAgentChatTransport` performs, inlined so
     // the mode is a TEXTUAL input of this memo: the currency must flip the
     // transport's identity (a new client follows), while everything the
-    // arms read stays live through the getter-input.
+    // arms read stays live through the getter-objects. `liveInput` and
+    // `liveDeps` are mount-stable, so the mode is the memo's only live key.
     return transportMode === "server"
-      ? { fetcher: createRelayFetcher(liveInput, deps) }
-      : { connection: createClientDirectConnection(liveInput, deps) };
-  }, [createAdapter, fetchOverride, liveInput, relayUrl, transportMode]);
+      ? { fetcher: createRelayFetcher(liveInput, liveDeps) }
+      : { connection: createClientDirectConnection(liveInput, liveDeps) };
+  }, [liveDeps, liveInput, transportMode]);
 
   // The rebuild trigger: a new thread id per transport identity, minted in
   // the render-phase state adjustment (React's adjust-state-when-props-

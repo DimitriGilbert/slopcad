@@ -12,6 +12,7 @@ import { z } from "zod";
 
 import {
   defineWebMcpTool,
+  registerWebMcpTool,
   unregisterWebMcpTool,
   webMcpToolNames,
   webMcpToolSnapshot,
@@ -65,6 +66,26 @@ describe("useWebMcpTools", () => {
     expect(webMcpToolNames()).toEqual(["lifecycle_probe.unmount"]);
     unmount();
     expect(webMcpToolNames()).toEqual([]);
+  });
+
+  it("unmount cleanup spares a name another host re-registered meanwhile", () => {
+    const entries = [probeEntry("lifecycle_probe.replaced")];
+    const { unmount } = render(<Harness entries={entries} />);
+    // Another host replaces the shared name after this host's binding.
+    registerWebMcpTool(
+      defineWebMcpTool({
+        description: "The surviving host's own registration.",
+        inputSchema: z.object({}),
+        name: "lifecycle_probe.replaced",
+        execute: () => ({ owner: "survivor" }),
+      }),
+    );
+    unmount();
+    // The binding's stale registrations no-op; the survivor stays live.
+    expect(webMcpToolNames()).toEqual(["lifecycle_probe.replaced"]);
+    expect(webMcpToolSnapshot()[0]?.description).toBe(
+      "The surviving host's own registration.",
+    );
   });
 
   it("serves the window seam without the real API", () => {

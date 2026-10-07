@@ -13,9 +13,11 @@ import {
   agentConfigPatchFromSettingsValues,
   agentSettingsSchema,
   agentSettingsValuesFromConfig,
+  apiKeySeedFor,
   createAgentSettingsFields,
   liveProviderOf,
   modelPickerSourceFor,
+  pickerMirroredRawId,
   reasoningEffortOptionsOf,
   reasoningSelectionOf,
   resolveSettingsModelId,
@@ -119,7 +121,7 @@ describe("agentSettingsValuesFromConfig (D5: nothing preselected)", () => {
     expect(built.reasoningBudgetTokens).toBe(0);
   });
 
-  it("remembers the stored selection (picker + key + prompt)", () => {
+  it("remembers the stored selection (picker + key + prompt), raw mirroring the stored model", () => {
     const built = agentSettingsValuesFromConfig(
       {
         ...unconfiguredConfig(),
@@ -133,6 +135,9 @@ describe("agentSettingsValuesFromConfig (D5: nothing preselected)", () => {
     );
     expect(built.apiKey).toBe("key-anthropic");
     expect(built.modelId).toBe("stored-model");
+    // The raw field starts MIRRORED to the stored model (the resolution
+    // authority is raw-first), but it is not a veto: a picker edit
+    // rewrites it (pinned in the pickerMirroredRawId describe below).
     expect(built.rawModelId).toBe("stored-model");
     expect(built.reasoningEffort).toBe("high");
     expect(built.systemPrompt).toBe("custom instructions");
@@ -235,6 +240,59 @@ describe("resolveSettingsModelId (D5: raw string always typable)", () => {
   });
 });
 
+describe("pickerMirroredRawId (the raw field mirrors picker edits, R1F1)", () => {
+  it("a picker-only change survives Save once mirrored", () => {
+    // The prefill mirrors the stored model into the raw field — which is
+    // exactly what used to veto a picker-only change on Save.
+    const prefilled = agentSettingsValuesFromConfig(
+      { ...unconfiguredConfig(), modelId: "stored-model", provider: "openai" },
+      false,
+    );
+    expect(resolveSettingsModelId(prefilled)).toBe("stored-model");
+    // The sheet's onChange mirror: the picker moved, the raw field takes
+    // the pick, and the raw-first resolver then persists it.
+    const mirrored = pickerMirroredRawId(prefilled.modelId, "fresh-pick");
+    expect(mirrored).toBe("fresh-pick");
+    if (mirrored !== null) {
+      expect(
+        resolveSettingsModelId({ ...prefilled, rawModelId: mirrored }),
+      ).toBe("fresh-pick");
+    }
+  });
+
+  it("a cleared picker mirrors as the empty string", () => {
+    expect(pickerMirroredRawId("stored-model", "")).toBe("");
+  });
+
+  it("a raw-field edit is left alone (the picker did not move)", () => {
+    expect(pickerMirroredRawId("stored-model", "stored-model")).toBeNull();
+  });
+});
+
+describe("apiKeySeedFor (the key field shows the chosen provider's own key, R1F2)", () => {
+  it("answers the stored key of the chosen provider", () => {
+    const config: AgentConfig = {
+      ...unconfiguredConfig(),
+      apiKeyByProvider: { openai: "sk-openai", anthropic: "sk-anthropic" },
+      provider: "openai",
+    };
+    expect(apiKeySeedFor(config, "openai")).toBe("sk-openai");
+    expect(apiKeySeedFor(config, "anthropic")).toBe("sk-anthropic");
+  });
+
+  it("answers empty for a provider with no stored key — never another provider's key", () => {
+    const config: AgentConfig = {
+      ...unconfiguredConfig(),
+      apiKeyByProvider: { openai: "sk-openai" },
+    };
+    expect(apiKeySeedFor(config, "anthropic")).toBe("");
+  });
+
+  it("answers empty before a provider is chosen", () => {
+    expect(apiKeySeedFor(unconfiguredConfig(), null)).toBe("");
+  });
+});
+
 describe("reasoningSelectionOf (D8: exactly the catalog's offered values)", () => {
   const effort: ModelReasoningOption = {
     type: "effort",
@@ -307,7 +365,7 @@ describe("agentConfigPatchFromSettingsValues", () => {
     expect(patch.apiKeyByProvider).toEqual({ openai: "key" });
   });
 
-  it("keeps the other providers' keys and clears an emptied key", () => {
+  it("keeps the other providers' keys and never erases a stored key with an emptied field", () => {
     const config: AgentConfig = {
       ...unconfiguredConfig(),
       apiKeyByProvider: { anthropic: "keep-me", openai: "old" },
@@ -317,7 +375,27 @@ describe("agentConfigPatchFromSettingsValues", () => {
       values({ apiKey: "", provider: "openai" }),
       { config, reasoningOption: undefined },
     );
-    expect(patch.apiKeyByProvider).toEqual({ anthropic: "keep-me" });
+    expect(patch.apiKeyByProvider).toEqual({
+      anthropic: "keep-me",
+      openai: "old",
+    });
+  });
+
+  it("a provider switch with an empty key field does not move the old key (R1F2)", () => {
+    // The in-form switch reseeds the field to "" (anthropic has no stored
+    // key); the submit must leave openai's key where it is and store
+    // nothing under anthropic.
+    const config: AgentConfig = {
+      ...unconfiguredConfig(),
+      apiKeyByProvider: { openai: "sk-openai" },
+      provider: "openai",
+    };
+    const patch = agentConfigPatchFromSettingsValues(
+      values({ apiKey: "", provider: "anthropic" }),
+      { config, reasoningOption: undefined },
+    );
+    expect(patch.provider).toBe("anthropic");
+    expect(patch.apiKeyByProvider).toEqual({ openai: "sk-openai" });
   });
 
   it("clearing the provider keeps the remembered endpoint untouched", () => {

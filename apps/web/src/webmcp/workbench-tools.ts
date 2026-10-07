@@ -29,7 +29,9 @@
  * - `cad_capture_views` — the snapshot exporter's own camera math and
  *   frame settle over the LIVE canvas (D10): one view or several angles in
  *   one call, each returned as a base64 PNG image part; the user's camera
- *   is restored on every exit path.
+ *   is restored on every exit path, and concurrent executions queue on a
+ *   mutex instead of interleaving over the shared camera overlay and
+ *   frame ledger.
  * - `cad_get_document` — the compact, model-oriented outline (Phase 2.2):
  *   mode, feature timeline outline, `$`-variables, bodies, selection,
  *   history, and the assembly records, through the shared
@@ -272,6 +274,26 @@ function refusalFromError(error: {
 }
 
 /**
+ * A promise-chain mutex: `run` queues `job` behind every job handed over
+ * before it, and a job starts only after the previous one SETTLED —
+ * fulfilled or rejected; one job's failure never breaks the queue for the
+ * others. The caller still receives each job's own outcome; the tail the
+ * chain retains is the settled (never-rejecting) form, so the retained
+ * promise stays a plain resolution.
+ */
+function createMutex(): <T>(job: () => Promise<T>) => Promise<T> {
+  let tail: Promise<unknown> = Promise.resolve();
+  return (job) => {
+    const run = tail.then(job, job);
+    tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+}
+
+/**
  * The domain's canonical value of `dimension` at `magnitude` — the same
  * switch `CadParameterPanel` applies for literal edits (the panel's helper
  * is module-private; the rule is the dimension's canonical-unit factory).
@@ -389,6 +411,77 @@ interface CapturedViewImage {
 }
 
 /**
+ * The `cad_capture_views` body: one read-modify-write over the SHARED
+ * user-camera overlay and the global frame ledger — snapshot the user's
+ * camera, drive the overlay per view, settle each frame, restore. Never
+ * reentrant: callers serialize executions through the capture mutex.
+ */
+async function captureViews(
+  surface: WorkbenchWebMcpSurface,
+  views: readonly CaptureViewInput[],
+): Promise<
+  | { readonly images: readonly CapturedViewImage[]; readonly ok: true }
+  | ToolRefusal
+> {
+  const applied = surface.appliedState();
+  if (applied === null) {
+    return refusal(
+      CAPTURE_NO_SCENE,
+      "The scene has not settled yet; there is no evaluated model to capture.",
+    );
+  }
+  const capture = surface.capture;
+  const requests = views.map(captureViewRequestOf);
+  const bounds = applied.measurement.bounds;
+  const convention = capture.convention();
+  const framesAtStart = capture.renderedFrames();
+  const previousCamera = capture.userCamera();
+  const images: CapturedViewImage[] = [];
+  // The highest frame count the ledger actually reported: the restore's
+  // settle waits one frame past RENDERED evidence, never past the
+  // requested count — an early refusal (unmounted canvas, failed encode)
+  // leaves the unvisited views' targets unreachable, and waiting on one
+  // would burn the settle's full timeout on frames that can never exist.
+  let settledFrames = framesAtStart;
+  try {
+    for (const [index, request] of requests.entries()) {
+      capture.setUserCamera(captureViewCamera(request, { bounds, convention }));
+      settledFrames = Math.max(
+        settledFrames,
+        await waitForRenderedFrame(capture.rootId, framesAtStart + index + 1),
+      );
+      const canvas = capture.canvas();
+      if (canvas === null) {
+        return refusal(
+          CAPTURE_NO_VIEWPORT,
+          "The viewport canvas is not mounted; nothing can be captured.",
+        );
+      }
+      const blob = await captureViewportPng(canvas);
+      if (blob === null) {
+        return refusal(
+          CAPTURE_FAILED,
+          `views[${String(index)}]: the canvas could not be encoded as PNG.`,
+        );
+      }
+      images.push({
+        data: await blobToBase64(blob),
+        mimeType: "image/png",
+        name: captureViewName(request),
+      });
+    }
+  } finally {
+    // The user's camera comes back on EVERY exit path — success, refusal,
+    // throw — and the restored view settles one frame past what actually
+    // rendered before the tool returns, so the viewport the user sees is
+    // theirs again.
+    capture.setUserCamera(previousCamera);
+    await waitForRenderedFrame(capture.rootId, settledFrames + 1);
+  }
+  return { images, ok: true };
+}
+
+/**
  * Builds the eleven workbench tool entries from one live surface. Called
  * once per mount (the entries read through the surface's accessors, so
  * once-minted entries stay current); the command-id enum is derived from
@@ -406,6 +499,14 @@ export function createWorkbenchWebMcpTools(
       : z
           .enum(commandIds)
           .describe("one of the command-menu ids (see cad_list_commands)");
+  // Concurrent capture executions are reachable: the AI client starts
+  // every client-tool execution as an unawaited promise (two calls in one
+  // assistant message run at once), and the bridge, the registry
+  // executor, and the spec mirror all land on this one entry. The capture
+  // body is a read-modify-write over the SHARED camera overlay and the
+  // global frame ledger, so every execution queues on one mount-scoped
+  // mutex instead of interleaving.
+  const serializeCaptures = createMutex();
 
   return [
     defineWebMcpTool({
@@ -655,70 +756,12 @@ export function createWorkbenchWebMcpTools(
           .describe("the views to capture, in order"),
       }),
       name: "cad_capture_views",
-      execute: async (input) => {
-        const applied = surface.appliedState();
-        if (applied === null) {
-          return refusal(
-            CAPTURE_NO_SCENE,
-            "The scene has not settled yet; there is no evaluated model to capture.",
-          );
-        }
-        const capture = surface.capture;
-        const requests = input.views.map(captureViewRequestOf);
-        const bounds = applied.measurement.bounds;
-        const convention = capture.convention();
-        const framesAtStart = capture.renderedFrames();
-        const previousCamera = capture.userCamera();
-        const images: CapturedViewImage[] = [];
-        // The highest frame count the ledger actually reported: the
-        // restore's settle waits one frame past RENDERED evidence, never
-        // past the requested count — an early refusal (unmounted canvas,
-        // failed encode) leaves the unvisited views' targets unreachable,
-        // and waiting on one would burn the settle's full timeout on
-        // frames that can never exist.
-        let settledFrames = framesAtStart;
-        try {
-          for (const [index, request] of requests.entries()) {
-            capture.setUserCamera(
-              captureViewCamera(request, { bounds, convention }),
-            );
-            settledFrames = Math.max(
-              settledFrames,
-              await waitForRenderedFrame(
-                capture.rootId,
-                framesAtStart + index + 1,
-              ),
-            );
-            const canvas = capture.canvas();
-            if (canvas === null) {
-              return refusal(
-                CAPTURE_NO_VIEWPORT,
-                "The viewport canvas is not mounted; nothing can be captured.",
-              );
-            }
-            const blob = await captureViewportPng(canvas);
-            if (blob === null) {
-              return refusal(
-                CAPTURE_FAILED,
-                `views[${String(index)}]: the canvas could not be encoded as PNG.`,
-              );
-            }
-            images.push({
-              data: await blobToBase64(blob),
-              mimeType: "image/png",
-              name: captureViewName(request),
-            });
-          }
-        } finally {
-          // The user's camera comes back on EVERY exit path — success,
-          // refusal, throw — and the restored view settles one frame past
-          // what actually rendered before the tool returns, so the
-          // viewport the user sees is theirs again.
-          capture.setUserCamera(previousCamera);
-          await waitForRenderedFrame(capture.rootId, settledFrames + 1);
-        }
-        return { images, ok: true };
-      },
+      // Serialized: the handler queues behind any in-flight capture (see
+      // the mutex above) — queued runs read the ledger only after the
+      // previous run's restore settled, so captures never interleave and
+      // can never mislabel another run's camera as their own.
+      execute: (input) =>
+        serializeCaptures(() => captureViews(surface, input.views)),
     }),
     defineWebMcpTool({
       annotations: { readOnlyHint: true },

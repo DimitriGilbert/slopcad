@@ -69,7 +69,14 @@ Vercel's UI message stream would need a translation layer (mapping in
    (`executeWebMcpTool`) — the command paths the UI uses, executing
    directly on the existing undo stack. There is no propose-then-apply
    execution path; the chat may _display_ executed tool calls as readable
-   diffs — display only.
+   diffs — display only. Scope (2026-10-06 review fix): client-direct mode
+   ONLY — server-emitted (relay) mode is text-only. The relay's keyless
+   wire contract (`{provider, modelId, modelOptions, maxIterations,
+   messages}`) declares no tools to the server-side run, so the shipped
+   system prompt states that unavailability there instead of the tool
+   catalogue, and the settings UI qualifies the mode as text-only.
+   Wiring tool declarations through the relay contract is future work;
+   until it lands, driving the model's tools requires client mode.
 
 4. **Parity is the audit criterion.** (D11) Every command-surface manifest
    capability maps to a registry tool or to a decline recorded in this
@@ -656,6 +663,17 @@ closed at the relay boundary (`apps/web/src/agent/relay.ts`):
   client fetcher always sends the config store's (normalized, ≥ 1)
   value; a stored bound above 25 is refused loudly by the relay's 400
   rather than silently clamped.
+- **No tools field exists — server mode is text-only.** (2026-10-06
+  review fix) The five-field contract deliberately carries no tool
+  declarations (the strict schema would refuse one with 400), so the
+  server-side `chat()` runs with an empty tool set. The client relay
+  fetcher therefore ships a DIFFERENT system prompt from client mode: no
+  tool catalogue, and an explicit line that tool use is unavailable in
+  server mode — the prompt must not promise tools the run was never
+  offered. Declaring tools over the wire (name + description + JSON
+  schema — not credentials, but contract surface that must re-pass this
+  section's closed-universe scrutiny) is future work; until it lands,
+  server mode answers in text only (D4's scope note above).
 
 ## Phase 4 UI notes (2026-10-04)
 

@@ -2845,9 +2845,11 @@ export function CompleteCadWorkbench({
           configurationPanel={configurationPanel}
           document={workbenchDocument}
           drawerOpen={panelsDrawerOpen}
+          mode={mode}
           onViewChange={setAgentChatView}
           parameterPanel={parameterPanel}
           propertyPanel={propertyPanel}
+          selection={selectionApi.selection}
           sessionSlot={agentChatSessionSlot}
           toolsSurface={agentToolsSurface}
           view={agentChatView}

@@ -55,10 +55,12 @@ import { listOpenAiCompatibleModels } from "@slopcad/ui/agent/providers/openai-c
 import {
   agentSettingsSchema,
   agentSettingsValuesFromConfig,
+  apiKeySeedFor,
   createAgentSettingsFields,
   liveProviderOf,
   modelPickerSourceFor,
   namedCatalogProviderOf,
+  pickerMirroredRawId,
   resolveSettingsModelId,
   type AgentSettingsValues,
 } from "./agent-settings-form";
@@ -216,15 +218,40 @@ export function AgentSettingsSheet({
 
   const [applyError, setApplyError] = useState<string | null>(null);
 
+  // The values snapshot the form showed BEFORE the change currently being
+  // handled: the two cross-field rules in `onChange` below key on WHICH
+  // field moved, not on what any value happens to be.
+  const previousValuesRef = useRef<AgentSettingsValues>(defaultValues);
+
   const settingsForm = useFormedible<AgentSettingsValues>({
     fields,
     formOptions: {
       defaultValues,
       onChange: ({ value }) => {
+        const previous = previousValuesRef.current;
+        previousValuesRef.current = value;
+        const nextProvider = liveProviderOf(value.provider);
         // Every in-form provider change re-keys the sheet's catalog
         // plumbing (D14) — the picker, its refresh row, and the
         // reasoning controls follow the selection without a save.
-        setLiveProvider(liveProviderOf(value.provider));
+        setLiveProvider(nextProvider);
+        // The key field always shows the CHOSEN provider's own stored
+        // key (the cross-provider leak fix): an in-form switch reseeds
+        // it, so the previous provider's key can never ride the submit
+        // into the new provider's config slot.
+        if (nextProvider !== liveProviderOf(previous.provider)) {
+          settingsForm.form.setFieldValue(
+            "apiKey",
+            apiKeySeedFor(config, nextProvider),
+          );
+        }
+        // A picker edit must survive Save (the raw-veto fix): the raw id
+        // field mirrors every picker change, so the raw-first resolver
+        // persists the picked model rather than the stale saved one.
+        const mirrored = pickerMirroredRawId(previous.modelId, value.modelId);
+        if (mirrored !== null) {
+          settingsForm.form.setFieldValue("rawModelId", mirrored);
+        }
       },
       onSubmit: ({ value }) => {
         const result = onApplySettings(value, reasoningOptionOf(value));
@@ -298,19 +325,25 @@ export function AgentSettingsSheet({
   }
 
   const pickerSource = modelPickerSourceFor(liveProvider);
+  // A failed refresh is a first-class outcome, never a silent idle: the
+  // handle carries the failure's readable reason and it takes precedence
+  // over the (stale, pre-failure) outcome union.
+  const refreshFailed = catalogRefresh.error !== null;
   const refreshNote =
     pickerSource === "catalog"
       ? catalogRefresh.isPending
         ? "Refreshing the catalog…"
-        : catalogRefresh.outcome === null
-          ? null
-          : catalogRefresh.outcome === "refetched"
-            ? "Catalog refetched."
-            : catalogRefresh.outcome === "not-modified"
-              ? "Catalog unchanged upstream."
-              : catalogRefresh.outcome === "stale-served"
-                ? "Upstream unavailable — kept the cached entries."
-                : "Catalog already fresh."
+        : refreshFailed
+          ? catalogRefresh.error
+          : catalogRefresh.outcome === null
+            ? null
+            : catalogRefresh.outcome === "refetched"
+              ? "Catalog refetched."
+              : catalogRefresh.outcome === "not-modified"
+                ? "Catalog unchanged upstream."
+                : catalogRefresh.outcome === "stale-served"
+                  ? "Upstream unavailable — kept the cached entries."
+                  : "Catalog already fresh."
       : pickerSource === "endpoint"
         ? endpointListAvailable
           ? null
@@ -371,7 +404,15 @@ export function AgentSettingsSheet({
               </Button>
             )}
             {refreshNote === null ? null : (
-              <span className="text-muted-foreground min-w-0 text-xs">
+              <span
+                className={`min-w-0 text-xs ${
+                  refreshFailed ? "text-destructive" : "text-muted-foreground"
+                }`}
+                data-testid={
+                  refreshFailed ? "agent-settings-refresh-error" : undefined
+                }
+                role={refreshFailed ? "alert" : undefined}
+              >
                 {refreshNote}
               </span>
             )}
