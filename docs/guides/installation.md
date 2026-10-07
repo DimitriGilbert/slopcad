@@ -39,17 +39,19 @@ pnpm test:session    # the whole program in one serial user session,
                      # self-verifying coverage (command surface + routes)
 ```
 
-The legacy per-feature fleet is deprecated but still runnable:
+The legacy per-feature fleet is deprecated but still runnable (counts
+via `playwright test --list`):
 
 ```bash
-pnpm test:e2e        # smoke (2)                          [deprecated]
-pnpm test:render     # render + workbench fixtures (87, byte-stable)
+pnpm test:e2e        # smoke (11)                         [deprecated]
+pnpm test:render     # render + workbench fixtures (103, byte-stable)
 pnpm test:worker     # the Manifold and OCCT worker fixtures (5)
-pnpm test:perf       # performance budgets (24; budgets.json untouched)
+pnpm test:perf       # performance budgets (2 tests over 24 recorded budgets)
 pnpm test:docs       # the /docs documentation application (14)
-pnpm test:workbench  # the complete workbench suite (6)
-pnpm test:a11y       # accessibility (37 + 1 skip)
-pnpm test:projects   # project/document persistence (1)
+pnpm test:workbench  # the complete workbench suite (53)
+pnpm test:a11y       # accessibility (47 tests × 2 browser projects;
+                     # Chromium-only probes skip on Firefox)
+pnpm test:projects   # project/document persistence (2)
 pnpm test:components # registry component previews (12)
 ```
 

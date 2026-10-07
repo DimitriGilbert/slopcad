@@ -5,11 +5,11 @@ Phase 17) is the ONE serialization that preserves parametric history:
 same parameters (with expressions), same feature graph, same bodies,
 same undo/redo reach, same regeneration picture, same metadata.
 
-## The shape (v2, fixed key order)
+## The shape (fixed key order — field list current as of format v9; the parser in `@slopcad/cad-core` is the source of truth)
 
 ```jsonc
 {
-  "formatVersion": 2, // CAD_NATIVE_FORMAT_VERSION
+  "formatVersion": 9, // CAD_NATIVE_FORMAT_VERSION
   "metadata": {/* sorted JSON-safe scalars */},
   "document": {/* SerializedCadDocument — state at the history cursor */},
   "history": {
@@ -19,6 +19,11 @@ same undo/redo reach, same regeneration picture, same metadata.
   },
   "regeneration": {/* loadable states, not recomputed */},
   "rollback": { "afterFeatureId": null }, // optional envelope field (Phase 20)
+  "suppressedFeatures": ["feat_…"], // optional, additive like rollback: sorted
+  // FeatureIds clamped to the declared features, emitted only when non-empty;
+  // absent loads as an empty set
+  "drawing": {/* sheets and views */}, // optional envelope field (Phase 53):
+  // emitted last, only when a drawing exists; absent means none
 }
 ```
 
