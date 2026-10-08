@@ -3,8 +3,9 @@
  * "Simulation failure modes join the structured-decline family (`sim/*`
  * codes): an unsupported scenario is a loud decline, never a fake
  * result"). Every sim-core boundary — compile, projection, fluid
- * evaluation, payload decode, export, and the Phase 61b `sim.*` worker
- * vocabulary's session addressing — refuses with one of these codes,
+ * evaluation, payload decode, export, the Phase 61b `sim.*` worker
+ * vocabulary's session addressing, and the Phase 62a voxelizer's mesh,
+ * domain, and grid-semantics doors — refuses with one of these codes,
  * in the exact discipline the document (`document/*`), configuration
  * (`configuration/*`), and kernel (`kernel/*`) families established.
  */
@@ -76,6 +77,30 @@ export const SIM_ERROR_CODES = {
    * error. The store surfaces the failure, never a fabricated run.
    */
   storeUnavailable: "sim/store-unavailable",
+  /**
+   * The voxelizer's mesh door refused its tessellation (Phase 62a, law
+   * S3): not a plain indexed triangle soup, a shape violation (lengths
+   * not divisible by 3, indices out of vertex range, non-finite
+   * coordinates, normals disagreement), or an empty/degenerate soup —
+   * zero triangles bound no solid, and the voxelizer declines loudly
+   * rather than emitting a fabricated all-empty grid.
+   */
+  tessellationInvalid: "sim/tessellation-invalid",
+  /**
+   * The voxelizer's domain door refused (Phase 62a): a non-positive
+   * resolution, an explicit box whose max corner does not exceed its min
+   * corner, a negative body margin, a malformed slice plane, or a
+   * resolution that would exceed the grid sample budget.
+   */
+  voxelDomainInvalid: "sim/voxel-domain-invalid",
+  /**
+   * The grid↔field-block bridge refused (Phase 62a): a field id that
+   * carries no grid-semantic suffix, a unit that disagrees with the
+   * declared semantics, non-binary occupancy values, malformed grid
+   * geometry, or a grid name outside the block id budget — the
+   * `result-payload-malformed` discipline extended to grid semantics.
+   */
+  gridFieldMalformed: "sim/grid-field-malformed",
 } as const;
 
 export type SimErrorCode =

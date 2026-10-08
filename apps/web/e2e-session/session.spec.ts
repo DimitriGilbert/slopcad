@@ -25,6 +25,10 @@ import {
   HOLE_DEFAULT_DIAMETER_MM,
 } from "../src/cad-workbench/hole";
 import {
+  SIM_FIXTURE_CHUNKS_PER_ROUND,
+  SIM_FIXTURE_FINE_SHAPE,
+} from "../src/sim-workbench/sim-grid-fixture";
+import {
   activateSketchTool,
   annotationsOf,
   assertPngs,
@@ -131,6 +135,7 @@ const PLANNED_ROUTES: readonly string[] = [
   "/io",
   "/projects",
   "/viewer",
+  "/workbench-sim",
 ];
 
 /** The one-process ledger (one worker, serial mode — no cross-process races). */
@@ -3179,6 +3184,85 @@ test("s24 the render fixture recomputes projection, pixels, and volume", async (
     expect(Number(volumeB)).toBeLessThan(Number(volumeA));
     const shotB = await page.locator("#render-viewport canvas").screenshot();
     expect(shotB.equals(shotA)).toBe(false);
+  });
+});
+
+test("s24b the sim workbench renders the demo body as a grid (Phase 62)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24b workbench-sim", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    const volumeText = await waitForSettledScene(page, SIM_ROOT);
+    // The demo body: the plate minus its ⌀12 through bore.
+    const analytic = 80 * 48 * 6 - Math.PI * 6 * 6 * 6;
+    expect(Math.abs(Number(volumeText) - analytic)).toBeLessThanOrEqual(
+      analytic * 0.005,
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE GRID (the phase's user-visible outcome): the boot application
+    // commits its chunk round — awaited on the data-sim-* counters,
+    // never a timeout — and the applied grid state pins the resolved
+    // shape with the part provably inside the lattice.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND),
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-notifications",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND),
+    );
+    const bootState = JSON.parse(
+      (await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-grid-state")) ?? "{}",
+    ) as {
+      readonly semantic: string;
+      readonly rounds: number;
+      readonly shape: readonly number[];
+      readonly occupiedNodes: number | null;
+    };
+    expect(bootState.semantic).toBe("occupancy");
+    expect(bootState.rounds).toBe(1);
+    expect(bootState.shape).toEqual([...SIM_FIXTURE_FINE_SHAPE]);
+    expect(bootState.occupiedNodes).not.toBeNull();
+    expect(bootState.occupiedNodes ?? 0).toBeGreaterThan(0);
+    expect(bootState.occupiedNodes ?? 0).toBeLessThan(51 * 35 * 10);
+
+    // The SDF flag: the other semantic's stream applies as its own
+    // committed round; toggling back re-publishes the occupancy field.
+    await page.locator("#sim-sdf-toggle").check();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND * 2),
+    );
+    await expect
+      .poll(async () => {
+        const state = JSON.parse(
+          (await page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-grid-state")) ?? "{}",
+        ) as { readonly semantic: string; readonly unit: string };
+        return state.semantic === "signed-distance" && state.unit === "mm";
+      })
+      .toBe(true);
+    await page.locator("#sim-sdf-toggle").uncheck();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND * 3),
+    );
+    await expect
+      .poll(async () => {
+        const state = JSON.parse(
+          (await page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-grid-state")) ?? "{}",
+        ) as { readonly semantic: string; readonly rounds: number };
+        return state.semantic === "occupancy" && state.rounds === 2;
+      })
+      .toBe(true);
   });
 });
 

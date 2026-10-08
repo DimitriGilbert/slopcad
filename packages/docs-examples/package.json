@@ -11,6 +11,9 @@
     "./react/store": {
       "default": "./src/react/store.tsx"
     },
+    "./cadjsx/sim-demo-body": {
+      "default": "./src/cadjsx/sim-demo-body.tsx"
+    },
     "./*": {
       "default": [
         "./src/*.ts",

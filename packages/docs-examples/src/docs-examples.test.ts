@@ -39,6 +39,8 @@ import { runProjectionExample } from "./core/projection";
 import { runUnitsExample } from "./core/units";
 import { runMeshExchangeExample } from "./io/mesh";
 import { runSimSpineExample } from "./sim/spine";
+import { runSimVoxelExample } from "./sim/voxel";
+import { runSimDemoBodyExample } from "./cadjsx/sim-demo-body";
 import { runSketchExample } from "./sketch/sketch";
 import { runSketchVocabularyExample } from "./sketch/vocabulary";
 import { runKernelExample, unwrapKernel } from "./kernel/primitives";
@@ -447,5 +449,46 @@ describe("guide example: simulation spine (Phase 61)", () => {
     expect(summary.vtiIsImageData).toBe(true);
     expect(summary.csvRows).toBe(6);
     expect(summary.csvHeader).toBe("drag (N)");
+  });
+});
+
+describe("guide example: the voxelizer (Phase 62, law S3)", () => {
+  it("voxelizes the analytic box exactly, signs it, and round-trips the block", () => {
+    const summary = runSimVoxelExample();
+    // The explicit [0, 16]³ domain at 2 mm: 9 nodes per axis.
+    expect(summary.shape).toEqual([9, 9, 9]);
+    expect(summary.totalNodes).toBe(729);
+    // The box spans [4, 12]³: nodes 4..12 step 2 — 5 per axis, exact.
+    expect(summary.occupiedNodes).toBe(125);
+    // The closed-set convention: the node exactly ON the corner is inside.
+    expect(summary.boundaryNodesInside).toBe(true);
+    // The z = 8 slice: one node on the plane, the same 5×5 in-plane set.
+    expect(summary.sliceShape).toEqual([9, 9, 1]);
+    expect(summary.sliceOccupiedNodes).toBe(25);
+    // The signed distances at the probed nodes are exact millimetres in
+    // metres: +2 mm outside the −x face, −4 mm at the centre.
+    expect(summary.distanceOutsideM).toBeCloseTo(0.002, 15);
+    expect(summary.distanceCenterM).toBeCloseTo(-0.004, 15);
+    // The block carries occupancy's dimensionless unit label, and the
+    // grid → block → payload → decode → grid door is exact.
+    expect(summary.occupancyUnit).toBe("1");
+    expect(summary.roundTripIdentical).toBe(true);
+  });
+});
+
+describe("guide example: the sim demo body (Phase 62c fixture model)", () => {
+  it("compiles the plate-with-bore model to a valid parametric document", () => {
+    const summary = runSimDemoBodyExample();
+    expect(summary.formatVersion).toBe(CAD_NATIVE_FORMAT_VERSION);
+    // The plate extrusion and the bore hole: the two features the
+    // /workbench-sim fixture renders and voxelizes; the hole's output is
+    // the <Body> record it was authored inside.
+    expect(summary.featureKinds).toEqual(["extrude", "hole"]);
+    expect(summary.bodyIds).toEqual(["body_sim-demo", "body_plate"]);
+    // thickness and bore, plus the hole's flat-form parameters.
+    expect(summary.parameterCount).toBeGreaterThan(2);
+    expect(summary.validatorIssues).toBe(0);
+    expect(summary.commandCount).toBeGreaterThan(0);
+    expect(summary.textBytes).toBeGreaterThan(0);
   });
 });

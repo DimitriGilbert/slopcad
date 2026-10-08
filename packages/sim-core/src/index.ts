@@ -9,7 +9,12 @@
  * the deterministic fake engine that exercises every protocol path until
  * the real solvers land. Phase 61c adds the SimResultStore (law S7): the
  * run-record wire contract with its parsers, the server and local
- * first-class backends, and the backend-selection seam. The package
+ * first-class backends, and the backend-selection seam. Phase 62a adds
+ * law S3's geometry interface: the voxelizer (tessellation → occupancy
+ * grid, 3D and cross-section slices), the signed-distance field behind
+ * its own optional door, and the named-grid semantics that ride the
+ * SimResult field blocks so overlays decode them through the existing
+ * payload path. The package
  * carries zero runtime dependencies, no
  * React, no DOM, and no solver — everything above it (sim-flow,
  * sim-dynamics, the worker host) builds on the API exported here.
@@ -316,3 +321,42 @@ export type {
 } from "./sim-worker-boot";
 export { hostSimWorker } from "./sim-worker";
 export type { SimWorkerHostOptions } from "./sim-worker";
+export {
+  type SimDistanceGrid,
+  type SimGridFieldSemantic,
+  type SimGridGeometry,
+  type SimOccupancyGrid,
+  type SimVoxelGrid,
+  SIM_GRID_FIELD_SEMANTICS,
+  SIM_GRID_MAX_SAMPLES,
+  SIM_GRID_NAME_MAX_LENGTH,
+  parseSimGridFieldId,
+  simGridFieldId,
+  simGridFromFieldBlock,
+  simGridGeometryProblem,
+  simGridNameProblem,
+  simGridSampleCount,
+  simGridSamplePositionM,
+  simGridSolverField,
+  simGridToFieldBlock,
+} from "./voxel-grid";
+export {
+  type SimTessellationWire,
+  type SimVoxelDomain,
+  type SimVoxelDomainBody,
+  type SimVoxelDomainExplicit,
+  type SimVoxelPlaneAxis,
+  type SimVoxelizeInput,
+  type SimVoxelizeSliceInput,
+  type SimVoxelSlicePlane,
+  type ValidatedSimTessellation,
+  SIM_VOXEL_PLANE_AXES,
+  parseSimTessellationWire,
+  simTessellationBoundsMm,
+  voxelizeSimTessellation,
+  voxelizeSimTessellationSlice,
+} from "./voxelizer";
+export {
+  type SimSignedDistanceInput,
+  simSignedDistanceGrid,
+} from "./signed-distance";

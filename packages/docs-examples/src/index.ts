@@ -105,9 +105,10 @@ export {
   type ComponentsExampleSummary,
 } from "./components/components";
 
-// -- Simulation (the Phase 61 spine) -------------------------------------------
+// -- Simulation (the Phase 61 spine; the Phase 62 voxelizer) ------------------
 
 export { runSimSpineExample, type SimSpineExampleSummary } from "./sim/spine";
+export { runSimVoxelExample, type SimVoxelExampleSummary } from "./sim/voxel";
 
 // -- CAD JSX (authoring) ------------------------------------------------------
 
@@ -117,6 +118,12 @@ export {
   runCadJsxExample,
   type CadJsxExampleSummary,
 } from "./cadjsx/hub-mount";
+export {
+  SimDemoBodyModel,
+  SIM_DEMO_BODY_DOCUMENT_ID,
+  runSimDemoBodyExample,
+  type SimDemoBodyExampleSummary,
+} from "./cadjsx/sim-demo-body";
 
 // -- React (jsdom; the /docs page does not import this module) ---------------
 

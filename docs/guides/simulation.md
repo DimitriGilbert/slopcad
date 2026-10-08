@@ -1,15 +1,19 @@
 # Simulation
 
-Phase 61 lays the simulation **spine** — the data model, boundaries, and
-plumbing every solver phase builds on. This guide is honest about what
-that means: as of Phase 61 there is NO solver. The first real physics
-(2D LBM flow) is Phase 63's; the voxelizer and field overlays are Phase
-62's; structural analysis is Phase 69's, reserved in the vocabulary and
+Phase 61 laid the simulation **spine** — the data model, boundaries, and
+plumbing every solver phase builds on. Phase 62 added the geometry
+interface: the voxelizer (tessellation → occupancy grid + signed
+distance, law S3) and the field-overlay family in the renderer, with
+the `/workbench-sim` fixture page showing any document body as a grid.
+This guide is honest about what that means: as of Phase 62 there is
+still NO solver. The first real physics (2D LBM flow) is Phase 63's;
+structural analysis is Phase 69's, reserved in the vocabulary and
 declined loudly until then. What exists today is everything AROUND the
 solvers: the scenario records, the units and regime-honesty boundaries,
 the run/result model with its binary payload and exports, the worker
-protocol, the result store, and the committed-application counters the
-workbench awaits. The plan is `ROADMAP-SIM.md`; the decision record is
+protocol, the result store, the voxelizer and overlays, and the
+committed-application counters the workbench awaits. The plan is
+`ROADMAP-SIM.md`; the decision record is
 `docs/architecture/adr-simulation.md`.
 
 ## Scenarios are document records (law S1)
@@ -106,19 +110,71 @@ The workbench engine carries a `data-sim-*` attribute family
 `data-sim-applied-progress-step`) stamped synchronously on the settle
 root, advancing ONLY when a notification actually applies (a gapped or
 duplicated chunk, a retrograde step — no commit). E2E awaits these
-counters, never timeouts; `frameloop="demand"` stays law, and no overlay
-rendering rides this seam yet (Phase 62 owns the field-overlay family).
+counters, never timeouts; `frameloop="demand"` stays law, and the
+Phase 62 field overlays ride the same seam — the `/workbench-sim`
+fixture's grid overlay mounts only from chunks the ledger applied.
+
+## The voxelizer and the field overlays (Phase 62, law S3)
+
+The voxel is the geometry interface: a watertight `Tessellation` in
+canonical millimetres becomes a deterministic occupancy grid (full 3D,
+or a 2D cross-section slice at a plane) plus an optional
+signed-distance field — `voxelizeSimTessellation` /
+`voxelizeSimTessellationSlice` / `simSignedDistanceGrid` in
+`@slopcad/sim-core`. A grid IS a Phase 61 field block: the same extent
+triples, origin/spacing geometry, and x-fastest value order, riding
+the `SMR1` payload unchanged (`simGridToFieldBlock` is the document-
+space door), so grids persist, export (`.vti`), and decode through the
+exact paths every other result field uses.
+
+**Honest scope** (stated, never hidden):
+
+- **Staircase boundaries.** Occupancy classifies node points against
+  the closed solid; a sloped or curved face becomes a voxel staircase.
+  That is law S3's stated accuracy band — comparative geometry A vs
+  geometry B is trustworthy, absolute values carry the staircase —
+  until a dedicated cut-cell phase exists (the Phase 66 decision
+  point, raised against the distance field).
+- **Node-centered samples.** The value at extent index (i, j, k)
+  belongs to the point `origin + i·spacing` per axis — VTK
+  ImageData's point-sample convention, which the `.vti` exporter
+  writes. A solver's cell interpretation is the consumer's documented
+  mapping, never a second grid geometry.
+- **Dyadic exactness.** The classification runs in the tessellation's
+  own millimetres; aligned fixtures (faces on node planes, dyadic
+  coordinates) classify EXACTLY, and the mm ↔ m leg of the S4
+  boundary is exact for dyadic values — any other double lands within
+  1 ulp. Analytic box/sphere fixtures pin the exactness.
+- **The distance field is optional.** `simSignedDistanceGrid` is never
+  called by the voxelizer; computing it is a consumer choice, and it
+  carries the exact Euclidean distance to the triangle soup (negative
+  inside), sign taken from the occupancy classification.
+
+The render side is the **field overlay family** (`@slopcad/cad-r3f`):
+colormap slice planes, iso-contours, seeded streamlines, and vector
+glyphs, painted through colormaps-as-data (the lighting-rig
+precedent). Overlays mount into the `CadScene` children slot, obey the
+demand-render law (one `invalidate()` per applied geometry, no frame
+loop), and never enter the pick path.
+
+**See it**: the `/workbench-sim` fixture page — a cad-jsx demo body
+tessellates through the real Manifold worker, voxelizes under an
+explicit domain, and renders as an occupancy grid (the colormap slice
+plus the 0.5 iso-contour at the grid's mid-height node plane, with the
+signed-distance field one toggle away). Each grid publishes as a chunk
+stream and applies through the law-S6 ledger, so the overlay you see
+is a committed application.
 
 ## What does not exist yet
 
-Honest inventory, per phase: the voxelizer and field visualization (62),
-the 2D wind-tunnel CPU kernel and the WGSL GPU provider (63/64), thermal
+Honest inventory, per phase: the 2D wind-tunnel CPU kernel and the
+WGSL GPU provider (63/64), thermal
 (65), 3D flow and rotating machinery with motor operating points (66),
 mechanism dynamics (67), combustion (68), structural FEM (69 — the kind
 declines with `sim/scenario-kind-unsupported` today), and parametric
 optimization (70).
 
-## The runnable example
+## The runnable examples
 
 `packages/docs-examples/src/sim/spine.ts` walks the spine end to end: it
 authors the wind-tunnel scenario, proves the snapshot hash's key-order
@@ -128,3 +184,13 @@ stability and edit sensitivity, compiles through the units/S9 boundary
 structural decline, encodes and decodes the `SMR1` payload, and exports
 the `.vti` and CSV bytes. The suite runs it and asserts every one of
 those sentences.
+
+`packages/docs-examples/src/sim/voxel.ts` walks the Phase 62 geometry
+interface over an analytic box: the explicit-domain occupancy is exact
+(125 of 729 nodes for the box-in-a-box fixture, boundary nodes inside —
+the closed-set convention), the z-slice resolves its plane exactly, the
+signed distances at the probed nodes are exact millimetres-in-metres,
+and the grid → block → payload → decode → grid door round-trips
+identically. `packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
+the `/workbench-sim` fixture's demo model — the plate-with-bore
+cad-jsx authoring the page voxelizes.
