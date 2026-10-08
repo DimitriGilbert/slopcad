@@ -105,6 +105,10 @@ export {
   type ComponentsExampleSummary,
 } from "./components/components";
 
+// -- Simulation (the Phase 61 spine) -------------------------------------------
+
+export { runSimSpineExample, type SimSpineExampleSummary } from "./sim/spine";
+
 // -- CAD JSX (authoring) ------------------------------------------------------
 
 export {

@@ -123,3 +123,24 @@ optimization, `SimStudy`) rides Decision 1's additive-section pattern and
 Decision 5's deterministic batch spine — a study is a record, a campaign
 is a versioned run family, and the GA loop is bitwise deterministic on the
 CPU path.
+
+## Implementation status (2026-10-08): the Phase 61 spine has landed
+
+Phase 61 is implemented: the `simulations` and `motors` document sections
+ride the native v10 identity migration (`@slopcad/cad-core`); the
+`@slopcad/sim-core` package carries the S4 compile/projection boundary,
+the S9 regime report, the starter fluid set (air/water/glycol), the
+scenario-snapshot hash, the `SimResult` model with its `SMR1` binary
+payload and the `.vti`/CSV exporters; the `sim.*` worker vocabulary over
+the kernel envelope — including the progress/field-chunk notification
+class, exercised end to end by the deterministic fake engine — is live
+with the workbench sim worker host (`apps/web/src/sim-workbench/`); the
+`SimResultStore` ships with its server backend (the `simulation_run`
+table and the tRPC `simulations` router) and its local first-class
+backend; and the workbench engine threads the `data-sim-*`
+committed-application counters (Decision 5's ledger discipline, law S6).
+Documented in `docs/guides/simulation.md` with a machine-verified
+runnable example (`packages/docs-examples/src/sim/spine.ts`). No solver
+exists yet: the first (2D LBM flow) is Phase 63's, the voxelizer and
+field overlays Phase 62's, and the `structural` kind still declines with
+`sim/scenario-kind-unsupported` until Phase 69.

@@ -38,6 +38,7 @@ import { runNativeFormatExample } from "./core/native";
 import { runProjectionExample } from "./core/projection";
 import { runUnitsExample } from "./core/units";
 import { runMeshExchangeExample } from "./io/mesh";
+import { runSimSpineExample } from "./sim/spine";
 import { runSketchExample } from "./sketch/sketch";
 import { runSketchVocabularyExample } from "./sketch/vocabulary";
 import { runKernelExample, unwrapKernel } from "./kernel/primitives";
@@ -406,5 +407,45 @@ describe("guide example: JSX-authored models (cad-jsx)", () => {
     expect(summary.resaveIdentical).toBe(true);
     expect(summary.textBytes).toBeGreaterThan(0);
     expect(summary.commandCount).toBeGreaterThan(0);
+  });
+});
+
+describe("guide example: simulation spine (Phase 61)", () => {
+  it("hashes, compiles, declines, round-trips, and exports the spine", () => {
+    const summary = runSimSpineExample();
+    // Provenance: the scenario-snapshot hash is 8 hex digits over the
+    // canonical JSON — key order cannot move it, any edit does.
+    expect(summary.snapshotHash).toMatch(/^[0-9a-f]{8}$/);
+    expect(summary.reorderedSnapshotHash).toBe(summary.snapshotHash);
+    expect(summary.editedSnapshotHash).not.toBe(summary.snapshotHash);
+    expect(summary.compiledSnapshotHash).toBe(summary.snapshotHash);
+    // S4: the document's millimetres crossed into solver SI.
+    expect(summary.domainMinM).toEqual([-0.5, -0.25, -0.25]);
+    expect(summary.cellSizeM).toBeCloseTo(0.002, 12);
+    // No materials cover the bodies, so the characteristic length is the
+    // domain box's smallest extent: 500 mm.
+    expect(summary.characteristicLengthM).toBeCloseTo(0.5, 12);
+    // S9, hand-computed from the air record's own fits at its 300 K
+    // reference: Re = ρ·V·L/μ, Ma = V/c, Pr = μ·cp/k.
+    expect(summary.reynolds).toBeCloseTo(
+      (1.176472549 * 10 * 0.5) / 1.845921383e-5,
+      6,
+    );
+    expect(summary.mach).toBeCloseTo(10 / 347.2, 12);
+    expect(summary.prandtl).toBeCloseTo((1.845921383e-5 * 1006) / 0.0263, 6);
+    // Re ≈ 3.19e5 crosses the 4000 turbulence threshold; Ma ≈ 0.029
+    // stays under the 0.3 compressibility line — one honest flag.
+    expect(summary.qualitative).toEqual(["turbulence-dominated"]);
+    // The Phase 69 carve: the structural vocabulary exists, the solver
+    // does not, and the boundary declines loudly.
+    expect(summary.structuralDeclineCode).toBe("sim/scenario-kind-unsupported");
+    // S7: the SMR1 payload decodes back to the authored block, and both
+    // deterministic exports carry their bytes.
+    expect(summary.payloadBytes).toBeGreaterThan(0);
+    expect(summary.decodedRoundTrip).toBe(true);
+    expect(summary.vtiBytes).toBeGreaterThan(0);
+    expect(summary.vtiIsImageData).toBe(true);
+    expect(summary.csvRows).toBe(6);
+    expect(summary.csvHeader).toBe("drag (N)");
   });
 });

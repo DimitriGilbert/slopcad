@@ -112,8 +112,20 @@ export const CAD_DOCUMENT_FORMAT_VERSION = 1;
  * that refusal at the migration gate; the v8→v9 migration is the identity
  * (v8 content is valid v9 content — an old file carries no `duplicate`
  * features, since the writer that emits one stamps v9).
+ *
+ * v10 (Phase 61, ROADMAP-SIM): the document substrate grew the simulation
+ * spine — the additive `simulations` section (SimScenario rows, the
+ * configurations discipline) and the additive `motors` section
+ * (DocumentMotorRecord rows), plus the `simulation`/`motor` id-generator
+ * counters and the `motor.*`/`simulation.*` command types. Content-additive
+ * exactly like the configurations step (v9 content is valid v10 content
+ * and the v9→v10 migration is the identity), but the version moves because
+ * an old reader would silently drop the standalone sections and counters —
+ * simulation intent and motor specs are data the old reader cannot carry —
+ * and a log carrying the new command types would fail deep in an old
+ * reader's replay instead of predictably at the version gate.
  */
-export const CAD_NATIVE_FORMAT_VERSION = 9;
+export const CAD_NATIVE_FORMAT_VERSION = 10;
 
 /**
  * Version of the renderer-neutral render projection wire format (Phase 11)

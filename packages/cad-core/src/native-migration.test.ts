@@ -108,8 +108,8 @@ const SYNTHETIC_V1_TO_V2: NativeFormatMigration = {
  * embedded sketch payloads' additive vocabulary growth).
  */
 describe("the production migration registry", () => {
-  it("carries the v1→…→v9 steps with pure deterministic transforms", () => {
-    expect(NATIVE_FORMAT_MIGRATIONS).toHaveLength(8);
+  it("carries the v1→…→v10 steps with pure deterministic transforms", () => {
+    expect(NATIVE_FORMAT_MIGRATIONS).toHaveLength(9);
     expect(NATIVE_FORMAT_MIGRATIONS[1]).toMatchObject({ from: 2, to: 3 });
     expect(NATIVE_FORMAT_MIGRATIONS[2]).toMatchObject({ from: 3, to: 4 });
     expect(NATIVE_FORMAT_MIGRATIONS[3]).toMatchObject({ from: 4, to: 5 });
@@ -117,6 +117,7 @@ describe("the production migration registry", () => {
     expect(NATIVE_FORMAT_MIGRATIONS[5]).toMatchObject({ from: 6, to: 7 });
     expect(NATIVE_FORMAT_MIGRATIONS[6]).toMatchObject({ from: 7, to: 8 });
     expect(NATIVE_FORMAT_MIGRATIONS[7]).toMatchObject({ from: 8, to: 9 });
+    expect(NATIVE_FORMAT_MIGRATIONS[8]).toMatchObject({ from: 9, to: 10 });
     const step = NATIVE_FORMAT_MIGRATIONS[0];
     expect(step).toMatchObject({ from: 1, to: 2 });
     if (step === undefined) return;

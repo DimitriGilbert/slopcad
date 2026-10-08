@@ -62,6 +62,26 @@ import {
   type SerializedDocumentConfiguration,
 } from "./configuration";
 import {
+  type DocumentMotorInput,
+  type DocumentMotorRecord,
+  type MotorTorqueSpeedPoint,
+  buildDocumentMotorBody,
+  getDocumentMotor,
+  parseDocumentMotor,
+  serializeDocumentMotor,
+  type SerializedDocumentMotor,
+} from "./motors";
+import {
+  type SimScenario,
+  type SimScenarioBody,
+  type SimScenarioInput,
+  buildSimScenarioBody,
+  getSimScenario,
+  parseSimScenario,
+  serializeSimScenario,
+  type SerializedSimScenario,
+} from "./simulation";
+import {
   type SerializedCurve,
   curveRecordProblems,
   parseSerializedCurve,
@@ -103,8 +123,12 @@ import {
   parseSectionId,
   type ReferenceId,
   type SectionId,
+  parseSimulationId,
+  type SimulationId,
   parseSketchDocumentId,
   type SketchDocumentId,
+  parseMotorId,
+  type MotorId,
 } from "./ids";
 import {
   JOINT_KINDS,
@@ -428,6 +452,25 @@ export interface CadDocument {
    */
   readonly configurations: readonly DocumentConfiguration[];
   /**
+   * The document's simulation scenarios, in add order (empty in older
+   * files; Phase 61-additive): named rows of simulation intent over the
+   * SAME document — kind, domain, boundary conditions, fluid and material
+   * selections, gravity, motor selection, backend preference — the
+   * configurations discipline applied to simulation (ROADMAP-SIM law S1,
+   * docs/architecture/adr-simulation.md). Every body id a scenario
+   * references names a body of this document and every motor selection
+   * names a motor record; the add path and the parse boundary both
+   * enforce it.
+   */
+  readonly simulations: readonly SimScenario[];
+  /**
+   * The document's motor records, in add order (empty in older files;
+   * Phase 61-additive): named motor specs — DC brushed, BLDC, or
+   * tabulated torque-speed curves, units authored in mN·m and rpm (the
+   * materials precedent applied to motors). Scenarios select them by id.
+   */
+  readonly motors: readonly DocumentMotorRecord[];
+  /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
    * generated ids unique across save/load.
@@ -629,6 +672,11 @@ export const DOCUMENT_ERROR_CODES = {
   configurationUnknownFeature: "document/configuration-unknown-feature",
   configurationUnknownBody: "document/configuration-unknown-body",
   configurationInUse: "document/configuration-in-use",
+  simulationInvalid: "document/simulation-invalid",
+  simulationUnknownBody: "document/simulation-unknown-body",
+  simulationUnknownMotor: "document/simulation-unknown-motor",
+  simulationInUse: "document/simulation-in-use",
+  motorInvalid: "document/motor-invalid",
   datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
@@ -1015,6 +1063,8 @@ function raiseGeneratorState(
     mate: Math.max(base.mate, floor.mate),
     joint: Math.max(base.joint, floor.joint),
     configuration: Math.max(base.configuration, floor.configuration),
+    simulation: Math.max(base.simulation, floor.simulation),
+    motor: Math.max(base.motor, floor.motor),
   };
   return Object.freeze(raised);
 }
@@ -1067,7 +1117,9 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
     document.curves.some((curve) => curve.id === id) ||
     document.mates.some((mate) => mate.id === id) ||
     document.joints.some((joint) => joint.id === id) ||
-    document.configurations.some((configuration) => configuration.id === id)
+    document.configurations.some((configuration) => configuration.id === id) ||
+    document.simulations.some((scenario) => scenario.id === id) ||
+    document.motors.some((motor) => motor.id === id)
   );
 }
 
@@ -1095,6 +1147,51 @@ function configurationInUseError(
   return docError(
     DOCUMENT_ERROR_CODES.configurationInUse,
     `${kind === "parameter" ? "Parameter" : kind === "feature" ? "Feature" : "Body"} "${id}" is referenced by configuration "${holder.id}".`,
+    id,
+  );
+}
+
+/**
+ * The structured in-use refusal when a SIMULATION references the entity:
+ * removing a body a scenario's domain or material assignments name would
+ * silently dangle the scenario, so removal refuses until the scenario
+ * drops or is edited (`document/simulation-in-use`, the
+ * configuration-in-use precedent — removal never cascades).
+ */
+function simulationInUseError(
+  document: CadDocument,
+  id: string,
+): DocumentError | undefined {
+  const holder = document.simulations.find(
+    (scenario) =>
+      (scenario.domain.kind === "body" &&
+        scenario.domain.bodyIds.some((bodyId) => bodyId === id)) ||
+      scenario.materials.some((row) => row.bodyId === id),
+  );
+  if (holder === undefined) return undefined;
+  return docError(
+    DOCUMENT_ERROR_CODES.simulationInUse,
+    `Body "${id}" is referenced by simulation scenario "${holder.id}".`,
+    id,
+  );
+}
+
+/**
+ * The structured in-use refusal when a scenario selects a MOTOR: removing
+ * a motor record a scenario names would silently dangle its selection, so
+ * removal refuses until the scenario drops or is edited.
+ */
+function motorInUseError(
+  document: CadDocument,
+  id: string,
+): DocumentError | undefined {
+  const holder = document.simulations.find(
+    (scenario) => scenario.motorId === id,
+  );
+  if (holder === undefined) return undefined;
+  return docError(
+    DOCUMENT_ERROR_CODES.simulationInUse,
+    `Motor "${id}" is selected by simulation scenario "${holder.id}".`,
     id,
   );
 }
@@ -1146,6 +1243,8 @@ export function createDocument(id: DocumentId): CadDocument {
     mates: Object.freeze([]),
     joints: Object.freeze([]),
     configurations: Object.freeze([]),
+    simulations: Object.freeze([]),
+    motors: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -1403,6 +1502,8 @@ export function removeBody(
   }
   const configurationUse = configurationInUseError(document, "body", id);
   if (configurationUse !== undefined) return fail(configurationUse);
+  const simulationUse = simulationInUseError(document, id);
+  if (simulationUse !== undefined) return fail(simulationUse);
   return ok(
     Object.freeze({
       ...document,
@@ -3521,6 +3622,449 @@ export function updateDocumentConfiguration(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Simulation scenarios (Phase 61 — the configurations discipline, law S1)
+// ---------------------------------------------------------------------------
+
+/** Result of {@link addDocumentSimulation}: the next document plus the record. */
+export interface DocumentSimulationAddResult {
+  readonly document: CadDocument;
+  readonly scenario: SimScenario;
+}
+
+/**
+ * Cross-checks a scenario row against the document it rides on: every body
+ * a body-derived domain names, every body a material assignment names, and
+ * a selected motor must be live records of this document. Material ids are
+ * consumer-layer records (the `DocumentMaterialRecord` resolver seam) and
+ * are shape-validated at the module boundary, not existence-checked here.
+ * The add path and the parse boundary share this so a hand-written file
+ * can never carry a row the compile boundary would refuse.
+ */
+function simulationRecordProblems(
+  document: CadDocument,
+  scenario: SimScenarioBody,
+): DocumentError | undefined {
+  if (scenario.domain.kind === "body") {
+    for (const bodyId of scenario.domain.bodyIds) {
+      if (getBody(document, bodyId) === undefined) {
+        return docError(
+          DOCUMENT_ERROR_CODES.simulationUnknownBody,
+          `Scenario "${scenario.name}" derives its domain from body "${bodyId}", which does not exist in document "${document.id}".`,
+          bodyId,
+        );
+      }
+    }
+  }
+  for (const assignment of scenario.materials) {
+    if (getBody(document, assignment.bodyId) === undefined) {
+      return docError(
+        DOCUMENT_ERROR_CODES.simulationUnknownBody,
+        `Scenario "${scenario.name}" assigns material to body "${assignment.bodyId}", which does not exist in document "${document.id}".`,
+        assignment,
+      );
+    }
+  }
+  if (
+    scenario.motorId !== undefined &&
+    getDocumentMotor(document.motors, scenario.motorId) === undefined
+  ) {
+    return docError(
+      DOCUMENT_ERROR_CODES.simulationUnknownMotor,
+      `Scenario "${scenario.name}" selects motor "${scenario.motorId}", which does not exist in document "${document.id}".`,
+      scenario.motorId,
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Adds one simulation scenario row (Phase 61): a named row of simulation
+ * intent over the SAME document — kind, domain, boundary conditions,
+ * fluid and material selections, gravity, motor selection, backend
+ * preference. Every referenced body and motor must name a live record of
+ * this document; ids and names are unique within the document (a
+ * generated `sim_…` id when omitted). The row never mutates the document
+ * state it lenses.
+ */
+export function addDocumentSimulation(
+  document: CadDocument,
+  input: SimScenarioInput,
+): ParseResult<DocumentSimulationAddResult, DocumentError> {
+  // The row is validated through the module's build boundary (identity
+  // aside), so the id-absent add path validates the same fields the
+  // explicit-id path does; the id itself is validated below.
+  const built = buildSimScenarioBody(
+    input.name,
+    input.kind,
+    input.domain,
+    input.conditions,
+    input.fluid,
+    input.materials,
+    input.gravityMPerS2,
+    input.motorId,
+    input.backend,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+        built.error.message,
+        input,
+      ),
+    );
+  }
+  if (
+    document.simulations.some((scenario) => scenario.name === built.value.name)
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+        `A simulation scenario named "${built.value.name}" already exists in document "${document.id}".`,
+        input,
+      ),
+    );
+  }
+  let id: SimulationId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextSimulationId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseSimulationId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A simulation id must be a valid simulation id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    id = parsed.value;
+    const unclaimable = unclaimablePayloadError("simulation", id);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, id)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${id}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    idGeneratorState = claimExplicitId(idGeneratorState, "simulation", id);
+  }
+  const problems = simulationRecordProblems(document, built.value);
+  if (problems !== undefined) return fail(problems);
+  const scenario = Object.freeze({ ...built.value, id }) as SimScenario;
+  return ok({
+    document: Object.freeze({
+      ...document,
+      simulations: Object.freeze([...document.simulations, scenario]),
+      idGeneratorState,
+    }),
+    scenario,
+  });
+}
+
+/** Removes one simulation scenario row by id (structured not-found refusal). */
+export function removeDocumentSimulation(
+  document: CadDocument,
+  id: SimulationId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getSimScenario(document.simulations, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No simulation scenario ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      simulations: Object.freeze(
+        document.simulations.filter((scenario) => scenario.id !== id),
+      ),
+    }),
+  );
+}
+
+/** The mutable fields of a scenario row — everything but its identity. */
+export interface DocumentSimulationUpdate {
+  readonly name: string;
+  readonly kind: SimScenarioInput["kind"];
+  readonly domain: SimScenarioInput["domain"];
+  readonly conditions?: SimScenarioInput["conditions"];
+  readonly fluid: SimScenarioInput["fluid"];
+  readonly materials?: SimScenarioInput["materials"];
+  readonly gravityMPerS2?: SimScenarioInput["gravityMPerS2"];
+  readonly motorId?: SimScenarioInput["motorId"];
+  readonly backend?: SimScenarioInput["backend"];
+}
+
+/**
+ * Replaces a scenario row's mutable fields — name, kind, domain,
+ * conditions, selections, gravity, motor, backend — keeping its id and
+ * list position, validated exactly like {@link addDocumentSimulation}.
+ */
+export function updateDocumentSimulation(
+  document: CadDocument,
+  id: SimulationId,
+  update: DocumentSimulationUpdate,
+): ParseResult<CadDocument, DocumentError> {
+  const existing = getSimScenario(document.simulations, id);
+  if (existing === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No simulation scenario ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const built = buildSimScenarioBody(
+    update.name,
+    update.kind,
+    update.domain,
+    update.conditions,
+    update.fluid,
+    update.materials,
+    update.gravityMPerS2,
+    update.motorId,
+    update.backend,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+        built.error.message,
+        update,
+      ),
+    );
+  }
+  if (
+    document.simulations.some(
+      (scenario) => scenario.id !== id && scenario.name === built.value.name,
+    )
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+        `A simulation scenario named "${built.value.name}" already exists in document "${document.id}".`,
+        update,
+      ),
+    );
+  }
+  const problems = simulationRecordProblems(document, built.value);
+  if (problems !== undefined) return fail(problems);
+  return ok(
+    Object.freeze({
+      ...document,
+      simulations: Object.freeze(
+        document.simulations.map((scenario) =>
+          scenario.id === id
+            ? Object.freeze({ ...built.value, id: scenario.id })
+            : scenario,
+        ),
+      ),
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Motor records (Phase 61 — the materials precedent, §7.9 ruling)
+// ---------------------------------------------------------------------------
+
+/** Result of {@link addDocumentMotor}: the next document plus the record. */
+export interface DocumentMotorAddResult {
+  readonly document: CadDocument;
+  readonly motor: DocumentMotorRecord;
+}
+
+/**
+ * Adds one motor record (Phase 61): a named motor spec — DC brushed, BLDC,
+ * or tabulated — with parameters authored in datasheet units (mN·m, rpm)
+ * and converted to SI only at the sim S4 boundary. Ids and names are
+ * unique within the document (a generated `mot_…` id when omitted).
+ */
+export function addDocumentMotor(
+  document: CadDocument,
+  input: DocumentMotorInput,
+): ParseResult<DocumentMotorAddResult, DocumentError> {
+  const built = buildDocumentMotorBody(
+    input.name,
+    input.kind,
+    input.stallTorqueMNm,
+    input.noLoadSpeedRpm,
+    input.nominalVoltageV,
+    input.points,
+    input.rotorInertiaKgM2,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.motorInvalid, built.error.message, input),
+    );
+  }
+  if (document.motors.some((motor) => motor.name === built.value.name)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.motorInvalid,
+        `A motor named "${built.value.name}" already exists in document "${document.id}".`,
+        input,
+      ),
+    );
+  }
+  let id: MotorId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextMotorId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseMotorId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A motor id must be a valid motor id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    id = parsed.value;
+    const unclaimable = unclaimablePayloadError("motor", id);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, id)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${id}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    idGeneratorState = claimExplicitId(idGeneratorState, "motor", id);
+  }
+  const motor = Object.freeze({ ...built.value, id }) as DocumentMotorRecord;
+  return ok({
+    document: Object.freeze({
+      ...document,
+      motors: Object.freeze([...document.motors, motor]),
+      idGeneratorState,
+    }),
+    motor,
+  });
+}
+
+/**
+ * Removes one motor record by id. Refused with `simulation-in-use` while
+ * any scenario selects it; removal never cascades.
+ */
+export function removeDocumentMotor(
+  document: CadDocument,
+  id: MotorId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getDocumentMotor(document.motors, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No motor ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const inUse = motorInUseError(document, id);
+  if (inUse !== undefined) return fail(inUse);
+  return ok(
+    Object.freeze({
+      ...document,
+      motors: Object.freeze(document.motors.filter((motor) => motor.id !== id)),
+    }),
+  );
+}
+
+/** The mutable fields of a motor record — everything but its identity. */
+export interface DocumentMotorUpdate {
+  readonly name: string;
+  readonly kind: DocumentMotorInput["kind"];
+  readonly stallTorqueMNm?: number;
+  readonly noLoadSpeedRpm?: number;
+  readonly nominalVoltageV?: number;
+  readonly points?: readonly MotorTorqueSpeedPoint[];
+  readonly rotorInertiaKgM2?: number;
+}
+
+/**
+ * Replaces a motor record's mutable fields — name, kind, parameters —
+ * keeping its id and list position, validated exactly like
+ * {@link addDocumentMotor}.
+ */
+export function updateDocumentMotor(
+  document: CadDocument,
+  id: MotorId,
+  update: DocumentMotorUpdate,
+): ParseResult<CadDocument, DocumentError> {
+  const existing = getDocumentMotor(document.motors, id);
+  if (existing === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No motor ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const built = buildDocumentMotorBody(
+    update.name,
+    update.kind,
+    update.stallTorqueMNm,
+    update.noLoadSpeedRpm,
+    update.nominalVoltageV,
+    update.points,
+    update.rotorInertiaKgM2,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.motorInvalid, built.error.message, update),
+    );
+  }
+  if (
+    document.motors.some(
+      (motor) => motor.id !== id && motor.name === built.value.name,
+    )
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.motorInvalid,
+        `A motor named "${built.value.name}" already exists in document "${document.id}".`,
+        update,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      motors: Object.freeze(
+        document.motors.map((motor) =>
+          motor.id === id
+            ? (Object.freeze({ ...built.value, id }) as DocumentMotorRecord)
+            : motor,
+        ),
+      ),
+    }),
+  );
+}
+
 /** Input of {@link addDocumentSection}: the record's authored fields. */
 export interface DocumentSectionInput {
   /** An explicit id (`sec_…`), or absent to generate the next one. */
@@ -3748,6 +4292,8 @@ export type SerializedIdGeneratorState = Omit<
   | "mate"
   | "joint"
   | "configuration"
+  | "simulation"
+  | "motor"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
@@ -3759,6 +4305,8 @@ export type SerializedIdGeneratorState = Omit<
   readonly mate?: number;
   readonly joint?: number;
   readonly configuration?: number;
+  readonly simulation?: number;
+  readonly motor?: number;
 };
 
 function serializeIdGeneratorState(
@@ -3782,6 +4330,8 @@ function serializeIdGeneratorState(
     ...(state.configuration === 0
       ? {}
       : { configuration: state.configuration }),
+    ...(state.simulation === 0 ? {} : { simulation: state.simulation }),
+    ...(state.motor === 0 ? {} : { motor: state.motor }),
   };
 }
 
@@ -3857,6 +4407,10 @@ export interface SerializedCadDocument {
   }[];
   /** Present exactly when the document carries configuration rows (additive). */
   readonly configurations?: readonly SerializedDocumentConfiguration[];
+  /** Present exactly when the document carries simulation scenarios (additive). */
+  readonly simulations?: readonly SerializedSimScenario[];
+  /** Present exactly when the document carries motor records (additive). */
+  readonly motors?: readonly SerializedDocumentMotor[];
 }
 
 /** Serializes a document to its canonical, deterministic JSON form. */
@@ -4029,6 +4583,22 @@ export function serializeCadDocument(
           configurations: document.configurations.map(
             serializeDocumentConfiguration,
           ),
+        }),
+    // Additive (Phase 61): emitted only when simulation scenarios exist,
+    // so documents from before simulations serialize byte-identically to
+    // their pre-simulation form.
+    ...(document.simulations.length === 0
+      ? {}
+      : {
+          simulations: document.simulations.map(serializeSimScenario),
+        }),
+    // Additive (Phase 61): emitted only when motor records exist, so
+    // documents from before motors serialize byte-identically to their
+    // pre-motor form.
+    ...(document.motors.length === 0
+      ? {}
+      : {
+          motors: document.motors.map(serializeDocumentMotor),
         }),
   };
 }
@@ -4597,6 +5167,45 @@ function parseSerializedConfiguration(
   return ok(parsed.value);
 }
 
+/**
+ * Parses a serialized simulation scenario through the simulation module's
+ * parse boundary (`parseSimScenario` — the same validation the record's
+ * add door applies), re-wrapping its structured failure as a document
+ * error.
+ */
+function parseSerializedSimulation(
+  input: unknown,
+): ParseResult<SimScenario, DocumentError> {
+  const parsed = parseSimScenario(input);
+  if (!parsed.ok) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+        parsed.error.message,
+        input,
+      ),
+    );
+  }
+  return ok(parsed.value);
+}
+
+/**
+ * Parses a serialized motor record through the motors module's parse
+ * boundary (`parseDocumentMotor`), re-wrapping its structured failure as
+ * a document error.
+ */
+function parseSerializedMotor(
+  input: unknown,
+): ParseResult<DocumentMotorRecord, DocumentError> {
+  const parsed = parseDocumentMotor(input);
+  if (!parsed.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.motorInvalid, parsed.error.message, input),
+    );
+  }
+  return ok(parsed.value);
+}
+
 /** Parses a finite [x, y, z] triple or fails structured. */
 function parseSectionTriple(
   input: unknown,
@@ -4911,6 +5520,18 @@ export function parseCadDocument(
     parseSerializedConfiguration,
   );
   if (!parsedConfigurations.ok) return parsedConfigurations;
+  const parsedMotors = parseSerializedList(
+    input.motors ?? [],
+    "motors",
+    parseSerializedMotor,
+  );
+  if (!parsedMotors.ok) return parsedMotors;
+  const parsedSimulations = parseSerializedList(
+    input.simulations ?? [],
+    "simulations",
+    parseSerializedSimulation,
+  );
+  if (!parsedSimulations.ok) return parsedSimulations;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -5006,6 +5627,28 @@ export function parseCadDocument(
     if (!added.ok) return added;
     document = added.value.document;
   }
+  // Motors parse after joints: they reference nothing, so any position
+  // after the sections they float free of works; this keeps the replay
+  // order stable and mirrors the section's declaration order.
+  for (const motor of parsedMotors.value) {
+    const added = addDocumentMotor(document, {
+      id: motor.id,
+      name: motor.name,
+      kind: motor.kind,
+      ...(motor.kind === "tabulated"
+        ? { points: motor.points }
+        : {
+            stallTorqueMNm: motor.stallTorqueMNm,
+            noLoadSpeedRpm: motor.noLoadSpeedRpm,
+            nominalVoltageV: motor.nominalVoltageV,
+          }),
+      ...(motor.rotorInertiaKgM2 === undefined
+        ? {}
+        : { rotorInertiaKgM2: motor.rotorInertiaKgM2 }),
+    });
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
   for (const feature of parsedFeatures.value) {
     const added = addFeature(document, {
       id: feature.id,
@@ -5026,6 +5669,25 @@ export function parseCadDocument(
       parameterOverrides: configuration.parameterOverrides,
       suppressedFeatures: configuration.suppressedFeatures,
       hiddenBodies: configuration.hiddenBodies,
+    });
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  // Simulations parse after everything they reference: bodies (domain and
+  // material assignments) and motors (the selection clause) all validate
+  // at the add boundary, so every referenced record must exist first.
+  for (const scenario of parsedSimulations.value) {
+    const added = addDocumentSimulation(document, {
+      id: scenario.id,
+      name: scenario.name,
+      kind: scenario.kind,
+      domain: scenario.domain,
+      conditions: scenario.conditions,
+      fluid: scenario.fluid,
+      materials: scenario.materials,
+      gravityMPerS2: scenario.gravityMPerS2,
+      ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
+      ...(scenario.backend === undefined ? {} : { backend: scenario.backend }),
     });
     if (!added.ok) return added;
     document = added.value.document;

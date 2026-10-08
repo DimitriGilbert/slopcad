@@ -155,6 +155,8 @@ import {
   currentDocument,
 } from "./history";
 import { parseAssemblyJoint, parseAssemblyMate } from "./mates";
+import { parseDocumentMotor } from "./motors";
+import { parseSimScenario } from "./simulation";
 import {
   CAD_ID_KINDS,
   parseBodyId,
@@ -164,8 +166,10 @@ import {
   parseDocumentId,
   type FeatureId,
   parseFeatureId,
+  parseMotorId,
   parseParameterId,
   parseReferenceId,
+  parseSimulationId,
   parseSketchDocumentId,
 } from "./ids";
 import {
@@ -1588,6 +1592,12 @@ function validateSerializedCadDocumentShape(
   validateSerializedCurveListShape(input.curves, `${path}.curves`, issues);
   validateSerializedMateListShape(input.mates, `${path}.mates`, issues);
   validateSerializedJointListShape(input.joints, `${path}.joints`, issues);
+  validateSerializedSimulationListShape(
+    input.simulations,
+    `${path}.simulations`,
+    issues,
+  );
+  validateSerializedMotorListShape(input.motors, `${path}.motors`, issues);
 }
 
 /**
@@ -1644,6 +1654,71 @@ function validateSerializedJointListShape(
   }
   input.forEach((entry, index) => {
     const parsed = parseAssemblyJoint(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
+}
+
+/**
+ * Inspects a PRESENT serialized simulation-scenario list through the
+ * simulation module's parse boundary (Phase 61): one structured issue per
+ * malformed row. Absent means empty — the additive discipline.
+ */
+function validateSerializedSimulationListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized simulations must be an array of scenario records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseSimScenario(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
+}
+
+/**
+ * Inspects a PRESENT serialized motor-record list through the motors
+ * module's parse boundary (Phase 61). Absent means empty.
+ */
+function validateSerializedMotorListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized motors must be an array of motor records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseDocumentMotor(entry);
     if (!parsed.ok) {
       issue(
         issues,
@@ -2010,6 +2085,53 @@ function validateCommandShape(
       "A curve.create command's curve payload must be a plain object (the curve module's canonical serialized form).",
       issues,
     );
+    return;
+  }
+  // The Phase 61 motor/simulation lifecycle commands: identity by wire
+  // prefix (optional on create, required on update/delete) and a plain
+  // payload record on create/update — deletes serialize identity-only
+  // ({formatVersion, type, id}) — the full semantic battery is the module
+  // parse the document substrate runs; the validator checks the shape it
+  // can see.
+  if (
+    type === "motor.create" ||
+    type === "motor.update" ||
+    type === "motor.delete" ||
+    type === "simulation.create" ||
+    type === "simulation.update" ||
+    type === "simulation.delete"
+  ) {
+    const isCreate = type === "motor.create" || type === "simulation.create";
+    const isDelete = type === "motor.delete" || type === "simulation.delete";
+    const isMotor = type.startsWith("motor.");
+    if (input.id !== undefined || !isCreate) {
+      const parsed = isMotor
+        ? parseMotorId(input.id)
+        : parseSimulationId(input.id);
+      if (!parsed.ok) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${path}.id`,
+          `A ${type} command's id must be a valid ${isMotor ? "motor" : "simulation"} id.`,
+        );
+      }
+    }
+    const payloadKey = isMotor ? "motor" : "scenario";
+    const payload = input[payloadKey];
+    // The payload contract binds creates and updates; a delete travels
+    // identity-only, so its payload is optional (and shape-checked when
+    // present, like every field that shows up).
+    if (!isDelete || payload !== undefined) {
+      if (!isPlainRecord(payload)) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${path}.${payloadKey}`,
+          `A ${type} command's ${payloadKey} payload must be a plain object (the module's canonical serialized form).`,
+        );
+      }
+    }
     return;
   }
   if (type === "feature.delete") {

@@ -73,6 +73,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
 ## Takeaways mapped against ROADMAP-SIM
 
 ### Phase 61 (spine) — what he validates
+
 - Determinism is a product feature, not an internal property: adaptive simulation
   quality changed results per machine and was removed entirely (§Numerics "Simulation
   quality is not a graphics setting"). Our fixed-quality, bitwise-deterministic stance
@@ -86,6 +87,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   adopt "cells at interactive rate" phrasing in docs.
 
 ### Phase 63/66 (flow) — validate, then exploit parallelism
+
 - Lead the known-cases gallery with the shock tube (Riemann) fixture, not the airfoil
   (§Testing "Validate CFD with the shock tube").
 - Expect and publish the dissipation/dispersion tradeoff: naive schemes low-pass the
@@ -103,6 +105,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   real").
 
 ### Phase 65 (thermal/radiation) — the subtle-effects warning
+
 - Wall heat transfer barely moved aggregate accuracy but dominated perceived output
   quality in his case; papers that omitted it undersold it (§Numerics "Wall heat
   transfer matters to sound even when accuracy papers skip it"). For our CHT phase:
@@ -113,6 +116,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   reaching believable wall temperatures.
 
 ### Phase 67 (dynamics/friction) — his strongest validation of our ruling
+
 - Friction belongs in the step, as forces, not post-passes: force-limited constraints
   produce slip emergence (§Friction "Tires are force-limited constraints"); per-
   constraint forces are first-class outputs reused for structural analysis and
@@ -131,6 +135,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   coupling tradeoff") — a template for our quasi-static coupling honesty notes.
 
 ### Phase 68 (combustion, Woschni/FMEP/brake) — direct precedent
+
 - The 0D chamber blueprint: vessels + valves, kinetic-energy state, molecule/energy
   conservation, textbook orifice flow (§Combustion "Gas network = discrete vessels",
   "Track kinetic energy", "Valve flow from a textbook") — validates our Wiebe/
@@ -154,6 +159,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   valve model) moved the same direction.
 
 ### Phase 69 (structural)
+
 - Reaction-force stress output with stated error bounds ("not 100 accurate... a lot of
   different solutions") validated against truss theory is a legitimate coarse tier —
   supports our comparative/staircase-banded positioning (§Testing "Solver reaction
@@ -163,6 +169,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   output is the door to failure physics") previews what FoS summaries could unlock.
 
 ### Phase 70 (optimization)
+
 - Characterize the machine before optimizing against it: a measured map "power demand →
   minimum heat at steady state" became the benchmark (§Testing "Difficulty needs a
   measured benchmark") — for us, run the objective landscape once per scenario family
@@ -175,6 +182,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   pilot over scenario fixtures would strengthen our e2e beyond render checks.
 
 ### S-laws (incl. S9 regime honesty)
+
 - S2/S5 (determinism, CPU oracle): validated — fixed quality, replayable state logs,
   timeline scrubbing to individual timesteps (§Testing "Deterministic replay tests";
   §UI/UX "Time is scrubbable").
@@ -192,6 +200,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
 ## Adopt / avoid / watch
 
 **Adopt**
+
 - Pinned-workload benchmarking and system-level RT-factor telemetry as the perf
   vocabulary (§Testing "Optimize by measurement"; §Architecture "Measure the system").
 - Labeled placeholders with named upgrade paths for every provisional model
@@ -204,6 +213,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   A-B the outputs (§Lessons "The ablation ladder").
 
 **Avoid**
+
 - Adaptive simulation quality or any silent accuracy knob that changes results per
   machine (§Numerics "Simulation quality is not a graphics setting").
 - Post-processing/synthesis layered over a too-coarse solver to fake fidelity — it
@@ -216,6 +226,7 @@ kind of requirement our S-laws should force into the open before a solver is wri
   are certain of").
 
 **Watch**
+
 - His junction handling and larger-engine scaling (deferred from the real-data video;
   report-C1 §Numerics "Boundary conditions are the hardest part") — directly relevant
   when Phase 66 faces multi-branch domains.

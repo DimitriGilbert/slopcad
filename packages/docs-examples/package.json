@@ -35,7 +35,8 @@
     "@slopcad/cad-kernel-manifold": "workspace:*",
     "@slopcad/cad-kernel-occt": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
-    "@slopcad/cad-sketch": "workspace:*"
+    "@slopcad/cad-sketch": "workspace:*",
+    "@slopcad/sim-core": "workspace:*"
   },
   "peerDependencies": {
     "react": "catalog:"
