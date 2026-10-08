@@ -171,6 +171,50 @@ function fixedClock(): () => Date {
   };
 }
 
+describe("parseSimResultSummary (the servedBackend marker, Phase 64b)", () => {
+  it("round-trips the honest backend record and keeps fixed key order", () => {
+    const compiled = compileFixture(4);
+    const parsed = parseSimResultSummary({
+      schemaVersion: SIM_RESULT_SUMMARY_VERSION,
+      scenarioSnapshotHash: compiled.scenarioSnapshotHash,
+      status: "completed",
+      regime: compiled.regime,
+      quantities: [{ name: "drag-force", value: 1, unit: "N" }],
+      servedBackend: "cpu",
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.servedBackend).toBe("cpu");
+    // Byte-determinism: the round-tripped summary re-serializes
+    // identically (the parser's fixed key order).
+    const again = parseSimResultSummary(
+      JSON.parse(JSON.stringify(parsed.value)),
+    );
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(JSON.stringify(again.value)).toBe(JSON.stringify(parsed.value));
+  });
+
+  it("keeps pre-64b summaries (no marker) valid and declines foreign values", () => {
+    const compiled = compileFixture(4);
+    const base = {
+      schemaVersion: SIM_RESULT_SUMMARY_VERSION,
+      scenarioSnapshotHash: compiled.scenarioSnapshotHash,
+      status: "completed",
+      regime: compiled.regime,
+      quantities: [],
+    };
+    const without = parseSimResultSummary(base);
+    expect(without.ok).toBe(true);
+    if (!without.ok) return;
+    expect(without.value.servedBackend).toBeUndefined();
+    const foreign = parseSimResultSummary({ ...base, servedBackend: "tpu" });
+    expect(foreign.ok).toBe(false);
+    if (foreign.ok) return;
+    expect(foreign.error.message).toContain("servedBackend");
+  });
+});
+
 describe("local SimResultStore (in-memory seam)", () => {
   it("puts, lists, and gets a run with byte-identical payload", async () => {
     const storage = createInMemorySimResultStorage();

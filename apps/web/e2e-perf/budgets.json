@@ -1,5 +1,6 @@
 {
   "kernel.lbm2d.referenceGrid.stepBatchMs": 750,
+  "kernel.lbm2d-wgsl.referenceGrid.stepBatchMs": 2000,
   "startup.wasmBoot.workerMs": 40,
   "startup.bootReport.mainThreadMs": 80,
   "startup.firstResponse.mainThreadMs": 80,

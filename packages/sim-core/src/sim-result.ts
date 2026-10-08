@@ -76,6 +76,9 @@ export interface SimHistorySeries {
   readonly samples: readonly number[];
 }
 
+/** Which kernel family executed the run — the honest backend record. */
+export type SimServedBackend = "cpu" | "gpu";
+
 /** The summary JSON a run persists (schema version, status, S9, provenance). */
 export interface SimResultSummary {
   readonly schemaVersion: number;
@@ -86,6 +89,14 @@ export interface SimResultSummary {
   readonly regime: SimRegimeReport;
   /** The projected quantities with explicit units (the S4 output). */
   readonly quantities: readonly SimProjectedQuantity[];
+  /**
+   * Which backend EXECUTED the run — distinct from the scenario's
+   * backend PREFERENCE (a gpu-preferred run on a GPU-less host serves
+   * `"cpu"` here through the router's documented fallback, Phase 64b's
+   * honest marker). Optional: summaries written before the field exists
+   * (and the fake engine's thermal placeholders) carry none.
+   */
+  readonly servedBackend?: SimServedBackend;
   /** On a failed run: the `sim/*` decline code and message. */
   readonly failureCode?: string;
   readonly failureMessage?: string;

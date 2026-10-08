@@ -93,15 +93,48 @@ the streaming surface: field chunks are slices of the finalized block
 (gapless indices, one header per field), so a reassembled stream is
 byte-identical to the persisted payload.
 
-The hosted engine is routed (Phase 63c): **flow** scenarios run the
-real 2D LBM reference kernel (`@slopcad/sim-flow`'s
-`createLbmSimEngine` — the CPU oracle, law S5); **thermal** runs the
-deterministic **fake engine** (`FAKE_SIM_ENGINE`, the `fake-kernel`
-precedent: it exercises every protocol path until Phase 65's real
-thermal solver lands); `structural` is declined by neither engine's
-kind list — the Phase 69 carve. A `gpu`-preferred flow scenario
-declines loudly today (`sim/backend-unavailable`): the WGSL provider is
-Phase 64's, and a GPU preference never silently falls back to the CPU.
+The hosted engine is routed (Phase 63c, extended 64a/64b): **flow**
+scenarios run the real 2D LBM engine (`@slopcad/sim-flow`), **thermal**
+runs the deterministic **fake engine** (`FAKE_SIM_ENGINE`, the
+`fake-kernel` precedent: it exercises every protocol path until Phase
+65's real thermal solver lands); `structural` is declined by neither
+engine's kind list — the Phase 69 carve. A `gpu`-preferred flow
+scenario routes to the **WGSL compute provider** (Phase 64a) when the
+feature detect finds a WebGPU device, and falls back GRACEFULLY to the
+CPU oracle twin when it does not — never a silent fallback you cannot
+see: the completed run's summary carries `servedBackend`
+(`"cpu"`/`"gpu"`), the honest record of which kernel executed it (the
+`/workbench-sim` fixture surfaces it as `data-sim-served-backend`).
+
+## The GPU path's honesty gates (law S5)
+
+The CPU oracle stays the test truth; the WGSL provider is never
+bit-asserted and never silently trusted. Three gates hold that line:
+
+- **The oracle-vs-GPU tolerance matrix** (`GPU_ORACLE_MATRIX` in
+  `@slopcad/sim-flow`): matched-step comparisons over a laminar
+  scenario matrix (Poiseuille channel, cylinder attached wake,
+  symmetry half-domain) with RECORDED tolerances — relative L2/L∞ on
+  the nine distribution arrays, the macroscopic fields, and the force
+  histories (a symmetric case's identically-zero lift compares its
+  provider's rounding noise against the run's force scale). The
+  comparison arithmetic is pinned headlessly; the matrix itself runs
+  under any WebGPU-capable host and SKIPS LOUDLY where none exists.
+- **The WebGPU e2e door** (`pnpm test:gpu-spike`): the matrix executed
+  in-browser against the production build under Dawn's SwiftShader
+  software adapter (`--enable-unsafe-webgpu` — the launch door the
+  Phase 64b spike validated; every case, every repeat, zero violations,
+  bitwise-stable across runs). A GPU-less host makes this harness fail
+  loudly — the door never silently passes. The spike's evidence and
+  the adopt decision are recorded in
+  `docs/architecture/wgsl-prespike-findings.md`.
+- **Perf budgets, honestly labeled**: `kernel.lbm2d-wgsl.referenceGrid.
+stepBatchMs` (same grid, same batch protocol as the CPU budget)
+  records the SOFTWARE-device cost — an upper bound on the
+  correctness-path cost, not a hardware-GPU perf claim; the
+  hardware-class budget is recorded as not-recordable-here in the
+  findings doc until a real device run exists. The perf run's
+  environment block records the adapter class beside every number.
 
 ## Committed applications in the workbench (law S6)
 
@@ -249,11 +282,14 @@ the full run's mirror symmetry itself pinned bitwise.
 
 ## What does not exist yet
 
-Honest inventory, per phase: the WGSL GPU provider (64), thermal
-(65), 3D flow and rotating machinery with motor operating points (66),
-mechanism dynamics (67), combustion (68), structural FEM (69 — the kind
-declines with `sim/scenario-kind-unsupported` today), and parametric
-optimization (70).
+Honest inventory, per phase: thermal (65), 3D flow and rotating
+machinery with motor operating points (66 — the WGSL provider exists
+and is tolerance-gated for 2D, but 3D D3Q19 is 66's), mechanism
+dynamics (67), combustion (68), structural FEM (69 — the kind declines
+with `sim/scenario-kind-unsupported` today), and parametric
+optimization (70). The GPU path's hardware-class perf budget is
+likewise not recorded yet (not recordable on the spike's software
+device — see `docs/architecture/wgsl-prespike-findings.md` §4).
 
 ## The runnable examples
 

@@ -161,6 +161,14 @@ export interface LbmRunReport {
   readonly fields: readonly SolverSimField[];
   /** Present when the scenario flagged the grid-convergence self-check. */
   readonly convergence?: LbmGridConvergenceReport;
+  /**
+   * Which backend executed the run (Phase 64b's honest marker): the
+   * engine that assembled this report stamps it, so the persisted
+   * summary records the kernel that RAN — distinct from the scenario's
+   * backend preference (a gpu-preferred fallback run stamps "cpu").
+   * Absent on reports no engine stamped.
+   */
+  readonly servedBackend?: "cpu" | "gpu";
 }
 
 /** The default snapshot identity: the driver's canonical view of the scenario. */
@@ -671,6 +679,9 @@ export function lbmRunSimResult(
       status: report.diverged ? "failed" : "completed",
       regime: report.regime,
       quantities: projected.value.scalars,
+      ...(report.servedBackend === undefined
+        ? {}
+        : { servedBackend: report.servedBackend }),
       ...(report.diverged
         ? {
             failureCode: SIM_ERROR_CODES.runDiverged,

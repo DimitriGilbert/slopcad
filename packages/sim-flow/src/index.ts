@@ -23,6 +23,18 @@
  *
  * The SoA layout (`./d2q9`, `./state`) is the shared memory contract
  * the Phase 64 WGSL provider mirrors buffer-for-buffer.
+ *
+ * Phase 64a adds the WGSL COMPUTE PROVIDER surface: the narrow
+ * WebGPU device abstraction with its honest feature detect
+ * (`./gpu-device`, `requestWebGpuDevice`), the generated shader
+ * module and its layout helpers (`./wgsl-shader`), the provider
+ * stepper (`./wgsl-stepper`), the provider engine and the routed
+ * default engine's gpu-preference fallback (`./engine-gpu`,
+ * `./engine`), and the S5 oracle-vs-GPU tolerance harness
+ * (`./gpu-oracle-harness`) — tolerances recorded as data, the matrix
+ * skipping loudly where no WebGPU device exists. The node-side fake
+ * device (`./wgsl-fake-device`) is subpath-imported by the tests, the
+ * sim-core node-hosting precedent.
  */
 
 export {
@@ -116,4 +128,68 @@ export {
   LBM_SIM_ENGINE_ID,
   createDefaultSimEngine,
   createLbmSimEngine,
+  type DefaultSimEngineOptions,
 } from "./engine";
+export { LBM_WGSL_SIM_ENGINE_ID, createWgslSimEngine } from "./engine-gpu";
+export {
+  type LateralFace,
+  LBM_SUPPORTED_KINDS,
+  type MappedFaces,
+  mapFaces,
+} from "./engine-shared";
+export {
+  type WgslBindGroup,
+  type WgslBindGroupEntry,
+  type WgslBuffer,
+  type WgslBufferUsage,
+  type WgslCommandBuffer,
+  type WgslCommandEncoder,
+  type WgslComputePass,
+  type WgslComputePipeline,
+  type WgslDevice,
+  type WgslDeviceSource,
+  type WgslQueue,
+  requestWebGpuDevice,
+} from "./gpu-device";
+export {
+  GPU_ORACLE_MATRIX,
+  GPU_ORACLE_TOLERANCES,
+  type GpuFieldDelta,
+  type GpuForceDelta,
+  type GpuOracleCase,
+  type GpuOracleCaseReport,
+  type GpuOracleTolerances,
+  gpuFieldDelta,
+  gpuForceDelta,
+  gpuOracleSkipReason,
+  gpuOracleViolations,
+  runGpuOracleCase,
+} from "./gpu-oracle-harness";
+export {
+  WGSL_BINDINGS,
+  WGSL_COLLISION_KINDS,
+  WGSL_D2Q9_COMPUTE,
+  WGSL_ENTRY_POINTS,
+  WGSL_FACE_KINDS,
+  WGSL_MAX_NODES,
+  WGSL_RUN_PARAMS_BYTE_LENGTH,
+  WGSL_STATUS_INDEXES,
+  WGSL_STEP_PARAMS_BYTE_LENGTH,
+  WGSL_WORKGROUP_SIZE,
+  type WgslFaceParams,
+  type WgslRunParams,
+  type WgslStepParams,
+  wgslDirectionByteOffset,
+  wgslEncodeRunParams,
+  wgslEncodeStepParams,
+  wgslPackDistributions,
+  wgslPackMask,
+  wgslPackStatus,
+  wgslReductionShape,
+  wgslUnpackDistributions,
+} from "./wgsl-shader";
+export {
+  type WgslLbmStepper,
+  type WgslStepperOptions,
+  createWgslLbmStepper,
+} from "./wgsl-stepper";

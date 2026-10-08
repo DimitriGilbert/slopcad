@@ -17,6 +17,7 @@ import { Route as IoRouteImport } from './routes/io'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PerfRouteImport } from './routes/perf'
 import { Route as RenderRouteImport } from './routes/render'
+import { Route as SimGpuRouteImport } from './routes/sim-gpu'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as ViewerRouteImport } from './routes/viewer'
@@ -81,6 +82,11 @@ const PerfRoute = PerfRouteImport.update({
 const RenderRoute = RenderRouteImport.update({
   id: '/render',
   path: '/render',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SimGpuRoute = SimGpuRouteImport.update({
+  id: '/sim-gpu',
+  path: '/sim-gpu',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SpikeRoute = SpikeRouteImport.update({
@@ -223,6 +229,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
+  '/sim-gpu': typeof SimGpuRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/viewer': typeof ViewerRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
+  '/sim-gpu': typeof SimGpuRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/viewer': typeof ViewerRoute
@@ -295,6 +303,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
+  '/sim-gpu': typeof SimGpuRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/viewer': typeof ViewerRoute
@@ -332,6 +341,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/perf'
     | '/render'
+    | '/sim-gpu'
     | '/spike'
     | '/ui-viewport'
     | '/viewer'
@@ -367,6 +377,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/perf'
     | '/render'
+    | '/sim-gpu'
     | '/spike'
     | '/ui-viewport'
     | '/viewer'
@@ -403,6 +414,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/perf'
     | '/render'
+    | '/sim-gpu'
     | '/spike'
     | '/ui-viewport'
     | '/viewer'
@@ -440,6 +452,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   PerfRoute: typeof PerfRoute
   RenderRoute: typeof RenderRoute
+  SimGpuRoute: typeof SimGpuRoute
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
   ViewerRoute: typeof ViewerRoute
@@ -520,6 +533,13 @@ declare module '@tanstack/react-router' {
       path: '/render'
       fullPath: '/render'
       preLoaderRoute: typeof RenderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sim-gpu': {
+      id: '/sim-gpu'
+      path: '/sim-gpu'
+      fullPath: '/sim-gpu'
+      preLoaderRoute: typeof SimGpuRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/spike': {
@@ -734,6 +754,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   PerfRoute: PerfRoute,
   RenderRoute: RenderRoute,
+  SimGpuRoute: SimGpuRoute,
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
   ViewerRoute: ViewerRoute,

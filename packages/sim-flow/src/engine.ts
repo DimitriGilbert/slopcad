@@ -34,6 +34,15 @@
  * randomness, a fixed emission schedule — the same compiled problem
  * produces the bitwise-identical result and the identical notification
  * stream every time, pinned over the node worker channel by test.
+ *
+ * Phase 64a extends the module with the BACKEND ROUTER: the shared
+ * mapping lives in `./engine-shared` (consumed by this engine and the
+ * WGSL provider engine alike), and `createDefaultSimEngine` gained the
+ * device-source option — a gpu-preferred flow scenario routes to the
+ * WGSL provider (`./engine-gpu`) when the feature detect finds a
+ * device, and falls back to this CPU oracle otherwise. The CPU engine
+ * itself still declines a DIRECT gpu-preferred call loudly: the
+ * fallback is the router's documented job, never a silent one.
  */
 
 import {
@@ -47,57 +56,48 @@ import {
   SIM_FLOW_DEFAULT_STEP_BUDGET,
   type SimParseResult,
   type SimResult,
-  type SimResultFieldBlock,
-  type SimScenarioKind,
-  type SolverSimField,
   simError,
   simFail,
   simOk,
-  splitSimFieldBlock,
-  projectSimResult,
 } from "@slopcad/sim-core";
 
 import { LbmMomentAccumulator, type LbmFieldMoments } from "./averaging";
 import {
-  type LbmConvergenceRungView,
-  type LbmGridConvergenceReport,
   LBM_GRID_CONVERGENCE_REFINEMENT,
   lbmConvergenceRungProblem,
   lbmGridConvergenceDrift,
 } from "./convergence";
+import { runWgslLbmEngine } from "./engine-gpu";
+import {
+  LBM_PREVIEW_INTERVAL_STEPS,
+  LBM_SUPPORTED_KINDS,
+  lbmAveragingFields,
+  lbmPublishPreview,
+  lbmRungView,
+  lbmWindowMeans,
+  mapFaces,
+  withConvergenceQuantities,
+} from "./engine-shared";
+import {
+  type WgslDevice,
+  type WgslDeviceSource,
+  requestWebGpuDevice,
+} from "./gpu-device";
 import { lbmSolidMaskFromGrid } from "./occupancy";
 import { type LbmRunReport, type LbmRunWindow, lbmRunSimResult } from "./run";
 import {
   type LbmStepper,
   type LbmStepperConfig,
-  type LbmFaceSpec,
   createLbmStepper,
 } from "./stepper";
 
 /** The real engine's stable id (the worker host's engine-selection key). */
 export const LBM_SIM_ENGINE_ID = "lbm2d-cpu-reference";
 
-/**
- * The streaming-preview interval: one preview round every this many
- * steps. Decimation chosen against the recorded perf budget
- * (`kernel.lbm2d.referenceGrid.stepBatchMs`, 10 steps ≈ 240 ms median /
- * 750 ms budget at the 512×256 reference grid) — one round costs about
- * one budgeted batch, the interactive-rate cadence the roadmap pins.
- */
-export const LBM_PREVIEW_INTERVAL_STEPS = 10;
-
-/**
- * The values-per-chunk ceiling a preview round splits its block into —
- * the protocol's framing knob, sized so one chunk stays a small message
- * at reference grids.
- */
-export const LBM_PREVIEW_CHUNK_MAX_VALUES = 16384;
-
-/** The scenario kinds the real engine solves (the 2D wind tunnel). */
-const SUPPORTED_KINDS: readonly SimScenarioKind[] = ["flow"];
-
-/** The four lateral faces the 2D slice consumes, by their compiled names. */
-type LateralFace = "xMin" | "xMax" | "yMin" | "yMax";
+export {
+  LBM_PREVIEW_CHUNK_MAX_VALUES,
+  LBM_PREVIEW_INTERVAL_STEPS,
+} from "./engine-shared";
 
 /** One rung's stepped outcome — the fields the report and drift consume. */
 interface SteppedRung {
@@ -106,38 +106,6 @@ interface SteppedRung {
   readonly window: LbmRunWindow | null;
   readonly meanDragNPerM: number | null;
   readonly meanLiftNPerM: number | null;
-}
-
-/** The window means, accumulated exactly as the 63b driver accumulates them. */
-function windowMeans(
-  stepper: LbmStepper,
-  averagingStartStep: number,
-): Pick<SteppedRung, "window" | "meanDragNPerM" | "meanLiftNPerM"> {
-  const histories = stepper.forceState().history;
-  const dragSamples = histories[0]?.samples ?? [];
-  const liftSamples = histories[1]?.samples ?? [];
-  if (stepper.step < averagingStartStep) {
-    return { window: null, meanDragNPerM: null, meanLiftNPerM: null };
-  }
-  // Samples are 0-based per COMPLETED step: the window [startStep, step]
-  // is samples[startStep − 1 … step − 1], accumulated in fixed order.
-  let dragSum = 0;
-  let liftSum = 0;
-  let count = 0;
-  for (let index = averagingStartStep - 1; index < stepper.step; index += 1) {
-    dragSum += dragSamples[index] ?? 0;
-    liftSum += liftSamples[index] ?? 0;
-    count += 1;
-  }
-  return {
-    window: {
-      fromStep: averagingStartStep,
-      toStep: stepper.step,
-      sampleCount: count,
-    },
-    meanDragNPerM: count > 0 ? dragSum / count : null,
-    meanLiftNPerM: count > 0 ? liftSum / count : null,
-  };
 }
 
 /** What one stepped run wants to emit between steps. */
@@ -152,51 +120,6 @@ interface EmissionChannels {
   readonly progressTotal: number;
   /** Whether preview rounds publish (the streaming show). */
   readonly preview: boolean;
-}
-
-/** The document-space preview block of the current speed field. */
-function previewBlock(
-  stepper: LbmStepper,
-): SimParseResult<SimResultFieldBlock, SimError> {
-  const speed = stepper.solverFields().find((field) => field.id === "speed");
-  if (speed === undefined) {
-    return simFail(
-      simError(
-        SIM_ERROR_CODES.scenarioInvalid,
-        "The stepper's solver fields did not carry the speed field the preview publishes.",
-        stepper.meta,
-      ),
-    );
-  }
-  const projected = projectSimResult({ scalars: [], fields: [speed] });
-  if (!projected.ok) return projected;
-  const block = projected.value.fields[0];
-  if (block === undefined) {
-    return simFail(
-      simError(
-        SIM_ERROR_CODES.scenarioInvalid,
-        "The S4 projection returned no block for the preview's speed field.",
-        speed,
-      ),
-    );
-  }
-  return simOk(block);
-}
-
-/** Publishes one preview round: the speed block, split into protocol chunks. */
-function publishPreview(
-  stepper: LbmStepper,
-  onFieldChunk: (chunk: SimEngineFieldChunk) => void,
-): void {
-  const block = previewBlock(stepper);
-  if (!block.ok) return; // The finalize path declines on the same problem.
-  const chunkCount = Math.max(
-    1,
-    Math.ceil(block.value.values.length / LBM_PREVIEW_CHUNK_MAX_VALUES),
-  );
-  for (const chunk of splitSimFieldBlock(block.value, chunkCount)) {
-    onFieldChunk(chunk);
-  }
 }
 
 /**
@@ -237,243 +160,22 @@ async function streamStepper(
       publishable &&
       (step % LBM_PREVIEW_INTERVAL_STEPS === 0 || step === stepBudget)
     ) {
-      publishPreview(stepper, channels.onFieldChunk);
+      lbmPublishPreview(stepper.solverFields(), channels.onFieldChunk);
     }
     if (step >= averagingStartStep) {
       const snapshot = stepper.snapshotLattice();
       accumulator.accumulate(snapshot.ux, snapshot.uy);
     }
   }
-  const means = windowMeans(stepper, averagingStartStep);
   return simOk({
     stepper,
     moments: accumulator.moments(),
-    ...means,
+    ...lbmWindowMeans(
+      stepper.forceState().history,
+      stepper.step,
+      averagingStartStep,
+    ),
   });
-}
-
-/** The window-averaged velocity moment fields, S4-ready (mm/s labels, SI values). */
-function averagingFields(
-  run: SteppedRung,
-  config: LbmStepperConfig,
-): readonly SolverSimField[] {
-  const moments = run.moments;
-  if (moments.count === 0) return [];
-  const stepper = run.stepper;
-  const nx = stepper.meta.nx;
-  const ny = stepper.meta.ny;
-  const dx = stepper.meta.units.cellSizeM;
-  const velocityFactor = stepper.meta.units.velocityFactor;
-  const originM = config.originM ?? [0, 0];
-  const geometry = {
-    extent: [nx, ny, 1] as const,
-    originM: [originM[0] ?? 0, originM[1] ?? 0, 0] as const,
-    spacingM: [dx, dx, dx] as const,
-    dataType: "float32" as const,
-  };
-  const meanX: number[] = [];
-  const meanY: number[] = [];
-  const fluctuationX: number[] = [];
-  const fluctuationY: number[] = [];
-  for (let index = 0; index < nx * ny; index += 1) {
-    meanX.push((moments.meanX[index] ?? 0) * velocityFactor);
-    meanY.push((moments.meanY[index] ?? 0) * velocityFactor);
-    fluctuationX.push(
-      Math.sqrt(moments.varianceX[index] ?? 0) * velocityFactor,
-    );
-    fluctuationY.push(
-      Math.sqrt(moments.varianceY[index] ?? 0) * velocityFactor,
-    );
-  }
-  return [
-    {
-      id: "mean-velocity-x",
-      unit: "mm/s",
-      dimension: "velocity",
-      values: meanX,
-      ...geometry,
-    },
-    {
-      id: "mean-velocity-y",
-      unit: "mm/s",
-      dimension: "velocity",
-      values: meanY,
-      ...geometry,
-    },
-    {
-      id: "fluctuation-velocity-x",
-      unit: "mm/s",
-      dimension: "velocity",
-      values: fluctuationX,
-      ...geometry,
-    },
-    {
-      id: "fluctuation-velocity-y",
-      unit: "mm/s",
-      dimension: "velocity",
-      values: fluctuationY,
-      ...geometry,
-    },
-  ];
-}
-
-/** The rung view the drift computation consumes, built from a stepped rung. */
-function convergenceRungView(
-  run: SteppedRung,
-  solid: Uint8Array,
-): SimParseResult<LbmConvergenceRungView, SimError> {
-  if (
-    run.window === null ||
-    run.meanDragNPerM === null ||
-    run.meanLiftNPerM === null
-  ) {
-    return simFail(
-      simError(
-        SIM_ERROR_CODES.scenarioInvalid,
-        "The grid-convergence self-check needs window-mean forces and moments from both rungs; the averaging window produced none.",
-        run.window,
-      ),
-    );
-  }
-  const stepper = run.stepper;
-  return simOk({
-    facts: {
-      nx: stepper.meta.nx,
-      ny: stepper.meta.ny,
-      cellSizeM: stepper.meta.units.cellSizeM,
-      completedSteps: stepper.step,
-      physicalDurationS: stepper.step * stepper.meta.units.timeStepS,
-      averagingWindowSteps: run.window.sampleCount,
-    },
-    solid,
-    meanVelocityXLattice: run.moments.meanX,
-    meanVelocityYLattice: run.moments.meanY,
-    meanDragNPerM: run.meanDragNPerM,
-    meanLiftNPerM: run.meanLiftNPerM,
-  });
-}
-
-/** The compiled problem's face mapping, declined loudly where the 2D kernel refuses. */
-interface MappedFaces {
-  readonly specs: Pick<LbmStepperConfig, "west" | "east" | "south" | "north">;
-  readonly characteristicVelocityMPerS: number;
-  readonly referencePressurePa: number;
-}
-
-function mapFaces(
-  request: SimEngineRequest,
-): SimParseResult<MappedFaces, SimError> {
-  const refuse = (
-    message: string,
-    at: unknown,
-  ): SimParseResult<never, SimError> =>
-    simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
-  const specs: Record<LateralFace, LbmFaceSpec | undefined> = {
-    xMin: undefined,
-    xMax: undefined,
-    yMin: undefined,
-    yMax: undefined,
-  };
-  let inletSpeed = 0;
-  let outletPressure: number | undefined;
-  for (const condition of request.compiled.conditions) {
-    const face = condition.face;
-    if (face === "zMin" || face === "zMax") {
-      return refuse(
-        `A condition on the "${face}" face is outside the 2D wind tunnel's slice — the kernel consumes the four lateral faces (xMin, xMax, yMin, yMax) of the slice plane.`,
-        condition,
-      );
-    }
-    switch (condition.kind) {
-      case "velocity-inlet": {
-        const velocity = condition.velocityMPerS;
-        if (velocity === undefined) {
-          return refuse(
-            "A compiled velocity-inlet condition carried no velocity vector.",
-            condition,
-          );
-        }
-        const [vx, vy] = [velocity[0] ?? 0, velocity[1] ?? 0];
-        specs[face] = { kind: "velocity-inlet", velocityMPerS: [vx, vy] };
-        inletSpeed = Math.max(inletSpeed, Math.sqrt(vx * vx + vy * vy));
-        break;
-      }
-      case "pressure-outlet": {
-        if (condition.pressurePa === undefined) {
-          return refuse(
-            "A compiled pressure-outlet condition carried no pressure.",
-            condition,
-          );
-        }
-        specs[face] = {
-          kind: "pressure-outlet",
-          pressurePa: condition.pressurePa,
-        };
-        outletPressure = condition.pressurePa;
-        break;
-      }
-      case "wall":
-        specs[face] = { kind: "wall", slip: condition.slip === true };
-        break;
-      case "symmetry":
-        specs[face] = { kind: "symmetry" };
-        break;
-      default:
-        return refuse(
-          `A "${condition.kind}" condition cannot ride the 2D flow kernel (it consumes velocity-inlet, pressure-outlet, wall, and symmetry).`,
-          condition,
-        );
-    }
-  }
-  if (inletSpeed <= 0) {
-    return refuse(
-      "A 2D wind-tunnel scenario needs at least one velocity-inlet on a lateral face — the characteristic velocity the lattice units derive from.",
-      request.compiled.conditions,
-    );
-  }
-  // The documented defaults for absent faces: convective outflow on the
-  // outflow side, no-slip walls on the periphery — the wind-tunnel shape.
-  const spec = (face: LateralFace, fallback: LbmFaceSpec) => {
-    const authored = specs[face];
-    return authored === undefined ? fallback : authored;
-  };
-  return simOk({
-    specs: {
-      west: spec("xMin", { kind: "wall", slip: false }),
-      east: spec("xMax", { kind: "convective-outflow" }),
-      south: spec("yMin", { kind: "wall", slip: false }),
-      north: spec("yMax", { kind: "wall", slip: false }),
-    },
-    characteristicVelocityMPerS: inletSpeed,
-    referencePressurePa: outletPressure ?? 0,
-  });
-}
-
-/** Attaches the convergence drift to the finalized summary, as quantities. */
-function withConvergenceQuantities(
-  result: SimResult,
-  convergence: LbmGridConvergenceReport,
-): SimResult {
-  const quantities = [...result.summary.quantities];
-  quantities.push({
-    name: "grid-convergence-drag-drift",
-    value: convergence.dragDrift.relative,
-    unit: "1",
-  });
-  quantities.push({
-    name: "grid-convergence-lift-drift",
-    value: convergence.liftDrift.relative,
-    unit: "1",
-  });
-  quantities.push({
-    name: "grid-convergence-field-l2-drift",
-    value: convergence.fieldDrift.l2Relative,
-    unit: "1",
-  });
-  return {
-    ...result,
-    summary: { ...result.summary, quantities },
-  };
 }
 
 async function runLbmEngine(
@@ -482,7 +184,7 @@ async function runLbmEngine(
   onFieldChunk?: (chunk: SimEngineFieldChunk) => void,
 ): Promise<SimParseResult<SimResult, SimError>> {
   const compiled = request.compiled;
-  if (!SUPPORTED_KINDS.includes(compiled.kind)) {
+  if (!LBM_SUPPORTED_KINDS.includes(compiled.kind)) {
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioKindUnsupported,
@@ -495,7 +197,7 @@ async function runLbmEngine(
     return simFail(
       simError(
         SIM_ERROR_CODES.backendUnavailable,
-        'The scenario prefers the "gpu" backend; the CPU reference kernel is the only provider until Phase 64\'s WGSL engine and its feature-detect fallback exist, and a GPU-preferred scenario declines loudly instead of silently falling back.',
+        'The scenario prefers the "gpu" backend; the CPU reference engine runs it only through the ROUTED default engine (createDefaultSimEngine), which feature-detects WebGPU, serves the WGSL provider when a device exists, and falls back to this CPU oracle — a direct CPU-engine call declines loudly instead of silently falling back.',
         compiled.backend,
       ),
     );
@@ -546,6 +248,10 @@ async function runLbmEngine(
     scenarioName: compiled.name,
     scenarioSnapshotHash: compiled.scenarioSnapshotHash,
     regime: compiled.regime,
+    // The honest backend record (Phase 64b): the CPU oracle executed
+    // this run — including the router's gpu-preference fallback, which
+    // rewrites the preference and hands the run to this engine.
+    servedBackend: "cpu",
     steps: stepper.step,
     diverged: stepper.diverged,
     grid: {
@@ -563,7 +269,16 @@ async function runLbmEngine(
     histories: stepper.forceState().history,
     fields: stepper.diverged
       ? []
-      : [...stepper.solverFields(), ...averagingFields(run, config)],
+      : [
+          ...stepper.solverFields(),
+          ...lbmAveragingFields(run.moments, {
+            nx: stepper.meta.nx,
+            ny: stepper.meta.ny,
+            cellSizeM: stepper.meta.units.cellSizeM,
+            velocityFactor: stepper.meta.units.velocityFactor,
+            originM: config.originM ?? [0, 0],
+          }),
+        ],
   };
   // A diverged run reports itself and skips the self-check: a blown-up
   // run has no trust indicator to compute (the 63b driver's own rule).
@@ -613,9 +328,25 @@ async function runLbmEngine(
       ),
     );
   }
-  const coarseView = convergenceRungView(run, mask.value.solid);
+  const coarseView = lbmRungView({
+    meta: stepper.meta,
+    completedSteps: stepper.step,
+    solid: mask.value.solid,
+    moments: run.moments,
+    window: run.window,
+    meanDragNPerM: run.meanDragNPerM,
+    meanLiftNPerM: run.meanLiftNPerM,
+  });
   if (!coarseView.ok) return coarseView;
-  const fineView = convergenceRungView(fine.value, refinedMask.value.solid);
+  const fineView = lbmRungView({
+    meta: fine.value.stepper.meta,
+    completedSteps: fine.value.stepper.step,
+    solid: refinedMask.value.solid,
+    moments: fine.value.moments,
+    window: fine.value.window,
+    meanDragNPerM: fine.value.meanDragNPerM,
+    meanLiftNPerM: fine.value.meanLiftNPerM,
+  });
   if (!fineView.ok) return fineView;
   const coarseProblem = lbmConvergenceRungProblem(coarseView.value);
   if (coarseProblem !== undefined) return simFail(coarseProblem);
@@ -634,7 +365,7 @@ async function runLbmEngine(
 export function createLbmSimEngine(): SimEngine {
   return {
     id: LBM_SIM_ENGINE_ID,
-    supportedKinds: SUPPORTED_KINDS,
+    supportedKinds: LBM_SUPPORTED_KINDS,
     backend: "cpu",
     run: (request, onProgress, onFieldChunk) =>
       runLbmEngine(request, onProgress, onFieldChunk),
@@ -642,25 +373,70 @@ export function createLbmSimEngine(): SimEngine {
 }
 
 /**
- * The default hosted engine (Phase 63c's engine selection): the real 2D
- * flow engine for flow scenarios, the 61b fake engine for thermal (until
- * Phase 65's real thermal solver lands), and `structural` declined by
- * neither engine's kind list — the Phase 69 carve, exactly as the
- * contract demands. Worker hosts that want the fake engine everywhere
- * (the 61b test truths) keep hosting it directly.
+ * The default hosted engine (Phase 63c's engine selection, extended at
+ * Phase 64a with the backend router): the real 2D flow engine for flow
+ * scenarios, the 61b fake engine for thermal (until Phase 65's real
+ * thermal solver lands), and `structural` declined by neither engine's
+ * kind list — the Phase 69 carve, exactly as the contract demands.
+ *
+ * The backend routing (Phase 64a, requirement 2): a GPU-PREFERRED flow
+ * scenario goes to the WGSL provider when the device source finds a
+ * WebGPU device, and falls back GRACEFULLY to the CPU oracle when it
+ * does not — the Phase 63 decline promoted into the router. The
+ * fallback runs the scenario's CPU twin (the compiled request with its
+ * backend preference marked consumed), the exact twin the S5 oracle
+ * harness diffs against the GPU run. Device detection happens once per
+ * engine instance (memoized) — deterministic routing for the engine's
+ * lifetime. The declared backend stays "cpu": the CPU oracle is the
+ * floor this engine guarantees even on GPU-less hosts, the honest
+ * capability statement. Worker hosts that want the fake engine
+ * everywhere (the 61b test truths) keep hosting it directly.
  */
-export function createDefaultSimEngine(): SimEngine {
+export interface DefaultSimEngineOptions {
+  /**
+   * The WebGPU device source the router consults for gpu-preferred
+   * flow scenarios — the feature-detection seam (default: the honest
+   * `navigator.gpu` request path). Hosts and tests inject their own.
+   */
+  readonly deviceSource?: WgslDeviceSource;
+}
+
+export function createDefaultSimEngine(
+  options?: DefaultSimEngineOptions,
+): SimEngine {
   const lbm = createLbmSimEngine();
   const fake = createFakeSimEngine();
+  const deviceSource = options?.deviceSource ?? requestWebGpuDevice;
+  let detectionResolved = false;
+  let detectedDevice: WgslDevice | undefined;
+  const detectDevice = async (): Promise<WgslDevice | undefined> => {
+    if (!detectionResolved) {
+      detectedDevice = await deviceSource();
+      detectionResolved = true;
+    }
+    return detectedDevice;
+  };
   return {
     id: "default-routed-sim",
     supportedKinds: [...lbm.supportedKinds, ...fake.supportedKinds],
     backend: "cpu",
-    run: (request, onProgress, onFieldChunk) => {
-      const engine = lbm.supportedKinds.includes(request.compiled.kind)
-        ? lbm
-        : fake;
-      return engine.run(request, onProgress, onFieldChunk);
+    run: async (request, onProgress, onFieldChunk) => {
+      const kind = request.compiled.kind;
+      if (!LBM_SUPPORTED_KINDS.includes(kind)) {
+        return fake.run(request, onProgress, onFieldChunk);
+      }
+      if (request.compiled.backend === "gpu") {
+        const device = await detectDevice();
+        if (device !== undefined) {
+          return runWgslLbmEngine(request, device, onProgress, onFieldChunk);
+        }
+        return lbm.run(
+          { compiled: { ...request.compiled, backend: "cpu" } },
+          onProgress,
+          onFieldChunk,
+        );
+      }
+      return lbm.run(request, onProgress, onFieldChunk);
     },
   };
 }

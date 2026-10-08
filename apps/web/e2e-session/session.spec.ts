@@ -3464,6 +3464,67 @@ test("s24d the sim workbench compares two persisted runs (Phase 63d)", async ({
   });
 });
 
+test("s24e a gpu-preferred flow scenario completes on the CPU fallback path (Phase 64b)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24e workbench-sim gpu fallback", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR a GPU-PREFERRED scenario: the Formedible backend radio
+    // selects the "gpu" preference (the Phase 64 provider door), one
+    // submit saving it into the document's simulations section (law S1).
+    // (The role query resolves the Base UI radio ITEM — the accessible
+    // span; the twin native input the label also names is aria-hidden.)
+    await page.getByLabel("Scenario name").fill("tunnel-gpu-preferred");
+    await page.getByRole("radio", { name: "GPU (Phase 64 provider)" }).click();
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // The run list is the law-S7 STORE's chronological list, which
+    // persists across this session's earlier sim stages — the honest
+    // assertion is that this run ADDS one, not an absolute count.
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+
+    // RUN: this harness launches WITHOUT the WebGPU door
+    // (`--enable-unsafe-webgpu` is off — law S5's CPU-oracle stance),
+    // so the router's feature detect finds no adapter and serves the
+    // scenario's CPU twin — the documented Phase 64a fallback. The run
+    // completes end to end, awaited on the committed-application
+    // counters and the honest backend record, never a timeout.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "240",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {

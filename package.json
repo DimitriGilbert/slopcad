@@ -25,6 +25,7 @@
     "test:render:gate": "node scripts/render-gate.mjs",
     "test:floor-probe": "pnpm --filter web probe:floor",
     "test:spike": "pnpm --filter web test:spike",
+    "test:gpu-spike": "pnpm --filter web test:gpu-spike",
     "test:perf": "pnpm --filter web test:perf",
     "smoke:consumer": "pnpm -C fixtures/cad-consumer smoke",
     "lint": "turbo run lint",

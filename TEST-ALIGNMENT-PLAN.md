@@ -114,3 +114,14 @@ deprecated but kept runnable for per-harness granularity (render pins,
 a11y rules, perf budgets). The D1–D7 decisions, the deviations, and
 the no-CI gate model all stand as written above; `pnpm verify` remains
 the single headless quality gate.
+
+_2026-10-08 update (ROADMAP-SIM Phase 64b):_ a twelfth Playwright
+harness joins the fleet as the law-S5 GPU door — `pnpm test:gpu-spike`
+(`apps/web/e2e-gpu-spike/`), booted like the perf/spike harnesses plus
+the `--enable-unsafe-webgpu` launch flag, running the oracle-vs-GPU
+tolerance matrix in-browser under Dawn's SwiftShader adapter against
+the production build. It is ADOPTED per the spike's stability evidence
+(not a `test:fast` member: the shared-server fast path serves a
+flag-less launch, and this door owns its flag), stays out of
+`pnpm verify` like every e2e harness, and its evidence lives in
+`docs/architecture/wgsl-prespike-findings.md`.

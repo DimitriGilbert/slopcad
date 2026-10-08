@@ -54,7 +54,9 @@
  * `data-sim-grid-error`), the 63c run family:
  * `data-sim-scenario-count`, `data-sim-run-status` (idle | compiling |
  * running | finalizing | persisting | completed | failed),
- * `data-sim-run-count`, `data-sim-run-hash`, `data-sim-export-vti`
+ * `data-sim-run-count`, `data-sim-run-hash`, `data-sim-served-backend`
+ * (the completed run's honest kernel record — "cpu" | "gpu" | ""),
+ * `data-sim-export-vti`
  * (exported .vti file count), `data-sim-export-csv`, and the 63d
  * compare family: `data-sim-compare-status` (idle | comparing | ready |
  * failed), `data-sim-compare-runs` (`a:<id>|b:<id>`),
@@ -556,6 +558,7 @@ export function SimWorkbenchPage(): ReactElement {
       data-sim-run-status={runStatus}
       data-sim-run-count={String(runs.length)}
       data-sim-run-hash={lastHash?.scenarioSnapshotHash ?? ""}
+      data-sim-served-backend={lastResult?.summary.servedBackend ?? ""}
       data-sim-export-vti={String(exportedVti)}
       data-sim-export-csv={String(exportedCsv)}
       data-sim-live-field={liveOverlay === null ? "" : "speed"}

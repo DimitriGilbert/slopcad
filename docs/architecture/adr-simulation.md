@@ -174,3 +174,34 @@ fixture (`packages/sim-flow/src/symmetry.test.ts`), and the
 session-harness stages s24b/s24c/s24d. The WGSL GPU provider (Phase 64) is next; thermal stays the fake engine's until Phase 65;
 `structural` still declines with `sim/scenario-kind-unsupported` until
 Phase 69.
+
+## Implementation status (2026-10-08): Phase 64 is implemented (provider + spike + fallback e2e)
+
+Phase 64a: the WGSL compute provider lives in `@slopcad/sim-flow` —
+the narrow `WgslDevice` seam with its honest feature detect
+(`requestWebGpuDevice`), the D2Q9 WGSL shader mirrored buffer-for-
+buffer onto the CPU layout, the provider stepper/engine behind the
+Phase 61 contract, and the routed default engine serving gpu-preferred
+flow scenarios on the provider with a GRACEFUL CPU-twin fallback.
+Phase 64b: the WebGPU-under-Playwright/Dawn spike ran the S5
+oracle-vs-GPU matrix in-browser against the production build under
+Dawn's SwiftShader adapter (launch door: `--enable-unsafe-webgpu`,
+probed and recorded) — every case, every repeat inside the recorded
+tolerances with three-plus orders of headroom, bitwise-stable across
+repeats and full harness runs — and the decision was **ADOPT into e2e
+as a dedicated door** (`pnpm test:gpu-spike`), law S5 unchanged (the
+session/render harnesses stay CPU-launched; the CPU oracle stays the
+test truth). The spike found and fixed two real 64a defects (the
+missing required pipeline `layout`; the symmetric-case zero-lift
+normalizer refusal) — evidence the gate works. The WGSL step-batch
+perf budget is recorded as a SOFTWARE-device ceiling (median 1228.3 ms
+vs the CPU's 268 ms on the identical protocol); the hardware-class
+budget is honestly not-recordable-here (no hardware adapter is
+enumerable in headless Chromium on this machine). The fallback path is
+e2e-pinned (session stage s24e: a gpu-preferred scenario completes on
+the CPU twin when WebGPU is absent), and result summaries now carry
+`servedBackend` — the machine-readable record of which kernel
+executed a run. Evidence and rationale:
+`docs/architecture/wgsl-prespike-findings.md` (the
+`occt-prespike-findings` precedent). Thermal stays the fake engine's
+until Phase 65.

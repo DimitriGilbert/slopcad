@@ -115,6 +115,7 @@ export {
   type SimResultFieldBlock,
   type SimResultStatus,
   type SimResultSummary,
+  type SimServedBackend,
   SIM_FIELD_LABEL_MAX_BYTES,
   SIM_RESULT_PAYLOAD_VERSION,
   SIM_RESULT_STATUSES,

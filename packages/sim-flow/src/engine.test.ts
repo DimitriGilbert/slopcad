@@ -166,6 +166,8 @@ describe("createLbmSimEngine: the contract over compiled problems", () => {
     expect(progress.length).toBe(24);
     expect(progress[progress.length - 1]?.step).toBe(24);
     expect(result.summary.status).toBe("completed");
+    // The honest backend marker: the CPU oracle executed this run.
+    expect(result.summary.servedBackend).toBe("cpu");
     expect(result.summary.scenarioSnapshotHash).toBe(
       compiled.value.scenarioSnapshotHash,
     );
@@ -332,7 +334,7 @@ describe("createLbmSimEngine: the contract over compiled problems", () => {
     expect(bareRun.error.message).toContain("velocity-inlet");
   });
 
-  it("declines the GPU preference until the Phase 64 provider exists, and unsupported kinds", async () => {
+  it("declines a gpu-preferred run for good: GPU dispatch belongs to the routed engine, never a direct CPU fallback; and unsupported kinds", async () => {
     const compiled = compileTunnel({
       scenario: { ...tunnelScenario(), backend: "gpu" },
     });

@@ -37,6 +37,7 @@ import type {
   SimResult,
   SimResultStatus,
   SimResultSummary,
+  SimServedBackend,
 } from "./sim-result";
 
 import { simError, SIM_ERROR_CODES } from "./errors";
@@ -267,6 +268,16 @@ export function parseSimResultSummary(
     if (!parsed.ok) return parsed;
     failureCode = parsed.value;
   }
+  let servedBackend: SimServedBackend | undefined;
+  if (input.servedBackend !== undefined) {
+    if (input.servedBackend !== "cpu" && input.servedBackend !== "gpu") {
+      return recordMalformed(
+        'A result summary\'s servedBackend must be "cpu" or "gpu".',
+        input.servedBackend,
+      );
+    }
+    servedBackend = input.servedBackend;
+  }
   let failureMessage: string | undefined;
   if (input.failureMessage !== undefined) {
     const parsed = parseLabel(
@@ -307,6 +318,7 @@ export function parseSimResultSummary(
         qualitative: Object.freeze(qualitative),
       }),
       quantities: Object.freeze(quantities),
+      ...(servedBackend === undefined ? {} : { servedBackend }),
       ...(failureCode === undefined ? {} : { failureCode }),
       ...(failureMessage === undefined ? {} : { failureMessage }),
     }),
