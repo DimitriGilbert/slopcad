@@ -8,6 +8,9 @@
     ".": {
       "default": "./src/index.ts"
     },
+    "./react/store": {
+      "default": "./src/react/store.tsx"
+    },
     "./*": {
       "default": [
         "./src/*.ts",
