@@ -183,6 +183,9 @@ importers:
       '@slopcad/sim-core':
         specifier: workspace:*
         version: link:../../packages/sim-core
+      '@slopcad/sim-flow':
+        specifier: workspace:*
+        version: link:../../packages/sim-flow
       '@slopcad/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -839,6 +842,9 @@ importers:
       '@slopcad/sim-core':
         specifier: workspace:*
         version: link:../sim-core
+      '@slopcad/sim-flow':
+        specifier: workspace:*
+        version: link:../sim-flow
     devDependencies:
       '@slopcad/config':
         specifier: workspace:*
@@ -904,6 +910,25 @@ importers:
       '@slopcad/cad-kernel':
         specifier: workspace:*
         version: link:../cad-kernel
+      '@slopcad/config':
+        specifier: workspace:*
+        version: link:../config
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.11(vitest@4.1.11)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.1)(@vitest/coverage-istanbul@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  packages/sim-flow:
+    dependencies:
+      '@slopcad/sim-core':
+        specifier: workspace:*
+        version: link:../sim-core
+    devDependencies:
       '@slopcad/config':
         specifier: workspace:*
         version: link:../config

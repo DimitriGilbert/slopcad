@@ -48,6 +48,14 @@ export const SIM_ERROR_CODES = {
    *  with no fallback declines loudly). */
   backendUnavailable: "sim/backend-unavailable",
   /**
+   * A run's numerics diverged (NaN/negative density — the reference
+   * kernel's divergence sentinel): the run froze at its last valid step
+   * and persists as a FAILED result carrying this code, never as a
+   * fabricated completed one (Phase 63b's persistence-honesty carve,
+   * defined now so the code vocabulary never reworks).
+   */
+  runDiverged: "sim/run-diverged",
+  /**
    * The worker session does not know the referenced compiled problem
    * (Phase 61b): `sim.run` addressed a problem id this session never
    * minted, or one from a dead channel.

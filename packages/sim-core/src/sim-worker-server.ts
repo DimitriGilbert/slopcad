@@ -89,7 +89,7 @@ import {
   simWorkerError,
 } from "./sim-worker-errors";
 import { simResultToFinalizeResult } from "./sim-worker-operations";
-import { compileSimScenario } from "./units";
+import { compileSimScenarioWithGeometry } from "./compile-geometry";
 
 /**
  * The sentinel the run wrappers throw to deliver cooperative cancellation
@@ -204,7 +204,11 @@ export function createSimWorkerServer(
     try {
       switch (request.operation) {
         case "sim.compile": {
-          const compiled = compileSimScenario({
+          // The Phase 63c geometry-aware door: the 61a compile plus the
+          // tessellation's voxelized occupancy slice (and run controls) when
+          // the request carries geometry — identical to the 61a compile
+          // otherwise, so every existing path keeps its exact behavior.
+          const compiled = compileSimScenarioWithGeometry({
             scenario: request.input.scenario,
             ...(request.input.motor === undefined
               ? {}
@@ -212,6 +216,9 @@ export function createSimWorkerServer(
             ...(request.input.bodyBounds === undefined
               ? {}
               : { bodyBounds: request.input.bodyBounds }),
+            ...(request.input.tessellation === undefined
+              ? {}
+              : { tessellation: request.input.tessellation }),
           });
           return compiled.ok
             ? { status: "compiled", compiled: compiled.value }

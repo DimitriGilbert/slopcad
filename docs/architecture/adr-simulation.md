@@ -144,3 +144,33 @@ runnable example (`packages/docs-examples/src/sim/spine.ts`). No solver
 exists yet: the first (2D LBM flow) is Phase 63's, the voxelizer and
 field overlays Phase 62's, and the `structural` kind still declines with
 `sim/scenario-kind-unsupported` until Phase 69.
+
+## Implementation status (2026-10-08): Phase 63 is implemented
+
+Phase 62 (the voxelizer, the signed-distance field, the field-overlay
+family, the `/workbench-sim` fixture) and Phase 63 are implemented.
+Phase 63 in full: the deterministic D2Q9 LBM reference kernel in
+`@slopcad/sim-flow` (BGK/TRT collision, push streaming with full-way
+bounce-back, Zou/He velocity and pressure boundaries, convective
+outflow, no-slip/slip walls and symmetry planes, momentum-exchange
+force integration with the exact per-step momentum audit); the run
+orchestration layer (fixed step budgets, force histories, post-hoc
+mean/fluctuation averaging per law S9, the regime wiring, the
+scenario-snapshot provenance); the factor-2 grid-convergence
+self-check; the real flow engine behind the `SimEngine` contract with
+the geometry-aware compile door; the `/workbench-sim` product surface
+(Formedible scenario authoring, the streamed run through the
+committed-application ledger, persistence through the local store,
+exports); the run comparison surface (two-run curve overlay + field
+diff, `apps/web/src/sim-workbench/sim-compare.ts` — risk S17's exact
+boundary); the known-cases gallery
+(`packages/docs-examples/src/sim/gallery.ts` — cylinder Strouhal vs
+Roshko's public-domain band, NACA 0012 lift slope vs the public-domain
+reference with blockage stated, and the shock tube DECLINED loudly on
+three machine-verified walls per the prior-art note); and the
+validation fixtures — Poiseuille vs the analytic parabola, the
+cylinder force audit, bitwise determinism, the half-domain symmetry
+fixture (`packages/sim-flow/src/symmetry.test.ts`), and the
+session-harness stages s24b/s24c/s24d. The WGSL GPU provider (Phase 64) is next; thermal stays the fake engine's until Phase 65;
+`structural` still declines with `sim/scenario-kind-unsupported` until
+Phase 69.

@@ -5,16 +5,15 @@ plumbing every solver phase builds on. Phase 62 added the geometry
 interface: the voxelizer (tessellation → occupancy grid + signed
 distance, law S3) and the field-overlay family in the renderer, with
 the `/workbench-sim` fixture page showing any document body as a grid.
-This guide is honest about what that means: as of Phase 62 there is
-still NO solver. The first real physics (2D LBM flow) is Phase 63's;
-structural analysis is Phase 69's, reserved in the vocabulary and
-declined loudly until then. What exists today is everything AROUND the
-solvers: the scenario records, the units and regime-honesty boundaries,
-the run/result model with its binary payload and exports, the worker
-protocol, the result store, the voxelizer and overlays, and the
-committed-application counters the workbench awaits. The plan is
-`ROADMAP-SIM.md`; the decision record is
-`docs/architecture/adr-simulation.md`.
+Phase 63 added the first real physics: the **2D wind tunnel** — a
+deterministic D2Q9 LBM reference kernel (`@slopcad/sim-flow`) behind
+the `SimEngine` contract, with the run comparison surface and the
+known-cases gallery closing the phase. What does NOT exist yet:
+thermal (65), 3D flow and rotating machinery with motor operating
+points (66), mechanism dynamics (67), combustion (68), structural FEM
+(69 — the kind declines with `sim/scenario-kind-unsupported` today),
+and parametric optimization (70). The plan is `ROADMAP-SIM.md`; the
+decision record is `docs/architecture/adr-simulation.md`.
 
 ## Scenarios are document records (law S1)
 
@@ -94,12 +93,15 @@ the streaming surface: field chunks are slices of the finalized block
 (gapless indices, one header per field), so a reassembled stream is
 byte-identical to the persisted payload.
 
-The hosted engine is, today, the deterministic **fake engine**
-(`FAKE_SIM_ENGINE`) — the `fake-kernel` precedent: it exercises every
-protocol path (scheduled progress, three chunk rounds whose final round
-reassembles to the finalized blocks, honest declines, cooperative
-cancellation) until Phase 63's real kernel replaces it behind the same
-`SimEngine` contract.
+The hosted engine is routed (Phase 63c): **flow** scenarios run the
+real 2D LBM reference kernel (`@slopcad/sim-flow`'s
+`createLbmSimEngine` — the CPU oracle, law S5); **thermal** runs the
+deterministic **fake engine** (`FAKE_SIM_ENGINE`, the `fake-kernel`
+precedent: it exercises every protocol path until Phase 65's real
+thermal solver lands); `structural` is declined by neither engine's
+kind list — the Phase 69 carve. A `gpu`-preferred flow scenario
+declines loudly today (`sim/backend-unavailable`): the WGSL provider is
+Phase 64's, and a GPU preference never silently falls back to the CPU.
 
 ## Committed applications in the workbench (law S6)
 
@@ -165,10 +167,89 @@ signed-distance field one toggle away). Each grid publishes as a chunk
 stream and applies through the law-S6 ledger, so the overlay you see
 is a committed application.
 
+## The 2D wind tunnel (Phase 63) and comparing runs
+
+A saved flow scenario with a voxelized body runs the real kernel:
+scenario → geometry-aware compile (the occupancy slice at the domain's
+mid-height plane) → the streamed run (Zou/He inlets, pressure/convective
+outlets, no-slip/slip walls and symmetry planes, full-way bounce-back
+on the voxelized body, momentum-exchange lift/drag histories) → the
+persisted `SimResult` with post-hoc mean/fluctuation fields (law S9's
+turbulence answer), the regime report, and — when the scenario flags
+it — the factor-2 grid-convergence self-check's drift numbers. The
+`/workbench-sim` panel authors scenarios (Formedible), runs them, lists
+the persisted runs, and exports the decimated `.vti` series plus the
+force CSV.
+
+**Comparing two runs** (the Phase 63d comparison surface, risk S17's
+exact boundary — two-run curve overlay + field diff, nothing more):
+pick two persisted runs in the panel's native selects and press
+Compare. You get two views:
+
+- **Curve overlay** — both runs' drag and lift histories against one
+  shared min/max window per quantity, as deterministic SVG polylines
+  (`simCurveOverlayOf` in `apps/web/src/sim-workbench/sim-compare.ts`).
+- **Field diff** — the same-field, same-geometry per-node difference
+  rendered through the Phase 62 overlay family with the diverging
+  cool–warm colormap over a symmetric window, plus the relative L2 and
+  L∞ difference norms (`simFieldDiffOf`). Two runs whose grids or
+  units disagree decline loudly (`sim/compare-geometry-mismatch`,
+  `sim/compare-unit-mismatch`) — the surface never resamples one run
+  onto another; that question is the grid-convergence ladder's, not a
+  comparison's.
+
+The diff's chunk round applies through the same committed-application
+ledger as every other overlay (law S6) — the `data-sim-*` counters
+advance on the commit, and e2e awaits exactly that.
+
+## The known-cases gallery (Phase 63d)
+
+Trust is visible, not promised: `packages/docs-examples/src/sim/gallery.ts`
+holds runnable, machine-verified examples pinned to published answers,
+each a deterministic scenario over the real air record with its
+confounders stated.
+
+- **Cylinder vortex shedding** — 128×48 lattice, D = 12 cells (25%
+  blockage, free-slip walls, convective outflow), Re = 100: the lift
+  history's oscillation period gives **St ≈ 0.231**, inside the stated
+  band [0.9, 1.8]× Roshko's unconfined correlation St = 0.212(1 −
+  21.2/Re) ≈ 0.167 (NACA TN 3169, public domain). The band is the
+  honest qualitative window per law S9: confinement at 25% blockage
+  inflates St; the suite asserts the sentence.
+- **NACA 0012 lift slope** — 160×64 lattice, 48-cell chord at Re = 200:
+  Cl(0°) = 0 exactly (the mirror-symmetric mask), Cl(8°) ≈ 0.80, slope
+  ≈ 0.91 × the thin-airfoil 2π/rad reference (textbook inviscid; the
+  NACA Report 824 experimental slope ≈ 0.11/deg at flight Re brackets
+  it from above), stated band [0.7, 1.1]×, tunnel blockage ≈ 19%
+  stated beside the coefficients. The Cd statement is honest about
+  low-Re + staircase drag: comparative, not absolute.
+- **The shock tube — declined loudly.** The researched prior art
+  (AngeTheGreat's engine-simulation corpus, `docs/research/
+ange-engine-sim/global-report.md` §Phase 63) leads its validation
+  ladder with the Sod shock tube. This kernel declines it, on three
+  machine-verified walls: the S9 compile flags the scenario
+  `compressibility-affected` (shock Ma ≈ 1.75, far outside the D2Q9
+  weakly-compressible Ma ≲ 0.3 validity); the Ma-1.75 inlet collapses
+  the unit closure onto the τ⁺ stability floor and the kernel refuses
+  it; and the Sod 10:1 atmospheric pressure ratio drives the lattice
+  density non-positive at any viscosity-feasible closure. A lattice
+  big enough to sneak under the mechanical checks would smear the
+  discontinuity into physically meaningless output — the gallery
+  states the reasoning (`SHOCK_TUBE_DECLINE_REASON`) instead of
+  running it.
+
+The suite runs each case (`packages/docs-examples/src/
+docs-examples.test.ts`) and asserts every sentence above. The kernel
+level carries the phase's remaining validation fixtures: the Poiseuille
+channel, the static-cylinder force audit, bitwise determinism
+(`packages/sim-flow/src/*.test.ts`), and the half-domain symmetry
+fixture (`symmetry.test.ts`) — a symmetry-plane run at half the domain
+whose fields match the mirrored full run within the stated band, with
+the full run's mirror symmetry itself pinned bitwise.
+
 ## What does not exist yet
 
-Honest inventory, per phase: the 2D wind-tunnel CPU kernel and the
-WGSL GPU provider (63/64), thermal
+Honest inventory, per phase: the WGSL GPU provider (64), thermal
 (65), 3D flow and rotating machinery with motor operating points (66),
 mechanism dynamics (67), combustion (68), structural FEM (69 — the kind
 declines with `sim/scenario-kind-unsupported` today), and parametric
@@ -191,6 +272,7 @@ interface over an analytic box: the explicit-domain occupancy is exact
 the closed-set convention), the z-slice resolves its plane exactly, the
 signed distances at the probed nodes are exact millimetres-in-metres,
 and the grid → block → payload → decode → grid door round-trips
-identically. `packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
+identically. `packages/docs-examples/src/sim/gallery.ts` is the
+known-cases gallery above. `packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
 the `/workbench-sim` fixture's demo model — the plate-with-bore
 cad-jsx authoring the page voxelizes.

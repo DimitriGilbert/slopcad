@@ -38,6 +38,13 @@ import { runNativeFormatExample } from "./core/native";
 import { runProjectionExample } from "./core/projection";
 import { runUnitsExample } from "./core/units";
 import { runMeshExchangeExample } from "./io/mesh";
+import {
+  roshkoStrouhal,
+  runCylinderSheddingExample,
+  runNacaAirfoilExample,
+  runShockTubeDeclineExample,
+  SOD_SHOCK_MACH,
+} from "./sim/gallery";
 import { runSimSpineExample } from "./sim/spine";
 import { runSimVoxelExample } from "./sim/voxel";
 import { runSimDemoBodyExample } from "./cadjsx/sim-demo-body";
@@ -490,5 +497,84 @@ describe("guide example: the sim demo body (Phase 62c fixture model)", () => {
     expect(summary.validatorIssues).toBe(0);
     expect(summary.commandCount).toBeGreaterThan(0);
     expect(summary.textBytes).toBeGreaterThan(0);
+  });
+});
+
+describe("guide example: the known-cases gallery — cylinder shedding (Phase 63d)", () => {
+  it("sheds at a Strouhal inside the stated band against Roshko's correlation", () => {
+    const summary = runCylinderSheddingExample();
+    // The scenario's own regime numbers: Re = 100 exactly (the lattice
+    // was designed for it), Ma ≈ 3.8e-4 — no S9 flags at this Re.
+    expect(summary.reynolds).toBeCloseTo(100, 6);
+    expect(summary.mach).toBeLessThan(0.001);
+    expect(summary.latticeMach).toBeLessThan(0.3);
+    expect(summary.qualitative).toEqual([]);
+    expect(summary.completed).toBe(true);
+    // The published answer: Roshko's unconfined correlation
+    // St = 0.212(1 − 21.2/Re) (NACA TN 3169, public domain) at Re=100.
+    expect(summary.roshkoStrouhal).toBeCloseTo(roshkoStrouhal(100), 9);
+    expect(summary.roshkoStrouhal).toBeCloseTo(0.167, 3);
+    // The measured answer (deterministic — measured at authoring time
+    // as St = 0.2309): enough cycles for a trustworthy period estimate,
+    // and inside the STATED band [0.9, 1.8]× the unconfined value —
+    // confinement at 25% blockage with slip walls inflates St; the
+    // band is the honest qualitative window per law S9, never a
+    // false-precision pin.
+    expect(summary.cycles).toBeGreaterThanOrEqual(20);
+    expect(summary.strouhal).toBeCloseTo(0.231, 2);
+    expect(summary.withinBand).toBe(true);
+  }, 300_000);
+});
+
+describe("guide example: the known-cases gallery — NACA 0012 (Phase 63d)", () => {
+  it("lifts with the public-domain slope inside the stated band, blockage stated", () => {
+    const summary = runNacaAirfoilExample();
+    expect(summary.reynolds).toBeCloseTo(200, 6);
+    expect(summary.mach).toBeLessThan(0.001);
+    expect(summary.completed).toBe(true);
+    // α = 0: the mask is exactly mirror-symmetric, so the lift is
+    // bitwise zero (the kernel's sign-exact mirror symmetry — the same
+    // fact the symmetry fixture pins at the kernel level).
+    expect(summary.clAtZeroAlpha).toBe(0);
+    // The measured answer at α = 8° (deterministic — 0.8005 at
+    // authoring time), against the public-domain reference: thin-
+    // airfoil theory's 2π/rad slope (textbook inviscid), with the
+    // NACA Report 824 experimental slope (≈ 0.11/deg at high Re) as
+    // the flight-Re reference our low-Re band brackets from below.
+    expect(summary.clAtEightDeg).toBeCloseTo(0.801, 2);
+    expect(summary.thinAirfoilSlopePerRad).toBeCloseTo(2 * Math.PI, 12);
+    expect(summary.slopeRatio).toBeCloseTo(0.913, 2);
+    expect(summary.withinBand).toBe(true);
+    // Pressure drag grows with incidence, and the confined tunnel's
+    // blockage (≈ 19% at α = 8°) is stated beside the coefficients —
+    // the roadmap's blockage-honesty sentence, machine-checked.
+    expect(summary.cdAtEightDeg).toBeGreaterThan(summary.cdAtZeroAlpha);
+    expect(summary.blockage).toBeCloseTo(0.194, 2);
+    // The honest Cd statement: at Re = 200 with staircase boundaries
+    // the drag sits far above the high-Re published skin-friction
+    // levels — comparative, not absolute (law S3's posture).
+    expect(summary.cdAtEightDeg).toBeGreaterThan(0.1);
+  }, 300_000);
+});
+
+describe("guide example: the known-cases gallery — the shock tube declines loudly (Phase 63d)", () => {
+  it("refuses the canonical Sod fixture on three independent, machine-verified walls", () => {
+    const summary = runShockTubeDeclineExample();
+    // The canonical state: shock Ma ≈ 1.75 (Sod 1978).
+    expect(summary.shockMach).toBe(SOD_SHOCK_MACH);
+    // Wall 1 — the S9 regime report flags the compressibility the
+    // weakly-compressible D2Q9 lattice cannot represent (and the huge
+    // Re raises the turbulence flag beside it).
+    expect(summary.flaggedCompressible).toBe(true);
+    expect(summary.qualitative).toContain("compressibility-affected");
+    expect(summary.qualitative).toContain("turbulence-dominated");
+    // Walls 2 and 3 — the kernel's own mechanical refusals: the
+    // Ma-1.75 inlet collapses onto the τ⁺ stability floor, and the
+    // 10:1 atmospheric ratio drives the lattice density non-positive.
+    expect(summary.inletAccepted).toBe(false);
+    expect(summary.pressureRatioAccepted).toBe(false);
+    // The decline is stated loudly — the guide prints this verbatim.
+    expect(summary.declineReason).toContain("Sod shock tube");
+    expect(summary.declineReason).toContain("declines the case loudly");
   });
 });

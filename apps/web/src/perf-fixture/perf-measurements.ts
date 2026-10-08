@@ -39,6 +39,13 @@
  *   document grown with a 40-feature extrude chain whose head parameter is
  *   edited (the whole chain re-executes) — the scaling probe for the
  *   incremental-invalidation ledger.
+ * - `kernel.lbm2d.referenceGrid.stepBatchMs` — the Phase 63 D2Q9
+ *   reference kernel's pure stepping cost at the roadmap's reference
+ *   preview grid (~512×256, a cylinder in a wind tunnel): one timed
+ *   batch of {@link KERNEL_STEP_BATCH} steps per sample after warmup,
+ *   the main-thread compute share of a streaming preview frame budget
+ *   (the kernel is deterministic synchronous TS — law S2 — so this is
+ *   the whole stepping story, no hidden async).
  *
  * The page-level metrics (scene settle, the applied → frame window —
  * `applyToFrameMs`, the production-build stand-in for React commit work
@@ -85,6 +92,7 @@ import {
   type WorkerTransport,
 } from "@slopcad/cad-kernel";
 import { manifoldWorkerBootReport } from "@slopcad/cad-kernel-manifold/manifold-worker-boot-report";
+import { createLbmStepper } from "@slopcad/sim-flow";
 
 import { computePlateWithHole } from "../worker-fixture/plate-scene";
 import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
@@ -101,6 +109,15 @@ const MAINTHREAD_SAMPLE_COUNT = 25;
 const INVALIDATION_SAMPLE_COUNT = 50;
 /** How many extrude features the invalidation growth probe chains. */
 const GROWN_CHAIN_FEATURES = 40;
+/** The LBM reference grid's extents (the roadmap's ~512×256 preview grid). */
+const KERNEL_REFERENCE_GRID_NX = 512;
+const KERNEL_REFERENCE_GRID_NY = 256;
+/** Warmup steps before the timed kernel batches (JIT and cache settle). */
+const KERNEL_WARMUP_STEPS = 10;
+/** Steps per timed kernel batch (one batch = one sample). */
+const KERNEL_STEP_BATCH = 10;
+/** How many timed kernel batches the kernel probe measures. */
+const KERNEL_BATCH_SAMPLES = 7;
 
 /** The environment block published beside the samples (provenance). */
 export interface PerfEnvironment {
@@ -188,6 +205,76 @@ function bootChannel(
       boot.dispose();
     },
   };
+}
+
+/**
+ * The kernel-stepping probe (Phase 63b's initial perf budget): the D2Q9
+ * reference kernel at the roadmap's reference preview grid — a 512×256
+ * wind tunnel around a cylinder slice (D = 96 cells, 37.5 % blockage),
+ * TRT at τ⁺ ≈ 0.6, ν chosen for that τ⁺ (≈4.5× real air) — stepped
+ * in timed batches of {@link KERNEL_STEP_BATCH} steps after a warmup
+ * batch. The stepper is synchronous deterministic TS, so one batch's
+ * wall time IS the pure stepping cost; a divergence mid-probe fails
+ * the probe loudly instead of publishing a fabricated timing.
+ */
+function probeKernelStepping(): Record<string, number[]> {
+  const solid = new Uint8Array(
+    KERNEL_REFERENCE_GRID_NX * KERNEL_REFERENCE_GRID_NY,
+  );
+  for (let y = 0; y < KERNEL_REFERENCE_GRID_NY; y += 1) {
+    for (let x = 0; x < KERNEL_REFERENCE_GRID_NX; x += 1) {
+      if ((x - 170.5) ** 2 + (y - 128) ** 2 <= 48 ** 2) {
+        solid[x + y * KERNEL_REFERENCE_GRID_NX] = 1;
+      }
+    }
+  }
+  const created = createLbmStepper({
+    mask: {
+      nx: KERNEL_REFERENCE_GRID_NX,
+      ny: KERNEL_REFERENCE_GRID_NY,
+      solid,
+    },
+    fluid: {
+      fluidId: "perf-air",
+      temperatureK: 300,
+      densityKgPerM3: 1.2,
+      dynamicViscosityPaS: 1.2 * 6.7e-5,
+      kinematicViscosityM2PerS: 6.7e-5,
+      thermalDiffusivityM2PerS: 6.7e-5 / 0.7,
+      prandtl: 0.7,
+      thermalExpansionPerK: 1 / 300,
+      specificHeatJPerKgK: 1005,
+      thermalConductivityWPerMK: (1.2 * 6.7e-5 * 1005) / 0.7,
+      speedOfSoundMPerS: 347,
+    },
+    cellSizeM: 0.001,
+    characteristicVelocityMPerS: 0.1,
+    collision: { kind: "trt" },
+    west: { kind: "velocity-inlet", velocityMPerS: [0.1, 0] },
+    east: { kind: "pressure-outlet", pressurePa: 0 },
+    south: { kind: "wall", slip: false },
+    north: { kind: "wall", slip: false },
+  });
+  if (!created.ok) {
+    throw new Error(
+      `the kernel-stepping probe refused its config: ${created.error.message}`,
+    );
+  }
+  const stepper = created.value;
+  stepper.run(KERNEL_WARMUP_STEPS);
+  if (stepper.diverged) {
+    throw new Error("the kernel-stepping probe diverged during warmup");
+  }
+  const samples: number[] = [];
+  for (let batch = 0; batch < KERNEL_BATCH_SAMPLES; batch += 1) {
+    const started = performance.now();
+    stepper.run(KERNEL_STEP_BATCH);
+    samples.push(performance.now() - started);
+  }
+  if (stepper.diverged) {
+    throw new Error("the kernel-stepping probe diverged inside a timed batch");
+  }
+  return { "kernel.lbm2d.referenceGrid.stepBatchMs": samples };
 }
 
 /**
@@ -655,12 +742,14 @@ function probeInvalidation(): Record<string, number[]> {
  * fixture page, which owns the coordinator session and the scene.
  */
 export async function runInPageMeasurements(): Promise<InPageMeasurements> {
+  const kernel = probeKernelStepping();
   const startup = await probeStartup();
   const operations = await probeOperations();
   const projection = probeProjection(operations.tessellation);
   const transfer = probeTransfer(operations.wireResponse);
   const invalidation = probeInvalidation();
   const combined: Record<string, number[]> = {
+    ...kernel,
     ...startup,
     ...operations.samples,
     ...projection,

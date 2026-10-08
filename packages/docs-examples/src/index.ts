@@ -105,7 +105,9 @@ export {
   type ComponentsExampleSummary,
 } from "./components/components";
 
-// -- Simulation (the Phase 61 spine; the Phase 62 voxelizer) ------------------
+// -- Simulation (the Phase 61 spine; the Phase 62 voxelizer; Phase 63's
+//    known-cases gallery is subpath-only — its minutes-long runs stay
+//    off the docs page's bundle, the node-worker example's precedent) --------
 
 export { runSimSpineExample, type SimSpineExampleSummary } from "./sim/spine";
 export { runSimVoxelExample, type SimVoxelExampleSummary } from "./sim/voxel";

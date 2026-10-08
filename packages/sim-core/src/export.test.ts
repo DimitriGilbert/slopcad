@@ -8,7 +8,12 @@ import { describe, expect, it } from "vitest";
 
 import { SIM_ERROR_CODES } from "./errors";
 import { type SimHistoryTable, exportSimHistoryCsv } from "./export-csv";
-import { exportSimFieldVti } from "./export-vtk";
+import {
+  SIM_VTI_MAX_DECIMATION,
+  decimateSimFieldBlock,
+  exportSimFieldVti,
+  exportSimFieldVtiDecimated,
+} from "./export-vtk";
 import { type SimResultFieldBlock } from "./sim-result";
 
 function requireOk<T, E extends { readonly message: string }>(
@@ -81,6 +86,70 @@ describe("the VTK .vti exporter", () => {
     expect(nonFinite.error.code).toBe(SIM_ERROR_CODES.quantityInvalid);
     const mismatch = exportSimFieldVti({ ...block(), values: [1, 2, 3] });
     expect(mismatch.ok).toBe(false);
+  });
+});
+
+describe("the decimated .vti twin (Phase 63c)", () => {
+  /** A 4×4×1 lattice whose decimation by 2 keeps the even nodes. */
+  function lattice(): SimResultFieldBlock {
+    return {
+      id: "speed",
+      unit: "mm/s",
+      extent: [4, 4, 1],
+      originMm: [0, 0, 0],
+      spacingMm: [1, 1, 1],
+      dataType: "float32",
+      values: Array.from({ length: 16 }, (_, index) => index + 0.5),
+    };
+  }
+
+  it("thins the node lattice by the factor: even nodes, scaled spacing, shrunk extent", () => {
+    const decimated = requireOk(
+      decimateSimFieldBlock(lattice(), 2),
+      "the decimation",
+    );
+    expect([...decimated.extent]).toEqual([2, 2, 1]);
+    expect([...decimated.spacingMm]).toEqual([2, 2, 2]);
+    // Nodes (0,0), (2,0), (0,2), (2,2) in x-fastest order.
+    expect(decimated.values).toEqual([0.5, 2.5, 8.5, 10.5]);
+    // Factor 1 is the identity sub-lattice (a fresh block).
+    const identity = requireOk(decimateSimFieldBlock(lattice(), 1), "factor 1");
+    expect(identity.values).toEqual(lattice().values);
+    expect(identity.extent).toEqual(lattice().extent);
+  });
+
+  it("declines factors outside the integer budget", () => {
+    for (const factor of [0, -1, 1.5, SIM_VTI_MAX_DECIMATION + 1]) {
+      const declined = decimateSimFieldBlock(lattice(), factor);
+      expect(declined.ok).toBe(false);
+      if (!declined.ok) {
+        expect(declined.error.code).toBe(SIM_ERROR_CODES.quantityInvalid);
+      }
+    }
+  });
+
+  it("states the factor honestly in the file's FieldData, deterministically", () => {
+    const first = requireOk(
+      exportSimFieldVtiDecimated(lattice(), 2),
+      "export one",
+    );
+    const second = requireOk(
+      exportSimFieldVtiDecimated(lattice(), 2),
+      "export two",
+    );
+    expect(second).toBe(first);
+    expect(first).toContain('Name="decimation"');
+    expect(first).toContain("2x2x2");
+    // The marker rides BESIDE the unit, and the full-fidelity form is
+    // marked too — the honesty never depends on the caller remembering.
+    const full = requireOk(
+      exportSimFieldVtiDecimated(lattice(), 1),
+      "factor 1",
+    );
+    expect(full).toContain("1x1x1");
+    expect(full).toContain('Name="unit"');
+    expect(full).toContain('WholeExtent="0 3 0 3 0 0"');
+    expect(first).toContain('WholeExtent="0 1 0 1 0 0"');
   });
 });
 

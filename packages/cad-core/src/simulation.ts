@@ -223,6 +223,17 @@ export interface SimScenarioBody {
   readonly materials: readonly SimMaterialAssignment[];
   /** The gravity vector, m/s² (default standard gravity, −Y). */
   readonly gravityMPerS2: SimVec3;
+  /**
+   * The flow run's fixed step budget (Phase 63c): a positive integer of
+   * lattice steps — a scenario field, never a runtime knob. Absent = the
+   * compile boundary's documented default.
+   */
+  readonly stepBudget?: number;
+  /**
+   * Whether the run also climbs the factor-2 grid-convergence ladder and
+   * reports the drift (Phase 63c's built-in trust indicator, advisory).
+   */
+  readonly gridConvergence?: boolean;
   /** The selected motor record for fan scenarios; absent = motor-less. */
   readonly motorId?: MotorId;
   /** The backend preference; absent = the CPU default. */
@@ -244,6 +255,8 @@ export interface SimScenarioInput {
   readonly fluid: string;
   readonly materials?: readonly SimMaterialAssignment[];
   readonly gravityMPerS2?: SimVec3;
+  readonly stepBudget?: number;
+  readonly gridConvergence?: boolean;
   readonly motorId?: MotorId;
   readonly backend?: SimBackendPreference;
 }
@@ -271,6 +284,7 @@ export const SIMULATION_ERROR_CODES = {
   gravityInvalid: "simulation/gravity-invalid",
   motorInvalid: "simulation/motor-invalid",
   backendInvalid: "simulation/backend-invalid",
+  runControlsInvalid: "simulation/run-controls-invalid",
 } as const;
 
 export type SimulationErrorCode =
@@ -979,6 +993,8 @@ export function buildSimScenarioBody(
   gravityMPerS2: unknown,
   motorId: unknown,
   backend: unknown,
+  stepBudget: unknown,
+  gridConvergence: unknown,
 ): ParseResult<SimScenarioBody, SimulationError> {
   if (typeof name !== "string" || !isValidSimulationName(name)) {
     return fail(
@@ -1053,6 +1069,36 @@ export function buildSimScenarioBody(
     }
     parsedBackend = match;
   }
+  let parsedStepBudget: number | undefined;
+  if (stepBudget !== undefined && stepBudget !== null) {
+    if (
+      typeof stepBudget !== "number" ||
+      !Number.isInteger(stepBudget) ||
+      stepBudget < 2
+    ) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.runControlsInvalid,
+          "A scenario's step budget must be an integer of at least 2 (so the averaging window opens inside the run).",
+          stepBudget,
+        ),
+      );
+    }
+    parsedStepBudget = stepBudget;
+  }
+  let parsedGridConvergence: boolean | undefined;
+  if (gridConvergence !== undefined && gridConvergence !== null) {
+    if (typeof gridConvergence !== "boolean") {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.runControlsInvalid,
+          "A scenario's grid-convergence flag must be a boolean.",
+          gridConvergence,
+        ),
+      );
+    }
+    parsedGridConvergence = gridConvergence;
+  }
   return ok(
     Object.freeze({
       name: name.trim(),
@@ -1062,6 +1108,12 @@ export function buildSimScenarioBody(
       fluid: fluid.trim(),
       materials: parsedMaterials.value,
       gravityMPerS2: gravity,
+      ...(parsedStepBudget === undefined
+        ? {}
+        : { stepBudget: parsedStepBudget }),
+      ...(parsedGridConvergence === undefined
+        ? {}
+        : { gridConvergence: parsedGridConvergence }),
       ...(parsedMotorId === undefined ? {} : { motorId: parsedMotorId }),
       ...(parsedBackend === undefined ? {} : { backend: parsedBackend }),
     }),
@@ -1080,6 +1132,8 @@ export interface SerializedSimScenarioBody {
     readonly materialId: string;
   }[];
   readonly gravityMPerS2: readonly [number, number, number];
+  readonly stepBudget?: number;
+  readonly gridConvergence?: boolean;
   readonly motorId?: string;
   /** Present exactly when the preference is not the CPU default. */
   readonly backend?: Exclude<SimBackendPreference, "cpu">;
@@ -1087,9 +1141,9 @@ export interface SerializedSimScenarioBody {
 
 /**
  * Serializes a scenario's authored fields; the identity rides separately.
- * Tolerates the draft form (optional collections and gravity) by applying
- * the same defaults the build boundary applies, so a command payload
- * serializes canonically without a build round-trip.
+ * Tolerates the draft form (optional collections, gravity, and run
+ * controls) by omitting the same optionals the build boundary omits, so a
+ * command payload serializes canonically without a build round-trip.
  */
 export function serializeSimScenarioBody(
   scenario: SimScenarioDraft,
@@ -1111,6 +1165,12 @@ export function serializeSimScenarioBody(
       materialId: assignment.materialId,
     })),
     gravityMPerS2: [...gravity],
+    ...(scenario.stepBudget === undefined
+      ? {}
+      : { stepBudget: scenario.stepBudget }),
+    ...(scenario.gridConvergence === undefined
+      ? {}
+      : { gridConvergence: scenario.gridConvergence }),
     ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
     ...(scenario.backend === undefined || scenario.backend === "cpu"
       ? {}
@@ -1145,6 +1205,8 @@ export function parseSimScenarioBody(
     input.gravityMPerS2,
     input.motorId,
     input.backend,
+    input.stepBudget,
+    input.gridConvergence,
   );
 }
 

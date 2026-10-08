@@ -1,20 +1,22 @@
 /**
- * The workbench's sim worker host (Phase 61b): boots the sim worker on
- * demand — the OCCT boot's pattern from the workbench page (`bootOcctWorker`
- * in `CompleteWorkbenchPage.tsx`) applied to the simulation channel. The
- * crash-settling boot (`bootSimWorkerChannel`, the Phase 35 hardening
- * discipline) settles in-flight requests if the thread ever dies and
- * reports the crash through `onCrash` so the hosting surface can display it
- * through its own error conventions; a crashed channel is the caller's to
- * forget, and the next boot starts a fresh worker.
+ * The workbench's sim worker host (Phase 61b, engine upgraded 63c): boots
+ * the sim worker on demand — the OCCT boot's pattern from the workbench
+ * page (`bootOcctWorker` in `CompleteWorkbenchPage.tsx`) applied to the
+ * simulation channel. The worker entry (`./sim-worker-entry`) hosts the
+ * ROUTED DEFAULT ENGINE: the real 2D LBM reference kernel for flow
+ * scenarios, the 61b fake engine for thermal, `structural` declined by
+ * the Phase 69 carve.
+ *
+ * The crash-settling boot (`bootSimWorkerChannel`, the Phase 35
+ * hardening discipline) settles in-flight requests if the thread ever
+ * dies and reports the crash through `onCrash` so the hosting surface
+ * can display it through its own error conventions; a crashed channel is
+ * the caller's to forget, and the next boot starts a fresh worker.
  *
  * The worker entry buffers nothing — sim hosting subscribes during module
  * evaluation — so no readiness handshake is needed: a request fired
  * immediately after `new Worker(...)` is answered once the entry loads.
- *
- * UI wiring is deliberately absent (the /workbench-sim fixture is Phase
- * 62's, the workbench panels Phase 63's);
- * this module is only the host: worker construction, the crash-settling
+ * This module is only the host: worker construction, the crash-settling
  * boot, and disposal. The module-worker URL stays an INLINE string literal
  * — the bundler statically rewrites exactly this form into its worker
  * chunks, so a variable indirection would silently break the worker

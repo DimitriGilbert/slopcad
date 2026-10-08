@@ -3266,6 +3266,204 @@ test("s24b the sim workbench renders the demo body as a grid (Phase 62)", async 
   });
 });
 
+test("s24c the sim workbench runs a wind tunnel through the real engine (Phase 63)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24c workbench-sim wind tunnel", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the Formedible scenario form's defaults ARE the demo wind
+    // tunnel — one submit saves the record into the document's
+    // simulations section (law S1).
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the real 2D LBM engine in the sim worker, awaited on the
+    // committed-application counters and the run family — never a
+    // timeout. The default budget (240 steps) publishes a preview round
+    // every 10 steps plus the final one.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "240",
+    );
+    const appliedChunks = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    // The Phase 62 grid round (8 chunks of the 2 mm fine preset) plus
+    // the run's preview rounds (240/10 = 24 rounds of one chunk at the
+    // 26×18 slice) — the exact committed-application arithmetic.
+    expect(appliedChunks).toBe(8 + 24);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // The live overlay mounted from the run's committed preview rounds
+    // (the velocity-magnitude slice; law S6 — overlay application IS
+    // committed application).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+
+    // PERSIST: the completed run landed in the local store, keyed by its
+    // scenario-snapshot hash, and the panel lists it.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      "1",
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-hash"),
+      )
+      .toMatch(/^[0-9a-f]{8}$/);
+    await expect(page.getByTestId("workbench-sim-run-row")).toHaveCount(1);
+
+    // EXPORT: the decimated .vti field series (one honest file per
+    // field block) and the force-history CSV — deterministic bytes, and
+    // the counters prove the paths ran.
+    await page.locator("#workbench-sim-export-vti").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-vti",
+      "8",
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      "1",
+    );
+  });
+});
+
+test("s24d the sim workbench compares two persisted runs (Phase 63d)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24d workbench-sim comparison", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // TWO KNOWN-DIFFERENT RUNS: the default tunnel at two inlet speeds
+    // — 0.01 and 0.015 m/s, both inside the heavily-confined demo
+    // plate's stable regime (the tunnel is ~70% blocked by the plate;
+    // 0.02 m/s already diverges the coarse lattice) — as DISTINCTLY
+    // NAMED scenario records (the document declines duplicate names),
+    // so two distinct persisted runs to compare. This stage runs both
+    // itself so it never depends on s24c's residue. (The scenario
+    // count is the PAGE's working document — this load starts empty,
+    // so the saves count 1 and 2; the run list and the compare selects
+    // below read the STORE, which persists across loads.)
+    await page.getByLabel("Scenario name").fill("tunnel-slow");
+    await page.getByLabel("Inlet speed (m/s)").fill("0.01");
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await page.getByLabel("Scenario name").fill("tunnel-faster");
+    await page.getByLabel("Inlet speed (m/s)").fill("0.015");
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // Select the two NEW runs — the chronologically last two in the
+    // compare selects (the run list is the store's chronological list).
+    const runIds = await page
+      .locator("#workbench-sim-compare-a option")
+      .evaluateAll((options) =>
+        options
+          .map((option) => (option as HTMLOptionElement).value)
+          .filter((value) => value !== ""),
+      );
+    expect(runIds.length).toBeGreaterThanOrEqual(2);
+    const runA = runIds[runIds.length - 2] ?? "";
+    const runB = runIds[runIds.length - 1] ?? "";
+    await page.locator("#workbench-sim-compare-a").selectOption(runA);
+    await page.locator("#workbench-sim-compare-b").selectOption(runB);
+
+    // The comparison fixture, awaited on the ledger counters — never a
+    // timeout: the diff's chunk round commits through the same
+    // committed-application ledger every other overlay rides, so the
+    // applied-field-chunks counter advances by EXACTLY the diff round's
+    // chunk count (8 — the fixture round shape over the 26×18 slice).
+    const chunksBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    await page.locator("#workbench-sim-compare").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-status",
+      "ready",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-runs",
+      `a:${runA}|b:${runB}`,
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(chunksBefore + 8),
+    );
+    await expect(page.getByTestId("workbench-sim-compare-error")).toHaveText(
+      "",
+    );
+
+    // The FIELD DIFF is rendered: the diffed field id, a nonzero
+    // relative L2 (two known-different inlet speeds), and the diff
+    // stats line in the panel — and the viewport's compare overlay
+    // mounted from the committed round (coolwarm diverging paint over
+    // the symmetric window).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-diff",
+      "speed",
+    );
+    const l2 = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-compare-l2"),
+    );
+    expect(l2).toBeGreaterThan(0);
+    await expect(page.getByTestId("workbench-sim-compare-diff")).toContainText(
+      "diff speed",
+    );
+
+    // The CURVE OVERLAY is rendered as data: both quantities, both
+    // runs — four deterministic polylines inside the compare panel.
+    await expect(
+      page.getByTestId("workbench-sim-compare-curves"),
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-testid="workbench-sim-compare-curves"] polyline[data-series]',
+      ),
+    ).toHaveCount(4);
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {

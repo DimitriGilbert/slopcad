@@ -14,7 +14,10 @@
  * grid, 3D and cross-section slices), the signed-distance field behind
  * its own optional door, and the named-grid semantics that ride the
  * SimResult field blocks so overlays decode them through the existing
- * payload path. The package
+ * payload path. Phase 63c adds the geometry-aware compile door
+ * (`./compile-geometry`: the tessellation's voxelized occupancy slice and
+ * the flow-run controls inside the compiled problem) and the decimated
+ * `.vti` export twin (`./export-vtk`). The package
  * carries zero runtime dependencies, no
  * React, no DOM, and no solver — everything above it (sim-flow,
  * sim-dynamics, the worker host) builds on the API exported here.
@@ -79,6 +82,12 @@ export {
   simReynolds,
 } from "./regime";
 export { canonicalSimJson, simScenarioSnapshotHash } from "./snapshot";
+export {
+  type CompiledSimRunControls,
+  type GeometrySimCompileInput,
+  SIM_FLOW_DEFAULT_STEP_BUDGET,
+  compileSimScenarioWithGeometry,
+} from "./compile-geometry";
 export {
   type CompiledSimCondition,
   type CompiledSimMotor,
@@ -162,7 +171,12 @@ export {
   type SimIdbTransaction,
   createIndexedDbSimResultStorage,
 } from "./sim-result-store-idb";
-export { exportSimFieldVti } from "./export-vtk";
+export {
+  SIM_VTI_MAX_DECIMATION,
+  decimateSimFieldBlock,
+  exportSimFieldVti,
+  exportSimFieldVtiDecimated,
+} from "./export-vtk";
 export {
   type SimEngine,
   type SimEngineFieldChunk,

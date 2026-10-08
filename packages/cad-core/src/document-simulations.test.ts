@@ -230,6 +230,58 @@ describe("the simulations document section", () => {
     expect(added.scenario.kind).toBe("structural");
   });
 
+  it("carries the Phase 63c run controls additively through add, serialize, and parse", () => {
+    const added = requireOk(
+      addDocumentSimulation(baseDocument(), {
+        ...scenarioFields(),
+        stepBudget: 240,
+        gridConvergence: true,
+      }),
+      "the run-controlled add",
+    );
+    expect(added.scenario.stepBudget).toBe(240);
+    expect(added.scenario.gridConvergence).toBe(true);
+    const serialized = serializeCadDocument(added.document);
+    const parsed = requireOk(
+      parseCadDocument(JSON.parse(JSON.stringify(serialized))),
+      "the serialized round-trip",
+    );
+    const scenario = parsed.simulations[0];
+    expect(scenario?.stepBudget).toBe(240);
+    expect(scenario?.gridConvergence).toBe(true);
+    // Absent controls stay absent (the additive discipline: old records
+    // parse unchanged, new optionals serialize only when authored).
+    const plain = requireOk(
+      addDocumentSimulation(baseDocument(), scenarioFields()),
+      "the plain add",
+    );
+    expect(plain.scenario.stepBudget).toBeUndefined();
+    expect(plain.scenario.gridConvergence).toBeUndefined();
+    const plainKeys = Object.keys(
+      (serializeCadDocument(plain.document).simulations ?? [])[0] ?? {},
+    );
+    expect(plainKeys).not.toContain("stepBudget");
+    expect(plainKeys).not.toContain("gridConvergence");
+  });
+
+  it("refuses malformed run controls with the structured code", () => {
+    for (const bad of [0, -4, 1.5] as const) {
+      const refused = addDocumentSimulation(baseDocument(), {
+        ...scenarioFields(),
+        stepBudget: bad,
+      });
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) {
+        expect(refused.error.message).toContain("step budget");
+      }
+    }
+    const refusedFlag = addDocumentSimulation(baseDocument(), {
+      ...scenarioFields(),
+      gridConvergence: "yes" as unknown as boolean,
+    });
+    expect(refusedFlag.ok).toBe(false);
+  });
+
   it("cross-checks referenced bodies and motors at the add boundary", () => {
     const unknownBody = addDocumentSimulation(baseDocument(), {
       ...scenarioFields(),

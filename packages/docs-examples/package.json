@@ -39,7 +39,8 @@
     "@slopcad/cad-kernel-occt": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
     "@slopcad/cad-sketch": "workspace:*",
-    "@slopcad/sim-core": "workspace:*"
+    "@slopcad/sim-core": "workspace:*",
+    "@slopcad/sim-flow": "workspace:*"
   },
   "peerDependencies": {
     "react": "catalog:"

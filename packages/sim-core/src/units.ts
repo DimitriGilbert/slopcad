@@ -19,6 +19,9 @@
  * pure SI (metres, metres-per-cell) for the solvers.
  */
 
+import type { CompiledSimRunControls } from "./compile-geometry";
+import type { SimOccupancyGrid } from "./voxel-grid";
+
 import { type SimError, SIM_ERROR_CODES, simError } from "./errors";
 import { getSimFluid, type SimFluidState, simFluidState } from "./fluids";
 import {
@@ -640,6 +643,26 @@ export interface CompiledSimScenario {
   readonly regime: SimRegimeReport;
   /** The scenario record's content hash at run time (§7.11 provenance). */
   readonly scenarioSnapshotHash: string;
+  /**
+   * The voxelized 2D occupancy slice of the scenario's bodies (Phase 63c,
+   * `./compile-geometry`): solver geometry in SI metres, consumed by the
+   * flow engine where it is produced (worker-side). Deliberately NOT part
+   * of the worker wire form — the geometry-aware compile attaches it, the
+   * plain compile never does, and neither ever needs it to cross back.
+   */
+  readonly occupancySlice?: SimOccupancyGrid;
+  /**
+   * The factor-2 refined twin of {@link occupancySlice}, attached when the
+   * scenario flags the grid-convergence self-check (the ladder's second
+   * rung, voxelized at half the resolution).
+   */
+  readonly occupancySliceRefined?: SimOccupancyGrid;
+  /**
+   * The flow-run controls (Phase 63c): the record's step budget and
+   * grid-convergence flag plus the derived averaging window. Attached by
+   * the geometry-aware compile for flow scenarios.
+   */
+  readonly run?: CompiledSimRunControls;
 }
 
 /**

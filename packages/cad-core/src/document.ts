@@ -3704,6 +3704,8 @@ export function addDocumentSimulation(
     input.gravityMPerS2,
     input.motorId,
     input.backend,
+    input.stepBudget,
+    input.gridConvergence,
   );
   if (!built.ok) {
     return fail(
@@ -3805,6 +3807,8 @@ export interface DocumentSimulationUpdate {
   readonly fluid: SimScenarioInput["fluid"];
   readonly materials?: SimScenarioInput["materials"];
   readonly gravityMPerS2?: SimScenarioInput["gravityMPerS2"];
+  readonly stepBudget?: SimScenarioInput["stepBudget"];
+  readonly gridConvergence?: SimScenarioInput["gridConvergence"];
   readonly motorId?: SimScenarioInput["motorId"];
   readonly backend?: SimScenarioInput["backend"];
 }
@@ -3839,6 +3843,8 @@ export function updateDocumentSimulation(
     update.gravityMPerS2,
     update.motorId,
     update.backend,
+    update.stepBudget,
+    update.gridConvergence,
   );
   if (!built.ok) {
     return fail(
@@ -5686,6 +5692,12 @@ export function parseCadDocument(
       fluid: scenario.fluid,
       materials: scenario.materials,
       gravityMPerS2: scenario.gravityMPerS2,
+      ...(scenario.stepBudget === undefined
+        ? {}
+        : { stepBudget: scenario.stepBudget }),
+      ...(scenario.gridConvergence === undefined
+        ? {}
+        : { gridConvergence: scenario.gridConvergence }),
       ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
       ...(scenario.backend === undefined ? {} : { backend: scenario.backend }),
     });

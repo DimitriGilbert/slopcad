@@ -106,14 +106,19 @@ export function isSimWorkerOperationId(
 /**
  * Input of `sim.compile`: the scenario's canonical serialized JSON verbatim
  * (the compile boundary re-validates every field — the 61a trust
- * discipline), the optional selected motor record in the same form, and the
+ * discipline), the optional selected motor record in the same form, the
  * optional body geometry bounds (document millimetres) a body-derived domain
- * needs.
+ * needs, and — Phase 63c — the optional merged tessellation of the
+ * scenario's referenced bodies in the voxelizer's wire form (flat mm
+ * positions/indices, optional normals): the geometry-aware compile door
+ * (`compileSimScenarioWithGeometry`) voxelizes it into the compiled
+ * problem's occupancy slice.
  */
 export interface WorkerSimCompileInput {
   readonly scenario: unknown;
   readonly motor?: unknown;
   readonly bodyBounds?: readonly SimBodyBoundsMm[];
+  readonly tessellation?: unknown;
 }
 
 /** Result of `sim.compile`: the minted problem id plus the compiled scenario. */
@@ -226,6 +231,7 @@ export interface SerializedSimWorkerOperationInputs {
     readonly scenario: unknown;
     readonly motor?: unknown;
     readonly bodyBounds?: readonly SerializedSimBodyBounds[];
+    readonly tessellation?: unknown;
   };
   readonly "sim.run": {
     readonly problem: string;
@@ -399,6 +405,9 @@ function serializeCompileInput(
             }),
           ),
         }),
+    ...(input.tessellation === undefined
+      ? {}
+      : { tessellation: input.tessellation }),
   };
 }
 
@@ -435,9 +444,9 @@ function parseCompileInput(
 ): ParseOutcome<WorkerSimCompileInput> {
   const record = requirePayloadRecord("sim.compile", input);
   if (!record.ok) return record;
-  // `scenario` (and the optional `motor`) cross VERBATIM: the compile
-  // boundary re-validates every field of the serialized records, so the
-  // codec demands only the scenario's presence.
+  // `scenario` (and the optional `motor`/`tessellation`) cross VERBATIM:
+  // the compile boundary re-validates every field of the serialized
+  // records, so the codec demands only the scenario's presence.
   if (!("scenario" in record.value)) {
     return payloadError(
       'The "sim.compile" payload must carry a "scenario" field.',
@@ -463,6 +472,9 @@ function parseCompileInput(
     scenario: record.value.scenario,
     ...(record.value.motor === undefined ? {} : { motor: record.value.motor }),
     ...(bodyBounds === undefined ? {} : { bodyBounds }),
+    ...(record.value.tessellation === undefined
+      ? {}
+      : { tessellation: record.value.tessellation }),
   });
 }
 
