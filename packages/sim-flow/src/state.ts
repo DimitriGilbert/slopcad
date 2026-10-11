@@ -81,10 +81,22 @@ export function createLbmState(mask: LbmSolidMask): LbmState {
  * the moment any node's density is non-finite or non-positive — the
  * divergence sentinel the stepper turns into its `diverged` flag; a
  * blown-up BGK run reports itself instead of fabricating fields.
+ *
+ * The optional per-node force arrays add Guo's half-step correction to
+ * the velocity — u = (Σf·c + F/2)/ρ — so a forced collision
+ * (`lbmCollide`'s Guo term) reads the physical velocity from its
+ * equilibrium's own convention (law: the forced stepper passes its
+ * buoyancy field here every step; an unforced call is bitwise the
+ * plain form, F = 0 contributing exact zeros).
  */
-export function lbmComputeMacroscopic(state: LbmState): boolean {
+export function lbmComputeMacroscopic(
+  state: LbmState,
+  forceX?: Float64Array,
+  forceY?: Float64Array,
+): boolean {
   const { f, rho, ux, uy } = state;
   const mask = state.solid.solid;
+  const forced = forceX !== undefined && forceY !== undefined;
   for (let index = 0; index < mask.length; index += 1) {
     if (mask[index] === 1) continue;
     let sum = 0;
@@ -98,8 +110,8 @@ export function lbmComputeMacroscopic(state: LbmState): boolean {
     }
     if (!Number.isFinite(sum) || sum <= 0) return false;
     rho[index] = sum;
-    ux[index] = mx / sum;
-    uy[index] = my / sum;
+    ux[index] = (mx + (forced ? (forceX?.[index] ?? 0) / 2 : 0)) / sum;
+    uy[index] = (my + (forced ? (forceY?.[index] ?? 0) / 2 : 0)) / sum;
   }
   return true;
 }

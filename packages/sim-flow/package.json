@@ -18,7 +18,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@slopcad/sim-core": "workspace:*"
+    "@slopcad/sim-core": "workspace:*",
+    "@slopcad/sim-thermal": "workspace:*"
   },
   "devDependencies": {
     "@slopcad/config": "workspace:*",

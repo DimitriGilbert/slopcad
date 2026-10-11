@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The runnable documentation examples (Phase 34): every guide in docs/guides references an example that lives here, and every example is machine-verified \u2014 `pnpm verify` typechecks and builds this package through the normal turbo graph, and its vitest suite RUNS each example and asserts the documented outcomes. The web app's /docs documentation application imports the browser-safe examples directly, so the page proves the same code the gates prove.",
+  "description": "The runnable documentation examples (Phase 34): every guide in docs/guides references an example that lives here, and every example is machine-verified — `pnpm verify` typechecks and builds this package through the normal turbo graph, and its vitest suite RUNS each example and asserts the documented outcomes. The web app's /docs documentation application imports the browser-safe examples directly, so the page proves the same code the gates prove.",
   "exports": {
     ".": {
       "default": "./src/index.ts"
@@ -32,15 +32,16 @@
     "@slopcad/cad-components": "workspace:*",
     "@slopcad/cad-core": "workspace:*",
     "@slopcad/cad-io": "workspace:*",
-    "@slopcad/cad-jsx": "workspace:*",
     "@slopcad/cad-jscad": "workspace:*",
+    "@slopcad/cad-jsx": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",
     "@slopcad/cad-kernel-occt": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
     "@slopcad/cad-sketch": "workspace:*",
     "@slopcad/sim-core": "workspace:*",
-    "@slopcad/sim-flow": "workspace:*"
+    "@slopcad/sim-flow": "workspace:*",
+    "@slopcad/sim-thermal": "workspace:*"
   },
   "peerDependencies": {
     "react": "catalog:"

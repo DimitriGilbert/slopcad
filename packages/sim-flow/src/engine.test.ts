@@ -368,7 +368,7 @@ describe("createLbmSimEngine: the contract over compiled problems", () => {
     expect(thermalRun.error.code).toBe("sim/scenario-kind-unsupported");
   });
 
-  it("routes through the default engine: thermal rides the fake engine, the flow engine serves flow", async () => {
+  it("routes through the default engine: the retired fake thermal route declines geometry-less thermal runs, the flow engine serves flow", async () => {
     const routed = createDefaultSimEngine();
     expect(routed.supportedKinds).toContain("flow");
     expect(routed.supportedKinds).toContain("thermal");
@@ -377,6 +377,9 @@ describe("createLbmSimEngine: the contract over compiled problems", () => {
     if (!compiled.ok) return;
     const run = await routed.run({ compiled: compiled.value });
     expect(run.ok).toBe(true);
+    // Phase 65c retired the fake thermal route: a thermal scenario the
+    // compile had no geometry for now declines loudly at the REAL
+    // conduction engine's geometry door — never a synthetic result.
     const thermal = compileSimScenarioWithGeometry({
       scenario: {
         name: "warm",
@@ -393,13 +396,9 @@ describe("createLbmSimEngine: the contract over compiled problems", () => {
     });
     if (!thermal.ok) return;
     const thermalRun = await routed.run({ compiled: thermal.value });
-    expect(thermalRun.ok).toBe(true);
-    if (thermalRun.ok) {
-      // The fake engine's signature histories (the routing proof).
-      expect(thermalRun.value.histories.map((series) => series.name)).toEqual([
-        "max-temperature",
-      ]);
-    }
+    expect(thermalRun.ok).toBe(false);
+    if (thermalRun.ok) return;
+    expect(thermalRun.error.code).toBe("sim/geometry-unavailable");
   });
 
   it("finalizes through the persistence payload: the decoded blocks match the result's fields", async () => {

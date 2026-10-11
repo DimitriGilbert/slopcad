@@ -206,8 +206,10 @@ export function createSimWorkerServer(
         case "sim.compile": {
           // The Phase 63c geometry-aware door: the 61a compile plus the
           // tessellation's voxelized occupancy slice (and run controls) when
-          // the request carries geometry — identical to the 61a compile
-          // otherwise, so every existing path keeps its exact behavior.
+          // the request carries geometry — and, Phase 65c, the thermal
+          // branch's per-body tessellations and material records —
+          // identical to the 61a compile otherwise, so every existing
+          // path keeps its exact behavior.
           const compiled = compileSimScenarioWithGeometry({
             scenario: request.input.scenario,
             ...(request.input.motor === undefined
@@ -219,6 +221,12 @@ export function createSimWorkerServer(
             ...(request.input.tessellation === undefined
               ? {}
               : { tessellation: request.input.tessellation }),
+            ...(request.input.materials === undefined
+              ? {}
+              : { materials: request.input.materials }),
+            ...(request.input.bodyTessellations === undefined
+              ? {}
+              : { bodyTessellations: request.input.bodyTessellations }),
           });
           return compiled.ok
             ? { status: "compiled", compiled: compiled.value }

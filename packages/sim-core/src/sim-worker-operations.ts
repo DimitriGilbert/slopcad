@@ -112,13 +112,24 @@ export function isSimWorkerOperationId(
  * scenario's referenced bodies in the voxelizer's wire form (flat mm
  * positions/indices, optional normals): the geometry-aware compile door
  * (`compileSimScenarioWithGeometry`) voxelizes it into the compiled
- * problem's occupancy slice.
+ * problem's occupancy slice. Phase 65c adds the thermal branch's pair: the
+ * optional serialized `DocumentMaterialRecord` wire objects the scenario's
+ * material assignments reference, and the referenced bodies' OWN
+ * tessellations (one entry per body) — the per-body form the per-cell
+ * material map needs.
  */
 export interface WorkerSimCompileInput {
   readonly scenario: unknown;
   readonly motor?: unknown;
   readonly bodyBounds?: readonly SimBodyBoundsMm[];
   readonly tessellation?: unknown;
+  /** Phase 65c: the material records the thermal branch resolves by id. */
+  readonly materials?: readonly unknown[];
+  /** Phase 65c: the per-body tessellations the thermal branch voxelizes. */
+  readonly bodyTessellations?: readonly {
+    readonly bodyId: string;
+    readonly tessellation: unknown;
+  }[];
 }
 
 /** Result of `sim.compile`: the minted problem id plus the compiled scenario. */
@@ -232,6 +243,11 @@ export interface SerializedSimWorkerOperationInputs {
     readonly motor?: unknown;
     readonly bodyBounds?: readonly SerializedSimBodyBounds[];
     readonly tessellation?: unknown;
+    readonly materials?: readonly unknown[];
+    readonly bodyTessellations?: readonly {
+      readonly bodyId: string;
+      readonly tessellation: unknown;
+    }[];
   };
   readonly "sim.run": {
     readonly problem: string;
@@ -408,6 +424,17 @@ function serializeCompileInput(
     ...(input.tessellation === undefined
       ? {}
       : { tessellation: input.tessellation }),
+    ...(input.materials === undefined
+      ? {}
+      : { materials: [...input.materials] }),
+    ...(input.bodyTessellations === undefined
+      ? {}
+      : {
+          bodyTessellations: input.bodyTessellations.map((entry) => ({
+            bodyId: entry.bodyId,
+            tessellation: entry.tessellation,
+          })),
+        }),
   };
 }
 
@@ -468,6 +495,52 @@ function parseCompileInput(
       bodyBounds.push(parsed.value);
     }
   }
+  // `materials` and `bodyTessellations` cross VERBATIM after the
+  // structural gate (arrays; body entries carry a string bodyId) — the
+  // compile boundary re-validates the records and tessellations itself.
+  let materials: unknown[] | undefined;
+  if (record.value.materials !== undefined) {
+    if (!Array.isArray(record.value.materials)) {
+      return payloadError(
+        'The "sim.compile" field "materials" must be an array of serialized material records.',
+        record.value.materials,
+      );
+    }
+    materials = (record.value.materials as readonly unknown[]).map(
+      (record) => record,
+    );
+  }
+  let bodyTessellations:
+    { readonly bodyId: string; readonly tessellation: unknown }[] | undefined;
+  if (record.value.bodyTessellations !== undefined) {
+    if (!Array.isArray(record.value.bodyTessellations)) {
+      return payloadError(
+        'The "sim.compile" field "bodyTessellations" must be an array of body tessellation entries.',
+        record.value.bodyTessellations,
+      );
+    }
+    bodyTessellations = [];
+    for (const entry of record.value.bodyTessellations) {
+      const entryRecord = requirePayloadRecord("sim.compile", entry);
+      if (!entryRecord.ok) return entryRecord;
+      const bodyId = requireString(
+        entryRecord.value.bodyId,
+        "sim.compile",
+        "bodyTessellations.bodyId",
+      );
+      if (!bodyId.ok) return bodyId;
+      if (!("tessellation" in entryRecord.value)) {
+        return payloadError(
+          'The "sim.compile" body tessellation entries must carry a "tessellation" field.',
+          entry,
+        );
+      }
+      bodyTessellations.push({
+        bodyId: bodyId.value,
+        tessellation: entryRecord.value.tessellation,
+      });
+    }
+  }
   return parseOk({
     scenario: record.value.scenario,
     ...(record.value.motor === undefined ? {} : { motor: record.value.motor }),
@@ -475,6 +548,8 @@ function parseCompileInput(
     ...(record.value.tessellation === undefined
       ? {}
       : { tessellation: record.value.tessellation }),
+    ...(materials === undefined ? {} : { materials }),
+    ...(bodyTessellations === undefined ? {} : { bodyTessellations }),
   });
 }
 

@@ -8,12 +8,16 @@ the `/workbench-sim` fixture page showing any document body as a grid.
 Phase 63 added the first real physics: the **2D wind tunnel** — a
 deterministic D2Q9 LBM reference kernel (`@slopcad/sim-flow`) behind
 the `SimEngine` contract, with the run comparison surface and the
-known-cases gallery closing the phase. What does NOT exist yet:
-thermal (65), 3D flow and rotating machinery with motor operating
-points (66), mechanism dynamics (67), combustion (68), structural FEM
-(69 — the kind declines with `sim/scenario-kind-unsupported` today),
-and parametric optimization (70). The plan is `ROADMAP-SIM.md`; the
-decision record is `docs/architecture/adr-simulation.md`.
+known-cases gallery closing the phase. Phase 65 added the **thermal
+domain**: FVM conduction with real materials and equilibrium
+boundaries, the conjugate buoyant coupling to the flow field, and the
+stove demo — a heated solid conducting through its wall and convecting
+to air, without fire. What does NOT exist yet: 3D flow and rotating
+machinery with motor operating points (66), mechanism dynamics (67),
+combustion (68), structural FEM (69 — the kind declines with
+`sim/scenario-kind-unsupported` today), and parametric optimization
+(70). The plan is `ROADMAP-SIM.md`; the decision record is
+`docs/architecture/adr-simulation.md`.
 
 ## Scenarios are document records (law S1)
 
@@ -93,18 +97,22 @@ the streaming surface: field chunks are slices of the finalized block
 (gapless indices, one header per field), so a reassembled stream is
 byte-identical to the persisted payload.
 
-The hosted engine is routed (Phase 63c, extended 64a/64b): **flow**
-scenarios run the real 2D LBM engine (`@slopcad/sim-flow`), **thermal**
-runs the deterministic **fake engine** (`FAKE_SIM_ENGINE`, the
-`fake-kernel` precedent: it exercises every protocol path until Phase
-65's real thermal solver lands); `structural` is declined by neither
-engine's kind list — the Phase 69 carve. A `gpu`-preferred flow
-scenario routes to the **WGSL compute provider** (Phase 64a) when the
-feature detect finds a WebGPU device, and falls back GRACEFULLY to the
-CPU oracle twin when it does not — never a silent fallback you cannot
-see: the completed run's summary carries `servedBackend`
-(`"cpu"`/`"gpu"`), the honest record of which kernel executed it (the
-`/workbench-sim` fixture surfaces it as `data-sim-served-backend`).
+The hosted engine is routed (Phase 63c, extended 64a/64b and 65c):
+**flow** scenarios run the real 2D LBM engine (`@slopcad/sim-flow`),
+**thermal** scenarios run the REAL thermal engines (Phase 65c retired
+the interim fake-engine thermal route): the coupled conjugate march
+(`@slopcad/sim-flow`'s CHT engine, `thermal-cht-cpu-reference`) when
+the scenario flags the coupling, the sealed conduction solve
+(`@slopcad/sim-thermal`'s engine, `thermal-fvm-cpu-reference`)
+otherwise — the split is exactly where the solvers live; `structural`
+is declined by no engine's kind list — the Phase 69 carve. A
+`gpu`-preferred flow scenario routes to the **WGSL compute provider**
+(Phase 64a) when the feature detect finds a WebGPU device, and falls
+back GRACEFULLY to the CPU oracle twin when it does not — never a
+silent fallback you cannot see: the completed run's summary carries
+`servedBackend` (`"cpu"`/`"gpu"`), the honest record of which kernel
+executed it (the `/workbench-sim` fixture surfaces it as
+`data-sim-served-backend`).
 
 ## The GPU path's honesty gates (law S5)
 
@@ -280,16 +288,80 @@ fixture (`symmetry.test.ts`) — a symmetry-plane run at half the domain
 whose fields match the mirrored full run within the stated band, with
 the full run's mirror symmetry itself pinned bitwise.
 
+## The stove: conduction and conjugate heat transfer (Phase 65)
+
+A saved thermal scenario runs the real thermal domain end to end:
+scenario → the geometry-aware compile's THERMAL branch (each referenced
+body's OWN tessellation voxelized at the domain's mid-height plane,
+unioned into the occupancy slice, and resolved into a PER-CELL material
+map — one index per voxel, the serialized `DocumentMaterialRecord` wire
+records riding the `sim.compile` input beside the per-body
+tessellations) → the routed engine (the sealed conduction solve or the
+coupled march, per the scenario's stance) → the persisted `SimResult`
+with the S9 regime (Prandtl always, Rayleigh under the compile's ΔT
+rule), the temperature extremes, the MEASURED energy-ledger facts (the
+source, the convection and radiation losses, the closing imbalance),
+and the temperature field as the overlay block.
+
+The scenario record carries its solve stance as a kind-locked
+`thermal` clause (a thermal scenario without one declines at the
+document boundary; no other kind accepts one): the radiation mode
+(off / linearized / full Stefan–Boltzmann), the steady-vs-transient
+stance with its budget (duration + sample cadence, an integer
+multiple), the total source power, the initial/ambient temperature,
+the equilibrium boundary's ambient convection coefficient, and the
+conjugate-coupling flag (transient-only — a steady coupled stance
+cannot even save).
+
+**Both modes of the demo are one form away on `/workbench-sim`** (the
+Formedible thermal form beside the flow form): the SEALED mode (steady
+equilibrium — every exposed face loses through the §7.12 boundary:
+ambient convection plus the radiation mode's loss, so the heated plate
+settles at a REAL wall temperature) and the COUPLED mode (the transient
+buoyant plume — the solid conducts, the interface exchanges heat
+conservatively with the fluid, Boussinesq buoyancy drives the plume,
+and fixed-temperature room walls at ambient are the loss path a sealed
+cavity otherwise lacks). The completed run's temperature preview round
+applies through the committed-application ledger (law S6) and paints
+the cool–warm colormap over the field's own range; runs persist through
+the same SimResultStore panel family (law S7).
+
+**Honest scope** (stated, never hidden):
+
+- **Coarse enclosure radiation.** The grey-diffuse enclosure exchange
+  is the uniform-radiosity form — one radiosity temperature per cavity,
+  no view factors, no participating media, no spectral bands. The
+  surface-to-ambient Stefan–Boltzmann loss is exact (full quartic,
+  Picard-lagged) or linearized (the standard solver-friendly slope at a
+  stated reference temperature — the cross-check band the fixtures
+  pin).
+- **Equilibrium boundaries, not CFD convection.** The sealed mode's
+  ambient convection uses the scenario's authored h — a constant, not a
+  solved boundary layer. The coupled mode's fluid convection is the
+  2D lattice's, per the wind tunnel's own honesty bands.
+- **S9 framing, not CFD-grade claims.** Pr always, Ra whenever the
+  buoyancy gate's inputs exist (the largest |T − T_ref| across the
+  temperature-bearing conditions); the numbers are advisory honesty
+  about the regime, never a validity certificate. The stove's settled
+  wall is trustworthy as a comparative equilibrium (geometry A vs
+  geometry B), stated with its staircase boundary band — not a
+  certified absolute.
+- **The 2D slab convention.** The thermal slice is a unit-depth slab:
+  every watt, joule and capacity is PER METRE OF DEPTH, the same
+  convention the coupled march and the flow kernel's forces use.
+
 ## What does not exist yet
 
-Honest inventory, per phase: thermal (65), 3D flow and rotating
-machinery with motor operating points (66 — the WGSL provider exists
-and is tolerance-gated for 2D, but 3D D3Q19 is 66's), mechanism
-dynamics (67), combustion (68), structural FEM (69 — the kind declines
-with `sim/scenario-kind-unsupported` today), and parametric
-optimization (70). The GPU path's hardware-class perf budget is
-likewise not recorded yet (not recordable on the spike's software
-device — see `docs/architecture/wgsl-prespike-findings.md` §4).
+Honest inventory, per phase: 3D flow and rotating machinery with motor
+operating points (66 — the WGSL provider exists and is tolerance-gated
+for 2D, but 3D D3Q19 is 66's), mechanism dynamics (67), combustion
+(68), structural FEM (69 — the kind declines with
+`sim/scenario-kind-unsupported` today), and parametric optimization
+(70). Motor thermal (I²R winding heat feeding the thermal solver,
+derating curves) is likewise deferred until a ruling raises it. The GPU
+path's hardware-class perf budget is likewise not recorded yet (not
+recordable on the spike's software device — see
+`docs/architecture/wgsl-prespike-findings.md` §4).
 
 ## The runnable examples
 
@@ -309,6 +381,9 @@ the closed-set convention), the z-slice resolves its plane exactly, the
 signed distances at the probed nodes are exact millimetres-in-metres,
 and the grid → block → payload → decode → grid door round-trips
 identically. `packages/docs-examples/src/sim/gallery.ts` is the
-known-cases gallery above. `packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
+known-cases gallery above. `packages/docs-examples/src/sim/thermal.ts`
+is the Phase 65 stove walk: the kind-locked stance decline, the sealed
+equilibrium's closing energy balance, the coupled plume's warmed air
+and closing ledger, and both engines' end-to-end determinism. `packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
 the `/workbench-sim` fixture's demo model — the plate-with-bore
 cad-jsx authoring the page voxelizes.

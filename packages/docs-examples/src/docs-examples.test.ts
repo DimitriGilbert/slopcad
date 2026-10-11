@@ -46,6 +46,7 @@ import {
   SOD_SHOCK_MACH,
 } from "./sim/gallery";
 import { runSimSpineExample } from "./sim/spine";
+import { runSimThermalExample } from "./sim/thermal";
 import { runSimVoxelExample } from "./sim/voxel";
 import { runSimDemoBodyExample } from "./cadjsx/sim-demo-body";
 import { runSketchExample } from "./sketch/sketch";
@@ -457,6 +458,34 @@ describe("guide example: simulation spine (Phase 61)", () => {
     expect(summary.csvRows).toBe(6);
     expect(summary.csvHeader).toBe("drag (N)");
   });
+});
+
+describe("guide example: the stove (Phase 65 — conduction and conjugate heat transfer)", () => {
+  it(
+    "settles the sealed equilibrium with a closing balance and runs the coupled plume",
+    { timeout: 30_000 },
+    async () => {
+      const summary = await runSimThermalExample();
+      // The kind-lock: a thermal record without its stance declines at
+      // the document boundary.
+      expect(summary.stanceDeclined).toBe(true);
+      // The sealed stove settles above its 293.15 K ambient, inside a
+      // physical band (an 8 W/m source against steel conduction and the
+      // §7.12 equilibrium boundary).
+      expect(summary.settledMaxK).toBeGreaterThan(293.15);
+      expect(summary.settledMaxK).toBeLessThan(400);
+      // The MEASURED energy balance closes: |imbalance|/source ≤ 2%.
+      expect(summary.balanceRelative).toBeLessThan(0.02);
+      // The one field block is the temperature overlay's.
+      expect(summary.fieldId).toBe("temperature");
+      // The coupled plume: the air warmed above its initial field, and
+      // the march's ledger closes within 5% of its term scale.
+      expect(summary.plumeFluidMaxK).toBeGreaterThan(293.15);
+      expect(summary.plumeClosureRelative).toBeLessThan(0.05);
+      // Both engines are deterministic end to end.
+      expect(summary.deterministic).toBe(true);
+    },
+  );
 });
 
 describe("guide example: the voxelizer (Phase 62, law S3)", () => {

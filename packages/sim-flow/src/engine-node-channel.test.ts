@@ -69,7 +69,7 @@ const OBSTACLE = boxTessellationWire([40, 15, 0], [60, 25, 10]);
 async function runOverChannel(
   channel: ReturnType<typeof createLbmNodeWorkerChannel>,
   scenario: Record<string, unknown>,
-  tessellation: unknown = OBSTACLE,
+  compile: Record<string, unknown> = { tessellation: OBSTACLE },
 ): Promise<{
   readonly notifications: readonly SimNotificationDelivery[];
   readonly summary: SimResultSummary;
@@ -84,7 +84,7 @@ async function runOverChannel(
   try {
     const compiled = await channel.client.request("sim.compile", {
       scenario,
-      tessellation,
+      ...compile,
     });
     const run = await channel.client.request("sim.run", {
       problem: compiled.problem,
@@ -242,25 +242,75 @@ describe("the routed engine over the node worker channel", () => {
     }
   });
 
-  it("routes thermal to the fake engine on the same channel and declines structural with the Phase 69 carve", async () => {
+  it("routes thermal to the real conduction engine on the same channel and declines structural with the Phase 69 carve", async () => {
     const channel = createLbmNodeWorkerChannel();
     try {
-      const thermal = await runOverChannel(channel, {
-        name: "warm",
-        kind: "thermal",
-        domain: {
-          kind: "explicit",
-          min: [0, 0, 0],
-          max: [10, 10, 10],
-          resolutionMm: 2,
+      // Phase 65c: the retired fake thermal route's channel proof — a
+      // REAL steady conduction run compiles (per-body tessellation +
+      // material records across the wire), runs (the temperature
+      // preview round through the notification stream), and finalizes
+      // (the S9 regime, the ledger quantities, the temperature block).
+      const thermal = await runOverChannel(
+        channel,
+        {
+          name: "warm-bar",
+          kind: "thermal",
+          domain: {
+            kind: "explicit",
+            min: [0, 0, 0],
+            max: [100, 40, 10],
+            resolutionMm: 5,
+          },
+          conditions: [
+            {
+              kind: "convection-ambient",
+              face: "yMin",
+              heatTransferCoefficientWPerM2K: 5,
+              ambientTemperatureK: 293.15,
+            },
+          ],
+          fluid: "air",
+          materials: [{ bodyId: "body_bar", materialId: "mat_steel" }],
+          thermal: {
+            radiationMode: "linearized",
+            solveMode: "steady",
+            cht: false,
+            sourceW: 8,
+            initialTemperatureK: 293.15,
+            ambientConvectionWPerM2K: 5,
+          },
         },
-        conditions: [],
-        fluid: "air",
-      });
+        {
+          materials: [
+            {
+              id: "mat_steel",
+              name: "Steel",
+              densityGPerCm3: 7.8,
+              thermalConductivityWPerMK: 45,
+              specificHeatJPerKgK: 466,
+              emissivity: 0.6,
+            },
+          ],
+          bodyTessellations: [{ bodyId: "body_bar", tessellation: OBSTACLE }],
+        },
+      );
       expect(thermal.summary.status).toBe("completed");
-      expect(thermal.histories.map((series) => series.name)).toEqual([
-        "max-temperature",
-      ]);
+      expect(thermal.fields.map((field) => field.id)).toContain("temperature");
+      const quantityNames = thermal.summary.quantities.map(
+        (quantity) => quantity.name,
+      );
+      expect(quantityNames).toContain("max-temperature");
+      expect(quantityNames).toContain("net-heat-imbalance");
+      // The equilibrium boundary is real: the bar settles above its
+      // 293.15 K initial field and below a 2× excess band.
+      const maxTemperature = thermal.summary.quantities.find(
+        (quantity) => quantity.name === "max-temperature",
+      );
+      expect(maxTemperature).toBeDefined();
+      if (maxTemperature !== undefined) {
+        expect(maxTemperature.value).toBeGreaterThan(293.15);
+        expect(maxTemperature.value).toBeLessThan(600);
+      }
 
       const structuralId = createSimWorkerRequestId("req_structural");
       const structuralPromise = channel.client.request(

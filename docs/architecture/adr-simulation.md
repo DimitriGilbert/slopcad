@@ -205,3 +205,47 @@ executed a run. Evidence and rationale:
 `docs/architecture/wgsl-prespike-findings.md` (the
 `occt-prespike-findings` precedent). Thermal stays the fake engine's
 until Phase 65.
+
+## Implementation status (2026-10-10): Phase 65 is implemented (conduction, conjugate coupling, the stove)
+
+Phase 65a: the FVM conduction domain lives in `@slopcad/sim-thermal` —
+the cell-centred energy balance over the voxel cells with per-cell
+materials from the extended `DocumentMaterialRecord` (re-validated at
+the package's own material door), the deterministic implicit steady
+solve (Jacobi-preconditioned CG, Picard-lagged full radiation, loud
+iteration-cap declines) and the explicit/implicit transient march, the
+complete boundary set (Dirichlet, Neumann, convection-to-ambient,
+surface-to-ambient Stefan–Boltzmann in both the linearized and the
+exact quartic form, and the grey-diffuse uniform-radiosity enclosure
+exchange), the per-connected-component steady-anchor analysis, the
+energy-conservation audit, and the S9 wiring (Prandtl always, Rayleigh
+under the 61a ΔT magnitude rule). Phase 65b: the conjugate coupling
+lives in `@slopcad/sim-flow` — the passive-scalar fluid thermal march
+(decided over double-distribution on measured fixtures: conservative
+by construction, interface-continuous at the stove's 1700:1 contrast),
+the Boussinesq buoyancy force through Guo collision forcing, and the
+lockstep coupled march (flow → fluid thermal → solid per coupling
+interval) whose interface exchange is conservative BY CONSTRUCTION and
+whose energy ledger is measured, never assumed. Phase 65c: the product
+surface — the real thermal engines behind the Phase 61 `SimEngine`
+contract (`@slopcad/sim-thermal`'s conduction engine for the sealed
+stance, `@slopcad/sim-flow`'s CHT engine for the coupled stance — the
+split exactly where the solvers live, composed by the routed default
+engine which retired the interim fake-engine thermal route); the
+geometry-aware compile's thermal branch (per-body tessellations → the
+union occupancy slice + the per-cell material map, with the serialized
+material records riding the `sim.compile` wire); the scenario record's
+kind-locked thermal stance (radiation mode, steady/transient budget,
+source, ambient equilibrium boundary, coupling flag); the stove demo on
+`/workbench-sim` (the Formedible thermal form beside the flow form, the
+temperature overlay through the Phase 62 family with the cool–warm
+colormap, persistence through the same SimResultStore panel family);
+the render baselines for the temperature overlay under SwiftShader and
+the session stage s24f (both stove modes driven from the UI, awaited on
+`data-sim-*` counters); and the runnable docs example
+(`packages/docs-examples/src/sim/thermal.ts`). Honest scope stated in
+the guide: the enclosure exchange is the coarse uniform-radiosity form,
+the sealed mode's ambient convection is the authored constant h, and
+the S9 numbers are advisory regime honesty, never CFD-grade
+certificates. `structural` still declines with
+`sim/scenario-kind-unsupported` until Phase 69.

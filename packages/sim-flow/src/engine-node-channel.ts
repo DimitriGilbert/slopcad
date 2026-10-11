@@ -1,8 +1,8 @@
 /**
  * The Node host of the real-engine sim worker (Phase 63c): creates a
  * real `node:worker_threads` thread running the `./engine-worker.node`
- * entry — the routed engine (2D LBM for flow, fake for thermal) — and
- * returns the fully wired channel. This is `@slopcad/sim-core`'s
+ * entry — the routed engine (2D LBM for flow, real conduction/CHT for
+ * thermal, Phase 65c) — and returns the fully wired channel. This is `@slopcad/sim-core`'s
  * `createSimNodeWorkerChannel` restated against sim-flow's own entry
  * (the sim-core channel's entry is hardcoded to the fake-engine host;
  * sim-core cannot import sim-flow, so the real-engine channel lives

@@ -1,7 +1,8 @@
 /**
  * The `/workbench-sim` fixture page (ROADMAP-SIM Phase 62c, extended
- * 63c — the flow ENGINE + PRODUCT SURFACE — and 63d — the run
- * COMPARISON SURFACE).
+ * 63c — the flow ENGINE + PRODUCT SURFACE —, 63d — the run
+ * COMPARISON SURFACE —, and 65c — the THERMAL ENGINE + the STOVE
+ * DEMO).
  *
  * ## Phase 62 (unchanged): "here is your part as a grid"
  *
@@ -43,6 +44,24 @@
  * `data-sim-*` counters advance on its commit, and the overlay mounts
  * only from the applied round.
  *
+ * ## Phase 65c: the stove (a heated solid, its wall, and the air)
+ *
+ * A Formedible THERMAL scenario form sits beside the flow form and
+ * authors the demo's stove record — the heated plate conducting through
+ * its wall and losing to air (a stove without fire): the SEALED
+ * conduction mode (steady equilibrium with the §7.12 ambient
+ * convection + radiation boundary) and the COUPLED mode (the transient
+ * buoyant plume — fixed-temperature room walls, Boussinesq buoyancy,
+ * the conservative interface exchange) are both one form away. The
+ * routed engine serves thermal for real now (the fake-engine thermal
+ * route retired): the compile carries the per-body tessellations and
+ * the material records across the wire, the run streams the temperature
+ * preview round through the same ledger, and the overlay paints the
+ * block through the 62 family with the cool–warm colormap over the
+ * field's own range. The completed run persists through the same
+ * SimResultStore panel family (law S7), keyed by the same hash
+ * discipline.
+ *
  * ## Machine-readable surface
  *
  * The render session's settle family (`data-dispatched`,
@@ -57,9 +76,10 @@
  * `data-sim-run-count`, `data-sim-run-hash`, `data-sim-served-backend`
  * (the completed run's honest kernel record — "cpu" | "gpu" | ""),
  * `data-sim-export-vti`
- * (exported .vti file count), `data-sim-export-csv`, and the 63d
- * compare family: `data-sim-compare-status` (idle | comparing | ready |
- * failed), `data-sim-compare-runs` (`a:<id>|b:<id>`),
+ * (exported .vti file count), `data-sim-export-csv`, the live overlay's
+ * field id (`data-sim-live-field` — "speed" or "temperature"), and the
+ * 63d compare family: `data-sim-compare-status` (idle | comparing |
+ * ready | failed), `data-sim-compare-runs` (`a:<id>|b:<id>`),
  * `data-sim-compare-diff` (the diffed field id once rendered),
  * `data-sim-compare-l2` (the relative L2 difference), and
  * `data-sim-compare-error`.
@@ -84,6 +104,7 @@ import type { DecodedFieldGrid } from "@slopcad/cad-r3f";
 import {
   CAD_FIELD_COLORMAP_COOLWARM,
   CAD_FIELD_COLORMAP_VIRIDIS,
+  type FieldColormap,
   decodedFieldGrid,
 } from "@slopcad/cad-r3f";
 
@@ -113,6 +134,8 @@ import {
   stampSimAppliedCounters,
 } from "./sim-grid-fixture";
 import { FlowScenarioForm } from "./flow-scenario-form";
+import { ThermalScenarioForm } from "./thermal-scenario-form";
+import { thermalMaterialPresetOf } from "./thermal-materials";
 import {
   type FlowRunOutcome,
   type FlowRunPhase,
@@ -158,6 +181,22 @@ const COMPARE_PANEL_HEIGHT = 64;
 const DEMO_DOCUMENT = simDemoDocument();
 const DEMO_BODIES = documentSceneBodies(DEMO_DOCUMENT, new Set(), null);
 const DEMO_RENDERABLE = renderableBodyIds(DEMO_DOCUMENT);
+/**
+ * The single demo body every thermal material assignment addresses —
+ * the first renderable body's own branded id (the demo document's one
+ * body; the assignment needs the record's branded id, not the set's
+ * plain string). The demo document without a body is a fixture bug the
+ * module scope reports immediately, never a runtime guess.
+ */
+const DEMO_BODY = DEMO_DOCUMENT.bodies.find((body) =>
+  DEMO_RENDERABLE.has(body.id as string),
+);
+if (DEMO_BODY === undefined) {
+  throw new Error(
+    "The sim demo document carries no renderable body for the thermal material assignment.",
+  );
+}
+const DEMO_BODY_ID = DEMO_BODY.id;
 
 /** An applied document-scene settle: the render state plus its revision. */
 interface AppliedScene {
@@ -167,18 +206,40 @@ interface AppliedScene {
 
 /** The live-field overlay the run's completed preview rounds paint. */
 interface LiveFieldOverlay {
+  /** The block's field id — "speed" (flow) or "temperature" (thermal). */
+  readonly fieldId: string;
   readonly field: DecodedFieldGrid;
   readonly slicePositionMm: number;
   readonly valueRange: readonly [number, number];
 }
 
-/** Derives the live overlay from a reassembled preview block. */
+/**
+ * Derives the live overlay from a reassembled preview block: the
+ * temperature block paints the cool–warm colormap over its OWN range
+ * (a data-derived window — deterministic because the block is); the
+ * speed block keeps the viridis colormap over the inlet band (the
+ * original 63c paint).
+ */
 function liveOverlayOf(block: SimResultFieldBlock): LiveFieldOverlay {
   const decoded = decodedFieldGrid(block);
+  const isTemperature = block.id === "temperature";
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  if (isTemperature) {
+    for (const value of block.values) {
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+    if (!(max > min)) max = min + 1;
+  } else {
+    min = 0;
+    max = OVERLAY_INLET_MM_PER_S;
+  }
   return {
+    fieldId: block.id,
     field: decoded,
     slicePositionMm: decoded.originMm[2] ?? 0,
-    valueRange: [0, OVERLAY_INLET_MM_PER_S],
+    valueRange: [min, max],
   };
 }
 
@@ -189,10 +250,18 @@ type OverlayMode = "fixture" | "live" | "compare";
 function diffOverlayOf(diff: SimFieldDiff): LiveFieldOverlay {
   const decoded = decodedFieldGrid(diff.block);
   return {
+    fieldId: diff.block.id,
     field: decoded,
     slicePositionMm: decoded.originMm[2] ?? 0,
     valueRange: diff.valueRange,
   };
+}
+
+/** The colormap a live field paints: cool–warm for temperature, viridis otherwise. */
+function liveColormapOf(fieldId: string): FieldColormap {
+  return fieldId === "temperature"
+    ? CAD_FIELD_COLORMAP_COOLWARM
+    : CAD_FIELD_COLORMAP_VIRIDIS;
 }
 
 export function SimWorkbenchPage(): ReactElement {
@@ -385,7 +454,7 @@ export function SimWorkbenchPage(): ReactElement {
     }
     if (settled === null || !("bodies" in settled.state.measurement)) {
       setSimError(
-        "The scene has not settled; the tunnel needs its tessellation.",
+        "The scene has not settled; the solver needs its tessellation.",
       );
       return;
     }
@@ -396,16 +465,36 @@ export function SimWorkbenchPage(): ReactElement {
     }
     const channel = ensureChannel();
     if (channel === null) return;
-    const tessellation = documentSceneTessellation(
-      settled.state.measurement.bodies,
-    );
     const scenario = serializeSimScenario(selectedScenario);
+    // The thermal branch's geometry (Phase 65c): the referenced bodies'
+    // OWN tessellations (the per-cell material map needs per-body
+    // geometry) plus the material records the assignments name — both
+    // across the compile wire, the flow's merged-tessellation shape
+    // untouched for flow runs.
+    const isThermal = selectedScenario.kind === "thermal";
+    const bodies = settled.state.measurement.bodies;
+    const materials = isThermal
+      ? selectedScenario.materials.map(
+          (assignment) => thermalMaterialPresetOf(assignment.materialId).record,
+        )
+      : undefined;
+    const bodyTessellations = isThermal
+      ? bodies.map((body) => ({
+          bodyId: body.bodyId,
+          tessellation: body.measurement.tessellation,
+        }))
+      : undefined;
+    const tessellation = isThermal
+      ? undefined
+      : documentSceneTessellation(bodies);
     setRunStatus("compiling");
     try {
       const outcome: FlowRunOutcome = await runFlowScenario({
         client: channel.client,
         scenario,
-        tessellation,
+        ...(tessellation === undefined ? {} : { tessellation }),
+        ...(materials === undefined ? {} : { materials }),
+        ...(bodyTessellations === undefined ? {} : { bodyTessellations }),
         documentVersionId: DOCUMENT_VERSION_ID,
         store,
         ledger: simLedger,
@@ -561,7 +650,7 @@ export function SimWorkbenchPage(): ReactElement {
       data-sim-served-backend={lastResult?.summary.servedBackend ?? ""}
       data-sim-export-vti={String(exportedVti)}
       data-sim-export-csv={String(exportedCsv)}
-      data-sim-live-field={liveOverlay === null ? "" : "speed"}
+      data-sim-live-field={liveOverlay === null ? "" : liveOverlay.fieldId}
       data-sim-compare-status={compareStatus}
       data-sim-compare-runs={`a:${compareRunA}|b:${compareRunB}`}
       data-sim-compare-diff={compareDiff === null ? "" : compareDiff.fieldId}
@@ -698,7 +787,7 @@ export function SimWorkbenchPage(): ReactElement {
               ) : liveOverlay !== null ? (
                 <FieldSlicePlane
                   axis="z"
-                  colormap={CAD_FIELD_COLORMAP_VIRIDIS}
+                  colormap={liveColormapOf(liveOverlay.fieldId)}
                   field={liveOverlay.field}
                   positionMm={liveOverlay.slicePositionMm}
                   valueRange={liveOverlay.valueRange}
@@ -729,6 +818,15 @@ export function SimWorkbenchPage(): ReactElement {
           <fieldset className="space-y-2 text-sm">
             <legend className="font-medium">Flow scenario (Phase 63)</legend>
             <FlowScenarioForm onSubmitScenario={onSaveScenario} />
+            <fieldset className="space-y-2 border-t pt-2">
+              <legend className="font-medium">
+                Thermal scenario — the stove (Phase 65)
+              </legend>
+              <ThermalScenarioForm
+                bodyId={DEMO_BODY_ID}
+                onSubmitScenario={onSaveScenario}
+              />
+            </fieldset>
             <div className="space-y-1">
               <button
                 id="workbench-sim-run"
@@ -748,6 +846,7 @@ export function SimWorkbenchPage(): ReactElement {
                 {selectedScenario === null
                   ? "(save a scenario first)"
                   : selectedScenario.name}
+                {selectedScenario === null ? "" : ` (${selectedScenario.kind})`}
               </button>
               <button
                 id="workbench-sim-export-vti"

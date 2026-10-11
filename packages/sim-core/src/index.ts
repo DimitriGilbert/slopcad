@@ -84,7 +84,10 @@ export {
 export { canonicalSimJson, simScenarioSnapshotHash } from "./snapshot";
 export {
   type CompiledSimRunControls,
+  type CompiledSimThermal,
+  type CompiledSimThermalMaterial,
   type GeometrySimCompileInput,
+  type SimBodyTessellation,
   SIM_FLOW_DEFAULT_STEP_BUDGET,
   compileSimScenarioWithGeometry,
 } from "./compile-geometry";

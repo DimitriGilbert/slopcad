@@ -1,9 +1,9 @@
 /**
  * The Node entry of the real-engine sim worker (Phase 63c): runs inside
  * a `node:worker_threads` thread and hosts the DEFAULT ROUTED engine —
- * the real 2D LBM engine for flow scenarios, the 61b fake engine for
- * thermal — as a sim worker-protocol responder over the node transport
- * adapter. This is `@slopcad/sim-core`'s `sim-worker.node` entry with the
+ * the real 2D LBM engine for flow scenarios, the real conduction/CHT
+ * thermal engines (Phase 65c) — as a sim worker-protocol responder
+ * over the node transport adapter. This is `@slopcad/sim-core`'s `sim-worker.node` entry with the
  * one difference that matters: the engine. sim-core cannot host the real
  * engine (sim-flow depends on it — the dependency arrow points the other
  * way), so the real-engine node entry lives HERE, subpath-only, never

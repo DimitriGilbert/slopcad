@@ -173,7 +173,7 @@ export interface LbmRunReport {
 
 /** The default snapshot identity: the driver's canonical view of the scenario. */
 function runScenarioIdentity(scenario: LbmRunScenario): unknown {
-  const { mask, ...stepperRest } = scenario.stepper;
+  const { mask, buoyancy, ...stepperRest } = scenario.stepper;
   return {
     name: scenario.name,
     stepBudget: scenario.stepBudget,
@@ -188,6 +188,20 @@ function runScenarioIdentity(scenario: LbmRunScenario): unknown {
         ny: mask.ny,
         solid: Array.from(mask.solid),
       },
+      // The buoyancy block hashes by its SI facts plus the live
+      // temperature field's LENGTH — the field's contents are the
+      // run's state, never its identity (the CHT driver owns the
+      // coupled march's own provenance).
+      ...(buoyancy === undefined
+        ? {}
+        : {
+            buoyancy: {
+              gravityMPerS2: buoyancy.gravityMPerS2,
+              thermalExpansionPerK: buoyancy.thermalExpansionPerK,
+              referenceTemperatureK: buoyancy.referenceTemperatureK,
+              temperatureNodeCount: buoyancy.temperatureK.length,
+            },
+          }),
     },
   };
 }

@@ -50,7 +50,6 @@ import {
   type SimEngineFieldChunk,
   type SimEngineProgress,
   type SimEngineRequest,
-  createFakeSimEngine,
   type SimError,
   SIM_ERROR_CODES,
   SIM_FLOW_DEFAULT_STEP_BUDGET,
@@ -60,6 +59,7 @@ import {
   simFail,
   simOk,
 } from "@slopcad/sim-core";
+import { createThermalSimEngine } from "@slopcad/sim-thermal";
 
 import { LbmMomentAccumulator, type LbmFieldMoments } from "./averaging";
 import {
@@ -67,6 +67,7 @@ import {
   lbmConvergenceRungProblem,
   lbmGridConvergenceDrift,
 } from "./convergence";
+import { createChtSimEngine } from "./engine-cht";
 import { runWgslLbmEngine } from "./engine-gpu";
 import {
   LBM_PREVIEW_INTERVAL_STEPS,
@@ -188,7 +189,7 @@ async function runLbmEngine(
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioKindUnsupported,
-        `The 2D reference flow engine does not solve the "${compiled.kind}" scenario kind (it solves flow; thermal stays the fake engine's, structural is Phase 69's carve).`,
+        `The 2D reference flow engine does not solve the "${compiled.kind}" scenario kind (it solves flow only; thermal is served by the real conduction/CHT engines through the routed default engine, and structural is Phase 69's carve).`,
         compiled.kind,
       ),
     );
@@ -374,10 +375,15 @@ export function createLbmSimEngine(): SimEngine {
 
 /**
  * The default hosted engine (Phase 63c's engine selection, extended at
- * Phase 64a with the backend router): the real 2D flow engine for flow
- * scenarios, the 61b fake engine for thermal (until Phase 65's real
- * thermal solver lands), and `structural` declined by neither engine's
- * kind list — the Phase 69 carve, exactly as the contract demands.
+ * Phase 64a with the backend router and at Phase 65c with the REAL
+ * thermal routing — the 63c fake-engine thermal route retires): the
+ * real 2D flow engine for flow scenarios, the REAL thermal engines for
+ * thermal scenarios (the coupled conjugate march when the scenario
+ * flags `cht`, the sealed conduction engine otherwise — the split is
+ * exactly where the solvers live: the coupled march is this package's
+ * `./cht`, the conduction solve is `@slopcad/sim-thermal`'s), and
+ * `structural` declined by no engine's kind list — the Phase 69 carve,
+ * exactly as the contract demands.
  *
  * The backend routing (Phase 64a, requirement 2): a GPU-PREFERRED flow
  * scenario goes to the WGSL provider when the device source finds a
@@ -405,7 +411,8 @@ export function createDefaultSimEngine(
   options?: DefaultSimEngineOptions,
 ): SimEngine {
   const lbm = createLbmSimEngine();
-  const fake = createFakeSimEngine();
+  const thermalConduction = createThermalSimEngine();
+  const thermalCoupled = createChtSimEngine();
   const deviceSource = options?.deviceSource ?? requestWebGpuDevice;
   let detectionResolved = false;
   let detectedDevice: WgslDevice | undefined;
@@ -418,12 +425,33 @@ export function createDefaultSimEngine(
   };
   return {
     id: "default-routed-sim",
-    supportedKinds: [...lbm.supportedKinds, ...fake.supportedKinds],
+    supportedKinds: [
+      ...lbm.supportedKinds,
+      ...thermalConduction.supportedKinds,
+      ...thermalCoupled.supportedKinds,
+    ],
     backend: "cpu",
     run: async (request, onProgress, onFieldChunk) => {
       const kind = request.compiled.kind;
+      if (kind === "thermal") {
+        // The thermal stance routing (Phase 65c): the coupled march when
+        // the compiled scenario flags it (the compile door already
+        // declined a coupled stance with no fluid domain to convect
+        // through), the sealed conduction solve otherwise.
+        return (
+          request.compiled.thermal?.cht === true
+            ? thermalCoupled
+            : thermalConduction
+        ).run(request, onProgress, onFieldChunk);
+      }
       if (!LBM_SUPPORTED_KINDS.includes(kind)) {
-        return fake.run(request, onProgress, onFieldChunk);
+        return simFail(
+          simError(
+            SIM_ERROR_CODES.scenarioKindUnsupported,
+            `The routed default engine does not solve the "${kind}" scenario kind (it solves flow and thermal; structural is Phase 69's carve).`,
+            kind,
+          ),
+        );
       }
       if (request.compiled.backend === "gpu") {
         const device = await detectDevice();

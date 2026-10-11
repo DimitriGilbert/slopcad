@@ -137,6 +137,21 @@ describe("the condition vocabulary pin", () => {
             conditions: [CONDITION_EXEMPLARS[conditionKind]],
             fluid: "air",
             materials: [],
+            // Phase 65c: a thermal scenario carries its solve stance
+            // (the record boundary kind-locks it), so the thermal-kind
+            // exemplars author one.
+            ...(compilableKind === "thermal"
+              ? {
+                  thermal: {
+                    radiationMode: "off" as const,
+                    solveMode: "steady" as const,
+                    cht: false,
+                    sourceW: 10,
+                    initialTemperatureK: 293.15,
+                    ambientConvectionWPerM2K: 5,
+                  },
+                }
+              : {}),
           },
         ),
         "the scenario add",

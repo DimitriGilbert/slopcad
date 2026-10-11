@@ -19,7 +19,10 @@
  * pure SI (metres, metres-per-cell) for the solvers.
  */
 
-import type { CompiledSimRunControls } from "./compile-geometry";
+import type {
+  CompiledSimRunControls,
+  CompiledSimThermal,
+} from "./compile-geometry";
 import type { SimOccupancyGrid } from "./voxel-grid";
 
 import { type SimError, SIM_ERROR_CODES, simError } from "./errors";
@@ -663,6 +666,15 @@ export interface CompiledSimScenario {
    * the geometry-aware compile for flow scenarios.
    */
   readonly run?: CompiledSimRunControls;
+  /**
+   * The thermal compile products (Phase 65c): the re-validated solve
+   * stance, the resolved body→material records, and the per-cell
+   * material map over {@link occupancySlice}'s cells. Attached by the
+   * geometry-aware compile for thermal scenarios that carry per-body
+   * tessellations and material records; consumed worker-side by the
+   * thermal engines, never part of the wire form.
+   */
+  readonly thermal?: CompiledSimThermal;
 }
 
 /**

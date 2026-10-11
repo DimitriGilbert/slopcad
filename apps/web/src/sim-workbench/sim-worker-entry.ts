@@ -1,8 +1,9 @@
 /**
  * The bundler-hosted entry of the sim worker for the workbench (Phase
- * 61b, extended 63c): hosts the ROUTED DEFAULT ENGINE — the real 2D LBM
- * engine for flow scenarios (`@slopcad/sim-flow`, Phase 63c), the 61b
- * fake engine for thermal, `structural` declined by the Phase 69 carve —
+ * 61b, extended 63c and 65c): hosts the ROUTED DEFAULT ENGINE — the
+ * real 2D LBM engine for flow scenarios (`@slopcad/sim-flow`, Phase
+ * 63c), the real conduction/CHT thermal engines (Phase 65c),
+ * `structural` declined by the Phase 69 carve —
  * as a sim worker-protocol responder over the dedicated-worker message
  * scope. This is `@slopcad/sim-core`'s `sim-worker.web` entry restated
  * with the one difference that matters: `createEngine` selects the real

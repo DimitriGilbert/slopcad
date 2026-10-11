@@ -268,6 +268,28 @@ describe("createWgslLbmStepper against the fake device", () => {
     if (noCapacity.ok) return;
     expect(noCapacity.error.code).toBe("sim/scenario-invalid");
 
+    // Phase 65b's loud decline: a buoyant config (the thermal
+    // coupling's driving term) must not run through a provider that
+    // would silently drop the physics — the CPU oracle owns the
+    // coupled march until a later phase raises GPU thermal.
+    const buoyant = await createWgslLbmStepper(
+      {
+        ...channelConfig(),
+        buoyancy: {
+          gravityMPerS2: [0, -9.81],
+          thermalExpansionPerK: 1 / 300,
+          referenceTemperatureK: 300,
+          temperatureK: new Float64Array(12 * 8).fill(300),
+        },
+      },
+      device,
+      { stepCapacity: 4 },
+    );
+    expect(buoyant.ok).toBe(false);
+    if (buoyant.ok) return;
+    expect(buoyant.error.code).toBe("sim/backend-unavailable");
+    expect(buoyant.error.message).toContain("thermal coupling");
+
     const oversized = await createWgslLbmStepper(
       {
         ...channelConfig(),

@@ -27,6 +27,7 @@ import {
   DOCUMENT_ERROR_CODES,
   type DocumentHistory,
   type DocumentMaterialRecord,
+  type SimScenarioThermalSpec,
   encodeNativeCadDocument,
   MATERIAL_RECORD_ERROR_CODES,
   type MotorId,
@@ -754,5 +755,145 @@ describe("the thermal material fields", () => {
       thermalConductivityWPerMK: -1,
     });
     expect(badConductivity.ok).toBe(false);
+  });
+});
+
+describe("the thermal solve stance (Phase 65c)", () => {
+  /** The stove stance's authored fields. */
+  function thermalStance(
+    overrides?: Partial<SimScenarioThermalSpec>,
+  ): SimScenarioThermalSpec {
+    return {
+      radiationMode: "linearized",
+      solveMode: "steady",
+      cht: false,
+      sourceW: 20,
+      initialTemperatureK: 293.15,
+      ambientConvectionWPerM2K: 5,
+      ...overrides,
+    };
+  }
+
+  /** A thermal scenario over the base document's body. */
+  function thermalFields(stance?: SimScenarioThermalSpec) {
+    return {
+      name: "Stove",
+      kind: "thermal" as const,
+      domain: {
+        kind: "explicit" as const,
+        min: [-100, -100, -100] as const,
+        max: [100, 100, 100] as const,
+        resolutionMm: 5,
+      },
+      conditions: [],
+      fluid: "air",
+      materials: [],
+      ...(stance === undefined ? {} : { thermal: stance }),
+    };
+  }
+
+  it("adds a thermal scenario with its stance and round-trips it canonically", () => {
+    const added = requireOk(
+      addDocumentSimulation(baseDocument(), thermalFields(thermalStance())),
+      "the thermal add",
+    );
+    const scenario = added.scenario;
+    expect(scenario.thermal).toBeDefined();
+    if (scenario.thermal === undefined) return;
+    expect(scenario.thermal.radiationMode).toBe("linearized");
+    expect(scenario.thermal.solveMode).toBe("steady");
+    expect(scenario.thermal.durationS).toBeUndefined();
+    const serialized = requireOk(
+      parseCadDocument(serializeCadDocument(added.document)),
+      "the serialized round-trip",
+    );
+    const restored = serialized.simulations[0];
+    if (restored === undefined) throw new Error("the scenario did not survive");
+    expect(restored.thermal).toEqual(scenario.thermal);
+  });
+
+  it("kind-locks the stance: thermal requires it, every other kind refuses it", () => {
+    const missing = addDocumentSimulation(baseDocument(), thermalFields());
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.error.message).toContain("thermal solve stance");
+    }
+    const stray = addDocumentSimulation(baseDocument(), {
+      ...scenarioFields(),
+      thermal: thermalStance(),
+    });
+    expect(stray.ok).toBe(false);
+    if (!stray.ok) {
+      expect(stray.error.message).toContain("thermal kind's alone");
+    }
+  });
+
+  it("declines a steady coupled stance and a transient budget off cadence", () => {
+    const steadyCoupled = addDocumentSimulation(
+      baseDocument(),
+      thermalFields(
+        thermalStance({
+          solveMode: "transient",
+          cht: true,
+          durationS: 30,
+          sampleIntervalS: 5,
+        }),
+      ),
+    );
+    expect(steadyCoupled.ok).toBe(true);
+    const badCoupled = addDocumentSimulation(
+      baseDocument(),
+      thermalFields(thermalStance({ solveMode: "steady", cht: true })),
+    );
+    expect(badCoupled.ok).toBe(false);
+    if (!badCoupled.ok) {
+      expect(badCoupled.error.message).toContain("transient by construction");
+    }
+    const missingBudget = addDocumentSimulation(
+      baseDocument(),
+      thermalFields(thermalStance({ solveMode: "transient" })),
+    );
+    expect(missingBudget.ok).toBe(false);
+    if (!missingBudget.ok) {
+      expect(missingBudget.error.message).toContain("duration");
+    }
+    const offCadence = addDocumentSimulation(
+      baseDocument(),
+      thermalFields(
+        thermalStance({
+          solveMode: "transient",
+          durationS: 30,
+          sampleIntervalS: 4,
+        }),
+      ),
+    );
+    expect(offCadence.ok).toBe(false);
+    if (!offCadence.ok) {
+      expect(offCadence.error.message).toContain("integer multiple");
+    }
+  });
+
+  it("updates a scenario's stance through the update path", () => {
+    const added = requireOk(
+      addDocumentSimulation(baseDocument(), thermalFields(thermalStance())),
+      "the thermal add",
+    );
+    const updated = requireOk(
+      updateDocumentSimulation(added.document, added.scenario.id, {
+        ...thermalFields(
+          thermalStance({
+            solveMode: "transient",
+            durationS: 60,
+            sampleIntervalS: 5,
+          }),
+        ),
+      }),
+      "the thermal update",
+    );
+    const scenario = updated.simulations[0];
+    if (scenario === undefined) throw new Error("the update lost the scenario");
+    if (scenario.thermal === undefined) return;
+    expect(scenario.thermal.solveMode).toBe("transient");
+    expect(scenario.thermal.durationS).toBe(60);
   });
 });

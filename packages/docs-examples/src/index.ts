@@ -110,6 +110,10 @@ export {
 //    off the docs page's bundle, the node-worker example's precedent) --------
 
 export { runSimSpineExample, type SimSpineExampleSummary } from "./sim/spine";
+export {
+  runSimThermalExample,
+  type SimThermalExampleSummary,
+} from "./sim/thermal";
 export { runSimVoxelExample, type SimVoxelExampleSummary } from "./sim/voxel";
 
 // -- CAD JSX (authoring) ------------------------------------------------------

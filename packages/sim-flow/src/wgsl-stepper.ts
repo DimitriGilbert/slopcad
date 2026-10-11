@@ -29,6 +29,12 @@
  * execution is the device's, which is why S5's gate is a tolerance
  * harness and the CPU stays the test truth.
  *
+ * Phase 65b boundary, stated loudly: the provider is CPU-coupling-
+ * only — a config carrying the buoyancy block declines with
+ * `sim/backend-unavailable` rather than running the flow without its
+ * physics (the GPU thermal field is a later phase's raise; until then
+ * the CPU oracle is the buoyant door).
+ *
  * The per-step dispatch sequence (asserted by the fake-device tests):
  * collide_step → stream_pull → apply_faces → reflect_solids →
  * reduce_partials → reduce_forces → macro_out — the CPU advance
@@ -372,6 +378,20 @@ export async function createWgslLbmStepper(
     at: unknown,
   ): SimParseResult<never, SimError> =>
     simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
+  // Phase 65b's loud decline: the WGSL provider is CPU-coupling-only —
+  // the thermal field, the Boussinesq forcing, and the CHT march live
+  // on the CPU oracle (GPU thermal is a later phase's raise, and the
+  // provider refuses to run a buoyant scenario while silently
+  // dropping the coupling term).
+  if (config.buoyancy !== undefined) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.backendUnavailable,
+        "The WGSL provider does not implement the thermal coupling yet (Phase 65b ships it CPU-only; a buoyant run needs the CPU oracle, whose collision carries the Guo force term). A buoyant scenario through this provider would silently drop the physics, and the provider declines loudly instead.",
+        config.buoyancy,
+      ),
+    );
+  }
   // The provider's own grid ceiling first: an over-cap grid declines
   // before the CPU twin's buffers are ever requested.
   const rawNx = config.mask.nx;

@@ -39,6 +39,8 @@ import type { LbmState } from "./state";
 import {
   D2Q9_OPPOSITE,
   D2Q9_Q,
+  D2Q9_VELOCITIES,
+  D2Q9_WEIGHTS,
   d2q9Equilibrium,
   d2q9EquilibriumEven,
   d2q9EquilibriumOdd,
@@ -115,11 +117,32 @@ export function lbmCollisionModelProblem(
  * FLUID node from the macroscopic fields (which must be current for
  * `f` — the stepper's step order guarantees it). Solids are skipped:
  * their contents are bounce-back's business, never collision's.
+ *
+ * The optional per-node force arrays (`fx`, `fy`, lattice momentum
+ * units per step — the Boussinesq field of `./buoyancy`) add the GUO
+ * forcing (Guo, Zheng & Shi 2002), the exact second-order form whose
+ * moments cancel the O(dt) force error: each step injects exactly ΣF
+ * of momentum (the momentum ledger's body-force term) and the
+ * macroscopic velocity the equilibrium reads must carry the half-step
+ * correction u = (Σf·c + F/2)/ρ (`lbmComputeMacroscopic`'s forced
+ * form). Under TRT the force splits with the collision: the
+ * reflection-EVEN part (the (c·u)(c·F) and u·F terms, weighted
+ * (1 − λ⁺/2)) rides the physical rate and the reflection-ODD part
+ * (w_i·3·c·F, weighted (1 − λ⁻/2)) rides the free rate — the
+ * d'Humières forcing the TRT literature standardizes on; under BGK
+ * the two weights coincide and the term reduces to the textbook
+ * (1 − 1/(2τ))·S_i verbatim.
  */
-export function lbmCollide(state: LbmState, rates: LbmRelaxationRates): void {
+export function lbmCollide(
+  state: LbmState,
+  rates: LbmRelaxationRates,
+  forceX?: Float64Array,
+  forceY?: Float64Array,
+): void {
   const { f, rho, ux, uy, nx, ny } = state;
   const mask = state.solid.solid;
   const { lambdaPlus, lambdaMinus } = rates;
+  const forced = forceX !== undefined && forceY !== undefined;
   for (let y = 0; y < ny; y += 1) {
     for (let x = 0; x < nx; x += 1) {
       const index = x + y * nx;
@@ -127,27 +150,44 @@ export function lbmCollide(state: LbmState, rates: LbmRelaxationRates): void {
       const nodeRho = rho[index] ?? 1;
       const nodeUx = ux[index] ?? 0;
       const nodeUy = uy[index] ?? 0;
+      const fx = forced ? (forceX?.[index] ?? 0) : 0;
+      const fy = forced ? (forceY?.[index] ?? 0) : 0;
       if (rates.kind === "bgk") {
         for (let i = 0; i < D2Q9_Q; i += 1) {
           const column = f[i];
           if (column === undefined) continue;
           const value = column[index] ?? 0;
+          const [cx, cy] = D2Q9_VELOCITIES[i] ?? [0, 0];
+          const cu = cx * nodeUx + cy * nodeUy;
+          const cf = cx * fx + cy * fy;
+          // Guo's S_i with the BGK half-rate weight (1 − λ/2).
+          const guo =
+            (1 - lambdaPlus / 2) *
+            (D2Q9_WEIGHTS[i] ?? 0) *
+            (3 * cf + 9 * cu * cf - 3 * (nodeUx * fx + nodeUy * fy));
           column[index] =
             value -
-            lambdaPlus * (value - d2q9Equilibrium(i, nodeRho, nodeUx, nodeUy));
+            lambdaPlus * (value - d2q9Equilibrium(i, nodeRho, nodeUx, nodeUy)) +
+            guo;
         }
         continue;
       }
+      // The common force pieces: the reflection-even scalar (per pair,
+      // since S⁺ is pair-constant) and the rest-direction weight.
+      const uDotF = nodeUx * fx + nodeUy * fy;
       // TRT: the rest direction is purely even; every reflected pair is
       // updated atomically from its two original values — the pair's odd
       // error enters each member with the opposite sign.
       const rest = f[0];
       if (rest !== undefined) {
         const value = rest[index] ?? 0;
+        const guoRest =
+          (1 - lambdaPlus / 2) * (D2Q9_WEIGHTS[0] ?? 0) * -3 * uDotF;
         rest[index] =
           value -
           lambdaPlus *
-            (value - d2q9EquilibriumEven(0, nodeRho, nodeUx, nodeUy));
+            (value - d2q9EquilibriumEven(0, nodeRho, nodeUx, nodeUy)) +
+          guoRest;
       }
       for (let i = 1; i < D2Q9_Q; i += 1) {
         const j = D2Q9_OPPOSITE[i] ?? 0;
@@ -161,8 +201,17 @@ export function lbmCollide(state: LbmState, rates: LbmRelaxationRates): void {
           (fi + fj) / 2 - d2q9EquilibriumEven(i, nodeRho, nodeUx, nodeUy);
         const oddError =
           (fi - fj) / 2 - d2q9EquilibriumOdd(i, nodeRho, nodeUx, nodeUy);
-        column[index] = fi - lambdaPlus * evenError - lambdaMinus * oddError;
-        mirror[index] = fj - lambdaPlus * evenError + lambdaMinus * oddError;
+        const [cx, cy] = D2Q9_VELOCITIES[i] ?? [0, 0];
+        const cu = cx * nodeUx + cy * nodeUy;
+        const cf = cx * fx + cy * fy;
+        const weight = D2Q9_WEIGHTS[i] ?? 0;
+        // Even part (pair-constant), odd part (sign-flips with the member).
+        const sPlus = (1 - lambdaPlus / 2) * weight * (9 * cu * cf - 3 * uDotF);
+        const sMinus = (1 - lambdaMinus / 2) * weight * 3 * cf;
+        column[index] =
+          fi - lambdaPlus * evenError - lambdaMinus * oddError + sPlus + sMinus;
+        mirror[index] =
+          fj - lambdaPlus * evenError + lambdaMinus * oddError + sPlus - sMinus;
       }
     }
   }

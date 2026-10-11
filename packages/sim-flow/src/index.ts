@@ -13,8 +13,9 @@
  * ADAPTER (`./engine`): the real 2D flow engine behind the Phase 61
  * `SimEngine` contract — compiled problem (with the 63c geometry-aware
  * compile's occupancy slice) → streamed run → finalized SimResult — and
- * the routed default engine that serves flow with it and thermal with
- * the fake engine. The package depends on
+ * the routed default engine that serves flow with it (its 63c thermal
+ * route went to the fake engine until Phase 65c retired it for the
+ * real conduction/CHT engines). The package depends on
  * `@slopcad/sim-core` alone at runtime — no React, no DOM, no node APIs
  * in the runtime entry (law S2), which is what makes the CPU
  * oracle the test truth (law S5). The node-only hosting modules
@@ -76,6 +77,29 @@ export {
 } from "./relaxation";
 export { lbmStream, lbmSwap } from "./streaming";
 export {
+  type LbmBuoyancyConfig,
+  type LbmForceField,
+  lbmBuoyancyForceLattice,
+  lbmBuoyancyProblem,
+  lbmForceFieldTotal,
+} from "./buoyancy";
+export {
+  CHT_HISTORY_SERIES,
+  CHT_SCALAR_SAFETY_DEFAULT,
+  CHT_SOLID_DEFAULTS,
+  type ChtEnergyLedger,
+  type ChtRunReport,
+  type ChtScenario,
+  runChtScenario,
+} from "./cht";
+export {
+  type LbmThermalFaceCondition,
+  type LbmThermalScalar,
+  type LbmThermalScalarConfig,
+  createLbmThermalScalar,
+  lbmInterfaceConductanceWPerMK,
+} from "./thermal-scalar";
+export {
   LBM_FACE_ORDER,
   LBM_FACES,
   type LbmFace,
@@ -130,6 +154,12 @@ export {
   createLbmSimEngine,
   type DefaultSimEngineOptions,
 } from "./engine";
+export {
+  CHT_SIM_ENGINE_ID,
+  CHT_SUPPORTED_KINDS,
+  chtRunSimResult,
+  createChtSimEngine,
+} from "./engine-cht";
 export { LBM_WGSL_SIM_ENGINE_ID, createWgslSimEngine } from "./engine-gpu";
 export {
   type LateralFace,

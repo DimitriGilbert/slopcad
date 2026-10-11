@@ -1,11 +1,12 @@
 /**
- * The workbench's sim worker host (Phase 61b, engine upgraded 63c): boots
+ * The workbench's sim worker host (Phase 61b, engine upgraded 63c,
+ * thermal routed 65c): boots
  * the sim worker on demand — the OCCT boot's pattern from the workbench
  * page (`bootOcctWorker` in `CompleteWorkbenchPage.tsx`) applied to the
  * simulation channel. The worker entry (`./sim-worker-entry`) hosts the
  * ROUTED DEFAULT ENGINE: the real 2D LBM reference kernel for flow
- * scenarios, the 61b fake engine for thermal, `structural` declined by
- * the Phase 69 carve.
+ * scenarios, the real conduction/CHT thermal engines (Phase 65c),
+ * `structural` declined by the Phase 69 carve.
  *
  * The crash-settling boot (`bootSimWorkerChannel`, the Phase 35
  * hardening discipline) settles in-flight requests if the thread ever

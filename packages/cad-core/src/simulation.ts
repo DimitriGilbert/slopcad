@@ -203,6 +203,240 @@ export interface SimMaterialAssignment {
 }
 
 /**
+ * The Stefan–Boltzmann treatments a thermal scenario may request for its
+ * radiating surfaces (Phase 65, §7.12): `off` (conduction/convection
+ * only), `linearized` (the standard solver-friendly slope), `full` (the
+ * exact quartic law, Picard-lagged).
+ */
+export const SIM_THERMAL_RADIATION_MODES = [
+  "off",
+  "linearized",
+  "full",
+] as const;
+
+export type SimThermalRadiationMode =
+  (typeof SIM_THERMAL_RADIATION_MODES)[number];
+
+/** The solve stances a thermal scenario may take (Phase 65). */
+export const SIM_THERMAL_SOLVE_MODES = ["steady", "transient"] as const;
+
+export type SimThermalSolveMode = (typeof SIM_THERMAL_SOLVE_MODES)[number];
+
+/**
+ * A thermal scenario's solve stance (Phase 65c, law S1-additive): the
+ * radiation mode, the steady-vs-transient choice with its budget, the
+ * heat source, the ambient equilibrium boundary, and whether the
+ * transient run couples to the fluid (the conjugate buoyant march).
+ * Required on `thermal` scenarios, refused on every other kind — one
+ * shape, one truth. Units are the SI-adjacent authoring units (K, W,
+ * W/(m²·K), s); the source is W per metre of the 2D slice's depth, the
+ * unit-depth slab convention the solver package documents.
+ */
+export interface SimScenarioThermalSpec {
+  readonly radiationMode: SimThermalRadiationMode;
+  readonly solveMode: SimThermalSolveMode;
+  /**
+   * Whether the transient run couples to the fluid domain — the
+   * conjugate buoyant march (Phase 65b). Steady scenarios refuse the
+   * flag: the coupled march is transient by construction.
+   */
+  readonly cht: boolean;
+  /** The volumetric heat source's TOTAL power, W per metre of depth (> 0). */
+  readonly sourceW: number;
+  /** The uniform initial field, K (> 0); also the ambient reference. */
+  readonly initialTemperatureK: number;
+  /**
+   * The equilibrium boundary's external convection coefficient h,
+   * W/(m²·K) (≥ 0) — §7.12's authored h for exposed faces facing the
+   * domain's fluid, alongside the radiation mode's loss.
+   */
+  readonly ambientConvectionWPerM2K: number;
+  /** The transient march's physical end time, s (> 0); required iff transient. */
+  readonly durationS?: number;
+  /** The history/field sampling cadence, s (> 0); required iff transient. */
+  readonly sampleIntervalS?: number;
+}
+
+/** Canonical JSON form of a thermal spec; fixed key order, optionals last. */
+export interface SerializedSimScenarioThermalSpec {
+  readonly radiationMode: SimThermalRadiationMode;
+  readonly solveMode: SimThermalSolveMode;
+  readonly cht: boolean;
+  readonly sourceW: number;
+  readonly initialTemperatureK: number;
+  readonly ambientConvectionWPerM2K: number;
+  readonly durationS?: number;
+  readonly sampleIntervalS?: number;
+}
+
+function isSimThermalRadiationMode(
+  input: unknown,
+): input is SimThermalRadiationMode {
+  return (
+    typeof input === "string" &&
+    SIM_THERMAL_RADIATION_MODES.includes(input as SimThermalRadiationMode)
+  );
+}
+
+function isSimThermalSolveMode(input: unknown): input is SimThermalSolveMode {
+  return (
+    typeof input === "string" &&
+    SIM_THERMAL_SOLVE_MODES.includes(input as SimThermalSolveMode)
+  );
+}
+
+/**
+ * Parses the thermal solve stance, kind-locked: a `thermal` scenario
+ * without one declines (there is no default physics), and any other
+ * kind carrying one declines (the stance is thermal's alone).
+ */
+function parseThermalSpec(
+  input: unknown,
+  kind: SimScenarioKind,
+): ParseResult<SimScenarioThermalSpec | undefined, SimulationError> {
+  if (input === undefined || input === null) {
+    if (kind === "thermal") {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.thermalSpecInvalid,
+          "A thermal scenario must carry its thermal solve stance (radiation mode, solve mode, source, ambient).",
+          input,
+        ),
+      );
+    }
+    return ok(undefined);
+  }
+  if (kind !== "thermal") {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.thermalSpecInvalid,
+        `A "${kind}" scenario cannot carry a thermal solve stance; it is the thermal kind's alone.`,
+        input,
+      ),
+    );
+  }
+  if (!isPlainRecord(input)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.thermalSpecInvalid,
+        "A thermal solve stance must be an object with radiationMode and solveMode fields.",
+        input,
+      ),
+    );
+  }
+  if (!isSimThermalRadiationMode(input.radiationMode)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.thermalSpecInvalid,
+        `A thermal solve stance's radiation mode must be one of: ${SIM_THERMAL_RADIATION_MODES.join(", ")}.`,
+        input.radiationMode,
+      ),
+    );
+  }
+  const radiationMode: SimThermalRadiationMode = input.radiationMode;
+  const solveMode = input.solveMode;
+  if (!isSimThermalSolveMode(solveMode)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.thermalSpecInvalid,
+        `A thermal solve stance's solve mode must be one of: ${SIM_THERMAL_SOLVE_MODES.join(", ")}.`,
+        solveMode,
+      ),
+    );
+  }
+  if (typeof input.cht !== "boolean") {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.thermalSpecInvalid,
+        "A thermal solve stance's conjugate-coupling flag must be a boolean.",
+        input.cht,
+      ),
+    );
+  }
+  if (solveMode === "steady" && input.cht) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.thermalSpecInvalid,
+        "A steady thermal scenario cannot request the conjugate coupled march — the coupling advances in physical time, so it is transient by construction.",
+        input,
+      ),
+    );
+  }
+  const sourceW = parsePositiveNumber(
+    input.sourceW,
+    SIMULATION_ERROR_CODES.thermalSpecInvalid,
+    "A thermal solve stance's source power",
+  );
+  if (!sourceW.ok) return sourceW;
+  const initialTemperatureK = parsePositiveNumber(
+    input.initialTemperatureK,
+    SIMULATION_ERROR_CODES.thermalSpecInvalid,
+    "A thermal solve stance's initial temperature",
+  );
+  if (!initialTemperatureK.ok) return initialTemperatureK;
+  const ambientConvectionRaw = parseFiniteNumber(
+    input.ambientConvectionWPerM2K,
+    SIMULATION_ERROR_CODES.thermalSpecInvalid,
+    "A thermal solve stance's ambient convection coefficient",
+  );
+  if (!ambientConvectionRaw.ok) return ambientConvectionRaw;
+  if (ambientConvectionRaw.value < 0) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.thermalSpecInvalid,
+        "A thermal solve stance's ambient convection coefficient must be non-negative W/(m²·K).",
+        input.ambientConvectionWPerM2K,
+      ),
+    );
+  }
+  let durationS: number | undefined;
+  let sampleIntervalS: number | undefined;
+  if (solveMode === "transient") {
+    const duration = parsePositiveNumber(
+      input.durationS,
+      SIMULATION_ERROR_CODES.thermalSpecInvalid,
+      "A transient thermal stance's duration",
+    );
+    if (!duration.ok) return duration;
+    const interval = parsePositiveNumber(
+      input.sampleIntervalS,
+      SIMULATION_ERROR_CODES.thermalSpecInvalid,
+      "A transient thermal stance's sample interval",
+    );
+    if (!interval.ok) return interval;
+    const intervals = duration.value / interval.value;
+    const sampleCount = Math.round(intervals);
+    if (
+      sampleCount < 1 ||
+      Math.abs(sampleCount * interval.value - duration.value) >
+        1e-9 * duration.value
+    ) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.thermalSpecInvalid,
+          "A transient thermal stance's duration must be an integer multiple of its sample interval so every sample lands on the cadence.",
+          { durationS: duration.value, sampleIntervalS: interval.value },
+        ),
+      );
+    }
+    durationS = duration.value;
+    sampleIntervalS = interval.value;
+  }
+  return ok(
+    Object.freeze({
+      radiationMode,
+      solveMode,
+      cht: input.cht,
+      sourceW: sourceW.value,
+      initialTemperatureK: initialTemperatureK.value,
+      ambientConvectionWPerM2K: ambientConvectionRaw.value,
+      ...(durationS === undefined ? {} : { durationS }),
+      ...(sampleIntervalS === undefined ? {} : { sampleIntervalS }),
+    }),
+  );
+}
+
+/**
  * The scenario's authored fields (identity aside): everything a
  * {@link SimScenario} carries except its id — the shape the document add
  * path takes and the command payloads ride.
@@ -234,6 +468,11 @@ export interface SimScenarioBody {
    * reports the drift (Phase 63c's built-in trust indicator, advisory).
    */
   readonly gridConvergence?: boolean;
+  /**
+   * The thermal solve stance (Phase 65c): required on `thermal`
+   * scenarios, refused on every other kind.
+   */
+  readonly thermal?: SimScenarioThermalSpec;
   /** The selected motor record for fan scenarios; absent = motor-less. */
   readonly motorId?: MotorId;
   /** The backend preference; absent = the CPU default. */
@@ -257,6 +496,7 @@ export interface SimScenarioInput {
   readonly gravityMPerS2?: SimVec3;
   readonly stepBudget?: number;
   readonly gridConvergence?: boolean;
+  readonly thermal?: SimScenarioThermalSpec;
   readonly motorId?: MotorId;
   readonly backend?: SimBackendPreference;
 }
@@ -285,6 +525,7 @@ export const SIMULATION_ERROR_CODES = {
   motorInvalid: "simulation/motor-invalid",
   backendInvalid: "simulation/backend-invalid",
   runControlsInvalid: "simulation/run-controls-invalid",
+  thermalSpecInvalid: "simulation/thermal-spec-invalid",
 } as const;
 
 export type SimulationErrorCode =
@@ -995,6 +1236,7 @@ export function buildSimScenarioBody(
   backend: unknown,
   stepBudget: unknown,
   gridConvergence: unknown,
+  thermal?: unknown,
 ): ParseResult<SimScenarioBody, SimulationError> {
   if (typeof name !== "string" || !isValidSimulationName(name)) {
     return fail(
@@ -1099,6 +1341,8 @@ export function buildSimScenarioBody(
     }
     parsedGridConvergence = gridConvergence;
   }
+  const parsedThermal = parseThermalSpec(thermal, kind);
+  if (!parsedThermal.ok) return parsedThermal;
   return ok(
     Object.freeze({
       name: name.trim(),
@@ -1114,6 +1358,9 @@ export function buildSimScenarioBody(
       ...(parsedGridConvergence === undefined
         ? {}
         : { gridConvergence: parsedGridConvergence }),
+      ...(parsedThermal.value === undefined
+        ? {}
+        : { thermal: parsedThermal.value }),
       ...(parsedMotorId === undefined ? {} : { motorId: parsedMotorId }),
       ...(parsedBackend === undefined ? {} : { backend: parsedBackend }),
     }),
@@ -1134,6 +1381,7 @@ export interface SerializedSimScenarioBody {
   readonly gravityMPerS2: readonly [number, number, number];
   readonly stepBudget?: number;
   readonly gridConvergence?: boolean;
+  readonly thermal?: SerializedSimScenarioThermalSpec;
   readonly motorId?: string;
   /** Present exactly when the preference is not the CPU default. */
   readonly backend?: Exclude<SimBackendPreference, "cpu">;
@@ -1171,6 +1419,24 @@ export function serializeSimScenarioBody(
     ...(scenario.gridConvergence === undefined
       ? {}
       : { gridConvergence: scenario.gridConvergence }),
+    ...(scenario.thermal === undefined
+      ? {}
+      : {
+          thermal: {
+            radiationMode: scenario.thermal.radiationMode,
+            solveMode: scenario.thermal.solveMode,
+            cht: scenario.thermal.cht,
+            sourceW: scenario.thermal.sourceW,
+            initialTemperatureK: scenario.thermal.initialTemperatureK,
+            ambientConvectionWPerM2K: scenario.thermal.ambientConvectionWPerM2K,
+            ...(scenario.thermal.durationS === undefined
+              ? {}
+              : { durationS: scenario.thermal.durationS }),
+            ...(scenario.thermal.sampleIntervalS === undefined
+              ? {}
+              : { sampleIntervalS: scenario.thermal.sampleIntervalS }),
+          },
+        }),
     ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
     ...(scenario.backend === undefined || scenario.backend === "cpu"
       ? {}
@@ -1207,6 +1473,7 @@ export function parseSimScenarioBody(
     input.backend,
     input.stepBudget,
     input.gridConvergence,
+    input.thermal,
   );
 }
 

@@ -3525,6 +3525,105 @@ test("s24e a gpu-preferred flow scenario completes on the CPU fallback path (Pha
   });
 });
 
+test("s24f the sim workbench runs the stove through the real thermal engine — sealed and coupled (Phase 65)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24f workbench-sim thermal stove", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR the SEALED stove: the thermal form's defaults ARE the demo
+    // (steady equilibrium, linearized radiation, the equilibrium
+    // boundary's ambient h) — one submit saves the record with its
+    // kind-locked thermal stance into the document's simulations
+    // section (law S1). The run list is the STORE's chronological list
+    // (it persists across this session's earlier sim stages), so the
+    // honest assertions are deltas, not absolute counts.
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    const chunksBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    await page.getByRole("button", { name: "Save thermal scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN the sealed conduction solve in the sim worker, awaited on the
+    // committed-application counters and the run family — never a
+    // timeout. The engine streams one progress hop per stage and ONE
+    // final temperature preview round (the 65a/65b whole-run driver
+    // discipline), so the chunk counter advances by exactly the round.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    // The temperature overlay mounted from the committed round (law S6).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    const sealedChunks = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(sealedChunks).toBeGreaterThan(chunksBefore);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR + RUN the COUPLED stove: the same form flips to the
+    // transient buoyant plume (fixed-temperature room walls at ambient,
+    // Boussinesq coupling, a short interactive budget) — the second
+    // mode of the demo, reachable from the same surface. The checkbox
+    // is the Base UI styled control (the hidden native twin carries the
+    // same label — the ROLE query resolves the visible one alone).
+    await page.getByLabel("Thermal scenario name").fill("stove-plume");
+    await page.getByRole("radio", { name: "Transient march" }).click();
+    await page
+      .getByRole("checkbox", {
+        name: "Conjugate: convect to the fluid (buoyant plume)",
+      })
+      .click();
+    await page.getByLabel("Transient duration (s)").fill("20");
+    await page.getByLabel("Sample interval (s)").fill("5");
+    await page.getByRole("button", { name: "Save thermal scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {

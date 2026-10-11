@@ -121,6 +121,18 @@ export interface FlowRunOptions {
    * loudly (`sim/geometry-unavailable`), never fabricates a tunnel.
    */
   readonly tessellation?: Tessellation;
+  /**
+   * Phase 65c (the thermal runs ride the same controller): the
+   * serialized material records the scenario's assignments reference,
+   * and the referenced bodies' OWN tessellations (one per body — the
+   * per-cell material map needs per-body geometry). Both cross the
+   * `sim.compile` wire verbatim; the thermal compile door consumes them.
+   */
+  readonly materials?: readonly unknown[];
+  readonly bodyTessellations?: readonly {
+    readonly bodyId: string;
+    readonly tessellation: Tessellation;
+  }[];
   /** The run persists against this document version id. */
   readonly documentVersionId: string;
   /** The law-S7 store the completed run persists through. */
@@ -182,6 +194,12 @@ export async function runFlowScenario(
         ...(options.tessellation === undefined
           ? {}
           : { tessellation: options.tessellation }),
+        ...(options.materials === undefined
+          ? {}
+          : { materials: options.materials }),
+        ...(options.bodyTessellations === undefined
+          ? {}
+          : { bodyTessellations: options.bodyTessellations }),
       });
     } catch (error) {
       throw wireFailure(error);

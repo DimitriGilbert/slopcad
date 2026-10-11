@@ -4,8 +4,11 @@
  * Phase 64's GPU provider is validated against. Everything a step does
  * is fixed-order arithmetic over the SoA state:
  *
- *   1. macroscopic recompute (the divergence sentinel lives here);
- *   2. collision (BGK/TRT, `./relaxation`);
+ *   1. macroscopic recompute (the divergence sentinel lives here; with
+ *      a buoyancy block, the Guo half-force correction and the force
+ *      field from the caller's live temperature — Phase 65b);
+ *   2. collision (BGK/TRT, `./relaxation`, with Guo forcing when the
+ *      buoyancy block is present);
  *   3. push streaming (`./streaming`);
  *   4. face conditions (Zou/He, convective, walls — `./boundaries`);
  *   5. full-way bounce-back reflection + momentum-exchange impulse;
@@ -36,6 +39,7 @@ import {
   simFail,
   simOk,
 } from "@slopcad/sim-core";
+import type { LbmBuoyancyConfig } from "./buoyancy";
 
 import {
   type LbmFace,
@@ -43,6 +47,11 @@ import {
   type LbmFaceMomentumLedger,
   lbmApplyFaceConditions,
 } from "./boundaries";
+import {
+  lbmBuoyancyForceLattice,
+  lbmBuoyancyProblem,
+  lbmForceFieldTotal,
+} from "./buoyancy";
 import { D2Q9_Q, D2Q9_VELOCITIES } from "./d2q9";
 import { LbmForceAccumulator } from "./forces";
 import {
@@ -105,6 +114,14 @@ export interface LbmStepperConfig {
   readonly referencePressurePa?: number;
   /** The lattice origin in the solver's SI frame, m (default [0, 0]). */
   readonly originM?: readonly [number, number];
+  /**
+   * The Boussinesq buoyancy coupling (Phase 65b): the per-node body
+   * force −β·(T − T_ref)·g applied through Guo collision forcing every
+   * step, read from the CALLER-OWNED live temperature field (the CHT
+   * coupled march's `./cht` advances it between flow steps). Absent =
+   * the unforced kernel, bitwise the Phase 63 behavior.
+   */
+  readonly buoyancy?: LbmBuoyancyConfig;
 }
 
 /** The immutable run facts a driver displays or hashes (S9 honesty). */
@@ -115,6 +132,14 @@ export interface LbmRunMeta {
   readonly collision: LbmCollisionModel;
   readonly rates: LbmRelaxationRates;
   readonly referencePressurePa: number;
+  /** The buoyancy coupling's SI facts when the run forces (absent = unforced). */
+  readonly buoyancy:
+    | {
+        readonly gravityMPerS2: readonly [number, number];
+        readonly thermalExpansionPerK: number;
+        readonly referenceTemperatureK: number;
+      }
+    | undefined;
 }
 
 /** One completed step's exact momentum ledger, lattice units. */
@@ -129,6 +154,9 @@ export interface LbmMomentumBookkeeping {
   /** 2·Σ f·c handed to solids (the force impulse, body-signed). */
   readonly solidImpulseX: number;
   readonly solidImpulseY: number;
+  /** Σ F over fluid nodes — the body force collision injected this step (0 unforced). */
+  readonly bodyForceX: number;
+  readonly bodyForceY: number;
 }
 
 /** Macroscopic fields in lattice units (solid columns zero). */
@@ -401,6 +429,13 @@ export function createLbmStepper(
     north: north.value,
   };
   const rates = lbmRelaxationRates(collision, units.value.tauPlus);
+  const buoyancyProblem =
+    config.buoyancy === undefined
+      ? undefined
+      : lbmBuoyancyProblem(config.buoyancy, mask);
+  if (buoyancyProblem !== undefined) {
+    return refuse(buoyancyProblem, config.buoyancy);
+  }
   const state: LbmState = createLbmState(mask);
   const forces = new LbmForceAccumulator(units.value);
   const ledger: LbmFaceMomentumLedger = { x: 0, y: 0 };
@@ -414,15 +449,37 @@ export function createLbmStepper(
     collision,
     rates,
     referencePressurePa,
+    buoyancy:
+      config.buoyancy === undefined
+        ? undefined
+        : {
+            gravityMPerS2: config.buoyancy.gravityMPerS2,
+            thermalExpansionPerK: config.buoyancy.thermalExpansionPerK,
+            referenceTemperatureK: config.buoyancy.referenceTemperatureK,
+          },
   });
 
   const advance = (): void => {
     if (diverged) return;
-    if (!lbmComputeMacroscopic(state)) {
+    let forceX: Float64Array | undefined;
+    let forceY: Float64Array | undefined;
+    let bodyForceX = 0;
+    let bodyForceY = 0;
+    if (config.buoyancy !== undefined) {
+      const field = lbmBuoyancyForceLattice(config.buoyancy, mask, units.value);
+      forceX = field.fx;
+      forceY = field.fy;
+      // The ledger's body-force term — the field's own total, so the
+      // stepper books the same sum everywhere (`./buoyancy`).
+      const total = lbmForceFieldTotal(field, mask);
+      bodyForceX = total.x;
+      bodyForceY = total.y;
+    }
+    if (!lbmComputeMacroscopic(state, forceX, forceY)) {
       diverged = true;
       return;
     }
-    lbmCollide(state, rates);
+    lbmCollide(state, rates, forceX, forceY);
     const dropped = lbmStream(state);
     lbmApplyFaceConditions(state, conditions, ledger);
     const impulse = lbmReflectSolids(state);
@@ -437,6 +494,8 @@ export function createLbmStepper(
       faceDeltaY: ledger.y,
       solidImpulseX: impulse.impulseX,
       solidImpulseY: impulse.impulseY,
+      bodyForceX,
+      bodyForceY,
     };
   };
 

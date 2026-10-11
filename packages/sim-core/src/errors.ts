@@ -56,6 +56,15 @@ export const SIM_ERROR_CODES = {
    */
   runDiverged: "sim/run-diverged",
   /**
+   * An owned iterative solver exhausted its iteration discipline without
+   * reaching its residual tolerance (Phase 65a's preconditioned-CG
+   * conduction solve, defined on the pre-date precedent of
+   * `operatingPointAmbiguous`): the iteration cap is a loud decline
+   * naming the residual it froze at, never a fabricated converged
+   * result.
+   */
+  solverUnconverged: "sim/solver-unconverged",
+  /**
    * The worker session does not know the referenced compiled problem
    * (Phase 61b): `sim.run` addressed a problem id this session never
    * minted, or one from a dead channel.
