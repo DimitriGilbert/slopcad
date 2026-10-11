@@ -83,6 +83,8 @@ export {
 } from "./regime";
 export { canonicalSimJson, simScenarioSnapshotHash } from "./snapshot";
 export {
+  type CompiledSimFlow3d,
+  type CompiledSimFlow3dRotation,
   type CompiledSimRunControls,
   type CompiledSimThermal,
   type CompiledSimThermalMaterial,

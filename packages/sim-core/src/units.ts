@@ -20,6 +20,7 @@
  */
 
 import type {
+  CompiledSimFlow3d,
   CompiledSimRunControls,
   CompiledSimThermal,
 } from "./compile-geometry";
@@ -655,6 +656,12 @@ export interface CompiledSimScenario {
    */
   readonly occupancySlice?: SimOccupancyGrid;
   /**
+   * The FULL-3D occupancy twin (Phase 66c): the voxelized geometry of a
+   * flow scenario carrying a 3D stance — the D3Q19 kernel's native
+   * input, worker-side-only exactly like {@link occupancySlice}.
+   */
+  readonly occupancy3d?: SimOccupancyGrid;
+  /**
    * The factor-2 refined twin of {@link occupancySlice}, attached when the
    * scenario flags the grid-convergence self-check (the ladder's second
    * rung, voxelized at half the resolution).
@@ -666,6 +673,14 @@ export interface CompiledSimScenario {
    * the geometry-aware compile for flow scenarios.
    */
   readonly run?: CompiledSimRunControls;
+  /**
+   * The 3D flow compile products (Phase 66c): the re-validated rotation
+   * stance in SI (absent rotation = the static 3D external-flow door),
+   * attached beside {@link occupancy3d} by the geometry-aware compile
+   * for flow scenarios carrying a 3D stance — worker-side-only, like
+   * every compile product.
+   */
+  readonly flow3d?: CompiledSimFlow3d;
   /**
    * The thermal compile products (Phase 65c): the re-validated solve
    * stance, the resolved body→material records, and the per-cell
@@ -1036,6 +1051,7 @@ export const SIM_QUANTITY_DIMENSIONS = [
   "length",
   "area",
   "volume",
+  "volumetricFlow",
   "velocity",
   "acceleration",
   "force",
@@ -1127,6 +1143,7 @@ export const SIM_PROJECTION_UNITS: Readonly<
   length: { unit: "mm", factor: MM_PER_M },
   area: { unit: "mm^2", factor: MM_PER_M * MM_PER_M },
   volume: { unit: "mm^3", factor: MM_PER_M * MM_PER_M * MM_PER_M },
+  volumetricFlow: { unit: "m^3/s", factor: 1 },
   velocity: { unit: "mm/s", factor: MM_PER_M },
   acceleration: { unit: "m/s^2", factor: 1 },
   force: { unit: "N", factor: 1 },

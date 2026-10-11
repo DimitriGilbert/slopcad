@@ -133,6 +133,12 @@ export interface FlowRunOptions {
     readonly bodyId: string;
     readonly tessellation: Tessellation;
   }[];
+  /**
+   * Phase 66c (the fan runs ride the same controller): the serialized
+   * motor record the scenario's selection references — across the
+   * `sim.compile` wire verbatim, the compile door's own `motor` seam.
+   */
+  readonly motor?: unknown;
   /** The run persists against this document version id. */
   readonly documentVersionId: string;
   /** The law-S7 store the completed run persists through. */
@@ -200,6 +206,7 @@ export async function runFlowScenario(
         ...(options.bodyTessellations === undefined
           ? {}
           : { bodyTessellations: options.bodyTessellations }),
+        ...(options.motor === undefined ? {} : { motor: options.motor }),
       });
     } catch (error) {
       throw wireFailure(error);

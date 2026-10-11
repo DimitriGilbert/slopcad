@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The runnable documentation examples (Phase 34): every guide in docs/guides references an example that lives here, and every example is machine-verified — `pnpm verify` typechecks and builds this package through the normal turbo graph, and its vitest suite RUNS each example and asserts the documented outcomes. The web app's /docs documentation application imports the browser-safe examples directly, so the page proves the same code the gates prove.",
+  "description": "The runnable documentation examples (Phase 34): every guide in docs/guides references an example that lives here, and every example is machine-verified \u2014 `pnpm verify` typechecks and builds this package through the normal turbo graph, and its vitest suite RUNS each example and asserts the documented outcomes. The web app's /docs documentation application imports the browser-safe examples directly, so the page proves the same code the gates prove.",
   "exports": {
     ".": {
       "default": "./src/index.ts"
@@ -13,6 +13,9 @@
     },
     "./cadjsx/sim-demo-body": {
       "default": "./src/cadjsx/sim-demo-body.tsx"
+    },
+    "./cadjsx/fan-in-tube": {
+      "default": "./src/cadjsx/fan-in-tube.tsx"
     },
     "./*": {
       "default": [

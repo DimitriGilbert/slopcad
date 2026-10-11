@@ -115,6 +115,7 @@ export {
   type SimThermalExampleSummary,
 } from "./sim/thermal";
 export { runSimVoxelExample, type SimVoxelExampleSummary } from "./sim/voxel";
+export { runSimFanExample, type SimFanExampleSummary } from "./sim/fan";
 
 // -- CAD JSX (authoring) ------------------------------------------------------
 

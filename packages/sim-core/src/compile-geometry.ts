@@ -46,7 +46,11 @@ import type {
 
 import { SIM_ERROR_CODES, simError } from "./errors";
 import { simFail, simOk } from "./result";
-import { voxelizeSimTessellationSlice } from "./voxelizer";
+import { MM_PER_M } from "./units";
+import {
+  voxelizeSimTessellation,
+  voxelizeSimTessellationSlice,
+} from "./voxelizer";
 import { compileSimScenario } from "./units";
 
 /**
@@ -439,6 +443,322 @@ export interface SimBodyTessellation {
   readonly tessellation: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// The 3D flow compile products (Phase 66c)
+// ---------------------------------------------------------------------------
+
+/** The boundary-treatment vocabulary, restated at this door. */
+const FLOW3D_BOUNDARY_TREATMENTS = ["staircase", "cut-cell"] as const;
+
+/** The rotation-kind vocabulary, restated at this door. */
+const FLOW3D_ROTATION_KINDS = ["mrf", "resolved-rotation"] as const;
+
+/** The rpm-mode vocabulary, restated at this door. */
+const FLOW3D_RPM_MODES = ["fixed", "motor"] as const;
+
+type Flow3dBoundaryTreatment = (typeof FLOW3D_BOUNDARY_TREATMENTS)[number];
+type Flow3dRotationKind = (typeof FLOW3D_ROTATION_KINDS)[number];
+type Flow3dRpmMode = (typeof FLOW3D_RPM_MODES)[number];
+
+function isFlow3dRotationKind(input: unknown): input is Flow3dRotationKind {
+  return (
+    typeof input === "string" &&
+    FLOW3D_ROTATION_KINDS.includes(input as Flow3dRotationKind)
+  );
+}
+
+function isFlow3dRpmMode(input: unknown): input is Flow3dRpmMode {
+  return (
+    typeof input === "string" &&
+    FLOW3D_RPM_MODES.includes(input as Flow3dRpmMode)
+  );
+}
+
+/** The compiled rotation half of a 3D stance: pure SI (law S4's door). */
+export interface CompiledSimFlow3dRotation {
+  readonly kind: Flow3dRotationKind;
+  /** One point on the shaft axis, m (converted from authored mm HERE). */
+  readonly axisPointM: readonly [number, number, number];
+  /** The axis direction, normalized at this door. */
+  readonly axisDirection: readonly [number, number, number];
+  /** The rotating zone's radius about the axis, m. */
+  readonly zoneRadiusM: number;
+  readonly rpmMode: Flow3dRpmMode;
+  /** The fixed shaft rate, rad/s (rpm × 2π/60 — converted HERE); iff fixed. */
+  readonly fixedOmegaRadPerS?: number;
+  /** The authored blade count (BPF arithmetic). */
+  readonly bladeCount: number;
+}
+
+/**
+ * The 3D flow compile products a `flow` scenario with a 3D stance
+ * carries (Phase 66c): the re-validated rotation (SI), plus the FULL-3D
+ * occupancy grid attached as {@link CompiledSimScenario.occupancy3d}
+ * (beside the 2D slice the wind-tunnel branch attaches — the same
+ * worker-side-only discipline: consumed where produced, never on the
+ * wire).
+ */
+export interface CompiledSimFlow3d {
+  /** The implemented boundary treatment — "staircase" today, always. */
+  readonly boundaryTreatment: "staircase";
+  readonly rotation?: CompiledSimFlow3dRotation;
+}
+
+/** The 3D occupancy grid's name — the compiled problem's own, fixed. */
+const OCCUPANCY_3D_NAME = "flow3d-domain";
+
+/** rpm → rad/s at the compile door (the motor record's own constant). */
+const RPM_TO_RAD_PER_S = (2 * Math.PI) / 60;
+
+/**
+ * Re-reads the 3D stance from the raw scenario record (the
+ * `parseThermalStance` precedent — the record layer validated the same
+ * fields; this door re-validates every field it consumes, converts the
+ * authored millimetres to SI, and owns the cut-cell decline: the
+ * reserved treatment is refused HERE, loudly, with the recorded
+ * raise-or-decline verdict's pointer — never silently accepted as the
+ * staircase it is not).
+ */
+function parseFlow3dStance(
+  scenario: Record<string, unknown>,
+): SimParseResult<CompiledSimFlow3d, SimError> {
+  const refuse = (
+    message: string,
+    at: unknown,
+  ): SimParseResult<never, SimError> =>
+    simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
+  const stance = scenario.flow3d;
+  if (!isPlainRecord(stance)) {
+    return refuse(
+      "A flow scenario's 3D stance must be a plain object (an optional rotation inside).",
+      stance,
+    );
+  }
+  if (
+    stance.boundaryTreatment !== undefined &&
+    stance.boundaryTreatment !== null
+  ) {
+    const value = stance.boundaryTreatment;
+    if (
+      typeof value !== "string" ||
+      !FLOW3D_BOUNDARY_TREATMENTS.includes(value as Flow3dBoundaryTreatment)
+    ) {
+      return refuse(
+        `A 3D stance's boundary treatment must be one of: ${FLOW3D_BOUNDARY_TREATMENTS.join(", ")}.`,
+        value,
+      );
+    }
+    if (value === "cut-cell") {
+      return simFail(
+        simError(
+          SIM_ERROR_CODES.boundaryTreatmentUnsupported,
+          'The reserved "cut-cell" boundary treatment has no solver: the Phase 66c raise-or-decline verdict DECLINED it against the Phase 62 distance field (staircase accuracy bands + the grid-convergence precedent cover the honesty instead — docs/architecture/adr-simulation.md, "The cut-cell decision"). Raise it with the owner and a dedicated phase lands it; this boundary refuses to silently serve the staircase under a cut-cell label.',
+          value,
+        ),
+      );
+    }
+  }
+  // The only implemented treatment survives the refusal above.
+  const boundaryTreatment = "staircase" as const;
+  if (stance.rotation === undefined || stance.rotation === null) {
+    return simOk({ boundaryTreatment });
+  }
+  const rotation = stance.rotation;
+  if (!isPlainRecord(rotation)) {
+    return refuse(
+      "A 3D stance's rotation must be a plain object with kind, axis, zone, mode, and blade fields.",
+      rotation,
+    );
+  }
+  if (!isFlow3dRotationKind(rotation.kind)) {
+    return refuse(
+      `A 3D stance's rotation kind must be one of: ${FLOW3D_ROTATION_KINDS.join(", ")}.`,
+      rotation.kind,
+    );
+  }
+  const tripleOf = (
+    input: unknown,
+    what: string,
+  ): SimParseResult<readonly [number, number, number], SimError> => {
+    // The element-wise copy keeps the element type `unknown` (never the
+    // `any` Array.isArray narrows to), so every component narrows
+    // through its own typeof/finite check below (the section-triple
+    // precedent).
+    const source: readonly unknown[] | null = Array.isArray(input)
+      ? (input as readonly unknown[])
+      : null;
+    const entries: readonly unknown[] =
+      source === null ? [] : [source[0], source[1], source[2]];
+    if (entries.length !== 3) {
+      return refuse(`A 3D stance's ${what} must be a triple.`, input);
+    }
+    const [x, y, z] = entries;
+    if (
+      typeof x !== "number" ||
+      !Number.isFinite(x) ||
+      typeof y !== "number" ||
+      !Number.isFinite(y) ||
+      typeof z !== "number" ||
+      !Number.isFinite(z)
+    ) {
+      return refuse(
+        `A 3D stance's ${what} must be three finite numbers.`,
+        input,
+      );
+    }
+    return simOk([x, y, z]);
+  };
+  const axisPointMm = tripleOf(rotation.axisPointMm, "rotation axis point");
+  if (!axisPointMm.ok) return axisPointMm;
+  const axisDirection = tripleOf(
+    rotation.axisDirection,
+    "rotation axis direction",
+  );
+  if (!axisDirection.ok) return axisDirection;
+  const [dx, dy, dz] = [
+    axisDirection.value[0] ?? 0,
+    axisDirection.value[1] ?? 0,
+    axisDirection.value[2] ?? 0,
+  ];
+  const directionNorm = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (!(directionNorm > 0)) {
+    return refuse(
+      "A 3D stance's rotation axis direction must be non-zero.",
+      rotation.axisDirection,
+    );
+  }
+  if (
+    typeof rotation.zoneRadiusMm !== "number" ||
+    !Number.isFinite(rotation.zoneRadiusMm) ||
+    rotation.zoneRadiusMm <= 0
+  ) {
+    return refuse(
+      "A 3D stance's rotating zone radius must be a positive finite number of millimetres.",
+      rotation.zoneRadiusMm,
+    );
+  }
+  if (!isFlow3dRpmMode(rotation.rpmMode)) {
+    return refuse(
+      `A 3D stance's rpm mode must be one of: ${FLOW3D_RPM_MODES.join(", ")}.`,
+      rotation.rpmMode,
+    );
+  }
+  const rpmMode = rotation.rpmMode;
+  let fixedOmegaRadPerS: number | undefined;
+  if (rpmMode === "fixed") {
+    if (
+      typeof rotation.fixedRpm !== "number" ||
+      !Number.isFinite(rotation.fixedRpm) ||
+      rotation.fixedRpm <= 0
+    ) {
+      return refuse(
+        "A fixed-rpm 3D stance's shaft rate must be a positive finite rpm value.",
+        rotation.fixedRpm,
+      );
+    }
+    fixedOmegaRadPerS = rotation.fixedRpm * RPM_TO_RAD_PER_S;
+  } else if (scenario.motorId === undefined || scenario.motorId === null) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.motorInvalid,
+        "A motor-driven 3D stance selects no motor record — the operating point solves T_motor(ω) = T_load(ω) against the scenario's selected `motors` record, and the compile refuses to guess one.",
+        scenario.motorId,
+      ),
+    );
+  }
+  if (
+    typeof rotation.bladeCount !== "number" ||
+    !Number.isInteger(rotation.bladeCount) ||
+    rotation.bladeCount < 1
+  ) {
+    return refuse(
+      "A 3D stance's blade count must be a positive integer (the authored field the BPF arithmetic consumes).",
+      rotation.bladeCount,
+    );
+  }
+  return simOk({
+    boundaryTreatment,
+    rotation: Object.freeze({
+      kind: rotation.kind,
+      axisPointM: [
+        (axisPointMm.value[0] ?? 0) / MM_PER_M,
+        (axisPointMm.value[1] ?? 0) / MM_PER_M,
+        (axisPointMm.value[2] ?? 0) / MM_PER_M,
+      ] as const,
+      axisDirection: [
+        dx / directionNorm,
+        dy / directionNorm,
+        dz / directionNorm,
+      ] as const,
+      zoneRadiusM: rotation.zoneRadiusMm / 1000,
+      rpmMode,
+      ...(fixedOmegaRadPerS === undefined ? {} : { fixedOmegaRadPerS }),
+      bladeCount: rotation.bladeCount,
+    }),
+  });
+}
+
+/**
+ * The 3D flow compile branch: the scenario's 3D stance re-validated
+ * into SI (the cut-cell decline lives inside), the merged tessellation
+ * voxelized into the FULL-3D occupancy grid (`voxelizeSimTessellation`
+ * — the Phase 62 native output the D3Q19 kernel consumes directly),
+ * and the run controls read exactly like the 2D branch's. The 3D
+ * factor-2 grid-convergence ladder is NOT part of this surface: a
+ * flagged scenario declines loudly here rather than silently skipping
+ * the self-check the 2D tunnel runs.
+ */
+function compileFlow3dProducts(
+  scenario: Record<string, unknown>,
+  input: GeometrySimCompileInput,
+  bodyBounds: readonly SimBodyBoundsMm[],
+): SimParseResult<
+  Pick<CompiledSimScenario, "occupancy3d" | "flow3d" | "run">,
+  SimError
+> {
+  const stance = parseFlow3dStance(scenario);
+  if (!stance.ok) return stance;
+  if (input.tessellation === undefined) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.geometryUnavailable,
+        "A 3D flow run needs the scenario's voxelized body geometry: compile with the bodies' tessellation — the 3D engine refuses to fabricate an empty domain.",
+        scenario.name,
+      ),
+    );
+  }
+  const run = compileRunControls(scenario);
+  if (!run.ok) return run;
+  if (run.value.gridConvergence) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.scenarioInvalid,
+        "A 3D flow scenario cannot flag the grid-convergence self-check yet: the factor-2 ladder's refined 3D twin (8× the nodes) is not part of Phase 66c's surface, and this door declines the flag loudly instead of silently skipping the self-check the 2D tunnel runs. Resolution guidance and accuracy bands cover 3D honesty today; the ladder needs its own phase or ruling.",
+        scenario.gridConvergence,
+      ),
+    );
+  }
+  const domain = resolveDomainMm(scenario, bodyBounds);
+  if (!domain.ok) return domain;
+  const [minMm, maxMm, resolutionMm] = domain.value;
+  const grid = voxelizeSimTessellation({
+    tessellation: input.tessellation,
+    domain: {
+      kind: "explicit",
+      minMm,
+      maxMm,
+      resolutionMm,
+    },
+    name: OCCUPANCY_3D_NAME,
+  });
+  if (!grid.ok) return grid;
+  return simOk({
+    occupancy3d: grid.value,
+    flow3d: stance.value,
+    run: run.value,
+  });
+}
+
 /**
  * The thermal compile branch: voxelizes each referenced body's
  * tessellation at the domain's mid-height plane (the SAME plane rule the
@@ -664,6 +984,19 @@ export function compileSimScenarioWithGeometry(
     );
   }
   if (compiled.value.kind === "thermal") {
+    // The 3D stance is the flow kind's alone: a thermal record carrying
+    // one declines here (the record boundary locked it first; this door
+    // re-checks every field it consumes — never a silently dropped
+    // stance).
+    if (input.scenario.flow3d !== undefined && input.scenario.flow3d !== null) {
+      return simFail(
+        simError(
+          SIM_ERROR_CODES.scenarioInvalid,
+          'A "thermal" scenario cannot carry a 3D flow stance; it is the flow kind\'s alone.',
+          input.scenario.flow3d,
+        ),
+      );
+    }
     if (input.bodyTessellations === undefined) {
       return simOk(compiled.value);
     }
@@ -677,6 +1010,20 @@ export function compileSimScenarioWithGeometry(
   }
   if (compiled.value.kind !== "flow" || input.tessellation === undefined) {
     return simOk(compiled.value);
+  }
+  // The 3D fork (Phase 66c): a flow scenario carrying a 3D stance
+  // compiles the FULL-3D occupancy grid and its rotation products
+  // instead of the 2D slice — the record vocabulary's honest fork the
+  // engines route on (each engine declines the other's scenarios
+  // loudly, never a silent misroute).
+  if (input.scenario.flow3d !== undefined && input.scenario.flow3d !== null) {
+    const flow3d = compileFlow3dProducts(
+      input.scenario,
+      input,
+      input.bodyBounds ?? [],
+    );
+    if (!flow3d.ok) return flow3d;
+    return simOk({ ...compiled.value, ...flow3d.value });
   }
   const domain = resolveDomainMm(input.scenario, input.bodyBounds ?? []);
   if (!domain.ok) return domain;

@@ -223,6 +223,41 @@ export const SIM_THERMAL_SOLVE_MODES = ["steady", "transient"] as const;
 export type SimThermalSolveMode = (typeof SIM_THERMAL_SOLVE_MODES)[number];
 
 /**
+ * The rotating-machinery kinds a flow scenario's 3D stance can select
+ * (Phase 66): MRF — the honest steady-fan default — or resolved
+ * rotation — the immersed moving-boundary showcase.
+ */
+export const SIM_FLOW3D_ROTATION_KINDS = ["mrf", "resolved-rotation"] as const;
+
+export type SimFlow3dRotationKind = (typeof SIM_FLOW3D_ROTATION_KINDS)[number];
+
+/**
+ * How a rotating scenario's shaft speed is set (Phase 66): a fixed
+ * authored rpm (motor-less scenarios), or the motor-driven operating
+ * point — the sim solves T_motor(ω) = T_load(ω) against the selected
+ * `motors` record instead of assuming a speed.
+ */
+export const SIM_FLOW3D_RPM_MODES = ["fixed", "motor"] as const;
+
+export type SimFlow3dRpmMode = (typeof SIM_FLOW3D_RPM_MODES)[number];
+
+/**
+ * The boundary treatments the 3D stance vocabulary reserves (Phase 66c,
+ * the cut-cell decision): `staircase` is the implemented law-S3
+ * treatment; `cut-cell` is a RESERVED record value — it stores and
+ * round-trips here, and the sim-core compile boundary declines it
+ * loudly (`sim/boundary-treatment-unsupported`) until a dedicated
+ * cut-cell phase exists, exactly the `structural` carve's discipline.
+ */
+export const SIM_FLOW3D_BOUNDARY_TREATMENTS = [
+  "staircase",
+  "cut-cell",
+] as const;
+
+export type SimFlow3dBoundaryTreatment =
+  (typeof SIM_FLOW3D_BOUNDARY_TREATMENTS)[number];
+
+/**
  * A thermal scenario's solve stance (Phase 65c, law S1-additive): the
  * radiation mode, the steady-vs-transient choice with its budget, the
  * heat source, the ambient equilibrium boundary, and whether the
@@ -269,6 +304,64 @@ export interface SerializedSimScenarioThermalSpec {
   readonly sampleIntervalS?: number;
 }
 
+/**
+ * The rotation half of a flow scenario's 3D stance (Phase 66): the
+ * machinery kind, the shaft axis (document millimetres — the S4
+ * boundary converts), the rotating zone's radius (the cylinder that
+ * encloses the rotor, the MRF frame region and the resolved rotor's
+ * extent alike), the speed stance (fixed rpm or the motor-driven
+ * operating point), and the authored blade count the BPF arithmetic
+ * consumes. `fixedRpm` is required exactly when the mode is `fixed`
+ * and refused otherwise, the `durationS`-iff-transient rule's shape.
+ */
+export interface SimScenarioFlow3dRotation {
+  readonly kind: SimFlow3dRotationKind;
+  /** One point on the shaft axis, mm (document space). */
+  readonly axisPointMm: SimVec3;
+  /** The axis direction, unnormalized, non-zero (any finite triple). */
+  readonly axisDirection: SimVec3;
+  /** The rotating zone's radius about the axis, mm (strictly positive). */
+  readonly zoneRadiusMm: number;
+  readonly rpmMode: SimFlow3dRpmMode;
+  /** The fixed shaft rate, rpm (strictly positive); required iff fixed mode. */
+  readonly fixedRpm?: number;
+  /** The authored blade count (BPF = blades × rpm — a scenario field). */
+  readonly bladeCount: number;
+}
+
+/**
+ * A flow scenario's 3D stance (Phase 66c, law S1-additive): opts the
+ * scenario into the 3D flow engine — the D3Q19 CPU oracle, and for
+ * rotating scenarios the MRF/resolved-rotation paths. Absent on a flow
+ * scenario the run stays the 2D wind tunnel (the slice discipline);
+ * present, the 2D engine declines it loudly and the routed engine
+ * serves the 3D domain (the same record vocabulary's honest fork).
+ * Required on no other kind — the stance is the flow kind's alone.
+ */
+export interface SimScenarioFlow3dSpec {
+  /**
+   * The boundary treatment (law S3): `staircase` (the default) or the
+   * reserved `cut-cell` — see {@link SIM_FLOW3D_BOUNDARY_TREATMENTS}.
+   */
+  readonly boundaryTreatment?: SimFlow3dBoundaryTreatment;
+  /** The rotating machinery; absent = the static 3D external-flow door. */
+  readonly rotation?: SimScenarioFlow3dRotation;
+}
+
+/** Canonical JSON form of the 3D stance; fixed key order, optionals last. */
+export interface SerializedSimScenarioFlow3dSpec {
+  readonly boundaryTreatment?: SimFlow3dBoundaryTreatment;
+  readonly rotation?: {
+    readonly kind: SimFlow3dRotationKind;
+    readonly axisPointMm: readonly [number, number, number];
+    readonly axisDirection: readonly [number, number, number];
+    readonly zoneRadiusMm: number;
+    readonly rpmMode: SimFlow3dRpmMode;
+    readonly fixedRpm?: number;
+    readonly bladeCount: number;
+  };
+}
+
 function isSimThermalRadiationMode(
   input: unknown,
 ): input is SimThermalRadiationMode {
@@ -282,6 +375,188 @@ function isSimThermalSolveMode(input: unknown): input is SimThermalSolveMode {
   return (
     typeof input === "string" &&
     SIM_THERMAL_SOLVE_MODES.includes(input as SimThermalSolveMode)
+  );
+}
+
+function isSimFlow3dRotationKind(
+  input: unknown,
+): input is SimFlow3dRotationKind {
+  return (
+    typeof input === "string" &&
+    SIM_FLOW3D_ROTATION_KINDS.includes(input as SimFlow3dRotationKind)
+  );
+}
+
+function isSimFlow3dRpmMode(input: unknown): input is SimFlow3dRpmMode {
+  return (
+    typeof input === "string" &&
+    SIM_FLOW3D_RPM_MODES.includes(input as SimFlow3dRpmMode)
+  );
+}
+
+function isSimFlow3dBoundaryTreatment(
+  input: unknown,
+): input is SimFlow3dBoundaryTreatment {
+  return (
+    typeof input === "string" &&
+    SIM_FLOW3D_BOUNDARY_TREATMENTS.includes(input as SimFlow3dBoundaryTreatment)
+  );
+}
+
+/**
+ * Parses the 3D stance, kind-locked: any kind but `flow` carrying one
+ * declines (the stance is the flow kind's alone), and a rotation's own
+ * fields are cross-checked (fixed rpm exactly when the fixed mode).
+ */
+function parseFlow3dSpec(
+  input: unknown,
+  kind: SimScenarioKind,
+): ParseResult<SimScenarioFlow3dSpec | undefined, SimulationError> {
+  if (input === undefined || input === null) {
+    return ok(undefined);
+  }
+  if (kind !== "flow") {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        `A "${kind}" scenario cannot carry a 3D flow stance; it is the flow kind's alone.`,
+        input,
+      ),
+    );
+  }
+  if (!isPlainRecord(input)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        "A 3D flow stance must be an object with an optional rotation field.",
+        input,
+      ),
+    );
+  }
+  let boundaryTreatment: SimFlow3dBoundaryTreatment | undefined;
+  if (
+    input.boundaryTreatment !== undefined &&
+    input.boundaryTreatment !== null
+  ) {
+    if (!isSimFlow3dBoundaryTreatment(input.boundaryTreatment)) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+          `A 3D flow stance's boundary treatment must be one of: ${SIM_FLOW3D_BOUNDARY_TREATMENTS.join(", ")}.`,
+          input.boundaryTreatment,
+        ),
+      );
+    }
+    boundaryTreatment = input.boundaryTreatment;
+  }
+  if (input.rotation === undefined || input.rotation === null) {
+    return ok(
+      Object.freeze(
+        boundaryTreatment === undefined ? {} : { boundaryTreatment },
+      ),
+    );
+  }
+  const rotation = input.rotation;
+  if (!isPlainRecord(rotation)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        "A 3D stance's rotation must be an object with kind, axis, zone, mode, and blade fields.",
+        rotation,
+      ),
+    );
+  }
+  if (!isSimFlow3dRotationKind(rotation.kind)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        `A 3D stance's rotation kind must be one of: ${SIM_FLOW3D_ROTATION_KINDS.join(", ")}.`,
+        rotation.kind,
+      ),
+    );
+  }
+  const axisPointMm = parseVec3(
+    rotation.axisPointMm,
+    SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+    "A 3D stance's rotation axis point",
+  );
+  if (!axisPointMm.ok) return axisPointMm;
+  const axisDirection = parseVec3(
+    rotation.axisDirection,
+    SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+    "A 3D stance's rotation axis direction",
+  );
+  if (!axisDirection.ok) return axisDirection;
+  if (axisDirection.value.every((component) => component === 0)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        "A 3D stance's rotation axis direction must be non-zero.",
+        rotation.axisDirection,
+      ),
+    );
+  }
+  const zoneRadiusMm = parsePositiveNumber(
+    rotation.zoneRadiusMm,
+    SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+    "A 3D stance's rotating zone radius",
+  );
+  if (!zoneRadiusMm.ok) return zoneRadiusMm;
+  if (!isSimFlow3dRpmMode(rotation.rpmMode)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        `A 3D stance's rpm mode must be one of: ${SIM_FLOW3D_RPM_MODES.join(", ")}.`,
+        rotation.rpmMode,
+      ),
+    );
+  }
+  const rpmMode = rotation.rpmMode;
+  let fixedRpm: number | undefined;
+  if (rpmMode === "fixed") {
+    const parsed = parsePositiveNumber(
+      rotation.fixedRpm,
+      SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+      "A fixed-rpm 3D stance's shaft rate",
+    );
+    if (!parsed.ok) return parsed;
+    fixedRpm = parsed.value;
+  } else if (rotation.fixedRpm !== undefined && rotation.fixedRpm !== null) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        "A motor-driven 3D stance cannot also author a fixed rpm — the operating point solves the speed.",
+        rotation.fixedRpm,
+      ),
+    );
+  }
+  const bladeCount = rotation.bladeCount;
+  if (
+    typeof bladeCount !== "number" ||
+    !Number.isInteger(bladeCount) ||
+    bladeCount < 1
+  ) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.flow3dSpecInvalid,
+        "A 3D stance's blade count must be a positive integer (the authored field the BPF arithmetic consumes).",
+        bladeCount,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...(boundaryTreatment === undefined ? {} : { boundaryTreatment }),
+      rotation: Object.freeze({
+        kind: rotation.kind,
+        axisPointMm: axisPointMm.value,
+        axisDirection: axisDirection.value,
+        zoneRadiusMm: zoneRadiusMm.value,
+        rpmMode,
+        ...(fixedRpm === undefined ? {} : { fixedRpm }),
+        bladeCount,
+      }),
+    }),
   );
 }
 
@@ -473,6 +748,12 @@ export interface SimScenarioBody {
    * scenarios, refused on every other kind.
    */
   readonly thermal?: SimScenarioThermalSpec;
+  /**
+   * The 3D flow stance (Phase 66c): present = the 3D engine serves this
+   * flow scenario (static external flow, or rotating machinery); absent
+   * = the 2D wind tunnel. Refused on every other kind.
+   */
+  readonly flow3d?: SimScenarioFlow3dSpec;
   /** The selected motor record for fan scenarios; absent = motor-less. */
   readonly motorId?: MotorId;
   /** The backend preference; absent = the CPU default. */
@@ -497,6 +778,7 @@ export interface SimScenarioInput {
   readonly stepBudget?: number;
   readonly gridConvergence?: boolean;
   readonly thermal?: SimScenarioThermalSpec;
+  readonly flow3d?: SimScenarioFlow3dSpec;
   readonly motorId?: MotorId;
   readonly backend?: SimBackendPreference;
 }
@@ -526,6 +808,7 @@ export const SIMULATION_ERROR_CODES = {
   backendInvalid: "simulation/backend-invalid",
   runControlsInvalid: "simulation/run-controls-invalid",
   thermalSpecInvalid: "simulation/thermal-spec-invalid",
+  flow3dSpecInvalid: "simulation/flow3d-spec-invalid",
 } as const;
 
 export type SimulationErrorCode =
@@ -1237,6 +1520,7 @@ export function buildSimScenarioBody(
   stepBudget: unknown,
   gridConvergence: unknown,
   thermal?: unknown,
+  flow3d?: unknown,
 ): ParseResult<SimScenarioBody, SimulationError> {
   if (typeof name !== "string" || !isValidSimulationName(name)) {
     return fail(
@@ -1343,6 +1627,8 @@ export function buildSimScenarioBody(
   }
   const parsedThermal = parseThermalSpec(thermal, kind);
   if (!parsedThermal.ok) return parsedThermal;
+  const parsedFlow3d = parseFlow3dSpec(flow3d, kind);
+  if (!parsedFlow3d.ok) return parsedFlow3d;
   return ok(
     Object.freeze({
       name: name.trim(),
@@ -1361,6 +1647,9 @@ export function buildSimScenarioBody(
       ...(parsedThermal.value === undefined
         ? {}
         : { thermal: parsedThermal.value }),
+      ...(parsedFlow3d.value === undefined
+        ? {}
+        : { flow3d: parsedFlow3d.value }),
       ...(parsedMotorId === undefined ? {} : { motorId: parsedMotorId }),
       ...(parsedBackend === undefined ? {} : { backend: parsedBackend }),
     }),
@@ -1382,6 +1671,7 @@ export interface SerializedSimScenarioBody {
   readonly stepBudget?: number;
   readonly gridConvergence?: boolean;
   readonly thermal?: SerializedSimScenarioThermalSpec;
+  readonly flow3d?: SerializedSimScenarioFlow3dSpec;
   readonly motorId?: string;
   /** Present exactly when the preference is not the CPU default. */
   readonly backend?: Exclude<SimBackendPreference, "cpu">;
@@ -1437,6 +1727,31 @@ export function serializeSimScenarioBody(
               : { sampleIntervalS: scenario.thermal.sampleIntervalS }),
           },
         }),
+    ...(scenario.flow3d === undefined
+      ? {}
+      : {
+          flow3d: {
+            ...(scenario.flow3d.boundaryTreatment === undefined ||
+            scenario.flow3d.boundaryTreatment === "staircase"
+              ? {}
+              : { boundaryTreatment: scenario.flow3d.boundaryTreatment }),
+            ...(scenario.flow3d.rotation === undefined
+              ? {}
+              : {
+                  rotation: {
+                    kind: scenario.flow3d.rotation.kind,
+                    axisPointMm: [...scenario.flow3d.rotation.axisPointMm],
+                    axisDirection: [...scenario.flow3d.rotation.axisDirection],
+                    zoneRadiusMm: scenario.flow3d.rotation.zoneRadiusMm,
+                    rpmMode: scenario.flow3d.rotation.rpmMode,
+                    ...(scenario.flow3d.rotation.fixedRpm === undefined
+                      ? {}
+                      : { fixedRpm: scenario.flow3d.rotation.fixedRpm }),
+                    bladeCount: scenario.flow3d.rotation.bladeCount,
+                  },
+                }),
+          },
+        }),
     ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
     ...(scenario.backend === undefined || scenario.backend === "cpu"
       ? {}
@@ -1474,6 +1789,7 @@ export function parseSimScenarioBody(
     input.stepBudget,
     input.gridConvergence,
     input.thermal,
+    input.flow3d,
   );
 }
 

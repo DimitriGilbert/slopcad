@@ -47,6 +47,7 @@ import {
 } from "./sim/gallery";
 import { runSimSpineExample } from "./sim/spine";
 import { runSimThermalExample } from "./sim/thermal";
+import { runSimFanExample } from "./sim/fan";
 import { runSimVoxelExample } from "./sim/voxel";
 import { runSimDemoBodyExample } from "./cadjsx/sim-demo-body";
 import { runSketchExample } from "./sketch/sketch";
@@ -606,4 +607,31 @@ describe("guide example: the known-cases gallery — the shock tube declines lou
     expect(summary.declineReason).toContain("Sod shock tube");
     expect(summary.declineReason).toContain("declines the case loudly");
   });
+});
+
+describe("guide example: the motor-driven fan (Phase 66)", () => {
+  it("finds the operating point and reports the fan family, deterministically", async () => {
+    const summary = await runSimFanExample();
+    // The cut-cell reserve declines loudly (the 66c decision).
+    expect(summary.cutCellDeclined).toBe(true);
+    // FOUND, not assumed: the point sits strictly inside the ladder.
+    expect(summary.operatingOmegaRadPerS).toBeGreaterThan(
+      0.25 * summary.noLoadRadPerS,
+    );
+    expect(summary.operatingOmegaRadPerS).toBeLessThan(summary.noLoadRadPerS);
+    // BPF = blades × rpm / 60 at the found point (4 blades).
+    const rpm = (summary.operatingOmegaRadPerS * 60) / (2 * Math.PI);
+    expect(summary.bladePassFrequencyHz).toBeCloseTo((4 * rpm) / 60, 9);
+    // The performance is extracted AT the found point (finite reads).
+    expect(Number.isFinite(summary.airflowM3PerS)).toBe(true);
+    expect(Number.isFinite(summary.pressureRisePa)).toBe(true);
+    // The S9 fan Re guidance line flags the low-Re demo regime.
+    expect(summary.fanReynoldsTip).toBeGreaterThan(0);
+    expect(summary.fanReynoldsTip).toBeLessThan(1e4);
+    expect(summary.flags).toContain("low-reynolds-fan");
+    // The published chart's history pair (four ladder rungs).
+    expect(summary.loadCurveSamples).toBe(4);
+    // Determinism (law S2).
+    expect(summary.deterministic).toBe(true);
+  }, 300_000);
 });

@@ -62,6 +62,25 @@
  * SimResultStore panel family (law S7), keyed by the same hash
  * discipline.
  *
+ * ## Phase 66c: the fan demo (motor-driven, in a tube)
+ *
+ * A demo-model selector (fixture data — radio presets, the resolution
+ * family's precedent) switches the page's document between the Phase 62
+ * demo plate and the FAN-IN-TUBE demo body (`fan-demo.ts`: the cad-jsx
+ * tube + paddle rotor, the demo motor record in the document's
+ * `motors` section, the motor-driven scenario defaults). A Formedible
+ * FAN scenario form sits beside the flow form and authors flow3d
+ * scenarios (rotation kind, RPM mode, motor selection, blade count,
+ * axis/zone) into the document's `simulations` section; "Run" drives
+ * the same compile → stream → finalize → persist path, now routed to
+ * the 3D reference engine — the motor-driven mode sweeps the ω ladder,
+ * SOLVES the operating point, and streams the verification rung's
+ * speed field through the same committed-application ledger (the
+ * mid-domain slice paints the velocity overlay). The published fan
+ * performance chart — the fan curve with the operating point
+ * superimposed — renders from the persisted result's own history pair
+ * and quantities (`fan-chart.tsx`, SVG-as-data).
+ *
  * ## Machine-readable surface
  *
  * The render session's settle family (`data-dispatched`,
@@ -82,7 +101,12 @@
  * ready | failed), `data-sim-compare-runs` (`a:<id>|b:<id>`),
  * `data-sim-compare-diff` (the diffed field id once rendered),
  * `data-sim-compare-l2` (the relative L2 difference), and
- * `data-sim-compare-error`.
+ * `data-sim-compare-error`; the 66c fan family:
+ * `data-sim-demo-model` ("plate" | "fan"),
+ * `data-sim-fan-chart` ("ready" once the chart rendered),
+ * `data-sim-fan-op-rpm`, `data-sim-fan-bpf-hz`, `data-sim-fan-airflow`,
+ * `data-sim-fan-dp-pa`, `data-sim-fan-reynolds`, and
+ * `data-sim-fan-flags` (the S9 qualitative flags, comma-joined).
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -90,8 +114,10 @@ import type { ReactElement } from "react";
 import { CadScene, FieldIsoContours, FieldSlicePlane } from "@slopcad/cad-r3f";
 import {
   addDocumentSimulation,
-  serializeSimScenario,
   type CadDocument,
+  type DocumentMotorRecord,
+  serializeDocumentMotor,
+  serializeSimScenario,
   type SimScenario,
   type SimScenarioDraft,
 } from "@slopcad/cad-core";
@@ -134,6 +160,9 @@ import {
   stampSimAppliedCounters,
 } from "./sim-grid-fixture";
 import { FlowScenarioForm } from "./flow-scenario-form";
+import { FanScenarioForm, type FanMotorOption } from "./fan-scenario-form";
+import { fanChartOf, FanChartPanel } from "./fan-chart";
+import { fanDemoDocument } from "./fan-demo";
 import { ThermalScenarioForm } from "./thermal-scenario-form";
 import { thermalMaterialPresetOf } from "./thermal-materials";
 import {
@@ -181,6 +210,19 @@ const COMPARE_PANEL_HEIGHT = 64;
 const DEMO_DOCUMENT = simDemoDocument();
 const DEMO_BODIES = documentSceneBodies(DEMO_DOCUMENT, new Set(), null);
 const DEMO_RENDERABLE = renderableBodyIds(DEMO_DOCUMENT);
+/**
+ * The fan demo's own document (computed once, pure — the plate demo's
+ * discipline): the cad-jsx fan-in-tube body plus the demo motor record
+ * the motor-driven scenario selects.
+ */
+const FAN_DEMO_DOCUMENT = fanDemoDocument();
+const FAN_DEMO_BODIES = documentSceneBodies(FAN_DEMO_DOCUMENT, new Set(), null);
+const FAN_DEMO_RENDERABLE = renderableBodyIds(FAN_DEMO_DOCUMENT);
+/** The demo-model selector's vocabulary (fixture data, the plate boot). */
+const DEMO_MODELS = [
+  { id: "plate", label: "Demo plate (2D tunnel)" },
+  { id: "fan", label: "Fan in a tube (3D, Phase 66)" },
+] as const;
 /**
  * The single demo body every thermal material assignment addresses —
  * the first renderable body's own branded id (the demo document's one
@@ -235,10 +277,17 @@ function liveOverlayOf(block: SimResultFieldBlock): LiveFieldOverlay {
     min = 0;
     max = OVERLAY_INLET_MM_PER_S;
   }
+  // A full-3D block (the 3D engine's fields) slices at its mid-height
+  // — the rotor's plane on the fan demo; a 2D slice block keeps its own
+  // plane (the origin IS the plane).
+  const nz = decoded.shape[2] ?? 1;
+  const slicePositionMm =
+    (decoded.originMm[2] ?? 0) +
+    Math.floor(nz / 2) * (decoded.spacingMm[2] ?? 0);
   return {
     fieldId: block.id,
     field: decoded,
-    slicePositionMm: decoded.originMm[2] ?? 0,
+    slicePositionMm,
     valueRange: [min, max],
   };
 }
@@ -282,6 +331,9 @@ export function SimWorkbenchPage(): ReactElement {
   // re-publishes a round.
   const appliedDigestRef = useRef("");
 
+  // --- Phase 66c state (the demo-model fork) --------------------------------
+  const [demoModel, setDemoModel] = useState<"plate" | "fan">("plate");
+  const [fanChart, setFanChart] = useState<ReturnType<typeof fanChartOf>>(null);
   // --- Phase 63c state ------------------------------------------------------
   const [workingDocument, setWorkingDocument] =
     useState<CadDocument>(DEMO_DOCUMENT);
@@ -331,11 +383,14 @@ export function SimWorkbenchPage(): ReactElement {
         setScene(applied);
       },
     );
-    session.dispatchDocument(DEMO_BODIES, DEMO_RENDERABLE);
+    session.dispatchDocument(
+      demoModel === "fan" ? FAN_DEMO_BODIES : DEMO_BODIES,
+      demoModel === "fan" ? FAN_DEMO_RENDERABLE : DEMO_RENDERABLE,
+    );
     return () => {
       session.dispose();
     };
-  }, []);
+  }, [demoModel]);
 
   // The run store boots with the page (the local backend; a decline
   // surfaces in the panel's error line, never a silent no-store).
@@ -378,6 +433,10 @@ export function SimWorkbenchPage(): ReactElement {
   useEffect(() => {
     if (scene === null) return;
     if (!("bodies" in scene.state.measurement)) return;
+    // The Phase 62 grid fixture is the PLATE demo's surface; the fan
+    // model's viewport shows the settled body and the run's live
+    // overlay paints its grid (the two demos' honest split).
+    if (demoModel === "fan") return;
     const digest = `${String(scene.revision)}|${controls.resolutionId}|${String(controls.signedDistance)}`;
     if (appliedDigestRef.current === digest) return;
     appliedDigestRef.current = digest;
@@ -413,7 +472,20 @@ export function SimWorkbenchPage(): ReactElement {
         occupiedNodes: simFixtureOccupiedNodes(field.field.grid),
       }),
     );
-  }, [scene, controls, simLedger]);
+  }, [scene, controls, simLedger, demoModel]);
+
+  /** Switches the demo model: the working document and overlays reset. */
+  const onSelectDemoModel = (model: "plate" | "fan"): void => {
+    if (model === demoModel) return;
+    setDemoModel(model);
+    setWorkingDocument(model === "fan" ? FAN_DEMO_DOCUMENT : DEMO_DOCUMENT);
+    setSelectedScenario(null);
+    setOverlay(null);
+    setLiveOverlay(null);
+    setOverlayMode("fixture");
+    setFanChart(null);
+    setGridState("");
+  };
 
   /** Saves a scenario record into the document's simulations section. */
   const onSaveScenario = (draft: SimScenarioDraft): void => {
@@ -473,6 +545,21 @@ export function SimWorkbenchPage(): ReactElement {
     // untouched for flow runs.
     const isThermal = selectedScenario.kind === "thermal";
     const bodies = settled.state.measurement.bodies;
+    // Phase 66c: a flow3d scenario's motor selection rides the compile
+    // wire (the serialized record of the working document's motors
+    // section — absent when the scenario selects none).
+    const motorRecord: DocumentMotorRecord | undefined =
+      selectedScenario.motorId === undefined
+        ? undefined
+        : workingDocument.motors.find(
+            (motor) => motor.id === selectedScenario.motorId,
+          );
+    if (selectedScenario.motorId !== undefined && motorRecord === undefined) {
+      setSimError(
+        `simulation/motor-invalid: The scenario selects motor "${selectedScenario.motorId}" but the working document carries no such record.`,
+      );
+      return;
+    }
     const materials = isThermal
       ? selectedScenario.materials.map(
           (assignment) => thermalMaterialPresetOf(assignment.materialId).record,
@@ -495,6 +582,9 @@ export function SimWorkbenchPage(): ReactElement {
         ...(tessellation === undefined ? {} : { tessellation }),
         ...(materials === undefined ? {} : { materials }),
         ...(bodyTessellations === undefined ? {} : { bodyTessellations }),
+        ...(motorRecord === undefined
+          ? {}
+          : { motor: serializeDocumentMotor(motorRecord) }),
         documentVersionId: DOCUMENT_VERSION_ID,
         store,
         ledger: simLedger,
@@ -511,6 +601,7 @@ export function SimWorkbenchPage(): ReactElement {
         },
       });
       setLastResult(outcome.result);
+      setFanChart(fanChartOf(outcome.result));
       await refreshRuns(store);
       setRunStatus("completed");
       setSimError("");
@@ -658,6 +749,30 @@ export function SimWorkbenchPage(): ReactElement {
         compareDiff === null ? "" : String(compareDiff.l2Relative)
       }
       data-sim-compare-error={compareError}
+      data-sim-demo-model={demoModel}
+      data-sim-fan-chart={fanChart === null ? "" : "ready"}
+      data-sim-fan-op-rpm={
+        fanChart === null ? "" : fanChart.headline.operatingRpm.toFixed(3)
+      }
+      data-sim-fan-bpf-hz={
+        fanChart === null
+          ? ""
+          : fanChart.headline.bladePassFrequencyHz.toFixed(4)
+      }
+      data-sim-fan-airflow={
+        fanChart === null
+          ? ""
+          : fanChart.headline.airflowM3PerS.toExponential(4)
+      }
+      data-sim-fan-dp-pa={
+        fanChart === null ? "" : fanChart.headline.pressureRisePa.toFixed(5)
+      }
+      data-sim-fan-reynolds={
+        fanChart === null ? "" : fanChart.headline.fanReynoldsTip.toFixed(2)
+      }
+      data-sim-fan-flags={
+        fanChart === null ? "" : fanChart.headline.flags.join(",")
+      }
       data-rendered-frames={String(renderedFrames)}
       data-error=""
     >
@@ -677,47 +792,77 @@ export function SimWorkbenchPage(): ReactElement {
       <div className="flex flex-wrap items-start gap-6">
         <div className="w-64 shrink-0 space-y-4">
           <fieldset className="space-y-1 text-sm">
-            <legend className="font-medium">Resolution</legend>
-            {SIM_FIXTURE_RESOLUTIONS.map((preset) => (
+            <legend className="font-medium">Demo model</legend>
+            {DEMO_MODELS.map((model) => (
               <label
-                key={preset.id}
+                key={model.id}
                 className="block"
-                htmlFor={`sim-resolution-${preset.id}`}
+                htmlFor={`sim-demo-model-${model.id}`}
               >
                 <input
-                  id={`sim-resolution-${preset.id}`}
+                  id={`sim-demo-model-${model.id}`}
                   className="mr-1"
                   type="radio"
-                  name="sim-resolution"
-                  value={preset.id}
-                  checked={controls.resolutionId === preset.id}
+                  name="sim-demo-model"
+                  value={model.id}
+                  checked={demoModel === model.id}
                   onChange={() => {
-                    setControls((previous) => ({
-                      ...previous,
-                      resolutionId: preset.id,
-                    }));
+                    onSelectDemoModel(model.id);
                   }}
                 />
-                {preset.label}
+                {model.label}
               </label>
             ))}
           </fieldset>
-          <label className="block space-y-1 text-sm" htmlFor="sim-sdf-toggle">
-            <span className="font-medium">Field</span>
-            <input
-              id="sim-sdf-toggle"
-              type="checkbox"
-              className="mr-1"
-              checked={controls.signedDistance}
-              onChange={() => {
-                setControls((previous) => ({
-                  ...previous,
-                  signedDistance: !previous.signedDistance,
-                }));
-              }}
-            />
-            signed distance (occupancy otherwise)
-          </label>
+          {demoModel === "fan" ? null : (
+            <>
+              <fieldset className="space-y-1 text-sm">
+                <legend className="font-medium">Resolution</legend>
+                {SIM_FIXTURE_RESOLUTIONS.map((preset) => (
+                  <label
+                    key={preset.id}
+                    className="block"
+                    htmlFor={`sim-resolution-${preset.id}`}
+                  >
+                    <input
+                      id={`sim-resolution-${preset.id}`}
+                      className="mr-1"
+                      type="radio"
+                      name="sim-resolution"
+                      value={preset.id}
+                      checked={controls.resolutionId === preset.id}
+                      onChange={() => {
+                        setControls((previous) => ({
+                          ...previous,
+                          resolutionId: preset.id,
+                        }));
+                      }}
+                    />
+                    {preset.label}
+                  </label>
+                ))}
+              </fieldset>
+              <label
+                className="block space-y-1 text-sm"
+                htmlFor="sim-sdf-toggle"
+              >
+                <span className="font-medium">Field</span>
+                <input
+                  id="sim-sdf-toggle"
+                  type="checkbox"
+                  className="mr-1"
+                  checked={controls.signedDistance}
+                  onChange={() => {
+                    setControls((previous) => ({
+                      ...previous,
+                      signedDistance: !previous.signedDistance,
+                    }));
+                  }}
+                />
+                signed distance (occupancy otherwise)
+              </label>
+            </>
+          )}
           <ul className="space-y-1 font-mono text-xs">
             <li>
               status = <span id="workbench-sim-status">boot</span>
@@ -818,15 +963,34 @@ export function SimWorkbenchPage(): ReactElement {
           <fieldset className="space-y-2 text-sm">
             <legend className="font-medium">Flow scenario (Phase 63)</legend>
             <FlowScenarioForm onSubmitScenario={onSaveScenario} />
-            <fieldset className="space-y-2 border-t pt-2">
-              <legend className="font-medium">
-                Thermal scenario — the stove (Phase 65)
-              </legend>
-              <ThermalScenarioForm
-                bodyId={DEMO_BODY_ID}
-                onSubmitScenario={onSaveScenario}
-              />
-            </fieldset>
+            {demoModel === "fan" ? (
+              <fieldset className="space-y-2 border-t pt-2">
+                <legend className="font-medium">
+                  Fan scenario — motor-driven, in a tube (Phase 66)
+                </legend>
+                <FanScenarioForm
+                  motorOptions={workingDocument.motors.map(
+                    (motor): FanMotorOption => ({
+                      value: motor.id,
+                      label: `${motor.name} (${motor.kind})`,
+                    }),
+                  )}
+                  submitLabel="Save fan scenario"
+                  onSubmitScenario={onSaveScenario}
+                />
+              </fieldset>
+            ) : (
+              <fieldset className="space-y-2 border-t pt-2">
+                <legend className="font-medium">
+                  Thermal scenario — the stove (Phase 65)
+                </legend>
+                <ThermalScenarioForm
+                  bodyId={DEMO_BODY_ID}
+                  onSubmitScenario={onSaveScenario}
+                />
+              </fieldset>
+            )}
+            {fanChart !== null ? <FanChartPanel chart={fanChart} /> : null}
             <div className="space-y-1">
               <button
                 id="workbench-sim-run"

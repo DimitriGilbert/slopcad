@@ -104,6 +104,15 @@ export const SIM_ERROR_CODES = {
    */
   tessellationInvalid: "sim/tessellation-invalid",
   /**
+   * A scenario requested a boundary treatment no solver implements
+   * (Phase 66c, the cut-cell decision): the record vocabulary reserves
+   * `cut-cell` beside the implemented `staircase`, and the compile
+   * boundary declines it loudly — pointing at the recorded raise-or-
+   * decline verdict — instead of silently accepting the staircase. The
+   * `structural`-carve discipline applied to law S3's geometry half.
+   */
+  boundaryTreatmentUnsupported: "sim/boundary-treatment-unsupported",
+  /**
    * The voxelizer's domain door refused (Phase 62a): a non-positive
    * resolution, an explicit box whose max corner does not exceed its min
    * corner, a negative body margin, a malformed slice plane, or a

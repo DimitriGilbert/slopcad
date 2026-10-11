@@ -13,6 +13,14 @@ export const SIM_QUALITATIVE_FLAGS = [
   "turbulence-dominated",
   "compressibility-affected",
   "buoyancy-driven",
+  /**
+   * A fan run whose tip-dynamic Reynolds number sits below the fan
+   * literature's data regime (Phase 66's S9 guidance line,
+   * `@slopcad/sim-flow`'s `FAN_LOW_REYNOLDS_ADVISORY`): the curve's
+   * shape is qualitative there — the numbers are still reported, the
+   * run still proceeds.
+   */
+  "low-reynolds-fan",
 ] as const;
 
 export type SimQualitativeFlag = (typeof SIM_QUALITATIVE_FLAGS)[number];

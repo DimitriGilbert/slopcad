@@ -3624,6 +3624,148 @@ test("s24f the sim workbench runs the stove through the real thermal engine — 
   });
 });
 
+test("s24g the sim workbench runs the motor-driven fan demo through the 3D engine (Phase 66)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24g workbench-sim fan demo", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // SWITCH the demo model to the fan-in-tube: the radio preset
+    // re-dispatches the fan document (the cad-jsx tube + rotor through
+    // the real Manifold worker) and resets the working document — the
+    // model fork's own settle, awaited on the scene family.
+    await page.locator("#sim-demo-model-fan").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fan",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the fan form's defaults ARE the motor-driven demo — the
+    // demo motor selection, MRF, four blades — one submit saves the
+    // flow3d stance into the document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save fan scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the 3D reference engine in the sim worker — the ω ladder of
+    // streamed MRF rungs, the operating-point solve, and the
+    // verification rung at the FOUND speed, awaited on the run family
+    // and the committed-application counters, never a timeout. The
+    // progress total spans the ladder's four rungs plus the verify
+    // rung (5 × 120 steps).
+    await page.locator("#workbench-sim-run").click();
+    // The sweep is five rungs (~8-10 s under the session's video
+    // load) — the wait stays attribute-driven (never a sleep); the
+    // longer allowance only clears the 10 s default's race with the
+    // rung ladder's honest duration.
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "600",
+    );
+    // The 3D speed overlay mounted from the verify rung's committed
+    // preview rounds (law S6 — overlay application IS committed
+    // application).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE OPERATING POINT IS VISIBLE: the found rpm sits strictly
+    // inside the motor's domain (0 < rpm < 40 no-load — the demo
+    // motor's own number, `FAN_DEMO_MOTOR_NUMBERS.noLoadSpeedRpm`),
+    // the BPF is the blades arithmetic at it, and the S9 fan Re line
+    // flags the demo's low-Re regime (law S9's honesty field on the
+    // surface).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-fan-chart",
+      "ready",
+    );
+    const foundRpm = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-fan-op-rpm"),
+    );
+    expect(foundRpm).toBeGreaterThan(1);
+    expect(foundRpm).toBeLessThan(39);
+    const bpf = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-fan-bpf-hz"),
+    );
+    expect(bpf).toBeCloseTo((4 * foundRpm) / 60, 2);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-fan-flags",
+      "low-reynolds-fan",
+    );
+
+    // THE CHART IS RENDERED: both curve polylines and the operating
+    // point's superimposed marker, from the persisted result's own
+    // history pair (SVG-as-data, the 63d family).
+    await expect(page.getByTestId("workbench-sim-fan-chart")).toBeVisible();
+    await expect(
+      page
+        .locator(
+          '[data-testid="workbench-sim-fan-chart"] polyline[data-series]',
+        )
+        .first(),
+    ).toBeVisible();
+    const seriesCount = await page
+      .locator('[data-testid="workbench-sim-fan-chart"] polyline[data-series]')
+      .count();
+    expect(seriesCount).toBe(2);
+    expect(
+      await page
+        .locator('[data-testid="workbench-sim-fan-chart"] g[data-marker]')
+        .count(),
+    ).toBe(1);
+
+    // PERSIST + EXPORT: the completed run landed in the store, and the
+    // export paths remain working for 3D runs — the .vti field series
+    // (one honest file per 3D field block) and the CSV (the ladder's
+    // load/motor pair).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const vtiBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-vti"),
+    );
+    await page.locator("#workbench-sim-export-vti").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-vti",
+      String(vtiBefore + 5),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {

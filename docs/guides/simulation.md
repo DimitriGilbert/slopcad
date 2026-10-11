@@ -350,14 +350,140 @@ the same SimResultStore panel family (law S7).
   every watt, joule and capacity is PER METRE OF DEPTH, the same
   convention the coupled march and the flow kernel's forces use.
 
+## The fan in a tube: 3D flow and rotating machinery (Phase 66)
+
+A flow scenario opts into the 3D engine through an additive,
+kind-locked `flow3d` stance on the record — the thermal stance's
+discipline applied to the flow kind. Without it the scenario stays the
+2D wind tunnel (a slice at the domain's mid-height); with it the
+compile voxelizes the FULL-3D occupancy grid and attaches the rotation
+products in SI, and the routed engine serves the 3D reference kernel
+(D3Q19, the CPU oracle — law S2/S5: e2e and the suites assert it; no
+WGSL provider engine adapter is routed for 3D yet, and a gpu-preferred
+3D run records `servedBackend: "cpu"` rather than claiming otherwise).
+The 2D engine declines a 3D-authored scenario and the 3D engine
+declines a slice-only one, both loudly — no silent misroute.
+
+The rotating half of the stance names the machinery kind, the shaft
+axis (document millimetres), the rotating zone's radius, the RPM MODE,
+and the authored blade count:
+
+- **MRF** (the honest default): the frozen-rotor steady frame. A
+  `fixed` rpm runs one streamed solve; a `motor` selection runs the
+  demo's own path — an ω ladder (uniform fractions
+  0.25/0.5/0.75/1.0 of the motor's top speed) of streamed rungs, the
+  operating-point solve `T_motor(ω) = T_load(ω)` against the selected
+  `motors` record (every intersection reported, the stable one taken,
+  a genuinely ambiguous pairing declines `sim/operating-point-ambiguous`
+  rather than guessing), and a verification rung AT the found speed
+  whose speed field is what streams and persists. The performance
+  trend — airflow and ΔP — is extracted at the found point, never
+  assumed; BPF = blades × rpm is arithmetic from the authored blade
+  count (counting blades off a staircase would be noise); the powers
+  (shaft, air, and the analytic motors' electrical family) and the
+  motor+fan system efficiency join the summary; and the rung torque
+  the verify window measures rides beside the solve as the
+  cross-check.
+- **Resolved rotation** (the showcase): the immersed moving-boundary
+  rotor at a FIXED rate, with the S9 mean/fluctuation split of the
+  rotor torque — the unsteady wake is the point. The motor-driven
+  transient is Phase 67's carve and the pairing declines loudly today.
+
+The published fan performance chart is deterministic data: the load
+curve and the motor line as two history series (N·m over the ladder's
+uniform rungs) plus the found operating point as summary quantities —
+`/workbench-sim` renders it as the curve with the point superimposed
+(`apps/web/src/sim-workbench/fan-chart.tsx`, the 63d comparison-chart
+family), and the CSV exporter writes the pair verbatim. The demo
+itself is the cad-jsx fan-in-tube body
+(`packages/docs-examples/src/cadjsx/fan-in-tube.tsx`) with a demo
+motor record in the document's `motors` section — select the "fan"
+demo model on `/workbench-sim`, save the form's defaults, run.
+
+### Resolution guidance and accuracy bands (law S3, stated honestly)
+
+The voxel is the geometry interface in 3D exactly as in 2D: bodies
+discretize to node-centered occupancy staircases, and the D3Q19
+kernel's solids are those nodes — full-way bounce-back. What that
+costs, per effect:
+
+- **Boundary resolution.** A curved wall carries O(dx) staircase
+  error. The fan surfaces that matter most — the blade leading/trailing
+  edges and the tip clearance — are the smallest features: the honest
+  authoring rule is ≥ 4–6 voxel rows across every flow-bearing gap
+  (the demo's 2 mm voxels against a 3 mm tip clearance is the COARSE
+  end; refine before believing a ΔP's second digit). Pressure losses
+  through coarse gaps are over-predicted, typically several-tens
+  percent at 2–3 voxels of clearance and improving with each doubling
+  (the same order the 2D cylinder-drag bands measured).
+- **Torque and the operating point.** The load torque integrates the
+  staircase rotor's momentum exchange — first-order in the wall
+  treatment (the MRF moving-wall correction's own statement) — so the
+  found rpm is a band, not a digit: treat O(10 %) at demo resolutions,
+  and read the verify-rung torque beside the solved torque (the run
+  reports both) as the in-band consistency check. The ladder itself is
+  four rungs by design; a production sweep raises the count and
+  narrows the piecewise-linear interpolation error.
+- **The zone edge.** MRF's frame force ends abruptly at the staircase
+  zone boundary (an O(dx) force jump, the module's own honesty note).
+  Keep the zone strictly inside the duct and around — not touching —
+  the stator.
+- **No grid-convergence ladder in 3D yet.** The factor-2 3D twin (8×
+  the nodes) is not part of this surface; the compile declines the
+  `gridConvergence` flag on a 3D scenario loudly instead of silently
+  skipping the self-check. Resolution trust in 3D rests on the bands
+  above until a later phase or ruling lands the ladder.
+
+### The fan Reynolds guidance line (law S9)
+
+Every rotating run reports the tip-dynamic Reynolds number
+Re_tip = ω·r_tip·2r_tip/ν and flags `low-reynolds-fan` below 1e4 —
+fan performance data and blade correlations assume Re ≳ 1e4–1e5, and
+below it the curve's SHAPE is qualitative (the numbers are still
+reported; the flag is honesty, never a decline). The demo fan sits
+deliberately in that band — a 14 mm rotor at 40 rpm-class speed in
+air — which is the guide's own demonstration of the flag doing its
+job. Above the turbulent advisory line the standing
+`turbulence-dominated` flag applies with no-RANS as ever.
+
+### MRF or resolved?
+
+MRF first, always: it is steady, cheap, and the operating-point
+workflow is built on it. Reach for resolved rotation when the question
+is the unsteady answer — the wake's fluctuation spectrum, startup
+transients, the mean/fluctuation split law S9 asks resolved runs to
+report — and pay for it: resolved runs need many steps per revolution
+(the stepper's per-revolution substep discipline enforces the tip
+speed's low-Mach ceiling), and the rotor's staircase geometry rotates
+as the rigid body it is.
+
+### The speed-resolution coupling, in one paragraph
+
+The lattice closure ties everything: dt scales with
+dx·u_lat/u_char, the relaxation rates with ν·dt/dx², and the rotating
+doors refuse |Ω_lat|·R (zone edge or tip) above 0.2. Two knobs trade
+against each other: a HIGHER u_lat buys damping (ν_lat rises) but
+raises every lattice speed; a LOWER u_lat gentles the base flow
+through voxelized blockage but stiffens the relaxation. At real air's
+viscosity and 2 mm voxels the demo runs u_lat = 0.03 (the 3D engine's
+documented damping choice — the 2D default 0.05 presumes a mostly-open
+slice, not a duct) with a 0.01 m/s duct velocity and a 40 rpm-class
+motor, and even then the tuning was done against the TESSELLATED body:
+the analytic twin alone under-predicts the staircase's blockage and
+will happily accept parameters the mesh rejects. Faster shafts need
+finer cells, a faster characteristic velocity, or both; the refusals
+state which limit you hit.
+
 ## What does not exist yet
 
-Honest inventory, per phase: 3D flow and rotating machinery with motor
-operating points (66 — the WGSL provider exists and is tolerance-gated
-for 2D, but 3D D3Q19 is 66's), mechanism dynamics (67), combustion
+Honest inventory, per phase: mechanism dynamics (67), combustion
 (68), structural FEM (69 — the kind declines with
 `sim/scenario-kind-unsupported` today), and parametric optimization
-(70). Motor thermal (I²R winding heat feeding the thermal solver,
+(70). 3D flow and rotating machinery (66) landed with the cut-cell
+treatment explicitly DECLINED (see the ADR's "The cut-cell decision");
+a 3D WGSL provider engine adapter, the 3D grid-convergence ladder, and
+the motor-driven resolved-rotation transient (Phase 67's carve) remain
+open. Motor thermal (I²R winding heat feeding the thermal solver,
 derating curves) is likewise deferred until a ruling raises it. The GPU
 path's hardware-class perf budget is likewise not recorded yet (not
 recordable on the spike's software device — see
@@ -384,6 +510,14 @@ identically. `packages/docs-examples/src/sim/gallery.ts` is the
 known-cases gallery above. `packages/docs-examples/src/sim/thermal.ts`
 is the Phase 65 stove walk: the kind-locked stance decline, the sealed
 equilibrium's closing energy balance, the coupled plume's warmed air
-and closing ledger, and both engines' end-to-end determinism. `packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
+and closing ledger, and both engines' end-to-end determinism. `packages/docs-examples/src/sim/fan.ts` is the Phase 66 fan walk: the
+kind-locked 3D stance and the cut-cell reserve's loud decline, the
+geometry-aware compile into the full-3D grid, and the motor-driven run
+that FINDS its operating point inside the ladder, extracts the
+performance at it, reports the BPF arithmetic and the S9 fan Re line,
+carries the chart's history pair, and repeats deterministically.
+`packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
 the `/workbench-sim` fixture's demo model — the plate-with-bore
-cad-jsx authoring the page voxelizes.
+cad-jsx authoring the page voxelizes. Its Phase 66 sibling
+`packages/docs-examples/src/cadjsx/fan-in-tube.tsx` is the fan demo's
+body — the tube and paddle rotor the fan form's defaults expect.

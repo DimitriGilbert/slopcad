@@ -3707,6 +3707,7 @@ export function addDocumentSimulation(
     input.stepBudget,
     input.gridConvergence,
     input.thermal,
+    input.flow3d,
   );
   if (!built.ok) {
     return fail(
@@ -3811,6 +3812,7 @@ export interface DocumentSimulationUpdate {
   readonly stepBudget?: SimScenarioInput["stepBudget"];
   readonly gridConvergence?: SimScenarioInput["gridConvergence"];
   readonly thermal?: SimScenarioInput["thermal"];
+  readonly flow3d?: SimScenarioInput["flow3d"];
   readonly motorId?: SimScenarioInput["motorId"];
   readonly backend?: SimScenarioInput["backend"];
 }
@@ -3848,6 +3850,7 @@ export function updateDocumentSimulation(
     update.stepBudget,
     update.gridConvergence,
     update.thermal,
+    update.flow3d,
   );
   if (!built.ok) {
     return fail(

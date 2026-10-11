@@ -47,6 +47,29 @@ export function analyticOccupancy(
 }
 
 /**
+ * The 3D analytic occupancy (Phase 66a): 1 exactly where the closed
+ * predicate holds, in the d3q19 layout contract's value order
+ * (`x + y·nx + z·nx·ny`, x-fastest) — the same convention
+ * `analyticOccupancy` pins for 2D, with the third axis appended.
+ */
+export function analyticOccupancy3d(
+  nx: number,
+  ny: number,
+  nz: number,
+  insideOrOn: (x: number, y: number, z: number) => boolean,
+): Uint8Array {
+  const cells = new Uint8Array(nx * ny * nz);
+  for (let z = 0; z < nz; z += 1) {
+    for (let y = 0; y < ny; y += 1) {
+      for (let x = 0; x < nx; x += 1) {
+        cells[x + y * nx + z * nx * ny] = insideOrOn(x, y, z) ? 1 : 0;
+      }
+    }
+  }
+  return cells;
+}
+
+/**
  * A watertight axis-aligned box as the voxelizer's tessellation wire
  * form (8 vertices, 12 triangles, no normals) — the engine-adapter
  * contract fixtures' obstacle: an aligned box voxelizes exactly, so the
@@ -124,4 +147,28 @@ export function boxTessellationWire(
       5, // x1 face
     ],
   };
+}
+
+/**
+ * Several box soups merged into ONE tessellation wire (Phase 66c): the
+ * positions concatenate in order and each part's indices rebase by the
+ * running vertex offset — the multi-body obstacles the 3D engine's
+ * contract fixtures voxelize (the fan demo's hub + cross-bars).
+ */
+export function mergedTessellationWire(
+  parts: readonly {
+    readonly positions: readonly number[];
+    readonly indices: readonly number[];
+  }[],
+): { readonly positions: number[]; readonly indices: number[] } {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (const part of parts) {
+    const offset = positions.length / 3;
+    positions.push(...part.positions);
+    for (const index of part.indices) {
+      indices.push(index + offset);
+    }
+  }
+  return { positions, indices };
 }

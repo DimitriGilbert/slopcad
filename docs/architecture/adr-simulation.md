@@ -249,3 +249,88 @@ the sealed mode's ambient convection is the authored constant h, and
 the S9 numbers are advisory regime honesty, never CFD-grade
 certificates. `structural` still declines with
 `sim/scenario-kind-unsupported` until Phase 69.
+
+## The cut-cell decision (2026-10-11, Phase 66c's named decision point)
+
+Phase 66's roadmap names the cut-cell question explicitly: "the
+cut-cell decision point — raise or decline explicitly against the
+distance field from Phase 62." This is that decision, recorded.
+
+**What cut-cells would buy.** Second-order boundary accuracy where the
+staircase is first-order: the boundary condition would apply at the
+true wall position (interpolated by the Phase 62 signed-distance
+field) instead of at the voxel face, removing the O(dx) geometry error
+from wall shear, pressure loss through gaps, and the rotor torque
+integration. For the fan line specifically it would attack exactly the
+terms the accuracy bands flag — tip-clearance losses and blade
+momentum exchange.
+
+**What they would cost.** Population redistribution at every cut link
+(the bounce-back reflection becomes a sub-grid interpolation), a mass
+and momentum bookkeeping that is no longer the exact
+impulse-counting audit the current kernel pins (the ledger discipline
+of 63a/66a would need a tolerance, not an identity), moving-wall
+cut-cells on the rotating doors (the MRF wall-velocity correction is
+already the formulation's one first-order piece — cut-cells multiply
+that surface), and a determinism surface strictly larger than the
+current one. The Phase 62 distance field itself is READY (analytic
+fixtures, exact signs, the grid ↔ block door round-trips) — the
+unreadiness is not the data, it is the solvers' audit discipline and
+the rotating-boundary interaction.
+
+**Law S3's stance.** "Staircase boundaries are stated honestly in
+accuracy bands; cut-cell accuracy is a dedicated later phase if the
+owner raises it." The bands are now published (the guide's Phase 66
+resolution-guidance section), the grid-convergence precedent exists in
+2D, and the fan Re guidance line states the demo regime — the honesty
+machinery S3 demands is in place without cut-cells.
+
+**Verdict: DECLINE, for now.** At the demo's resolutions the dominant
+error sources are the low-Re regime, the four-rung ladder, and the
+first-order MRF wall treatment — a second-order boundary would refine
+the third-largest term. The raise path stays open and cheap to walk:
+the distance field is ready, the refusal is one branch
+(`sim/boundary-treatment-unsupported` at the compile door, the
+`structural`-carve discipline), and a dedicated phase lands it if the
+owner rules it in. Until then the reserved `cut-cell` treatment value
+declines loudly — never a silent staircase under a cut-cell label.
+
+## Implementation status (2026-10-11): Phase 66 is implemented (3D flow, rotating machinery, the fan demo)
+
+Phase 66a: the D3Q19 CPU oracle and its WGSL provider
+(`@slopcad/sim-flow`'s `d3q19/state-3d/streaming-3d/relaxation-3d/
+boundaries-3d/forces-3d/stepper-3d` and the 3D shader/stepper twins)
+— BGK/TRT, full-way bounce-back on the voxelizer's native 3D output,
+three-component momentum exchange, the exact momentum audit, and the
+S5 3D tolerance harness. Phase 66b: rotating machinery — the rotation
+vocabulary with its routing MARKER (every static door refuses a
+marked config by value), MRF as the honest steady default (the
+one-Coriolis lab-variable frozen-rotor form, exact interface
+exchange, pinned fixed points), resolved rotation as the immersed
+moving-boundary showcase, axial torque integration, the
+operating-point solve (hand-solvable fixtures pin the intersection,
+the stability criterion, the BPF arithmetic, and the
+multiple-intersection decline), and the fan analysis (the ω-ladder
+load curve with the Phase 67 friction seam, the performance
+extraction, the S9 fan Re line). Phase 66c (this slice): the ENGINE
+AND PRODUCT ROUTING — the flow scenario's additive, kind-locked
+`flow3d` stance at the cad-core record boundary and the sim-core
+compile door (the full-3D occupancy grid, the SI rotation products,
+the cut-cell decline above, the loud no-3D-ladder decline); the 3D
+reference engine behind the Phase 61 contract (`engine-3d.ts`: the
+static door, the MRF fixed-rpm and motor-driven operating-point doors
+with streamed rungs, the resolved-rotation showcase with its
+mean/fluctuation split, per-step cooperative-cancellation windows and
+S6 preview rounds, loud cross-declines with the 2D engine, and the
+routed default engine's 3D branch); the fan-in-a-tube demo (the
+cad-jsx body, the demo motor record in the document's `motors`
+section, the `/workbench-sim` demo-model selector, the Formedible fan
+form, and the published fan performance chart as deterministic data —
+the curve pair plus the superimposed found point, the 63d
+chart-as-data family); the guide's Phase 66 section (resolution
+guidance, accuracy bands, the fan Re line, MRF-vs-resolved guidance,
+the speed-resolution coupling); the runnable docs example
+(`packages/docs-examples/src/sim/fan.ts`); and the sanctioned perf
+budget (`kernel.lbm3d-fan.mrfGrid.stepBatchMs` — the CPU oracle at
+the reduced demo resolution, honestly labeled a reduced-resolution
+ceiling). `structural` still declines until Phase 69.

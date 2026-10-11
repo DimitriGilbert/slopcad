@@ -46,6 +46,10 @@
  *   the main-thread compute share of a streaming preview frame budget
  *   (the kernel is deterministic synchronous TS — law S2 — so this is
  *   the whole stepping story, no hidden async).
+ * - `kernel.lbm3d-fan.mrfGrid.stepBatchMs` — the Phase 66 3D fan MRF
+ *   stepper at the REDUCED demo resolution (the CPU oracle the e2e
+ *   measures — a reduced-resolution ceiling, honestly labeled, never a
+ *   production-grid claim);
  * - `kernel.lbm2d-wgsl.referenceGrid.stepBatchMs` — the Phase 64 WGSL
  *   provider's SAME batch protocol on the SAME reference grid
  *   (submit ten steps, then await the status readback that completes
@@ -105,6 +109,7 @@ import { manifoldWorkerBootReport } from "@slopcad/cad-kernel-manifold/manifold-
 import {
   type LbmStepperConfig,
   createLbmStepper,
+  createMrf3dStepper,
   createWgslLbmStepper,
   requestWebGpuDevice,
 } from "@slopcad/sim-flow";
@@ -402,6 +407,100 @@ async function probeWgslKernelStepping(): Promise<Record<string, number[]>> {
   } finally {
     device.destroy();
   }
+}
+
+/**
+ * The 3D fan MRF stepping probe (Phase 66c's perf budget): the
+ * motor-driven fan demo's own kernel path — the frozen-rotor MRF
+ * stepper over the demo-shaped paddle rotor in its duct — at the
+ * REDUCED resolution e2e measures (the demo's 2 mm twin, honestly
+ * labeled: this is the CPU oracle at demo resolution, the sanctioned
+ * reduced-resolution ceiling, not a production-grid claim). The
+ * protocol is the 2D probe's own: a warmup batch, then timed batches
+ * of {@link KERNEL_STEP_BATCH} steps; a divergence mid-probe fails
+ * loudly instead of publishing a fabricated timing.
+ */
+function probe3dFanMrfStepping(): Record<string, number[]> {
+  // The demo twin's lattice: 17 × 17 × 22 at 2 mm, the paddle rotor
+  // (hub + cross-bars) inside the duct shell, the zone a 4-cell
+  // cylinder about the +Z axis.
+  const NX = 17;
+  const NY = 17;
+  const NZ = 22;
+  const AXIS_X = 8;
+  const AXIS_Y = 8;
+  const ROTOR_Z = 10;
+  const DX = 0.002;
+  const solid = new Uint8Array(NX * NY * NZ);
+  const plane = NX * NY;
+  for (let z = 0; z < NZ; z += 1) {
+    for (let y = 0; y < NY; y += 1) {
+      for (let x = 0; x < NX; x += 1) {
+        const wx = (x - AXIS_X) * DX * 1000;
+        const wy = (y - AXIS_Y) * DX * 1000;
+        const wz = (z - ROTOR_Z) * DX * 1000;
+        const radius = Math.hypot(wx, wy);
+        const shell = radius >= 10 && radius <= 14 && Math.abs(wz) <= 18;
+        const rotorZBand = Math.abs(wz) <= 2;
+        const hub = radius <= 2 && rotorZBand;
+        const barY = Math.abs(wx) <= 1 && Math.abs(wy) <= 7 && rotorZBand;
+        const barX = Math.abs(wy) <= 1 && Math.abs(wx) <= 7 && rotorZBand;
+        solid[x + y * NX + z * plane] = shell || hub || barY || barX ? 1 : 0;
+      }
+    }
+  }
+  const created = createMrf3dStepper({
+    mask: { nx: NX, ny: NY, nz: NZ, solid },
+    fluid: {
+      fluidId: "perf-air",
+      temperatureK: 300,
+      densityKgPerM3: 1.2,
+      dynamicViscosityPaS: 1.2 * 1.5e-5,
+      kinematicViscosityM2PerS: 1.5e-5,
+      thermalDiffusivityM2PerS: 1.5e-5 / 0.7,
+      prandtl: 0.7,
+      thermalExpansionPerK: 1 / 300,
+      specificHeatJPerKgK: 1005,
+      thermalConductivityWPerMK: (1.2 * 1.5e-5 * 1005) / 0.7,
+      speedOfSoundMPerS: 347,
+    },
+    cellSizeM: DX,
+    characteristicVelocityMPerS: 0.025,
+    west: { kind: "wall", slip: false },
+    east: { kind: "wall", slip: false },
+    south: { kind: "wall", slip: false },
+    north: { kind: "wall", slip: false },
+    bottom: { kind: "velocity-inlet", velocityMPerS: [0, 0, 0.025] },
+    top: { kind: "convective-outflow" },
+    rotation: { kind: "mrf" },
+    axis: {
+      pointM: [AXIS_X * DX, AXIS_Y * DX, ROTOR_Z * DX],
+      direction: [0, 0, 1],
+    },
+    omegaRadPerS: 4,
+    rotatingZone: (x, y, z) =>
+      Math.hypot(x - AXIS_X, y - AXIS_Y) <= 4 && Math.abs(z - ROTOR_Z) <= 6,
+  });
+  if (!created.ok) {
+    throw new Error(
+      `the 3D fan MRF probe refused its config: ${created.error.message}`,
+    );
+  }
+  const stepper = created.value;
+  stepper.run(KERNEL_WARMUP_STEPS);
+  if (stepper.diverged) {
+    throw new Error("the 3D fan MRF probe diverged during warmup");
+  }
+  const samples: number[] = [];
+  for (let batch = 0; batch < KERNEL_BATCH_SAMPLES; batch += 1) {
+    const started = performance.now();
+    stepper.run(KERNEL_STEP_BATCH);
+    samples.push(performance.now() - started);
+  }
+  if (stepper.diverged) {
+    throw new Error("the 3D fan MRF probe diverged inside a timed batch");
+  }
+  return { "kernel.lbm3d-fan.mrfGrid.stepBatchMs": samples };
 }
 
 /**
@@ -871,6 +970,7 @@ function probeInvalidation(): Record<string, number[]> {
 export async function runInPageMeasurements(): Promise<InPageMeasurements> {
   const webgpuAdapter = await readWebgpuAdapterProvenance();
   const kernel = probeKernelStepping();
+  const kernel3dFan = probe3dFanMrfStepping();
   const kernelWgsl = await probeWgslKernelStepping();
   const startup = await probeStartup();
   const operations = await probeOperations();
@@ -879,6 +979,7 @@ export async function runInPageMeasurements(): Promise<InPageMeasurements> {
   const invalidation = probeInvalidation();
   const combined: Record<string, number[]> = {
     ...kernel,
+    ...kernel3dFan,
     ...kernelWgsl,
     ...startup,
     ...operations.samples,

@@ -68,6 +68,7 @@ import {
   lbmGridConvergenceDrift,
 } from "./convergence";
 import { createChtSimEngine } from "./engine-cht";
+import { createFlow3dSimEngine } from "./engine-3d";
 import { runWgslLbmEngine } from "./engine-gpu";
 import {
   LBM_PREVIEW_INTERVAL_STEPS,
@@ -200,6 +201,15 @@ async function runLbmEngine(
         SIM_ERROR_CODES.backendUnavailable,
         'The scenario prefers the "gpu" backend; the CPU reference engine runs it only through the ROUTED default engine (createDefaultSimEngine), which feature-detects WebGPU, serves the WGSL provider when a device exists, and falls back to this CPU oracle — a direct CPU-engine call declines loudly instead of silently falling back.',
         compiled.backend,
+      ),
+    );
+  }
+  if (compiled.flow3d !== undefined) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.geometryUnavailable,
+        "This flow scenario carries a 3D stance (flow3d compile products): the 2D wind tunnel serves slice-authored scenarios only, and the 3D reference engine owns this one — the routed default engine routes it; a direct 2D-engine call declines loudly instead of silently running a slice of a 3D-authored scenario.",
+        compiled.name,
       ),
     );
   }
@@ -411,6 +421,7 @@ export function createDefaultSimEngine(
   options?: DefaultSimEngineOptions,
 ): SimEngine {
   const lbm = createLbmSimEngine();
+  const lbm3d = createFlow3dSimEngine();
   const thermalConduction = createThermalSimEngine();
   const thermalCoupled = createChtSimEngine();
   const deviceSource = options?.deviceSource ?? requestWebGpuDevice;
@@ -426,9 +437,12 @@ export function createDefaultSimEngine(
   return {
     id: "default-routed-sim",
     supportedKinds: [
-      ...lbm.supportedKinds,
-      ...thermalConduction.supportedKinds,
-      ...thermalCoupled.supportedKinds,
+      ...new Set([
+        ...lbm.supportedKinds,
+        ...lbm3d.supportedKinds,
+        ...thermalConduction.supportedKinds,
+        ...thermalCoupled.supportedKinds,
+      ]),
     ],
     backend: "cpu",
     run: async (request, onProgress, onFieldChunk) => {
@@ -451,6 +465,19 @@ export function createDefaultSimEngine(
             `The routed default engine does not solve the "${kind}" scenario kind (it solves flow and thermal; structural is Phase 69's carve).`,
             kind,
           ),
+        );
+      }
+      // The 3D stance routing (Phase 66c): a flow scenario carrying
+      // flow3d compile products goes to the 3D reference engine — the
+      // gpu preference is CONSUMED there (no WGSL provider engine
+      // adapter is routed for 3D yet; the CPU oracle serves, the
+      // summary's servedBackend records it — the router's documented
+      // CPU floor, never a fabricated GPU claim).
+      if (request.compiled.flow3d !== undefined) {
+        return lbm3d.run(
+          { compiled: { ...request.compiled, backend: "cpu" } },
+          onProgress,
+          onFieldChunk,
         );
       }
       if (request.compiled.backend === "gpu") {
