@@ -448,7 +448,7 @@
           "value": {
             "dimension": "length",
             "unit": "mm",
-            "value": 3
+            "value": 2
           },
           "expression": null,
           "metadata": {}
@@ -551,7 +551,7 @@
           "value": {
             "dimension": "length",
             "unit": "mm",
-            "value": 40.6
+            "value": 39.6
           },
           "expression": {
             "kind": "binary",
@@ -1041,7 +1041,6 @@
               },
               "id": "skcon_d14",
               "kind": "distanceX",
-              "parameterId": "param_bandZ1",
               "second": {
                 "entity": "skent_l2",
                 "point": "end"
@@ -1049,7 +1048,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 22
+                "value": 26
               }
             },
             {
@@ -1059,7 +1058,6 @@
               },
               "id": "skcon_d15",
               "kind": "distanceX",
-              "parameterId": "param_bandZ2",
               "second": {
                 "entity": "skent_l3",
                 "point": "end"
@@ -1067,7 +1065,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 38
+                "value": 34
               }
             },
             {
@@ -1167,7 +1165,6 @@
               },
               "id": "skcon_d23",
               "kind": "distanceY",
-              "parameterId": "param_rBoss",
               "second": {
                 "entity": "skent_l2",
                 "point": "end"
@@ -1175,7 +1172,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 40.6
+                "value": 35.2
               }
             },
             {
@@ -1185,7 +1182,6 @@
               },
               "id": "skcon_d24",
               "kind": "distanceY",
-              "parameterId": "param_rBoss",
               "second": {
                 "entity": "skent_l3",
                 "point": "end"
@@ -1193,7 +1189,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 40.6
+                "value": 36.8
               }
             },
             {
@@ -2756,7 +2752,7 @@
             "value": {
               "dimension": "length",
               "unit": "mm",
-              "value": 3
+              "value": 2
             }
           },
           {
@@ -2937,7 +2933,6 @@
                   },
                   "id": "skcon_d14",
                   "kind": "distanceX",
-                  "parameterId": "param_bandZ1",
                   "second": {
                     "entity": "skent_l2",
                     "point": "end"
@@ -2945,7 +2940,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 22
+                    "value": 26
                   }
                 },
                 {
@@ -2955,7 +2950,6 @@
                   },
                   "id": "skcon_d15",
                   "kind": "distanceX",
-                  "parameterId": "param_bandZ2",
                   "second": {
                     "entity": "skent_l3",
                     "point": "end"
@@ -2963,7 +2957,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 38
+                    "value": 34
                   }
                 },
                 {
@@ -3063,7 +3057,6 @@
                   },
                   "id": "skcon_d23",
                   "kind": "distanceY",
-                  "parameterId": "param_rBoss",
                   "second": {
                     "entity": "skent_l2",
                     "point": "end"
@@ -3071,7 +3064,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 40.6
+                    "value": 35.2
                   }
                 },
                 {
@@ -3081,7 +3074,6 @@
                   },
                   "id": "skcon_d24",
                   "kind": "distanceY",
-                  "parameterId": "param_rBoss",
                   "second": {
                     "entity": "skent_l3",
                     "point": "end"
@@ -3089,7 +3081,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 40.6
+                    "value": 36.8
                   }
                 },
                 {
@@ -4564,42 +4556,7 @@
             "outputs": [
               "body_cup"
             ]
-          }
-        ]
-      },
-      {
-        "formatVersion": 1,
-        "commands": [
-          {
-            "formatVersion": 1,
-            "type": "parameter.set",
-            "id": "param_height",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 70
-            }
-          }
-        ]
-      },
-      {
-        "formatVersion": 1,
-        "commands": [
-          {
-            "formatVersion": 1,
-            "type": "parameter.set",
-            "id": "param_height",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 50
-            }
-          }
-        ]
-      },
-      {
-        "formatVersion": 1,
-        "commands": [
+          },
           {
             "formatVersion": 1,
             "type": "body.update",
@@ -4609,7 +4566,7 @@
         ]
       }
     ],
-    "cursor": 4
+    "cursor": 1
   },
   "regeneration": {
     "formatVersion": 1,
