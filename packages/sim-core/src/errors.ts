@@ -127,6 +127,23 @@ export const SIM_ERROR_CODES = {
    * `result-payload-malformed` discipline extended to grid semantics.
    */
   gridFieldMalformed: "sim/grid-field-malformed",
+  /**
+   * The Phase 67 dynamics build door refused the mechanism (defined
+   * 67a, pre-dated on the `operatingPointAmbiguous` precedent): a
+   * malformed occurrence/mass/joint wire form, an occurrence without
+   * mass properties, a joint addressing an unknown occurrence, a motor
+   * riding a joint with no single rotational drive DOF, or a topology
+   * the reference kernel declines (disconnected grounded fragments
+   * beyond the forest stance) — a loud decline, never a guessed model.
+   */
+  mechanismInvalid: "sim/mechanism-invalid",
+  /**
+   * A mechanism's closed loop could not close (Phase 67a): the loop
+   * projection exhausted its Levenberg–Marquardt discipline above the
+   * closure tolerance — the run declines naming the residual it froze
+   * at, never fabricates a snapped mechanism.
+   */
+  loopUnresolved: "sim/loop-unresolved",
 } as const;
 
 export type SimErrorCode =

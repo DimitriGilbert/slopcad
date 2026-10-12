@@ -3184,6 +3184,10 @@ export interface DocumentJointInput {
   readonly occurrenceId: OccurrenceId;
   /** Required for every kind except `rigid` (see the joint frame rules). */
   readonly frame?: JointFrame;
+  /** Viscous damping coefficient (N·m·s/rad rotational / N·s/m translational); optional, ≥ 0. */
+  readonly viscousDampingNPerMSPerRad?: number;
+  /** Coulomb friction-loss magnitude (N·m rotational / N translational); optional, ≥ 0. */
+  readonly frictionLossNPerM?: number;
 }
 
 /** Result of {@link addJoint}: the next document plus the record. */
@@ -3302,6 +3306,20 @@ export function addJoint(
       frame = { origin: [...candidate.origin], axis: [...axis] };
     }
   }
+  for (const [field, value] of [
+    ["viscous damping", input.viscousDampingNPerMSPerRad],
+    ["friction loss", input.frictionLossNPerM],
+  ] as const) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.jointInvalid,
+          `A joint's ${field} field must be a finite non-negative number when present.`,
+          value,
+        ),
+      );
+    }
+  }
   let id: JointId;
   let idGeneratorState = document.idGeneratorState;
   if (input.id === undefined) {
@@ -3342,6 +3360,12 @@ export function addJoint(
     baseOccurrenceId: input.baseOccurrenceId,
     occurrenceId: input.occurrenceId,
     ...(frame === undefined ? {} : { frame }),
+    ...(input.viscousDampingNPerMSPerRad === undefined
+      ? {}
+      : { viscousDampingNPerMSPerRad: input.viscousDampingNPerMSPerRad }),
+    ...(input.frictionLossNPerM === undefined
+      ? {}
+      : { frictionLossNPerM: input.frictionLossNPerM }),
   });
   return ok({
     document: Object.freeze({
@@ -3675,6 +3699,39 @@ function simulationRecordProblems(
       scenario.motorId,
     );
   }
+  const dynamics = scenario.dynamics;
+  if (dynamics !== undefined) {
+    if (
+      dynamics.motorJointId !== undefined &&
+      !document.joints.some((joint) => joint.id === dynamics.motorJointId)
+    ) {
+      return docError(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+        `Scenario "${scenario.name}" rides its motor on joint "${String(dynamics.motorJointId)}", which does not exist in document "${document.id}".`,
+        dynamics.motorJointId,
+      );
+    }
+    const occurrenceIds = new Set(
+      document.occurrences.map((occurrence) => occurrence.id),
+    );
+    for (const load of dynamics.loads ?? []) {
+      const target =
+        load.kind === "flow-force"
+          ? { kind: "occurrence", id: load.occurrenceId as string }
+          : { kind: "joint", id: load.jointId as string };
+      const exists =
+        load.kind === "flow-force"
+          ? occurrenceIds.has(load.occurrenceId)
+          : document.joints.some((joint) => joint.id === load.jointId);
+      if (!exists) {
+        return docError(
+          DOCUMENT_ERROR_CODES.simulationInvalid,
+          `Scenario "${scenario.name}" couples a ${target.kind === "occurrence" ? "flow-force load to occurrence" : "torque estimate to joint"} "${target.id}", which does not exist in document "${document.id}".`,
+          target.id,
+        );
+      }
+    }
+  }
   return undefined;
 }
 
@@ -3708,6 +3765,7 @@ export function addDocumentSimulation(
     input.gridConvergence,
     input.thermal,
     input.flow3d,
+    input.dynamics,
   );
   if (!built.ok) {
     return fail(
@@ -3813,6 +3871,7 @@ export interface DocumentSimulationUpdate {
   readonly gridConvergence?: SimScenarioInput["gridConvergence"];
   readonly thermal?: SimScenarioInput["thermal"];
   readonly flow3d?: SimScenarioInput["flow3d"];
+  readonly dynamics?: SimScenarioInput["dynamics"];
   readonly motorId?: SimScenarioInput["motorId"];
   readonly backend?: SimScenarioInput["backend"];
 }
@@ -3851,6 +3910,7 @@ export function updateDocumentSimulation(
     update.gridConvergence,
     update.thermal,
     update.flow3d,
+    update.dynamics,
   );
   if (!built.ok) {
     return fail(
@@ -4416,6 +4476,8 @@ export interface SerializedCadDocument {
       readonly origin: readonly [number, number, number];
       readonly axis?: readonly [number, number, number];
     };
+    readonly viscousDampingNPerMSPerRad?: number;
+    readonly frictionLossNPerM?: number;
   }[];
   /** Present exactly when the document carries configuration rows (additive). */
   readonly configurations?: readonly SerializedDocumentConfiguration[];
@@ -4584,6 +4646,17 @@ export function serializeCadDocument(
                       : { axis: [...joint.frame.axis] }),
                   },
                 }),
+            // Phase 67's friction fields ride only when authored — the
+            // thermal-fields precedent — so a frictionless joint
+            // serializes byte-identically to its pre-67 form.
+            ...(joint.viscousDampingNPerMSPerRad === undefined
+              ? {}
+              : {
+                  viscousDampingNPerMSPerRad: joint.viscousDampingNPerMSPerRad,
+                }),
+            ...(joint.frictionLossNPerM === undefined
+              ? {}
+              : { frictionLossNPerM: joint.frictionLossNPerM }),
           })),
         }),
     // Additive (Phase 57): emitted only when configuration rows exist, so
@@ -5635,6 +5708,12 @@ export function parseCadDocument(
       baseOccurrenceId: joint.baseOccurrenceId,
       occurrenceId: joint.occurrenceId,
       ...(joint.frame === undefined ? {} : { frame: joint.frame }),
+      ...(joint.viscousDampingNPerMSPerRad === undefined
+        ? {}
+        : { viscousDampingNPerMSPerRad: joint.viscousDampingNPerMSPerRad }),
+      ...(joint.frictionLossNPerM === undefined
+        ? {}
+        : { frictionLossNPerM: joint.frictionLossNPerM }),
     });
     if (!added.ok) return added;
     document = added.value.document;
@@ -5705,6 +5784,10 @@ export function parseCadDocument(
         ? {}
         : { gridConvergence: scenario.gridConvergence }),
       ...(scenario.thermal === undefined ? {} : { thermal: scenario.thermal }),
+      ...(scenario.flow3d === undefined ? {} : { flow3d: scenario.flow3d }),
+      ...(scenario.dynamics === undefined
+        ? {}
+        : { dynamics: scenario.dynamics }),
       ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
       ...(scenario.backend === undefined ? {} : { backend: scenario.backend }),
     });

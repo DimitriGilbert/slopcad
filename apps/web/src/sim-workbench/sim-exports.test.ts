@@ -13,6 +13,7 @@ import type { SimResult } from "@slopcad/sim-core";
 import {
   SIM_EXPORT_DEFAULT_VTI_DECIMATION,
   exportSimResultForceHistoryCsv,
+  exportSimResultJointHistoryCsv,
   exportSimResultVtiSeries,
 } from "./sim-exports";
 
@@ -105,5 +106,41 @@ describe("exportSimResultForceHistoryCsv", () => {
         histories: [],
       }),
     ).toBeNull();
+  });
+});
+
+describe("exportSimResultJointHistoryCsv", () => {
+  it("emits the time-first joint table, joint series only, deterministically", () => {
+    const result = {
+      ...storedResult(),
+      histories: [
+        { name: "time", unit: "s", samples: [0.04, 0.08] },
+        {
+          name: "joint:jnt_crank:dof0:position",
+          unit: "rad",
+          samples: [0.5, 1.0],
+        },
+        {
+          name: "joint:jnt_crank:dissipated-power",
+          unit: "W",
+          samples: [0.01, 0.02],
+        },
+        { name: "energy:kinetic", unit: "J", samples: [1, 2] },
+      ],
+    };
+    const first = exportSimResultJointHistoryCsv(result);
+    const second = exportSimResultJointHistoryCsv(result);
+    expect(second).toBe(first);
+    expect(first).toBe(
+      [
+        "time (s),joint:jnt_crank:dof0:position (rad),joint:jnt_crank:dissipated-power (W)",
+        "0.04,0.5,0.01",
+        "0.08,1,0.02",
+        "",
+      ].join("\n"),
+    );
+    // A run with no joint series (the flow/thermal families) exports
+    // nothing through THIS door — never a fabricated table.
+    expect(exportSimResultJointHistoryCsv(storedResult())).toBeNull();
   });
 });

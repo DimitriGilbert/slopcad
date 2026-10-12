@@ -63,6 +63,7 @@ import type {
   CompiledSimMotor,
   CompiledSimScenario,
   SimBodyBoundsMm,
+  SimMechanismWire,
 } from "./units";
 import type { SimDomainFace } from "./vocabulary";
 import type { SimQualitativeFlag } from "./regime";
@@ -130,6 +131,13 @@ export interface WorkerSimCompileInput {
     readonly bodyId: string;
     readonly tessellation: unknown;
   }[];
+  /**
+   * Phase 67c: the mechanism wire the dynamics branch compiles — the
+   * document's resolved occurrences, serialized joint records, mass
+   * properties, and grounded ids, crossing verbatim after the
+   * structural gate (the compile boundary re-validates).
+   */
+  readonly mechanism?: SimMechanismWire;
 }
 
 /** Result of `sim.compile`: the minted problem id plus the compiled scenario. */
@@ -248,6 +256,12 @@ export interface SerializedSimWorkerOperationInputs {
       readonly bodyId: string;
       readonly tessellation: unknown;
     }[];
+    readonly mechanism?: {
+      readonly occurrences: readonly unknown[];
+      readonly joints: readonly unknown[];
+      readonly masses: readonly unknown[];
+      readonly grounded?: readonly string[];
+    };
   };
   readonly "sim.run": {
     readonly problem: string;
@@ -435,6 +449,18 @@ function serializeCompileInput(
             tessellation: entry.tessellation,
           })),
         }),
+    ...(input.mechanism === undefined
+      ? {}
+      : {
+          mechanism: {
+            occurrences: [...input.mechanism.occurrences],
+            joints: [...input.mechanism.joints],
+            masses: [...input.mechanism.masses],
+            ...(input.mechanism.grounded === undefined
+              ? {}
+              : { grounded: [...input.mechanism.grounded] }),
+          },
+        }),
   };
 }
 
@@ -541,6 +567,53 @@ function parseCompileInput(
       });
     }
   }
+  // The mechanism wire (Phase 67c): structural gate, verbatim crossing.
+  let mechanism: SimMechanismWire | undefined;
+  if (record.value.mechanism !== undefined) {
+    const wire = requirePayloadRecord("sim.compile", record.value.mechanism);
+    if (!wire.ok) return wire;
+    if (
+      !Array.isArray(wire.value.occurrences) ||
+      !Array.isArray(wire.value.joints) ||
+      !Array.isArray(wire.value.masses)
+    ) {
+      return payloadError(
+        'The "sim.compile" field "mechanism" must carry occurrences, joints, and masses arrays.',
+        record.value.mechanism,
+      );
+    }
+    if (
+      wire.value.grounded !== undefined &&
+      !Array.isArray(wire.value.grounded)
+    ) {
+      return payloadError(
+        'The "sim.compile" mechanism field "grounded" must be an array of occurrence id strings.',
+        wire.value.grounded,
+      );
+    }
+    let groundedIds: readonly string[] | undefined;
+    if (Array.isArray(wire.value.grounded)) {
+      const ids: string[] = [];
+      for (const id of wire.value.grounded) {
+        if (typeof id !== "string") {
+          return payloadError(
+            'The "sim.compile" mechanism field "grounded" must be an array of occurrence id strings — a non-string entry is declined, never silently dropped.',
+            id,
+          );
+        }
+        ids.push(id);
+      }
+      groundedIds = ids;
+    }
+    mechanism = {
+      occurrences: (wire.value.occurrences as readonly unknown[]).map(
+        (entry) => entry,
+      ),
+      joints: (wire.value.joints as readonly unknown[]).map((entry) => entry),
+      masses: (wire.value.masses as readonly unknown[]).map((entry) => entry),
+      ...(groundedIds === undefined ? {} : { grounded: groundedIds }),
+    };
+  }
   return parseOk({
     scenario: record.value.scenario,
     ...(record.value.motor === undefined ? {} : { motor: record.value.motor }),
@@ -550,6 +623,7 @@ function parseCompileInput(
       : { tessellation: record.value.tessellation }),
     ...(materials === undefined ? {} : { materials }),
     ...(bodyTessellations === undefined ? {} : { bodyTessellations }),
+    ...(mechanism === undefined ? {} : { mechanism }),
   });
 }
 
@@ -848,7 +922,7 @@ function parseCompiledScenarioEntry(
   if (!record.ok) return record;
   if (!isSimScenarioKind(record.value.kind)) {
     return payloadError(
-      'The "sim.compile" field "compiled.kind" must be one of: flow, thermal, structural.',
+      'The "sim.compile" field "compiled.kind" must be one of: flow, thermal, dynamics, structural.',
       record.value.kind,
     );
   }

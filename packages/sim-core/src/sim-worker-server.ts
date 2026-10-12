@@ -227,6 +227,9 @@ export function createSimWorkerServer(
             ...(request.input.bodyTessellations === undefined
               ? {}
               : { bodyTessellations: request.input.bodyTessellations }),
+            ...(request.input.mechanism === undefined
+              ? {}
+              : { mechanism: request.input.mechanism }),
           });
           return compiled.ok
             ? { status: "compiled", compiled: compiled.value }

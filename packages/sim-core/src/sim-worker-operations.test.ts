@@ -125,6 +125,79 @@ describe("sim.compile codecs", () => {
     );
   });
 
+  it("round-trips the mechanism wire (Phase 67c) across the codec", () => {
+    const mechanism = {
+      occurrences: [
+        {
+          id: "occ_base",
+          placement: {
+            rotation: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+            translation: [0, 0, 0],
+          },
+        },
+      ],
+      joints: [
+        {
+          id: "jnt_crank",
+          name: "Crank main bearing",
+          kind: "revolute",
+          baseOccurrenceId: "occ_base",
+          occurrenceId: "occ_crank",
+          frame: { origin: [0, 0, 0], axis: [0, 0, 1] },
+        },
+      ],
+      masses: [
+        {
+          occurrenceId: "occ_base",
+          massGrams: 282.6,
+          centerOfGravityMm: [65, 0, 0],
+        },
+      ],
+      grounded: ["occ_base"],
+    };
+    const wire = serializeSimWorkerOperationInput("sim.compile", {
+      scenario: flowScenario(),
+      mechanism,
+    });
+    expect(JSON.parse(JSON.stringify(wire))).toEqual(wire);
+    const parsed = parseSimWorkerOperationInput(
+      "sim.compile",
+      JSON.parse(JSON.stringify(wire)),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.mechanism).toEqual(mechanism);
+  });
+
+  it("declines malformed mechanism wires loudly, never filtering them", () => {
+    const overMechanism = (mechanism: unknown) =>
+      parseSimWorkerOperationInput("sim.compile", {
+        scenario: flowScenario(),
+        mechanism,
+      });
+    expectPayloadFailure(overMechanism("not a record"));
+    expectPayloadFailure(overMechanism({ occurrences: [], masses: [] }));
+    // The never-guess posture (Phase 67c validator finding): a
+    // non-string grounded entry is declined, never silently dropped
+    // from the weld list.
+    expectPayloadFailure(
+      overMechanism({
+        occurrences: [{ id: "occ_base" }],
+        joints: [],
+        masses: [],
+        grounded: ["occ_base", 42],
+      }),
+    );
+    expectPayloadFailure(
+      overMechanism({
+        occurrences: [{ id: "occ_base" }],
+        joints: [],
+        masses: [],
+        grounded: "occ_base",
+      }),
+    );
+  });
+
   it("round-trips the compiled scenario with its regime and provenance", () => {
     const compiled = compiledOf(flowScenario());
     const result = {

@@ -15,6 +15,7 @@
 export const SIM_CORE_SCENARIO_KINDS = [
   "flow",
   "thermal",
+  "dynamics",
   "structural",
 ] as const;
 

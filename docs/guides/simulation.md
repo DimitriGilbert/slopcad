@@ -474,19 +474,85 @@ will happily accept parameters the mesh rejects. Faster shafts need
 finer cells, a faster characteristic velocity, or both; the refusals
 state which limit you hit.
 
+## The slider-crank: mechanism dynamics (Phase 67)
+
+Mechanism dynamics is a DIFFERENT kind of physics from the flow and
+thermal runs, and the surface says so: a `dynamics` scenario carries
+no domain-face boundary conditions (the compile declines any), its
+regime report is EMPTY (law S9's Re/Ma/Pr/Ra gates do not apply to a
+mechanism march — the honest claim is no claim), and its mechanism
+source is the DOCUMENT itself: the assembly's placed occurrences, its
+joint records (with the additive friction fields), one mass entry per
+occurrence, and the grounded ids, crossing the compile as the
+`mechanism` wire exactly where the thermal branch's material records
+cross. The scenario's own fields are the march budget (time step,
+duration, sample cadence — an integer step lattice, validated at both
+the record and compile boundaries), the motor selection (the 61
+`motors` section, riding exactly one named joint), and the engine
+provider: `reference` (the default — the deterministic TypeScript
+kernel, the S2/S5 oracle) or `mujoco` (the Apache-2.0 wasm provider
+behind the SAME contract, an explicit opt-in that declines loudly
+when its module cannot load, never a silent fallback).
+
+The kernel's honesty posture, stated once:
+
+- **The reference kernel is the oracle.** Unit suites and the session
+  assert the reference path; the MuJoCo provider is validated against
+  it through the cross-tolerance matrix (friction-bearing fixtures
+  included), never bit-asserted.
+- **Friction**: joint records carry a viscous damping coefficient and
+  a Coulomb friction-loss magnitude (each consumed in its DOF
+  flavour's unit). Friction is part of `step`, never a post-pass, and
+  the per-joint dissipated power and dissipated work are RESULT data
+  (projected quantities — the Phase 70 objective material). Breakaway
+  is the same Coulomb value: there is no separate stiction model.
+- **Loop joints**: a joint that CLOSES a loop and carries either
+  friction field is declined at build — loudly, never silently
+  dropped. Loop-joint friction is outside the tree-joint cone
+  vocabulary this kernel owns.
+- **Loads**: quasi-static couplings ride the scenario as time series —
+  flow-force histories (the 63/66 runs' drag/lift outputs, per-body)
+  and named combustion torque estimates (Phase 68's SHAPE: an external
+  torque series on a joint drive; the Phase 68 integration itself is
+  Phase 68). They evaluate per step (piecewise-linear between samples,
+  constant ends outside) into the same control term gravity uses.
+
+The `/workbench-sim` SLIDER-CRANK mode is the demo: the cad-jsx
+mechanism bodies (a base plate, a crank, a connecting rod, a piston)
+placed as occurrences and joined by the document's own joint records —
+the wrist pin closes the loop, which is exactly why it carries no
+friction fields. A Formedible dynamics form authors the record; "Run"
+drives compile → stream → finalize → persist through the same
+protocol and ledger as every other domain (the preview round is the
+per-joint dissipated-power history); and the completed run's own joint
+histories animate the mechanism through the assembly-motion surface —
+`applyMotionJoint` composes the crank rotation, the conrod angle, and
+the piston slide per sample, deterministic under scrub. The joint
+histories export as CSV (time first); the Phase 66 fan transient is
+cross-referenced (not re-delivered) by the kernel test that drives the
+66 demo motor + its measured aero load to the 66 operating point.
+
+The honest gaps: the mass properties author as an analytic twin (the
+document's measured-mass pipeline is not yet wired to the compile),
+per-occurrence inertia tensors are authored data (absent = point
+mass), and there is no contact or collision model — joints constrain,
+solids never collide.
+
 ## What does not exist yet
 
-Honest inventory, per phase: mechanism dynamics (67), combustion
-(68), structural FEM (69 — the kind declines with
-`sim/scenario-kind-unsupported` today), and parametric optimization
-(70). 3D flow and rotating machinery (66) landed with the cut-cell
-treatment explicitly DECLINED (see the ADR's "The cut-cell decision");
-a 3D WGSL provider engine adapter, the 3D grid-convergence ladder, and
-the motor-driven resolved-rotation transient (Phase 67's carve) remain
-open. Motor thermal (I²R winding heat feeding the thermal solver,
-derating curves) is likewise deferred until a ruling raises it. The GPU
-path's hardware-class perf budget is likewise not recorded yet (not
-recordable on the spike's software device — see
+Honest inventory, per phase: combustion (68), structural FEM (69 —
+the kind declines with `sim/scenario-kind-unsupported` today), and
+parametric optimization (70). 3D flow and rotating machinery (66)
+landed with the cut-cell treatment explicitly DECLINED (see the ADR's
+"The cut-cell decision"); a 3D WGSL provider engine adapter, the 3D
+grid-convergence ladder, and the motor-driven resolved-rotation
+transient (Phase 67's carve) remain open. Mechanism dynamics (67)
+landed with the gaps its section above states (no measured-mass
+pipeline into the compile, no contact model). Motor thermal (I²R
+winding heat feeding the thermal solver, derating curves) is likewise
+deferred until a ruling raises it. The GPU path's hardware-class perf
+budget is likewise not recorded yet (not recordable on the spike's
+software device — see
 `docs/architecture/wgsl-prespike-findings.md` §4).
 
 ## The runnable examples
@@ -520,4 +586,8 @@ carries the chart's history pair, and repeats deterministically.
 the `/workbench-sim` fixture's demo model — the plate-with-bore
 cad-jsx authoring the page voxelizes. Its Phase 66 sibling
 `packages/docs-examples/src/cadjsx/fan-in-tube.tsx` is the fan demo's
-body — the tube and paddle rotor the fan form's defaults expect.
+body — the tube and paddle rotor the fan form's defaults expect — and
+its Phase 67 sibling
+`packages/docs-examples/src/cadjsx/slider-crank.tsx` is the dynamics
+demo's bodies: the base plate, crank, rod, and piston the mechanism's
+joint records join.

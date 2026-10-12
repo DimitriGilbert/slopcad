@@ -334,3 +334,49 @@ the speed-resolution coupling); the runnable docs example
 budget (`kernel.lbm3d-fan.mrfGrid.stepBatchMs` — the CPU oracle at
 the reduced demo resolution, honestly labeled a reduced-resolution
 ceiling). `structural` still declines until Phase 69.
+
+## Implementation status (2026-10-12): Phase 67 is implemented (mechanism dynamics, providerised)
+
+Phase 67a (landed first): the `DynamicsEngine` contract
+(`@slopcad/sim-dynamics`' pure-type provider seam), the document→SI
+wire door (occurrences, serialized joint records with the additive
+friction pair, mass properties, motor records — mm/grams/datasheet
+units in, SI out), the world-aligned spatial algebra, and the own TS
+reference kernel — Featherstone-style articulated-body dynamics over
+`JOINT_KINDS` with gravity as a first-class body force, friction as
+force-limited constraints with emergent slip inside `step`,
+per-joint dissipated power/work as result data, the 61 motor
+abstraction, and loop closure through the restated LM machinery; the
+energy/momentum conservation audit, the analytic fixtures (pendulum,
+free fall, spin-down, drag, four-bar loop), and the determinism pin.
+Phase 67b (landed second): the MuJoCo provider — the MJCF document
+builder (deterministic XML, the friction fields as native
+`damping`/`frictionloss` attributes), the state round-trip, the wasm
+loading seam, and the cross-tolerance matrix against the reference
+oracle (friction-bearing fixtures first-class; tabulated motors
+covered on both paths). Phase 67c (this slice): the PRODUCT SURFACE —
+the additive, kind-locked `dynamics` scenario kind at the cad-core
+record boundary (the march budget on an integer step lattice, the
+motor selection riding exactly one named joint, the quasi-static load
+couplings as time series, the provider selection with the reference
+default and the MuJoCo opt-in), the sim-core compile branch (the
+mechanism wire crossing beside the motor record, the empty S9 regime
+report — no inapplicable dimensionless claims — and the loud declines
+for missing wires and off-lattice budgets), the dynamics engine
+behind the Phase 61 contract (the stepped march with per-sample
+progress and the one committed dissipation preview round, the
+per-joint dissipated power/work summaries as projected quantities,
+the energy ledger and joint histories), the quasi-static load
+coupling module (flow-force histories and named combustion torque
+estimates, piecewise-linear with constant ends, into the
+gravity-sharing loads term and joint efforts), the engine-kinematics
+demo (the cad-jsx slider-crank document — occurrences, the four joint
+records with the wrist pin closing the loop friction-free, the demo
+motor — animated through the assembly-motion surface from the run's
+own histories, deterministic under scrub), the `/workbench-sim`
+dynamics mode with its Formedible form and the joint-histories CSV
+export, the Phase 66 fan-transient cross-reference (the 66 demo motor
+and its measured aero load settling on the 66 operating point within
+the measured band), and the session stage s24h. `structural` still
+declines until Phase 69; combustion torque stays an INPUT series
+until Phase 68.

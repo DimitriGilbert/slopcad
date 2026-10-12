@@ -83,6 +83,35 @@ export function exportSimResultForceHistoryCsv(
   return exported.ok ? exported.value : null;
 }
 
+/**
+ * Exports one run's JOINT histories as deterministic CSV (Phase 67c,
+ * law S7): a time column first (seconds — the sample cadence's own
+ * clock), then every joint series (positions, rates, dissipated
+ * power/work per joint). Returns `null` when the run carries no joint
+ * series (nothing to export — never a fabricated table).
+ */
+export function exportSimResultJointHistoryCsv(
+  result: SimResult,
+): string | null {
+  const jointSeries = result.histories.filter((series) =>
+    series.name.startsWith("joint:"),
+  );
+  if (jointSeries.length === 0) return null;
+  const time = result.histories.find((series) => series.name === "time");
+  if (time === undefined) return null;
+  const exported = exportSimHistoryCsv({
+    columns: [
+      { name: "time", unit: time.unit, samples: [...time.samples] },
+      ...jointSeries.map((series) => ({
+        name: series.name,
+        unit: series.unit,
+        samples: [...series.samples],
+      })),
+    ],
+  });
+  return exported.ok ? exported.value : null;
+}
+
 /** Triggers a browser download of the exported files (best-effort UI sugar). */
 export function downloadSimExportFiles(files: readonly SimExportFile[]): void {
   for (const file of files) {

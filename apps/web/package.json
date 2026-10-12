@@ -49,6 +49,7 @@
     "@slopcad/docs-examples": "workspace:*",
     "@slopcad/env": "workspace:*",
     "@slopcad/sim-core": "workspace:*",
+    "@slopcad/sim-dynamics": "workspace:*",
     "@slopcad/sim-flow": "workspace:*",
     "@slopcad/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",

@@ -36,10 +36,14 @@
 import { type MaterialId, parseMaterialId } from "./document-mass";
 import {
   type BodyId,
+  type JointId,
   type MotorId,
+  type OccurrenceId,
   type SimulationId,
   parseBodyId,
+  parseJointId,
   parseMotorId,
+  parseOccurrenceId,
   parseSimulationId,
 } from "./ids";
 import { type ParseFailure, type ParseResult, fail, ok } from "./result";
@@ -49,9 +53,16 @@ export type SimVec3 = readonly [number, number, number];
 
 /**
  * The scenario kinds (Phase 61 carve; `structural` is reserved for Phase 69
- * and declines at the sim-core compile boundary until that phase lands).
+ * and declines at the sim-core compile boundary until that phase lands;
+ * `dynamics` is Phase 67's mechanism-dynamics kind — its solve stance is
+ * the dynamics kind's alone).
  */
-export const SIM_SCENARIO_KINDS = ["flow", "thermal", "structural"] as const;
+export const SIM_SCENARIO_KINDS = [
+  "flow",
+  "thermal",
+  "dynamics",
+  "structural",
+] as const;
 
 export type SimScenarioKind = (typeof SIM_SCENARIO_KINDS)[number];
 
@@ -400,6 +411,526 @@ function isSimFlow3dBoundaryTreatment(
   return (
     typeof input === "string" &&
     SIM_FLOW3D_BOUNDARY_TREATMENTS.includes(input as SimFlow3dBoundaryTreatment)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The dynamics solve stance (Phase 67c, law S1-additive)
+// ---------------------------------------------------------------------------
+
+/**
+ * The dynamics engines a scenario may select (Phase 67): `reference` is
+ * the deterministic TypeScript kernel — the S2/S5 oracle and the default;
+ * `mujoco` is the Apache-2.0 wasm provider behind the SAME contract, an
+ * explicit opt-in that declines loudly when its module cannot load,
+ * never a silent fallback to the reference.
+ */
+export const SIM_DYNAMICS_PROVIDERS = ["reference", "mujoco"] as const;
+
+export type SimDynamicsProvider = (typeof SIM_DYNAMICS_PROVIDERS)[number];
+
+/** One sample of a quasi-static load series: a time and its magnitude. */
+export interface SimDynamicsLoadSample {
+  /** The sample's time, s (≥ 0, within the stance's duration). */
+  readonly tS: number;
+}
+
+/** One flow-force history sample (a 63/66 run output's drag/lift series). */
+export interface SimDynamicsFlowForceSample extends SimDynamicsLoadSample {
+  /** The force at the sample's time, N (world components). */
+  readonly forceN: SimVec3;
+  /** The application point, world mm; absent = the body's COG. */
+  readonly atWorldPointMm?: SimVec3;
+}
+
+/**
+ * One combustion-torque-estimate sample (Phase 68's shape, authored as an
+ * external torque series — the Phase 68 integration itself is Phase 68).
+ */
+export interface SimDynamicsJointTorqueSample extends SimDynamicsLoadSample {
+  /** The drive effort at the sample's time, N·m. */
+  readonly effortNPerM: number;
+}
+
+/**
+ * One quasi-static load coupling (Phase 67c): a time series applied
+ * per-step. `flow-force` rides a body occurrence (the 2D/3D flow runs'
+ * force histories); `joint-torque` rides a joint's drive DOF (the
+ * combustion torque estimates). Samples interpolate piecewise-linearly
+ * between their points with constant end extrapolation — the tabulated
+ * motor's discipline, stated once here.
+ */
+export type SimScenarioDynamicsLoad =
+  | {
+      readonly kind: "flow-force";
+      /** The occurrence the force history applies to. */
+      readonly occurrenceId: OccurrenceId;
+      readonly samples: readonly SimDynamicsFlowForceSample[];
+    }
+  | {
+      readonly kind: "joint-torque";
+      /** The named estimate (a load record's display identity). */
+      readonly name: string;
+      /** The joint whose drive DOF the torque series drives. */
+      readonly jointId: JointId;
+      readonly samples: readonly SimDynamicsJointTorqueSample[];
+    };
+
+/**
+ * A dynamics scenario's solve stance (Phase 67c, kind-locked): the
+ * provider selection (reference default, MuJoCo opt-in), the integration
+ * budget (time step, duration, sample cadence — all authored, never
+ * runtime knobs), the joint the scenario's selected motor record rides,
+ * and the quasi-static load couplings. Required on `dynamics` scenarios
+ * and refused on every other kind — the thermal stance's discipline.
+ */
+export interface SimScenarioDynamicsSpec {
+  /**
+   * The engine selection; absent = the reference kernel (the S2/S5
+   * oracle default — MuJoCo is the explicit opt-in).
+   */
+  readonly provider?: SimDynamicsProvider;
+  /** The integration time step, s (strictly positive). */
+  readonly timeStepS: number;
+  /** The physical end time, s (strictly positive; an integer number of steps). */
+  readonly durationS: number;
+  /** The history sampling cadence, s (an integer number of steps; ≤ duration). */
+  readonly sampleIntervalS: number;
+  /**
+   * The joint the scenario's `motorId` selection rides; required exactly
+   * when a motor is selected, refused otherwise (the fixedRpm-iff-fixed
+   * rule's shape).
+   */
+  readonly motorJointId?: JointId;
+  readonly loads?: readonly SimScenarioDynamicsLoad[];
+}
+
+/** Canonical JSON form of a load series; fixed key order, optionals last. */
+export type SerializedSimScenarioDynamicsLoad =
+  | {
+      readonly kind: "flow-force";
+      readonly occurrenceId: string;
+      readonly samples: readonly {
+        readonly tS: number;
+        readonly forceN: readonly [number, number, number];
+        readonly atWorldPointMm?: readonly [number, number, number];
+      }[];
+    }
+  | {
+      readonly kind: "joint-torque";
+      readonly name: string;
+      readonly jointId: string;
+      readonly samples: readonly {
+        readonly tS: number;
+        readonly effortNPerM: number;
+      }[];
+    };
+
+/** Canonical JSON form of the dynamics stance; fixed key order, optionals last. */
+export interface SerializedSimScenarioDynamicsSpec {
+  readonly timeStepS: number;
+  readonly durationS: number;
+  readonly sampleIntervalS: number;
+  readonly motorJointId?: string;
+  readonly loads?: SerializedSimScenarioDynamicsLoad[];
+  /** Present exactly when the provider is not the reference default. */
+  readonly provider?: Exclude<SimDynamicsProvider, "reference">;
+}
+
+function isSimDynamicsProvider(input: unknown): input is SimDynamicsProvider {
+  return (
+    typeof input === "string" &&
+    SIM_DYNAMICS_PROVIDERS.includes(input as SimDynamicsProvider)
+  );
+}
+
+/**
+ * Parses one load series' samples' shared spine: at least two samples,
+ * strictly increasing times inside `[0, durationS]`, every time finite.
+ */
+function parseLoadSamples(
+  input: readonly unknown[],
+  durationS: number,
+  what: string,
+): ParseResult<readonly number[], SimulationError> {
+  if (input.length < 2) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        `${what} must carry at least two samples (a series interpolates; a constant is one endpoint twice).`,
+        input.length,
+      ),
+    );
+  }
+  const times: number[] = [];
+  for (const entry of input) {
+    if (!isPlainRecord(entry)) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          `${what} must be plain sample objects.`,
+          entry,
+        ),
+      );
+    }
+    if (
+      typeof entry.tS !== "number" ||
+      !Number.isFinite(entry.tS) ||
+      entry.tS < 0 ||
+      entry.tS > durationS
+    ) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          `${what}'s sample times must be finite and inside the stance's duration [0, ${String(durationS)} s].`,
+          entry.tS,
+        ),
+      );
+    }
+    if (times.length > 0 && entry.tS <= (times.at(-1) ?? 0)) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          `${what}'s sample times must be strictly increasing.`,
+          entry.tS,
+        ),
+      );
+    }
+    times.push(entry.tS);
+  }
+  return ok(times);
+}
+
+/** Parses the quasi-static load couplings (unknown input, kind-tagged). */
+function parseDynamicsLoads(
+  input: unknown,
+  durationS: number,
+): ParseResult<readonly SimScenarioDynamicsLoad[], SimulationError> {
+  if (input === undefined || input === null) {
+    return ok(Object.freeze([]));
+  }
+  if (!Array.isArray(input)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        "A dynamics stance's loads must be an array of series records.",
+        input,
+      ),
+    );
+  }
+  const loads: SimScenarioDynamicsLoad[] = [];
+  const torqueNames = new Set<string>();
+  for (const entry of input) {
+    if (!isPlainRecord(entry)) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          "Each dynamics load must be a plain object with a kind field.",
+          entry,
+        ),
+      );
+    }
+    if (entry.kind === "flow-force") {
+      const occurrence = parseOccurrenceId(entry.occurrenceId);
+      if (!occurrence.ok) {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+            `A flow-force load must carry a valid occurrence id: ${occurrence.error.message}`,
+            entry.occurrenceId,
+          ),
+        );
+      }
+      if (!Array.isArray(entry.samples)) {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+            "A flow-force load must carry its samples array.",
+            entry.samples,
+          ),
+        );
+      }
+      const times = parseLoadSamples(
+        entry.samples,
+        durationS,
+        "A flow-force load",
+      );
+      if (!times.ok) return times;
+      const samples: SimDynamicsFlowForceSample[] = [];
+      for (const [index, sample] of entry.samples.entries()) {
+        if (!isPlainRecord(sample)) continue; // parseLoadSamples declined already
+        const forceN = parseVec3(
+          sample.forceN,
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          "A flow-force sample's force",
+        );
+        if (!forceN.ok) return forceN;
+        let atWorldPointMm: SimVec3 | undefined;
+        if (
+          sample.atWorldPointMm !== undefined &&
+          sample.atWorldPointMm !== null
+        ) {
+          const point = parseVec3(
+            sample.atWorldPointMm,
+            SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+            "A flow-force sample's application point",
+          );
+          if (!point.ok) return point;
+          atWorldPointMm = point.value;
+        }
+        samples.push({
+          tS: times.value[index] ?? 0,
+          forceN: forceN.value,
+          ...(atWorldPointMm === undefined ? {} : { atWorldPointMm }),
+        });
+      }
+      loads.push(
+        Object.freeze({
+          kind: "flow-force",
+          occurrenceId: occurrence.value,
+          samples: Object.freeze(samples),
+        }),
+      );
+      continue;
+    }
+    if (entry.kind === "joint-torque") {
+      if (
+        typeof entry.name !== "string" ||
+        entry.name.trim().length < 1 ||
+        entry.name.trim().length > 64
+      ) {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+            "A joint-torque load's name must be 1-64 characters (trimmed).",
+            entry.name,
+          ),
+        );
+      }
+      const joint = parseJointId(entry.jointId);
+      if (!joint.ok) {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+            `A joint-torque load must carry a valid joint id: ${joint.error.message}`,
+            entry.jointId,
+          ),
+        );
+      }
+      if (!Array.isArray(entry.samples)) {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+            "A joint-torque load must carry its samples array.",
+            entry.samples,
+          ),
+        );
+      }
+      const times = parseLoadSamples(
+        entry.samples,
+        durationS,
+        "A joint-torque load",
+      );
+      if (!times.ok) return times;
+      const samples: SimDynamicsJointTorqueSample[] = [];
+      for (const [index, sample] of entry.samples.entries()) {
+        if (!isPlainRecord(sample)) continue; // parseLoadSamples declined already
+        if (
+          typeof sample.effortNPerM !== "number" ||
+          !Number.isFinite(sample.effortNPerM)
+        ) {
+          return fail(
+            simulationError(
+              SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+              "A joint-torque sample's effort must be a finite number (N·m).",
+              sample.effortNPerM,
+            ),
+          );
+        }
+        samples.push({
+          tS: times.value[index] ?? 0,
+          effortNPerM: sample.effortNPerM,
+        });
+      }
+      const name = entry.name.trim();
+      if (torqueNames.has(name)) {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+            `The named torque estimate "${name}" appears twice; one name per estimate.`,
+            name,
+          ),
+        );
+      }
+      torqueNames.add(name);
+      loads.push(
+        Object.freeze({
+          kind: "joint-torque",
+          name,
+          jointId: joint.value,
+          samples: Object.freeze(samples),
+        }),
+      );
+      continue;
+    }
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        'A dynamics load\'s kind must be "flow-force" or "joint-torque".',
+        entry.kind,
+      ),
+    );
+  }
+  return ok(Object.freeze(loads));
+}
+
+/**
+ * Parses the dynamics solve stance, kind-locked: a `dynamics` scenario
+ * without one declines (there is no default physics), any other kind
+ * carrying one declines (the stance is the dynamics kind's alone), and
+ * the budget's own fields are cross-checked (integer steps; the sample
+ * cadence an integer number of steps inside the duration; the motor
+ * joint present exactly when the record selects a motor).
+ */
+function parseDynamicsSpec(
+  input: unknown,
+  kind: SimScenarioKind,
+  motorId: MotorId | undefined,
+): ParseResult<SimScenarioDynamicsSpec | undefined, SimulationError> {
+  if (input === undefined || input === null) {
+    if (kind === "dynamics") {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          "A dynamics scenario must carry its dynamics solve stance (time step, duration, sample cadence).",
+          input,
+        ),
+      );
+    }
+    return ok(undefined);
+  }
+  if (kind !== "dynamics") {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        `A "${kind}" scenario cannot carry a dynamics solve stance; it is the dynamics kind's alone.`,
+        input,
+      ),
+    );
+  }
+  if (!isPlainRecord(input)) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        "A dynamics solve stance must be an object with timeStepS, durationS, and sampleIntervalS fields.",
+        input,
+      ),
+    );
+  }
+  const timeStepS = parsePositiveNumber(
+    input.timeStepS,
+    SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+    "A dynamics stance's time step",
+  );
+  if (!timeStepS.ok) return timeStepS;
+  const durationS = parsePositiveNumber(
+    input.durationS,
+    SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+    "A dynamics stance's duration",
+  );
+  if (!durationS.ok) return durationS;
+  const sampleIntervalS = parsePositiveNumber(
+    input.sampleIntervalS,
+    SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+    "A dynamics stance's sample interval",
+  );
+  if (!sampleIntervalS.ok) return sampleIntervalS;
+  // The step lattice: the duration is EXACTLY an integer number of steps
+  // and the cadence an integer number of steps inside it, so every sample
+  // lands on a step boundary — the transient thermal cadence's rule.
+  const steps = Math.round(durationS.value / timeStepS.value);
+  if (
+    steps < 1 ||
+    Math.abs(steps * timeStepS.value - durationS.value) > 1e-9 * durationS.value
+  ) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        "A dynamics stance's duration must be an integer multiple of its time step so the march ends exactly on the lattice.",
+        { durationS: durationS.value, timeStepS: timeStepS.value },
+      ),
+    );
+  }
+  const cadenceSteps = Math.round(sampleIntervalS.value / timeStepS.value);
+  if (
+    cadenceSteps < 1 ||
+    Math.abs(cadenceSteps * timeStepS.value - sampleIntervalS.value) >
+      1e-9 * sampleIntervalS.value ||
+    sampleIntervalS.value > durationS.value
+  ) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        "A dynamics stance's sample interval must be an integer number of time steps, at most the duration.",
+        { sampleIntervalS: sampleIntervalS.value, timeStepS: timeStepS.value },
+      ),
+    );
+  }
+  let provider: SimDynamicsProvider = "reference";
+  if (input.provider !== undefined && input.provider !== null) {
+    if (!isSimDynamicsProvider(input.provider)) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          `A dynamics stance's provider must be one of: ${SIM_DYNAMICS_PROVIDERS.join(", ")}.`,
+          input.provider,
+        ),
+      );
+    }
+    provider = input.provider;
+  }
+  let motorJointId: JointId | undefined;
+  if (input.motorJointId !== undefined && input.motorJointId !== null) {
+    if (motorId === undefined) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          "A dynamics stance's motor joint is authored exactly when the scenario selects a motor record (motorId).",
+          input.motorJointId,
+        ),
+      );
+    }
+    const parsed = parseJointId(input.motorJointId);
+    if (!parsed.ok) {
+      return fail(
+        simulationError(
+          SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+          `A dynamics stance's motor joint must be a valid joint id: ${parsed.error.message}`,
+          input.motorJointId,
+        ),
+      );
+    }
+    motorJointId = parsed.value;
+  } else if (motorId !== undefined) {
+    return fail(
+      simulationError(
+        SIMULATION_ERROR_CODES.dynamicsSpecInvalid,
+        `The scenario selects motor "${motorId}" but its dynamics stance names no motor joint — the record rides exactly one joint.`,
+        motorId,
+      ),
+    );
+  }
+  const loads = parseDynamicsLoads(input.loads, durationS.value);
+  if (!loads.ok) return loads;
+  return ok(
+    Object.freeze({
+      timeStepS: timeStepS.value,
+      durationS: durationS.value,
+      sampleIntervalS: sampleIntervalS.value,
+      ...(motorJointId === undefined ? {} : { motorJointId }),
+      ...(loads.value.length === 0 ? {} : { loads: loads.value }),
+      ...(provider === "reference" ? {} : { provider }),
+    }),
   );
 }
 
@@ -754,6 +1285,11 @@ export interface SimScenarioBody {
    * = the 2D wind tunnel. Refused on every other kind.
    */
   readonly flow3d?: SimScenarioFlow3dSpec;
+  /**
+   * The dynamics solve stance (Phase 67c): required on `dynamics`
+   * scenarios, refused on every other kind.
+   */
+  readonly dynamics?: SimScenarioDynamicsSpec;
   /** The selected motor record for fan scenarios; absent = motor-less. */
   readonly motorId?: MotorId;
   /** The backend preference; absent = the CPU default. */
@@ -779,6 +1315,7 @@ export interface SimScenarioInput {
   readonly gridConvergence?: boolean;
   readonly thermal?: SimScenarioThermalSpec;
   readonly flow3d?: SimScenarioFlow3dSpec;
+  readonly dynamics?: SimScenarioDynamicsSpec;
   readonly motorId?: MotorId;
   readonly backend?: SimBackendPreference;
 }
@@ -809,6 +1346,7 @@ export const SIMULATION_ERROR_CODES = {
   runControlsInvalid: "simulation/run-controls-invalid",
   thermalSpecInvalid: "simulation/thermal-spec-invalid",
   flow3dSpecInvalid: "simulation/flow3d-spec-invalid",
+  dynamicsSpecInvalid: "simulation/dynamics-spec-invalid",
 } as const;
 
 export type SimulationErrorCode =
@@ -1521,6 +2059,7 @@ export function buildSimScenarioBody(
   gridConvergence: unknown,
   thermal?: unknown,
   flow3d?: unknown,
+  dynamics?: unknown,
 ): ParseResult<SimScenarioBody, SimulationError> {
   if (typeof name !== "string" || !isValidSimulationName(name)) {
     return fail(
@@ -1629,6 +2168,8 @@ export function buildSimScenarioBody(
   if (!parsedThermal.ok) return parsedThermal;
   const parsedFlow3d = parseFlow3dSpec(flow3d, kind);
   if (!parsedFlow3d.ok) return parsedFlow3d;
+  const parsedDynamics = parseDynamicsSpec(dynamics, kind, parsedMotorId);
+  if (!parsedDynamics.ok) return parsedDynamics;
   return ok(
     Object.freeze({
       name: name.trim(),
@@ -1650,6 +2191,9 @@ export function buildSimScenarioBody(
       ...(parsedFlow3d.value === undefined
         ? {}
         : { flow3d: parsedFlow3d.value }),
+      ...(parsedDynamics.value === undefined
+        ? {}
+        : { dynamics: parsedDynamics.value }),
       ...(parsedMotorId === undefined ? {} : { motorId: parsedMotorId }),
       ...(parsedBackend === undefined ? {} : { backend: parsedBackend }),
     }),
@@ -1672,6 +2216,7 @@ export interface SerializedSimScenarioBody {
   readonly gridConvergence?: boolean;
   readonly thermal?: SerializedSimScenarioThermalSpec;
   readonly flow3d?: SerializedSimScenarioFlow3dSpec;
+  readonly dynamics?: SerializedSimScenarioDynamicsSpec;
   readonly motorId?: string;
   /** Present exactly when the preference is not the CPU default. */
   readonly backend?: Exclude<SimBackendPreference, "cpu">;
@@ -1683,6 +2228,52 @@ export interface SerializedSimScenarioBody {
  * controls) by omitting the same optionals the build boundary omits, so a
  * command payload serializes canonically without a build round-trip.
  */
+/** Canonical JSON of one load series; fixed key order, optionals last. */
+function serializeDynamicsLoad(
+  load: SimScenarioDynamicsLoad,
+): SerializedSimScenarioDynamicsLoad {
+  if (load.kind === "flow-force") {
+    return {
+      kind: "flow-force",
+      occurrenceId: load.occurrenceId,
+      samples: load.samples.map((sample) => ({
+        tS: sample.tS,
+        forceN: [...sample.forceN],
+        ...(sample.atWorldPointMm === undefined
+          ? {}
+          : { atWorldPointMm: [...sample.atWorldPointMm] }),
+      })),
+    };
+  }
+  return {
+    kind: "joint-torque",
+    name: load.name,
+    jointId: load.jointId,
+    samples: load.samples.map((sample) => ({
+      tS: sample.tS,
+      effortNPerM: sample.effortNPerM,
+    })),
+  };
+}
+
+/** Canonical JSON of the dynamics stance; fixed key order, optionals last. */
+export function serializeSimScenarioDynamicsSpec(
+  spec: SimScenarioDynamicsSpec,
+): SerializedSimScenarioDynamicsSpec {
+  return {
+    timeStepS: spec.timeStepS,
+    durationS: spec.durationS,
+    sampleIntervalS: spec.sampleIntervalS,
+    ...(spec.motorJointId === undefined
+      ? {}
+      : { motorJointId: spec.motorJointId }),
+    ...(spec.loads === undefined || spec.loads.length === 0
+      ? {}
+      : { loads: spec.loads.map(serializeDynamicsLoad) }),
+    ...(spec.provider === "reference" ? {} : { provider: spec.provider }),
+  };
+}
+
 export function serializeSimScenarioBody(
   scenario: SimScenarioDraft,
 ): SerializedSimScenarioBody {
@@ -1752,6 +2343,9 @@ export function serializeSimScenarioBody(
                 }),
           },
         }),
+    ...(scenario.dynamics === undefined
+      ? {}
+      : { dynamics: serializeSimScenarioDynamicsSpec(scenario.dynamics) }),
     ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
     ...(scenario.backend === undefined || scenario.backend === "cpu"
       ? {}
@@ -1790,6 +2384,7 @@ export function parseSimScenarioBody(
     input.gridConvergence,
     input.thermal,
     input.flow3d,
+    input.dynamics,
   );
 }
 

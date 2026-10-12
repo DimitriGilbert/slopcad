@@ -39,9 +39,14 @@ import type { SimError } from "./errors";
 import type { SimOccupancyGrid } from "./voxel-grid";
 import type { SimParseResult } from "./result";
 import type {
+  CompiledSimDynamics,
+  CompiledSimDynamicsForceSample,
+  CompiledSimDynamicsLoad,
+  CompiledSimDynamicsTorqueSample,
   CompiledSimScenario,
   SimBodyBoundsMm,
   SimCompileInput,
+  SimMechanismWire,
 } from "./units";
 
 import { SIM_ERROR_CODES, simError } from "./errors";
@@ -108,6 +113,37 @@ export interface GeometrySimCompileInput extends SimCompileInput {
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+/** A finite [x, y, z] triple or a structured decline (the units door's rule). */
+function finiteTriple(
+  input: unknown,
+  what: string,
+): SimParseResult<readonly [number, number, number], SimError> {
+  const source: readonly unknown[] | null = Array.isArray(input)
+    ? (input as readonly unknown[])
+    : null;
+  const entries: readonly unknown[] =
+    source === null ? [] : [source[0], source[1], source[2]];
+  if (
+    entries.length !== 3 ||
+    !entries.every(
+      (entry) => typeof entry === "number" && Number.isFinite(entry),
+    )
+  ) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.scenarioInvalid,
+        `${what} must be an array of three finite numbers.`,
+        input,
+      ),
+    );
+  }
+  return simOk([
+    entries[0] as number,
+    entries[1] as number,
+    entries[2] as number,
+  ]);
 }
 
 /**
@@ -951,6 +987,334 @@ function compileThermalProducts(
   });
 }
 
+// ---------------------------------------------------------------------------
+// The dynamics compile products (Phase 67c)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compiles a dynamics scenario's products (Phase 67c, the
+ * `compileThermalProducts` precedent): the serialized solve stance
+ * re-validated field-by-field (the record layer validated the same
+ * fields; this door re-checks every field it consumes), the mechanism
+ * wire validated structurally (plain arrays, non-empty — the 67
+ * dynamics door re-validates every record inside them and converts the
+ * document units, its own documented S4 stance), the load couplings
+ * converted to SI (the application point's mm → m; times, forces, and
+ * efforts are authored SI-adjacent already), and the serialized motor
+ * record carried verbatim for the door's own one conversion site.
+ */
+function compileDynamicsProducts(
+  input: GeometrySimCompileInput,
+): SimParseResult<Pick<CompiledSimScenario, "dynamics">, SimError> {
+  const refuse = (
+    message: string,
+    at: unknown,
+  ): SimParseResult<never, SimError> =>
+    simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
+  const scenario = input.scenario;
+  if (!isPlainRecord(scenario)) {
+    return refuse(
+      "A scenario must be a plain serialized scenario object.",
+      scenario,
+    );
+  }
+  const stance = scenario.dynamics;
+  if (!isPlainRecord(stance)) {
+    return refuse(
+      "A dynamics scenario must carry its dynamics solve stance (the time step, the duration, the sample cadence) — the compile door refuses to guess a march.",
+      stance,
+    );
+  }
+  const positive = (
+    value: unknown,
+    what: string,
+  ): SimParseResult<number, SimError> =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+      ? simOk(value)
+      : refuse(
+          `A dynamics stance's ${what} must be a positive finite number.`,
+          value,
+        );
+  const timeStepS = positive(stance.timeStepS, "time step");
+  if (!timeStepS.ok) return timeStepS;
+  const durationS = positive(stance.durationS, "duration");
+  if (!durationS.ok) return durationS;
+  const sampleIntervalS = positive(stance.sampleIntervalS, "sample interval");
+  if (!sampleIntervalS.ok) return sampleIntervalS;
+  const steps = Math.round(durationS.value / timeStepS.value);
+  if (
+    steps < 1 ||
+    Math.abs(steps * timeStepS.value - durationS.value) > 1e-9 * durationS.value
+  ) {
+    return refuse(
+      "A dynamics stance's duration must be an integer multiple of its time step so the march ends exactly on the step lattice.",
+      { durationS: durationS.value, timeStepS: timeStepS.value },
+    );
+  }
+  const cadenceSteps = Math.round(sampleIntervalS.value / timeStepS.value);
+  if (
+    cadenceSteps < 1 ||
+    Math.abs(cadenceSteps * timeStepS.value - sampleIntervalS.value) >
+      1e-9 * sampleIntervalS.value ||
+    sampleIntervalS.value > durationS.value
+  ) {
+    return refuse(
+      "A dynamics stance's sample interval must be an integer number of time steps, at most the duration.",
+      { sampleIntervalS: sampleIntervalS.value, timeStepS: timeStepS.value },
+    );
+  }
+  let provider: "reference" | "mujoco" = "reference";
+  if (stance.provider !== undefined && stance.provider !== null) {
+    if (stance.provider !== "reference" && stance.provider !== "mujoco") {
+      return refuse(
+        'A dynamics stance\'s provider must be "reference" or "mujoco".',
+        stance.provider,
+      );
+    }
+    provider = stance.provider;
+  }
+  let motorJointId: string | undefined;
+  if (stance.motorJointId !== undefined && stance.motorJointId !== null) {
+    if (typeof stance.motorJointId !== "string") {
+      return refuse(
+        "A dynamics stance's motor joint must be a joint id string.",
+        stance.motorJointId,
+      );
+    }
+    motorJointId = stance.motorJointId;
+  }
+
+  // The mechanism wire: structural validation only (the dynamics door
+  // owns the field-by-field restatement).
+  const wire = input.mechanism;
+  if (!isPlainRecord(wire)) {
+    return refuse(
+      "A dynamics compile needs the document's mechanism wire (occurrences, joints, mass properties, grounded ids) — the compile door refuses to fabricate a mechanism.",
+      wire,
+    );
+  }
+  if (
+    !Array.isArray(wire.occurrences) ||
+    wire.occurrences.length === 0 ||
+    !Array.isArray(wire.joints) ||
+    !Array.isArray(wire.masses)
+  ) {
+    return refuse(
+      "A mechanism wire must carry non-empty occurrences and joints arrays plus its mass-properties list.",
+      {
+        occurrences: Array.isArray(wire.occurrences)
+          ? wire.occurrences.length
+          : "absent",
+        joints: Array.isArray(wire.joints) ? wire.joints.length : "absent",
+        masses: Array.isArray(wire.masses) ? wire.masses.length : "absent",
+      },
+    );
+  }
+  if (wire.grounded !== undefined && !Array.isArray(wire.grounded)) {
+    return refuse(
+      "A mechanism wire's grounded list must be an array.",
+      wire.grounded,
+    );
+  }
+  let groundedIds: readonly string[] | undefined;
+  if (Array.isArray(wire.grounded)) {
+    const ids: string[] = [];
+    for (const id of wire.grounded) {
+      if (typeof id !== "string") {
+        return refuse(
+          "A mechanism wire's grounded entries must be occurrence id strings — the compile door never guesses which bodies weld to ground.",
+          id,
+        );
+      }
+      ids.push(id);
+    }
+    groundedIds = ids;
+  }
+  const mechanism: SimMechanismWire = {
+    occurrences: wire.occurrences,
+    joints: wire.joints,
+    masses: wire.masses,
+    ...(groundedIds === undefined ? {} : { grounded: groundedIds }),
+  };
+
+  // The load couplings: SI magnitudes, the application point converted.
+  const loads: CompiledSimDynamicsLoad[] = [];
+  if (stance.loads !== undefined && stance.loads !== null) {
+    if (!Array.isArray(stance.loads)) {
+      return refuse(
+        "A dynamics stance's loads must be an array of series records.",
+        stance.loads,
+      );
+    }
+    for (const entry of stance.loads) {
+      if (!isPlainRecord(entry)) {
+        return refuse(
+          "Each dynamics load must be a plain object with a kind field.",
+          entry,
+        );
+      }
+      const samplesWire = entry.samples;
+      if (!Array.isArray(samplesWire) || samplesWire.length < 2) {
+        return refuse(
+          "A dynamics load must carry at least two samples (a series interpolates).",
+          samplesWire,
+        );
+      }
+      const parseTimes = (samples: readonly unknown[]): number[] => {
+        const times: number[] = [];
+        for (const sample of samples) {
+          if (!isPlainRecord(sample)) continue; // declined below on shape
+          const t = sample.tS;
+          if (
+            typeof t !== "number" ||
+            !Number.isFinite(t) ||
+            t < 0 ||
+            t > durationS.value
+          ) {
+            return [];
+          }
+          times.push(t);
+        }
+        return times;
+      };
+      if (entry.kind === "flow-force") {
+        if (typeof entry.occurrenceId !== "string") {
+          return refuse(
+            "A flow-force load must carry its occurrence id string.",
+            entry.occurrenceId,
+          );
+        }
+        const times = parseTimes(samplesWire);
+        let ordered = times.length === samplesWire.length;
+        for (let index = 1; ordered && index < times.length; index += 1) {
+          if ((times[index] ?? 0) <= (times[index - 1] ?? 0)) ordered = false;
+        }
+        if (!ordered) {
+          return refuse(
+            "A flow-force load's sample times must be finite, strictly increasing, and inside the duration.",
+            samplesWire,
+          );
+        }
+        const samples: CompiledSimDynamicsForceSample[] = [];
+        for (const sample of samplesWire) {
+          if (!isPlainRecord(sample)) {
+            return refuse(
+              "A flow-force sample must be a plain object.",
+              sample,
+            );
+          }
+          const forceN = finiteTriple(
+            sample.forceN,
+            "A flow-force sample's force",
+          );
+          if (!forceN.ok) return forceN;
+          let atWorldPointM: readonly [number, number, number] | undefined;
+          if (
+            sample.atWorldPointMm !== undefined &&
+            sample.atWorldPointMm !== null
+          ) {
+            const pointMm = finiteTriple(
+              sample.atWorldPointMm,
+              "A flow-force sample's application point",
+            );
+            if (!pointMm.ok) return pointMm;
+            atWorldPointM = [
+              pointMm.value[0] / MM_PER_M,
+              pointMm.value[1] / MM_PER_M,
+              pointMm.value[2] / MM_PER_M,
+            ];
+          }
+          samples.push({
+            tS: sample.tS as number,
+            forceN: forceN.value,
+            ...(atWorldPointM === undefined ? {} : { atWorldPointM }),
+          });
+        }
+        loads.push({
+          kind: "flow-force",
+          occurrenceId: entry.occurrenceId,
+          samples: Object.freeze(samples),
+        });
+        continue;
+      }
+      if (entry.kind === "joint-torque") {
+        if (
+          typeof entry.name !== "string" ||
+          entry.name.trim().length < 1 ||
+          entry.name.trim().length > 64
+        ) {
+          return refuse(
+            "A joint-torque load's name must be 1-64 characters (trimmed).",
+            entry.name,
+          );
+        }
+        if (typeof entry.jointId !== "string") {
+          return refuse(
+            "A joint-torque load must carry its joint id string.",
+            entry.jointId,
+          );
+        }
+        const times = parseTimes(samplesWire);
+        let ordered = times.length === samplesWire.length;
+        for (let index = 1; ordered && index < times.length; index += 1) {
+          if ((times[index] ?? 0) <= (times[index - 1] ?? 0)) ordered = false;
+        }
+        if (!ordered) {
+          return refuse(
+            "A joint-torque load's sample times must be finite, strictly increasing, and inside the duration.",
+            samplesWire,
+          );
+        }
+        const samples: CompiledSimDynamicsTorqueSample[] = [];
+        for (const sample of samplesWire) {
+          if (!isPlainRecord(sample)) {
+            return refuse(
+              "A joint-torque sample must be a plain object.",
+              sample,
+            );
+          }
+          if (
+            typeof sample.effortNPerM !== "number" ||
+            !Number.isFinite(sample.effortNPerM)
+          ) {
+            return refuse(
+              "A joint-torque sample's effort must be a finite number (N·m).",
+              sample.effortNPerM,
+            );
+          }
+          samples.push({
+            tS: sample.tS as number,
+            effortNPerM: sample.effortNPerM,
+          });
+        }
+        loads.push({
+          kind: "joint-torque",
+          name: entry.name.trim(),
+          jointId: entry.jointId,
+          samples: Object.freeze(samples),
+        });
+        continue;
+      }
+      return refuse(
+        'A dynamics load\'s kind must be "flow-force" or "joint-torque".',
+        entry.kind,
+      );
+    }
+  }
+
+  const dynamics: CompiledSimDynamics = Object.freeze({
+    provider,
+    timeStepS: timeStepS.value,
+    durationS: durationS.value,
+    sampleIntervalS: sampleIntervalS.value,
+    ...(motorJointId === undefined ? {} : { motorJointId }),
+    mechanism,
+    loads: Object.freeze(loads),
+    ...(input.motor === undefined ? {} : { motorWire: input.motor }),
+  });
+  return simOk({ dynamics });
+}
+
 /**
  * Compiles a serialized scenario into solver space WITH its geometry
  * (Phase 63c, extended 65c): the 61a {@link compileSimScenario} plus,
@@ -982,6 +1346,16 @@ export function compileSimScenarioWithGeometry(
         input.scenario,
       ),
     );
+  }
+  if (compiled.value.kind === "dynamics") {
+    // The dynamics branch (Phase 67c): the mechanism wire is the
+    // document's own resolved state (occurrences, joint records, mass
+    // properties), re-validated structurally here and converted by the
+    // 67 dynamics door — the thermal door's record discipline. No
+    // voxelization: the mechanism IS the geometry.
+    const dynamics = compileDynamicsProducts(input);
+    if (!dynamics.ok) return dynamics;
+    return simOk({ ...compiled.value, ...dynamics.value });
   }
   if (compiled.value.kind === "thermal") {
     // The 3D stance is the flow kind's alone: a thermal record carrying

@@ -17,6 +17,9 @@
     "./cadjsx/fan-in-tube": {
       "default": "./src/cadjsx/fan-in-tube.tsx"
     },
+    "./cadjsx/slider-crank": {
+      "default": "./src/cadjsx/slider-crank.tsx"
+    },
     "./*": {
       "default": [
         "./src/*.ts",

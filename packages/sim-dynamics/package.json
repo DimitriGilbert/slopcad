@@ -1,0 +1,31 @@
+{
+  "name": "@slopcad/sim-dynamics",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@slopcad/sim-core": "workspace:*",
+    "mujoco": "3.1.16"
+  },
+  "devDependencies": {
+    "@slopcad/cad-core": "workspace:*",
+    "@slopcad/config": "workspace:*",
+    "@vitest/coverage-istanbul": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

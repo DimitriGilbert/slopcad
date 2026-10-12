@@ -24,6 +24,7 @@ import type {
 } from "../cad-workbench/sim-application-ledger";
 import type {
   SimEngineFieldChunk,
+  SimMechanismWire,
   SimResult,
   SimResultFieldBlock,
   SimResultRunRecord,
@@ -139,6 +140,14 @@ export interface FlowRunOptions {
    * `sim.compile` wire verbatim, the compile door's own `motor` seam.
    */
   readonly motor?: unknown;
+  /**
+   * Phase 67c (the dynamics runs ride the same controller): the
+   * document's mechanism wire — the resolved occurrences, the
+   * serialized joint records, the mass properties, and the grounded
+   * ids — across the `sim.compile` wire verbatim, the dynamics
+   * branch's own `mechanism` seam.
+   */
+  readonly mechanism?: SimMechanismWire;
   /** The run persists against this document version id. */
   readonly documentVersionId: string;
   /** The law-S7 store the completed run persists through. */
@@ -207,6 +216,9 @@ export async function runFlowScenario(
           ? {}
           : { bodyTessellations: options.bodyTessellations }),
         ...(options.motor === undefined ? {} : { motor: options.motor }),
+        ...(options.mechanism === undefined
+          ? {}
+          : { mechanism: options.mechanism }),
       });
     } catch (error) {
       throw wireFailure(error);

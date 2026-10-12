@@ -95,12 +95,17 @@ export {
 } from "./compile-geometry";
 export {
   type CompiledSimCondition,
+  type CompiledSimDynamics,
+  type CompiledSimDynamicsForceSample,
+  type CompiledSimDynamicsLoad,
+  type CompiledSimDynamicsTorqueSample,
   type CompiledSimMotor,
   type CompiledSimMotorLine,
   type CompiledSimMotorTable,
   type CompiledSimScenario,
   type SimBodyBoundsMm,
   type SimCompileInput,
+  type SimMechanismWire,
   type SimProjectedField,
   type SimProjectedOutcome,
   type SimProjectedQuantity,
@@ -111,6 +116,7 @@ export {
   type SolverSimOutcome,
   type SolverSimScalar,
   MM_PER_M,
+  compileSimMotor,
   compileSimScenario,
   projectSimResult,
 } from "./units";

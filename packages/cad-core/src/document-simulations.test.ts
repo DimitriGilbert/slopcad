@@ -14,6 +14,8 @@ import {
   addBody,
   addDocumentMotor,
   addDocumentSimulation,
+  addJoint,
+  addOccurrence,
   applyCommand,
   applyTransaction,
   type CadCommand,
@@ -21,12 +23,16 @@ import {
   createBodyId,
   createDocument,
   createDocumentId,
+  createJointId,
   createMotorId,
   createNativeCadDocument,
+  createOccurrenceId,
   createSimulationId,
   DOCUMENT_ERROR_CODES,
   type DocumentHistory,
   type DocumentMaterialRecord,
+  type SimScenarioDynamicsSpec,
+  type SimScenarioInput,
   type SimScenarioThermalSpec,
   encodeNativeCadDocument,
   MATERIAL_RECORD_ERROR_CODES,
@@ -888,12 +894,503 @@ describe("the thermal solve stance (Phase 65c)", () => {
           }),
         ),
       }),
-      "the thermal update",
+      "the update",
     );
     const scenario = updated.simulations[0];
     if (scenario === undefined) throw new Error("the update lost the scenario");
     if (scenario.thermal === undefined) return;
     expect(scenario.thermal.solveMode).toBe("transient");
     expect(scenario.thermal.durationS).toBe(60);
+  });
+});
+
+describe("the dynamics solve stance (Phase 67c)", () => {
+  /** The demo march's stance: 1 ms steps, 2 s, sampled every 40 ms. */
+  function dynamicsStance(
+    overrides?: Partial<SimScenarioDynamicsSpec>,
+  ): SimScenarioDynamicsSpec {
+    return {
+      timeStepS: 0.001,
+      durationS: 2,
+      sampleIntervalS: 0.04,
+      ...overrides,
+    };
+  }
+
+  /** A dynamics scenario over the base document. */
+  function dynamicsFields(stance?: SimScenarioDynamicsSpec) {
+    return {
+      name: "Slider-crank",
+      kind: "dynamics" as const,
+      domain: {
+        kind: "explicit" as const,
+        min: [-20, -40, -12] as const,
+        max: [150, 40, 12] as const,
+        resolutionMm: 2,
+      },
+      conditions: [],
+      fluid: "air",
+      materials: [],
+      ...(stance === undefined ? {} : { dynamics: stance }),
+    };
+  }
+
+  /**
+   * The malformed-wire decline harness: a stance of untrusted data
+   * through the add boundary — the seam the serialized-document parse
+   * defends, so the malformed declines are exercised exactly as they
+   * arrive off the wire.
+   */
+  const declinedAdd = (
+    document: CadDocument,
+    stance: unknown,
+    motorId?: MotorId,
+  ): ReturnType<typeof addDocumentSimulation> =>
+    addDocumentSimulation(document, {
+      name: "Slider-crank",
+      kind: "dynamics",
+      domain: {
+        kind: "explicit",
+        min: [-20, -40, -12],
+        max: [150, 40, 12],
+        resolutionMm: 2,
+      },
+      conditions: [],
+      fluid: "air",
+      materials: [],
+      dynamics: stance,
+      ...(motorId === undefined ? {} : { motorId }),
+    } as unknown as SimScenarioInput);
+
+  /**
+   * A document the stance's references can address: two joined
+   * occurrences (a crank and a rod on a z revolute) plus a motor
+   * record — the load couplings' and the motor joint's own home.
+   */
+  function mechanismDocument(): {
+    document: CadDocument;
+    motorId: MotorId;
+  } {
+    const crankBody = requireOk(
+      addBody(baseDocument(), { name: "Crank" }),
+      "the crank body",
+    );
+    const rodBody = requireOk(
+      addBody(crankBody.document, { name: "Rod" }),
+      "the rod body",
+    );
+    const withCrank = requireOk(
+      addOccurrence(rodBody.document, {
+        id: createOccurrenceId("occ_crank"),
+        name: "Crank",
+        source: { kind: "body", bodyId: crankBody.body.id },
+        placement: { kind: "offset", translation: [0, 0, 0] },
+      }),
+      "the crank occurrence",
+    );
+    const withRod = requireOk(
+      addOccurrence(withCrank.document, {
+        id: createOccurrenceId("occ_rod"),
+        name: "Rod",
+        source: { kind: "body", bodyId: rodBody.body.id },
+        placement: { kind: "offset", translation: [30, 0, 0] },
+      }),
+      "the rod occurrence",
+    );
+    const joined = requireOk(
+      addJoint(withRod.document, {
+        id: createJointId("jnt_crank"),
+        name: "Crank main bearing",
+        kind: "revolute",
+        baseOccurrenceId: createOccurrenceId("occ_crank"),
+        occurrenceId: createOccurrenceId("occ_rod"),
+        frame: { origin: [0, 0, 0], axis: [0, 0, 1] },
+      }),
+      "the crank joint",
+    );
+    const motored = requireOk(
+      addDocumentMotor(joined.document, {
+        id: createMotorId("mot_crank-drive"),
+        name: "Crank drive",
+        kind: "dc-brushed",
+        stallTorqueMNm: 80,
+        noLoadSpeedRpm: 1500,
+        nominalVoltageV: 12,
+      }),
+      "the motor add",
+    );
+    return { document: motored.document, motorId: motored.motor.id };
+  }
+
+  it("adds a dynamics scenario with its stance and round-trips it canonically", () => {
+    const { document, motorId } = mechanismDocument();
+    const added = requireOk(
+      addDocumentSimulation(document, {
+        ...dynamicsFields(
+          dynamicsStance({
+            motorJointId: createJointId("jnt_crank"),
+            loads: [
+              {
+                kind: "flow-force",
+                occurrenceId: createOccurrenceId("occ_rod"),
+                samples: [
+                  { tS: 0, forceN: [1, 0, 0], atWorldPointMm: [10, 0, 0] },
+                  { tS: 2, forceN: [2, 0, 0] },
+                ],
+              },
+              {
+                kind: "joint-torque",
+                name: "combustion estimate",
+                jointId: createJointId("jnt_crank"),
+                samples: [
+                  { tS: 0, effortNPerM: 0 },
+                  { tS: 2, effortNPerM: 0.01 },
+                ],
+              },
+            ],
+          }),
+        ),
+        motorId,
+      }),
+      "the dynamics add",
+    );
+    const scenario = added.scenario;
+    expect(scenario.dynamics).toBeDefined();
+    if (scenario.dynamics === undefined) return;
+    expect(scenario.dynamics.timeStepS).toBe(0.001);
+    expect(scenario.dynamics.durationS).toBe(2);
+    expect(scenario.dynamics.sampleIntervalS).toBe(0.04);
+    expect(scenario.dynamics.provider).toBeUndefined();
+    expect(scenario.dynamics.loads).toHaveLength(2);
+    const serialized = requireOk(
+      parseCadDocument(serializeCadDocument(added.document)),
+      "the serialized round-trip",
+    );
+    const restored = serialized.simulations[0];
+    if (restored === undefined) throw new Error("the scenario did not survive");
+    expect(restored.dynamics).toEqual(scenario.dynamics);
+  });
+
+  it("kind-locks the stance: dynamics requires it, every other kind refuses it", () => {
+    const missing = addDocumentSimulation(baseDocument(), dynamicsFields());
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.error.message).toContain("dynamics solve stance");
+    }
+    const stray = addDocumentSimulation(baseDocument(), {
+      ...scenarioFields(),
+      dynamics: dynamicsStance(),
+    });
+    expect(stray.ok).toBe(false);
+    if (!stray.ok) {
+      expect(stray.error.message).toContain("dynamics kind's alone");
+    }
+    const malformed = declinedAdd(baseDocument(), "not an object");
+    expect(malformed.ok).toBe(false);
+  });
+
+  it("declines budgets off the step lattice and cadences off the step grid", () => {
+    const offLattice = declinedAdd(
+      baseDocument(),
+      dynamicsStance({ timeStepS: 0.003, durationS: 1 }),
+    );
+    expect(offLattice.ok).toBe(false);
+    if (!offLattice.ok) {
+      expect(offLattice.error.message).toContain("integer multiple");
+    }
+    const offGrid = declinedAdd(
+      baseDocument(),
+      dynamicsStance({ sampleIntervalS: 0.0005 }),
+    );
+    expect(offGrid.ok).toBe(false);
+    if (!offGrid.ok) {
+      expect(offGrid.error.message).toContain("integer number of time steps");
+    }
+    const pastDuration = declinedAdd(
+      baseDocument(),
+      dynamicsStance({ sampleIntervalS: 4 }),
+    );
+    expect(pastDuration.ok).toBe(false);
+    const badStep = declinedAdd(
+      baseDocument(),
+      dynamicsStance({ timeStepS: 0 }),
+    );
+    expect(badStep.ok).toBe(false);
+    const badProvider = declinedAdd(baseDocument(), {
+      ...dynamicsStance(),
+      provider: "warp",
+    });
+    expect(badProvider.ok).toBe(false);
+  });
+
+  it("rides the motor joint exactly when the record selects a motor (the iff rule)", () => {
+    const { document, motorId } = mechanismDocument();
+    const withoutMotor = declinedAdd(
+      document,
+      dynamicsStance({ motorJointId: createJointId("jnt_crank") }),
+    );
+    expect(withoutMotor.ok).toBe(false);
+    if (!withoutMotor.ok) {
+      expect(withoutMotor.error.message).toContain("exactly when");
+    }
+    const withoutJoint = declinedAdd(document, dynamicsStance(), motorId);
+    expect(withoutJoint.ok).toBe(false);
+    if (!withoutJoint.ok) {
+      expect(withoutJoint.error.message).toContain("names no motor joint");
+    }
+    const malformedJoint = declinedAdd(
+      document,
+      { ...dynamicsStance(), motorJointId: "crank" },
+      motorId,
+    );
+    expect(malformedJoint.ok).toBe(false);
+    const paired = addDocumentSimulation(document, {
+      ...dynamicsFields(
+        dynamicsStance({ motorJointId: createJointId("jnt_crank") }),
+      ),
+      motorId,
+    });
+    expect(paired.ok).toBe(true);
+    if (paired.ok) {
+      expect(paired.value.scenario.motorId).toBe(motorId);
+      expect(paired.value.scenario.dynamics?.motorJointId).toBe("jnt_crank");
+    }
+  });
+
+  it("validates the load couplings' kinds, samples, and names", () => {
+    const declined = (entry: unknown, fragment: string): void => {
+      const refused = declinedAdd(baseDocument(), {
+        ...dynamicsStance(),
+        loads: [entry],
+      });
+      expect(refused.ok).toBe(false);
+      if (!refused.ok) {
+        expect(refused.error.message).toContain(fragment);
+      }
+    };
+    declined(
+      { kind: "wind-force", occurrenceId: "occ_piston", samples: [] },
+      '"flow-force" or "joint-torque"',
+    );
+    declined("not a record", "plain object");
+    declined(
+      {
+        kind: "flow-force",
+        occurrenceId: "piston",
+        samples: [
+          { tS: 0, forceN: [1, 0, 0] },
+          { tS: 1, forceN: [1, 0, 0] },
+        ],
+      },
+      "valid occurrence id",
+    );
+    declined(
+      {
+        kind: "flow-force",
+        occurrenceId: "occ_piston",
+        samples: [{ tS: 0, forceN: [1, 0, 0] }],
+      },
+      "at least two samples",
+    );
+    declined(
+      {
+        kind: "flow-force",
+        occurrenceId: "occ_piston",
+        samples: [
+          { tS: 1, forceN: [1, 0, 0] },
+          { tS: 0, forceN: [1, 0, 0] },
+        ],
+      },
+      "strictly increasing",
+    );
+    declined(
+      {
+        kind: "flow-force",
+        occurrenceId: "occ_piston",
+        samples: [
+          { tS: 0, forceN: [1, 0, 0] },
+          { tS: 3, forceN: [1, 0, 0] },
+        ],
+      },
+      "inside the stance's duration",
+    );
+    declined(
+      {
+        kind: "flow-force",
+        occurrenceId: "occ_piston",
+        samples: [
+          { tS: 0, forceN: [1, 0] },
+          { tS: 1, forceN: [1, 0, 0] },
+        ],
+      },
+      "force",
+    );
+    declined(
+      {
+        kind: "joint-torque",
+        name: "estimate",
+        jointId: "crank",
+        samples: [
+          { tS: 0, effortNPerM: 0 },
+          { tS: 1, effortNPerM: 0 },
+        ],
+      },
+      "valid joint id",
+    );
+    declined(
+      {
+        kind: "joint-torque",
+        name: "estimate",
+        jointId: "jnt_crank",
+        samples: [
+          { tS: 0, effortNPerM: 0 },
+          { tS: 1, effortNPerM: Number.NaN },
+        ],
+      },
+      "finite number",
+    );
+    declined(
+      {
+        kind: "joint-torque",
+        name: "   ",
+        jointId: "jnt_crank",
+        samples: [
+          { tS: 0, effortNPerM: 0 },
+          { tS: 1, effortNPerM: 0 },
+        ],
+      },
+      "1-64 characters",
+    );
+    // One name per estimate: two torques on the SAME joint still split
+    // by name, a repeated name is the ambiguity the boundary refuses.
+    const twice = declinedAdd(baseDocument(), {
+      ...dynamicsStance(),
+      loads: [
+        {
+          kind: "joint-torque",
+          name: "estimate",
+          jointId: "jnt_crank",
+          samples: [
+            { tS: 0, effortNPerM: 0 },
+            { tS: 1, effortNPerM: 0 },
+          ],
+        },
+        {
+          kind: "joint-torque",
+          name: "estimate",
+          jointId: "jnt_crank",
+          samples: [
+            { tS: 0, effortNPerM: 0 },
+            { tS: 1, effortNPerM: 0 },
+          ],
+        },
+      ],
+    });
+    expect(twice.ok).toBe(false);
+    if (!twice.ok) {
+      expect(twice.error.message).toContain("appears twice");
+    }
+  });
+
+  it("cross-checks the stance's joint and load references at the document boundary", () => {
+    const { document, motorId } = mechanismDocument();
+
+    const unknownJoint = addDocumentSimulation(document, {
+      ...dynamicsFields(
+        dynamicsStance({ motorJointId: createJointId("jnt_ghost") }),
+      ),
+      motorId,
+    });
+    expect(unknownJoint.ok).toBe(false);
+    if (!unknownJoint.ok) {
+      expect(unknownJoint.error.code).toBe(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+      );
+      expect(unknownJoint.error.message).toContain("does not exist");
+    }
+
+    const knownJoint = addDocumentSimulation(document, {
+      ...dynamicsFields(
+        dynamicsStance({ motorJointId: createJointId("jnt_crank") }),
+      ),
+      motorId,
+    });
+    expect(knownJoint.ok).toBe(true);
+
+    const unknownOccurrenceLoad = addDocumentSimulation(
+      document,
+      dynamicsFields(
+        dynamicsStance({
+          loads: [
+            {
+              kind: "flow-force",
+              occurrenceId: createOccurrenceId("occ_ghost"),
+              samples: [
+                { tS: 0, forceN: [1, 0, 0] },
+                { tS: 1, forceN: [1, 0, 0] },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(unknownOccurrenceLoad.ok).toBe(false);
+    if (!unknownOccurrenceLoad.ok) {
+      expect(unknownOccurrenceLoad.error.message).toContain(
+        "flow-force load to occurrence",
+      );
+    }
+
+    const unknownJointLoad = addDocumentSimulation(
+      document,
+      dynamicsFields(
+        dynamicsStance({
+          loads: [
+            {
+              kind: "joint-torque",
+              name: "estimate",
+              jointId: createJointId("jnt_ghost"),
+              samples: [
+                { tS: 0, effortNPerM: 0 },
+                { tS: 1, effortNPerM: 0 },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(unknownJointLoad.ok).toBe(false);
+    if (!unknownJointLoad.ok) {
+      expect(unknownJointLoad.error.message).toContain(
+        "torque estimate to joint",
+      );
+    }
+
+    const knownLoads = addDocumentSimulation(document, {
+      ...dynamicsFields(
+        dynamicsStance({
+          loads: [
+            {
+              kind: "flow-force",
+              occurrenceId: createOccurrenceId("occ_rod"),
+              samples: [
+                { tS: 0, forceN: [1, 0, 0] },
+                { tS: 1, forceN: [1, 0, 0] },
+              ],
+            },
+            {
+              kind: "joint-torque",
+              name: "estimate",
+              jointId: createJointId("jnt_crank"),
+              samples: [
+                { tS: 0, effortNPerM: 0 },
+                { tS: 1, effortNPerM: 0 },
+              ],
+            },
+          ],
+        }),
+      ),
+    });
+    expect(knownLoads.ok).toBe(true);
   });
 });

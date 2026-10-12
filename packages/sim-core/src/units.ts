@@ -471,7 +471,14 @@ export interface CompiledSimMotorTable {
 
 export type CompiledSimMotor = CompiledSimMotorLine | CompiledSimMotorTable;
 
-function parseMotor(
+/**
+ * Parses one serialized motor record into the compiled SI form — the
+ * one authored-datasheet → SI motor conversion (Phase 67a export): the
+ * scenario compile calls it for the scenario's selection, and the
+ * Phase 67 dynamics door calls it for the motor a joint record rides,
+ * so mN·m/rpm become N·m/rad·s⁻¹ at exactly one site in the stack.
+ */
+export function compileSimMotor(
   input: unknown,
   expectedId: string,
 ): SimParseResult<CompiledSimMotor, SimError> {
@@ -618,6 +625,84 @@ export interface SimCompileInput {
    * supply declines with `sim/geometry-unavailable`, never guesses.
    */
   readonly bodyBounds?: readonly SimBodyBoundsMm[];
+  /**
+   * The mechanism wire (Phase 67c): the document's resolved occurrences,
+   * serialized joint records, per-occurrence mass properties, and
+   * grounded occurrence ids — REQUIRED by a dynamics scenario's compile,
+   * ignored by every other kind. Document wire forms verbatim (mm,
+   * grams, serialized records): the 67 dynamics door re-validates and
+   * converts them (its own documented S4 stance), exactly as the
+   * thermal door re-validates material records.
+   */
+  readonly mechanism?: SimMechanismWire;
+}
+
+/**
+ * The mechanism a dynamics scenario solves (Phase 67c, document wire):
+ * every placed occurrence, the serialized joint records, one mass
+ * entry per occurrence, and the occurrences welded to ground.
+ */
+export interface SimMechanismWire {
+  readonly occurrences: readonly unknown[];
+  readonly joints: readonly unknown[];
+  readonly masses: readonly unknown[];
+  readonly grounded?: readonly string[];
+}
+
+/** One compiled flow-force load sample (SI; the point converted mm → m). */
+export interface CompiledSimDynamicsForceSample {
+  readonly tS: number;
+  readonly forceN: readonly [number, number, number];
+  readonly atWorldPointM?: readonly [number, number, number];
+}
+
+/** One compiled joint-torque sample (SI). */
+export interface CompiledSimDynamicsTorqueSample {
+  readonly tS: number;
+  readonly effortNPerM: number;
+}
+
+/**
+ * One compiled quasi-static load coupling (Phase 67c): a `flow-force`
+ * history rides an occurrence; a `joint-torque` estimate rides a joint
+ * drive DOF. Times are seconds, forces newtons, efforts N·m.
+ */
+export type CompiledSimDynamicsLoad =
+  | {
+      readonly kind: "flow-force";
+      readonly occurrenceId: string;
+      readonly samples: readonly CompiledSimDynamicsForceSample[];
+    }
+  | {
+      readonly kind: "joint-torque";
+      readonly name: string;
+      readonly jointId: string;
+      readonly samples: readonly CompiledSimDynamicsTorqueSample[];
+    };
+
+/**
+ * The dynamics compile products (Phase 67c): the re-validated stance
+ * (provider, step budget, cadence, the motor's joint), the mechanism
+ * wire (document space — the 67 dynamics door converts it), the load
+ * couplings (SI), and the serialized motor record the door re-compiles
+ * through its own one conversion site. Attached for `dynamics`
+ * scenarios; never part of any other kind's compile.
+ */
+export interface CompiledSimDynamics {
+  readonly provider: "reference" | "mujoco";
+  readonly timeStepS: number;
+  readonly durationS: number;
+  readonly sampleIntervalS: number;
+  readonly motorJointId?: string;
+  readonly mechanism: SimMechanismWire;
+  readonly loads: readonly CompiledSimDynamicsLoad[];
+  /**
+   * The selected motor's SERIALIZED record (when the scenario selects
+   * one): the dynamics door compiles it through `compileSimMotor` — the
+   * one authored-datasheet → SI site — so the record crosses this
+   * product verbatim, never double-converted.
+   */
+  readonly motorWire?: unknown;
 }
 
 /** The scenario in solver space: pure SI, plus the S9 report and provenance. */
@@ -690,6 +775,14 @@ export interface CompiledSimScenario {
    * thermal engines, never part of the wire form.
    */
   readonly thermal?: CompiledSimThermal;
+  /**
+   * The dynamics compile products (Phase 67c): the re-validated stance
+   * and the mechanism wire (document space — the 67 dynamics door
+   * converts it). Attached for `dynamics` scenarios carrying a
+   * mechanism wire; consumed worker-side by the dynamics engine, never
+   * part of the wire form.
+   */
+  readonly dynamics?: CompiledSimDynamics;
 }
 
 /**
@@ -846,6 +939,15 @@ export function compileSimScenario(
     if (!parsed.ok) return parsed;
     conditions.push(parsed.value);
   }
+  if (kind === "dynamics" && conditions.length > 0) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.scenarioInvalid,
+        'A "dynamics" scenario carries no domain-face boundary conditions — its physics is the document\'s joints, masses, and motors (the flow/thermal vocabulary has nothing to address here).',
+        conditions,
+      ),
+    );
+  }
 
   // --- Gravity --------------------------------------------------------------
   let gravityMPerS2: readonly [number, number, number] = [0, -9.80665, 0];
@@ -902,7 +1004,7 @@ export function compileSimScenario(
         ),
       );
     }
-    const parsedMotor = parseMotor(input.motor, scenario.motorId);
+    const parsedMotor = compileSimMotor(input.motor, scenario.motorId);
     if (!parsedMotor.ok) return parsedMotor;
     motor = parsedMotor.value;
   }
@@ -975,36 +1077,45 @@ export function compileSimScenario(
       deltaTemperatureK = Math.max(deltaTemperatureK ?? 0, magnitude);
     }
   }
-  const regime = simRegimeReport({
-    ...(speedMPerS === undefined
-      ? {}
-      : {
-          reynolds: simReynolds(
-            fluidState.value.densityKgPerM3,
-            speedMPerS,
-            characteristicLengthM,
+  // Law S9 for mechanism dynamics: NONE of the flow/thermal
+  // dimensionless gates (Re, Ma, Pr, Ra) applies — the run's validity
+  // gates are the integration budget and the loop-closure tolerance,
+  // which the result states on its own. The compile computes NOTHING
+  // here rather than carrying an inapplicable number forward: an empty
+  // regime report is the honest dynamics claim.
+  const regime =
+    kind === "dynamics"
+      ? simRegimeReport({})
+      : simRegimeReport({
+          ...(speedMPerS === undefined
+            ? {}
+            : {
+                reynolds: simReynolds(
+                  fluidState.value.densityKgPerM3,
+                  speedMPerS,
+                  characteristicLengthM,
+                  fluidState.value.dynamicViscosityPaS,
+                ),
+                mach: simMach(speedMPerS, fluidState.value.speedOfSoundMPerS),
+              }),
+          prandtl: simPrandtl(
             fluidState.value.dynamicViscosityPaS,
+            fluidState.value.specificHeatJPerKgK,
+            fluidState.value.thermalConductivityWPerMK,
           ),
-          mach: simMach(speedMPerS, fluidState.value.speedOfSoundMPerS),
-        }),
-    prandtl: simPrandtl(
-      fluidState.value.dynamicViscosityPaS,
-      fluidState.value.specificHeatJPerKgK,
-      fluidState.value.thermalConductivityWPerMK,
-    ),
-    ...(kind === "thermal" && deltaTemperatureK !== undefined
-      ? {
-          rayleigh: simRayleigh(
-            gravityMagnitude,
-            fluidState.value.thermalExpansionPerK,
-            deltaTemperatureK,
-            characteristicLengthM,
-            fluidState.value.kinematicViscosityM2PerS,
-            fluidState.value.thermalDiffusivityM2PerS,
-          ),
-        }
-      : {}),
-  });
+          ...(kind === "thermal" && deltaTemperatureK !== undefined
+            ? {
+                rayleigh: simRayleigh(
+                  gravityMagnitude,
+                  fluidState.value.thermalExpansionPerK,
+                  deltaTemperatureK,
+                  characteristicLengthM,
+                  fluidState.value.kinematicViscosityM2PerS,
+                  fluidState.value.thermalDiffusivityM2PerS,
+                ),
+              }
+            : {}),
+        });
 
   // --- Provenance and backend -------------------------------------------------
   const snapshotHash = simScenarioSnapshotHash(scenario);
