@@ -15,7 +15,7 @@
 
 import type { ComputationContext } from "@slopcad/cad-kernel";
 import type { HelixSweepInput } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 
 /**
  * The helix request the workbench dispatches (see
@@ -37,7 +37,7 @@ export interface HelixSceneRequest {
 export async function computeHelixScene(
   context: ComputationContext,
   request: HelixSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const swept = await context.request("solid.helixSweep", {
     loop: request.loop,
     spine: request.spine,
@@ -52,10 +52,13 @@ export async function computeHelixScene(
     solid: swept.solid,
   });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
+    solid: swept.solid,
   };
 }

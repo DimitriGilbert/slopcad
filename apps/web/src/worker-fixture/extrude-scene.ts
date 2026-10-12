@@ -17,7 +17,7 @@ import type {
   ComputationContext,
   ProfileExtrudeInput,
 } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 
 /** The extrude request the workbench dispatches (see cad-workbench/extrude). */
 export interface ExtrudeSceneRequest {
@@ -39,7 +39,7 @@ const mm = (value: number) => length(value, "mm");
 export async function computeExtrudeScene(
   context: ComputationContext,
   request: ExtrudeSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await context.request("solid.extrude", {
     loop: request.loop,
     height: mm(Math.abs(request.distanceMm)),
@@ -64,11 +64,14 @@ export async function computeExtrudeScene(
     solid: extruded.solid,
   });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
+    solid: extruded.solid,
   };
 }
 

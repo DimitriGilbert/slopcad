@@ -30,7 +30,15 @@ import type {
   MirrorSceneRequest,
   PatternFeatureSceneRequest,
   PatternPathSceneRequest,
+  PatternTransformSceneRequest,
 } from "../cad-workbench/pattern";
+
+import {
+  type ComposedSceneResult,
+  type ComputedSolids,
+  NO_COMPUTED_SOLIDS,
+  operandSolid,
+} from "./body-ops-scenes";
 
 const mm = (value: number) => length(value, "mm");
 
@@ -87,7 +95,7 @@ async function translatedCopy(
 export async function computePatternFeatureScene(
   context: ComputationContext,
   request: PatternFeatureSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await extrudeBase(context, request.base);
   const plan = planArrayPatternInstances(request.legs);
   const skips = new Set(request.skips);
@@ -99,7 +107,7 @@ export async function computePatternFeatureScene(
     copies.push(await translatedCopy(context, extruded.solid, offset));
   }
   const merged = await context.request("solid.union", { operands: copies });
-  return measure(context, merged.solid);
+  return { measurement: await measure(context, merged.solid), solid: merged.solid };
 }
 
 /**
@@ -112,7 +120,7 @@ export async function computePatternFeatureScene(
 export async function computePatternPathScene(
   context: ComputationContext,
   request: PatternPathSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await extrudeBase(context, request.base);
   const totalLength = sweepPathTotalLength(request.path);
   const lastStation = (request.count - 1) * request.spacingMm;
@@ -154,7 +162,7 @@ export async function computePatternPathScene(
     copies.push(placed.solid);
   }
   const merged = await context.request("solid.union", { operands: copies });
-  return measure(context, merged.solid);
+  return { measurement: await measure(context, merged.solid), solid: merged.solid };
 }
 
 /**
@@ -166,7 +174,7 @@ export async function computePatternPathScene(
 export async function computeMirrorScene(
   context: ComputationContext,
   request: MirrorSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await extrudeBase(context, request.base);
   const plan = planDatumMirror({
     origin: request.plane.origin,
@@ -215,10 +223,74 @@ export async function computeMirrorScene(
     working = fromOrigin.solid;
   }
   if (request.merge === 1) {
-    return measure(context, working);
+    return { measurement: await measure(context, working), solid: working };
   }
   const merged = await context.request("solid.union", {
     operands: [extruded.solid, working],
   });
-  return measure(context, merged.solid);
+  return { measurement: await measure(context, merged.solid), solid: merged.solid };
+}
+
+/**
+ * The transform patterns (patternLinear / patternCircular): the target's
+ * computed solid (any solid — the operand seam, never the last-extrude
+ * assumption) copied by one transform per instance and unioned, the
+ * bridge's own composition — instance 0 is the target itself, copies
+ * 1..count−1 march the direction by i·spacing (linear) or rotate by
+ * i·(totalAngle ÷ count) about the axis (circular — the datum-axis form
+ * recentering on the axis origin first, the contract's rotation-then-
+ * translation order carrying the way back). One `solid.union` merges
+ * every instance; a structured kernel rejection surfaces as the scene's
+ * error.
+ */
+export async function computePatternTransformScene(
+  context: ComputationContext,
+  request: PatternTransformSceneRequest,
+  computed: ComputedSolids = NO_COMPUTED_SOLIDS,
+): Promise<ComposedSceneResult> {
+  const target = await operandSolid(
+    context,
+    request.target,
+    computed,
+    "target",
+  );
+  const copies: WorkerSolidId[] = [target];
+  if (request.pattern.kind === "linear") {
+    const { count, spacingMm, direction } = request.pattern;
+    for (let i = 1; i < count; i += 1) {
+      copies.push(
+        await translatedCopy(context, target, [
+          direction[0] * spacingMm * i,
+          direction[1] * spacingMm * i,
+          direction[2] * spacingMm * i,
+        ]),
+      );
+    }
+  } else {
+    const { count, totalAngleRad, axis, axisOrigin } = request.pattern;
+    const step = totalAngleRad / count;
+    const offAxis =
+      axisOrigin[0] !== 0 || axisOrigin[1] !== 0 || axisOrigin[2] !== 0;
+    for (let i = 1; i < count; i += 1) {
+      const source = offAxis
+        ? await translatedCopy(context, target, [
+            -axisOrigin[0],
+            -axisOrigin[1],
+            -axisOrigin[2],
+          ])
+        : target;
+      const placed = await context.request("solid.transform", {
+        solid: source,
+        translation: {
+          x: mm(axisOrigin[0]),
+          y: mm(axisOrigin[1]),
+          z: mm(axisOrigin[2]),
+        },
+        rotation: { axis, angle: angle(i * step, "rad") },
+      });
+      copies.push(placed.solid);
+    }
+  }
+  const merged = await context.request("solid.union", { operands: copies });
+  return { measurement: await measure(context, merged.solid), solid: merged.solid };
 }

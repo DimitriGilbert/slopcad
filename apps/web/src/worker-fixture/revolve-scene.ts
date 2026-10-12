@@ -17,7 +17,7 @@ import type {
   ComputationContext,
   ProfileRevolveInput,
 } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 
 /**
  * The revolve request the workbench dispatches (see
@@ -41,7 +41,7 @@ export interface RevolveSceneRequest {
 export async function computeRevolveScene(
   context: ComputationContext,
   request: RevolveSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const revolved = await context.request("solid.revolve", {
     loop: request.loop,
     axis: request.axis,
@@ -61,10 +61,13 @@ export async function computeRevolveScene(
     solid: revolved.solid,
   });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
+    solid: revolved.solid,
   };
 }

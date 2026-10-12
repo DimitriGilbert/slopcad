@@ -21,6 +21,7 @@ import { angle, length } from "@slopcad/cad-core";
 import type { ComputationContext, WorkerSolidId } from "@slopcad/cad-kernel";
 import { planSplitCut } from "@slopcad/cad-kernel";
 import type { PlateMeasurement } from "./plate-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
 import type { RibSceneRequest } from "../cad-workbench/rib";
 import type {
@@ -75,7 +76,7 @@ async function measure(
 export async function computeRibScene(
   context: ComputationContext,
   request: RibSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await extrudeBase(context, request.base);
   const half = request.thicknessMm / 2;
   const ribUp = await context.request("solid.extrude", {
@@ -102,41 +103,41 @@ export async function computeRibScene(
       "rib/no-op: the rib cross-section lies entirely inside the target — the union's volume did not grow. Draw the rib's profile reaching outside the part it strengthens.",
     );
   }
-  return measure(context, merged.solid);
+  return { measurement: await measure(context, merged.solid), solid: merged.solid };
 }
 
 /** The scale: one transform carrying the uniform factor. */
 export async function computeScaleScene(
   context: ComputationContext,
   request: ScaleSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await extrudeBase(context, request.base);
   const scaled = await context.request("solid.transform", {
     solid: extruded.solid,
     translation: { x: mm(0), y: mm(0), z: mm(0) },
     scale: request.factor,
   });
-  return measure(context, scaled.solid);
+  return { measurement: await measure(context, scaled.solid), solid: scaled.solid };
 }
 
 /** The thicken: one closed-hollow call. */
 export async function computeThickenScene(
   context: ComputationContext,
   request: ThickenSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await extrudeBase(context, request.base);
   const thickened = await context.request("solid.thicken", {
     target: extruded.solid,
     thickness: mm(request.thicknessMm),
   });
-  return measure(context, thickened.solid);
+  return { measurement: await measure(context, thickened.solid), solid: thickened.solid };
 }
 
 /** The split: the bridge's covering-box cut, with the both-ways guard. */
 export async function computeSplitScene(
   context: ComputationContext,
   request: SplitSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const extruded = await extrudeBase(context, request.base);
   const measured = await context.request("solid.bounds", {
     solid: extruded.solid,
@@ -181,5 +182,5 @@ export async function computeSplitScene(
       "split/removed-everything: the kept side of the datum plane holds no target material — flip the keep side or move the datum plane through the solid.",
     );
   }
-  return measure(context, cut.solid);
+  return { measurement: await measure(context, cut.solid), solid: cut.solid };
 }

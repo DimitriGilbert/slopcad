@@ -202,9 +202,12 @@ import {
  * Capabilities of the Manifold kernel, honestly declared:
  *
  * - Booleans are Manifold's core competence (`booleans`).
- * - Only translation is exposed because the Phase 8 contract carries only
- *   translation; Manifold can rotate/scale, but the flags stay `false`
- *   until the contract extends to accept those inputs.
+ * - Translation AND rotation are exposed (`transformTranslation`,
+ *   `transformRotation`): the contract's `TransformInput.rotation` is
+ *   composed with the optional uniform scale into one column-major
+ *   axis-angle affine (Rodrigues — the same `axisAngleMatrix` the
+ *   placement code rides) fed to the engine's `transform`, the placement
+ *   precedent applied to the rigid-transform op.
  * - Volumes are computed by the engine from the exact boundary mesh
  *   representation (divergence theorem), exact up to floating point, for
  *   primitives and boolean results alike — unlike the fake kernel's voxel
@@ -267,7 +270,7 @@ import {
 export const MANIFOLD_KERNEL_CAPABILITIES: KernelCapabilities = Object.freeze({
   booleans: true,
   transformTranslation: true,
-  transformRotation: false,
+  transformRotation: true,
   transformScale: true,
   exactPrimitiveVolumes: true,
   exactBooleanVolumes: true,
@@ -1396,6 +1399,70 @@ export function manifoldKernelFromRuntime(
         const x = valueIn(translation.x, "mm");
         const y = valueIn(translation.y, "mm");
         const z = valueIn(translation.z, "mm");
+        // The optional axis-angle rotation (the contract's TransformInput
+        // carries it since the transform contract's extension — the
+        // adapter's flag follows the implementation below): validated the
+        // placement-rotation way (finite angle, non-zero finite axis),
+        // composed with the optional uniform scale into ONE column-major
+        // affine, p ↦ s·R·p + t — the uniform scale commutes with the
+        // rotation, so the linear block is s·R outright.
+        if (translation.rotation !== undefined) {
+          const rotation = translation.rotation;
+          const axis = rotation.axis;
+          const ax = axis[0];
+          const ay = axis[1];
+          const az = axis[2];
+          if (
+            !Number.isFinite(rotation.angle.value) ||
+            !Number.isFinite(ax) ||
+            !Number.isFinite(ay) ||
+            !Number.isFinite(az) ||
+            Math.hypot(ax, ay, az) === 0
+          ) {
+            return fail(
+              kernelError(
+                KERNEL_ERROR_CODES.invalidRotation,
+                `transform rejected a rotation about [${String(ax)}, ${String(ay)}, ${String(az)}] by ${String(rotation.angle.value)} ${rotation.angle.unit}: the axis must be a non-zero finite vector and the angle a finite magnitude.`,
+              ),
+            );
+          }
+          const angleRad = valueIn(rotation.angle, "rad");
+          let rs = 1;
+          if (translation.scale !== undefined) {
+            if (
+              !(translation.scale > 0) ||
+              !Number.isFinite(translation.scale)
+            ) {
+              return fail(
+                kernelError(
+                  KERNEL_ERROR_CODES.invalidLength,
+                  `transform rejected the scale factor ${String(translation.scale)}: it must be a finite, strictly positive number.`,
+                ),
+              );
+            }
+            rs = translation.scale;
+          }
+          const r = axisAngleMatrix(axis, angleRad);
+          const mat4: Mat4 = [
+            rs * (r[0]?.[0] ?? 0),
+            rs * (r[1]?.[0] ?? 0),
+            rs * (r[2]?.[0] ?? 0),
+            0,
+            rs * (r[0]?.[1] ?? 0),
+            rs * (r[1]?.[1] ?? 0),
+            rs * (r[2]?.[1] ?? 0),
+            0,
+            rs * (r[0]?.[2] ?? 0),
+            rs * (r[1]?.[2] ?? 0),
+            rs * (r[2]?.[2] ?? 0),
+            0,
+            x,
+            y,
+            z,
+            1,
+          ];
+          return ok(wrapSolid(manifold.value.transform(mat4)));
+        }
         // The Phase 41 uniform scale: the engine's affine transform with
         // the positive scale on the diagonal (the same mat4 surface the
         // mirror rides), applied about the world origin BEFORE the

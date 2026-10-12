@@ -937,3 +937,131 @@ describe("the duplicate-to-boolean admissions (Phase 32b)", () => {
     });
   });
 });
+
+describe("the computed-operand admissions (the cup fix)", () => {
+  it("a boolean over revolves admits — each revolve rides consumed-only", () => {
+    // THE regression pin for the cup: before, `sceneOperandOfBody` declined
+    // every non-allowlisted producer, so union/subtract over revolved solids
+    // silently rendered the fallback blob instead of the fused result.
+    const document = withStages(
+      bootPlateDocument(),
+      { kind: "revolve" },
+      { kind: "revolve" },
+      { kind: "boolean", operation: "subtract", targetIndex: 1, toolIndex: 2 },
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "revolve", consumedOnly: true },
+      { bodyId: "body_stage2", kind: "revolve", consumedOnly: true },
+      { bodyId: "body_stage3", kind: "boolean" },
+    ]);
+  });
+
+  it("a patternLinear over an extrude admits — the plain target stays absorbed", () => {
+    let document = withStages(bootPlateDocument(), { kind: "extrude" });
+    for (const [id, name, value] of [
+      [createParameterId("param_pat_count"), "patCount", dimensionless(3)],
+      [createParameterId("param_pat_spacing"), "patSpacing", length(15)],
+      [createParameterId("param_pat_dir"), "patDir", angle(0)],
+    ] as const) {
+      document = requireOk(
+        addDocumentParameter(document, { id, name, value }),
+      ).document;
+    }
+    document = requireOk(
+      addBody(document, { id: createBodyId("body_pat1"), name: "pattern" }),
+    ).document;
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_pat1"),
+        kind: "patternLinear",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_stage1") },
+          { kind: "parameter", id: createParameterId("param_pat_count") },
+          { kind: "parameter", id: createParameterId("param_pat_spacing") },
+          { kind: "parameter", id: createParameterId("param_pat_dir") },
+        ],
+        outputs: [createBodyId("body_pat1")],
+      }),
+    ).document;
+    // The extrude target re-derives inside the request (kind "extrude"),
+    // so it stays absorbed — only the pattern's own tip renders.
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_pat1", kind: "patternTransform" },
+    ]);
+  });
+
+  it("a patternCircular over a revolve admits — the computed target rides consumed-only", () => {
+    let document = withStages(bootPlateDocument(), { kind: "revolve" });
+    for (const [id, name, value] of [
+      [createParameterId("param_pc_count"), "pcCount", dimensionless(4)],
+      [createParameterId("param_pc_angle"), "pcAngle", angle(Math.PI * 2)],
+      [createParameterId("param_pc_axis"), "pcAxis", dimensionless(3)],
+    ] as const) {
+      document = requireOk(
+        addDocumentParameter(document, { id, name, value }),
+      ).document;
+    }
+    document = requireOk(
+      addBody(document, { id: createBodyId("body_pc1"), name: "pattern" }),
+    ).document;
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_pc1"),
+        kind: "patternCircular",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_stage1") },
+          { kind: "parameter", id: createParameterId("param_pc_count") },
+          { kind: "parameter", id: createParameterId("param_pc_angle") },
+          { kind: "parameter", id: createParameterId("param_pc_axis") },
+        ],
+        outputs: [createBodyId("body_pc1")],
+      }),
+    ).document;
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "revolve", consumedOnly: true },
+      { bodyId: "body_pc1", kind: "patternTransform" },
+    ]);
+  });
+
+  it("emits a consumer after its consumed operands, whatever the body insertion order", () => {
+    // Regression pin for the emission pass: a consumer's `body` record
+    // inserted before the bodies its feature consumes (the order a
+    // command batch produces) pushed the consumer's scene entry ahead of
+    // its operands — the compute pass then resolved no computed solid and
+    // the consumer reported "operand-unavailable" instead of rendering.
+    let document = requireOk(
+      addBody(bootPlateDocument(), {
+        id: createBodyId("body_cup"),
+        name: "cup",
+      }),
+    ).document;
+    document = withStages(
+      document,
+      { kind: "revolve" },
+      { kind: "revolve" },
+      { kind: "boolean", operation: "union", targetIndex: 1, toolIndex: 2 },
+    );
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_cup"),
+        kind: "subtract",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_stage3") },
+          { kind: "feature", id: createFeatureId("feat_stage2") },
+        ],
+        outputs: [createBodyId("body_cup")],
+      }),
+    ).document;
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "revolve", consumedOnly: true },
+      { bodyId: "body_stage2", kind: "revolve", consumedOnly: true },
+      { bodyId: "body_stage3", kind: "boolean", consumedOnly: true },
+      { bodyId: "body_cup", kind: "boolean" },
+    ]);
+  });
+});
+

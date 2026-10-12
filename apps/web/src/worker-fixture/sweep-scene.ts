@@ -17,7 +17,7 @@ import type {
   ComputationContext,
   ProfileSweepInput,
 } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 
 /**
  * The sweep request the workbench dispatches (see
@@ -40,7 +40,7 @@ export interface SweepSceneRequest {
 export async function computeSweepScene(
   context: ComputationContext,
   request: SweepSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const swept = await context.request("solid.sweep", {
     loop: request.loop,
     path: request.path,
@@ -55,10 +55,13 @@ export async function computeSweepScene(
     solid: swept.solid,
   });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
+    solid: swept.solid,
   };
 }
