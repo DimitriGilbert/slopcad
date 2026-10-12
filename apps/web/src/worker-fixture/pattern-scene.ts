@@ -107,7 +107,10 @@ export async function computePatternFeatureScene(
     copies.push(await translatedCopy(context, extruded.solid, offset));
   }
   const merged = await context.request("solid.union", { operands: copies });
-  return { measurement: await measure(context, merged.solid), solid: merged.solid };
+  return {
+    measurement: await measure(context, merged.solid),
+    solid: merged.solid,
+  };
 }
 
 /**
@@ -162,7 +165,10 @@ export async function computePatternPathScene(
     copies.push(placed.solid);
   }
   const merged = await context.request("solid.union", { operands: copies });
-  return { measurement: await measure(context, merged.solid), solid: merged.solid };
+  return {
+    measurement: await measure(context, merged.solid),
+    solid: merged.solid,
+  };
 }
 
 /**
@@ -228,7 +234,10 @@ export async function computeMirrorScene(
   const merged = await context.request("solid.union", {
     operands: [extruded.solid, working],
   });
-  return { measurement: await measure(context, merged.solid), solid: merged.solid };
+  return {
+    measurement: await measure(context, merged.solid),
+    solid: merged.solid,
+  };
 }
 
 /**
@@ -292,5 +301,8 @@ export async function computePatternTransformScene(
     }
   }
   const merged = await context.request("solid.union", { operands: copies });
-  return { measurement: await measure(context, merged.solid), solid: merged.solid };
+  return {
+    measurement: await measure(context, merged.solid),
+    solid: merged.solid,
+  };
 }

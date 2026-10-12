@@ -580,9 +580,7 @@ export function documentSceneBodies(
   // pattern may repeat ANY body, so the request admits through the
   // operand queue like the booleans: it runs only once the target's own
   // scene entry exists (producing-feature order carries the ordering).
-  for (const request of documentPatternTransformSceneRequests(
-    activeDocument,
-  )) {
+  for (const request of documentPatternTransformSceneRequests(activeDocument)) {
     admissions.push({
       bodyId: request.bodyId,
       scene: { kind: "patternTransform", request },
@@ -682,9 +680,7 @@ export function documentSceneBodies(
     if (!requests.has(candidate.bodyId)) continue;
     dependencies.set(
       candidate.bodyId,
-      candidate.computedOperands.filter((operandId) =>
-        requests.has(operandId),
-      ),
+      candidate.computedOperands.filter((operandId) => requests.has(operandId)),
     );
   }
   const bodyOrder = document.bodies.map((body) => body.id);

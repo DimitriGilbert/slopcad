@@ -24,26 +24,23 @@ interface HandleSpec {
  * embedded into the wall so the union welds them on.
  */
 export function MultiHandleCup(): React.JSX.Element {
-  const handles: HandleSpec[] = Array.from(
-    { length: HANDLE_COUNT },
-    (_, i) => {
-      const angle = (i * TAU) / HANDLE_COUNT;
-      const c = Math.cos(angle);
-      const s = Math.sin(angle);
-      return {
-        angle,
-        sketchId: `skd_handle-${i + 1}`,
-        featureId: `feat_handle-${i + 1}`,
-        origin: {
-          x: HANDLE_RADIAL * c,
-          y: HANDLE_RADIAL * s,
-          z: HANDLE_Z,
-        },
-        normal: { x: c, y: s, z: 0 },
-        xAxis: { x: -s, y: c, z: 0 },
-      };
-    },
-  );
+  const handles: HandleSpec[] = Array.from({ length: HANDLE_COUNT }, (_, i) => {
+    const angle = (i * TAU) / HANDLE_COUNT;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return {
+      angle,
+      sketchId: `skd_handle-${i + 1}`,
+      featureId: `feat_handle-${i + 1}`,
+      origin: {
+        x: HANDLE_RADIAL * c,
+        y: HANDLE_RADIAL * s,
+        z: HANDLE_Z,
+      },
+      normal: { x: c, y: s, z: 0 },
+      xAxis: { x: -s, y: c, z: 0 },
+    };
+  });
 
   return (
     <>

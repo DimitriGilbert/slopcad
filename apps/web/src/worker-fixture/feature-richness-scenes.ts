@@ -103,7 +103,10 @@ export async function computeRibScene(
       "rib/no-op: the rib cross-section lies entirely inside the target — the union's volume did not grow. Draw the rib's profile reaching outside the part it strengthens.",
     );
   }
-  return { measurement: await measure(context, merged.solid), solid: merged.solid };
+  return {
+    measurement: await measure(context, merged.solid),
+    solid: merged.solid,
+  };
 }
 
 /** The scale: one transform carrying the uniform factor. */
@@ -117,7 +120,10 @@ export async function computeScaleScene(
     translation: { x: mm(0), y: mm(0), z: mm(0) },
     scale: request.factor,
   });
-  return { measurement: await measure(context, scaled.solid), solid: scaled.solid };
+  return {
+    measurement: await measure(context, scaled.solid),
+    solid: scaled.solid,
+  };
 }
 
 /** The thicken: one closed-hollow call. */
@@ -130,7 +136,10 @@ export async function computeThickenScene(
     target: extruded.solid,
     thickness: mm(request.thicknessMm),
   });
-  return { measurement: await measure(context, thickened.solid), solid: thickened.solid };
+  return {
+    measurement: await measure(context, thickened.solid),
+    solid: thickened.solid,
+  };
 }
 
 /** The split: the bridge's covering-box cut, with the both-ways guard. */

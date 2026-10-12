@@ -186,10 +186,7 @@ async function computeOneBodyScene(
       return { measurement: composed.measurement, solid: composed.solid };
     }
     case "patternFeature": {
-      const composed = await computePatternFeatureScene(
-        context,
-        scene.request,
-      );
+      const composed = await computePatternFeatureScene(context, scene.request);
       return { measurement: composed.measurement, solid: composed.solid };
     }
     case "patternPath": {
