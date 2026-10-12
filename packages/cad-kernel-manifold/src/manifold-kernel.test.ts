@@ -12,7 +12,7 @@
 
 import { evaluateWire } from "@slopcad/cad-kernel";
 import { beforeAll, describe, expect, it } from "vitest";
-import { type LengthValue, length } from "@slopcad/cad-core";
+import { angle, type LengthValue, length } from "@slopcad/cad-core";
 import {
   assertAreaClose,
   assertBoundsEqual,
@@ -97,7 +97,7 @@ describe("manifold kernel identity and capabilities", () => {
     expect(MANIFOLD_KERNEL_CAPABILITIES).toEqual({
       booleans: true,
       transformTranslation: true,
-      transformRotation: false,
+      transformRotation: true,
       transformScale: true,
       exactPrimitiveVolumes: true,
       exactBooleanVolumes: true,
@@ -700,6 +700,70 @@ describe("manifold kernel mirror (Phase 26.9)", () => {
       mine.mirror(foreign, { axis: "x", offset: length(0) }),
       KERNEL_ERROR_CODES.solidNotOwned,
       "foreign mirror target",
+    );
+  });
+});
+
+describe("manifold kernel transform rotation", () => {
+  it("rotates about a world axis exactly: bounds and volume carry over", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 30, 20, 10);
+    const rotated = unwrapKernelResult(
+      kernel.transform(solid, {
+        x: length(0),
+        y: length(0),
+        z: length(0),
+        rotation: { axis: [0, 0, 1], angle: angle(Math.PI / 2) },
+      }),
+      "rotate 90deg about z",
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(rotated), "rotated volume"),
+      30 * 20 * 10,
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(rotated), "rotated bounds"),
+      { min: [-20, 0, 0], max: [0, 30, 10] },
+    );
+  });
+
+  it("composes rotation, scale, and translation in the contract's order", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 10, 10, 10);
+    const moved = unwrapKernelResult(
+      kernel.transform(solid, {
+        x: length(5),
+        y: length(0),
+        z: length(0),
+        rotation: { axis: [0, 0, 1], angle: angle(Math.PI / 2) },
+        scale: 2,
+      }),
+      "s·R·p + t",
+    );
+    assertVolumeClose(
+      unwrapKernelResult(kernel.volume(moved), "scaled volume"),
+      8 * 10 ** 3,
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertBoundsEqual(
+      unwrapKernelResult(kernel.bounds(moved), "composed bounds"),
+      { min: [-15, 0, 0], max: [5, 20, 20] },
+    );
+  });
+
+  it("rejects a degenerate rotation axis with kernel/invalid-length", () => {
+    const kernel = makeKernel();
+    const solid = box(kernel, 10, 10, 10);
+    expectKernelFailure(
+      kernel.transform(solid, {
+        x: length(0),
+        y: length(0),
+        z: length(0),
+        rotation: { axis: [0, 0, 0], angle: angle(1) },
+      }),
+      KERNEL_ERROR_CODES.invalidRotation,
+      "zero rotation axis",
     );
   });
 });

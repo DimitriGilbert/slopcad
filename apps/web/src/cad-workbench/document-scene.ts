@@ -102,9 +102,11 @@ import {
   documentMirrorSceneRequest,
   documentPatternFeatureSceneRequest,
   documentPatternPathSceneRequest,
+  documentPatternTransformSceneRequests,
   type MirrorSceneRequest,
   type PatternFeatureSceneRequest,
   type PatternPathSceneRequest,
+  type PatternTransformSceneRequest,
 } from "./pattern";
 import { documentRibSceneRequest, type RibSceneRequest } from "./rib";
 import {
@@ -159,6 +161,10 @@ export type DocumentBodyScene =
   | {
       readonly kind: "patternPath";
       readonly request: PatternPathSceneRequest;
+    }
+  | {
+      readonly kind: "patternTransform";
+      readonly request: PatternTransformSceneRequest;
     }
   | { readonly kind: "mirror"; readonly request: MirrorSceneRequest }
   | { readonly kind: "boolean"; readonly request: BooleanSceneRequest }
@@ -569,6 +575,22 @@ export function documentSceneBodies(
       consumesOperands: true,
     });
   }
+  // The transform patterns (patternLinear / patternCircular): EVERY
+  // feature renders, each consuming its target's computed solid — a
+  // pattern may repeat ANY body, so the request admits through the
+  // operand queue like the booleans: it runs only once the target's own
+  // scene entry exists (producing-feature order carries the ordering).
+  for (const request of documentPatternTransformSceneRequests(
+    activeDocument,
+  )) {
+    admissions.push({
+      bodyId: request.bodyId,
+      scene: { kind: "patternTransform", request },
+      computedOperands:
+        request.target.kind === "computed" ? [request.target.bodyId] : [],
+      consumesOperands: true,
+    });
+  }
   if (moveBody !== null) {
     admissions.push({
       bodyId: moveBody.bodyId,
@@ -646,16 +668,57 @@ export function documentSceneBodies(
   // re-materializing the fixture plate. An absorbed body listed as
   // compute-only rides along (`consumedOnly`) — computed to feed its
   // consumer, never rendered.
+  //
+  // Emission follows DEPENDENCY order, not `document.bodies` insertion
+  // order: a consumer whose computed operands ride along compute-only
+  // must run after them — the pass's `computedSolids` map is filled in
+  // sequence, so an entry emitted before its operands resolves nothing.
+  // Body insertion order (which follows command order, not feature
+  // order) places a consumer first whenever its `body` record was
+  // created before the operand features. Body order stays the
+  // tie-break so layout still mirrors document order for independents.
+  const dependencies = new Map<string, readonly string[]>();
+  for (const { candidate } of ordered) {
+    if (!requests.has(candidate.bodyId)) continue;
+    dependencies.set(
+      candidate.bodyId,
+      candidate.computedOperands.filter((operandId) =>
+        requests.has(operandId),
+      ),
+    );
+  }
+  const bodyOrder = document.bodies.map((body) => body.id);
+  const emitted = new Set<string>();
+  const emissionOrder: string[] = [];
+  const pending = new Set(requests.keys());
+  let progressed = true;
+  while (pending.size > 0 && progressed) {
+    progressed = false;
+    for (const bodyId of bodyOrder) {
+      if (!pending.has(bodyId)) continue;
+      const deps = dependencies.get(bodyId) ?? [];
+      if (deps.every((dep) => emitted.has(dep))) {
+        emitted.add(bodyId);
+        emissionOrder.push(bodyId);
+        pending.delete(bodyId);
+        progressed = true;
+      }
+    }
+  }
+  // A dependency cycle (or a body absent from the document list) leaves
+  // entries pending — emit them in request order rather than dropping.
+  for (const bodyId of pending) emissionOrder.push(bodyId);
+
   const rendered: DocumentBodySceneRequest[] = [];
-  for (const body of document.bodies) {
-    const scene = requests.get(body.id);
+  for (const bodyId of emissionOrder) {
+    const scene = requests.get(bodyId);
     if (scene === undefined) continue;
-    if (absorbed.has(body.id)) {
-      if (!consumedOnly.has(body.id)) continue;
-      rendered.push({ bodyId: body.id, scene, consumedOnly: true });
+    if (absorbed.has(bodyId)) {
+      if (!consumedOnly.has(bodyId)) continue;
+      rendered.push({ bodyId, scene, consumedOnly: true });
       continue;
     }
-    rendered.push({ bodyId: body.id, scene });
+    rendered.push({ bodyId, scene });
   }
   return rendered;
 }

@@ -360,23 +360,12 @@ export function sceneOperandOfBody(
       ? null
       : { kind: "extrude", request: derivation };
   }
-  if (
-    producer.kind === "hole" ||
-    producer.kind === "union" ||
-    producer.kind === "subtract" ||
-    producer.kind === "intersect"
-  ) {
-    return { kind: "computed", bodyId };
-  }
-  // A duplicate feature's copy bodies are computed solids (Phase 60): each
-  // copy's scene applies the planned T^i transform to the source's solid,
-  // and a LATER consumer (another duplicate, a boolean) composes from the
-  // copy's own output — the iterative use the verb is for.
-  if (producer.kind === "duplicate") {
+  if (COMPUTED_OPERAND_PRODUCER_KINDS.has(producer.kind)) {
     return { kind: "computed", bodyId };
   }
   // The move-body feature is the translate kind carrying the authored
-  // parameter pair (the move reader's own gate).
+  // parameter pair (the move reader's own gate); a display-state translate
+  // (fewer parameter inputs — the fixture plate's chain) stays data-only.
   if (
     producer.kind === "translate" &&
     producer.inputs.filter((ref) => ref.kind === "parameter").length >= 4
@@ -385,6 +374,52 @@ export function sceneOperandOfBody(
   }
   return null;
 }
+
+/**
+ * Feature kinds whose output bodies are computable solids a consuming
+ * composition (pad, hole, boolean, move, duplicate) may ride: the whole
+ * solid-producing vocabulary — revolves, sweeps, lofts, the thread/rib
+ * family, every pattern, the mirror, the scale/thicken/split body ops,
+ * the booleans themselves, the duplicates, the primitives, and the face
+ * ops — everything whose scene can honestly hand its computed solid to a
+ * consumer. Deliberately OUT: extrude (rides its raw derivation — the
+ * datum re-resolution the composition order demands), sheets (an open
+ * shell carries no solid a boolean may consume), wires/curves/sections
+ * (no volume), and the data-only kinds (rotate, the short translate)
+ * the callers' own comments decline.
+ */
+const COMPUTED_OPERAND_PRODUCER_KINDS: ReadonlySet<string> = new Set([
+  "revolve",
+  "sweep",
+  "loft",
+  "helix",
+  "thread",
+  "rib",
+  "hole",
+  "union",
+  "subtract",
+  "intersect",
+  "duplicate",
+  "patternLinear",
+  "patternCircular",
+  "patternFace",
+  "patternFeature",
+  "patternPath",
+  "mirror",
+  "scale",
+  "thicken",
+  "split",
+  "shell",
+  "fillet",
+  "chamfer",
+  "moveFace",
+  "deleteFace",
+  "replaceFace",
+  "box",
+  "sphere",
+  "cylinder",
+  "cone",
+]);
 
 /**
  * Reads ONE extrude feature into its worker-scene request, resolving the

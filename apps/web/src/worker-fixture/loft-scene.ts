@@ -14,7 +14,7 @@
 
 import { length } from "@slopcad/cad-core";
 import type { ComputationContext, ProfileLoftInput } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 
 /**
  * The loft request the workbench dispatches (see `../cad-workbench/loft`):
@@ -38,7 +38,7 @@ export interface LoftSceneRequest {
 export async function computeLoftScene(
   context: ComputationContext,
   request: LoftSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const lofted = await context.request("solid.loft", {
     sections: request.sections.map((section) => ({
       loop: section.loop,
@@ -55,10 +55,13 @@ export async function computeLoftScene(
     solid: lofted.solid,
   });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
+    solid: lofted.solid,
   };
 }
