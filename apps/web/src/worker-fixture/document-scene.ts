@@ -265,9 +265,12 @@ function fallbackSourceOf(operand: SceneOperand): FallbackSource {
  * renders its own extrusion; a computed operand renders the measurement
  * its scene already produced earlier in the pass — a refused boolean over
  * a holed block shows the HOLED block, the lineage's honest current
- * state. The pad renders its base extrusion; the independent kinds and
- * the sheet chain carry nothing (a refused sheet renders no partial
- * chain).
+ * state. The pad renders its base extrusion; the transform pattern
+ * renders its target's state (a refused copy transform must not strand a
+ * still-valid operand — the target's scene ran compute-only for the
+ * pattern, so its measurement is right there in the pass); the
+ * independent kinds and the sheet chain carry nothing (a refused sheet
+ * renders no partial chain).
  */
 function fallbackSourcesOf(
   scene: DocumentBodyScene,
@@ -295,6 +298,8 @@ function fallbackSourcesOf(
       return [fallbackSourceOf(scene.request.base)];
     case "duplicate":
       return [fallbackSourceOf(scene.request.base)];
+    case "patternTransform":
+      return [fallbackSourceOf(scene.request.target)];
     default:
       return [];
   }

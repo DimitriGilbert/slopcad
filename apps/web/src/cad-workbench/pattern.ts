@@ -21,6 +21,7 @@ import type { CadDocument, FeatureRecord } from "@slopcad/cad-core";
 import type { ArrayPatternLeg } from "@slopcad/cad-kernel";
 import type { SweepPathSegmentInput } from "@slopcad/cad-kernel";
 import {
+  PATTERN_COUNT_LIMIT,
   sweepPathProblem,
   sweepPathStationAt,
   sweepPathTotalLength,
@@ -57,6 +58,13 @@ export const PATTERN_DEFAULTS: PatternFeatureInput = {
   legs: [{ directionDeg: 0, count: 3, spacingMm: 20 }],
   skips: [],
 };
+
+/**
+ * The circular pattern's total-angle ceiling — the bridge's own domain
+ * (core-bridge's `FULL_CIRCLE_RAD + ANGLE_DOMAIN_TOLERANCE_RAD`): the
+ * sweep is `(0, 2π]`, the 1e-9 float round-trip slack included.
+ */
+const PATTERN_TOTAL_ANGLE_MAX_RAD = Math.PI * 2 + 1e-9;
 
 /** The path pattern's authoring numbers. */
 export interface PatternPathInput {
@@ -547,7 +555,18 @@ export function documentPatternTransformSceneRequests(
         (entry) => entry.id === parameterRefs[index]?.id,
       )?.value;
     const count = magnitudeIn(parameterValue(0), "dimensionless", "1");
-    if (count === null) continue;
+    // The bridge's count domain (core-bridge's pattern executor): a whole
+    // number in [2, PATTERN_COUNT_LIMIT]. An out-of-domain pattern is a
+    // refused feature — the scene must not compute it and present a
+    // successful verdict over geometry regeneration rejected.
+    if (
+      count === null ||
+      !Number.isInteger(count) ||
+      count < 2 ||
+      count > PATTERN_COUNT_LIMIT
+    ) {
+      continue;
+    }
     const directionFromDatum = (): {
       readonly origin: readonly [number, number, number];
       readonly direction: readonly [number, number, number];
@@ -561,7 +580,9 @@ export function documentPatternTransformSceneRequests(
     let pattern: PatternTransformPlan | null = null;
     if (feature.kind === "patternLinear") {
       const spacingMm = magnitudeIn(parameterValue(1), "length", "mm");
-      if (spacingMm === null) continue;
+      // The bridge's linear domain: strictly positive spacing (zero or
+      // negative stacks every copy and degenerates to the target).
+      if (spacingMm === null || !(spacingMm > 0)) continue;
       if (datumRefs.length === 1 && parameterRefs.length === 2) {
         const axis = directionFromDatum();
         if (axis === null) continue;
@@ -602,7 +623,15 @@ export function documentPatternTransformSceneRequests(
       }
     } else {
       const totalAngleRad = magnitudeIn(parameterValue(1), "angle", "rad");
-      if (totalAngleRad === null) continue;
+      // The bridge's circular domain: a strictly positive sweep of at most
+      // one full turn (a longer sweep double-covers the circle).
+      if (
+        totalAngleRad === null ||
+        !(totalAngleRad > 0) ||
+        totalAngleRad > PATTERN_TOTAL_ANGLE_MAX_RAD
+      ) {
+        continue;
+      }
       if (datumRefs.length === 1 && parameterRefs.length === 2) {
         const axis = directionFromDatum();
         if (axis === null) continue;

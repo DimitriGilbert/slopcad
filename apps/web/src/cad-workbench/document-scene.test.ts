@@ -1063,4 +1063,198 @@ describe("the computed-operand admissions (the cup fix)", () => {
       { bodyId: "body_cup", kind: "boolean" },
     ]);
   });
+
+  /** The patternLinear builder the domain tests share (count + spacing + direction). */
+  function linearPatternDocument(count: number, spacingMm: number) {
+    let document = withStages(bootPlateDocument(), { kind: "extrude" });
+    for (const [id, name, value] of [
+      [createParameterId("param_pat_count"), "patCount", dimensionless(count)],
+      [createParameterId("param_pat_spacing"), "patSpacing", length(spacingMm)],
+      [createParameterId("param_pat_dir"), "patDir", angle(0)],
+    ] as const) {
+      document = requireOk(
+        addDocumentParameter(document, { id, name, value }),
+      ).document;
+    }
+    document = requireOk(
+      addBody(document, { id: createBodyId("body_pat1"), name: "pattern" }),
+    ).document;
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_pat1"),
+        kind: "patternLinear",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_stage1") },
+          { kind: "parameter", id: createParameterId("param_pat_count") },
+          { kind: "parameter", id: createParameterId("param_pat_spacing") },
+          { kind: "parameter", id: createParameterId("param_pat_dir") },
+        ],
+        outputs: [createBodyId("body_pat1")],
+      }),
+    ).document;
+    return document;
+  }
+
+  it("a patternLinear with a refused count emits no scene — the bridge's domain is the reader's", () => {
+    // count 1 is "a pattern of one copy is no pattern" in the bridge — a
+    // refused feature must not still render a successful scene.
+    expect(bodyIdsOf(linearPatternDocument(1, 15))).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "extrude" },
+    ]);
+    // The non-integer and past-limit counts ride the same gate.
+    expect(bodyIdsOf(linearPatternDocument(2.5, 15))).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "extrude" },
+    ]);
+  });
+
+  it("a patternLinear with zero spacing emits no scene — the refused feature stays refused", () => {
+    expect(bodyIdsOf(linearPatternDocument(3, 0))).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "extrude" },
+    ]);
+  });
+
+  it("a patternCircular over one full turn emits no scene — the bridge's sweep cap holds", () => {
+    let document = withStages(bootPlateDocument(), { kind: "revolve" });
+    for (const [id, name, value] of [
+      [createParameterId("param_pc_count"), "pcCount", dimensionless(4)],
+      [createParameterId("param_pc_angle"), "pcAngle", angle(7)],
+      [createParameterId("param_pc_axis"), "pcAxis", dimensionless(3)],
+    ] as const) {
+      document = requireOk(
+        addDocumentParameter(document, { id, name, value }),
+      ).document;
+    }
+    document = requireOk(
+      addBody(document, { id: createBodyId("body_pc1"), name: "pattern" }),
+    ).document;
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_pc1"),
+        kind: "patternCircular",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_stage1") },
+          { kind: "parameter", id: createParameterId("param_pc_count") },
+          { kind: "parameter", id: createParameterId("param_pc_angle") },
+          { kind: "parameter", id: createParameterId("param_pc_axis") },
+        ],
+        outputs: [createBodyId("body_pc1")],
+      }),
+    ).document;
+    // 7 rad > 2π double-covers the circle — the target keeps its own
+    // rendered scene, unmarked compute-only (nothing consumed it).
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "revolve" },
+    ]);
+  });
+
+  it("a boolean over a primitive declines — the seam never advertises an operand with no scene", () => {
+    // `box` produces a real solid but NO scene entry: the operand seam
+    // declines it, so the union skips honestly instead of promising a
+    // computed solid the document pass cannot supply.
+    let document = withStages(bootPlateDocument(), { kind: "extrude" });
+    for (const [id, name, value] of [
+      [createParameterId("param_box_w"), "boxW", length(10)],
+      [createParameterId("param_box_d"), "boxD", length(10)],
+      [createParameterId("param_box_h"), "boxH", length(10)],
+    ] as const) {
+      document = requireOk(
+        addDocumentParameter(document, { id, name, value }),
+      ).document;
+    }
+    for (const bodyId of ["body_box", "body_union"] as const) {
+      document = requireOk(
+        addBody(document, { id: createBodyId(bodyId), name: bodyId }),
+      ).document;
+    }
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_box"),
+        kind: "box",
+        inputs: [
+          { kind: "parameter", id: createParameterId("param_box_w") },
+          { kind: "parameter", id: createParameterId("param_box_d") },
+          { kind: "parameter", id: createParameterId("param_box_h") },
+        ],
+        outputs: [createBodyId("body_box")],
+      }),
+    ).document;
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_union"),
+        kind: "union",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_stage1") },
+          { kind: "feature", id: createFeatureId("feat_box") },
+        ],
+        outputs: [createBodyId("body_union")],
+      }),
+    ).document;
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "extrude" },
+    ]);
+  });
+
+  it("a second patternFeature's output is not operand-capable — the reader serves the first only", () => {
+    // The legacy pattern readers compose ONE chain: the document's first
+    // feature of the kind. A body produced by a second patternFeature
+    // carries no scene entry, so a consumer over it declines honestly.
+    let document = withStages(bootPlateDocument(), { kind: "extrude" });
+    for (const [id, name, value] of [
+      [createParameterId("param_pf_dir"), "pfDir", angle(0)],
+      [createParameterId("param_pf_count"), "pfCount", dimensionless(2)],
+      [createParameterId("param_pf_gap"), "pfGap", length(20)],
+    ] as const) {
+      document = requireOk(
+        addDocumentParameter(document, { id, name, value }),
+      ).document;
+    }
+    for (const [index, bodyId] of [
+      "body_pf1",
+      "body_pf2",
+      "body_union",
+    ].entries()) {
+      document = requireOk(
+        addBody(document, { id: createBodyId(bodyId), name: `pf${index}` }),
+      ).document;
+    }
+    for (const [index, bodyId] of ["body_pf1", "body_pf2"].entries()) {
+      document = requireOk(
+        addFeature(document, {
+          id: createFeatureId(`feat_pf${String(index + 1)}`),
+          kind: "patternFeature",
+          inputs: [
+            { kind: "parameter", id: createParameterId("param_pf_dir") },
+            { kind: "parameter", id: createParameterId("param_pf_count") },
+            { kind: "parameter", id: createParameterId("param_pf_gap") },
+          ],
+          outputs: [createBodyId(bodyId)],
+        }),
+      ).document;
+    }
+    document = requireOk(
+      addFeature(document, {
+        id: createFeatureId("feat_union"),
+        kind: "union",
+        inputs: [
+          { kind: "feature", id: createFeatureId("feat_stage1") },
+          { kind: "feature", id: createFeatureId("feat_pf2") },
+        ],
+        outputs: [createBodyId("body_union")],
+      }),
+    ).document;
+    // Only the FIRST patternFeature's output carries a scene entry — the
+    // union targeting the second's output declines (consuming nothing),
+    // the base extrude keeps rendering unconsumed, and body_pf2 renders
+    // under no scene.
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_plate", kind: "plate" },
+      { bodyId: "body_stage1", kind: "extrude" },
+      { bodyId: "body_pf1", kind: "patternFeature" },
+    ]);
+  });
 });

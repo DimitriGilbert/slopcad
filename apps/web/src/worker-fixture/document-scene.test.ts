@@ -88,6 +88,17 @@ function answerSceneOperation(
       if (!cut.ok) throw new Error(cut.error.message);
       return { solid: mint(cut.value) };
     }
+    case "solid.transform": {
+      const moved = kernel.transform(owned(input.solid), {
+        ...(input.rotation === undefined ? {} : { rotation: input.rotation }),
+        ...(input.scale === undefined ? {} : { scale: input.scale }),
+        x: input.translation.x,
+        y: input.translation.y,
+        z: input.translation.z,
+      });
+      if (!moved.ok) throw new Error(moved.error.message);
+      return { solid: mint(moved.value) };
+    }
     case "solid.helixSweep": {
       const swept = kernel.helixSweep(input);
       if (!swept.ok) throw new Error(swept.error.message);
@@ -593,5 +604,86 @@ describe("computeDocumentScene: the operand handoff (composition)", () => {
     );
     // The lineage fallback still renders the tool (its derivation).
     expect(result.bodies.map((body) => body.bodyId)).toEqual(["body_tool"]);
+  });
+
+  it("a refused transform pattern falls back to its EXTRUDE target's derivation", async () => {
+    // The fake kernel refuses rotations (transformRotation is false), so
+    // the circular pattern's first copy transform fails — the lineage
+    // fallback must still render the still-valid target's extrusion rather
+    // than leave the consumed-only operand invisible.
+    const context = sceneContext(measuringKernel());
+    const patternBody: DocumentBodySceneRequest = {
+      bodyId: "body_pattern",
+      scene: {
+        kind: "patternTransform",
+        request: {
+          target: {
+            kind: "extrude",
+            request: {
+              loop: squareLoop(0, 0, 10, 10),
+              placement: IDENTITY_PLACEMENT,
+              distanceMm: 10,
+              bodyId: "body_block",
+            },
+          },
+          pattern: {
+            kind: "circular",
+            count: 4,
+            totalAngleRad: Math.PI * 2,
+            axis: [0, 0, 1],
+            axisOrigin: [0, 0, 0],
+          },
+          bodyId: "body_pattern",
+        },
+      },
+    };
+    const result = await computeDocumentScene(
+      context,
+      [patternBody],
+      new Set(["body_pattern", "body_block"]),
+    );
+    expect(result.failures.map((failure) => failure.scene)).toEqual([
+      "patternTransform",
+    ]);
+    expect(result.bodies.map((body) => body.bodyId)).toEqual(["body_block"]);
+    expect(result.bodies[0]?.measurement.volume).toBeGreaterThan(0);
+  });
+
+  it("a refused transform pattern falls back to its COMPUTED target's pass measurement", async () => {
+    // The reviewer's case: the pattern's target ran compute-only to feed
+    // the pattern, the copy transform refuses (the fake kernel carries no
+    // rotation), and the holed block must not disappear — its pass
+    // measurement is the lineage's honest current state.
+    const context = sceneContext(measuringKernel());
+    const patternBody: DocumentBodySceneRequest = {
+      bodyId: "body_pattern",
+      scene: {
+        kind: "patternTransform",
+        request: {
+          target: { kind: "computed", bodyId: "body_holed" },
+          pattern: {
+            kind: "circular",
+            count: 4,
+            totalAngleRad: Math.PI * 2,
+            axis: [0, 0, 1],
+            axisOrigin: [0, 0, 0],
+          },
+          bodyId: "body_pattern",
+        },
+      },
+    };
+    const result = await computeDocumentScene(
+      context,
+      [holedBase(), patternBody],
+      new Set(["body_holed", "body_pattern"]),
+    );
+    expect(result.failures.map((failure) => failure.scene)).toEqual([
+      "patternTransform",
+    ]);
+    expect(result.bodies.map((body) => body.bodyId)).toEqual(["body_holed"]);
+    const expected = 1000 - Math.PI * 4 * 10;
+    expect(
+      Math.abs((result.bodies[0]?.measurement.volume ?? -1) - expected),
+    ).toBeLessThanOrEqual(Math.abs(expected) * 0.02);
   });
 });
