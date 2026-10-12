@@ -348,7 +348,14 @@ export function useViewerEngine(
     }
     if (storedHole !== null) {
       sessionRef.current?.dispatch(storedHole, activeSectionRequest);
+      return;
     }
+    // No scene resolves and no fixture plate: the honest empty settle —
+    // the bare viewer shows the grid instead of a never-mounting canvas.
+    sessionRef.current?.dispatchDocument(
+      [],
+      renderableBodyIds(workbenchDocument),
+    );
   }, [workbenchDocument, rollback, storedHole, activeSectionRequest]);
 
   // The host pushes the CURRENT projection into the store — the projection

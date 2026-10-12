@@ -1,24 +1,27 @@
 /**
- * The composed workbench's document: the plate body, the through-bore
- * diameter the parameter panel edits, the translate-about-the-plate feature
- * (three length-component parameters), the rotate-about-+Z feature
- * downstream of the translate feature, and the expression-driven pair
- * `volumeHint` (`holeDiameter * 2`) and `boreRadius` (`holeDiameter / 2`) —
- * two levels of stored expressions, so a single `holeDiameter` commit
- * re-derives both through the command vocabulary's recompute. A lean, real
- * product document with a two-feature timeline — the Phase 20 history
- * surface (rollback, suppression, failure recovery) needs an
- * upstream/downstream pair to act on, so the rotate feature declares the
- * translate feature as an input. Every tool the workbench's toolbar
- * registers resolves against it: rotate resolves the rotate feature
- * (body + exactly one angle parameter), translate resolves the translate
- * feature (body + three length parameters).
+ * The composed workbench's boot session: an EMPTY document — no bodies,
+ * no parameters, no features. A real workbench boot is a blank bench; the
+ * author commits the first body through the sketch → solid actions and
+ * the document scene renders it from that transaction on.
  *
- * Deterministic (explicit ids), so the workbench boots identically every
- * run. The hole parameter keeps the shared fixture id, so the established
- * `holeDiameterMm` reader works on this document unchanged. Parameters
- * touch no feature, so the tree's derivation, the executor stand-in, and
- * the boot scene are unaffected by the expression-driven pair.
+ * The demo document below (the drilled plate, the through-bore diameter
+ * the parameter panel edits, the translate-about-the-plate feature —
+ * three length-component parameters — the rotate-about-+Z feature
+ * downstream of the translate feature, the expression-driven pair
+ * `volumeHint` (`holeDiameter * 2`) and `boreRadius` (`holeDiameter / 2`),
+ * and the disabled mid-height section record) is the fixture the test
+ * surfaces pin: a lean, real product document with a two-feature
+ * timeline (the Phase 20 history surface's upstream/downstream pair) and
+ * a section record to toggle. It boots only behind {@link
+ * WORKBENCH_DEMO_SESSION_KEY} — the flag the e2e session's browser
+ * context and the jsdom suites set once — or a `?demo` search parameter.
+ * Saved documents from the demo era still carry its records, so the
+ * plate scene machinery below keeps serving them; the flag only picks
+ * the BOOT document.
+ *
+ * Deterministic (explicit ids), so the demo boots identically every run.
+ * The hole parameter keeps the shared fixture id, so the established
+ * `holeDiameterMm` reader works on this document unchanged.
  */
 
 import {
@@ -44,6 +47,14 @@ import {
 
 import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
 import { requireDocumentOk } from "../workbench-fixture/workbench-document";
+
+/**
+ * The opt-in flag a harness sets to boot the demo document instead of the
+ * clean bench: a `slopcad:workbench-demo-session` localStorage key (the
+ * e2e context's init script and the jsdom suites' setup), or a `?demo`
+ * search parameter on the workbench route.
+ */
+export const WORKBENCH_DEMO_SESSION_KEY = "slopcad:workbench-demo-session";
 
 /** The stable plate body id (same body the projection carries). */
 const PLATE_BODY_ID: BodyId = createBodyId("body_plate");
@@ -74,14 +85,50 @@ const BORE_RADIUS_PARAMETER = createParameterId("param_bore_radius");
 const HOLE_PARAMETER = createParameterId("param_hole_diameter");
 
 /**
- * Builds the workbench session: the plate at the scene's default bore,
- * `holeDiameter`, the translate components, and `rotate_z` at identity,
- * `volumeHint` defined as `holeDiameter * 2`, and `boreRadius` defined as
- * `holeDiameter / 2` — both cached at their matching values (the honest
- * boot: cache equals what the expression produces at the default). Feature
- * order: translate first, rotate second (downstream).
+ * Builds the workbench's boot session: one empty document. The clean
+ * bench is the product default — the first authoring transaction adds
+ * the first record.
  */
 export function createCadWorkbenchSession(): CadSession {
+  return createSession(createDocument(createDocumentId("doc_cad_workbench")));
+}
+
+/**
+ * Whether this boot wants the demo document: the localStorage flag or a
+ * `?demo` search parameter, absent outside a browser (server render,
+ * Node callers) — the clean bench is the default everywhere.
+ */
+function demoSessionRequested(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (window.localStorage.getItem(WORKBENCH_DEMO_SESSION_KEY) !== null) {
+      return true;
+    }
+  } catch {
+    // localStorage denied (privacy mode): the search flag still applies.
+  }
+  return new URLSearchParams(window.location.search).has("demo");
+}
+
+/**
+ * The session the workbench store boots: the demo plate document behind
+ * the flag, the clean empty document otherwise.
+ */
+export function workbenchSessionForBoot(): CadSession {
+  return demoSessionRequested()
+    ? createCadWorkbenchDemoSession()
+    : createCadWorkbenchSession();
+}
+
+/**
+ * Builds the demo workbench session: the plate at the scene's default
+ * bore, `holeDiameter`, the translate components, and `rotate_z` at
+ * identity, `volumeHint` defined as `holeDiameter * 2`, and `boreRadius`
+ * defined as `holeDiameter / 2` — both cached at their matching values
+ * (the honest boot: cache equals what the expression produces at the
+ * default). Feature order: translate first, rotate second (downstream).
+ */
+export function createCadWorkbenchDemoSession(): CadSession {
   const hint = parseExpression("holeDiameter * 2");
   if (!hint.ok) {
     throw new Error(`Workbench expression rejected: ${hint.error.message}`);

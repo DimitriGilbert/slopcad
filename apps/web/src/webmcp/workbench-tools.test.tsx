@@ -26,7 +26,10 @@ import type { CadStore } from "@slopcad/cad-react";
 import type { CadCommandDescriptor } from "@slopcad/ui/components/cad/cad-command-menu";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
-import { createCadWorkbenchSession } from "../cad-workbench/session";
+import {
+  createCadWorkbenchDemoSession,
+  WORKBENCH_DEMO_SESSION_KEY,
+} from "../cad-workbench/session";
 import {
   useWorkbenchEngine,
   WorkbenchStoreProvider,
@@ -69,6 +72,9 @@ type ToolRun =
   | { readonly ok: true; readonly payload: unknown }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
+// The engine mounts boot the demo document (the session module's opt-in).
+window.localStorage.setItem(WORKBENCH_DEMO_SESSION_KEY, "1");
+
 /** The eight tool names, in registration order. */
 const TOOL_NAMES = [
   "cad_get_document_summary",
@@ -88,9 +94,9 @@ interface TestSurfaceState {
   measureText: string | null;
 }
 
-/** A fresh store over the app's own workbench session. */
+/** A fresh store over the app's demo workbench session. */
 function freshStore(): CadStore {
-  return createCadStore({ session: createCadWorkbenchSession() });
+  return createCadStore({ session: createCadWorkbenchDemoSession() });
 }
 
 /** Binds the eight tools over one store + mutable surface state. */

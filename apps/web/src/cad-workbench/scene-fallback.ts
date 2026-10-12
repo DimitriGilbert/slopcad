@@ -12,11 +12,12 @@
  * (the same one the complete workbench implements inline): when the
  * active scene no longer resolves, re-point at the highest scene the
  * document still resolves, in the create actions' precedence — hole over
- * revolve over extrude, then the plate.
+ * revolve over extrude, then the fixture plate, then the empty scene.
  */
 
 import type { CadDocument } from "@slopcad/cad-core";
 
+import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { documentExtrudeRequest } from "./extrude";
 import { documentHoleSceneRequest } from "./hole";
 import { documentLoftRequest } from "./loft";
@@ -48,6 +49,7 @@ import { documentDuplicateSceneRequests } from "./duplicate";
  * scene).
  */
 export type WorkbenchSceneKind =
+  | "empty"
   | "plate"
   | "extrude"
   | "revolve"
@@ -73,7 +75,9 @@ export type WorkbenchSceneKind =
  * The highest scene the document still resolves, in the create actions'
  * precedence: the hole composition when every hole still cuts its base,
  * else the loft, else the sweep, else the revolve, else the extrude, else
- * the plate (which follows the stored hole parameter and always resolves).
+ * the plate when the document carries the fixture's hole parameter (the
+ * plate computation follows it), else `empty` — the clean bench resolves
+ * nothing and renders the honest empty scene.
  */
 export function highestResolvableScene(
   document: CadDocument,
@@ -100,7 +104,7 @@ export function highestResolvableScene(
   if (documentSweepRequest(document) !== null) return "sweep";
   if (documentRevolveRequest(document) !== null) return "revolve";
   if (documentExtrudeRequest(document) !== null) return "extrude";
-  return "plate";
+  return holeDiameterMm(document) !== null ? "plate" : "empty";
 }
 
 /**
@@ -108,14 +112,21 @@ export function highestResolvableScene(
  * the active scene still resolves (the caller keeps it — the fallback only
  * ever falls back, so a newly created deeper scene wins through its own
  * action's scene switch, never through this), otherwise the highest scene
- * the document still resolves. The plate scene always resolves, so it
- * never falls back.
+ * the document still resolves. The empty scene never falls back (it
+ * resolves always); the plate holds only while the document carries the
+ * fixture's hole parameter — a parameter delete strands it like any
+ * other scene's regression.
  */
 export function honestSceneFallback(
   document: CadDocument,
   activeScene: WorkbenchSceneKind,
 ): WorkbenchSceneKind | null {
-  if (activeScene === "plate") return null;
+  if (activeScene === "empty") return null;
+  if (activeScene === "plate") {
+    return holeDiameterMm(document) !== null
+      ? null
+      : highestResolvableScene(document);
+  }
   // The curves scene resolves while the document carries at least one
   // curve record — an undo that removes the last curve falls back to the
   // highest solid scene (never stale curve pixels).

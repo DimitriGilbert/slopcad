@@ -295,8 +295,17 @@ describe("highestResolvableScene", () => {
     );
   });
 
-  it("lands on the plate when no solid feature resolves", () => {
-    expect(highestResolvableScene(createDocument(DOC))).toBe("plate");
+  it("lands on the plate only while the fixture's hole parameter is stored", () => {
+    // The clean bench (no holeDiameter) resolves nothing — the honest
+    // empty scene, not a plate the document never asked for.
+    expect(highestResolvableScene(createDocument(DOC))).toBe("empty");
+    const plated = addDocumentParameter(createDocument(DOC), {
+      id: createParameterId("param_hole_diameter"),
+      name: "holeDiameter",
+      value: length(8),
+    });
+    if (!plated.ok) throw new Error(plated.error.message);
+    expect(highestResolvableScene(plated.value.document)).toBe("plate");
   });
 });
 
@@ -312,11 +321,21 @@ describe("honestSceneFallback", () => {
     ).toBeNull();
   });
 
-  it("never falls back from the plate scene (it always resolves)", () => {
-    expect(honestSceneFallback(createDocument(DOC), "plate")).toBeNull();
+  it("holds the plate scene only while the fixture's hole parameter is stored", () => {
+    const plated = addDocumentParameter(createDocument(DOC), {
+      id: createParameterId("param_hole_diameter"),
+      name: "holeDiameter",
+      value: length(8),
+    });
+    if (!plated.ok) throw new Error(plated.error.message);
+    expect(honestSceneFallback(plated.value.document, "plate")).toBeNull();
+    // A plate activeScene over a document that lost the parameter strands
+    // like any other scene's regression — it re-points, never stales.
+    expect(honestSceneFallback(createDocument(DOC), "plate")).toBe("empty");
     expect(
       honestSceneFallback(buildSolidDocument("extrude", "hole"), "plate"),
-    ).toBeNull();
+    ).toBe("hole");
+    expect(honestSceneFallback(createDocument(DOC), "empty")).toBeNull();
   });
 
   it("re-points the hole scene at the extrude after the hole is undone", () => {
@@ -326,8 +345,8 @@ describe("honestSceneFallback", () => {
     );
   });
 
-  it("re-points the hole scene at the plate after everything is undone", () => {
-    expect(honestSceneFallback(createDocument(DOC), "hole")).toBe("plate");
+  it("re-points the hole scene at the empty scene after everything is undone", () => {
+    expect(honestSceneFallback(createDocument(DOC), "hole")).toBe("empty");
   });
 
   it("re-points a dead hole scene at the deepest survivor (revolve over extrude)", () => {
@@ -342,8 +361,8 @@ describe("honestSceneFallback", () => {
     );
   });
 
-  it("re-points the extrude scene at the plate after the extrude is undone", () => {
-    expect(honestSceneFallback(createDocument(DOC), "extrude")).toBe("plate");
+  it("re-points the extrude scene at the empty scene after the extrude is undone", () => {
+    expect(honestSceneFallback(createDocument(DOC), "extrude")).toBe("empty");
   });
 
   it("keeps the curves scene while a curve record remains, over the solids beneath", () => {
@@ -365,13 +384,13 @@ describe("honestSceneFallback", () => {
     expect(honestSceneFallback(curved.value.document, "curves")).toBeNull();
     // The curve record never perturbs the SOLID precedence: the highest
     // resolvable solid scene stays what the solid features name.
-    expect(highestResolvableScene(curved.value.document)).toBe("plate");
+    expect(highestResolvableScene(curved.value.document)).toBe("empty");
   });
 
   it("re-points the curves scene at the highest solid scene after the last curve is undone", () => {
     expect(honestSceneFallback(buildSolidDocument("extrude"), "curves")).toBe(
       "extrude",
     );
-    expect(honestSceneFallback(createDocument(DOC), "curves")).toBe("plate");
+    expect(honestSceneFallback(createDocument(DOC), "curves")).toBe("empty");
   });
 });

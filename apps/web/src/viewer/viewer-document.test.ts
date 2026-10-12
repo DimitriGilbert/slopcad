@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createCadWorkbenchSession } from "../cad-workbench/session";
+import { createCadWorkbenchDemoSession } from "../cad-workbench/session";
 import { serializeSessionToNativeText } from "../cad-projects/native-document-bridge";
 import {
   loadViewerDocument,
@@ -16,7 +16,7 @@ import {
   viewerDocumentTitle,
 } from "./viewer-document";
 
-const session = createCadWorkbenchSession();
+const session = createCadWorkbenchDemoSession();
 const nativeText = serializeSessionToNativeText(session, new Map(), null);
 
 describe("loadViewerDocument", () => {

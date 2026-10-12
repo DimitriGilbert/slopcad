@@ -11,7 +11,10 @@ import {
   waitForImportedMeshSettled,
   waitForSettledScene,
 } from "../e2e-render/helpers";
-import { createCadWorkbenchSession } from "../src/cad-workbench/session";
+import {
+  createCadWorkbenchDemoSession,
+  WORKBENCH_DEMO_SESSION_KEY,
+} from "../src/cad-workbench/session";
 import { serializeSessionToNativeText } from "../src/cad-projects/native-document-bridge";
 import { VIEWER_FRAME_HEADERS } from "../src/viewer/viewer-frame-policy";
 import {
@@ -191,6 +194,13 @@ const test = base.extend<object, { sessionPage: Page }>({
             }
           : {}),
       });
+      // The journey walks the pinned demo document: every workbench route
+      // the context opens boots the plate fixture, exactly as the baselines
+      // were authored (the production default is the clean empty bench).
+      await context.addInitScript(
+        (key) => window.localStorage.setItem(key, "1"),
+        WORKBENCH_DEMO_SESSION_KEY,
+      );
       const page = await context.newPage();
       await use(page);
       await context.close();
@@ -4213,7 +4223,7 @@ test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports
     // through the native bridge — five literal variables, two expression
     // variables, and the plate whose volume the pins below derive from.
     const nativeText = serializeSessionToNativeText(
-      createCadWorkbenchSession(),
+      createCadWorkbenchDemoSession(),
       new Map(),
       null,
     );

@@ -88,7 +88,7 @@ import { manifoldWorkerBootReport } from "@slopcad/cad-kernel-manifold/manifold-
 
 import { computePlateWithHole } from "../worker-fixture/plate-scene";
 import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
-import { createCadWorkbenchSession } from "../cad-workbench/session";
+import { createCadWorkbenchDemoSession } from "../cad-workbench/session";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 
 /** How many fresh worker boots the startup probe measures. */
@@ -505,7 +505,7 @@ function probeInvalidation(): Record<string, number[]> {
 
   // (a) + (b): the workbench document as booted.
   {
-    const boot = createCadWorkbenchSession();
+    const boot = createCadWorkbenchDemoSession();
     let cursor = bootWorkbenchCursor(boot.document);
     let session: CadSession = boot;
     for (let i = 0; i < INVALIDATION_SAMPLE_COUNT; i += 1) {
@@ -546,7 +546,7 @@ function probeInvalidation(): Record<string, number[]> {
   // derivation pass that re-executes the whole chain.
   const grownSamples: number[] = [];
   {
-    const boot = createCadWorkbenchSession();
+    const boot = createCadWorkbenchDemoSession();
     let session: CadSession = boot;
     const headParameter = createParameterId("param_chain_head_depth");
     const headSketch = createSketchDocumentId("skd_chain_head");
