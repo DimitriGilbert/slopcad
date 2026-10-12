@@ -648,9 +648,7 @@
             "id": "param_translate_z"
           }
         ],
-        "outputs": [
-          "body_plate"
-        ]
+        "outputs": ["body_plate"]
       },
       {
         "id": "feat_rotate_plate",
@@ -669,9 +667,7 @@
             "id": "param_rotate_z"
           }
         ],
-        "outputs": [
-          "body_plate"
-        ]
+        "outputs": ["body_plate"]
       },
       {
         "id": "feat_cup-revolve",
@@ -690,9 +686,7 @@
             "id": "param_cup-revolve-axis"
           }
         ],
-        "outputs": [
-          "body_cup-shell"
-        ]
+        "outputs": ["body_cup-shell"]
       },
       {
         "id": "feat_handle-0",
@@ -711,9 +705,7 @@
             "id": "param_handle-0-axis"
           }
         ],
-        "outputs": [
-          "body_handle-0"
-        ]
+        "outputs": ["body_handle-0"]
       },
       {
         "id": "feat_handle-1",
@@ -732,9 +724,7 @@
             "id": "param_handle-1-axis"
           }
         ],
-        "outputs": [
-          "body_handle-1"
-        ]
+        "outputs": ["body_handle-1"]
       },
       {
         "id": "feat_handle-2",
@@ -753,9 +743,7 @@
             "id": "param_handle-2-axis"
           }
         ],
-        "outputs": [
-          "body_handle-2"
-        ]
+        "outputs": ["body_handle-2"]
       },
       {
         "id": "feat_handle-3",
@@ -774,9 +762,7 @@
             "id": "param_handle-3-axis"
           }
         ],
-        "outputs": [
-          "body_handle-3"
-        ]
+        "outputs": ["body_handle-3"]
       },
       {
         "id": "feat_handle-4",
@@ -795,9 +781,7 @@
             "id": "param_handle-4-axis"
           }
         ],
-        "outputs": [
-          "body_handle-4"
-        ]
+        "outputs": ["body_handle-4"]
       },
       {
         "id": "feat_handle-5",
@@ -816,9 +800,7 @@
             "id": "param_handle-5-axis"
           }
         ],
-        "outputs": [
-          "body_handle-5"
-        ]
+        "outputs": ["body_handle-5"]
       },
       {
         "id": "feat_cavity",
@@ -837,9 +819,7 @@
             "id": "param_cup-revolve-axis"
           }
         ],
-        "outputs": [
-          "body_cavity"
-        ]
+        "outputs": ["body_cavity"]
       },
       {
         "id": "feat_cup-union",
@@ -874,9 +854,7 @@
             "id": "feat_handle-5"
           }
         ],
-        "outputs": [
-          "body_cup-union"
-        ]
+        "outputs": ["body_cup-union"]
       },
       {
         "id": "feat_cup",
@@ -891,9 +869,7 @@
             "id": "feat_cavity"
           }
         ],
-        "outputs": [
-          "body_cup"
-        ]
+        "outputs": ["body_cup"]
       }
     ],
     "sketches": [
@@ -2187,16 +2163,8 @@
       {
         "id": "sec_mid_height",
         "name": "mid-height",
-        "origin": [
-          15,
-          10,
-          5
-        ],
-        "normal": [
-          0,
-          0,
-          1
-        ],
+        "origin": [15, 10, 5],
+        "normal": [0, 0, 1],
         "keepSide": 1,
         "enabled": false
       }
@@ -2344,9 +2312,7 @@
               "id": "param_translate_z"
             }
           ],
-          "outputs": [
-            "body_plate"
-          ]
+          "outputs": ["body_plate"]
         },
         {
           "id": "feat_rotate_plate",
@@ -2365,25 +2331,15 @@
               "id": "param_rotate_z"
             }
           ],
-          "outputs": [
-            "body_plate"
-          ]
+          "outputs": ["body_plate"]
         }
       ],
       "sections": [
         {
           "id": "sec_mid_height",
           "name": "mid-height",
-          "origin": [
-            15,
-            10,
-            5
-          ],
-          "normal": [
-            0,
-            0,
-            1
-          ],
+          "origin": [15, 10, 5],
+          "normal": [0, 0, 1],
           "keepSide": 1,
           "enabled": false
         }
@@ -3889,9 +3845,7 @@
                 "id": "param_cup-revolve-axis"
               }
             ],
-            "outputs": [
-              "body_cup-shell"
-            ]
+            "outputs": ["body_cup-shell"]
           },
           {
             "formatVersion": 1,
@@ -3912,9 +3866,7 @@
                 "id": "param_handle-0-axis"
               }
             ],
-            "outputs": [
-              "body_handle-0"
-            ]
+            "outputs": ["body_handle-0"]
           },
           {
             "formatVersion": 1,
@@ -3935,9 +3887,7 @@
                 "id": "param_handle-1-axis"
               }
             ],
-            "outputs": [
-              "body_handle-1"
-            ]
+            "outputs": ["body_handle-1"]
           },
           {
             "formatVersion": 1,
@@ -3958,9 +3908,7 @@
                 "id": "param_handle-2-axis"
               }
             ],
-            "outputs": [
-              "body_handle-2"
-            ]
+            "outputs": ["body_handle-2"]
           },
           {
             "formatVersion": 1,
@@ -3981,9 +3929,7 @@
                 "id": "param_handle-3-axis"
               }
             ],
-            "outputs": [
-              "body_handle-3"
-            ]
+            "outputs": ["body_handle-3"]
           },
           {
             "formatVersion": 1,
@@ -4004,9 +3950,7 @@
                 "id": "param_handle-4-axis"
               }
             ],
-            "outputs": [
-              "body_handle-4"
-            ]
+            "outputs": ["body_handle-4"]
           },
           {
             "formatVersion": 1,
@@ -4027,9 +3971,7 @@
                 "id": "param_handle-5-axis"
               }
             ],
-            "outputs": [
-              "body_handle-5"
-            ]
+            "outputs": ["body_handle-5"]
           },
           {
             "formatVersion": 1,
@@ -4502,9 +4444,7 @@
                 "id": "param_cup-revolve-axis"
               }
             ],
-            "outputs": [
-              "body_cavity"
-            ]
+            "outputs": ["body_cavity"]
           },
           {
             "formatVersion": 1,
@@ -4541,9 +4481,7 @@
                 "id": "feat_handle-5"
               }
             ],
-            "outputs": [
-              "body_cup-union"
-            ]
+            "outputs": ["body_cup-union"]
           },
           {
             "formatVersion": 1,
@@ -4560,9 +4498,7 @@
                 "id": "feat_cavity"
               }
             ],
-            "outputs": [
-              "body_cup"
-            ]
+            "outputs": ["body_cup"]
           }
         ]
       },

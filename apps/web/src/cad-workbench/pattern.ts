@@ -531,9 +531,7 @@ export function documentPatternTransformSceneRequests(
       (ref) => ref.kind === "parameter",
     );
     const datumRefs = feature.inputs.filter((ref) => ref.kind === "datum");
-    const sketchRefs = feature.inputs.filter(
-      (ref) => ref.kind === "sketch",
-    );
+    const sketchRefs = feature.inputs.filter((ref) => ref.kind === "sketch");
     if (bodyId === undefined || targetRefs.length !== 1) continue;
     const targetRef = targetRefs[0];
     if (targetRef === undefined) continue;
@@ -550,12 +548,10 @@ export function documentPatternTransformSceneRequests(
       )?.value;
     const count = magnitudeIn(parameterValue(0), "dimensionless", "1");
     if (count === null) continue;
-    const directionFromDatum = ():
-      | {
-          readonly origin: readonly [number, number, number];
-          readonly direction: readonly [number, number, number];
-        }
-      | null => {
+    const directionFromDatum = (): {
+      readonly origin: readonly [number, number, number];
+      readonly direction: readonly [number, number, number];
+    } | null => {
       const datumRef = datumRefs[0];
       if (datumRef === undefined || datumRef.kind !== "datum") return null;
       const resolved = resolveSessionDatumAxis(document, datumRef.id);
@@ -585,10 +581,7 @@ export function documentPatternTransformSceneRequests(
           path.value.path,
           sweepPathTotalLength(path.value.path),
         ).point;
-        const run: [number, number] = [
-          end[0] - start[0],
-          end[1] - start[1],
-        ];
+        const run: [number, number] = [end[0] - start[0], end[1] - start[1]];
         const norm = Math.hypot(run[0], run[1]);
         if (norm === 0) continue;
         pattern = {
@@ -621,11 +614,7 @@ export function documentPatternTransformSceneRequests(
           axisOrigin: axis.origin,
         };
       } else {
-        const axisIndex = magnitudeIn(
-          parameterValue(2),
-          "dimensionless",
-          "1",
-        );
+        const axisIndex = magnitudeIn(parameterValue(2), "dimensionless", "1");
         const axis: readonly [number, number, number] | undefined =
           axisIndex === 1
             ? [1, 0, 0]
