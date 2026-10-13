@@ -41,6 +41,7 @@ import {
   occtRankDuplicateNames,
   occtShapeTopology,
 } from "./occt-topology";
+import { untracked } from "./test-support";
 
 let runtime: OcctRuntime;
 let oc: OpenCascadeInstance;
@@ -900,10 +901,12 @@ describe("Phase N1: history-based names replace the allocation hash", () => {
     ).toEqual(full);
   });
 
-  it("keeps the legacy hash schema for solids whose history is not tracked yet", () => {
+  it("keeps the legacy hash schema for solids no history names (a BREP import)", () => {
     const kernel = occtKernelFromRuntime(runtime);
+    const solid = untracked(kernel, boxSolid(kernel, 3, 3, 3));
+    // Phase N2: a transform carries what it is given — here, no names.
     const moved = unwrapKernelResult(
-      kernel.transform(boxSolid(kernel, 3, 3, 3), {
+      kernel.transform(solid, {
         x: length(1),
         y: length(0),
         z: length(0),

@@ -340,9 +340,23 @@ export type KernelResult<T> = ParseResult<T, KernelError>;
  * with it (`<featureId>/+X`, `<featureId>/side/0`), so names stay unique
  * across a document's features and never read a dimension. Absent, the
  * kernel prefixes with the operation's own name (`box`, `extrude`, …).
+ * The Phase N2 edge/face features name the faces they CREATE with it
+ * (`<featureId>/fillet/<edge name>`, `<featureId>/inner/<face name>`).
  */
 export interface FeatureNamingInput {
   readonly featureId?: string;
+}
+
+/**
+ * The pattern instance a `transform` places (Phase N2b): the moved copy's
+ * faces are renamed `<featureId>/instance/<index>/<face name>`, so the
+ * copies of one pattern keep distinct, rebuild-stable names (the seed
+ * instance is never transformed and keeps its own). Kernels without
+ * persistent topology ignore it.
+ */
+export interface PatternInstanceNamingInput {
+  readonly featureId: string;
+  readonly index: number;
 }
 
 /** Input of `createBox`: the box's extents along x, y, z (all positive). */
@@ -768,7 +782,7 @@ export type SweepPathSegmentInput =
  *   operation. `sweep` rejects with `kernel/unsupported-operation` — the
  *   honest structured answer, never a bad approximation.
  */
-export interface ProfileSweepInput {
+export interface ProfileSweepInput extends FeatureNamingInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly path: readonly SweepPathSegmentInput[];
   readonly placement: ProfilePlacementInput;
@@ -1185,7 +1199,7 @@ export interface ProfileLoftSectionInput {
  *   `kernel/unsupported-operation` — the honest structured answer, never
  *   a hand-rolled mesh in its place.
  */
-export interface ProfileLoftInput {
+export interface ProfileLoftInput extends FeatureNamingInput {
   readonly sections: readonly ProfileLoftSectionInput[];
   readonly placement: ProfilePlacementInput;
   /**
@@ -1265,7 +1279,7 @@ export interface ProfileLoftInput {
  *   (probed; booleans/extrusions/hulls/minkowski/expansions only).
  *   `fillet` rejects with `kernel/unsupported-operation`.
  */
-export interface FilletInput {
+export interface FilletInput extends FeatureNamingInput {
   /** The solid whose edges are rounded. */
   readonly target: KernelSolid;
   /**
@@ -1353,7 +1367,7 @@ export interface FilletInput {
  *   hulls, minkowski, expansions, modifiers only). `chamfer` rejects with
  *   `kernel/unsupported-operation`.
  */
-export interface ChamferInput {
+export interface ChamferInput extends FeatureNamingInput {
   /** The solid whose edges are beveled. */
   readonly target: KernelSolid;
   /**
@@ -1440,7 +1454,7 @@ export interface ChamferInput {
  *   internal helper — no face selection, no wall building). `shell`
  *   rejects with `kernel/unsupported-operation`.
  */
-export interface ShellInput {
+export interface ShellInput extends FeatureNamingInput {
   /** The solid to hollow. */
   readonly target: KernelSolid;
   /**
@@ -1499,7 +1513,7 @@ export interface ShellInput {
  *   its primitives. Every call answers `kernel/unsupported-operation`.
  * - JSCAD: `thicken: false` — the same verdict (no offsetting op).
  */
-export interface ThickenInput {
+export interface ThickenInput extends FeatureNamingInput {
   /** The solid to hollow into a closed shell. */
   readonly target: KernelSolid;
   /** The uniform wall thickness (strictly positive). */
@@ -1569,7 +1583,7 @@ export interface ThickenInput {
  *   no face identity to move; the mesh engines have no face selection at
  *   all), so every call answers `kernel/unsupported-operation`.
  */
-export interface MoveFaceInput {
+export interface MoveFaceInput extends FeatureNamingInput {
   /** The solid whose face moves. */
   readonly target: KernelSolid;
   /** The face to move, as the target's topology-snapshot face ordinal. */
@@ -1643,7 +1657,7 @@ export interface ReplaceFacePlaneInput {
  * - Fake / Manifold / JSCAD: `localFaceOps: false` — every call answers
  *   `kernel/unsupported-operation`.
  */
-export interface ReplaceFaceInput {
+export interface ReplaceFaceInput extends FeatureNamingInput {
   /** The solid whose face is replaced. */
   readonly target: KernelSolid;
   /** The face to replace, as the target's topology-snapshot face ordinal. */
@@ -1710,6 +1724,8 @@ export interface DeleteFaceInput {
  */
 export interface TransformInput extends TranslationInput {
   readonly rotation?: RotationInput;
+  /** Names the moved copy as one pattern instance (Phase N2b). */
+  readonly instance?: PatternInstanceNamingInput;
   /**
    * The optional UNIFORM scale factor (Phase 41): a strictly positive
    * dimensionless number. The transform maps `p ↦ s·R·p + t` — the scale
@@ -1823,7 +1839,7 @@ export type MirrorPlaneAxis = "x" | "y" | "z";
  *
  * The first Phase 26 operation every kernel implements honestly.
  */
-export interface MirrorInput {
+export interface MirrorInput extends FeatureNamingInput {
   /** The world axis the mirror plane is normal to (see the module doc). */
   readonly axis: MirrorPlaneAxis;
   /**

@@ -56,6 +56,7 @@ import {
 import { occtKernelFromRuntime } from "./occt-kernel";
 import { createOcctRuntime, type OcctRuntime } from "./occt-runtime";
 import { occtTopologyView } from "./occt-topology";
+import { untracked } from "./test-support";
 
 let runtime: OcctRuntime;
 
@@ -155,6 +156,15 @@ function drilledPlate(kernel: Kernel): KernelSolid {
   return unwrapKernelResult(kernel.subtract(plate, [bore]), "subtract");
 }
 
+/**
+ * The drilled plate with hash identities — the legacy regime the Phase 22
+ * repair scenarios below measure (since Phase N2 the boolean itself
+ * carries names; see {@link untracked}).
+ */
+function legacyPlate(kernel: Kernel): KernelSolid {
+  return untracked(kernel, drilledPlate(kernel));
+}
+
 /** The wall that splits the plate's top face: 2×20×4 at x ∈ [14,16], z ∈ [6,10]. */
 function wall(kernel: Kernel): KernelSolid {
   const raw = box(kernel, 2, 20, 4);
@@ -224,14 +234,14 @@ describe("minting and validity against the real kernel", () => {
     const snapshot = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
     expect(snapshot.kernelId).toBe("opencascade");
     expect(snapshot.persistentTopology).toBe(true);
-    // Phase N1: the kernel mints names and still understands hashes; the
-    // drilled plate is a subtract output (history not tracked yet), so its
-    // entities carry the legacy hash schema.
+    // Phase N1: the kernel mints names and still understands hashes;
+    // Phase N2: the subtract carries its operands' names through its
+    // history, so the drilled plate's entities are named.
     expect(snapshot.identitySchemas).toEqual([
       "occt-name/1",
       "occt-shape-hash-v1",
     ]);
-    expect(snapshot.entities[0]?.identity?.schema).toBe("occt-shape-hash-v1");
+    expect(snapshot.entities[0]?.identity?.schema).toBe("occt-name/1");
     expect(snapshot.entities).toHaveLength(7);
     for (const entity of snapshot.entities) {
       expect(entity.identity).not.toBeNull();
@@ -244,8 +254,8 @@ describe("minting and validity against the real kernel", () => {
 
   it("rebuild snapshots are identity-disjoint and geometry-identical", () => {
     const kernel = occtKernelFromRuntime(runtime);
-    const first = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
-    const second = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 2);
+    const first = snapshotOf(kernel, legacyPlate(kernel), drilledBody, 1);
+    const second = snapshotOf(kernel, legacyPlate(kernel), drilledBody, 2);
     const firstHashes = new Set(
       first.entities.map((entity) => entity.identity?.data.hash),
     );
@@ -388,7 +398,7 @@ describe("harmless change (translate tweak): identity dies, repair re-anchors", 
     if (!provenance.ok) throw new Error(provenance.error.message);
     expect(provenance.value.featurePath).toEqual([boxFeature, drillFeature]);
 
-    const v1 = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
+    const v1 = snapshotOf(kernel, legacyPlate(kernel), drilledBody, 1);
     const boreFace = faceByArea(v1, BORE_WALL_AREA);
     const minted = mintTopologyReference(
       v1,
@@ -403,7 +413,7 @@ describe("harmless change (translate tweak): identity dies, repair re-anchors", 
 
     // The harmless change: the same graph with the plate translated 5 mm.
     const moved = unwrapKernelResult(
-      kernel.transform(drilledPlate(kernel), {
+      kernel.transform(legacyPlate(kernel), {
         x: length(5),
         y: length(0),
         z: length(0),
@@ -460,7 +470,7 @@ describe("harmless change (translate tweak): identity dies, repair re-anchors", 
     const document = referenceDocument();
     const provenance = referenceProvenance(document, drilledBody);
     if (!provenance.ok) throw new Error(provenance.error.message);
-    const v1 = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
+    const v1 = snapshotOf(kernel, legacyPlate(kernel), drilledBody, 1);
     const minted = mintTopologyReference(
       v1,
       faceByArea(v1, BORE_WALL_AREA).ordinal,
@@ -470,7 +480,7 @@ describe("harmless change (translate tweak): identity dies, repair re-anchors", 
     if (!minted.ok) throw new Error(minted.error.message);
     // The rebuild: fresh identity, identical geometry — the reference
     // resolves missing and repairs by geometry.
-    const v2 = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 2);
+    const v2 = snapshotOf(kernel, legacyPlate(kernel), drilledBody, 2);
     const missing = resolveTopologyReference(minted.value, v2);
     if (!missing.ok) throw new Error(missing.error.message);
     expect(missing.value.validity.state).toBe("missing");
@@ -786,7 +796,7 @@ describe("Phase N1: history-based names survive the rebuild", () => {
     const kernel = occtKernelFromRuntime(runtime);
     const provenance = referenceProvenance(referenceDocument(), drilledBody);
     if (!provenance.ok) throw new Error(provenance.error.message);
-    const legacy = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
+    const legacy = snapshotOf(kernel, legacyPlate(kernel), drilledBody, 1);
     const minted = mintTopologyReference(legacy, 0, provenance.value, {
       id: createReferenceId("ref_legacy_hash"),
       kind: "face",

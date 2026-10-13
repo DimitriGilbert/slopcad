@@ -48,6 +48,97 @@
  * hash reference resolves to `missing` against named snapshots, never a
  * crash.
  *
+ * ## Names through topology-changing operations (Phase N2)
+ *
+ * One helper, {@link occtCarryFaceNames}, carries face names through a
+ * builder's history for every operation that tracks it: for each named
+ * input face `IsDeleted` drops the name, `Modified` keeps it (k images of a
+ * split become `name#0 … name#(k−1)`, ordered by body-relative centroid,
+ * then area), and faces the operation creates are named
+ * `<feature>/<role>/<source name>` from `Generated(source)`. Every
+ * multi-face history list — a split's `Modified` images, a created
+ * source's `Generated` faces, a loft column's span walls, a moved face's
+ * prism walls — takes its `#k` suffixes from that ONE geometric rule
+ * ({@link occtNameHistoryFaces}), never from builder-list order. Edges and
+ * vertices are re-derived from the carried face names exactly as in N1.
+ * The operations, and what each names:
+ *
+ * - Fuse / Cut / Common (`union`, `subtract`, `intersect`, folded
+ *   pairwise): both operands' names carried; the tool's surviving faces
+ *   keep the names its OWN feature gave them; deleted faces are dropped.
+ * - Transform (`BRepBuilderAPI_Transform`): every name preserved.
+ * - MakeFillet (`fillet`): `<feature>/fillet/<edge name>` per blended
+ *   edge, `<feature>/fillet/<vertex name>` per corner patch.
+ * - MakeChamfer (`chamfer`): `<feature>/chamfer/<edge name>`, corner
+ *   patches `<feature>/chamfer/<vertex name>`.
+ * - MakeThickSolid (`shell`): kept faces keep their names, their offset
+ *   walls are `<feature>/inner/<face name>`; a removed face's name is
+ *   DROPPED (its references resolve `missing`), and the rim the engine
+ *   reports as that face's trimmed `Modified` image is
+ *   `<feature>/rim/<face name>`.
+ *
+ * Phase N2b — face ops, patterns and the remaining builders:
+ *
+ * - Transform as a pattern instance (`patternFeature`, `patternFace`,
+ *   `patternPath`, the linear/polar patterns): the seed keeps its names,
+ *   each placed copy is `<feature>/instance/<index>/<face name>` (the
+ *   instance ordinal, stable across skips), then the fuse carries them.
+ * - Transform as a reflection (`mirror`, both the direct and the oblique
+ *   datum route): the copy is `<feature>/mirror/<face name>`.
+ * - MakePrism + Fuse/Cut (`moveFace`, `replaceFace`'s parallel regime):
+ *   the moved face keeps its name, the walls it sweeps are
+ *   `<feature>/side/<edge name>`, its consumed start cap
+ *   `<feature>/base/<face name>`.
+ * - Covering-box Cut (`replaceFace`'s oblique regime): the plane's new face
+ *   is `<feature>/plane/<face name>`; two surviving tool faces would share
+ *   that name, so the result is then unnamed instead.
+ * - Composite tool bodies: every bridge composition that builds a tool
+ *   body names it under its OWN feature, so its faces never take the
+ *   kernel's operation-default names (`extrude/…`, `revolve/…`) that two
+ *   features would share. The Splitter-style covering cut (`split`) and
+ *   the flat `hole`'s bore prism are `<feature>/tool/…`; the structured
+ *   `hole`'s per-position revolve tools are `<feature>/tool/<i>/…` (its
+ *   threaded ridge is the unnamed `helixSweep` below); the `rib`'s two
+ *   half-extrudes are `<feature>/up/…` and `<feature>/down/…`. The
+ *   subtract / union carries them.
+ * - MakePipeShell (`sweep`): `<feature>/side/<segment key>` per profile
+ *   edge, caps `<feature>/start` / `<feature>/end` (solid sweeps only).
+ * - ThruSections (`loft`): span s's ruled wall from segment k is
+ *   `<feature>/side/<s>/<key>`, caps `<feature>/start` / `<feature>/end`;
+ *   a repartitioned (unequal-count) collection whose walls no section edge
+ *   reports is unnamed.
+ * - DraftAngle (tapered `extrude`): every face keeps its name (the engine
+ *   reports drafted walls as `Generated` by their face, caps `Modified`).
+ * - MakeThickSolid + Cut (`thicken`): the outer skin keeps its names, the
+ *   cavity walls are `<feature>/inner/<face name>`.
+ * - `deleteFace` declines structurally on this backend (no result, nothing
+ *   to name).
+ *
+ * The operations that report no history over the faces they rebuild, and
+ * whose output therefore stays UNNAMED (every one of them, by name):
+ *
+ * - Solid builders: `helixSweep` (the meridian-station helix sweep) and
+ *   `sweepWire` (the attached-profile sweep).
+ * - Sheet construction: `createSheet` (every surface kind).
+ * - Sheet trimming: `trimSheet`, on BOTH routes — the Splitter route (the
+ *   kept faces are re-sewn) and the Common / Cut route (`foldBoolean`
+ *   without operand names); `untrimSheet`; `extendSheet`.
+ * - Sheet stitching: `knit` (the sewn shell and the solid it closes into)
+ *   and `unstitch` (the loose-face compound).
+ * - Sheet surfacing: `fillPatch`, `offsetSheet`, and `thickenSheet` (the
+ *   sheet-to-solid thickening; the solid `thicken` above is named).
+ * - Sheet face ops: `replaceFaceWithSheet` and `deleteFaceKeepSurface`
+ *   (both its remainder and its extracted face) — the sheet variants of
+ *   the named `replaceFace` / the declining `deleteFace`.
+ * - `section`: the cut solid it returns beside the section measure.
+ *
+ * An operation that cannot report history (the operations listed above as
+ * unnamed, `importBrep` and `importStep`), an unnamed operand, or a result
+ * face no history entry claims leaves the output UNNAMED: its snapshot reports
+ * hash identities, and references into it fall back to cad-core's
+ * `repairTopologyReference` — an explicit `repaired` state, refused when
+ * geometric twins make it ambiguous.
+ *
  * All measures use exact BREP integration (`UseTriangulation = false`), in
  * the kernel's canonical millimetres, and every embind wrapper is deleted
  * exactly once on the success path.
@@ -467,18 +558,52 @@ export function occtListShapes(
   return found;
 }
 
+/** The ordering key of one face: body-relative centroid, then area. */
+function faceKeyOf(
+  oc: OpenCascadeInstance,
+  face: TopoDS_Shape,
+  bodyCentroid: { readonly x: number; readonly y: number; readonly z: number },
+): number[] {
+  const props = new oc.GProp_GProps();
+  try {
+    oc.BRepGProp.SurfaceProperties(face, props, true, false);
+    const com = props.CentreOfMass();
+    try {
+      return [
+        com.X() - bodyCentroid.x,
+        com.Y() - bodyCentroid.y,
+        com.Z() - bodyCentroid.z,
+        props.Mass(),
+      ];
+    } finally {
+      com.delete();
+    }
+  } finally {
+    props.delete();
+  }
+}
+
 /**
- * Names the faces of one history list: a single face is `name`, several
- * rank `name#<k>` in the builder's own (deterministic) order.
+ * Names the faces of one history list (the one suffix rule every history
+ * reader shares, N1 constructors and N2 carries alike): a single face is
+ * `name`; several are `name#0 … name#(k−1)`, ranked by their centroid
+ * relative to `body`'s centre of mass, then area
+ * ({@link occtRankDuplicateNames}: images no geometry separates share one
+ * name — the resolver's `ambiguous`, never a guess).
  */
 export function occtNameHistoryFaces(
+  oc: OpenCascadeInstance,
+  body: TopoDS_Shape,
   faces: readonly TopoDS_Shape[],
   name: string,
 ): OcctNamedFace[] {
-  return faces.map((face, index) => ({
-    face,
-    name: faces.length === 1 ? name : `${name}#${String(index)}`,
-  }));
+  if (faces.length < 2) return faces.map((face) => ({ face, name }));
+  const centroid = bodyCentroidOf(oc, body);
+  const ranked = occtRankDuplicateNames(
+    faces.map(() => name),
+    faces.map((face) => faceKeyOf(oc, face, centroid)),
+  );
+  return faces.map((face, index) => ({ face, name: ranked[index] ?? name }));
 }
 
 /** Whether `shape` holds a sub-shape `IsSame` as `part`. */
@@ -506,6 +631,167 @@ export function occtContainsSame(
 /** Frees the history faces a builder-history reader collected. */
 export function occtDisposeHistory(history: readonly OcctNamedFace[]): void {
   for (const entry of history) entry.face.delete();
+}
+
+// ---------------------------------------------------------------------------
+// Names carried through topology-changing operations (Phase N2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The builder-history surface every topology-changing OCCT builder exposes
+ * (`BRepBuilderAPI_MakeShape` and its subclasses: the booleans,
+ * `BRepBuilderAPI_Transform`, `BRepFilletAPI_MakeFillet/MakeChamfer`,
+ * `BRepOffsetAPI_MakeThickSolid`): embind classes satisfy it without casts.
+ */
+export interface OcctHistoryBuilder {
+  Modified(shape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Generated(shape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  IsDeleted(shape: TopoDS_Shape): boolean;
+}
+
+/** One operand of a history step: its shape and its face names (or none). */
+export interface OcctNamedInput {
+  readonly shape: TopoDS_Shape;
+  readonly faceNames: OcctFaceNames | null;
+}
+
+/**
+ * A source of faces the operation CREATES, and the name they carry
+ * (`<feature>/<role>/<source name>`): read from the builder's `Generated`
+ * list (a fillet's face from its edge, a shell's inner wall from its face)
+ * or its `Modified` list (a shell's rim — the trimmed image of a removed
+ * face whose own name the shell drops).
+ */
+export interface OcctCreatedSource {
+  readonly source: TopoDS_Shape;
+  readonly name: string;
+  readonly history: "generated" | "modified";
+}
+
+/** Options of {@link occtCarryFaceNames}. */
+export interface OcctCarryOptions {
+  /** Faces created by the operation, named from their source. */
+  readonly created?: readonly OcctCreatedSource[];
+  /**
+   * Input faces whose names the operation drops explicitly, like
+   * `IsDeleted` faces (a shell's removed faces: the engine reports their
+   * rim as `Modified`, the shell names it as a created face instead).
+   */
+  readonly dropped?: readonly TopoDS_Shape[];
+}
+
+/**
+ * Carries face names through one builder step (Phase N2) — the one naming
+ * helper every topology-changing operation shares. For each named input
+ * face: `IsDeleted` (or listed in `dropped`) drops the name; an empty
+ * `Modified` keeps the face itself under its name; one image keeps the
+ * name; k images (a split) are `name#0 … name#(k−1)`, ranked by their
+ * centroid relative to the RESULT's centre of mass, then area
+ * ({@link occtNameHistoryFaces}). Every created source's
+ * images take the source's name under the same split rule. A result face
+ * no history entry claims, or an unnamed input, leaves the result unnamed
+ * (null) — its snapshot reports hash identities and references into it
+ * fall back to `repairTopologyReference`.
+ */
+export function occtCarryFaceNames(
+  oc: OpenCascadeInstance,
+  builder: OcctHistoryBuilder,
+  result: TopoDS_Shape,
+  inputs: readonly OcctNamedInput[],
+  options: OcctCarryOptions = {},
+): OcctFaceNames | null {
+  const FACE = oc.TopAbs_ShapeEnum.TopAbs_FACE;
+  if (inputs.some((input) => input.faceNames === null)) return null;
+  const history: OcctNamedFace[] = [];
+  const pushImages = (images: TopoDS_Shape[], name: string): void => {
+    history.push(...occtNameHistoryFaces(oc, result, images, name));
+  };
+  try {
+    for (const input of inputs) {
+      const names = input.faceNames ?? [];
+      const faces = occtDistinctSubShapes(oc, input.shape, FACE);
+      const kept = new Set<TopoDS_Shape>();
+      try {
+        if (faces.length !== names.length) return null;
+        faces.forEach((face, index) => {
+          const name = names[index] ?? "";
+          if (
+            builder.IsDeleted(face) ||
+            (options.dropped ?? []).some((dropped) => dropped.IsSame(face))
+          ) {
+            return;
+          }
+          const modified = builder.Modified(face);
+          const images = occtListShapes(oc, modified, FACE);
+          modified.delete();
+          if (images.length === 0) {
+            kept.add(face);
+            history.push({ face, name });
+          } else {
+            pushImages(images, name);
+          }
+        });
+      } finally {
+        for (const face of faces) if (!kept.has(face)) face.delete();
+      }
+    }
+    for (const created of options.created ?? []) {
+      const list =
+        created.history === "generated"
+          ? builder.Generated(created.source)
+          : builder.Modified(created.source);
+      const images = occtListShapes(oc, list, FACE);
+      list.delete();
+      pushImages(images, created.name);
+    }
+    return occtNameFaces(oc, result, occtHistoryFaceNamer(history));
+  } finally {
+    occtDisposeHistory(history);
+  }
+}
+
+/** One entity of a named shape and its snapshot name. */
+export interface OcctNamedEntity {
+  readonly shape: TopoDS_Shape;
+  readonly name: string;
+}
+
+/**
+ * The named entities of one kind on a named shape, in snapshot order: the
+ * sources a feature names its created faces after (`<feature>/fillet/<edge
+ * name>`). Null when the shape is unnamed (its snapshot carries hashes).
+ * The returned shapes are caller-owned.
+ */
+export function occtNamedEntitiesOf(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  kind: TopologyReferenceKind,
+  faceNames: OcctFaceNames | null,
+): OcctNamedEntity[] | null {
+  if (faceNames === null) return null;
+  const entities = occtShapeTopology(oc, shape, [kind], faceNames);
+  const names: string[] = [];
+  for (const entity of entities) {
+    const name = entity.identity?.data.name;
+    if (
+      entity.identity?.schema !== OCCT_NAME_IDENTITY_SCHEMA ||
+      typeof name !== "string"
+    ) {
+      return null;
+    }
+    names.push(name);
+  }
+  const resolved = occtEntitiesAtOrdinals(
+    oc,
+    shape,
+    kind,
+    entities.map((entity) => entity.ordinal),
+    (occurrence) => occurrence,
+  );
+  return resolved.occurrences.map((occurrence, index) => ({
+    shape: occurrence,
+    name: names[index] ?? "",
+  }));
 }
 
 /** Body-relative point of a vertex, as a plain triple. */

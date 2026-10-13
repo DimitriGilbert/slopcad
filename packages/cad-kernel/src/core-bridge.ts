@@ -1509,6 +1509,7 @@ function runDatumPlaneMirror(
     const mirrored = kernel.mirror(solid, {
       axis: plan.axis,
       offset: lengthValue(plan.offsetMm),
+      featureId: feature.id,
     });
     return mirrored.ok
       ? { ok: true, solid: mirrored.value }
@@ -1551,6 +1552,7 @@ function runDatumPlaneMirror(
   const reflected = kernel.mirror(rotated.value, {
     axis: "x",
     offset: lengthValue(0),
+    featureId: feature.id,
   });
   if (!reflected.ok) {
     return operationFailure(
@@ -2514,14 +2516,21 @@ function runEdgeCutOperation(
   const cut = lengthValue(size.mm);
   const result =
     kind === "fillet"
-      ? kernel.fillet({ target: target.solid, edges: ordinals, radius: cut })
+      ? kernel.fillet({
+          featureId: feature.id,
+          target: target.solid,
+          edges: ordinals,
+          radius: cut,
+        })
       : kind === "chamfer"
         ? kernel.chamfer({
+            featureId: feature.id,
             target: target.solid,
             edges: ordinals,
             distance: cut,
           })
         : kernel.shell({
+            featureId: feature.id,
             target: target.solid,
             faces: ordinals,
             thickness: cut,
@@ -3112,6 +3121,7 @@ function runPatternOperation(
     for (let i = 1; i < count; i += 1) {
       const offset = i * spacing.mm;
       const placed = kernel.transform(target.solid, {
+        instance: { featureId: feature.id, index: i },
         x: lengthValue(offset * dx),
         y: lengthValue(offset * dy),
         z: lengthValue(offset * dz),
@@ -3212,6 +3222,7 @@ function runPatternOperation(
           );
         }
         const placed = kernel.transform(centered.value, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(axisOrigin[0]),
           y: lengthValue(axisOrigin[1]),
           z: lengthValue(axisOrigin[2]),
@@ -3262,6 +3273,7 @@ function runPatternOperation(
             : [0, 0, 1];
       for (let i = 1; i < count; i += 1) {
         const placed = kernel.transform(target.solid, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(0),
           y: lengthValue(0),
           z: lengthValue(0),
@@ -3653,6 +3665,7 @@ function runPatternFeatureOperation(
         continue;
       }
       const placed = kernel.transform(solid, {
+        instance: { featureId: feature.id, index: ordinal },
         x: lengthValue(offset[0]),
         y: lengthValue(offset[1]),
         z: lengthValue(offset[2]),
@@ -3888,6 +3901,7 @@ function runPatternPathOperation(
     const translation: DatumVec3 = [station.point[0], 0, station.point[1]];
     const placed = tangentFollow
       ? kernel.transform(target.solid, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(translation[0]),
           y: lengthValue(translation[1]),
           z: lengthValue(translation[2]),
@@ -3904,6 +3918,7 @@ function runPatternPathOperation(
           })(),
         })
       : kernel.transform(target.solid, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(translation[0]),
           y: lengthValue(translation[1]),
           z: lengthValue(translation[2]),
@@ -4283,6 +4298,7 @@ function runPatternFaceOperation(
       offset[0] * xAxis[2] + offset[1] * yAxis[2],
     ];
     const placed = kernel.transform(target.solid, {
+      instance: { featureId: feature.id, index: ordinal },
       x: lengthValue(world[0]),
       y: lengthValue(world[1]),
       z: lengthValue(world[2]),
@@ -4557,6 +4573,7 @@ function runMirrorOperation(
   const result = kernel.mirror(target.solid, {
     axis,
     offset: lengthValue(offset.mm),
+    featureId: feature.id,
   });
   return result.ok
     ? { ok: true, solid: result.value }
@@ -4867,8 +4884,11 @@ function executeHoleCut(
 ): OperationOutcome {
   // The tool: a one-segment extruded circle (see HoleCutPlan — the extrude
   // op's own placement carries the axis orientation every kernel
-  // implements, so no rotation-gated transform is involved).
+  // implements, so no rotation-gated transform is involved). Phase N2: the
+  // tool is named under the hole feature (`<feature>/tool/...`), so the
+  // bore wall it leaves carries a feature-scoped, rebuild-stable name.
   const tool = kernel.extrude({
+    featureId: `${feature.id}/tool`,
     loop: [{ kind: "circle", center: [0, 0], radius: plan.toolRadiusMm }],
     height: lengthValue(plan.toolHeightMm),
     direction: 1,
@@ -5314,10 +5334,16 @@ function runStructuredHoleOperation(
   }
 
   // The composed cut: one tool solid per position (plus the threaded
-  // type's ridge sweep), ONE subtract, the measured post-condition.
+  // type's ridge sweep), ONE subtract, the measured post-condition. Phase
+  // N2: each position's tool is named under the hole feature and its
+  // position index (`<feature>/tool/<i>/...`), so the faces the cut leaves
+  // never share a name with another hole's or another position's.
   const tools: KernelSolid[] = [];
-  for (const position of planned.plan.positions) {
-    const tool = kernel.revolve(position.revolveTool);
+  for (const [index, position] of planned.plan.positions.entries()) {
+    const tool = kernel.revolve({
+      ...position.revolveTool,
+      featureId: `${feature.id}/tool/${index}`,
+    });
     if (!tool.ok) {
       return operationFailure(feature, tool.error.code, tool.error.message);
     }
@@ -5532,6 +5558,7 @@ function runSweepOperation(
     };
   }
   const sweepInput: ProfileSweepInput = {
+    featureId: feature.id,
     loop: resolvedProfile.value.loop,
     path: resolvedPath.value.path,
     placement: resolvedProfile.value.placement,
@@ -5668,6 +5695,7 @@ function runLoftOperation(
     });
   }
   const loftInput: ProfileLoftInput = {
+    featureId: feature.id,
     sections,
     placement: placement ?? {
       rotation: { axis: [0, 0, 1], angle: angleValue(0, "rad") },
@@ -6361,7 +6389,11 @@ function runRibOperation(
     };
   }
   const half = thickness.mm / 2;
+  // Phase N2: the two halves are named under the rib feature with distinct
+  // roles (`<feature>/up/...`, `<feature>/down/...`), so their faces carry
+  // feature-scoped names that never collide through the union.
   const ribUp = kernel.extrude({
+    featureId: `${feature.id}/up`,
     loop: resolvedProfile.value.loop,
     height: lengthValue(half),
     direction: 1,
@@ -6371,6 +6403,7 @@ function runRibOperation(
     return operationFailure(feature, ribUp.error.code, ribUp.error.message);
   }
   const ribDown = kernel.extrude({
+    featureId: `${feature.id}/down`,
     loop: resolvedProfile.value.loop,
     height: lengthValue(half),
     direction: -1,
@@ -6575,6 +6608,7 @@ function runThickenOperation(
     };
   }
   const result = kernel.thicken({
+    featureId: feature.id,
     target: target.solid,
     thickness: lengthValue(thickness.mm),
   });
@@ -6723,7 +6757,11 @@ function runSplitOperation(
     keepSide: sideValue.value,
     bounds: measured.value,
   });
+  // Phase N2b: the covering tool is named under the split feature
+  // (`<feature>/tool/side/<i>`, `<feature>/tool/start`), so the cut's
+  // new face carries a rebuild-stable name through the subtract.
   const tool = kernel.extrude({
+    featureId: `${feature.id}/tool`,
     loop: plan.toolLoop,
     height: lengthValue(plan.toolHeightMm),
     direction: 1,
@@ -7059,6 +7097,7 @@ function runLocalFaceOperation(
     const distance = readers.lengthParameter(distanceRef, "distance");
     if (!distance.ok) return { ok: false, diagnostic: distance.diagnostic };
     const result = kernel.moveFace({
+      featureId: feature.id,
       target: target.solid,
       face: face.ordinal,
       direction,
@@ -7100,6 +7139,7 @@ function runLocalFaceOperation(
       );
     }
     const result = kernel.replaceFace({
+      featureId: feature.id,
       target: target.solid,
       face: face.ordinal,
       plane: {

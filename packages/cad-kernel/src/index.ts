@@ -61,6 +61,7 @@ export type {
   DeleteFaceInput,
   DeleteFaceKeepInput,
   DeleteFaceKeepResult,
+  PatternInstanceNamingInput,
   ProfileExtrudeInput,
   ProfileLoftInput,
   ProfileLoftSectionInput,
