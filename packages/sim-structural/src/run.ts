@@ -197,6 +197,12 @@ export interface StructuralRunReport {
   readonly maxDeflectionM: number;
   /** The largest element von Mises stress, Pa. */
   readonly vonMisesMaxPa: number;
+  /**
+   * The voxelized solid's total mass, kg — Σ occupied cells × cell
+   * volume × the cell's material density (Phase 70's objective material:
+   * the staircase-honest mass of the SAME grid the stresses live on).
+   */
+  readonly massKg: number;
   /** The overall factor of safety (min over yield-bearing materials). */
   readonly factorOfSafety?: number;
   /** The per-material safety views, yield-bearing materials only. */
@@ -848,11 +854,17 @@ export function runStructuralScenario(
     hexDMatrix(material.youngsModulusPa, material.poissonRatio),
   );
   const elementDisplacement = new Float64Array(24);
+  // The voxelized mass (deterministic accumulation in element order):
+  // one occupied cell's volume × its material's density per element.
+  const cellVolumeM3 =
+    (mesh.spacingM[0] ?? 1) * (mesh.spacingM[1] ?? 1) * (mesh.spacingM[2] ?? 1);
+  let massKg = 0;
   for (let element = 0; element < mesh.elementCount; element += 1) {
     const gridNode = mesh.gridNodeOfElement[element] ?? 0;
     const materialIndex = scenario.cellMaterialIndex[gridNode] ?? 0;
     const material = materials[materialIndex - 1];
     if (material === undefined) continue;
+    massKg += cellVolumeM3 * material.densityKgPerM3;
     let cx = 0;
     let cy = 0;
     let cz = 0;
@@ -992,6 +1004,7 @@ export function runStructuralScenario(
       vonMisesField,
       maxDeflectionM,
       vonMisesMaxPa,
+      massKg,
       ...(factorOfSafety === undefined ? {} : { factorOfSafety }),
       materialSafety: Object.freeze(materialSafety),
     }),
@@ -1030,6 +1043,11 @@ export function structuralRunSimResult(
       name: "von-mises-max",
       dimension: "pressure",
       value: report.vonMisesMaxPa,
+    },
+    {
+      name: "mass",
+      dimension: "mass",
+      value: report.massKg,
     },
     {
       name: "solver-iterations",

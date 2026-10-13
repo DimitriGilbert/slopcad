@@ -61,7 +61,11 @@
  * fields. Every message survives `value → JSON → value` unchanged.
  */
 
-import type { SimEngineFieldChunk, SimEngineProgress } from "./engine";
+import type {
+  SimEngineFieldChunk,
+  SimEngineOptimizationGeneration,
+  SimEngineProgress,
+} from "./engine";
 import type { SimWorkerOperationId } from "./sim-worker-operations";
 import type {
   SimWorkerOperationInput,
@@ -190,9 +194,24 @@ export interface SerializedSimFieldChunkNotification {
   readonly values: string;
 }
 
+/**
+ * The wire form of an optimization-generation notification (Phase 70a):
+ * the best-of-generation notice an optimization run publishes after each
+ * generation settles — pure JSON numbers, no binary payload.
+ */
+export interface SerializedSimOptimizationGenerationNotification {
+  readonly kind: "optimization-generation";
+  readonly generation: number;
+  readonly evaluated: number;
+  readonly budget: number;
+  readonly best?: readonly number[];
+}
+
 /** The wire payload of a notification message. */
 export type SerializedSimWorkerNotification =
-  SerializedSimProgressNotification | SerializedSimFieldChunkNotification;
+  | SerializedSimProgressNotification
+  | SerializedSimFieldChunkNotification
+  | SerializedSimOptimizationGenerationNotification;
 
 /** The decoded progress notification: the engine's step counter, tagged. */
 export interface SimProgressNotification extends SimEngineProgress {
@@ -204,9 +223,16 @@ export interface SimFieldChunkNotification extends SimEngineFieldChunk {
   readonly kind: "field-chunk";
 }
 
+/** The decoded optimization-generation notification: the notice, tagged. */
+export interface SimOptimizationGenerationNotification extends SimEngineOptimizationGeneration {
+  readonly kind: "optimization-generation";
+}
+
 /** The typed notification payload a host consumes after decode. */
 export type SimWorkerNotification =
-  SimProgressNotification | SimFieldChunkNotification;
+  | SimProgressNotification
+  | SimFieldChunkNotification
+  | SimOptimizationGenerationNotification;
 
 /** One decoded notification with the request it streams for. */
 export interface SimNotificationDelivery {
@@ -343,6 +369,30 @@ export function createSimFieldChunkNotification(
   };
 }
 
+/**
+ * Builds an optimization-generation notification for the request bearing
+ * `requestId` (Phase 70a): the generation counter, the cumulative
+ * evaluation count, the budget, and — when the generation produced one —
+ * the best candidate's raw objective vector.
+ */
+export function createSimOptimizationGenerationNotification(
+  requestId: SimWorkerRequestId,
+  notice: SimEngineOptimizationGeneration,
+): SimWorkerNotificationMessage {
+  return {
+    protocolVersion: SIM_WORKER_PROTOCOL_VERSION,
+    kind: "notification",
+    requestId,
+    notification: {
+      kind: "optimization-generation",
+      generation: notice.generation,
+      evaluated: notice.evaluated,
+      budget: notice.budget,
+      ...(notice.best === undefined ? {} : { best: [...notice.best] }),
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
@@ -415,6 +465,68 @@ function finiteTriple(
 
 /** Sanity budget for one chunk's decoded value count. */
 const CHUNK_VALUE_BUDGET = 100_000_000;
+
+/** The most objectives one optimization-generation notice may carry. */
+const OPTIMIZATION_NOTICE_MAX_OBJECTIVES = 8;
+
+function parseOptimizationGenerationNotification(
+  input: Record<string, unknown>,
+): ParseOutcome<SerializedSimOptimizationGenerationNotification> {
+  if (!isNonNegativeInteger(input.generation)) {
+    return malformed(
+      "An optimization-generation notification's generation must be a non-negative integer.",
+      input.generation,
+    );
+  }
+  if (!isNonNegativeInteger(input.evaluated)) {
+    return malformed(
+      "An optimization-generation notification's evaluated must be a non-negative integer.",
+      input.evaluated,
+    );
+  }
+  if (!isNonNegativeInteger(input.budget)) {
+    return malformed(
+      "An optimization-generation notification's budget must be a non-negative integer.",
+      input.budget,
+    );
+  }
+  let best: readonly number[] | undefined;
+  if (input.best !== undefined) {
+    if (!Array.isArray(input.best)) {
+      return malformed(
+        "An optimization-generation notification's best must be an array of finite numbers.",
+        input.best,
+      );
+    }
+    if (input.best.length > OPTIMIZATION_NOTICE_MAX_OBJECTIVES) {
+      return malformed(
+        "An optimization-generation notification's best carries more than the objective budget.",
+        input.best.length,
+      );
+    }
+    const values: number[] = [];
+    for (const value of input.best) {
+      if (!isFiniteNumber(value)) {
+        return malformed(
+          "An optimization-generation notification's best must be an array of finite numbers.",
+          input.best,
+        );
+      }
+      values.push(value);
+    }
+    best = values;
+  }
+  return {
+    ok: true,
+    value: {
+      kind: "optimization-generation",
+      generation: input.generation,
+      evaluated: input.evaluated,
+      budget: input.budget,
+      ...(best === undefined ? {} : { best }),
+    },
+  };
+}
 
 function parseProgressNotification(
   input: Record<string, unknown>,
@@ -562,8 +674,11 @@ function parseNotificationPayload(
   }
   if (input.kind === "progress") return parseProgressNotification(input);
   if (input.kind === "field-chunk") return parseFieldChunkNotification(input);
+  if (input.kind === "optimization-generation") {
+    return parseOptimizationGenerationNotification(input);
+  }
   return malformed(
-    'A notification payload kind must be "progress" or "field-chunk".',
+    'A notification payload kind must be "progress", "field-chunk", or "optimization-generation".',
     input.kind,
   );
 }
@@ -733,6 +848,23 @@ export function decodeSimWorkerNotification(
             ? {}
             : { totalSteps: notification.totalSteps }),
           step: notification.step,
+        },
+      },
+    };
+  }
+  if (notification.kind === "optimization-generation") {
+    return {
+      ok: true,
+      value: {
+        requestId: message.requestId,
+        notification: {
+          kind: "optimization-generation",
+          generation: notification.generation,
+          evaluated: notification.evaluated,
+          budget: notification.budget,
+          ...(notification.best === undefined
+            ? {}
+            : { best: [...notification.best] }),
         },
       },
     };

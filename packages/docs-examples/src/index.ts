@@ -124,6 +124,11 @@ export {
   runSimStructuralExample,
   type SimStructuralExampleSummary,
 } from "./sim/structural";
+export {
+  runSimStudyBracketExample,
+  type SimStudyBracketSummary,
+} from "./sim/study";
+export { runSimStudyFanExample, type SimStudyFanSummary } from "./sim/study";
 
 // -- CAD JSX (authoring) ------------------------------------------------------
 

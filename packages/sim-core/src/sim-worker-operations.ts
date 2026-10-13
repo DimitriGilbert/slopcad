@@ -87,6 +87,7 @@ export const SIM_WORKER_OPERATION_IDS = [
   "sim.compile",
   "sim.run",
   "sim.finalize",
+  "sim.optimize",
 ] as const;
 
 /** An operation the sim worker protocol knows how to carry. */
@@ -185,11 +186,87 @@ export interface WorkerSimFinalizeResult {
   readonly histories: readonly SimHistorySeries[];
 }
 
+/**
+ * Input of `sim.optimize` (Phase 70a): the study's serialized record, the
+ * serialized scenario every candidate runs, the document's serialized
+ * parameter table (the genome's address space and the constraint
+ * environment), and the compile context — the `sim.compile` field family
+ * (motor records the discrete genes choose among, optional body bounds,
+ * tessellation, materials, per-body tessellations). The `study`,
+ * `scenario`, and `parameters` records cross VERBATIM; the executor
+ * re-validates every field through the cad-core parse boundaries (this
+ * codec demands only their presence, the compile precedent). Per-candidate
+ * geometry re-drive services are a HOST-side injection on the executor,
+ * never wire data: the worker envelope carries document context only.
+ */
+export interface WorkerSimOptimizeInput {
+  readonly study: unknown;
+  readonly scenario: unknown;
+  readonly parameters: unknown;
+  readonly motors?: readonly unknown[];
+  readonly bodyBounds?: readonly SimBodyBoundsMm[];
+  readonly tessellation?: unknown;
+  readonly materials?: readonly unknown[];
+  readonly bodyTessellations?: readonly {
+    readonly bodyId: string;
+    readonly tessellation: unknown;
+  }[];
+}
+
+/**
+ * One evaluated candidate of an optimization campaign (Phase 70a): the
+ * genome's authored form (parameter ids with canonical-magnitude values,
+ * discrete record choices), the outcome — raw objective vector in the
+ * study's objective order, or the `sim/*` decline code — and the rank the
+ * generation's non-dominated sort assigned (0 = the best front; declined
+ * candidates carry the worst rank).
+ */
+export interface WorkerSimOptimizeCandidate {
+  /** The candidate's evaluation index within the whole campaign. */
+  readonly index: number;
+  readonly genomeParameters: readonly {
+    readonly parameterId: string;
+    readonly value: number;
+  }[];
+  readonly genomeRecords: readonly {
+    readonly recordKind: string;
+    readonly recordId: string;
+  }[];
+  readonly status: "ok" | "declined";
+  readonly objectives: readonly number[];
+  readonly declineCode?: string;
+  readonly rank: number;
+}
+
+/** One generation's logged population (Phase 70a): survivors in rank order. */
+export interface WorkerSimOptimizeGeneration {
+  readonly generation: number;
+  /** Cumulative candidate evaluations after this generation settled. */
+  readonly evaluations: number;
+  readonly candidates: readonly WorkerSimOptimizeCandidate[];
+}
+
+/**
+ * Result of `sim.optimize`: the deterministic campaign — the family key,
+ * every generation's surviving population, the evaluation/decline counts,
+ * and the final Pareto front (the non-dominated candidates of the last
+ * population, rank 0).
+ */
+export interface WorkerSimOptimizeResult {
+  /** The campaign's deterministic family key (study content + seed hash). */
+  readonly campaign: string;
+  readonly generations: readonly WorkerSimOptimizeGeneration[];
+  readonly evaluations: number;
+  readonly declined: number;
+  readonly pareto: readonly WorkerSimOptimizeCandidate[];
+}
+
 /** The typed input of each operation. */
 export interface SimWorkerOperationInputs {
   readonly "sim.compile": WorkerSimCompileInput;
   readonly "sim.run": WorkerSimRunInput;
   readonly "sim.finalize": WorkerSimFinalizeInput;
+  readonly "sim.optimize": WorkerSimOptimizeInput;
 }
 
 /** The typed input of an operation, keyed by operation id. */
@@ -202,6 +279,7 @@ export interface SimWorkerOperationResults {
   readonly "sim.compile": WorkerSimCompileResult;
   readonly "sim.run": WorkerSimRunResult;
   readonly "sim.finalize": WorkerSimFinalizeResult;
+  readonly "sim.optimize": WorkerSimOptimizeResult;
 }
 
 /** The typed result of an operation, keyed by operation id. */
@@ -294,6 +372,19 @@ export interface SerializedSimWorkerOperationInputs {
   readonly "sim.finalize": {
     readonly run: string;
   };
+  readonly "sim.optimize": {
+    readonly study: unknown;
+    readonly scenario: unknown;
+    readonly parameters: unknown;
+    readonly motors?: readonly unknown[];
+    readonly bodyBounds?: readonly SerializedSimBodyBounds[];
+    readonly tessellation?: unknown;
+    readonly materials?: readonly unknown[];
+    readonly bodyTessellations?: readonly {
+      readonly bodyId: string;
+      readonly tessellation: unknown;
+    }[];
+  };
 }
 
 /** The canonical JSON input form of an operation, keyed by operation id. */
@@ -316,6 +407,45 @@ export interface SerializedSimWorkerOperationResults {
     readonly summary: Record<string, unknown>;
     readonly payload: string;
     readonly histories: readonly SimHistorySeries[];
+  };
+  readonly "sim.optimize": {
+    readonly campaign: string;
+    readonly generations: readonly {
+      readonly generation: number;
+      readonly evaluations: number;
+      readonly candidates: readonly {
+        readonly index: number;
+        readonly genomeParameters: readonly {
+          readonly parameterId: string;
+          readonly value: number;
+        }[];
+        readonly genomeRecords: readonly {
+          readonly recordKind: string;
+          readonly recordId: string;
+        }[];
+        readonly status: "ok" | "declined";
+        readonly objectives: readonly number[];
+        readonly declineCode?: string;
+        readonly rank: number;
+      }[];
+    }[];
+    readonly evaluations: number;
+    readonly declined: number;
+    readonly pareto: readonly {
+      readonly index: number;
+      readonly genomeParameters: readonly {
+        readonly parameterId: string;
+        readonly value: number;
+      }[];
+      readonly genomeRecords: readonly {
+        readonly recordKind: string;
+        readonly recordId: string;
+      }[];
+      readonly status: "ok" | "declined";
+      readonly objectives: readonly number[];
+      readonly declineCode?: string;
+      readonly rank: number;
+    }[];
   };
 }
 
@@ -1465,6 +1595,443 @@ function parseFinalizeResult(
 }
 
 // ---------------------------------------------------------------------------
+// sim.optimize codecs (Phase 70a)
+// ---------------------------------------------------------------------------
+
+/**
+ * The population/generation sanity budgets the optimize codecs enforce —
+ * the study record's own budgets (cad-core's `SIM_STUDY_MAX_*`), mirrored
+ * here so the wire refuses oversized campaigns without importing the
+ * document package.
+ */
+const SIM_OPTIMIZE_MAX_GENERATIONS = 512;
+const SIM_OPTIMIZE_MAX_POPULATION = 512;
+const SIM_OPTIMIZE_MAX_GENES = 16;
+
+function serializeOptimizeInput(
+  input: WorkerSimOptimizeInput,
+): SerializedSimWorkerOperationInputs["sim.optimize"] {
+  return {
+    study: input.study,
+    scenario: input.scenario,
+    parameters: input.parameters,
+    ...(input.motors === undefined ? {} : { motors: [...input.motors] }),
+    ...(input.bodyBounds === undefined
+      ? {}
+      : {
+          bodyBounds: input.bodyBounds.map(
+            (entry): SerializedSimBodyBounds => ({
+              bodyId: entry.bodyId,
+              minMm: [...entry.minMm] as readonly [number, number, number],
+              maxMm: [...entry.maxMm] as readonly [number, number, number],
+            }),
+          ),
+        }),
+    ...(input.tessellation === undefined
+      ? {}
+      : { tessellation: input.tessellation }),
+    ...(input.materials === undefined
+      ? {}
+      : { materials: [...input.materials] }),
+    ...(input.bodyTessellations === undefined
+      ? {}
+      : {
+          bodyTessellations: input.bodyTessellations.map((entry) => ({
+            bodyId: entry.bodyId,
+            tessellation: entry.tessellation,
+          })),
+        }),
+  };
+}
+
+function parseOptimizeInput(
+  input: unknown,
+): ParseOutcome<WorkerSimOptimizeInput> {
+  const record = requirePayloadRecord("sim.optimize", input);
+  if (!record.ok) return record;
+  // The document-context records cross VERBATIM (the compile precedent):
+  // the executor re-validates the study, scenario, parameter table, and
+  // motor records through their own parse boundaries.
+  for (const field of ["study", "scenario", "parameters"] as const) {
+    if (!(field in record.value)) {
+      return payloadError(
+        `The "sim.optimize" payload must carry a "${field}" field.`,
+        input,
+      );
+    }
+  }
+  let motors: unknown[] | undefined;
+  if (record.value.motors !== undefined) {
+    if (!Array.isArray(record.value.motors)) {
+      return payloadError(
+        'The "sim.optimize" field "motors" must be an array of serialized motor records.',
+        record.value.motors,
+      );
+    }
+    motors = (record.value.motors as readonly unknown[]).map((entry) => entry);
+  }
+  let bodyBounds: SimBodyBoundsMm[] | undefined;
+  if (record.value.bodyBounds !== undefined) {
+    if (!Array.isArray(record.value.bodyBounds)) {
+      return payloadError(
+        'The "sim.optimize" field "bodyBounds" must be an array of body bound records.',
+        record.value.bodyBounds,
+      );
+    }
+    bodyBounds = [];
+    for (const entry of record.value.bodyBounds) {
+      const parsed = parseBodyBoundsEntry(entry);
+      if (!parsed.ok) return parsed;
+      bodyBounds.push(parsed.value);
+    }
+  }
+  let materials: unknown[] | undefined;
+  if (record.value.materials !== undefined) {
+    if (!Array.isArray(record.value.materials)) {
+      return payloadError(
+        'The "sim.optimize" field "materials" must be an array of serialized material records.',
+        record.value.materials,
+      );
+    }
+    materials = (record.value.materials as readonly unknown[]).map(
+      (entry) => entry,
+    );
+  }
+  let bodyTessellations:
+    { readonly bodyId: string; readonly tessellation: unknown }[] | undefined;
+  if (record.value.bodyTessellations !== undefined) {
+    if (!Array.isArray(record.value.bodyTessellations)) {
+      return payloadError(
+        'The "sim.optimize" field "bodyTessellations" must be an array of body tessellation entries.',
+        record.value.bodyTessellations,
+      );
+    }
+    bodyTessellations = [];
+    for (const entry of record.value.bodyTessellations) {
+      const entryRecord = requirePayloadRecord("sim.optimize", entry);
+      if (!entryRecord.ok) return entryRecord;
+      const bodyId = requireString(
+        entryRecord.value.bodyId,
+        "sim.optimize",
+        "bodyTessellations.bodyId",
+      );
+      if (!bodyId.ok) return bodyId;
+      if (!("tessellation" in entryRecord.value)) {
+        return payloadError(
+          'The "sim.optimize" body tessellation entries must carry a "tessellation" field.',
+          entry,
+        );
+      }
+      bodyTessellations.push({
+        bodyId: bodyId.value,
+        tessellation: entryRecord.value.tessellation,
+      });
+    }
+  }
+  return parseOk({
+    study: record.value.study,
+    scenario: record.value.scenario,
+    parameters: record.value.parameters,
+    ...(motors === undefined ? {} : { motors }),
+    ...(bodyBounds === undefined ? {} : { bodyBounds }),
+    ...(record.value.tessellation === undefined
+      ? {}
+      : { tessellation: record.value.tessellation }),
+    ...(materials === undefined ? {} : { materials }),
+    ...(bodyTessellations === undefined ? {} : { bodyTessellations }),
+  });
+}
+
+function parseGenomeParameters(
+  input: unknown,
+  operation: "sim.optimize",
+): ParseOutcome<
+  readonly { readonly parameterId: string; readonly value: number }[]
+> {
+  if (!Array.isArray(input)) {
+    return payloadError(
+      `The "${operation}" genome parameters must be an array.`,
+      input,
+    );
+  }
+  if (input.length > SIM_OPTIMIZE_MAX_GENES) {
+    return payloadError(
+      `The "${operation}" genome parameters carry more than ${String(SIM_OPTIMIZE_MAX_GENES)} entries.`,
+      input.length,
+    );
+  }
+  const entries: { parameterId: string; value: number }[] = [];
+  for (const entry of input) {
+    const record = requirePayloadRecord(operation, entry);
+    if (!record.ok) return record;
+    const parameterId = requireString(
+      record.value.parameterId,
+      operation,
+      "genomeParameters.parameterId",
+    );
+    if (!parameterId.ok) return parameterId;
+    const value = requireFinite(
+      record.value.value,
+      operation,
+      "genomeParameters.value",
+    );
+    if (!value.ok) return value;
+    entries.push({ parameterId: parameterId.value, value: value.value });
+  }
+  return parseOk(entries);
+}
+
+function parseGenomeRecords(
+  input: unknown,
+  operation: "sim.optimize",
+): ParseOutcome<
+  readonly { readonly recordKind: string; readonly recordId: string }[]
+> {
+  if (!Array.isArray(input)) {
+    return payloadError(
+      `The "${operation}" genome records must be an array.`,
+      input,
+    );
+  }
+  if (input.length > SIM_OPTIMIZE_MAX_GENES) {
+    return payloadError(
+      `The "${operation}" genome records carry more than ${String(SIM_OPTIMIZE_MAX_GENES)} entries.`,
+      input.length,
+    );
+  }
+  const entries: { recordKind: string; recordId: string }[] = [];
+  for (const entry of input) {
+    const record = requirePayloadRecord(operation, entry);
+    if (!record.ok) return record;
+    const recordKind = requireString(
+      record.value.recordKind,
+      operation,
+      "genomeRecords.recordKind",
+    );
+    if (!recordKind.ok) return recordKind;
+    const recordId = requireString(
+      record.value.recordId,
+      operation,
+      "genomeRecords.recordId",
+    );
+    if (!recordId.ok) return recordId;
+    entries.push({
+      recordKind: recordKind.value,
+      recordId: recordId.value,
+    });
+  }
+  return parseOk(entries);
+}
+
+function serializeCandidate(
+  candidate: WorkerSimOptimizeCandidate,
+): SerializedSimWorkerOperationResults["sim.optimize"]["pareto"][number] {
+  return {
+    index: candidate.index,
+    genomeParameters: candidate.genomeParameters.map((entry) => ({
+      parameterId: entry.parameterId,
+      value: entry.value,
+    })),
+    genomeRecords: candidate.genomeRecords.map((entry) => ({
+      recordKind: entry.recordKind,
+      recordId: entry.recordId,
+    })),
+    status: candidate.status,
+    objectives: [...candidate.objectives],
+    ...(candidate.declineCode === undefined
+      ? {}
+      : { declineCode: candidate.declineCode }),
+    rank: candidate.rank,
+  };
+}
+
+function parseCandidateEntry(
+  input: unknown,
+): ParseOutcome<WorkerSimOptimizeCandidate> {
+  const record = requirePayloadRecord("sim.optimize", input);
+  if (!record.ok) return record;
+  const index = requireNonNegativeInteger(
+    record.value.index,
+    "sim.optimize",
+    "index",
+  );
+  if (!index.ok) return index;
+  const genomeParameters = parseGenomeParameters(
+    record.value.genomeParameters,
+    "sim.optimize",
+  );
+  if (!genomeParameters.ok) return genomeParameters;
+  const genomeRecords = parseGenomeRecords(
+    record.value.genomeRecords,
+    "sim.optimize",
+  );
+  if (!genomeRecords.ok) return genomeRecords;
+  if (record.value.status !== "ok" && record.value.status !== "declined") {
+    return payloadError(
+      'The "sim.optimize" candidate field "status" must be "ok" or "declined".',
+      record.value.status,
+    );
+  }
+  if (!Array.isArray(record.value.objectives)) {
+    return payloadError(
+      'The "sim.optimize" candidate field "objectives" must be an array of finite numbers.',
+      record.value.objectives,
+    );
+  }
+  const objectives: number[] = [];
+  for (const value of record.value.objectives) {
+    const parsed = requireFinite(value, "sim.optimize", "objectives");
+    if (!parsed.ok) return parsed;
+    objectives.push(parsed.value);
+  }
+  let declineCode: string | undefined;
+  if (record.value.declineCode !== undefined) {
+    const parsed = requireString(
+      record.value.declineCode,
+      "sim.optimize",
+      "declineCode",
+    );
+    if (!parsed.ok) return parsed;
+    declineCode = parsed.value;
+  }
+  const rank = requireNonNegativeInteger(
+    record.value.rank,
+    "sim.optimize",
+    "rank",
+  );
+  if (!rank.ok) return rank;
+  return parseOk({
+    index: index.value,
+    genomeParameters: genomeParameters.value,
+    genomeRecords: genomeRecords.value,
+    status: record.value.status,
+    objectives,
+    ...(declineCode === undefined ? {} : { declineCode }),
+    rank: rank.value,
+  });
+}
+
+function serializeOptimizeResult(
+  result: WorkerSimOptimizeResult,
+): SerializedSimWorkerOperationResults["sim.optimize"] {
+  return {
+    campaign: result.campaign,
+    generations: result.generations.map((generation) => ({
+      generation: generation.generation,
+      evaluations: generation.evaluations,
+      candidates: generation.candidates.map(serializeCandidate),
+    })),
+    evaluations: result.evaluations,
+    declined: result.declined,
+    pareto: result.pareto.map(serializeCandidate),
+  };
+}
+
+function parseOptimizeResult(
+  input: unknown,
+): ParseOutcome<WorkerSimOptimizeResult> {
+  const record = requirePayloadRecord("sim.optimize", input);
+  if (!record.ok) return record;
+  const campaign = requireString(
+    record.value.campaign,
+    "sim.optimize",
+    "campaign",
+  );
+  if (!campaign.ok) return campaign;
+  if (!Array.isArray(record.value.generations)) {
+    return payloadError(
+      'The "sim.optimize" result field "generations" must be an array.',
+      record.value.generations,
+    );
+  }
+  if (record.value.generations.length > SIM_OPTIMIZE_MAX_GENERATIONS) {
+    return payloadError(
+      `The "sim.optimize" result carries more than ${String(SIM_OPTIMIZE_MAX_GENERATIONS)} generations.`,
+      record.value.generations.length,
+    );
+  }
+  const generations: WorkerSimOptimizeGeneration[] = [];
+  for (const entry of record.value.generations) {
+    const generationRecord = requirePayloadRecord("sim.optimize", entry);
+    if (!generationRecord.ok) return generationRecord;
+    const generation = requireNonNegativeInteger(
+      generationRecord.value.generation,
+      "sim.optimize",
+      "generations.generation",
+    );
+    if (!generation.ok) return generation;
+    const evaluations = requireNonNegativeInteger(
+      generationRecord.value.evaluations,
+      "sim.optimize",
+      "generations.evaluations",
+    );
+    if (!evaluations.ok) return evaluations;
+    if (!Array.isArray(generationRecord.value.candidates)) {
+      return payloadError(
+        'The "sim.optimize" generation field "candidates" must be an array.',
+        generationRecord.value.candidates,
+      );
+    }
+    if (
+      generationRecord.value.candidates.length > SIM_OPTIMIZE_MAX_POPULATION
+    ) {
+      return payloadError(
+        `A "sim.optimize" generation carries more than ${String(SIM_OPTIMIZE_MAX_POPULATION)} candidates.`,
+        generationRecord.value.candidates.length,
+      );
+    }
+    const candidates: WorkerSimOptimizeCandidate[] = [];
+    for (const candidate of generationRecord.value.candidates) {
+      const parsed = parseCandidateEntry(candidate);
+      if (!parsed.ok) return parsed;
+      candidates.push(parsed.value);
+    }
+    generations.push({
+      generation: generation.value,
+      evaluations: evaluations.value,
+      candidates,
+    });
+  }
+  const evaluations = requireNonNegativeInteger(
+    record.value.evaluations,
+    "sim.optimize",
+    "evaluations",
+  );
+  if (!evaluations.ok) return evaluations;
+  const declined = requireNonNegativeInteger(
+    record.value.declined,
+    "sim.optimize",
+    "declined",
+  );
+  if (!declined.ok) return declined;
+  if (!Array.isArray(record.value.pareto)) {
+    return payloadError(
+      'The "sim.optimize" result field "pareto" must be an array.',
+      record.value.pareto,
+    );
+  }
+  if (record.value.pareto.length > SIM_OPTIMIZE_MAX_POPULATION) {
+    return payloadError(
+      `The "sim.optimize" result carries more than ${String(SIM_OPTIMIZE_MAX_POPULATION)} Pareto members.`,
+      record.value.pareto.length,
+    );
+  }
+  const pareto: WorkerSimOptimizeCandidate[] = [];
+  for (const entry of record.value.pareto) {
+    const parsed = parseCandidateEntry(entry);
+    if (!parsed.ok) return parsed;
+    pareto.push(parsed.value);
+  }
+  return parseOk({
+    campaign: campaign.value,
+    generations,
+    evaluations: evaluations.value,
+    declined: declined.value,
+    pareto,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // The codec tables
 // ---------------------------------------------------------------------------
 
@@ -1476,6 +2043,7 @@ const INPUT_SERIALIZERS: {
   "sim.compile": serializeCompileInput,
   "sim.run": serializeRunInput,
   "sim.finalize": serializeFinalizeInput,
+  "sim.optimize": serializeOptimizeInput,
 };
 
 const INPUT_PARSERS: {
@@ -1486,6 +2054,7 @@ const INPUT_PARSERS: {
   "sim.compile": parseCompileInput,
   "sim.run": parseRunInput,
   "sim.finalize": parseFinalizeInput,
+  "sim.optimize": parseOptimizeInput,
 };
 
 const RESULT_SERIALIZERS: {
@@ -1496,6 +2065,7 @@ const RESULT_SERIALIZERS: {
   "sim.compile": serializeCompileResult,
   "sim.run": serializeRunResult,
   "sim.finalize": serializeFinalizeResult,
+  "sim.optimize": serializeOptimizeResult,
 };
 
 const RESULT_PARSERS: {
@@ -1506,6 +2076,7 @@ const RESULT_PARSERS: {
   "sim.compile": parseCompileResult,
   "sim.run": parseRunResult,
   "sim.finalize": parseFinalizeResult,
+  "sim.optimize": parseOptimizeResult,
 };
 
 /** Serializes an operation's typed input to its canonical wire form. */

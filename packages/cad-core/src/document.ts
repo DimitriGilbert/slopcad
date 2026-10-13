@@ -82,6 +82,17 @@ import {
   type SerializedSimScenario,
 } from "./simulation";
 import {
+  type SerializedSimStudy,
+  type SimStudy,
+  type SimStudyBody,
+  type SimStudyInput,
+  buildSimStudyBody,
+  crossCheckSimStudy,
+  getSimStudy,
+  parseSimStudy,
+  serializeSimStudy,
+} from "./study";
+import {
   type SerializedCurve,
   curveRecordProblems,
   parseSerializedCurve,
@@ -125,6 +136,8 @@ import {
   type SectionId,
   parseSimulationId,
   type SimulationId,
+  parseStudyId,
+  type StudyId,
   parseSketchDocumentId,
   type SketchDocumentId,
   parseMotorId,
@@ -471,6 +484,20 @@ export interface CadDocument {
    */
   readonly motors: readonly DocumentMotorRecord[];
   /**
+   * The document's parametric optimization studies, in add order (empty
+   * in older files; Phase 70b-additive — ROADMAP-SIM, the finale):
+   * named rows of optimization intent over the SAME document — a bounded
+   * genome over the parameter table (plus discrete named-record genes),
+   * objectives selected among result-store summary scalars, constraints
+   * parameter expressions the document already validates — the
+   * configurations discipline applied once more (law S1's additive
+   * precedent). Every scenario, parameter, and record choice a study
+   * addresses names a record of this document; the add path and the
+   * parse boundary both enforce it through the study module's
+   * cross-check.
+   */
+  readonly studies: readonly SimStudy[];
+  /**
    * Persisted counters of the document's id generator. Serializing this
    * state (and raising it past every numeric id at parse time) is what keeps
    * generated ids unique across save/load.
@@ -677,6 +704,8 @@ export const DOCUMENT_ERROR_CODES = {
   simulationUnknownMotor: "document/simulation-unknown-motor",
   simulationInUse: "document/simulation-in-use",
   motorInvalid: "document/motor-invalid",
+  studyInvalid: "document/study-invalid",
+  studyInUse: "document/study-in-use",
   datumPayloadInvalid: "document/datum-payload-invalid",
   featureKindInvalid: "document/feature-kind-invalid",
   inputKindInvalid: "document/input-kind-invalid",
@@ -1065,6 +1094,7 @@ function raiseGeneratorState(
     configuration: Math.max(base.configuration, floor.configuration),
     simulation: Math.max(base.simulation, floor.simulation),
     motor: Math.max(base.motor, floor.motor),
+    study: Math.max(base.study, floor.study),
   };
   return Object.freeze(raised);
 }
@@ -1119,7 +1149,8 @@ function isIdRegistered(document: CadDocument, id: string): boolean {
     document.joints.some((joint) => joint.id === id) ||
     document.configurations.some((configuration) => configuration.id === id) ||
     document.simulations.some((scenario) => scenario.id === id) ||
-    document.motors.some((motor) => motor.id === id)
+    document.motors.some((motor) => motor.id === id) ||
+    document.studies.some((study) => study.id === id)
   );
 }
 
@@ -1196,6 +1227,46 @@ function motorInUseError(
   );
 }
 
+/**
+ * The structured in-use refusal when a STUDY references the entity
+ * (Phase 70b): removing a parameter a study's genome addresses, a motor a
+ * discrete gene offers as a choice, or the scenario a study runs would
+ * silently dangle the study, so removal refuses until the study drops or
+ * is re-saved (`document/study-in-use`, the configuration-in-use
+ * precedent — removal never cascades).
+ */
+function studyInUseError(
+  document: CadDocument,
+  kind: "parameter" | "motor" | "simulation",
+  id: string,
+): DocumentError | undefined {
+  const holder = document.studies.find((study) =>
+    kind === "parameter"
+      ? study.genes.some(
+          (gene) => gene.kind === "parameter" && gene.parameterId === id,
+        )
+      : kind === "motor"
+        ? study.genes.some(
+            (gene) =>
+              gene.kind === "discrete" &&
+              gene.choices.some((choice) => choice === id),
+          )
+        : study.scenarioId === id,
+  );
+  if (holder === undefined) return undefined;
+  const label =
+    kind === "parameter"
+      ? "Parameter"
+      : kind === "motor"
+        ? "Motor"
+        : "Simulation scenario";
+  return docError(
+    DOCUMENT_ERROR_CODES.studyInUse,
+    `${label} "${id}" is referenced by study "${holder.id}".`,
+    id,
+  );
+}
+
 function featureInputResolves(
   document: CadDocument,
   ref: FeatureInputRef,
@@ -1245,6 +1316,7 @@ export function createDocument(id: DocumentId): CadDocument {
     configurations: Object.freeze([]),
     simulations: Object.freeze([]),
     motors: Object.freeze([]),
+    studies: Object.freeze([]),
     idGeneratorState: claimExplicitId(
       createIdGenerator().state(),
       "document",
@@ -1966,6 +2038,8 @@ export function removeDocumentParameter(
   }
   const configurationUse = configurationInUseError(document, "parameter", id);
   if (configurationUse !== undefined) return fail(configurationUse);
+  const studyUse = studyInUseError(document, "parameter", id);
+  if (studyUse !== undefined) return fail(studyUse);
   const removed = removeParameter(document.parameters, id);
   if (!removed.ok) return removed;
   return ok(Object.freeze({ ...document, parameters: removed.value }));
@@ -3850,6 +3924,8 @@ export function removeDocumentSimulation(
       ),
     );
   }
+  const studyUse = studyInUseError(document, "simulation", id);
+  if (studyUse !== undefined) return fail(studyUse);
   return ok(
     Object.freeze({
       ...document,
@@ -4063,6 +4139,8 @@ export function removeDocumentMotor(
   }
   const inUse = motorInUseError(document, id);
   if (inUse !== undefined) return fail(inUse);
+  const studyUse = studyInUseError(document, "motor", id);
+  if (studyUse !== undefined) return fail(studyUse);
   return ok(
     Object.freeze({
       ...document,
@@ -4137,6 +4215,232 @@ export function updateDocumentMotor(
           motor.id === id
             ? (Object.freeze({ ...built.value, id }) as DocumentMotorRecord)
             : motor,
+        ),
+      ),
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Study records (Phase 70b — the configurations precedent once more)
+// ---------------------------------------------------------------------------
+
+/** Result of {@link addDocumentStudy}: the next document plus the record. */
+export interface DocumentStudyAddResult {
+  readonly document: CadDocument;
+  readonly study: SimStudy;
+}
+
+/**
+ * Runs the study module's cross-check against THIS document's records and
+ * converts every problem into one structured `document/study-invalid`
+ * refusal (the simulation-record precedent: one failure naming them all).
+ */
+function studyRecordProblems(
+  document: CadDocument,
+  body: SimStudyBody,
+): DocumentError | undefined {
+  const problems = crossCheckSimStudy(body, {
+    parameters: document.parameters,
+    motors: document.motors,
+    simulations: document.simulations,
+  });
+  if (problems.length === 0) return undefined;
+  return docError(
+    DOCUMENT_ERROR_CODES.studyInvalid,
+    problems.map((problem) => problem.message).join(" "),
+    Object.freeze(problems),
+  );
+}
+
+/**
+ * Adds one optimization study row (Phase 70b): a named row of optimization
+ * intent over the SAME document — the genome (bounded parameter genes plus
+ * discrete named-record genes), the objectives (result-summary scalar
+ * selections), the constraints (parameter expressions), and the NSGA-II
+ * algorithm/budget fields. The scenario, every parameter gene, and every
+ * discrete choice must name a live record of this document (the study
+ * module's cross-check, one refusal naming every problem); ids and names
+ * are unique within the document (a generated `study_…` id when omitted).
+ */
+export function addDocumentStudy(
+  document: CadDocument,
+  input: SimStudyInput,
+): ParseResult<DocumentStudyAddResult, DocumentError> {
+  const built = buildSimStudyBody(
+    input.name,
+    input.scenarioId,
+    input.genes,
+    input.objectives,
+    input.constraints,
+    input.population,
+    input.generations,
+    input.mutationRate,
+    input.crossoverRate,
+    input.seed,
+    input.maxEvaluations,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.studyInvalid, built.error.message, input),
+    );
+  }
+  if (document.studies.some((study) => study.name === built.value.name)) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.studyInvalid,
+        `A study named "${built.value.name}" already exists in document "${document.id}".`,
+        input,
+      ),
+    );
+  }
+  let id: StudyId;
+  let idGeneratorState = document.idGeneratorState;
+  if (input.id === undefined) {
+    const generated = generateId(idGeneratorState, (generator) =>
+      generator.nextStudyId(),
+    );
+    if (!generated.ok) return generated;
+    id = generated.value.id;
+    idGeneratorState = generated.value.state;
+  } else {
+    const parsed = parseStudyId(input.id);
+    if (!parsed.ok) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idInvalid,
+          `A study id must be a valid study id: ${parsed.error.message}`,
+          input.id,
+        ),
+      );
+    }
+    id = parsed.value;
+    const unclaimable = unclaimablePayloadError("study", id);
+    if (unclaimable !== undefined) return fail(unclaimable);
+    if (isIdRegistered(document, id)) {
+      return fail(
+        docError(
+          DOCUMENT_ERROR_CODES.idConflict,
+          `An entity with id "${id}" already exists in document "${document.id}".`,
+          input,
+        ),
+      );
+    }
+    idGeneratorState = claimExplicitId(idGeneratorState, "study", id);
+  }
+  const problems = studyRecordProblems(document, built.value);
+  if (problems !== undefined) return fail(problems);
+  const study = Object.freeze({ ...built.value, id }) as SimStudy;
+  return ok({
+    document: Object.freeze({
+      ...document,
+      studies: Object.freeze([...document.studies, study]),
+      idGeneratorState,
+    }),
+    study,
+  });
+}
+
+/** Removes one optimization study row by id (structured not-found refusal). */
+export function removeDocumentStudy(
+  document: CadDocument,
+  id: StudyId,
+): ParseResult<CadDocument, DocumentError> {
+  if (getSimStudy(document.studies, id) === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No study ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  return ok(
+    Object.freeze({
+      ...document,
+      studies: Object.freeze(
+        document.studies.filter((study) => study.id !== id),
+      ),
+    }),
+  );
+}
+
+/** The mutable fields of a study row — everything but its identity. */
+export interface DocumentStudyUpdate {
+  readonly name: string;
+  readonly scenarioId: SimStudyInput["scenarioId"];
+  readonly genes?: SimStudyInput["genes"];
+  readonly objectives?: SimStudyInput["objectives"];
+  readonly constraints?: SimStudyInput["constraints"];
+  readonly population?: number;
+  readonly generations?: number;
+  readonly mutationRate?: number;
+  readonly crossoverRate?: number;
+  readonly seed?: number;
+  readonly maxEvaluations?: number;
+}
+
+/**
+ * Replaces a study row's mutable fields — name, scenario, genome,
+ * objectives, constraints, algorithm and budget — keeping its id and list
+ * position, validated exactly like {@link addDocumentStudy}.
+ */
+export function updateDocumentStudy(
+  document: CadDocument,
+  id: StudyId,
+  update: DocumentStudyUpdate,
+): ParseResult<CadDocument, DocumentError> {
+  const existing = getSimStudy(document.studies, id);
+  if (existing === undefined) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.notFound,
+        `No study ${String(id)} exists in document "${document.id}".`,
+        id,
+      ),
+    );
+  }
+  const built = buildSimStudyBody(
+    update.name,
+    update.scenarioId,
+    update.genes,
+    update.objectives,
+    update.constraints,
+    update.population,
+    update.generations,
+    update.mutationRate,
+    update.crossoverRate,
+    update.seed,
+    update.maxEvaluations,
+  );
+  if (!built.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.studyInvalid, built.error.message, update),
+    );
+  }
+  if (
+    document.studies.some(
+      (study) => study.id !== id && study.name === built.value.name,
+    )
+  ) {
+    return fail(
+      docError(
+        DOCUMENT_ERROR_CODES.studyInvalid,
+        `A study named "${built.value.name}" already exists in document "${document.id}".`,
+        update,
+      ),
+    );
+  }
+  const problems = studyRecordProblems(document, built.value);
+  if (problems !== undefined) return fail(problems);
+  return ok(
+    Object.freeze({
+      ...document,
+      studies: Object.freeze(
+        document.studies.map((study) =>
+          study.id === id
+            ? (Object.freeze({ ...built.value, id }) as SimStudy)
+            : study,
         ),
       ),
     }),
@@ -4352,7 +4656,8 @@ export interface SerializedFeatureRecord {
  * Canonical JSON form of the id generator state. The `sketch` counter is
  * Phase 26.1-additive, the `datum` counter Phase 39-additive, the
  * `section` counter Phase 46-additive, the `curve` counter
- * Phase 47-additive, and the `occurrence` counter Phase 50-additive: each
+ * Phase 47-additive, the `occurrence` counter Phase 50-additive, and the
+ * `study` counter Phase 70a-additive (ROADMAP-SIM): each
  * is emitted exactly when
  * nonzero, so documents that never carried ids of that kind serialize
  * byte-identically to their earlier form; parsing defaults an absent
@@ -4372,6 +4677,7 @@ export type SerializedIdGeneratorState = Omit<
   | "configuration"
   | "simulation"
   | "motor"
+  | "study"
 > & {
   readonly sketch?: number;
   readonly datum?: number;
@@ -4385,6 +4691,7 @@ export type SerializedIdGeneratorState = Omit<
   readonly configuration?: number;
   readonly simulation?: number;
   readonly motor?: number;
+  readonly study?: number;
 };
 
 function serializeIdGeneratorState(
@@ -4410,6 +4717,7 @@ function serializeIdGeneratorState(
       : { configuration: state.configuration }),
     ...(state.simulation === 0 ? {} : { simulation: state.simulation }),
     ...(state.motor === 0 ? {} : { motor: state.motor }),
+    ...(state.study === 0 ? {} : { study: state.study }),
   };
 }
 
@@ -4491,6 +4799,8 @@ export interface SerializedCadDocument {
   readonly simulations?: readonly SerializedSimScenario[];
   /** Present exactly when the document carries motor records (additive). */
   readonly motors?: readonly SerializedDocumentMotor[];
+  /** Present exactly when the document carries study records (additive). */
+  readonly studies?: readonly SerializedSimStudy[];
 }
 
 /** Serializes a document to its canonical, deterministic JSON form. */
@@ -4690,6 +5000,14 @@ export function serializeCadDocument(
       ? {}
       : {
           motors: document.motors.map(serializeDocumentMotor),
+        }),
+    // Additive (Phase 70b): emitted only when study records exist, so
+    // documents from before studies serialize byte-identically to their
+    // pre-study form.
+    ...(document.studies.length === 0
+      ? {}
+      : {
+          studies: document.studies.map(serializeSimStudy),
         }),
   };
 }
@@ -5297,6 +5615,23 @@ function parseSerializedMotor(
   return ok(parsed.value);
 }
 
+/**
+ * Parses a serialized study record through the study module's parse
+ * boundary (`parseSimStudy`), re-wrapping its structured failure as a
+ * document error (Phase 70b).
+ */
+function parseSerializedStudy(
+  input: unknown,
+): ParseResult<SimStudy, DocumentError> {
+  const parsed = parseSimStudy(input);
+  if (!parsed.ok) {
+    return fail(
+      docError(DOCUMENT_ERROR_CODES.studyInvalid, parsed.error.message, input),
+    );
+  }
+  return ok(parsed.value);
+}
+
 /** Parses a finite [x, y, z] triple or fails structured. */
 function parseSectionTriple(
   input: unknown,
@@ -5623,6 +5958,12 @@ export function parseCadDocument(
     parseSerializedSimulation,
   );
   if (!parsedSimulations.ok) return parsedSimulations;
+  const parsedStudies = parseSerializedList(
+    input.studies ?? [],
+    "studies",
+    parseSerializedStudy,
+  );
+  if (!parsedStudies.ok) return parsedStudies;
   const parsedFeatures = parseSerializedList(
     input.features,
     "features",
@@ -5802,6 +6143,28 @@ export function parseCadDocument(
         : { structural: scenario.structural }),
       ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
       ...(scenario.backend === undefined ? {} : { backend: scenario.backend }),
+    });
+    if (!added.ok) return added;
+    document = added.value.document;
+  }
+  // Studies parse after everything they reference: the scenario a study
+  // runs, the parameters its genome addresses, and the motors its
+  // discrete genes offer all cross-check at the add boundary, so every
+  // referenced record must exist first (the simulations precedent).
+  for (const study of parsedStudies.value) {
+    const added = addDocumentStudy(document, {
+      id: study.id,
+      name: study.name,
+      scenarioId: study.scenarioId,
+      genes: study.genes,
+      objectives: study.objectives,
+      constraints: study.constraints,
+      population: study.population,
+      generations: study.generations,
+      mutationRate: study.mutationRate,
+      crossoverRate: study.crossoverRate,
+      seed: study.seed,
+      maxEvaluations: study.maxEvaluations,
     });
     if (!added.ok) return added;
     document = added.value.document;

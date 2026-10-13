@@ -51,6 +51,7 @@
     "@slopcad/sim-core": "workspace:*",
     "@slopcad/sim-dynamics": "workspace:*",
     "@slopcad/sim-flow": "workspace:*",
+    "@slopcad/sim-optimization": "workspace:*",
     "@slopcad/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/ai": "^0.64.0",

@@ -48,6 +48,12 @@ export const SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE =
 /** The last applied progress step, stamped from the first progress commit on. */
 export const SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE =
   "data-sim-applied-progress-step";
+/**
+ * The last applied optimization generation (Phase 70a), stamped from the
+ * first best-of-generation commit on — the live-preview await surface.
+ */
+export const SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE =
+  "data-sim-applied-optimization-generation";
 
 /** The committed counter family — one immutable snapshot per application. */
 export interface SimAppliedCounters {
@@ -57,6 +63,8 @@ export interface SimAppliedCounters {
   readonly fieldChunks: number;
   /** The last applied progress step, or `null` before one applies. */
   readonly progressStep: number | null;
+  /** The last applied optimization generation, or `null` before one applies. */
+  readonly optimizationGeneration: number | null;
 }
 
 /**
@@ -91,6 +99,8 @@ export interface SimApplicationLedger {
   fieldChunks: number;
   /** The applied progress high-water step, or `null` before one applies. */
   progressStep: number | null;
+  /** The applied optimization-generation high-water mark, or `null`. */
+  optimizationGeneration: number | null;
   /** Per-field applied stream state, keyed by field id. */
   fields: Map<string, SimAppliedField>;
 }
@@ -101,6 +111,7 @@ export function createSimApplicationLedger(): SimApplicationLedger {
     notifications: 0,
     fieldChunks: 0,
     progressStep: null,
+    optimizationGeneration: null,
     fields: new Map(),
   };
 }
@@ -113,6 +124,7 @@ export function simAppliedCountersOf(
     notifications: ledger.notifications,
     fieldChunks: ledger.fieldChunks,
     progressStep: ledger.progressStep,
+    optimizationGeneration: ledger.optimizationGeneration,
   });
 }
 
@@ -164,6 +176,23 @@ function framableChunk(chunk: SimEngineFieldChunk): boolean {
     chunk.chunkIndex < chunk.chunkCount &&
     chunk.values.length > 0
   );
+}
+
+/** Applies one optimization-generation notice: strictly advancing generations apply. */
+function applyOptimizationGeneration(
+  ledger: SimApplicationLedger,
+  generation: number,
+): SimAppliedCounters | null {
+  if (!Number.isInteger(generation) || generation < 0) return null;
+  if (
+    ledger.optimizationGeneration !== null &&
+    generation <= ledger.optimizationGeneration
+  ) {
+    return null; // a duplicate or retrograde generation re-announces.
+  }
+  ledger.optimizationGeneration = generation;
+  ledger.notifications += 1;
+  return simAppliedCountersOf(ledger);
 }
 
 /** Applies one progress notification: strictly advancing steps apply. */
@@ -239,6 +268,9 @@ export function applySimNotification(
 ): SimAppliedCounters | null {
   if (notification.kind === "progress") {
     return applyProgress(ledger, notification.step);
+  }
+  if (notification.kind === "optimization-generation") {
+    return applyOptimizationGeneration(ledger, notification.generation);
   }
   return applyFieldChunk(ledger, notification);
 }

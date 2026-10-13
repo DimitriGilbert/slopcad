@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createSimFieldChunkNotification,
+  createSimOptimizationGenerationNotification,
   createSimProgressNotification,
   createSimWorkerCancel,
   createSimWorkerErrorResponse,
@@ -302,3 +303,71 @@ function runIdOf(raw: string): SimRunId {
   if (!parsed.ok) throw new Error("test run id must parse");
   return parsed.value;
 }
+
+describe("the optimization-generation notification (Phase 70a)", () => {
+  it("builds a notice that survives JSON and decodes to the engine shape", () => {
+    const message = createSimOptimizationGenerationNotification(
+      requestId.value,
+      { generation: 3, evaluated: 42, budget: 96, best: [1.25, 7] },
+    );
+    const parsed = parseSimWorkerMessage(roundTrip(message));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    if (parsed.value.kind !== "notification") return;
+    const decoded = decodeSimWorkerNotification(parsed.value);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(decoded.value.requestId).toBe(requestId.value);
+    expect(decoded.value.notification).toEqual({
+      kind: "optimization-generation",
+      generation: 3,
+      evaluated: 42,
+      budget: 96,
+      best: [1.25, 7],
+    });
+  });
+
+  it("carries an all-declined generation with the best absent", () => {
+    const message = createSimOptimizationGenerationNotification(
+      requestId.value,
+      { generation: 0, evaluated: 8, budget: 32 },
+    );
+    const parsed = parseSimWorkerMessage(roundTrip(message));
+    if (!parsed.ok) return;
+    if (parsed.value.kind !== "notification") return;
+    const decoded = decodeSimWorkerNotification(parsed.value);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(decoded.value.notification).toEqual({
+      kind: "optimization-generation",
+      generation: 0,
+      evaluated: 8,
+      budget: 32,
+    });
+  });
+
+  it("refuses a malformed notice structurally", () => {
+    expect(
+      parseSimWorkerMessage({
+        protocolVersion: 1,
+        kind: "notification",
+        requestId: "req_000001",
+        notification: { kind: "optimization-generation", generation: -1 },
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseSimWorkerMessage({
+        protocolVersion: 1,
+        kind: "notification",
+        requestId: "req_000001",
+        notification: {
+          kind: "optimization-generation",
+          generation: 0,
+          evaluated: 0,
+          budget: 0,
+          best: [Number.NaN],
+        },
+      }).ok,
+    ).toBe(false);
+  });
+});

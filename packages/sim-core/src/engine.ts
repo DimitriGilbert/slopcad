@@ -68,6 +68,24 @@ export interface SimEngineFieldChunk {
 }
 
 /**
+ * One optimization-generation emission (the Phase 70a streaming seam): the
+ * best-of-generation notice an optimization run publishes after each
+ * generation settles — the live-preview payload the workbench applies as a
+ * committed application through the `data-sim-*` discipline (law S6).
+ * `best` is the generation's best candidate's RAW objective vector in the
+ * study's objective order; absent when the entire generation declined.
+ */
+export interface SimEngineOptimizationGeneration {
+  /** The generation that just settled (0-based). */
+  readonly generation: number;
+  /** Cumulative candidate evaluations after this generation. */
+  readonly evaluated: number;
+  /** The study's evaluation budget (the denominator of the progress view). */
+  readonly budget: number;
+  readonly best?: readonly number[];
+}
+
+/**
  * One solver domain behind the provider seam. `run` is async because
  * real engines ride a worker; it is still deterministic — the same
  * request produces the same result (the CPU oracle's bitwise claim, law

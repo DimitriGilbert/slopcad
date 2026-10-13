@@ -131,6 +131,33 @@ describe("cantilever tip deflection vs beam theory", () => {
   }, 60_000);
 });
 
+describe("the voxelized mass vs hand calculation", () => {
+  it("sums occupied cells × cell volume × density, and projects it as kg", () => {
+    const cellsPerDepth = 2;
+    const run = runStructuralScenario(cantileverScenario(cellsPerDepth));
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    // The hand value: every cell of the box grid is occupied (one
+    // element per occupied node), each carrying h³ of steel.
+    const h = DEPTH_M / cellsPerDepth;
+    const cellsLong = Math.round(LENGTH_M / h);
+    const occupiedCells = cellsLong * cellsPerDepth * cellsPerDepth;
+    const hand =
+      occupiedCells * (h * h * h) * (STEEL_WIRE.densityGPerCm3 * 1000);
+    expect(run.value.grid.elementCount).toBe(occupiedCells);
+    expect(run.value.massKg).toBeCloseTo(hand, 12);
+    // The S4 seam: the mass projects with its explicit kilogram unit.
+    const result = structuralRunSimResult(run.value);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const mass = result.value.summary.quantities.find(
+      (quantity) => quantity.name === "mass",
+    );
+    expect(mass?.unit).toBe("kg");
+    expect(mass?.value).toBeCloseTo(hand, 12);
+  }, 60_000);
+});
+
 describe("the FoS arithmetic vs hand calculation", () => {
   it("divides the yield strength by the max von Mises exactly", () => {
     const run = runStructuralScenario(cantileverScenario(2));

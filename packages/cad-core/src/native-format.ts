@@ -157,6 +157,7 @@ import {
 import { parseAssemblyJoint, parseAssemblyMate } from "./mates";
 import { parseDocumentMotor } from "./motors";
 import { parseSimScenario } from "./simulation";
+import { parseSimStudy } from "./study";
 import {
   CAD_ID_KINDS,
   parseBodyId,
@@ -171,6 +172,7 @@ import {
   parseReferenceId,
   parseSimulationId,
   parseSketchDocumentId,
+  parseStudyId,
 } from "./ids";
 import {
   type NativeMigrationError,
@@ -1598,6 +1600,7 @@ function validateSerializedCadDocumentShape(
     issues,
   );
   validateSerializedMotorListShape(input.motors, `${path}.motors`, issues);
+  validateSerializedStudyListShape(input.studies, `${path}.studies`, issues);
 }
 
 /**
@@ -1719,6 +1722,40 @@ function validateSerializedMotorListShape(
   }
   input.forEach((entry, index) => {
     const parsed = parseDocumentMotor(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
+}
+
+/**
+ * Inspects a PRESENT serialized study list through the study module's
+ * parse boundary (Phase 70b — ROADMAP-SIM, the finale): one structured
+ * issue per malformed record. Absent means empty — the additive
+ * discipline.
+ */
+function validateSerializedStudyListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized studies must be an array of study records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseSimStudy(entry);
     if (!parsed.ok) {
       issue(
         issues,
@@ -2087,9 +2124,10 @@ function validateCommandShape(
     );
     return;
   }
-  // The Phase 61 motor/simulation lifecycle commands: identity by wire
-  // prefix (optional on create, required on update/delete) and a plain
-  // payload record on create/update — deletes serialize identity-only
+  // The Phase 61 motor/simulation lifecycle commands and the Phase 70b
+  // study lifecycle commands: identity by wire prefix (optional on
+  // create, required on update/delete) and a plain payload record on
+  // create/update — deletes serialize identity-only
   // ({formatVersion, type, id}) — the full semantic battery is the module
   // parse the document substrate runs; the validator checks the shape it
   // can see.
@@ -2099,25 +2137,37 @@ function validateCommandShape(
     type === "motor.delete" ||
     type === "simulation.create" ||
     type === "simulation.update" ||
-    type === "simulation.delete"
+    type === "simulation.delete" ||
+    type === "study.create" ||
+    type === "study.update" ||
+    type === "study.delete"
   ) {
-    const isCreate = type === "motor.create" || type === "simulation.create";
-    const isDelete = type === "motor.delete" || type === "simulation.delete";
+    const isCreate =
+      type === "motor.create" ||
+      type === "simulation.create" ||
+      type === "study.create";
+    const isDelete =
+      type === "motor.delete" ||
+      type === "simulation.delete" ||
+      type === "study.delete";
     const isMotor = type.startsWith("motor.");
+    const isStudy = type.startsWith("study.");
     if (input.id !== undefined || !isCreate) {
       const parsed = isMotor
         ? parseMotorId(input.id)
-        : parseSimulationId(input.id);
+        : isStudy
+          ? parseStudyId(input.id)
+          : parseSimulationId(input.id);
       if (!parsed.ok) {
         issue(
           issues,
           NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
           `${path}.id`,
-          `A ${type} command's id must be a valid ${isMotor ? "motor" : "simulation"} id.`,
+          `A ${type} command's id must be a valid ${isMotor ? "motor" : isStudy ? "study" : "simulation"} id.`,
         );
       }
     }
-    const payloadKey = isMotor ? "motor" : "scenario";
+    const payloadKey = isMotor ? "motor" : isStudy ? "study" : "scenario";
     const payload = input[payloadKey];
     // The payload contract binds creates and updates; a delete travels
     // identity-only, so its payload is optional (and shape-checked when

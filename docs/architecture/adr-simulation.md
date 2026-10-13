@@ -486,3 +486,66 @@ the runnable docs example. The `fan-run` centrifugal mode and the
 thermal chain are run-time selections by design: runs are store data
 keyed to document versions, never document records — the stance
 records the intent, the launch resolves the source.
+
+## Implementation status (2026-10-13): Phase 70 is implemented — the finale; the roadmap's phases are all landed
+
+Phase 70a (landed first): `packages/sim-optimization` — the NSGA-II
+engine over the simulation spine (law S2: deterministic given the
+study's seed and the deterministic kernels; single-objective the
+degenerate case), the evaluation driver on the batch spine
+(parametric re-drive through the document's own parameter machinery →
+constraint expressions → geometry-aware compile → routed engine solve
+→ objective extraction from the run's own summary scalars; every
+refusal a structured `sim/*` decline the engine counts as
+dominated/penalized, never a crash), the campaign persistence and
+export family (`persistSimCampaign` with the additive `campaign` tag
+on `SimResultSummary` — study + deterministic family + generation +
+the exact replay genome, law S7's run families; the quoting-free
+deterministic Pareto CSV), the `sim.optimize` worker operation behind
+the host-injected executor seam, and the cad-core study vocabulary
+(`SimStudy` records, the cross-checks, the wire codec) with the
+`data-sim-applied-optimization-generation` ledger counter (law S6).
+
+Phase 70b (this slice): the STUDY PRODUCT SURFACE. The document lift:
+the additive `studies` section (add/update/remove with the study
+module's cross-checks and the parameter/motor/scenario in-use
+refusals — the configurations precedent), the `study.*` command
+vocabulary through the log codec, native v10 → v11 as a
+content-additive identity migration (byte-identical round-trips, the
+migration fixture), and the agent-chat command decoder's study
+summaries. The engine-side additive scalars the named objectives
+needed: the structural run's own `mass` (the voxelized total — the
+staircase-honest mass of the same grid the stresses live on) and the
+3D fan engine's `airflow-per-electrical-watt` at the found operating
+point (the §7.9 motor-in-the-loop system objective; a new
+`volumetricFlowPerPower` dimension in the S4 projection table). The
+geometry provider seam widened to sync-or-async — a browser host
+re-drives its kernel worker per candidate and the candidate's
+evaluation awaits the settle; determinism is the VALUES, never the
+scheduling (the sync analytic providers the docs walks use are
+unchanged). The `/workbench-sim` study panel: the Formedible study
+form (parameter genes with bounds from the document's literal table,
+the discrete motor gene, objectives with directions, the constraint
+expression, algorithm and budget), the main-thread campaign runner
+(the workbench's routed engines composed at the host; every
+candidate's re-driven document dispatches through the real kernel
+worker — the re-drive VISIBLE in the viewport — and every generation
+notice lands through the committed-application ledger), the Pareto
+view (the Phase 63 comparison surface generalized to N runs: the
+front scatter with dominated survivors, the best-of-generation
+progression, per-candidate replay with the identical-vector pin), the
+campaign family list from the store, and the Pareto CSV export. The
+two named demos — "the lightest bracket that survives the load"
+(thickness/wallHeight integer genome, mass vs FoS, the slenderness
+constraint declining the thin-tall corner; the dominated-front
+structure pinned) and "the most efficient fan" (the bore gene beside
+the discrete motor gene, air-per-electrical-watt at each candidate's
+found operating point) — runnable from the UI at e2e-sized budgets
+and pinned as the runnable docs example. The session stage s24k
+(attribute-driven: author, run, Pareto rendered, one replay, the CSV
+door). The guide's studies section states the fitness-landscape
+caveat (the staircase's plateaus and jumps) with the two committed
+mitigations — resolution ladders per study and multi-seed campaigns,
+the family key encoding the seed — and both demos as walkthroughs.
+Distance-field-smoothed objectives remain deferred to a cut-cell
+phase (§6 stands).

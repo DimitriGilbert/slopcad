@@ -82,6 +82,7 @@ export {
   simReynolds,
 } from "./regime";
 export { canonicalSimJson, simScenarioSnapshotHash } from "./snapshot";
+export { formatSimFloat, SIM_EXPORT_SIGNIFICANT_DIGITS } from "./format";
 export {
   type CompiledSimCombustion,
   type CompiledSimCombustionEngine,
@@ -128,6 +129,10 @@ export {
 export {
   type SimHistorySeries,
   type SimResult,
+  type SimResultCampaignTag,
+  type SimCampaignGenome,
+  type SimCampaignGenomeParameter,
+  type SimCampaignGenomeRecord,
   type SimResultFieldBlock,
   type SimResultStatus,
   type SimResultSummary,
@@ -197,6 +202,7 @@ export {
 export {
   type SimEngine,
   type SimEngineFieldChunk,
+  type SimEngineOptimizationGeneration,
   type SimEngineProgress,
   type SimEngineRequest,
 } from "./engine";
@@ -275,11 +281,16 @@ export type {
   WorkerSimCompileResult,
   WorkerSimFinalizeInput,
   WorkerSimFinalizeResult,
+  WorkerSimOptimizeCandidate,
+  WorkerSimOptimizeGeneration,
+  WorkerSimOptimizeInput,
+  WorkerSimOptimizeResult,
   WorkerSimRunInput,
   WorkerSimRunResult,
 } from "./sim-worker-operations";
 export {
   createSimFieldChunkNotification,
+  createSimOptimizationGenerationNotification,
   createSimProgressNotification,
   createSimWorkerCancel,
   createSimWorkerErrorResponse,
@@ -295,10 +306,12 @@ export {
 export type {
   DecodedSimWorkerRequest,
   SerializedSimFieldChunkNotification,
+  SerializedSimOptimizationGenerationNotification,
   SerializedSimProgressNotification,
   SerializedSimWorkerNotification,
   SimFieldChunkNotification,
   SimNotificationDelivery,
+  SimOptimizationGenerationNotification,
   SimProgressNotification,
   SimWorkerCancelMessage,
   SimWorkerErrorResponseMessage,
@@ -331,6 +344,8 @@ export {
 export type { SimWebWorkerMessagePort } from "./sim-web-transport";
 export { createSimWorkerServer } from "./sim-worker-server";
 export type {
+  SimOptimizationExecutor,
+  SimOptimizationExecutorCallbacks,
   SimWorkerServer,
   SimWorkerServerOptions,
 } from "./sim-worker-server";

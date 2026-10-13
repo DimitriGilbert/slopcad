@@ -118,6 +118,7 @@ import {
   type SimAppliedCounters,
   SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE,
   SIM_APPLIED_NOTIFICATIONS_ATTRIBUTE,
+  SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
   SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
   simAppliedCountersOf,
 } from "./sim-application-ledger";
@@ -884,6 +885,12 @@ export function useWorkbenchEngine(
           root.setAttribute(
             SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
             String(committed.progressStep),
+          );
+        }
+        if (committed.optimizationGeneration !== null) {
+          root.setAttribute(
+            SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
+            String(committed.optimizationGeneration),
           );
         }
       }

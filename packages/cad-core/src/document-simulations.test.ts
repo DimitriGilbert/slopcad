@@ -664,23 +664,23 @@ describe("the native format with the simulation spine (v10)", () => {
     expect(revived.document.motors).toEqual([]);
   });
 
-  it("migrates v9-stamped content through the identity step to v10", () => {
+  it("migrates v9-stamped content through the identity steps to v11", () => {
     const native = nativeWithSimulationHistory();
     const text = stringifyNativeCadDocument(serializeNativeCadDocument(native));
-    expect(readNativeFormatVersion(JSON.parse(text))).toBe(10);
+    expect(readNativeFormatVersion(JSON.parse(text))).toBe(11);
     const asV9 = {
       ...(JSON.parse(text) as Record<string, unknown>),
       formatVersion: 9,
     };
     const migrated = requireOk(migrateNativeCadDocument(asV9), "the migration");
-    expect(readNativeFormatVersion(migrated)).toBe(10);
+    expect(readNativeFormatVersion(migrated)).toBe(11);
     // Identity: nothing but the stamp changed.
     const migratedRecord = migrated as Record<string, unknown>;
     const expected = JSON.parse(text) as Record<string, unknown>;
     const { formatVersion: migratedStamp, ...migratedContent } = migratedRecord;
     const { formatVersion: expectedStamp, ...expectedContent } = expected;
-    expect(migratedStamp).toBe(10);
-    expect(expectedStamp).toBe(10);
+    expect(migratedStamp).toBe(11);
+    expect(expectedStamp).toBe(11);
     expect(migratedContent).toEqual(expectedContent);
   });
 

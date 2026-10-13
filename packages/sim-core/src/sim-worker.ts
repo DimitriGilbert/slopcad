@@ -18,6 +18,7 @@
 
 import type { SimEngine } from "./engine";
 import type {
+  SimOptimizationExecutor,
   SimWorkerServer,
   SimWorkerServerOptions,
 } from "./sim-worker-server";
@@ -37,6 +38,12 @@ export interface SimWorkerHostOptions {
    * engine from a later phase the same way.
    */
   readonly createEngine?: () => SimEngine | Promise<SimEngine>;
+  /**
+   * The Phase 70a optimization executor behind `sim.optimize` — inject the
+   * NSGA-II runner (`@slopcad/sim-optimization`) to serve optimization
+   * runs; absent, the operation declines `sim/optimizer-unavailable`.
+   */
+  readonly optimizer?: SimOptimizationExecutor;
   /** Additional server options (id generator, ledger) for pinned hosting. */
   readonly server?: Omit<SimWorkerServerOptions, "engine" | "transport">;
 }
@@ -54,6 +61,9 @@ export async function hostSimWorker(
   return createSimWorkerServer({
     engine,
     transport: options.transport,
+    ...(options.optimizer === undefined
+      ? {}
+      : { optimizer: options.optimizer }),
     ...(options.server ?? {}),
   });
 }

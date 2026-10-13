@@ -1270,6 +1270,7 @@ export const SIM_QUANTITY_DIMENSIONS = [
   "area",
   "volume",
   "volumetricFlow",
+  "volumetricFlowPerPower",
   "velocity",
   "acceleration",
   "force",
@@ -1362,6 +1363,11 @@ export const SIM_PROJECTION_UNITS: Readonly<
   area: { unit: "mm^2", factor: MM_PER_M * MM_PER_M },
   volume: { unit: "mm^3", factor: MM_PER_M * MM_PER_M * MM_PER_M },
   volumetricFlow: { unit: "m^3/s", factor: 1 },
+  /**
+   * The Phase 70 "air per watt" family: delivered volumetric flow per
+   * electrical watt (m³/J) — the motor-in-the-loop system objective.
+   */
+  volumetricFlowPerPower: { unit: "m^3/J", factor: 1 },
   velocity: { unit: "mm/s", factor: MM_PER_M },
   acceleration: { unit: "m/s^2", factor: 1 },
   force: { unit: "N", factor: 1 },

@@ -155,6 +155,36 @@ export const SIM_ERROR_CODES = {
    * curve. Defined at the spine so the code vocabulary never reworks.
    */
   combustionModeUnsupported: "sim/combustion-mode-unsupported",
+  /**
+   * Phase 70a: a serialized optimization study (or its document context)
+   * did not parse at the optimization door — the record, the parameter
+   * table, or a referenced record is malformed. The run never starts.
+   */
+  studyInvalid: "sim/study-invalid",
+  /**
+   * Phase 70a: a candidate's genome violates the study's constraint
+   * expressions (or the redrive could not evaluate them) — the
+   * structured decline the engine counts as dominated/penalized, never
+   * a crash.
+   */
+  optimizationConstraintViolated: "sim/optimization-constraint-violated",
+  /** Phase 70a: the redrive of a candidate's parameter table left
+   *  expression-driven values stale (an evaluation failure at the new
+   *  literals) — the candidate declines, never fabricates values. */
+  optimizationRedriveFailed: "sim/optimization-redrive-failed",
+  /**
+   * Phase 70a: a candidate solved but its result summary carries no
+   * (or a non-finite) quantity for a study objective — the objective
+   * selection and the engine's projection disagree, and the candidate
+   * declines loudly instead of scoring a guessed number.
+   */
+  optimizationObjectiveMissing: "sim/optimization-objective-missing",
+  /**
+   * Phase 70a: a `sim.optimize` request reached a worker that hosts no
+   * optimization executor (the engine-side seam is an injection, never
+   * an assumption) — a loud decline, never a fabricated campaign.
+   */
+  optimizerUnavailable: "sim/optimizer-unavailable",
 } as const;
 
 export type SimErrorCode =

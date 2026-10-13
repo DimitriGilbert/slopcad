@@ -4272,6 +4272,170 @@ test("s24j the sim workbench holds the load — the bracket through the structur
   });
 });
 
+test("s24k the sim workbench evolves a study — the Pareto front, its ledger counters, and a replay (Phase 70)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24k workbench-sim optimization study", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // The bracket substrate (s24j's model): the cad-jsx parameters the
+    // study's genome addresses ARE the document's table.
+    await page.locator("#sim-demo-model-bracket").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "bracket",
+    );
+    const scenariosBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-scenario-count"),
+    );
+
+    // AUTHOR — the demo study scenario (the peg-height load over the
+    // genome-grown domain), then the study row itself through the
+    // Formedible form (the bracket demo presets ARE the defaults; the
+    // scenario combobox picks the just-saved record — the template
+    // dialog's combobox-option discipline).
+    await page.locator("#workbench-sim-study-demo-scenario").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      String(scenariosBefore + 1),
+    );
+    await page
+      .getByRole("combobox", { name: "Scenario (every candidate runs it)" })
+      .click();
+    await page
+      .getByRole("option", { name: "bracket-study-load (structural)" })
+      .click();
+    await page.getByRole("button", { name: "Save study" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-count",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // RUN — the campaign through the main-thread driver: every
+    // candidate re-drives the document through the real kernel worker
+    // (the viewport shows each evaluation), every generation notice
+    // lands through the committed-application ledger (law S6), and the
+    // front persists as a law-S7 family. Awaited on the status family,
+    // never a timeout.
+    await page.locator("#workbench-sim-study-run").click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-study-run-status"),
+        { timeout: 180_000 },
+      )
+      .toBe("completed");
+    // The evaluation count is DISTINCT genomes (the engine's cache
+    // excludes plateau collisions): the 18-slot budget spends 6 — the
+    // integer-lattice offspring collide with their parents at this
+    // seed, the fitness-landscape caveat demonstrated live. Determinism
+    // makes the number exact (the same seed ⇒ the same front, every
+    // run).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-evaluations",
+      "6",
+    );
+    // The ledger's optimization-generation counter advanced through the
+    // committed applications (the attribute exists only after one).
+    const generation = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-optimization-generation"),
+    );
+    expect(generation).toBeGreaterThanOrEqual(0);
+    // The Pareto view rendered: the scatter with its front circles and
+    // the store's campaign family.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-pareto",
+      "ready",
+    );
+    await expect(
+      page.locator(
+        '[data-testid="workbench-sim-pareto-scatter"] circle[data-front="true"]',
+      ),
+    ).not.toHaveCount(0);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-campaign-families",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // REPLAY — one front candidate: its exact genome re-driven visibly,
+    // the identical objective vector back (law S2/S5 determinism).
+    const replayButton = page.locator('[id^="workbench-sim-replay-"]').first();
+    await replayButton.click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-study-replay-status"),
+        { timeout: 120_000 },
+      )
+      .toBe("ok");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-replay-matches",
+      "true",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // EXPORT — the Pareto front as deterministic CSV.
+    await page.locator("#workbench-sim-study-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-export-csv",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // FAN — the co-optimization demo's own save path (Phase 70b): a
+    // FRESH fan document through the preset's LOAD path (the study motor
+    // ensured beside the demo's own BEFORE the study form maps — the
+    // ordering a pre-ensuring unit fixture can never see), the demo
+    // study scenario, then the study row through the Formedible form
+    // with the fan presets (the bore gene, the motor gene, the
+    // air-per-watt objective) — saved, no pre-ensure. The page reload
+    // gives the study form a fresh, untouched mount (a touched form
+    // keeps its values across model switches — TanStack's reseed gate),
+    // so the fan presets ARE the form's values, exactly as a user
+    // switching to the fan model on a fresh load sees them.
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    await waitForSettledScene(page, SIM_ROOT);
+    await page.locator("#sim-demo-model-fan").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fan",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await page.locator("#workbench-sim-study-demo-scenario").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page
+      .getByRole("combobox", { name: "Scenario (every candidate runs it)" })
+      .click();
+    await page.getByRole("option", { name: "fan-study (flow)" }).click();
+    await page.getByRole("button", { name: "Save study" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-count",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {

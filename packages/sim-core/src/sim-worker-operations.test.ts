@@ -83,8 +83,10 @@ describe("the operation registry", () => {
       "sim.compile",
       "sim.run",
       "sim.finalize",
+      "sim.optimize",
     ]);
     expect(isSimWorkerOperationId("sim.run")).toBe(true);
+    expect(isSimWorkerOperationId("sim.optimize")).toBe(true);
     expect(isSimWorkerOperationId("solid.createBox")).toBe(false);
   });
 });
@@ -336,6 +338,136 @@ describe("sim.finalize codecs", () => {
         summary: { schemaVersion: 1 },
         payload: "AAAA",
         histories: [],
+      }),
+    );
+  });
+});
+
+describe("sim.optimize codecs (Phase 70a)", () => {
+  const optimizeInput = {
+    study: { id: "study_lightest", name: "lightest bracket" },
+    scenario: { name: "tunnel", kind: "flow" },
+    parameters: { parameters: [] },
+    motors: [{ id: "mot_a", name: "A", kind: "bldc" }],
+    bodyBounds: [
+      {
+        bodyId: "body_1",
+        minMm: [0, 0, 0] as const,
+        maxMm: [1, 1, 1] as const,
+      },
+    ],
+  };
+
+  const candidate = {
+    index: 0,
+    genomeParameters: [{ parameterId: "param_width", value: 10 }],
+    genomeRecords: [{ recordKind: "motor", recordId: "mot_a" }],
+    status: "ok" as const,
+    objectives: [1.25],
+    rank: 0,
+  };
+
+  const optimizeResult = {
+    campaign: "abcd1234",
+    generations: [
+      {
+        generation: 0,
+        evaluations: 4,
+        candidates: [
+          candidate,
+          {
+            index: 1,
+            genomeParameters: [],
+            genomeRecords: [],
+            status: "declined" as const,
+            objectives: [],
+            declineCode: "sim/optimization-constraint-violated",
+            rank: 1,
+          },
+        ],
+      },
+    ],
+    evaluations: 4,
+    declined: 1,
+    pareto: [candidate],
+  };
+
+  it("round-trips input and result through the canonical wire forms", () => {
+    const wire = serializeSimWorkerOperationInput(
+      "sim.optimize",
+      optimizeInput,
+    );
+    expect(JSON.parse(JSON.stringify(wire))).toEqual(wire);
+    const parsed = parseSimWorkerOperationInput(
+      "sim.optimize",
+      JSON.parse(JSON.stringify(wire)),
+    );
+    expect(parsed.ok).toBe(true);
+    const resultWire = serializeSimWorkerOperationResult(
+      "sim.optimize",
+      optimizeResult,
+    );
+    expect(JSON.parse(JSON.stringify(resultWire))).toEqual(resultWire);
+    const parsedResult = parseSimWorkerOperationResult(
+      "sim.optimize",
+      JSON.parse(JSON.stringify(resultWire)),
+    );
+    expect(parsedResult.ok).toBe(true);
+    if (!parsedResult.ok) return;
+    expect(parsedResult.value.campaign).toBe("abcd1234");
+    expect(parsedResult.value.pareto[0]?.objectives).toEqual([1.25]);
+  });
+
+  it("demands the document-context records and validates structure", () => {
+    expectPayloadFailure(parseSimWorkerOperationInput("sim.optimize", {}));
+    expectPayloadFailure(
+      parseSimWorkerOperationInput("sim.optimize", {
+        study: {},
+        scenario: {},
+        parameters: {},
+        motors: "not-an-array",
+      }),
+    );
+    expectPayloadFailure(
+      parseSimWorkerOperationInput("sim.optimize", {
+        ...optimizeInput,
+        bodyBounds: [{ bodyId: "b", minMm: [0, 0], maxMm: [1, 1, 1] }],
+      }),
+    );
+    expectPayloadFailure(
+      parseSimWorkerOperationResult("sim.optimize", {
+        campaign: "abcd1234",
+        generations: "no",
+        evaluations: 1,
+        declined: 0,
+        pareto: [],
+      }),
+    );
+    expectPayloadFailure(
+      parseSimWorkerOperationResult("sim.optimize", {
+        campaign: "abcd1234",
+        generations: [],
+        evaluations: -1,
+        declined: 0,
+        pareto: [],
+      }),
+    );
+    expectPayloadFailure(
+      parseSimWorkerOperationResult("sim.optimize", {
+        campaign: "abcd1234",
+        generations: [],
+        evaluations: 1,
+        declined: 0,
+        pareto: [
+          {
+            index: 0,
+            genomeParameters: [],
+            genomeRecords: [],
+            status: "ok",
+            objectives: [Number.NaN],
+            rank: 0,
+          },
+        ],
       }),
     );
   });

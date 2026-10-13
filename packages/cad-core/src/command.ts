@@ -83,6 +83,7 @@ import {
   addDocumentMotor,
   addDocumentParameter,
   addDocumentSimulation,
+  addDocumentStudy,
   addFeature,
   type CadDocument,
   type DocumentError,
@@ -93,6 +94,7 @@ import {
   removeDocumentMotor,
   removeDocumentParameter,
   removeDocumentSimulation,
+  removeDocumentStudy,
   removeFeature,
   renameDocumentParameter,
   reorderFeature,
@@ -101,6 +103,7 @@ import {
   updateDocumentConfiguration,
   updateDocumentMotor,
   updateDocumentSimulation,
+  updateDocumentStudy,
   updateFeature,
 } from "./document";
 import {
@@ -113,6 +116,7 @@ import {
   type ParameterId,
   type SimulationId,
   type SketchDocumentId,
+  type StudyId,
   parseBodyId,
   parseConfigurationId,
   parseCurveId,
@@ -122,6 +126,7 @@ import {
   parseParameterId,
   parseSimulationId,
   parseSketchDocumentId,
+  parseStudyId,
   type ReferenceId,
   parseReferenceId,
 } from "./ids";
@@ -137,6 +142,12 @@ import {
   parseSimScenarioBody,
   serializeSimScenarioBody,
 } from "./simulation";
+import {
+  type SerializedSimStudyBody,
+  type SimStudyDraft,
+  parseSimStudyBody,
+  serializeSimStudyDraft,
+} from "./study";
 import { type SerializedCurve, parseSerializedCurve } from "./curve";
 import { type ExpressionNode, parseExpressionAst } from "./expression";
 import { type ParameterError, updateParameterValue } from "./parameter";
@@ -174,6 +185,9 @@ export const CAD_COMMAND_TYPES = [
   "simulation.create",
   "simulation.update",
   "simulation.delete",
+  "study.create",
+  "study.update",
+  "study.delete",
 ] as const;
 
 export type CadCommandType = (typeof CAD_COMMAND_TYPES)[number];
@@ -467,6 +481,30 @@ export type CadCommand =
   | {
       readonly type: "simulation.delete";
       readonly id: SimulationId;
+    }
+  | {
+      /**
+       * The Phase 70 optimization study creation: the row's authored
+       * fields — name, the scenario selection, the genome (bounded
+       * parameter genes plus discrete named-record genes), the
+       * objectives, the constraints, the NSGA-II algorithm and budget
+       * fields — ride exactly the shape the study module parses
+       * (`SerializedSimStudyBody`), with the add path's defaults
+       * applying.
+       */
+      readonly type: "study.create";
+      readonly id?: StudyId;
+      readonly study: SimStudyDraft;
+    }
+  | {
+      /** Replaces a study row's mutable fields, keeping its identity. */
+      readonly type: "study.update";
+      readonly id: StudyId;
+      readonly study: SimStudyDraft;
+    }
+  | {
+      readonly type: "study.delete";
+      readonly id: StudyId;
     };
 
 /** Stable failure codes produced when command input is rejected. */
@@ -754,6 +792,21 @@ export function applyCommand(
     }
     case "simulation.delete":
       return removeDocumentSimulation(document, command.id);
+    case "study.create": {
+      const added = addDocumentStudy(document, {
+        ...(command.id === undefined ? {} : { id: command.id }),
+        ...command.study,
+      });
+      if (!added.ok) return added;
+      return ok(added.value.document);
+    }
+    case "study.update": {
+      const updated = updateDocumentStudy(document, command.id, command.study);
+      if (!updated.ok) return updated;
+      return ok(updated.value);
+    }
+    case "study.delete":
+      return removeDocumentStudy(document, command.id);
     default:
       return fail(
         commandError(
@@ -940,6 +993,23 @@ export type SerializedCadCommand =
   | {
       readonly formatVersion: number;
       readonly type: "simulation.delete";
+      readonly id: string;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "study.create";
+      readonly id?: string;
+      readonly study: SerializedSimStudyBody;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "study.update";
+      readonly id: string;
+      readonly study: SerializedSimStudyBody;
+    }
+  | {
+      readonly formatVersion: number;
+      readonly type: "study.delete";
       readonly id: string;
     };
 
@@ -1218,6 +1288,26 @@ export function serializeCommand(command: CadCommand): SerializedCadCommand {
         scenario: serializeSimScenarioBody(command.scenario),
       };
     case "simulation.delete":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+      };
+    case "study.create":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        ...(command.id === undefined ? {} : { id: command.id }),
+        study: serializeSimStudyDraft(command.study),
+      };
+    case "study.update":
+      return {
+        formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
+        type: command.type,
+        id: command.id,
+        study: serializeSimStudyDraft(command.study),
+      };
+    case "study.delete":
       return {
         formatVersion: CAD_DOCUMENT_FORMAT_VERSION,
         type: command.type,
@@ -2285,6 +2375,70 @@ export function parseCommand(
           commandError(
             COMMAND_ERROR_CODES.malformed,
             `A simulation.delete command needs a valid simulation id: ${parsedId.error.message}`,
+            input.id,
+          ),
+        );
+      }
+      return ok(Object.freeze({ type, id: parsedId.value }));
+    }
+    case "study.create":
+    case "study.update": {
+      const isUpdate = type === "study.update";
+      let id: StudyId | undefined;
+      if (isUpdate || input.id !== undefined) {
+        const parsedId = parseStudyId(input.id);
+        if (!parsedId.ok) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              `A ${type} command needs a valid study id: ${parsedId.error.message}`,
+              input.id,
+            ),
+          );
+        }
+        id = parsedId.value;
+      }
+      // The study payload parses through the study module's own strict
+      // parser; the document cross-checks (the scenario selection, the
+      // genome's parameters and records, the constraint identifiers)
+      // re-run at the substrate ({@link addDocumentStudy}).
+      const parsedStudy = parseSimStudyBody(input.study);
+      if (!parsedStudy.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A ${type} command needs a valid study payload: ${parsedStudy.error.message}`,
+            input.study,
+          ),
+        );
+      }
+      if (isUpdate) {
+        if (id === undefined) {
+          return fail(
+            commandError(
+              COMMAND_ERROR_CODES.malformed,
+              "A study.update command needs a valid study id.",
+              input.id,
+            ),
+          );
+        }
+        return ok(Object.freeze({ type, id, study: parsedStudy.value }));
+      }
+      return ok(
+        Object.freeze({
+          type,
+          ...(id === undefined ? {} : { id }),
+          study: parsedStudy.value,
+        }),
+      );
+    }
+    case "study.delete": {
+      const parsedId = parseStudyId(input.id);
+      if (!parsedId.ok) {
+        return fail(
+          commandError(
+            COMMAND_ERROR_CODES.malformed,
+            `A study.delete command needs a valid study id: ${parsedId.error.message}`,
             input.id,
           ),
         );

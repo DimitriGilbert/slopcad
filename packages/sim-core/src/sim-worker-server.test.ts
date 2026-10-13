@@ -18,10 +18,12 @@ import { createSimInMemoryTransportPair } from "./sim-transport";
 import { createSimWorkerServer } from "./sim-worker-server";
 import {
   createSimWorkerRequest,
+  decodeSimWorkerNotification,
   parseSimWorkerMessage,
 } from "./sim-worker-protocol";
 import { parseSimWorkerOperationResult } from "./sim-worker-operations";
 import { SIM_WORKER_PROTOCOL_ERROR_CODES } from "./sim-worker-errors";
+import { SIM_ERROR_CODES, simError } from "./errors";
 import { createFakeSimEngine } from "./fake-engine";
 import { type SimCompileInput, compileSimScenario } from "./units";
 import {
@@ -441,5 +443,163 @@ describe("the parse boundary", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(sent.length).toBe(0);
     server.close();
+  });
+});
+
+describe("the optimization executor seam (Phase 70a)", () => {
+  const optimizeInput = {
+    study: { id: "study_x", name: "x" },
+    scenario: flowScenario(),
+    parameters: { parameters: [] },
+  };
+
+  const stubResult = {
+    campaign: "abcd1234",
+    generations: [
+      {
+        generation: 0,
+        evaluations: 2,
+        candidates: [
+          {
+            index: 0,
+            genomeParameters: [{ parameterId: "param_width", value: 5 }],
+            genomeRecords: [],
+            status: "ok" as const,
+            objectives: [1],
+            rank: 0,
+          },
+        ],
+      },
+    ],
+    evaluations: 2,
+    declined: 0,
+    pareto: [
+      {
+        index: 0,
+        genomeParameters: [{ parameterId: "param_width", value: 5 }],
+        genomeRecords: [],
+        status: "ok" as const,
+        objectives: [1],
+        rank: 0,
+      },
+    ],
+  };
+
+  it("declines sim.optimize loudly when no executor is hosted", async () => {
+    const { sent, request } = harness();
+    request("sim.optimize", optimizeInput);
+    await settle();
+    const responses = parseAll(sent).filter(
+      (message) => message.kind === "response",
+    );
+    const failure = responses[0];
+    expect(failure?.kind === "response" && failure.status === "error").toBe(
+      true,
+    );
+    if (
+      failure === undefined ||
+      failure.kind !== "response" ||
+      failure.status !== "error"
+    ) {
+      return;
+    }
+    expect(failure.error.code).toBe(
+      SIM_WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+    );
+    expect(failure.error.data).toMatchObject({
+      simCode: "sim/optimizer-unavailable",
+    });
+  });
+
+  it("executes through an injected executor and streams both notice kinds", async () => {
+    const pair = createSimInMemoryTransportPair();
+    const notices: string[] = [];
+    const sent: unknown[] = [];
+    const server = createSimWorkerServer({
+      engine: createFakeSimEngine(),
+      transport: pair.server,
+      optimizer: (input, callbacks) => {
+        expect(input.study).toEqual(optimizeInput.study);
+        callbacks.onProgress({ step: 1, totalSteps: 4 });
+        callbacks.onOptimizationGeneration({
+          generation: 0,
+          evaluated: 2,
+          budget: 4,
+          best: [1],
+        });
+        return Promise.resolve({ ok: true, value: stubResult });
+      },
+    });
+    void server;
+    pair.client.onMessage((data) => {
+      sent.push(data);
+      const parsed = parseSimWorkerMessage(data);
+      if (!parsed.ok) return;
+      if (parsed.value.kind !== "notification") return;
+      const decoded = decodeSimWorkerNotification(parsed.value);
+      if (!decoded.ok) return;
+      notices.push(decoded.value.notification.kind);
+    });
+    pair.client.send(
+      createSimWorkerRequest(
+        createSimWorkerRequestId("req_opt1"),
+        "sim.optimize",
+        optimizeInput,
+      ),
+    );
+    await settle();
+    expect(notices).toEqual(["progress", "optimization-generation"]);
+    const response = parseAll(sent).find(
+      (message) => message.kind === "response",
+    );
+    if (
+      response === undefined ||
+      response.kind !== "response" ||
+      response.status !== "ok"
+    ) {
+      throw new Error("expected a success response");
+    }
+    const parsedResult = parseSimWorkerOperationResult(
+      "sim.optimize",
+      response.result,
+    );
+    expect(parsedResult.ok).toBe(true);
+    if (parsedResult.ok) {
+      expect(parsedResult.value.campaign).toBe("abcd1234");
+    }
+  });
+
+  it("maps an executor decline onto worker/operation-failed with the sim code", async () => {
+    const pair = createSimInMemoryTransportPair();
+    const sent: unknown[] = [];
+    pair.client.onMessage((data) => sent.push(data));
+    createSimWorkerServer({
+      engine: createFakeSimEngine(),
+      transport: pair.server,
+      optimizer: () =>
+        Promise.resolve({
+          ok: false,
+          error: simError(SIM_ERROR_CODES.studyInvalid, "bad study", null),
+        }),
+    });
+    pair.client.send(
+      createSimWorkerRequest(
+        createSimWorkerRequestId("req_opt2"),
+        "sim.optimize",
+        optimizeInput,
+      ),
+    );
+    await settle();
+    const failure = parseAll(sent).find(
+      (message) => message.kind === "response",
+    );
+    if (
+      failure === undefined ||
+      failure.kind !== "response" ||
+      failure.status !== "error"
+    ) {
+      throw new Error("expected an error response");
+    }
+    expect(failure.error.data).toMatchObject({ simCode: "sim/study-invalid" });
   });
 });

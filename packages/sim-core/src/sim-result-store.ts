@@ -45,6 +45,9 @@ import { simFail, simOk } from "./result";
 import { SIM_QUALITATIVE_FLAGS } from "./regime";
 import { decodeSimBase64Strict, encodeSimBase64 } from "./sim-base64";
 import {
+  type SimCampaignGenomeParameter,
+  type SimCampaignGenomeRecord,
+  type SimResultCampaignTag,
   decodeSimResultPayload,
   encodeSimResultPayload,
   SIM_RESULT_STATUSES,
@@ -288,6 +291,12 @@ export function parseSimResultSummary(
     if (!parsed.ok) return parsed;
     failureMessage = parsed.value;
   }
+  let campaign: SimResultCampaignTag | undefined;
+  if (input.campaign !== undefined) {
+    const parsed = parseSimResultCampaignTag(input.campaign);
+    if (!parsed.ok) return parsed;
+    campaign = parsed.value;
+  }
   if (
     status === "failed" &&
     (failureCode === undefined || failureMessage === undefined)
@@ -321,6 +330,136 @@ export function parseSimResultSummary(
       ...(servedBackend === undefined ? {} : { servedBackend }),
       ...(failureCode === undefined ? {} : { failureCode }),
       ...(failureMessage === undefined ? {} : { failureMessage }),
+      ...(campaign === undefined ? {} : { campaign }),
+    }),
+  );
+}
+
+/** The most gene assignments one campaign genome may carry (the study gene budget). */
+const SIM_CAMPAIGN_MAX_GENES = 16;
+
+function parseNonNegativeInteger(
+  input: unknown,
+  what: string,
+): SimParseResult<number, SimError> {
+  if (typeof input !== "number" || !Number.isInteger(input) || input < 0) {
+    return recordMalformed(`${what} must be a non-negative integer.`, input);
+  }
+  return simOk(input);
+}
+
+/**
+ * Parses untrusted input as a {@link SimResultCampaignTag} — the Phase 70a
+ * run-family key with its replay genome, every field bounded and rebuilt
+ * in a fixed key order so a round-tripped tag re-serializes identically.
+ */
+function parseSimResultCampaignTag(
+  input: unknown,
+): SimParseResult<SimResultCampaignTag, SimError> {
+  if (!isPlainRecord(input)) {
+    return recordMalformed(
+      "A summary's campaign tag must be a plain object.",
+      input,
+    );
+  }
+  const studyId = parseLabel(
+    input.studyId,
+    "A campaign tag's studyId",
+    SIM_RESULT_RUN_ID_MAX_LENGTH,
+  );
+  if (!studyId.ok) return studyId;
+  const family = parseLabel(
+    input.family,
+    "A campaign tag's family",
+    SIM_RESULT_RUN_ID_MAX_LENGTH,
+  );
+  if (!family.ok) return family;
+  const generation = parseNonNegativeInteger(
+    input.generation,
+    "A campaign tag's generation",
+  );
+  if (!generation.ok) return generation;
+  const candidate = parseNonNegativeInteger(
+    input.candidate,
+    "A campaign tag's candidate",
+  );
+  if (!candidate.ok) return candidate;
+  const seed = parseNonNegativeInteger(input.seed, "A campaign tag's seed");
+  if (!seed.ok) return seed;
+  if (!isPlainRecord(input.genome)) {
+    return recordMalformed(
+      "A campaign tag's genome must be a plain object with parameters and records arrays.",
+      input.genome,
+    );
+  }
+  if (
+    !Array.isArray(input.genome.parameters) ||
+    !Array.isArray(input.genome.records) ||
+    input.genome.parameters.length > SIM_CAMPAIGN_MAX_GENES ||
+    input.genome.records.length > SIM_CAMPAIGN_MAX_GENES
+  ) {
+    return recordMalformed(
+      `A campaign genome must carry parameters and records arrays of at most ${String(SIM_CAMPAIGN_MAX_GENES)} entries each.`,
+      input.genome,
+    );
+  }
+  const parameters: SimCampaignGenomeParameter[] = [];
+  for (const entry of input.genome.parameters) {
+    if (!isPlainRecord(entry)) {
+      return recordMalformed(
+        "A campaign genome parameter must be a plain object with parameterId and value fields.",
+        entry,
+      );
+    }
+    const parameterId = parseLabel(
+      entry.parameterId,
+      "A campaign genome parameter's parameterId",
+      SIM_RESULT_RUN_ID_MAX_LENGTH,
+    );
+    if (!parameterId.ok) return parameterId;
+    const value = parseFiniteNumber(
+      entry.value,
+      "A campaign genome parameter's value",
+    );
+    if (!value.ok) return value;
+    parameters.push({ parameterId: parameterId.value, value: value.value });
+  }
+  const records: SimCampaignGenomeRecord[] = [];
+  for (const entry of input.genome.records) {
+    if (!isPlainRecord(entry)) {
+      return recordMalformed(
+        "A campaign genome record must be a plain object with recordKind and recordId fields.",
+        entry,
+      );
+    }
+    const recordKind = parseLabel(
+      entry.recordKind,
+      "A campaign genome record's recordKind",
+      SIM_RESULT_RUN_ID_MAX_LENGTH,
+    );
+    if (!recordKind.ok) return recordKind;
+    const recordId = parseLabel(
+      entry.recordId,
+      "A campaign genome record's recordId",
+      SIM_RESULT_RUN_ID_MAX_LENGTH,
+    );
+    if (!recordId.ok) return recordId;
+    records.push({
+      recordKind: recordKind.value,
+      recordId: recordId.value,
+    });
+  }
+  return simOk(
+    Object.freeze({
+      studyId: studyId.value,
+      family: family.value,
+      generation: generation.value,
+      candidate: candidate.value,
+      seed: seed.value,
+      genome: Object.freeze({
+        parameters: Object.freeze(parameters),
+        records: Object.freeze(records),
+      }),
     }),
   );
 }

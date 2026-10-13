@@ -980,6 +980,14 @@ async function runFlow3dEngine(
             "dimensionless",
             fanAirPowerW / electricalPowerW,
           ),
+          // Phase 70's "air per watt at the operating point": the
+          // delivered flow per electrical watt (m³/J) — the motor in the
+          // loop makes it the system objective the roadmap names.
+          scalar(
+            "airflow-per-electrical-watt",
+            "volumetricFlowPerPower",
+            performance.value.airflowM3PerS / electricalPowerW,
+          ),
         ]),
     scalar(
       "blade-pass-frequency",

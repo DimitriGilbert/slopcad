@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import type {
   SimFieldChunkNotification,
   SimProgressNotification,
+  SimWorkerNotification,
 } from "@slopcad/sim-core";
 
 import {
@@ -45,6 +46,17 @@ function progress(step: number): SimProgressNotification {
   return { kind: "progress", step, totalSteps: 24 };
 }
 
+/** An optimization-generation notice (Phase 70a). */
+function generationNotice(generation: number): SimWorkerNotification {
+  return {
+    kind: "optimization-generation",
+    generation,
+    evaluated: generation * 4,
+    budget: 96,
+    best: [1.25],
+  };
+}
+
 /** The applied-notifications counter of a ledger, for the tight asserts. */
 function notificationsOf(ledger: SimApplicationLedger): number {
   return simAppliedCountersOf(ledger).notifications;
@@ -57,16 +69,19 @@ describe("progress applications", () => {
       notifications: 1,
       fieldChunks: 0,
       progressStep: 1,
+      optimizationGeneration: null,
     });
     expect(applySimNotification(ledger, progress(2))).toEqual({
       notifications: 2,
       fieldChunks: 0,
       progressStep: 2,
+      optimizationGeneration: null,
     });
     expect(applySimNotification(ledger, progress(24))).toEqual({
       notifications: 3,
       fieldChunks: 0,
       progressStep: 24,
+      optimizationGeneration: null,
     });
   });
 
@@ -83,6 +98,33 @@ describe("progress applications", () => {
   });
 });
 
+describe("optimization-generation applications (Phase 70a)", () => {
+  it("applies strictly advancing generations and counts one notification each", () => {
+    const ledger = createSimApplicationLedger();
+    expect(applySimNotification(ledger, generationNotice(0))).toEqual({
+      notifications: 1,
+      fieldChunks: 0,
+      progressStep: null,
+      optimizationGeneration: 0,
+    });
+    expect(applySimNotification(ledger, generationNotice(3))).toEqual({
+      notifications: 2,
+      fieldChunks: 0,
+      progressStep: null,
+      optimizationGeneration: 3,
+    });
+  });
+
+  it("commits nothing for duplicate or retrograde generations", () => {
+    const ledger = createSimApplicationLedger();
+    applySimNotification(ledger, generationNotice(5));
+    const before = simAppliedCountersOf(ledger);
+    expect(applySimNotification(ledger, generationNotice(5))).toBeNull();
+    expect(applySimNotification(ledger, generationNotice(4))).toBeNull();
+    expect(simAppliedCountersOf(ledger)).toEqual(before);
+  });
+});
+
 describe("field-chunk applications", () => {
   it("establishes a stream at chunk 0 and extends it contiguously", () => {
     const ledger = createSimApplicationLedger();
@@ -90,6 +132,7 @@ describe("field-chunk applications", () => {
       notifications: 1,
       fieldChunks: 1,
       progressStep: null,
+      optimizationGeneration: null,
     });
     applySimNotification(ledger, chunk(1, 4));
     applySimNotification(ledger, chunk(2, 4));
@@ -97,6 +140,7 @@ describe("field-chunk applications", () => {
       notifications: 4,
       fieldChunks: 4,
       progressStep: null,
+      optimizationGeneration: null,
     });
     const field = ledger.fields.get("velocity-magnitude");
     expect(field?.appliedChunks).toBe(4);
@@ -166,6 +210,7 @@ describe("field-chunk applications", () => {
       notifications: 8,
       fieldChunks: 8,
       progressStep: null,
+      optimizationGeneration: null,
     });
   });
 
@@ -184,6 +229,7 @@ describe("field-chunk applications", () => {
       notifications: 4,
       fieldChunks: 4,
       progressStep: null,
+      optimizationGeneration: null,
     });
   });
 

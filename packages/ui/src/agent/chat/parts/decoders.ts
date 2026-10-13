@@ -150,6 +150,16 @@ export function formatCadCommand(command: CadCommand): string {
       return `Update ${command.scenario.kind} scenario ${String(command.id)}`;
     case "simulation.delete":
       return `Delete simulation scenario ${String(command.id)}`;
+    case "study.create":
+      return `Create study "${command.study.name}" (${String(
+        command.study.genes?.length ?? 0,
+      )} gene${(command.study.genes?.length ?? 0) === 1 ? "" : "s"}, ${String(
+        command.study.objectives?.length ?? 0,
+      )} objective${(command.study.objectives?.length ?? 0) === 1 ? "" : "s"})`;
+    case "study.update":
+      return `Update study ${String(command.id)}`;
+    case "study.delete":
+      return `Delete study ${String(command.id)}`;
     default: {
       // Exhaustiveness: a future command type must extend the summaries.
       const exhaustive: never = command;

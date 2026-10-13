@@ -116,13 +116,16 @@
  * `data-sim-motion-time-s` (SVG-as-data, scrubbed deterministically).
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { CadScene, FieldIsoContours, FieldSlicePlane } from "@slopcad/cad-r3f";
 import {
   addDocumentSimulation,
+  addDocumentStudy,
   type CadDocument,
   type DocumentMotorRecord,
+  type SimStudy,
+  type SimStudyInput,
   serializeDocumentMotor,
   serializeSimScenario,
   type SimScenario,
@@ -133,6 +136,7 @@ import type { SimResultRunRecord } from "@slopcad/sim-core";
 import type { SimResultStore } from "@slopcad/sim-core";
 import type { SimStructuralChainInput } from "@slopcad/sim-core";
 import type { SimResult } from "@slopcad/sim-core";
+import type { WorkerSimOptimizeCandidate } from "@slopcad/sim-core";
 import type { BootedSimWorkerChannel } from "@slopcad/sim-core";
 import type { DecodedFieldGrid } from "@slopcad/cad-r3f";
 import {
@@ -141,6 +145,8 @@ import {
   type FieldColormap,
   decodedFieldGrid,
 } from "@slopcad/cad-r3f";
+import { exportSimParetoCsv } from "@slopcad/sim-optimization";
+import type { SimOptimizationGeometry } from "@slopcad/sim-optimization";
 
 import {
   bootRenderFixtureSession,
@@ -176,6 +182,36 @@ import { thermalMaterialPresetOf } from "./thermal-materials";
 import { StructuralScenarioForm } from "./structural-scenario-form";
 import { structuralMaterialPresetOf } from "./structural-materials";
 import { bracketDemoDocument } from "./bracket-demo";
+import {
+  BRACKET_GENES,
+  BRACKET_STUDY_DEMO,
+  bracketStudyInput,
+  bracketStudyScenarioDraft,
+} from "./bracket-study-demo";
+import {
+  fanStudyScenarioDraft,
+  fanWorkbenchDocument,
+  FAN_STUDY_DEMO,
+  FAN_STUDY_GENES,
+} from "./fan-study-demo";
+import {
+  STUDY_FORM_DEFAULT_VALUES,
+  StudyForm,
+  type StudyValues,
+} from "./study-form";
+import {
+  type StudyCampaignHandle,
+  type StudyGeometryRedrive,
+  StudyRunFailure,
+  replayStudyCandidate,
+  runStudyCampaign,
+} from "./study-run";
+import {
+  campaignFamilyRows,
+  type StudyParetoView,
+  ParetoViewPanel,
+  paretoViewOf,
+} from "./study-pareto";
 import { CombustionStoveForm } from "./combustion-stove-form";
 import { CombustionEngineForm } from "./combustion-engine-form";
 import { engineChartOf, EngineChartPanel } from "./engine-chart";
@@ -244,6 +280,15 @@ const DEMO_RENDERABLE = renderableBodyIds(DEMO_DOCUMENT);
 const FAN_DEMO_DOCUMENT = fanDemoDocument();
 const FAN_DEMO_BODIES = documentSceneBodies(FAN_DEMO_DOCUMENT, new Set(), null);
 const FAN_DEMO_RENDERABLE = renderableBodyIds(FAN_DEMO_DOCUMENT);
+/**
+ * The fan preset's WORKING document (computed once, pure — the demo
+ * document's discipline): the demo document PLUS the study motor the
+ * fan-study demo ensures at the LOAD path, so the study form's discrete
+ * motor gene finds its two choices the moment the fan document loads —
+ * the ensure PRECEDES the form's map (a fresh fan document carries one
+ * motor, and the mapper refuses a one-choice discrete gene).
+ */
+const FAN_WORKING_DOCUMENT = fanWorkbenchDocument();
 /**
  * The slider-crank demo's own document (computed once, pure — the
  * plate demo's discipline): the cad-jsx mechanism bodies, the four
@@ -455,6 +500,21 @@ export function SimWorkbenchPage(): ReactElement {
   const [structuralField, setStructuralField] = useState<
     "displacement" | "von-mises"
   >("displacement");
+  // --- Phase 70b state (the optimization study surface) --------------------
+  const [selectedStudy, setSelectedStudy] = useState<SimStudy | null>(null);
+  const [studyStatus, setStudyStatus] = useState("idle");
+  const [studyRun, setStudyRun] = useState<{
+    readonly campaign: string;
+    readonly evaluations: number;
+    readonly declined: number;
+  } | null>(null);
+  const [paretoView, setParetoView] = useState<StudyParetoView | null>(null);
+  const [campaignHandle, setCampaignHandle] =
+    useState<StudyCampaignHandle | null>(null);
+  const [replayStatus, setReplayStatus] = useState("idle");
+  const [replayMatches, setReplayMatches] = useState("");
+  const [replayObjectives, setReplayObjectives] = useState("");
+  const [exportedStudyCsv, setExportedStudyCsv] = useState(0);
   const channelRef = useRef<BootedSimWorkerChannel | null>(null);
   // The store-boot promise: a run awaits it, so a fast click after load
   // never races the IndexedDB open (it declines only on a real failure).
@@ -462,6 +522,11 @@ export function SimWorkbenchPage(): ReactElement {
     Promise.resolve(null),
   );
   const sceneRef = useRef<AppliedScene | null>(null);
+  // The study's re-drive settle await: a one-shot resolver the session's
+  // applied callback consumes — the geometry provider's await surface.
+  const pendingSettleRef = useRef<((applied: AppliedScene) => void) | null>(
+    null,
+  );
 
   useEffect(() => {
     const session = bootRenderFixtureSession(
@@ -477,6 +542,9 @@ export function SimWorkbenchPage(): ReactElement {
         const applied: AppliedScene = { state, revision };
         sceneRef.current = applied;
         setScene(applied);
+        const pending = pendingSettleRef.current;
+        pendingSettleRef.current = null;
+        pending?.(applied);
       },
     );
     session.dispatchDocument(
@@ -495,7 +563,10 @@ export function SimWorkbenchPage(): ReactElement {
             ? BRACKET_DEMO_RENDERABLE
             : DEMO_RENDERABLE,
     );
+    // The study's re-drive service rides this session's dispatch.
+    dispatchDocumentRef.current = session.dispatchDocument.bind(session);
     return () => {
+      dispatchDocumentRef.current = null;
       session.dispose();
     };
   }, [demoModel]);
@@ -588,7 +659,7 @@ export function SimWorkbenchPage(): ReactElement {
     setDemoModel(model);
     setWorkingDocument(
       model === "fan"
-        ? FAN_DEMO_DOCUMENT
+        ? FAN_WORKING_DOCUMENT
         : model === "slider"
           ? SLIDER_DEMO_DOCUMENT
           : model === "bracket"
@@ -1001,6 +1072,328 @@ export function SimWorkbenchPage(): ReactElement {
 
   const lastHash = runs.length > 0 ? runs[runs.length - 1] : undefined;
 
+  // --- Phase 70b: the optimization study surface ----------------------------
+
+  /**
+   * The study form's boot values: the DEMO PRESETS of the current model
+   * (the bracket's mass-vs-FoS genome, the fan's bore+motor
+   * co-optimization), keyed so they re-derive only when the model or the
+   * addressed record ids change — a mid-session scenario save never
+   * resets the authoring form.
+   */
+  const studyDefaults = useMemo<StudyValues>(() => {
+    const base = { ...STUDY_FORM_DEFAULT_VALUES };
+    const literal = workingDocument.parameters.parameters.filter(
+      (parameter) => parameter.expression === null,
+    );
+    const parameterId = (index: number): string =>
+      literal[index]?.id ?? base.geneAParameterId;
+    // The demo presets target the DEMO STUDY SCENARIO when it is saved,
+    // the model's fallback scenario otherwise, the document's first row
+    // as the last resort.
+    const scenarioIdOf = (names: readonly string[]): string => {
+      for (const name of names) {
+        const found = workingDocument.simulations.find(
+          (scenario) => scenario.name === name,
+        );
+        if (found !== undefined) return found.id;
+      }
+      return workingDocument.simulations[0]?.id ?? "";
+    };
+    if (demoModel === "bracket") {
+      const input = bracketStudyInput(
+        scenarioIdOf(["bracket-study-load"]) as SimStudyInput["scenarioId"],
+      );
+      return {
+        ...base,
+        name: input.name,
+        scenarioId: scenarioIdOf(["bracket-study-load", "bracket"]),
+        geneAParameterId: BRACKET_GENES.thickness,
+        geneAKind: "integer",
+        geneAMin: BRACKET_STUDY_DEMO.thicknessMin,
+        geneAMax: BRACKET_STUDY_DEMO.thicknessMax,
+        geneAStep: BRACKET_STUDY_DEMO.thicknessStep,
+        geneBEnabled: true,
+        geneBParameterId: BRACKET_GENES.wallHeight,
+        geneBKind: "integer",
+        geneBMin: BRACKET_STUDY_DEMO.wallHeightMin,
+        geneBMax: BRACKET_STUDY_DEMO.wallHeightMax,
+        geneBStep: BRACKET_STUDY_DEMO.wallHeightStep,
+        constraintEnabled: true,
+        constraintExpression: BRACKET_STUDY_DEMO.constraint,
+        population: input.population ?? base.population,
+        generations: input.generations ?? base.generations,
+        seed: input.seed ?? base.seed,
+        maxEvaluations: input.maxEvaluations ?? base.maxEvaluations,
+      };
+    }
+    if (demoModel === "fan") {
+      return {
+        ...base,
+        name: "most-efficient-fan",
+        scenarioId: scenarioIdOf(["fan-study", "fan-in-tube"]),
+        geneAParameterId: FAN_STUDY_GENES.boreRadius,
+        geneAKind: "decimal",
+        geneAMin: FAN_STUDY_DEMO.boreMin,
+        geneAMax: FAN_STUDY_DEMO.boreMax,
+        geneAStep: FAN_STUDY_DEMO.boreStep,
+        geneBEnabled: false,
+        motorGeneEnabled: true,
+        objectiveAQuantity: "airflow-per-electrical-watt",
+        objectiveADirection: "maximize",
+        objectiveBEnabled: false,
+        population: FAN_STUDY_DEMO.population,
+        generations: FAN_STUDY_DEMO.generations,
+        seed: FAN_STUDY_DEMO.seed,
+        maxEvaluations: FAN_STUDY_DEMO.population * FAN_STUDY_DEMO.generations,
+      };
+    }
+    return {
+      ...base,
+      scenarioId: workingDocument.simulations[0]?.id ?? "",
+      geneAParameterId: parameterId(0),
+    };
+    // The key: the model plus the record ids the defaults address — the
+    // memo re-derives when a save changes those, never otherwise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    demoModel,
+    workingDocument.simulations,
+    workingDocument.parameters,
+    workingDocument.motors.length,
+  ]);
+
+  /** Saves a study row into the document's studies section (law S1). */
+  const onSaveStudy = (draft: SimStudyInput): void => {
+    // The fan study's discrete motor gene already found its two choices:
+    // the fan preset's LOAD path (FAN_WORKING_DOCUMENT) ensured the
+    // study motor before the form mapped, so the draft is honest against
+    // the working document as it stands.
+    const added = addDocumentStudy(workingDocument, draft);
+    if (!added.ok) {
+      setSimError(`study/invalid: ${added.error.message}`);
+      return;
+    }
+    setWorkingDocument(added.value.document);
+    setSelectedStudy(added.value.study);
+    setSimError("");
+  };
+
+  /**
+   * Saves the CURRENT MODEL'S demo study scenario — the fixture-data
+   * presets the study form's defaults target (the bracket's
+   * peg-height load over the genome-grown domain; the fan's
+   * coarse-budget sweep). The study's scenario is a document record the
+   * same as every scenario: one button, no magic.
+   */
+  const onSaveDemoStudyScenario = (): void => {
+    const draft =
+      demoModel === "bracket"
+        ? bracketStudyScenarioDraft()
+        : demoModel === "fan"
+          ? fanStudyScenarioDraft()
+          : null;
+    if (draft === null) {
+      setSimError(
+        "study/demo-scenario-missing: This model carries no demo study scenario preset.",
+      );
+      return;
+    }
+    onSaveScenario(draft);
+  };
+
+  /**
+   * The study's per-candidate geometry re-drive (the async provider
+   * seam): the re-driven parameter table rebuilds the document's scene
+   * requests, the render session's kernel worker re-tessellates them,
+   * and the awaited settle carries the per-body tessellations — the
+   * viewport SHOWS every candidate as it is evaluated (the re-drive
+   * visible), and the compile consumes the real re-driven geometry.
+   */
+  const makeGeometryRedrive = (
+    documentAtRun: CadDocument,
+  ): StudyGeometryRedrive => {
+    return async (candidate): Promise<SimOptimizationGeometry> => {
+      const settled = sceneRef.current;
+      if (settled === null || !("bodies" in settled.state.measurement)) {
+        return {};
+      }
+      const sceneDocument: CadDocument = {
+        ...documentAtRun,
+        parameters: candidate.parameters,
+      };
+      // The dispatch shares the page's renderable set: every body the
+      // model renders stays rendered across the re-drive.
+      const renderable =
+        demoModel === "fan"
+          ? FAN_DEMO_RENDERABLE
+          : demoModel === "bracket"
+            ? BRACKET_DEMO_RENDERABLE
+            : DEMO_RENDERABLE;
+      const bodies = documentSceneBodies(sceneDocument, new Set(), null);
+      if (bodies.length === 0) return {};
+      const settledScene = await new Promise<AppliedScene | null>((resolve) => {
+        pendingSettleRef.current = resolve;
+        dispatchDocumentRef.current?.(bodies, renderable);
+      });
+      if (
+        settledScene === null ||
+        !("bodies" in settledScene.state.measurement)
+      ) {
+        return {};
+      }
+      const measured = settledScene.state.measurement.bodies;
+      return {
+        tessellation: documentSceneTessellation(measured),
+        bodyTessellations: measured.map((body) => ({
+          bodyId: body.bodyId,
+          tessellation: body.measurement.tessellation,
+        })),
+      };
+    };
+  };
+
+  /** The render session's dispatch, kept for the re-drive service. */
+  const dispatchDocumentRef = useRef<
+    | ((
+        bodies: ReturnType<typeof documentSceneBodies>,
+        renderable: ReadonlySet<string>,
+      ) => void)
+    | null
+  >(null);
+
+  /** Runs the saved study as a campaign, persisting its Pareto family. */
+  const onRunStudy = async (): Promise<void> => {
+    if (selectedStudy === null) {
+      setSimError("Save a study before running it.");
+      return;
+    }
+    const store = await storeBootRef.current;
+    if (store === null) {
+      setSimError("sim/store-unavailable: The result store did not boot.");
+      setStudyStatus("failed");
+      return;
+    }
+    const documentAtRun = workingDocument;
+    const geometry = makeGeometryRedrive(documentAtRun);
+    setStudyStatus("running");
+    setReplayStatus("idle");
+    setReplayMatches("");
+    setReplayObjectives("");
+    try {
+      const campaign = await runStudyCampaign({
+        document: documentAtRun,
+        study: selectedStudy,
+        store,
+        documentVersionId: DOCUMENT_VERSION_ID,
+        ledger: simLedger,
+        geometry,
+        events: {
+          onPhase: (phase, detail) => {
+            setStudyStatus(phase);
+            if (detail !== undefined && detail !== "") setSimError(detail);
+          },
+          onApplied: (counters) => {
+            stampSimAppliedCounters(ROOT_ID, counters);
+            setSimCounters(counters);
+          },
+        },
+      });
+      setStudyRun({
+        campaign: campaign.result.campaign,
+        evaluations: campaign.result.evaluations,
+        declined: campaign.result.declined,
+      });
+      setParetoView(paretoViewOf(selectedStudy, campaign.result));
+      setCampaignHandle(campaign.handle);
+      await refreshRuns(store);
+      setStudyStatus("completed");
+      setSimError("");
+    } catch (error) {
+      const detail =
+        error instanceof StudyRunFailure
+          ? `${error.code}: ${error.message}`
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      setSimError(detail);
+      setStudyStatus("failed");
+    }
+  };
+
+  /** Replays one front candidate: the exact genome, re-driven visibly. */
+  const onReplayCandidate = async (
+    candidate: WorkerSimOptimizeCandidate,
+  ): Promise<void> => {
+    if (campaignHandle === null) return;
+    setReplayStatus("running");
+    setReplayMatches("");
+    setReplayObjectives("");
+    const evaluation = await replayStudyCandidate({
+      handle: campaignHandle,
+      candidate,
+    });
+    if (!evaluation.ok) {
+      setSimError(`${evaluation.error.code}: ${evaluation.error.message}`);
+      setReplayStatus("declined");
+      return;
+    }
+    if (evaluation.value.status !== "ok") {
+      setReplayStatus("declined");
+      return;
+    }
+    const objectives = [...evaluation.value.objectives];
+    setReplayObjectives(
+      objectives.map((value) => value.toPrecision(6)).join(","),
+    );
+    const identical =
+      objectives.length === candidate.objectives.length &&
+      objectives.every((value, index) => value === candidate.objectives[index]);
+    setReplayMatches(identical ? "true" : "false");
+    setReplayStatus("ok");
+  };
+
+  /** Exports the completed campaign's Pareto front as deterministic CSV. */
+  const onExportStudyCsv = (): void => {
+    if (paretoView === null || selectedStudy === null) return;
+    // The objective columns' units come from the persisted family's own
+    // summaries — the store's quantities, never a guess.
+    const familyRuns = runs.filter(
+      (run) => run.summary.campaign?.studyId === selectedStudy.id,
+    );
+    const objectives = selectedStudy.objectives.map((objective) => {
+      for (const run of familyRuns) {
+        const quantity = run.summary.quantities.find(
+          (entry) => entry.name === objective.quantity,
+        );
+        if (quantity !== undefined) {
+          return { name: objective.quantity, unit: quantity.unit };
+        }
+      }
+      return { name: objective.quantity, unit: "1" };
+    });
+    const exported = exportSimParetoCsv(paretoView.front, {
+      objectives,
+      geneParameters: selectedStudy.genes
+        .filter((gene) => gene.kind === "parameter")
+        .map((gene) => (gene.kind === "parameter" ? gene.parameterId : "")),
+      geneRecords: selectedStudy.genes
+        .filter((gene) => gene.kind === "discrete")
+        .map((gene) => (gene.kind === "discrete" ? gene.recordKind : "")),
+    });
+    if (!exported.ok) {
+      setSimError(`${exported.error.code}: ${exported.error.message}`);
+      return;
+    }
+    downloadSimExportFiles([
+      {
+        filename: `${studyRun?.campaign ?? "campaign"}-pareto.csv`,
+        text: exported.value,
+      },
+    ]);
+    setExportedStudyCsv((count) => count + 1);
+  };
+
   return (
     <div
       id={ROOT_ID}
@@ -1100,6 +1493,21 @@ export function SimWorkbenchPage(): ReactElement {
       data-sim-fan-flags={
         fanChart === null ? "" : fanChart.headline.flags.join(",")
       }
+      data-sim-study-count={String(workingDocument.studies.length)}
+      data-sim-study-run-status={studyStatus}
+      data-sim-study-campaign={studyRun?.campaign ?? ""}
+      data-sim-study-evaluations={
+        studyRun === null ? "" : String(studyRun.evaluations)
+      }
+      data-sim-study-declined={
+        studyRun === null ? "" : String(studyRun.declined)
+      }
+      data-sim-pareto={paretoView === null ? "" : "ready"}
+      data-sim-study-replay-status={replayStatus}
+      data-sim-study-replay-matches={replayMatches}
+      data-sim-study-replay-objectives={replayObjectives}
+      data-sim-study-export-csv={String(exportedStudyCsv)}
+      data-sim-campaign-families={String(campaignFamilyRows(runs).length)}
       data-rendered-frames={String(renderedFrames)}
       data-error=""
     >
@@ -1529,6 +1937,101 @@ export function SimWorkbenchPage(): ReactElement {
               )}
             </ul>
           </div>
+          {/* Phase 70b — the optimization study surface: the Formedible
+              study form, the campaign run, the Pareto view (the 63d
+              comparison surface generalized to N runs), candidate
+              replay, the Pareto CSV export, and the store's campaign
+              families (law S7 run families). */}
+          <fieldset className="space-y-2 text-sm">
+            <legend className="font-medium">Study (Phase 70)</legend>
+            <StudyForm
+              document={workingDocument}
+              defaultValues={studyDefaults}
+              onSubmitStudy={onSaveStudy}
+              onProblems={(problems) => {
+                setSimError(
+                  `study/form: ${problems
+                    .map((problem) => problem.message)
+                    .join(" ")}`,
+                );
+              }}
+              submitLabel="Save study"
+            />
+            {demoModel === "bracket" || demoModel === "fan" ? (
+              <button
+                id="workbench-sim-study-demo-scenario"
+                type="button"
+                className="w-full border px-2 py-1"
+                onClick={onSaveDemoStudyScenario}
+              >
+                Save the demo study scenario
+              </button>
+            ) : null}
+            <button
+              id="workbench-sim-study-run"
+              type="button"
+              className="w-full border px-2 py-1"
+              disabled={
+                selectedStudy === null ||
+                ["running", "persisting"].includes(studyStatus)
+              }
+              onClick={() => {
+                void onRunStudy();
+              }}
+            >
+              Run study{" "}
+              {selectedStudy === null
+                ? "(save a study first)"
+                : selectedStudy.name}
+            </button>
+            <button
+              id="workbench-sim-study-export-csv"
+              type="button"
+              className="w-full border px-2 py-1"
+              disabled={paretoView === null}
+              onClick={onExportStudyCsv}
+            >
+              Export Pareto CSV
+            </button>
+            {paretoView !== null ? (
+              <ParetoViewPanel
+                view={paretoView}
+                replayStatus={replayStatus}
+                onReplay={(candidate) => {
+                  void onReplayCandidate(candidate);
+                }}
+              />
+            ) : null}
+            <p className="font-mono text-[10px]">
+              replay {replayStatus}
+              {replayObjectives === "" ? "" : ` → [${replayObjectives}]`}
+              {replayMatches === "" ? "" : ` (identical: ${replayMatches})`}
+            </p>
+            <div className="space-y-1">
+              <p className="font-medium">Campaigns (persisted families)</p>
+              <ul
+                id="workbench-sim-campaigns"
+                className="space-y-1 font-mono text-xs"
+              >
+                {campaignFamilyRows(runs).length === 0 ? (
+                  <li>none yet</li>
+                ) : (
+                  campaignFamilyRows(runs).map((family) => (
+                    <li
+                      key={family.family}
+                      data-testid="workbench-sim-campaign-row"
+                    >
+                      {family.studyId} seed {String(family.seed)} gen{" "}
+                      {family.generations
+                        .map((generation) => String(generation))
+                        .join("/")}{" "}
+                      · {String(family.runs)} runs
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          </fieldset>
           {/* Phase 63d — the run comparison surface: two-run curve
               overlay + field diff ONLY (risk S17's boundary). The run
               selection rides native selects over the persisted run list

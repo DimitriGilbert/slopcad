@@ -711,10 +711,112 @@ the displacement paint under SwiftShader.
   provider contract) remains declined by default — raising it re-opens
   the roadmap, it does not patch this surface.
 
+## Parametric optimization studies (Phase 70, the finale)
+
+A **study** is a document record on the simulations/motors precedent
+(law S1's additive discipline once more): a named row in the document's
+`studies` section carrying the GENOME (a bounded subset of the
+document's LITERAL parameter table — an expression-driven parameter is
+refused loudly, the re-drive recompute would overwrite an override —
+plus discrete named-record genes, a choice among motor records being
+the first), the OBJECTIVES (result-summary scalar selections with
+directions), the CONSTRAINTS (parameter expressions the document
+already validates; a constraint holds when it evaluates strictly
+positive), and the NSGA-II algorithm and budget fields (population,
+generations, mutation and crossover rates, the deterministic seed, and
+the evaluation cap). The native format bumped v10 → v11 as a
+content-additive identity migration — the configurations precedent's
+exact shape.
+
+The engine is NSGA-II multi-objective GA with single-objective as the
+degenerate case, deterministic end to end: same study bytes + same seed
+
+- the deterministic kernels ⇒ the same front, every time (law S2/S5 —
+  the suites pin it as a byte-equal repeat). Every candidate runs the
+  full pipeline parametric re-drive → constraints → compile → solve →
+  objective extraction; every refusal along it is a structured `sim/*`
+  decline the engine counts as dominated/penalized — never a crash.
+
+### The fitness-landscape caveat (law-adjacent guidance)
+
+The voxel staircase quantizes every geometry-derived objective into
+plateaus and jumps: candidates whose geometry voxelizes identically
+score identically, and one extra occupied cell row steps every
+geometry objective at once. Two mitigations are committed and named:
+
+- **Resolution ladders per study** — re-run the champion at finer
+  `resolutionMm` rungs of the scenario record and compare; a champion
+  that survives the ladder is trustworthy, one that reshuffles was a
+  staircase artifact.
+- **Multi-seed campaigns** — the same study at several seeds; the
+  campaign family key encodes the seed precisely so rungs of a
+  multi-seed campaign stay distinguishable in the store. Agreement
+  across seeds is the trust signal, disagreement is the plateau
+  talking.
+
+Distance-field-smoothed objectives arrive only with a future cut-cell
+phase; until then the staircase is part of the accuracy band, stated
+here and in the study record's own docs.
+
+### The lightest bracket that survives the load
+
+The roadmap's first named demo, runnable on `/workbench-sim` (the
+L-bracket model, the "Save the demo study scenario" and study-form
+presets) and pinned in `packages/docs-examples/src/sim/study.ts`: the
+69 substrate's `thickness`/`wallHeight` parameters as an integer
+lattice genome, the structural run's own MASS scalar (minimize — the
+voxelized total the Phase 69 engine projects, staircase-honest against
+the same grid the stresses live on) against its FACTOR OF SAFETY
+(maximize), with the slenderness constraint `12 * thickness -
+wallHeight` declining the thin-tall corner. The demo's Pareto front IS
+the roadmap sentence: every front point is a bracket that survives the
+load at its own weight, the light end trading FoS for grams — "the
+lightest bracket that survives the load" is the front's knee, chosen
+by the reader, not hard-coded. The suite pins the front's dominated
+structure (mass and FoS strictly increase together along it), the
+constraint's structured declines, the deterministic repeat, and the
+champion's exact replay.
+
+### The most efficient fan
+
+The second named demo — the §7.9 motor ruling's payoff: the fan
+geometry (the duct's bore) AND the motor record co-optimized, the
+motor a discrete gene beside the geometry gene, against AIRFLOW PER
+ELECTRICAL WATT at the FOUND operating point (the Phase 66 summary's
+system objective — the motor in the loop makes it system-level). Every
+candidate sweeps its ω ladder, solves its motor-line × load-curve
+intersection, and is scored at the found point; a motor that cannot
+find a point declines loudly and sinks. The suite pins the champion's
+found operating rpm, its motor choice among the gene's records, the
+deterministic repeat, and the exact replay.
+
+### The workbench surface
+
+`/workbench-sim` gains the study panel: a Formedible study form
+(parameter genes with bounds from the document's own literal table,
+the discrete motor gene, objective selection with directions, the
+constraint expression, algorithm and budget), the campaign Run (the
+main-thread driver with the workbench's routed engines; every
+candidate's re-driven document dispatches through the real kernel
+worker — the viewport SHOWS each evaluation — and every generation
+notice lands through the committed-application ledger, law S6's
+`data-sim-applied-optimization-generation` counter), the Pareto view
+(the Phase 63 comparison surface generalized to N runs: the front
+scatter with its dominated survivors, the best-of-generation
+progression, and a Replay button per front candidate — the exact
+genome re-driven visibly, the identical objective vector back), the
+campaign list (the store's run families keyed to study + seed, law
+S7), and the Pareto CSV export (deterministic bytes, the objective
+columns headed in the runs' own units).
+
 ## What does not exist yet
 
-Honest inventory, per phase: parametric optimization (70) alone
-remains. Structural FEM (69) landed with the comparative bands its
+Honest inventory, per phase: the roadmap's phases are all landed —
+parametric optimization (70) closed the plan with the caveat structure
+its section above states (the staircase plateau/jump band, resolution
+ladders and multi-seed campaigns as the named mitigations,
+distance-field-smoothed objectives deferred to a cut-cell phase).
+Structural FEM (69) landed with the comparative bands its
 section above states (coarse element-center recovery, staircase
 geometry, no 3D picking on the sim grid). Combustion (68) landed with the gaps
 its section above states: the closed-cycle subset (gas exchange
@@ -778,3 +880,9 @@ spray refusal at the chemistry door, the base Otto case (IMEP in the
 SI band, the brake family below the indicated, the audit closing at
 the float floor, the 721-sample pressure trace), the spark sweep with
 its knock boundary, and the engine's determinism.
+`packages/docs-examples/src/sim/study.ts` is the Phase 70 pair — the
+two named demos above: the lightest bracket (the dominated-front
+structure, the constraint declines, the deterministic repeat, the
+champion's exact replay, and the Pareto CSV bytes) and the most
+efficient fan (the bore + motor co-optimization scored at each
+candidate's found operating point, with the same determinism pins).

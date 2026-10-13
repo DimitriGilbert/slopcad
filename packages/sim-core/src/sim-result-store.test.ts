@@ -527,3 +527,93 @@ function fakeMinimalClient(): SimResultServerClient {
     put: () => Promise.reject(new Error("The selector test never puts.")),
   };
 }
+
+describe("the summary campaign tag (Phase 70a, law S7 run families)", () => {
+  const taggedSummary = {
+    schemaVersion: SIM_RESULT_SUMMARY_VERSION,
+    scenarioSnapshotHash: "0123abcd",
+    status: "completed" as const,
+    regime: { qualitative: [] },
+    quantities: [{ name: "mass", value: 1.21, unit: "g" }],
+    campaign: {
+      studyId: "study_toy",
+      family: "abcd1234",
+      generation: 3,
+      candidate: 17,
+      seed: 7,
+      genome: {
+        parameters: [
+          { parameterId: "param_width", value: 10 },
+          { parameterId: "param_height", value: 10 },
+        ],
+        records: [{ recordKind: "motor", recordId: "mot_torquey" }],
+      },
+    },
+  };
+
+  it("round-trips a tagged summary through parse with fixed key order", () => {
+    const parsed = parseSimResultSummary(
+      JSON.parse(JSON.stringify(taggedSummary)),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.campaign?.family).toBe("abcd1234");
+    expect(parsed.value.campaign?.genome.parameters.length).toBe(2);
+    // The reconstructed summary re-serializes identically (byte determinism).
+    const again = parseSimResultSummary(
+      JSON.parse(JSON.stringify(parsed.value)),
+    );
+    expect(again.ok).toBe(true);
+    if (again.ok) {
+      expect(JSON.stringify(again.value.campaign)).toBe(
+        JSON.stringify(parsed.value.campaign),
+      );
+    }
+  });
+
+  it("keeps untagged summaries valid (the additive discipline)", () => {
+    const untagged = { ...taggedSummary };
+    delete (untagged as { campaign?: unknown }).campaign;
+    const parsed = parseSimResultSummary(untagged);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.campaign).toBeUndefined();
+    }
+  });
+
+  it("refuses malformed tags structurally", () => {
+    const refuse = (campaign: unknown): void => {
+      const parsed = parseSimResultSummary({ ...taggedSummary, campaign });
+      expect(parsed.ok).toBe(false);
+    };
+    refuse("not-an-object");
+    refuse({ studyId: "study_toy", family: "abcd1234", generation: -1 });
+    refuse({
+      studyId: "study_toy",
+      family: "abcd1234",
+      generation: 0,
+      candidate: 0,
+      seed: 0.5,
+      genome: { parameters: [], records: [] },
+    });
+    refuse({
+      studyId: "study_toy",
+      family: "abcd1234",
+      generation: 0,
+      candidate: 0,
+      seed: 0,
+      genome: {
+        parameters: [{ parameterId: "p", value: "wide" }],
+        records: [],
+      },
+    });
+    refuse({
+      studyId: "study_toy",
+      family: "abcd1234",
+      generation: 0,
+      candidate: 0,
+      seed: 0,
+      genome: { parameters: [], records: [{ recordKind: "motor" }] },
+    });
+  });
+});

@@ -49,6 +49,7 @@ import { runSimSpineExample } from "./sim/spine";
 import { runSimThermalExample } from "./sim/thermal";
 import { runSimFanExample } from "./sim/fan";
 import { runSimStructuralExample } from "./sim/structural";
+import { runSimStudyBracketExample, runSimStudyFanExample } from "./sim/study";
 import { runSimCombustionExample } from "./sim/combustion";
 import { runSimVoxelExample } from "./sim/voxel";
 import { runSimDemoBodyExample } from "./cadjsx/sim-demo-body";
@@ -705,6 +706,57 @@ describe("guide example: the bracket (Phase 69 — coarse voxel FEM)", () => {
       expect(summary.spunVonMisesPa).toBeGreaterThan(2 * summary.vonMisesPa);
       // Determinism (law S2).
       expect(summary.deterministic).toBe(true);
+    },
+  );
+});
+
+describe("guide example: the optimization studies (Phase 70, the finale)", () => {
+  it(
+    "evolves the lightest bracket that survives the load",
+    { timeout: 240_000 },
+    async () => {
+      const summary = await runSimStudyBracketExample();
+      // The front exists and spans the trade-off: mass and FoS rise
+      // together along it (the dominated-front structure).
+      expect(summary.frontSize).toBeGreaterThan(1);
+      expect(summary.frontMonotone).toBe(true);
+      expect(summary.massMaxKg).toBeGreaterThan(summary.massMinKg);
+      expect(summary.factorOfSafetyMax).toBeGreaterThan(
+        summary.factorOfSafetyMin,
+      );
+      // The slenderness constraint declines the thin-tall corner (a
+      // structured decline counted as dominated, never a crash).
+      expect(summary.constraintDeclineSeen).toBe(true);
+      expect(summary.declined).toBeGreaterThan(0);
+      expect(summary.evaluations).toBeGreaterThan(0);
+      // Determinism (law S2/S5): the same seed re-runs to the same
+      // front, and the champion replays to its exact vector.
+      expect(summary.deterministic).toBe(true);
+      expect(summary.replayIdentical).toBe(true);
+      // The Pareto CSV: the header names the objective columns in the
+      // runs' own units, one row per front candidate.
+      expect(summary.csvHeader).toBe(
+        "candidate,mass (kg),factor-of-safety (1),param_thickness,param_wall-height",
+      );
+      expect(summary.csvRows).toBe(summary.frontSize);
+    },
+  );
+
+  it(
+    "co-optimizes the most efficient fan — the motor record a gene",
+    { timeout: 600_000 },
+    async () => {
+      const summary = await runSimStudyFanExample();
+      // Every scored candidate found an operating point and projected
+      // the air-per-watt system objective at it.
+      expect(summary.objectiveProjected).toBe(true);
+      expect(summary.championAirPerWatt).toBeGreaterThan(0);
+      expect(summary.championOperatingRpm).toBeGreaterThan(0);
+      expect(["mot_speedy", "mot_torquey"]).toContain(summary.championMotorId);
+      expect(summary.evaluations).toBeGreaterThan(0);
+      // Determinism (law S2/S5) and the exact replay.
+      expect(summary.deterministic).toBe(true);
+      expect(summary.replayIdentical).toBe(true);
     },
   );
 });

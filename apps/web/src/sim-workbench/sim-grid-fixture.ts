@@ -52,6 +52,7 @@ import {
   type SimApplicationLedger,
   SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE,
   SIM_APPLIED_NOTIFICATIONS_ATTRIBUTE,
+  SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
   SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
 } from "../cad-workbench/sim-application-ledger";
 
@@ -325,6 +326,12 @@ export function stampSimAppliedCounters(
     root.setAttribute(
       SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
       String(counters.progressStep),
+    );
+  }
+  if (counters.optimizationGeneration !== null) {
+    root.setAttribute(
+      SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
+      String(counters.optimizationGeneration),
     );
   }
 }

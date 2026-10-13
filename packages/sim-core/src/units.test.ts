@@ -394,6 +394,50 @@ describe("result projection (solver → document)", () => {
     expect(field?.values).toEqual([1000, 2000]);
   });
 
+  it("round-trips the Phase 70 air-per-watt family (flow ÷ power = m³/J)", () => {
+    const projected = requireOk(
+      projectSimResult({
+        scalars: [
+          { name: "airflow", dimension: "volumetricFlow", value: 1.5e-5 },
+          { name: "electrical-power", dimension: "power", value: 0.02 },
+          {
+            name: "airflow-per-electrical-watt",
+            dimension: "volumetricFlowPerPower",
+            value: 1.5e-5 / 0.02,
+          },
+        ],
+        fields: [],
+      }),
+      "the air-per-watt projection",
+    );
+    const byName = new Map(
+      projected.scalars.map((quantity) => [quantity.name, quantity]),
+    );
+    expect(byName.get("airflow")).toEqual({
+      name: "airflow",
+      value: 1.5e-5,
+      unit: "m^3/s",
+    });
+    expect(byName.get("electrical-power")).toEqual({
+      name: "electrical-power",
+      value: 0.02,
+      unit: "W",
+    });
+    const perWatt = byName.get("airflow-per-electrical-watt");
+    expect(perWatt).toEqual({
+      name: "airflow-per-electrical-watt",
+      value: 1.5e-5 / 0.02,
+      unit: "m^3/J",
+    });
+    // The units round-trip: the projected family divides back —
+    // (m³/s) ÷ (J/s) = m³/J recovers the ratio quantity exactly.
+    expect(perWatt?.value).toBeCloseTo(
+      (byName.get("airflow")?.value ?? 0) /
+        (byName.get("electrical-power")?.value ?? 1),
+      18,
+    );
+  });
+
   it("declines non-finite projected quantities", () => {
     const result = projectSimResult({
       scalars: [{ name: "drag", dimension: "force", value: Number.NaN }],

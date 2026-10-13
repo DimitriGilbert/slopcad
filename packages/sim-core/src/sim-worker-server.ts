@@ -26,8 +26,11 @@
  *    channel as they are reported, and each callback first checks the
  *    abort set, throwing the {@link SimRunCancelledError} sentinel so a
  *    conforming engine unwinds instead of running on; `sim.finalize`
- *    returns a completed run's {@link SimResult} as its persisted form.
- *    The computed outcome then runs through `ledger.finish`: a suppressed
+ *    returns a completed run's {@link SimResult} as its persisted form;
+ *    `sim.optimize` (Phase 70a) delegates to the host-injected
+ *    {@link SimOptimizationExecutor} with the same wrapped-emission
+ *    discipline (progress + best-of-generation notifications). The
+ *    computed outcome then runs through `ledger.finish`: a suppressed
  *    outcome is dropped and replaced by the `worker/cancelled` ack, so a
  *    late success can never be emitted after a recorded cancellation —
  *    and a suppressed run mints no run id and stores nothing.
@@ -53,9 +56,11 @@
 import type {
   SimEngine,
   SimEngineFieldChunk,
+  SimEngineOptimizationGeneration,
   SimEngineProgress,
 } from "./engine";
 import type { SimError } from "./errors";
+import type { SimParseResult } from "./result";
 import type { SimResult } from "./sim-result";
 import type { SimWorkerCancellationLedger } from "./sim-worker-cancellation";
 import type {
@@ -72,11 +77,16 @@ import type {
 } from "./sim-worker-protocol";
 import type { SimWorkerTransport } from "./sim-transport";
 import type { CompiledSimScenario } from "./units";
+import type {
+  WorkerSimOptimizeInput,
+  WorkerSimOptimizeResult,
+} from "./sim-worker-operations";
 
 import { createSimWorkerCancellationLedger } from "./sim-worker-cancellation";
 import { createSimWorkerIdGenerator } from "./sim-worker-ids";
 import {
   createSimFieldChunkNotification,
+  createSimOptimizationGenerationNotification,
   createSimProgressNotification,
   createSimWorkerErrorResponse,
   createSimWorkerSuccessResponse,
@@ -123,7 +133,44 @@ type SimExecutionOutcome =
       readonly status: "finalized";
       readonly response: SimWorkerSuccessResponseMessage;
     }
+  | {
+      readonly status: "optimized";
+      readonly result: WorkerSimOptimizeResult;
+    }
   | { readonly status: "failed"; readonly error: SimWorkerError };
+
+/**
+ * The streaming + cooperation surface an optimization executor receives
+ * (Phase 70a): progress emissions (candidate counts), generation notices
+ * (best-of-generation previews), and the abort poll — the same
+ * cooperative-cancellation discipline the engine contract's callbacks
+ * carry. The executor unwinds by THROWING when `shouldAbort` turns true;
+ * the ledger's pinned rule decides the wire outcome (a recorded cancel
+ * replaces any computed outcome with the cancelled ack).
+ */
+export interface SimOptimizationExecutorCallbacks {
+  readonly onProgress: (progress: SimEngineProgress) => void;
+  readonly onOptimizationGeneration: (
+    notice: SimEngineOptimizationGeneration,
+  ) => void;
+  readonly shouldAbort: () => boolean;
+}
+
+/**
+ * The Phase 70a executor seam: the host-injected optimization runner
+ * behind the `sim.optimize` operation. sim-core stays
+ * runtime-dependency-free, so the NSGA-II driver (which needs the
+ * document parameter machinery) is an INJECTION, never an import — the
+ * worker envelope carries the wire codecs and this contract, and
+ * `@slopcad/sim-optimization` provides the implementation. Structured
+ * `sim/*` declines ride the ordinary `worker/operation-failed` response.
+ */
+export interface SimOptimizationExecutor {
+  (
+    input: WorkerSimOptimizeInput,
+    callbacks: SimOptimizationExecutorCallbacks,
+  ): Promise<SimParseResult<WorkerSimOptimizeResult, SimError>>;
+}
 
 /** Options of {@link createSimWorkerServer}. */
 export interface SimWorkerServerOptions {
@@ -131,6 +178,12 @@ export interface SimWorkerServerOptions {
   readonly engine: SimEngine;
   /** The transport end the server listens on and answers from. */
   readonly transport: SimWorkerTransport;
+  /**
+   * The optimization executor behind `sim.optimize` (Phase 70a) — an
+   * injected runner (see {@link SimOptimizationExecutor}); absent, the
+   * operation declines `sim/optimizer-unavailable` loudly.
+   */
+  readonly optimizer?: SimOptimizationExecutor;
   /** Mints the session's ids. Defaults to a fresh generator. */
   readonly ids?: SimWorkerIdGenerator;
   /** The responder-side cancellation ledger. Defaults to a fresh one. */
@@ -148,6 +201,7 @@ export function createSimWorkerServer(
   options: SimWorkerServerOptions,
 ): SimWorkerServer {
   const { engine, transport } = options;
+  const optimizer = options.optimizer;
   const ids = options.ids ?? createSimWorkerIdGenerator();
   const ledger = options.ledger ?? createSimWorkerCancellationLedger();
   const problems = new Map<SimProblemId, CompiledSimScenario>();
@@ -352,6 +406,48 @@ export function createSimWorkerServer(
                 ),
               };
         }
+        case "sim.optimize": {
+          // The Phase 70a seam: the optimization runner is an injection
+          // (sim-core stays runtime-dependency-free); a host that did not
+          // inject one declines loudly, never fabricates a campaign.
+          if (optimizer === undefined) {
+            return {
+              status: "failed",
+              error: simWorkerError(
+                SIM_WORKER_PROTOCOL_ERROR_CODES.operationFailed,
+                'The "sim.optimize" operation needs an optimization executor this worker does not host (the NSGA-II driver is an injected seam, never an assumption).',
+                { simCode: "sim/optimizer-unavailable" },
+              ),
+            };
+          }
+          // The emission wrappers mirror the run case: each checks the
+          // abort set first (the cooperative window), then streams.
+          const onProgress = (progress: SimEngineProgress): void => {
+            if (aborted.has(requestId))
+              throw new SimRunCancelledError(requestId);
+            transport.send(createSimProgressNotification(requestId, progress));
+          };
+          const onOptimizationGeneration = (
+            notice: SimEngineOptimizationGeneration,
+          ): void => {
+            if (aborted.has(requestId))
+              throw new SimRunCancelledError(requestId);
+            transport.send(
+              createSimOptimizationGenerationNotification(requestId, notice),
+            );
+          };
+          const outcome = await optimizer(request.input, {
+            onProgress,
+            onOptimizationGeneration,
+            shouldAbort: () => aborted.has(requestId),
+          });
+          return outcome.ok
+            ? { status: "optimized", result: outcome.value }
+            : {
+                status: "failed",
+                error: simDecline("sim.optimize", outcome.error),
+              };
+        }
       }
     } catch (error) {
       return {
@@ -393,6 +489,21 @@ export function createSimWorkerServer(
           run,
           steps: outcome.steps,
           chunks: outcome.chunks,
+        }),
+      );
+      return;
+    }
+    if (outcome.status === "optimized") {
+      // The campaign identity is deterministic (study content + seed hash),
+      // so the response mints no session id — the campaign re-runs
+      // identically and persists through the store, never the session.
+      transport.send(
+        createSimWorkerSuccessResponse(requestId, "sim.optimize", {
+          campaign: outcome.result.campaign,
+          generations: outcome.result.generations,
+          evaluations: outcome.result.evaluations,
+          declined: outcome.result.declined,
+          pareto: outcome.result.pareto,
         }),
       );
       return;

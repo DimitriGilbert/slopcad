@@ -79,6 +79,59 @@ export interface SimHistorySeries {
 /** Which kernel family executed the run — the honest backend record. */
 export type SimServedBackend = "cpu" | "gpu";
 
+/**
+ * One parameter gene assignment of a campaign candidate's genome: the
+ * parameter's id and the assigned canonical-magnitude value (Phase 70a).
+ */
+export interface SimCampaignGenomeParameter {
+  readonly parameterId: string;
+  readonly value: number;
+}
+
+/**
+ * One discrete gene assignment of a campaign candidate's genome: the
+ * record family and the chosen record id (Phase 70a).
+ */
+export interface SimCampaignGenomeRecord {
+  readonly recordKind: string;
+  readonly recordId: string;
+}
+
+/**
+ * A campaign candidate's exact genome — the replay inputs (Phase 70a):
+ * the parameter overrides and the discrete record choices that produced
+ * the run, canonical and JSON-safe.
+ */
+export interface SimCampaignGenome {
+  readonly parameters: readonly SimCampaignGenomeParameter[];
+  readonly records: readonly SimCampaignGenomeRecord[];
+}
+
+/**
+ * The campaign tag a persisted run may carry (Phase 70a, law S7's run
+ * families): the study and deterministic family a run belongs to, the
+ * generation and candidate it was minted from, the seed, and the exact
+ * genome that produced it — so any stored campaign member replays from
+ * its own record. Absent on every non-optimization run (additive).
+ */
+export interface SimResultCampaignTag {
+  /** The study record's id (`study_…`). */
+  readonly studyId: string;
+  /**
+   * The deterministic family key: the content hash of the study record
+   * plus its seed (the snapshot-hash precedent, 8 lowercase hex digits).
+   * Multi-seed campaigns share a study id and differ in family.
+   */
+  readonly family: string;
+  /** The generation the candidate was evaluated in (0-based). */
+  readonly generation: number;
+  /** The candidate's evaluation index within the whole campaign (0-based). */
+  readonly candidate: number;
+  /** The study's seed (u32). */
+  readonly seed: number;
+  readonly genome: SimCampaignGenome;
+}
+
 /** The summary JSON a run persists (schema version, status, S9, provenance). */
 export interface SimResultSummary {
   readonly schemaVersion: number;
@@ -90,7 +143,7 @@ export interface SimResultSummary {
   /** The projected quantities with explicit units (the S4 output). */
   readonly quantities: readonly SimProjectedQuantity[];
   /**
-   * Which backend EXECUTED the run — distinct from the scenario's
+   * Which backend EXECUTED the run — distinct from the scenario record's
    * backend PREFERENCE (a gpu-preferred run on a GPU-less host serves
    * `"cpu"` here through the router's documented fallback, Phase 64b's
    * honest marker). Optional: summaries written before the field exists
@@ -100,6 +153,12 @@ export interface SimResultSummary {
   /** On a failed run: the `sim/*` decline code and message. */
   readonly failureCode?: string;
   readonly failureMessage?: string;
+  /**
+   * Phase 70a-additive: the optimization campaign membership this run was
+   * minted from, when the run was a study candidate — the run-family key
+   * (law S7) and the exact genome for replay. Absent on ordinary runs.
+   */
+  readonly campaign?: SimResultCampaignTag;
 }
 
 /** A persisted run: the summary, the field blocks, and the histories. */

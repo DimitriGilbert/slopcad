@@ -133,7 +133,9 @@ describe("the notification subscription", () => {
       received.push(
         delivery.notification.kind === "field-chunk"
           ? `field-chunk:${delivery.notification.id}:${String(delivery.notification.values.length)}`
-          : `progress:${String(delivery.notification.step)}`,
+          : delivery.notification.kind === "progress"
+            ? `progress:${String(delivery.notification.step)}`
+            : `optimization-generation:${String(delivery.notification.generation)}`,
       );
     });
     respondingEnd(pair, (id) => {

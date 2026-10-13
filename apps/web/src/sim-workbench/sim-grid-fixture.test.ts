@@ -229,6 +229,7 @@ describe("the committed-application bridge (law S6)", () => {
       notifications: 8,
       fieldChunks: 8,
       progressStep: null,
+      optimizationGeneration: null,
     });
     expect(root.getAttribute(SIM_APPLIED_NOTIFICATIONS_ATTRIBUTE)).toBe("8");
     expect(root.getAttribute(SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE)).toBe("8");
