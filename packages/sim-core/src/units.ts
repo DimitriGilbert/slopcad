@@ -20,6 +20,7 @@
  */
 
 import type {
+  CompiledSimCombustion,
   CompiledSimFlow3d,
   CompiledSimRunControls,
   CompiledSimThermal,
@@ -42,6 +43,7 @@ import {
   type SimDomainFace,
   type SimScenarioKind,
   isSimScenarioKind,
+  SIM_CORE_SCENARIO_KINDS,
 } from "./vocabulary";
 
 /** The mm-to-metre factor — the one length conversion constant of S4. */
@@ -783,6 +785,15 @@ export interface CompiledSimScenario {
    * part of the wire form.
    */
   readonly dynamics?: CompiledSimDynamics;
+  /**
+   * The combustion compile products (Phase 68c): the re-validated
+   * mode-locked stance — the stove mode's fire fields plus the SAME
+   * per-cell material map the thermal branch builds (the 65-family
+   * solve), or the engine mode's slider-crank geometry in SI. Attached
+   * by the geometry-aware compile for combustion scenarios; consumed
+   * worker-side by the combustion engine, never part of the wire form.
+   */
+  readonly combustion?: CompiledSimCombustion;
 }
 
 /**
@@ -820,7 +831,7 @@ export function compileSimScenario(
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioInvalid,
-        `A scenario kind must be one of: flow, thermal, structural.`,
+        `A scenario kind must be one of: ${SIM_CORE_SCENARIO_KINDS.join(", ")}.`,
         scenario.kind,
       ),
     );
@@ -947,6 +958,23 @@ export function compileSimScenario(
         conditions,
       ),
     );
+  }
+  // The combustion kind's engine mode mirrors the dynamics rule (the
+  // record boundary locked it first; this door re-checks every field it
+  // consumes — never a silently dropped condition).
+  if (kind === "combustion" && conditions.length > 0) {
+    const stance = isPlainRecord(scenario.combustion)
+      ? scenario.combustion
+      : {};
+    if (stance.mode === "engine") {
+      return simFail(
+        simError(
+          SIM_ERROR_CODES.scenarioInvalid,
+          'An "engine"-mode combustion scenario carries no domain-face boundary conditions — the 0D chamber\'s physics is its authored stance.',
+          conditions,
+        ),
+      );
+    }
   }
 
   // --- Gravity --------------------------------------------------------------
@@ -1082,7 +1110,11 @@ export function compileSimScenario(
   // gates are the integration budget and the loop-closure tolerance,
   // which the result states on its own. The compile computes NOTHING
   // here rather than carrying an inapplicable number forward: an empty
-  // regime report is the honest dynamics claim.
+  // regime report is the honest dynamics claim. The combustion kind's
+  // claim is the same shape plus the fluid's Prandtl (the stove mode's
+  // conduction solve convects to the scenario's fluid; the engine mode
+  // has no flow domain at all, and its honesty fields are the chemistry
+  // fit bands the 68b result carries).
   const regime =
     kind === "dynamics"
       ? simRegimeReport({})
@@ -1103,7 +1135,8 @@ export function compileSimScenario(
             fluidState.value.specificHeatJPerKgK,
             fluidState.value.thermalConductivityWPerMK,
           ),
-          ...(kind === "thermal" && deltaTemperatureK !== undefined
+          ...((kind === "thermal" || kind === "combustion") &&
+          deltaTemperatureK !== undefined
             ? {
                 rayleigh: simRayleigh(
                   gravityMagnitude,

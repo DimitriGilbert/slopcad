@@ -3766,6 +3766,7 @@ export function addDocumentSimulation(
     input.thermal,
     input.flow3d,
     input.dynamics,
+    input.combustion,
   );
   if (!built.ok) {
     return fail(
@@ -3872,6 +3873,7 @@ export interface DocumentSimulationUpdate {
   readonly thermal?: SimScenarioInput["thermal"];
   readonly flow3d?: SimScenarioInput["flow3d"];
   readonly dynamics?: SimScenarioInput["dynamics"];
+  readonly combustion?: SimScenarioInput["combustion"];
   readonly motorId?: SimScenarioInput["motorId"];
   readonly backend?: SimScenarioInput["backend"];
 }
@@ -3911,6 +3913,7 @@ export function updateDocumentSimulation(
     update.thermal,
     update.flow3d,
     update.dynamics,
+    update.combustion,
   );
   if (!built.ok) {
     return fail(
@@ -5788,6 +5791,9 @@ export function parseCadDocument(
       ...(scenario.dynamics === undefined
         ? {}
         : { dynamics: scenario.dynamics }),
+      ...(scenario.combustion === undefined
+        ? {}
+        : { combustion: scenario.combustion }),
       ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
       ...(scenario.backend === undefined ? {} : { backend: scenario.backend }),
     });

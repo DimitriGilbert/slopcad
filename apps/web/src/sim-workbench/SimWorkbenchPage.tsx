@@ -171,6 +171,9 @@ import { fanChartOf, FanChartPanel } from "./fan-chart";
 import { fanDemoDocument } from "./fan-demo";
 import { ThermalScenarioForm } from "./thermal-scenario-form";
 import { thermalMaterialPresetOf } from "./thermal-materials";
+import { CombustionStoveForm } from "./combustion-stove-form";
+import { CombustionEngineForm } from "./combustion-engine-form";
+import { engineChartOf, EngineChartPanel } from "./engine-chart";
 import {
   sliderCrankDemoDocument,
   sliderCrankMechanismWire,
@@ -195,6 +198,7 @@ import {
 } from "./sim-compare";
 import {
   downloadSimExportFiles,
+  exportSimResultCombustionCsvs,
   exportSimResultForceHistoryCsv,
   exportSimResultJointHistoryCsv,
   exportSimResultVtiSeries,
@@ -247,12 +251,23 @@ const SLIDER_DEMO_BODIES = documentSceneBodies(
   null,
 );
 const SLIDER_DEMO_RENDERABLE = renderableBodyIds(SLIDER_DEMO_DOCUMENT);
-/** The demo-model selector's vocabulary (fixture data, the plate boot). */
+/**
+ * The demo-model selector's vocabulary (fixture data, the plate boot).
+ * The FIRE and ENGINE models (Phase 68c) render the PLATE document —
+ * the 65 stove body — the fire demo voxelizes it (the 65-family
+ * coupling) and the engine demo needs no geometry at all (the 0D
+ * chamber's domain is its authored stance), the honest split.
+ */
 const DEMO_MODELS = [
   { id: "plate", label: "Demo plate (2D tunnel)" },
   { id: "fan", label: "Fan in a tube (3D, Phase 66)" },
   { id: "slider", label: "Slider-crank mechanism (dynamics, Phase 67)" },
+  { id: "fire", label: "Stove with fire (combustion, Phase 68)" },
+  { id: "engine", label: "Otto engine cycle (combustion, Phase 68)" },
 ] as const;
+
+/** The demo-model selector's id vocabulary. */
+type DemoModelId = (typeof DEMO_MODELS)[number]["id"];
 /**
  * The single demo body every thermal material assignment addresses —
  * the first renderable body's own branded id (the demo document's one
@@ -362,10 +377,11 @@ export function SimWorkbenchPage(): ReactElement {
   const appliedDigestRef = useRef("");
 
   // --- Phase 66c state (the demo-model fork) --------------------------------
-  const [demoModel, setDemoModel] = useState<"plate" | "fan" | "slider">(
-    "plate",
-  );
+  const [demoModel, setDemoModel] = useState<DemoModelId>("plate");
   const [fanChart, setFanChart] = useState<ReturnType<typeof fanChartOf>>(null);
+  // --- Phase 68c state (the engine charts) ----------------------------------
+  const [engineChart, setEngineChart] =
+    useState<ReturnType<typeof engineChartOf>>(null);
   // --- Phase 67c state (the mechanism-motion surface) ------------------------
   const [mechanismMotion, setMechanismMotion] =
     useState<ReturnType<typeof mechanismMotionOf>>(null);
@@ -518,7 +534,7 @@ export function SimWorkbenchPage(): ReactElement {
   }, [scene, controls, simLedger, demoModel]);
 
   /** Switches the demo model: the working document and overlays reset. */
-  const onSelectDemoModel = (model: "plate" | "fan" | "slider"): void => {
+  const onSelectDemoModel = (model: DemoModelId): void => {
     if (model === demoModel) return;
     setDemoModel(model);
     setWorkingDocument(
@@ -533,6 +549,7 @@ export function SimWorkbenchPage(): ReactElement {
     setLiveOverlay(null);
     setOverlayMode("fixture");
     setFanChart(null);
+    setEngineChart(null);
     setMechanismMotion(null);
     setGridState("");
   };
@@ -599,6 +616,13 @@ export function SimWorkbenchPage(): ReactElement {
     // records, mass twin, and grounded ids the dynamics branch
     // compiles); the tessellation stays the flow path's own.
     const isDynamics = selectedScenario.kind === "dynamics";
+    // Phase 68c: a STOVE-mode combustion scenario's compile carries the
+    // thermal branch's own pair (the per-body tessellations plus the
+    // material records — the fire couples through the voxelized
+    // interface); the ENGINE mode needs neither (the 0D chamber).
+    const isCombustionStove =
+      selectedScenario.kind === "combustion" &&
+      selectedScenario.combustion?.mode === "stove";
     const bodies = settled.state.measurement.bodies;
     // Phase 66c: a flow3d scenario's motor selection rides the compile
     // wire (the serialized record of the working document's motors
@@ -615,18 +639,19 @@ export function SimWorkbenchPage(): ReactElement {
       );
       return;
     }
-    const materials = isThermal
+    const materialsWithMaps = isThermal || isCombustionStove;
+    const materials = materialsWithMaps
       ? selectedScenario.materials.map(
           (assignment) => thermalMaterialPresetOf(assignment.materialId).record,
         )
       : undefined;
-    const bodyTessellations = isThermal
+    const bodyTessellations = materialsWithMaps
       ? bodies.map((body) => ({
           bodyId: body.bodyId,
           tessellation: body.measurement.tessellation,
         }))
       : undefined;
-    const tessellation = isThermal
+    const tessellation = materialsWithMaps
       ? undefined
       : documentSceneTessellation(bodies);
     const mechanism = isDynamics
@@ -661,6 +686,7 @@ export function SimWorkbenchPage(): ReactElement {
       });
       setLastResult(outcome.result);
       setFanChart(fanChartOf(outcome.result));
+      setEngineChart(engineChartOf(outcome.result));
       setMechanismMotion(mechanismMotionOf(outcome.result));
       await refreshRuns(store);
       setRunStatus("completed");
@@ -681,12 +707,19 @@ export function SimWorkbenchPage(): ReactElement {
     setExportedVti((count) => count + files.length);
   };
 
-  /** Exports the last completed run's force-history CSV. */
+  /** Exports the last completed run's history CSV. */
   const onExportCsv = (): void => {
     if (lastResult === null) return;
-    // A dynamics run exports its JOINT histories (the assembly-motion
-    // surface's own data, time first); every other run keeps the
-    // force-history table and filename.
+    // A combustion run exports ITS tables (the cycle trace plus the
+    // sweep, or the fire march) — the two files the run's own series
+    // carry; a dynamics run exports its JOINT histories (time first);
+    // every other run keeps the force-history table and filename.
+    const combustionFiles = exportSimResultCombustionCsvs(lastResult);
+    if (combustionFiles.length > 0) {
+      downloadSimExportFiles(combustionFiles);
+      setExportedCsv((count) => count + combustionFiles.length);
+      return;
+    }
     const dynamicsCsv = exportSimResultJointHistoryCsv(lastResult);
     const isDynamicsResult = dynamicsCsv !== null;
     const csv = isDynamicsResult
@@ -820,6 +853,29 @@ export function SimWorkbenchPage(): ReactElement {
       data-sim-compare-error={compareError}
       data-sim-demo-model={demoModel}
       data-sim-fan-chart={fanChart === null ? "" : "ready"}
+      data-sim-engine-chart={engineChart === null ? "" : "ready"}
+      data-sim-engine-imep-bar={
+        engineChart === null
+          ? ""
+          : (engineChart.headline.imepPa / 1e5).toFixed(4)
+      }
+      data-sim-engine-bmep-bar={
+        engineChart === null
+          ? ""
+          : (engineChart.headline.bmepPa / 1e5).toFixed(4)
+      }
+      data-sim-engine-brake-torque={
+        engineChart === null
+          ? ""
+          : engineChart.headline.brakeTorqueNPerM.toFixed(3)
+      }
+      data-sim-engine-knock-boundary={
+        engineChart === null || engineChart.torque === undefined
+          ? ""
+          : engineChart.torque.knockBoundary === undefined
+            ? ""
+            : String(engineChart.torque.knockBoundary)
+      }
       data-sim-motion={mechanismMotion === null ? "" : "ready"}
       data-sim-fan-op-rpm={
         fanChart === null ? "" : fanChart.headline.operatingRpm.toFixed(3)
@@ -884,7 +940,7 @@ export function SimWorkbenchPage(): ReactElement {
               </label>
             ))}
           </fieldset>
-          {demoModel === "fan" ? null : (
+          {demoModel === "plate" ? (
             <>
               <fieldset className="space-y-1 text-sm">
                 <legend className="font-medium">Resolution</legend>
@@ -932,7 +988,7 @@ export function SimWorkbenchPage(): ReactElement {
                 signed distance (occupancy otherwise)
               </label>
             </>
-          )}
+          ) : null}
           <ul className="space-y-1 font-mono text-xs">
             <li>
               status = <span id="workbench-sim-status">boot</span>
@@ -1032,7 +1088,9 @@ export function SimWorkbenchPage(): ReactElement {
         <div className="w-72 shrink-0 space-y-4">
           <fieldset className="space-y-2 text-sm">
             <legend className="font-medium">Flow scenario (Phase 63)</legend>
-            {demoModel === "slider" ? null : (
+            {demoModel === "slider" ||
+            demoModel === "fire" ||
+            demoModel === "engine" ? null : (
               <FlowScenarioForm onSubmitScenario={onSaveScenario} />
             )}
             {demoModel === "fan" ? (
@@ -1067,6 +1125,23 @@ export function SimWorkbenchPage(): ReactElement {
                   onSubmitScenario={onSaveScenario}
                 />
               </fieldset>
+            ) : demoModel === "fire" ? (
+              <fieldset className="space-y-2 border-t pt-2">
+                <legend className="font-medium">
+                  Fire scenario — the stove with fire (Phase 68)
+                </legend>
+                <CombustionStoveForm
+                  bodyId={DEMO_BODY_ID}
+                  onSubmitScenario={onSaveScenario}
+                />
+              </fieldset>
+            ) : demoModel === "engine" ? (
+              <fieldset className="space-y-2 border-t pt-2">
+                <legend className="font-medium">
+                  Engine scenario — the 0D Otto cycle (Phase 68)
+                </legend>
+                <CombustionEngineForm onSubmitScenario={onSaveScenario} />
+              </fieldset>
             ) : (
               <fieldset className="space-y-2 border-t pt-2">
                 <legend className="font-medium">
@@ -1079,6 +1154,9 @@ export function SimWorkbenchPage(): ReactElement {
               </fieldset>
             )}
             {fanChart !== null ? <FanChartPanel chart={fanChart} /> : null}
+            {engineChart !== null ? (
+              <EngineChartPanel chart={engineChart} />
+            ) : null}
             {mechanismMotion !== null ? (
               <MechanismMotionPanel motion={mechanismMotion} />
             ) : null}

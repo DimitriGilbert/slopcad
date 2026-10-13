@@ -6,9 +6,11 @@
  * union — the canonical serialized scenario JSON is the contract between
  * the two packages, exactly as the kernel wire contract is between
  * cad-core and cad-kernel. The union includes `structural` now (Phase
- * 69's carve): the record stores, round-trips, and hashes, while the
- * compile boundary declines it with `sim/scenario-kind-unsupported`
- * until the Phase 69 solver lands.
+ * 69's carve) and `combustion` (Phase 68): the records store,
+ * round-trip, and hash, while the solver surface is each kind's own
+ * (combustion's engine serves Phase 68c's two modes; structural still
+ * declines with `sim/scenario-kind-unsupported` until the Phase 69
+ * solver lands).
  */
 
 /** The scenario kinds the compile boundary understands (mirrors cad-core). */
@@ -16,6 +18,7 @@ export const SIM_CORE_SCENARIO_KINDS = [
   "flow",
   "thermal",
   "dynamics",
+  "combustion",
   "structural",
 ] as const;
 

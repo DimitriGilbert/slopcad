@@ -203,8 +203,13 @@ packages/sim-core      pure data + contracts, no solver logic:
                        local backends), .vti/CSV exporters
 packages/sim-flow      LBM domain: CPU reference kernel (TS) + WGSL
                        provider, 2D → 3D, force integration, rotating
-                       boundaries, thermal coupling; combustion chemistry
-                       starts as a module here, promoted if it grows
+                       boundaries, thermal coupling
+packages/sim-combustion
+                       premixed combustion chemistry (Phase 68a):
+                       11-species HP equilibrium, adiabatic flame
+                       temperature, fuel–air tables; promoted at birth
+                       (the sim-thermal/sim-dynamics precedent), and
+                       68b's reactor must not import the LBM package
 packages/sim-dynamics  DynamicsEngine contract + TS reference kernel +
                        MuJoCo provider (Rapier eligible later through the
                        same contract)
@@ -743,7 +748,7 @@ kernel (the MuJoCo provider may expose its own); server-side solve farms;
 GPL components in the default bundle. Raising any of these re-opens this
 document.
 
-## 7. Decision log (owner rulings: 2026-09-25, 2026-10-07, and 2026-10-08)
+## 7. Decision log (owner rulings: 2026-09-25, 2026-10-07, 2026-10-08, and 2026-10-12)
 
 1. **First vertical slice: the 2D wind tunnel**, under the global ruling
    that phases are ordered most-reusable-part-first with a quick, visible
@@ -811,6 +816,12 @@ document.
     0D chamber gains a Woschni-style wall heat-transfer correlation so
     the engine energy balance closes as fuel = brake + exhaust enthalpy +
     wall/coolant loss.
+13. **Combustion is born promoted** (2026-10-12, docs-follow-code):
+    Phase 68a's chemistry ships as `packages/sim-combustion`, not as a
+    module inside sim-flow — a deliberate deviation from §4's original
+    epoch diagram, applying the sim-thermal/sim-dynamics precedent at
+    birth. The dependency rule it fixes: 68b's 0D reactor builds on
+    sim-combustion and must not import the LBM package.
 
 ## 8. Risk register
 

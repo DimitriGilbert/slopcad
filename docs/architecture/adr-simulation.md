@@ -380,3 +380,52 @@ and its measured aero load settling on the 66 operating point within
 the measured band), and the session stage s24h. `structural` still
 declines until Phase 69; combustion torque stays an INPUT series
 until Phase 68.
+
+## Implementation status (2026-10-13): Phase 68 is implemented (combustion, provisional)
+
+Phase 68a (landed first): `packages/sim-combustion` — born PROMOTED
+(the §7.13 ruling) — carrying the curated NASA-7 species database,
+the polynomial evaluator in its published dimensionless forms, the
+premixed reactant streams, the element-potential Gibbs-minimization
+equilibrium solver (TP and HP), and the adiabatic-flame/fuel–air-table
+surface with its deterministic CSV projection. Phase 68b (landed
+second): the one-step Arrhenius kinetics with the shared
+induction-time definition, the Metghalchi–Keck flame-speed
+correlation, the conservative-by-construction 0D constant-volume
+reactor (an RK4-stage extent clamp fixed the depletion-asymptote NaN
+at rich burnout — the march statement unchanged, tests green), the
+frozen/equilibrium property machinery, the slider-crank chamber
+geometry pinned bitwise against the Phase 67 kernel, the two-zone 0D
+Otto closed cycle (Wiebe release grounded in the flame speed, Woschni
+wall heat, Chen–Flynn brake family, the closing audit, the
+Livengood–Wu knock integral), and the CR/φ/spark sweeps. Phase 68c
+(this slice): the PRODUCT SURFACE — the additive, kind-locked
+`combustion` scenario kind at the cad-core record boundary with its
+two mode-locked stances (stove/engine, the engine subset of fuels
+carrying flame-speed fits, the engine mode carrying no domain-face
+conditions), the sim-core compile branch (the stove mode reusing the
+65c per-body material-map voxelization through a shared walker; the
+engine mode converting the chamber mm → m at the one S4 site with NO
+voxelization), the combustion engine behind the Phase 61 contract
+(the 0D cycle adapter with the P-vs-crank histories, the
+indicated/brake/loss families side by side, the pressure-trace
+preview round as a history-grid block, and the sweeps; the stove
+adapter coupling the reactor's progress-variable wall heat into the
+65 implicit march over sim-thermal's exported FVM pieces — the CHT
+engine's own precedent, one-way and frozen-wall, stated), the
+`/workbench-sim` FIRE and ENGINE demos (the Formedible forms, the
+published engine charts as deterministic SVG-as-data — the P–θ trace,
+the two-family torque curve, the knock-boundary marker), the
+combustion CSV exports (crank-first cycle trace, axis-first sweep,
+time-first fire march), the session stage s24i, the render baseline
+(`e2e-render/sim-combustion.spec.ts`), the guide's Phase 68 section
+with its honest-scope list, and the runnable docs example. Spray is
+declined everywhere, never approximated — with
+`sim/combustion-mode-unsupported` at the library doors (the reactor,
+the cycle, the sweeps), and through the authoring doors' own mode
+vocabularies (`simulation/combustion-spec-invalid` at the record
+boundary's stove/engine lock, `sim/scenario-invalid` at the compile
+door's stance parse); the phase
+stays PROVISIONAL (closed-cycle subset, one-way fire coupling,
+comparative knock — the gaps the guide states). `structural` still
+declines until Phase 69.

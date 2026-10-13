@@ -144,6 +144,15 @@ export const SIM_ERROR_CODES = {
    * at, never fabricates a snapped mechanism.
    */
   loopUnresolved: "sim/loop-unresolved",
+  /**
+   * A combustion surface was asked for a mode outside the premixed
+   * line (Phase 68b, §6 of ROADMAP-SIM): spray / non-premixed /
+   * mixing-controlled (diesel-class) combustion is declined at every
+   * level — the 0D reactor, the flame-speed grounding, the engine
+   * cycle, and every sweep — never approximated with a fitted burn
+   * curve. Defined at the spine so the code vocabulary never reworks.
+   */
+  combustionModeUnsupported: "sim/combustion-mode-unsupported",
 } as const;
 
 export type SimErrorCode =

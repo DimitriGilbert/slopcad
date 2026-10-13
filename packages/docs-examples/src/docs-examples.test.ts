@@ -48,6 +48,7 @@ import {
 import { runSimSpineExample } from "./sim/spine";
 import { runSimThermalExample } from "./sim/thermal";
 import { runSimFanExample } from "./sim/fan";
+import { runSimCombustionExample } from "./sim/combustion";
 import { runSimVoxelExample } from "./sim/voxel";
 import { runSimDemoBodyExample } from "./cadjsx/sim-demo-body";
 import { runSketchExample } from "./sketch/sketch";
@@ -631,6 +632,41 @@ describe("guide example: the motor-driven fan (Phase 66)", () => {
     expect(summary.flags).toContain("low-reynolds-fan");
     // The published chart's history pair (four ladder rungs).
     expect(summary.loadCurveSamples).toBe(4);
+    // Determinism (law S2).
+    expect(summary.deterministic).toBe(true);
+  }, 300_000);
+});
+
+describe("guide example: the premixed Otto engine (Phase 68)", () => {
+  it("runs the base case and one sweep with the families side by side, deterministically", async () => {
+    const summary = await runSimCombustionExample();
+    // The kind-lock at the record boundary (the sentence the guide
+    // states).
+    expect(summary.stanceDeclined).toBe(true);
+    // Spray is declined at every level — never approximated.
+    expect(summary.sprayDeclineCode).toBe("sim/combustion-mode-unsupported");
+    // The gas-path truth in the SI band at CR 10, WOT stoichiometric.
+    expect(summary.imepPa).toBeGreaterThan(8e5);
+    expect(summary.imepPa).toBeLessThan(2.5e6);
+    // The brake family sits below the indicated by the friction
+    // overlay (Chen–Flynn + pumping).
+    expect(summary.bmepPa).toBeGreaterThan(5e5);
+    expect(summary.bmepPa).toBeLessThan(summary.imepPa);
+    // The loss family closes the balance: fuel = brake + friction +
+    // exhaust enthalpy + wall heat, residual at the float floor.
+    expect(summary.auditRelative).toBeLessThan(1e-6);
+    // The knock report's comparative integral is aboard.
+    expect(summary.knockIntegralMax).toBeGreaterThan(1);
+    // The P-vs-crank trace: the closed cycle's grid (720° at 0.5°).
+    expect(summary.traceSamples).toBe(721);
+    // The spark sweep: 7 rows (10° to 50° over 6 intervals) with the
+    // knock boundary marked inside the span.
+    expect(summary.sweepRows).toBe(7);
+    expect(summary.knockBoundaryDeg).toBeDefined();
+    if (summary.knockBoundaryDeg !== undefined) {
+      expect(summary.knockBoundaryDeg).toBeGreaterThanOrEqual(10);
+      expect(summary.knockBoundaryDeg).toBeLessThanOrEqual(50);
+    }
     // Determinism (law S2).
     expect(summary.deterministic).toBe(true);
   }, 300_000);

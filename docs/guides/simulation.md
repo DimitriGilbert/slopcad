@@ -538,11 +538,114 @@ per-occurrence inertia tensors are authored data (absent = point
 mass), and there is no contact or collision model — joints constrain,
 solids never collide.
 
+## Combustion: the stove with fire and the 0D Otto engine (Phase 68)
+
+Combustion is a THIRD kind of physics surface, and like dynamics it
+says so: a `combustion` scenario carries a kind-locked stance with TWO
+modes — `stove` (fire in the Phase 65 domain) and `engine` (the 0D
+Otto cycle) — and the engine mode, like the dynamics kind, carries no
+domain-face boundary conditions (the compile declines any). The
+chemistry itself is the 68a/68b foundation: the curated NASA-7
+species database, the element-potential Gibbs-minimization equilibrium
+solver (TP and HP), the premixed reactant streams, the one-step
+Westbrook–Dryer kinetics, the Metghalchi–Keck laminar flame-speed
+correlation, the 0D constant-volume reactor, and the two-zone closed
+Otto cycle with Wiebe heat release GROUNDED in the flame speed (never
+a fitted diesel-style burn curve).
+
+- **ENGINE mode — the named deliverable.** The Phase 67 slider-crank
+  supplies the chamber volume history (authored in document
+  millimetres; the compile converts at the one S4 site); the trapped
+  charge is authored as the IVC state with composition/AFR as
+  TRANSPORTED state (a lean or throttled charge releases exactly the
+  fuel energy it traps — the researched failure mode's fix); wall
+  heat is the Woschni (1967) correlation with authored wall
+  temperature (the adiabatic trace is one field away); friction is
+  the Chen–Flynn FMEP correlation with pumping as an authored PMEP
+  field — published-range defaults, every coefficient a scenario
+  field. The outputs: the pressure-vs-crank-angle trace (with its
+  motored twin), IMEP — the gas-path truth — with the BRAKE family
+  beside it (BMEP, brake torque and power, brake thermal efficiency,
+  BMEP = IMEP − FMEP − PMEP by arithmetic), the LOSS family closing
+  the balance (fuel = brake + friction + exhaust enthalpy +
+  wall/coolant, residual at the float floor), and the Livengood–Wu
+  knock integral over the unburned zone. Sweeps (compression ratio,
+  equivalence ratio, spark timing) ride the same result as sweep
+  series, and the spark sweep's knock boundary is a summary quantity.
+- **STOVE mode — the stove with fire.** The 68b reactor burns the
+  chamber charge with wall loss through the voxelized solid–fluid
+  interface (h·A per metre of the slab's depth — the 65 convention),
+  and the 65 implicit conduction march consumes the reactor's
+  progress-variable wall heat as an area-weighted volumetric source on
+  the wetted wall cells. The chamber's equilibrium gas state (the 68a
+  HP products) reports beside the fire's own history; the temperature
+  field paints through the Phase 62 overlay family exactly like the
+  65 stove's.
+
+**Both demos are on `/workbench-sim`** (the demo-model selector's
+FIRE and ENGINE entries, both over the 65 stove body's plate
+document — the engine needs no geometry, its physics is the authored
+stance). The ENGINE mode's Formedible form authors fuel, φ, the
+slider-crank geometry, speed, the IVC charge, spark timing, the
+wall-heat stance, the Chen–Flynn overrides (one checkbox away from
+the published default), and the sweep; the published charts are
+deterministic SVG-as-data (the fan-chart family): the P-vs-crank
+trace (fired solid, motored dashed), the TORQUE CURVE with the
+indicated and brake families both shown over the sweep axis, and the
+knock boundary's marker where the sweep's integral first crosses 1.
+The FIRE mode's form authors the charge (lit — a cold charge never
+ignites, the honest 0D authoring rule), the fire–wall coupling, and
+the 65-family solve fields. Runs persist through the same
+SimResultStore panel family (law S7) and export as CSV: the
+crank-first cycle trace plus the axis-first sweep table (engine), or
+the time-first fire march (stove).
+
+**Honest scope** (stated, never hidden):
+
+- **0D premixed line.** Flame fronts are modeled, never resolved; the
+  cycle is the IDEAL closed portion (IVC to EVO) with gas exchange
+  DEFERRED — the breathing is the authored IVC state and pumping
+  rides the friction family as an authored PMEP field. Non-premixed
+  (spray, diesel-class) combustion is declined everywhere, never
+  approximated — with `sim/combustion-mode-unsupported` at the
+  library doors (the reactor, the cycle, the sweeps), and earlier
+  through the authoring doors' own mode vocabularies: the record
+  boundary's stove/engine lock
+  (`simulation/combustion-spec-invalid`) and the compile door's
+  stance parse (`sim/scenario-invalid`).
+- **Equilibrium + reduced chemistry.** The burned zone rides an
+  11-species HP equilibrium table; the reaction rate is a one-step
+  global calibration. This is 0D thermochemistry, not detailed
+  kinetics — no reaction pathways, no emissions chemistry.
+- **Comparative knock.** The Livengood–Wu integral's induction time
+  is the one-step flame calibration, not an autoignition mechanism —
+  no octane-number physics, no cool-flame/NTC behavior. The ABSOLUTE
+  integral (and any absolute onset angle) is biased eager; the
+  report is trustworthy comparatively — its trend with spark advance,
+  compression ratio, and charge state — which is exactly how the
+  surface uses it (the boundary MARKER on the spark sweep).
+- **Adiabatic-vs-correlation bands.** Wall heat (Woschni) and friction
+  (Chen–Flynn) are correlation-band honest, not component models:
+  the per-component breakdown (rings/bearings/valvetrain) is deferred
+  by ruling, and the adiabatic trace stays one field away so the
+  band is visible, not hidden.
+- **One-way fire coupling.** The stove mode's reactor-to-wall heat is
+  a frozen-wall one-way coupling (the authored wall temperature);
+  the honest-h(t) two-way lockstep is the 68b reactor's own seam,
+  waiting on a ruling.
+- **Provisional phase framing.** Phase 68 is marked provisional in
+  the roadmap; the 0D numbers are engineering-adjacent and
+  comparative-trustworthy (trends against CR/φ/spark), not a
+  calibrated engine simulator.
+
 ## What does not exist yet
 
-Honest inventory, per phase: combustion (68), structural FEM (69 —
+Honest inventory, per phase: structural FEM (69 —
 the kind declines with `sim/scenario-kind-unsupported` today), and
-parametric optimization (70). 3D flow and rotating machinery (66)
+parametric optimization (70). Combustion (68) landed with the gaps
+its section above states: the closed-cycle subset (gas exchange
+deferred, PMEP authored), one-way fire coupling, comparative-only
+knock, and the CH4/octane fuel set. 3D flow and rotating machinery (66)
 landed with the cut-cell treatment explicitly DECLINED (see the ADR's
 "The cut-cell decision"); a 3D WGSL provider engine adapter, the 3D
 grid-convergence ladder, and the motor-driven resolved-rotation
@@ -590,4 +693,9 @@ body — the tube and paddle rotor the fan form's defaults expect — and
 its Phase 67 sibling
 `packages/docs-examples/src/cadjsx/slider-crank.tsx` is the dynamics
 demo's bodies: the base plate, crank, rod, and piston the mechanism's
-joint records join.
+joint records join. `packages/docs-examples/src/sim/combustion.ts` is
+the Phase 68 combustion walk: the kind-locked stance decline, the
+spray refusal at the chemistry door, the base Otto case (IMEP in the
+SI band, the brake family below the indicated, the audit closing at
+the float floor, the 721-sample pressure trace), the spark sweep with
+its knock boundary, and the engine's determinism.

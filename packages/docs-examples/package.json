@@ -45,6 +45,7 @@
     "@slopcad/cad-kernel-occt": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
     "@slopcad/cad-sketch": "workspace:*",
+    "@slopcad/sim-combustion": "workspace:*",
     "@slopcad/sim-core": "workspace:*",
     "@slopcad/sim-flow": "workspace:*",
     "@slopcad/sim-thermal": "workspace:*"

@@ -426,8 +426,13 @@ async function runDynamicsEngine(
     value: finalState.energy.externalWorkJ,
     unit: "J",
   });
+  // The conserved-audit TOTAL (KE + PE − motor work − external work +
+  // dissipated), the energy:audit history's final sample — not the drift:
+  // drift is audit(t) − audit(0) and equals this only when the initial
+  // state carried zero energy. Consumers wanting drift pair this with
+  // the run's initial energy (the conservation fixtures' computation).
   quantities.push({
-    name: "energy-audit-drift",
+    name: "energy-audit-total",
     value: finalState.energy.auditJ,
     unit: "J",
   });

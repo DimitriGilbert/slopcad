@@ -180,6 +180,9 @@ importers:
       '@slopcad/env':
         specifier: workspace:*
         version: link:../../packages/env
+      '@slopcad/sim-combustion':
+        specifier: workspace:*
+        version: link:../../packages/sim-combustion
       '@slopcad/sim-core':
         specifier: workspace:*
         version: link:../../packages/sim-core
@@ -842,6 +845,9 @@ importers:
       '@slopcad/cad-sketch':
         specifier: workspace:*
         version: link:../cad-sketch
+      '@slopcad/sim-combustion':
+        specifier: workspace:*
+        version: link:../sim-combustion
       '@slopcad/sim-core':
         specifier: workspace:*
         version: link:../sim-core
@@ -898,6 +904,31 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.4.1
+      '@vitest/coverage-istanbul':
+        specifier: 'catalog:'
+        version: 4.1.11(vitest@4.1.11)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.4.1)(@vitest/coverage-istanbul@4.1.11)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  packages/sim-combustion:
+    dependencies:
+      '@slopcad/sim-core':
+        specifier: workspace:*
+        version: link:../sim-core
+      '@slopcad/sim-thermal':
+        specifier: workspace:*
+        version: link:../sim-thermal
+    devDependencies:
+      '@slopcad/config':
+        specifier: workspace:*
+        version: link:../config
+      '@slopcad/sim-dynamics':
+        specifier: workspace:*
+        version: link:../sim-dynamics
       '@vitest/coverage-istanbul':
         specifier: 'catalog:'
         version: 4.1.11(vitest@4.1.11)

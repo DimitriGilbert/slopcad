@@ -31,6 +31,7 @@ import {
   DOCUMENT_ERROR_CODES,
   type DocumentHistory,
   type DocumentMaterialRecord,
+  type SimScenarioCombustionSpec,
   type SimScenarioDynamicsSpec,
   type SimScenarioInput,
   type SimScenarioThermalSpec,
@@ -901,6 +902,279 @@ describe("the thermal solve stance (Phase 65c)", () => {
     if (scenario.thermal === undefined) return;
     expect(scenario.thermal.solveMode).toBe("transient");
     expect(scenario.thermal.durationS).toBe(60);
+  });
+});
+
+describe("the combustion solve stance (Phase 68c)", () => {
+  /** The stove-with-fire stance: a lit methane charge in the 65 domain. */
+  function stoveStance(): SimScenarioCombustionSpec {
+    return {
+      mode: "stove",
+      fuel: "CH4",
+      equivalenceRatio: 1,
+      chargeTemperatureK: 1400,
+      chargePressureBar: 1,
+      wallConvectionWPerM2K: 30,
+      radiationMode: "linearized",
+      initialTemperatureK: 293.15,
+      ambientConvectionWPerM2K: 5,
+      durationS: 30,
+      sampleIntervalS: 1,
+    };
+  }
+
+  /** The Otto engine stance: the demo 0.5 L single at CR 10. */
+  function engineStance(): SimScenarioCombustionSpec {
+    return {
+      mode: "engine",
+      fuel: "C8H18-ISO",
+      geometry: {
+        boreMm: 86,
+        crankRadiusMm: 43,
+        rodLengthMm: 143,
+        compressionRatio: 10,
+      },
+      speedRpm: 1500,
+      charge: { intakePressureBar: 1, intakeTK: 300, equivalenceRatio: 1 },
+      spark: { timingBTDCDeg: 25 },
+      wallHeat: { mode: "woschni", wallTemperatureK: 450 },
+      sweep: { kind: "sparkTiming", from: 10, to: 50, steps: 4 },
+    };
+  }
+
+  /** A combustion scenario over the base document. */
+  function combustionFields(stance: SimScenarioCombustionSpec) {
+    return {
+      name: "Fire",
+      kind: "combustion" as const,
+      domain: {
+        kind: "explicit" as const,
+        min: [0, 0, 0] as const,
+        max: [100, 40, 10] as const,
+        resolutionMm: 5,
+      },
+      conditions: [],
+      fluid: "air",
+      materials: [],
+      combustion: stance,
+    };
+  }
+
+  /** The malformed-stance decline harness (the wire form, untrusted). */
+  const declinedAdd = (
+    document: CadDocument,
+    stance: unknown,
+    conditions: readonly unknown[] = [],
+  ): ReturnType<typeof addDocumentSimulation> =>
+    addDocumentSimulation(document, {
+      name: "Fire",
+      kind: "combustion",
+      domain: {
+        kind: "explicit",
+        min: [0, 0, 0],
+        max: [100, 40, 10],
+        resolutionMm: 5,
+      },
+      conditions,
+      fluid: "air",
+      materials: [],
+      combustion: stance,
+    } as unknown as SimScenarioInput);
+
+  it("adds both modes and round-trips them canonically", () => {
+    for (const stance of [stoveStance(), engineStance()]) {
+      const added = requireOk(
+        addDocumentSimulation(baseDocument(), combustionFields(stance)),
+        `the ${stance.mode} add`,
+      );
+      expect(added.scenario.kind).toBe("combustion");
+      expect(added.scenario.combustion).toEqual(stance);
+      // The canonical round-trip: serialize → parse is the identity.
+      const reparsed = requireOk(
+        parseCadDocument(
+          JSON.parse(
+            JSON.stringify(serializeCadDocument(added.document)),
+          ) as unknown,
+        ),
+        `the ${stance.mode} document round-trip`,
+      );
+      const scenario = reparsed.simulations[0];
+      expect(scenario).toBeDefined();
+      if (scenario !== undefined) {
+        expect(scenario.combustion).toEqual(stance);
+      }
+    }
+  });
+
+  it("kind-locks the stance: absent on combustion declines, present on others declines", () => {
+    const missing = declinedAdd(baseDocument(), undefined);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.error.code).toBe(DOCUMENT_ERROR_CODES.simulationInvalid);
+      expect(missing.error.message).toContain("combustion solve stance");
+    }
+    const wrongKind = addDocumentSimulation(baseDocument(), {
+      ...scenarioFields(),
+      combustion: stoveStance(),
+    });
+    expect(wrongKind.ok).toBe(false);
+    if (!wrongKind.ok) {
+      expect(wrongKind.error.message).toContain(
+        "cannot carry a combustion solve stance",
+      );
+    }
+  });
+
+  it("refuses engine-mode domain-face conditions (the dynamics kind's rule)", () => {
+    const declined = declinedAdd(baseDocument(), engineStance(), [
+      { kind: "fixed-temperature", face: "xMin", temperatureK: 300 },
+    ]);
+    expect(declined.ok).toBe(false);
+    if (!declined.ok) {
+      expect(declined.error.message).toContain(
+        "no domain-face boundary conditions",
+      );
+    }
+    // The stove mode consumes the thermal set.
+    const stoveWithWall = declinedAdd(baseDocument(), stoveStance(), [
+      { kind: "fixed-temperature", face: "xMin", temperatureK: 300 },
+    ]);
+    expect(stoveWithWall.ok).toBe(true);
+  });
+
+  it("refuses the engine mode's unphysical fields loudly", () => {
+    // A rod shorter than the crank cannot assemble.
+    const shortRod = declinedAdd(baseDocument(), {
+      ...engineStance(),
+      geometry: {
+        boreMm: 86,
+        crankRadiusMm: 43,
+        rodLengthMm: 40,
+        compressionRatio: 10,
+      },
+    });
+    expect(shortRod.ok).toBe(false);
+    if (!shortRod.ok) {
+      expect(shortRod.error.message).toContain("rod must be longer");
+    }
+    // Methane has no published flame-speed fit — the burn-duration
+    // grounding declines to guess one.
+    const methane = declinedAdd(baseDocument(), {
+      ...engineStance(),
+      fuel: "CH4" as never,
+    });
+    expect(methane.ok).toBe(false);
+    if (!methane.ok) {
+      expect(methane.error.message).toContain("flame-speed fit");
+    }
+    // Spark outside the compression stroke.
+    const lateSpark = declinedAdd(baseDocument(), {
+      ...engineStance(),
+      spark: { timingBTDCDeg: 200 },
+    });
+    expect(lateSpark.ok).toBe(false);
+  });
+
+  it("refuses the stove mode's off-lattice cadence", () => {
+    const offLattice = declinedAdd(baseDocument(), {
+      ...stoveStance(),
+      sampleIntervalS: 0.7,
+    });
+    expect(offLattice.ok).toBe(false);
+    if (!offLattice.ok) {
+      expect(offLattice.error.message).toContain("integer multiple");
+    }
+  });
+});
+
+describe("the 3D flow stance (Phase 66c)", () => {
+  it("adds a flow scenario with its rotation stance and round-trips it canonically", () => {
+    const added = requireOk(
+      addDocumentSimulation(baseDocument(), {
+        ...scenarioFields(),
+        flow3d: {
+          boundaryTreatment: "staircase",
+          rotation: {
+            kind: "mrf",
+            axisPointMm: [0, 0, 0],
+            axisDirection: [0, 1, 0],
+            zoneRadiusMm: 80,
+            rpmMode: "fixed",
+            fixedRpm: 3000,
+            bladeCount: 7,
+          },
+        },
+      }),
+      "the 3D stance add",
+    );
+    const scenario = added.scenario;
+    expect(scenario.flow3d).toBeDefined();
+    if (scenario.flow3d === undefined) return;
+    expect(scenario.flow3d.boundaryTreatment).toBe("staircase");
+    expect(scenario.flow3d.rotation?.kind).toBe("mrf");
+    expect(scenario.flow3d.rotation?.fixedRpm).toBe(3000);
+    expect(scenario.flow3d.rotation?.bladeCount).toBe(7);
+    const serialized = requireOk(
+      parseCadDocument(serializeCadDocument(added.document)),
+      "the serialized round-trip",
+    );
+    const restored = serialized.simulations[0];
+    if (restored === undefined) throw new Error("the scenario did not survive");
+    expect(restored.flow3d?.rotation).toEqual(scenario.flow3d.rotation);
+    // The default boundary treatment normalizes to absent in canonical
+    // form (the provider: "reference" discipline) — semantics preserved.
+    expect(restored.flow3d?.boundaryTreatment).toBeUndefined();
+  });
+
+  it("round-trips the static 3D door and the motor-driven mode stance", () => {
+    const staticAdded = requireOk(
+      addDocumentSimulation(baseDocument(), {
+        ...scenarioFields(),
+        flow3d: {},
+      }),
+      "the static 3D add",
+    );
+    const staticSerialized = requireOk(
+      parseCadDocument(serializeCadDocument(staticAdded.document)),
+      "the static round-trip",
+    );
+    const staticRestored = staticSerialized.simulations[0];
+    if (staticRestored === undefined) {
+      throw new Error("the static scenario did not survive");
+    }
+    expect(staticRestored.flow3d).toEqual(staticAdded.scenario.flow3d);
+    expect(staticRestored.flow3d?.rotation).toBeUndefined();
+
+    const { document, motorId } = withMotor();
+    const motorDriven = requireOk(
+      addDocumentSimulation(document, {
+        ...scenarioFields(),
+        flow3d: {
+          boundaryTreatment: "cut-cell",
+          rotation: {
+            kind: "resolved-rotation",
+            axisPointMm: [10, 0, 0],
+            axisDirection: [0.5, 1, 0],
+            zoneRadiusMm: 45,
+            rpmMode: "motor",
+            bladeCount: 5,
+          },
+        },
+        motorId,
+      }),
+      "the motor-driven add",
+    );
+    const motorSerialized = requireOk(
+      parseCadDocument(serializeCadDocument(motorDriven.document)),
+      "the motor round-trip",
+    );
+    const motorRestored = motorSerialized.simulations[0];
+    if (motorRestored === undefined) {
+      throw new Error("the motor scenario did not survive");
+    }
+    expect(motorRestored.flow3d).toEqual(motorDriven.scenario.flow3d);
+    expect(motorRestored.flow3d?.rotation?.rpmMode).toBe("motor");
+    expect(motorRestored.flow3d?.rotation?.fixedRpm).toBeUndefined();
   });
 });
 

@@ -922,7 +922,7 @@ function parseCompiledScenarioEntry(
   if (!record.ok) return record;
   if (!isSimScenarioKind(record.value.kind)) {
     return payloadError(
-      'The "sim.compile" field "compiled.kind" must be one of: flow, thermal, dynamics, structural.',
+      'The "sim.compile" field "compiled.kind" must be one of: flow, thermal, dynamics, combustion, structural.',
       record.value.kind,
     );
   }

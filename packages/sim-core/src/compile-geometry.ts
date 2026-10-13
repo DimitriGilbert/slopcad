@@ -796,21 +796,27 @@ function compileFlow3dProducts(
 }
 
 /**
- * The thermal compile branch: voxelizes each referenced body's
- * tessellation at the domain's mid-height plane (the SAME plane rule the
- * flow slice uses), unions the per-body grids into the occupancy slice,
- * and resolves the per-cell material map — every solid cell carries the
- * 1-based material index of the FIRST body claiming it (deterministic in
- * input order; overlapping bodies are the author's ambiguity, the map is
- * not). Every voxelized body must carry a material assignment whose id
- * names one of the supplied records; anything else declines loudly.
+ * The thermal compile branch's shared core (Phase 65c, restated for
+ * Phase 68c's stove mode): voxelizes each referenced body's
+ * tessellation at the domain's mid-height plane (the SAME plane rule
+ * the flow slice uses), unions the per-body grids into the occupancy
+ * slice, and resolves the per-cell material map — every solid cell
+ * carries the 1-based material index of the FIRST body claiming it
+ * (deterministic in input order; overlapping bodies are the author's
+ * ambiguity, the map is not). Every voxelized body must carry a
+ * material assignment whose id names one of the supplied records;
+ * anything else declines loudly.
  */
-function compileThermalProducts(
+function voxelizeSolidMaterialMap(
   scenario: Record<string, unknown>,
   input: GeometrySimCompileInput,
   bodyBounds: readonly SimBodyBoundsMm[],
 ): SimParseResult<
-  Pick<CompiledSimScenario, "occupancySlice" | "thermal">,
+  {
+    readonly occupancySlice: SimOccupancyGrid;
+    readonly materials: readonly CompiledSimThermalMaterial[];
+    readonly materialIndex: Uint16Array;
+  },
   SimError
 > {
   const refuse = (
@@ -818,13 +824,11 @@ function compileThermalProducts(
     at: unknown,
   ): SimParseResult<never, SimError> =>
     simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
-  const stance = parseThermalStance(scenario);
-  if (!stance.ok) return stance;
 
   const bodies = input.bodyTessellations ?? [];
   if (bodies.length === 0) {
     return refuse(
-      "A thermal compile needs the referenced bodies' tessellations (one entry per body); the compile door refuses to fabricate an empty solid.",
+      "The compile needs the referenced bodies' tessellations (one entry per body); the compile door refuses to fabricate an empty solid.",
       input.bodyTessellations,
     );
   }
@@ -846,7 +850,7 @@ function compileThermalProducts(
   for (const record of input.materials ?? []) {
     if (!isPlainRecord(record) || typeof record.id !== "string") {
       return refuse(
-        "A thermal compile's material records must be plain objects carrying a string id.",
+        "The compile's material records must be plain objects carrying a string id.",
         record,
       );
     }
@@ -885,14 +889,14 @@ function compileThermalProducts(
   for (const body of bodies) {
     if (!isPlainRecord(body) || typeof body.bodyId !== "string") {
       return refuse(
-        "A thermal compile's body tessellations must carry a string bodyId beside the tessellation.",
+        "The compile's body tessellations must carry a string bodyId beside the tessellation.",
         body,
       );
     }
     const materialId = materialOfBody.get(body.bodyId);
     if (materialId === undefined) {
       return refuse(
-        `The thermal scenario voxelizes body "${body.bodyId}" but assigns it no material; every solid the conduction solve sees must carry one, and the compile door declines instead of guessing.`,
+        `The scenario voxelizes body "${body.bodyId}" but assigns it no material; every solid the conduction solve sees must carry one, and the compile door declines instead of guessing.`,
         body.bodyId,
       );
     }
@@ -901,7 +905,7 @@ function compileThermalProducts(
       const record = recordsById.get(materialId);
       if (record === undefined) {
         return refuse(
-          `The scenario assigns material "${materialId}" but no supplied material record carries that id; the thermal compile refuses a selection it cannot resolve.`,
+          `The scenario assigns material "${materialId}" but no supplied material record carries that id; the compile refuses a selection it cannot resolve.`,
           materialId,
         );
       }
@@ -925,7 +929,7 @@ function compileThermalProducts(
         slice.value.shape[2] !== reference.shape[2]
       ) {
         return refuse(
-          "The thermal compile's per-body slices disagree on their lattice shape; every body must voxelize over the SAME domain at the SAME resolution.",
+          "The compile's per-body slices disagree on their lattice shape; every body must voxelize over the SAME domain at the SAME resolution.",
           {
             first: [...reference.shape],
             body: [...slice.value.shape],
@@ -947,7 +951,7 @@ function compileThermalProducts(
   const union = reference;
   if (union === undefined) {
     return refuse(
-      "A thermal compile needs at least one body tessellation.",
+      "The compile needs at least one body tessellation.",
       input.bodyTessellations,
     );
   }
@@ -968,6 +972,39 @@ function compileThermalProducts(
       );
     }
   }
+  return simOk({ occupancySlice: union, materials, materialIndex });
+}
+
+/**
+ * The thermal compile branch: voxelizes each referenced body's
+ * tessellation at the domain's mid-height plane (the SAME plane rule the
+ * flow slice uses), unions the per-body grids into the occupancy slice,
+ * and resolves the per-cell material map — every solid cell carries the
+ * 1-based material index of the FIRST body claiming it (deterministic in
+ * input order; overlapping bodies are the author's ambiguity, the map is
+ * not). Every voxelized body must carry a material assignment whose id
+ * names one of the supplied records; anything else declines loudly.
+ */
+function compileThermalProducts(
+  scenario: Record<string, unknown>,
+  input: GeometrySimCompileInput,
+  bodyBounds: readonly SimBodyBoundsMm[],
+): SimParseResult<
+  Pick<CompiledSimScenario, "occupancySlice" | "thermal">,
+  SimError
+> {
+  const refuse = (
+    message: string,
+    at: unknown,
+  ): SimParseResult<never, SimError> =>
+    simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
+  const stance = parseThermalStance(scenario);
+  if (!stance.ok) return stance;
+
+  const solid = voxelizeSolidMaterialMap(scenario, input, bodyBounds);
+  if (!solid.ok) return solid;
+  const union = solid.value.occupancySlice;
+
   if (stance.value.cht) {
     let fluidCells = 0;
     for (let cell = 0; cell < union.cells.length; cell += 1) {
@@ -983,7 +1020,11 @@ function compileThermalProducts(
 
   return simOk({
     occupancySlice: union,
-    thermal: { ...stance.value, materials, materialIndex },
+    thermal: {
+      ...stance.value,
+      materials: solid.value.materials,
+      materialIndex: solid.value.materialIndex,
+    },
   });
 }
 
@@ -1315,6 +1356,527 @@ function compileDynamicsProducts(
   return simOk({ dynamics });
 }
 
+// ---------------------------------------------------------------------------
+// The combustion compile products (Phase 68c)
+// ---------------------------------------------------------------------------
+
+/** The combustion stance's mode vocabulary, restated at this door. */
+const COMBUSTION_MODES = ["stove", "engine"] as const;
+
+/** The combustion stance's fuel vocabulary, restated at this door. */
+const COMBUSTION_FUELS = ["CH4", "C8H18-ISO", "C8H18-N"] as const;
+
+/** The engine mode's fuels (those with a published flame-speed fit). */
+const COMBUSTION_ENGINE_FUELS = ["C8H18-ISO", "C8H18-N"] as const;
+
+/** The sweep-axis vocabulary, restated at this door. */
+const COMBUSTION_SWEEP_KINDS = [
+  "compressionRatio",
+  "equivalenceRatio",
+  "sparkTiming",
+] as const;
+
+/** The equivalence-ratio ceiling the chemistry carries (the 68a door's). */
+const COMBUSTION_MAX_EQUIVALENCE_RATIO = 5;
+
+type CombustionMode = (typeof COMBUSTION_MODES)[number];
+type CombustionFuel = (typeof COMBUSTION_FUELS)[number];
+type CombustionSweepKind = (typeof COMBUSTION_SWEEP_KINDS)[number];
+
+/**
+ * The STOVE-mode compile products (Phase 68c): the re-validated fire
+ * stance plus the SAME per-cell material map the thermal branch builds
+ * (the 65-family solve), consumed worker-side by the combustion stove
+ * engine beside {@link CompiledSimScenario.occupancySlice}.
+ */
+export interface CompiledSimCombustionStove {
+  readonly mode: "stove";
+  readonly fuel: CombustionFuel;
+  readonly equivalenceRatio: number;
+  readonly chargeTemperatureK: number;
+  readonly chargePressureBar: number;
+  readonly wallConvectionWPerM2K: number;
+  /** The fire-side wall temperature, K — resolved (default: the field). */
+  readonly wallTemperatureK: number;
+  readonly radiationMode: ThermalRadiationMode;
+  readonly initialTemperatureK: number;
+  readonly ambientConvectionWPerM2K: number;
+  readonly durationS: number;
+  readonly sampleIntervalS: number;
+  readonly materials: readonly CompiledSimThermalMaterial[];
+  /** Per-cell 1-based material index over the occupancy slice; 0 on fluid. */
+  readonly materialIndex: Uint16Array;
+}
+
+/**
+ * The ENGINE-mode compile products (Phase 68c): the re-validated 0D
+ * Otto stance with the slider-crank geometry converted to SI HERE (the
+ * one mm→m site for the chamber, law S4). No voxelization — the 0D
+ * chamber has no spatial domain; the Phase 67 seam is the volume
+ * formula the cycle integrates.
+ */
+export interface CompiledSimCombustionEngine {
+  readonly mode: "engine";
+  readonly fuel: Exclude<CombustionFuel, "CH4">;
+  readonly geometry: {
+    readonly boreM: number;
+    readonly crankRadiusM: number;
+    readonly rodLengthM: number;
+    readonly compressionRatio: number;
+  };
+  readonly speedRpm: number;
+  readonly charge: {
+    readonly intakePressureBar: number;
+    readonly intakeTK: number;
+    readonly equivalenceRatio: number;
+  };
+  readonly spark: {
+    readonly timingBTDCDeg: number;
+    readonly turbulenceSpeedMultiplier?: number;
+  };
+  readonly wallHeat:
+    | { readonly mode: "adiabatic" }
+    | { readonly mode: "woschni"; readonly wallTemperatureK: number };
+  readonly friction?: {
+    readonly aBar: number;
+    readonly bBarPerBar: number;
+    readonly cBarPerMPerS: number;
+    readonly dBarPerM2S2: number;
+    readonly pumpingMepBar: number;
+  };
+  readonly sweep?: {
+    readonly kind: CombustionSweepKind;
+    readonly from: number;
+    readonly to: number;
+    readonly steps: number;
+  };
+}
+
+/** The combustion compile products, mode-locked (Phase 68c). */
+export type CompiledSimCombustion =
+  CompiledSimCombustionStove | CompiledSimCombustionEngine;
+
+function isCombustionMode(input: unknown): input is CombustionMode {
+  return (
+    typeof input === "string" &&
+    COMBUSTION_MODES.includes(input as CombustionMode)
+  );
+}
+
+function isCombustionFuel(input: unknown): input is CombustionFuel {
+  return (
+    typeof input === "string" &&
+    COMBUSTION_FUELS.includes(input as CombustionFuel)
+  );
+}
+
+/**
+ * Re-reads the combustion stance from the raw scenario record (the
+ * `parseThermalStance` precedent — the record layer validated the same
+ * fields; this door re-validates every field it consumes), converting
+ * the engine mode's millimetres to SI and resolving the stove mode's
+ * optional wall temperature against its initial field.
+ */
+type CombustionStanceWire =
+  | Omit<CompiledSimCombustionStove, "materials" | "materialIndex">
+  | CompiledSimCombustionEngine;
+
+function parseCombustionStance(
+  scenario: Record<string, unknown>,
+): SimParseResult<CombustionStanceWire, SimError> {
+  const refuse = (
+    message: string,
+    at: unknown,
+  ): SimParseResult<never, SimError> =>
+    simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
+  const positive = (
+    value: unknown,
+    what: string,
+    max?: number,
+  ): SimParseResult<number, SimError> =>
+    typeof value === "number" && Number.isFinite(value) && value > 0
+      ? max === undefined || value <= max
+        ? simOk(value)
+        : refuse(
+            `A combustion stance's ${what} must be at most ${String(max)}.`,
+            value,
+          )
+      : refuse(
+          `A combustion stance's ${what} must be a positive finite number.`,
+          value,
+        );
+  const stance = scenario.combustion;
+  if (!isPlainRecord(stance)) {
+    return refuse(
+      "A combustion scenario must carry its combustion solve stance (the stove fire or the 0D engine cycle) — the compile door refuses to guess physics.",
+      stance,
+    );
+  }
+  if (!isCombustionMode(stance.mode)) {
+    return refuse(
+      `A combustion stance's mode must be one of ${COMBUSTION_MODES.join(", ")}.`,
+      stance.mode,
+    );
+  }
+  if (!isCombustionFuel(stance.fuel)) {
+    return refuse(
+      `A combustion stance's fuel must be one of ${COMBUSTION_FUELS.join(", ")}.`,
+      stance.fuel,
+    );
+  }
+  if (stance.mode === "stove") {
+    const equivalenceRatio = positive(
+      stance.equivalenceRatio,
+      "equivalence ratio",
+      COMBUSTION_MAX_EQUIVALENCE_RATIO,
+    );
+    if (!equivalenceRatio.ok) return equivalenceRatio;
+    const chargeTemperatureK = positive(
+      stance.chargeTemperatureK,
+      "charge temperature",
+    );
+    if (!chargeTemperatureK.ok) return chargeTemperatureK;
+    const chargePressureBar = positive(
+      stance.chargePressureBar,
+      "charge pressure",
+    );
+    if (!chargePressureBar.ok) return chargePressureBar;
+    const wallConvectionWPerM2K = positive(
+      stance.wallConvectionWPerM2K,
+      "wall convection coefficient",
+    );
+    if (!wallConvectionWPerM2K.ok) return wallConvectionWPerM2K;
+    if (!isThermalRadiationMode(stance.radiationMode)) {
+      return refuse(
+        `A stove stance's radiation mode must be one of ${THERMAL_RADIATION_MODES.join(", ")}.`,
+        stance.radiationMode,
+      );
+    }
+    const initialTemperatureK = positive(
+      stance.initialTemperatureK,
+      "initial temperature",
+    );
+    if (!initialTemperatureK.ok) return initialTemperatureK;
+    if (
+      typeof stance.ambientConvectionWPerM2K !== "number" ||
+      !Number.isFinite(stance.ambientConvectionWPerM2K) ||
+      stance.ambientConvectionWPerM2K < 0
+    ) {
+      return refuse(
+        "A stove stance's ambient convection coefficient must be a finite number ≥ 0 W/(m²·K).",
+        stance.ambientConvectionWPerM2K,
+      );
+    }
+    const durationS = positive(stance.durationS, "duration");
+    if (!durationS.ok) return durationS;
+    const sampleIntervalS = positive(stance.sampleIntervalS, "sample interval");
+    if (!sampleIntervalS.ok) return sampleIntervalS;
+    const sampleCount = Math.round(durationS.value / sampleIntervalS.value);
+    if (
+      sampleCount < 1 ||
+      Math.abs(sampleCount * sampleIntervalS.value - durationS.value) >
+        1e-9 * durationS.value
+    ) {
+      return refuse(
+        "A stove stance's duration must be an integer multiple of its sample interval so every sample lands on the cadence.",
+        { durationS: durationS.value, sampleIntervalS: sampleIntervalS.value },
+      );
+    }
+    let wallTemperatureK = initialTemperatureK.value;
+    if (
+      stance.wallTemperatureK !== undefined &&
+      stance.wallTemperatureK !== null
+    ) {
+      const parsed = positive(stance.wallTemperatureK, "wall temperature");
+      if (!parsed.ok) return parsed;
+      wallTemperatureK = parsed.value;
+    }
+    return simOk({
+      mode: "stove",
+      fuel: stance.fuel,
+      equivalenceRatio: equivalenceRatio.value,
+      chargeTemperatureK: chargeTemperatureK.value,
+      chargePressureBar: chargePressureBar.value,
+      wallConvectionWPerM2K: wallConvectionWPerM2K.value,
+      wallTemperatureK,
+      radiationMode: stance.radiationMode,
+      initialTemperatureK: initialTemperatureK.value,
+      ambientConvectionWPerM2K: stance.ambientConvectionWPerM2K,
+      durationS: durationS.value,
+      sampleIntervalS: sampleIntervalS.value,
+    });
+  }
+  // The engine mode.
+  if (!(COMBUSTION_ENGINE_FUELS as readonly string[]).includes(stance.fuel)) {
+    return refuse(
+      `An engine stance's fuel must be one of ${COMBUSTION_ENGINE_FUELS.join(", ")} (the fuels with a published laminar flame-speed fit).`,
+      stance.fuel,
+    );
+  }
+  const geometry = stance.geometry;
+  if (!isPlainRecord(geometry)) {
+    return refuse(
+      "An engine stance must carry its slider-crank geometry (bore, crank radius, rod, compression ratio) in millimetres.",
+      geometry,
+    );
+  }
+  const boreMm = positive(geometry.boreMm, "bore");
+  if (!boreMm.ok) return boreMm;
+  const crankRadiusMm = positive(geometry.crankRadiusMm, "crank radius");
+  if (!crankRadiusMm.ok) return crankRadiusMm;
+  const rodLengthMm = positive(geometry.rodLengthMm, "rod length");
+  if (!rodLengthMm.ok) return rodLengthMm;
+  if (rodLengthMm.value <= crankRadiusMm.value) {
+    return refuse(
+      "An engine stance's rod must be longer than its crank radius — the linkage's assembly condition l > r.",
+      { rodLengthMm: rodLengthMm.value, crankRadiusMm: crankRadiusMm.value },
+    );
+  }
+  const compressionRatio = positive(
+    geometry.compressionRatio,
+    "compression ratio",
+  );
+  if (!compressionRatio.ok) return compressionRatio;
+  if (compressionRatio.value <= 1) {
+    return refuse(
+      "An engine stance's compression ratio must exceed 1.",
+      geometry.compressionRatio,
+    );
+  }
+  const speedRpm = positive(stance.speedRpm, "speed");
+  if (!speedRpm.ok) return speedRpm;
+  const charge = stance.charge;
+  if (!isPlainRecord(charge)) {
+    return refuse(
+      "An engine stance must carry its trapped charge (intake pressure, intake temperature, equivalence ratio).",
+      charge,
+    );
+  }
+  const intakePressureBar = positive(
+    charge.intakePressureBar,
+    "intake pressure",
+  );
+  if (!intakePressureBar.ok) return intakePressureBar;
+  const intakeTK = positive(charge.intakeTK, "intake temperature");
+  if (!intakeTK.ok) return intakeTK;
+  const equivalenceRatio = positive(
+    charge.equivalenceRatio,
+    "equivalence ratio",
+    COMBUSTION_MAX_EQUIVALENCE_RATIO,
+  );
+  if (!equivalenceRatio.ok) return equivalenceRatio;
+  const spark = stance.spark;
+  if (!isPlainRecord(spark)) {
+    return refuse(
+      "An engine stance must carry its spark timing (degrees before compression TDC).",
+      spark,
+    );
+  }
+  const timingBTDCDeg = spark.timingBTDCDeg;
+  if (
+    typeof timingBTDCDeg !== "number" ||
+    !Number.isFinite(timingBTDCDeg) ||
+    timingBTDCDeg <= 0 ||
+    timingBTDCDeg >= 178
+  ) {
+    return refuse(
+      "An engine stance's spark timing must lie strictly inside the compression stroke (0–178° before TDC).",
+      timingBTDCDeg,
+    );
+  }
+  let turbulenceSpeedMultiplier: number | undefined;
+  if (
+    spark.turbulenceSpeedMultiplier !== undefined &&
+    spark.turbulenceSpeedMultiplier !== null
+  ) {
+    const parsed = positive(
+      spark.turbulenceSpeedMultiplier,
+      "turbulence flame-speed multiplier",
+    );
+    if (!parsed.ok) return parsed;
+    turbulenceSpeedMultiplier = parsed.value;
+  }
+  const wallHeat = stance.wallHeat;
+  let compiledWallHeat:
+    | { readonly mode: "adiabatic" }
+    | { readonly mode: "woschni"; readonly wallTemperatureK: number };
+  if (isPlainRecord(wallHeat) && wallHeat.mode === "woschni") {
+    const wallTemperatureK = positive(
+      wallHeat.wallTemperatureK,
+      "Woschni wall temperature",
+    );
+    if (!wallTemperatureK.ok) return wallTemperatureK;
+    compiledWallHeat = {
+      mode: "woschni",
+      wallTemperatureK: wallTemperatureK.value,
+    };
+  } else if (isPlainRecord(wallHeat) && wallHeat.mode === "adiabatic") {
+    compiledWallHeat = { mode: "adiabatic" };
+  } else {
+    return refuse(
+      'An engine stance must carry its wall-heat boundary (mode "adiabatic" or "woschni").',
+      wallHeat,
+    );
+  }
+  let friction: CompiledSimCombustionEngine["friction"];
+  if (
+    stance.friction !== undefined &&
+    stance.friction !== null &&
+    isPlainRecord(stance.friction)
+  ) {
+    const nonNegativeFinite = (value: unknown): number | null => {
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        return null;
+      }
+      return value;
+    };
+    const aBar = nonNegativeFinite(stance.friction.aBar);
+    if (aBar === null) {
+      return refuse(
+        "A friction field's a must be a non-negative finite number.",
+        stance.friction.aBar,
+      );
+    }
+    const bBarPerBar = nonNegativeFinite(stance.friction.bBarPerBar);
+    if (bBarPerBar === null) {
+      return refuse(
+        "A friction field's b must be a non-negative finite number.",
+        stance.friction.bBarPerBar,
+      );
+    }
+    const cBarPerMPerS = nonNegativeFinite(stance.friction.cBarPerMPerS);
+    if (cBarPerMPerS === null) {
+      return refuse(
+        "A friction field's c must be a non-negative finite number.",
+        stance.friction.cBarPerMPerS,
+      );
+    }
+    const dBarPerM2S2 = nonNegativeFinite(stance.friction.dBarPerM2S2);
+    if (dBarPerM2S2 === null) {
+      return refuse(
+        "A friction field's d must be a non-negative finite number.",
+        stance.friction.dBarPerM2S2,
+      );
+    }
+    const pumpingMepBar = nonNegativeFinite(stance.friction.pumpingMepBar);
+    if (pumpingMepBar === null) {
+      return refuse(
+        "A friction field's pumping MEP must be a non-negative finite number.",
+        stance.friction.pumpingMepBar,
+      );
+    }
+    friction = {
+      aBar,
+      bBarPerBar,
+      cBarPerMPerS,
+      dBarPerM2S2,
+      pumpingMepBar,
+    };
+  }
+  let sweep: CompiledSimCombustionEngine["sweep"];
+  if (stance.sweep !== undefined && stance.sweep !== null) {
+    if (!isPlainRecord(stance.sweep)) {
+      return refuse(
+        "An engine stance's sweep must be an object (kind, from, to, steps).",
+        stance.sweep,
+      );
+    }
+    if (
+      typeof stance.sweep.kind !== "string" ||
+      !COMBUSTION_SWEEP_KINDS.includes(stance.sweep.kind as CombustionSweepKind)
+    ) {
+      return refuse(
+        `An engine stance's sweep kind must be one of ${COMBUSTION_SWEEP_KINDS.join(", ")}.`,
+        stance.sweep.kind,
+      );
+    }
+    const from = stance.sweep.from;
+    const to = stance.sweep.to;
+    if (
+      typeof from !== "number" ||
+      !Number.isFinite(from) ||
+      typeof to !== "number" ||
+      !Number.isFinite(to)
+    ) {
+      return refuse("A sweep's from and to values must be finite numbers.", {
+        from,
+        to,
+      });
+    }
+    const steps = stance.sweep.steps;
+    if (typeof steps !== "number" || !Number.isInteger(steps) || steps < 1) {
+      return refuse(
+        "A sweep needs at least 1 interval (a positive integer step count).",
+        steps,
+      );
+    }
+    sweep = {
+      kind: stance.sweep.kind as CombustionSweepKind,
+      from,
+      to,
+      steps,
+    };
+  }
+  return simOk({
+    mode: "engine",
+    fuel: stance.fuel as Exclude<CombustionFuel, "CH4">,
+    geometry: {
+      boreM: boreMm.value / MM_PER_M,
+      crankRadiusM: crankRadiusMm.value / MM_PER_M,
+      rodLengthM: rodLengthMm.value / MM_PER_M,
+      compressionRatio: compressionRatio.value,
+    },
+    speedRpm: speedRpm.value,
+    charge: {
+      intakePressureBar: intakePressureBar.value,
+      intakeTK: intakeTK.value,
+      equivalenceRatio: equivalenceRatio.value,
+    },
+    spark: {
+      timingBTDCDeg,
+      ...(turbulenceSpeedMultiplier === undefined
+        ? {}
+        : { turbulenceSpeedMultiplier }),
+    },
+    wallHeat: compiledWallHeat,
+    ...(friction === undefined ? {} : { friction }),
+    ...(sweep === undefined ? {} : { sweep }),
+  });
+}
+
+/**
+ * The combustion compile branch (Phase 68c): the mode-locked stance
+ * re-validated at this door; the STOVE mode voxelizes the SAME
+ * per-body material map the thermal branch builds (the 65-family
+ * solve) beside its occupancy slice, and the ENGINE mode converts the
+ * authored slider-crank millimetres to SI with NO voxelization (the 0D
+ * chamber has no spatial domain).
+ */
+function compileCombustionProducts(
+  scenario: Record<string, unknown>,
+  input: GeometrySimCompileInput,
+  bodyBounds: readonly SimBodyBoundsMm[],
+): SimParseResult<
+  Pick<CompiledSimScenario, "occupancySlice" | "combustion">,
+  SimError
+> {
+  const stance = parseCombustionStance(scenario);
+  if (!stance.ok) return stance;
+  if (stance.value.mode === "engine") {
+    return simOk({ combustion: stance.value });
+  }
+  const solid = voxelizeSolidMaterialMap(scenario, input, bodyBounds);
+  if (!solid.ok) return solid;
+  return simOk({
+    occupancySlice: solid.value.occupancySlice,
+    combustion: {
+      ...stance.value,
+      materials: solid.value.materials,
+      materialIndex: solid.value.materialIndex,
+    },
+  });
+}
+
 /**
  * Compiles a serialized scenario into solver space WITH its geometry
  * (Phase 63c, extended 65c): the 61a {@link compileSimScenario} plus,
@@ -1356,6 +1918,19 @@ export function compileSimScenarioWithGeometry(
     const dynamics = compileDynamicsProducts(input);
     if (!dynamics.ok) return dynamics;
     return simOk({ ...compiled.value, ...dynamics.value });
+  }
+  if (compiled.value.kind === "combustion") {
+    // The combustion branch (Phase 68c): the mode-locked stance with
+    // the stove mode's per-body material map (the 65-family voxelization)
+    // or the engine mode's SI chamber geometry (no voxelization — the 0D
+    // chamber has no spatial domain).
+    const combustion = compileCombustionProducts(
+      input.scenario,
+      input,
+      input.bodyBounds ?? [],
+    );
+    if (!combustion.ok) return combustion;
+    return simOk({ ...compiled.value, ...combustion.value });
   }
   if (compiled.value.kind === "thermal") {
     // The 3D stance is the flow kind's alone: a thermal record carrying

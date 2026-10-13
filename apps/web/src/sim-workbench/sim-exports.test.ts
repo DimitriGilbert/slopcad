@@ -12,6 +12,7 @@ import type { SimResult } from "@slopcad/sim-core";
 
 import {
   SIM_EXPORT_DEFAULT_VTI_DECIMATION,
+  exportSimResultCombustionCsvs,
   exportSimResultForceHistoryCsv,
   exportSimResultJointHistoryCsv,
   exportSimResultVtiSeries,
@@ -142,5 +143,50 @@ describe("exportSimResultJointHistoryCsv", () => {
     // A run with no joint series (the flow/thermal families) exports
     // nothing through THIS door — never a fabricated table.
     expect(exportSimResultJointHistoryCsv(storedResult())).toBeNull();
+  });
+});
+
+describe("exportSimResultCombustionCsvs", () => {
+  it("emits the crank-first cycle table and the axis-first sweep table, deterministically", () => {
+    const result = {
+      ...storedResult(),
+      histories: [
+        { name: "crank-angle", unit: "deg", samples: [-180, 0] },
+        { name: "pressure", unit: "bar", samples: [1, 60] },
+        { name: "sweep:spark-timing-btdc", unit: "deg", samples: [10, 20] },
+        { name: "sweep:imep", unit: "Pa", samples: [1.1e6, 1.2e6] },
+      ],
+    };
+    const first = exportSimResultCombustionCsvs(result);
+    const second = exportSimResultCombustionCsvs(result);
+    expect(second).toEqual(first);
+    expect(first.length).toBe(2);
+    const cycle = first[0];
+    const sweep = first[1];
+    if (cycle === undefined || sweep === undefined) return;
+    expect(cycle.filename).toContain("-cycle.csv");
+    expect(cycle.text.split("\n")[0]).toBe("crank-angle (deg),pressure (bar)");
+    expect(sweep.filename).toContain("-sweep.csv");
+    expect(sweep.text.split("\n")[0]).toBe(
+      "sweep:spark-timing-btdc (deg),sweep:imep (Pa)",
+    );
+  });
+
+  it("emits the time-first fire table for stove runs, nothing for other families", () => {
+    const stove = {
+      ...storedResult(),
+      histories: [
+        { name: "time", unit: "s", samples: [0, 1] },
+        { name: "fire:progress", unit: "1", samples: [0, 1] },
+      ],
+    };
+    const files = exportSimResultCombustionCsvs(stove);
+    expect(files.length).toBe(1);
+    const fire = files[0];
+    if (fire === undefined) return;
+    expect(fire.filename).toContain("-fire.csv");
+    expect(fire.text.split("\n")[0]).toBe("time (s),fire:progress (1)");
+    // A result whose series carry neither family exports nothing.
+    expect(exportSimResultCombustionCsvs(storedResult())).toEqual([]);
   });
 });

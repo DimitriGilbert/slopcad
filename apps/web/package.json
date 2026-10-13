@@ -85,7 +85,8 @@
     "sonner": "catalog:",
     "tailwindcss": "catalog:",
     "three": "0.186.0",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@slopcad/sim-combustion": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

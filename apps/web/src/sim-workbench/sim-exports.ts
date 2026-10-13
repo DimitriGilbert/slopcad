@@ -112,6 +112,75 @@ export function exportSimResultJointHistoryCsv(
   return exported.ok ? exported.value : null;
 }
 
+/**
+ * Exports one combustion run's tables as deterministic CSV files
+ * (Phase 68c, law S7): the ENGINE mode's P-vs-crank trace (the
+ * crank-angle column first, then every cycle series) plus, when the
+ * run swept, the sweep table (the axis column first, then every sweep
+ * series); the STOVE mode's fire march (the time column first, then
+ * the fire and field series). Empty when the run is neither — never a
+ * fabricated table.
+ */
+export function exportSimResultCombustionCsvs(
+  result: SimResult,
+): readonly SimExportFile[] {
+  const stem = filenameStem(result.summary.scenarioSnapshotHash);
+  const files: SimExportFile[] = [];
+  const cycleSeries = result.histories.filter(
+    (series) => !series.name.startsWith("sweep:"),
+  );
+  const angle = cycleSeries.find((series) => series.name === "crank-angle");
+  const time = cycleSeries.find((series) => series.name === "time");
+  const leading = angle ?? time;
+  if (leading !== undefined && cycleSeries.length > 1) {
+    const ordered = [
+      leading,
+      ...cycleSeries.filter((series) => series.name !== leading.name),
+    ];
+    const exported = exportSimHistoryCsv({
+      columns: ordered.map((series) => ({
+        name: series.name,
+        unit: series.unit,
+        samples: [...series.samples],
+      })),
+    });
+    if (exported.ok) {
+      files.push({
+        filename: `${stem}-${angle === undefined ? "fire" : "cycle"}.csv`,
+        text: exported.value,
+      });
+    }
+  }
+  const sweepSeries = result.histories.filter((series) =>
+    series.name.startsWith("sweep:"),
+  );
+  if (sweepSeries.length > 0) {
+    // The axis column: `engine-sweeps` emits the kind's own axis
+    // column first in its history table (the spark-timing / CR / φ
+    // column ahead of imep and the rest), so the first prefixed
+    // `sweep:` series IS the axis — taken unconditionally on that
+    // emission order.
+    const axis = sweepSeries[0];
+    if (axis !== undefined) {
+      const ordered = [
+        axis,
+        ...sweepSeries.filter((series) => series.name !== axis.name),
+      ];
+      const exported = exportSimHistoryCsv({
+        columns: ordered.map((series) => ({
+          name: series.name,
+          unit: series.unit,
+          samples: [...series.samples],
+        })),
+      });
+      if (exported.ok) {
+        files.push({ filename: `${stem}-sweep.csv`, text: exported.value });
+      }
+    }
+  }
+  return files;
+}
+
 /** Triggers a browser download of the exported files (best-effort UI sugar). */
 export function downloadSimExportFiles(files: readonly SimExportFile[]): void {
   for (const file of files) {

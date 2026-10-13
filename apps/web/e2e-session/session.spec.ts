@@ -3888,6 +3888,166 @@ test("s24h the sim workbench runs the slider-crank dynamics demo and animates it
   });
 });
 
+test("s24i the sim workbench runs the combustion demos — the Otto engine's charts and the stove with fire (Phase 68)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24i workbench-sim combustion", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // --- THE ENGINE DEMO: the 0D Otto cycle. Switch the demo model to
+    // the engine — the 0D chamber needs no geometry, so the PLATE
+    // document stays the rendered scene (the honest split: the panel's
+    // physics is the authored stance).
+    await page.locator("#sim-demo-model-engine").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "engine",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the engine form's defaults ARE the demo — the 0.5 L
+    // single at CR 10, 1500 rpm, WOT stoichiometric, Woschni walls,
+    // the published Chen–Flynn friction, and the spark sweep from 10°
+    // to 50° — one submit saves the kind-locked combustion stance into
+    // the document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save engine scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the combustion engine in the sim worker — the base cycle
+    // plus the 8-interval spark sweep (measured ≈ 3.5 s on the CPU
+    // oracle), awaited on the run family and the counters, never a
+    // timeout; the allowance matches the fan ladder's precedent.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE CHARTS ARE RENDERED (SVG-as-data, the fan-chart family): the
+    // P-vs-crank trace with its motored twin, the torque curve with
+    // BOTH families (indicated + brake), and the knock boundary's
+    // marker on the spark sweep — every polyline from the persisted
+    // result's own histories.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-engine-chart",
+      "ready",
+    );
+    const imepBar = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-imep-bar"),
+    );
+    expect(imepBar).toBeGreaterThan(8);
+    expect(imepBar).toBeLessThan(25);
+    const bmepBar = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-bmep-bar"),
+    );
+    expect(bmepBar).toBeGreaterThan(5);
+    expect(bmepBar).toBeLessThan(imepBar);
+    const brakeTorque = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-brake-torque"),
+    );
+    expect(brakeTorque).toBeGreaterThan(20);
+    const knockBoundary = await page
+      .locator(`#${SIM_ROOT}`)
+      .getAttribute("data-sim-engine-knock-boundary");
+    expect(knockBoundary).not.toBe("");
+    expect(Number(knockBoundary)).toBeGreaterThanOrEqual(10);
+    expect(Number(knockBoundary)).toBeLessThanOrEqual(50);
+    const chart = page.getByTestId("workbench-sim-engine-chart");
+    await expect(chart).toBeVisible();
+    const seriesCount = await chart.locator("polyline[data-series]").count();
+    expect(seriesCount).toBe(4);
+    expect(
+      await chart.locator("line[data-marker='knock-boundary']").count(),
+    ).toBe(1);
+    // The pressure-trace preview round applied through the ledger
+    // (law S6 — the chunk counter advanced past the fixture's own).
+    const chunksAfterEngine = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(chunksAfterEngine).toBeGreaterThan(0);
+
+    // PERSIST + EXPORT: the run landed in the store, and the CSV door
+    // exports BOTH tables (the crank-first cycle trace and the
+    // axis-first sweep).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // --- THE STOVE WITH FIRE: the 65 stove body with a fire source.
+    // The fire form's defaults ARE the demo (lit methane in the
+    // chamber, steel body, the 65-family solve fields) — the same
+    // save → run → persist path, now with the reactor's wall heat
+    // coupling into the conduction march.
+    await page.locator("#sim-demo-model-fire").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fire",
+    );
+    await page.getByRole("button", { name: "Save fire scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The temperature overlay mounted from the committed round (law S6)
+    // — the fire's heat, painted through the 62 family.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {

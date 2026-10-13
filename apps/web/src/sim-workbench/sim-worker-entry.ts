@@ -1,9 +1,10 @@
 /**
  * The bundler-hosted entry of the sim worker for the workbench (Phase
- * 61b, extended 63c, 65c, and 67c): hosts the ROUTED DEFAULT ENGINE —
- * the real 2D LBM engine for flow scenarios (`@slopcad/sim-flow`,
+ * 61b, extended 63c, 65c, 67c, and 68c): hosts the ROUTED DEFAULT
+ * ENGINE — the real 2D LBM engine for flow scenarios (`@slopcad/sim-flow`,
  * Phase 63c), the real conduction/CHT thermal engines (Phase 65c),
  * the real dynamics engine (`@slopcad/sim-dynamics`, Phase 67c),
+ * the real combustion engine (`@slopcad/sim-combustion`, Phase 68c),
  * `structural` declined by the Phase 69 carve —
  * as a sim worker-protocol responder over the dedicated-worker message
  * scope. This is `@slopcad/sim-core`'s `sim-worker.web` entry restated
@@ -11,12 +12,14 @@
  * engine. The module-worker URL stays an INLINE import — the bundler
  * statically rewrites exactly this form into its worker chunks.
  *
- * The dynamics routing composes at THIS host (the layering rule: the
- * flow package routes flow/thermal, the dynamics package owns its own
- * engine, and the workbench's worker entry is the one place both are
- * known): a dynamics-kind request goes to the dynamics engine, every
- * other kind to the flow package's routed default — each engine
- * declining the kinds it does not solve, never a silent misroute.
+ * The dynamics and combustion routing compose at THIS host (the
+ * layering rule: the flow package routes flow/thermal, the dynamics
+ * package owns its own engine, the combustion package owns its own,
+ * and the workbench's worker entry is the one place all are known):
+ * a dynamics-kind request goes to the dynamics engine, a
+ * combustion-kind request to the combustion engine, every other kind
+ * to the flow package's routed default — each engine declining the
+ * kinds it does not solve, never a silent misroute.
  *
  * A hosting failure cannot hang the channel: the hosting promise is
  * caught, and while the thread can still speak the failure is posted to
@@ -32,6 +35,7 @@ import { hostSimWorker } from "@slopcad/sim-core";
 import { isSimWebWorkerMessagePort } from "@slopcad/sim-core";
 import { SIM_WORKER_BOOT_FAILURE_KEY } from "@slopcad/sim-core";
 import { createDefaultSimEngine } from "@slopcad/sim-flow";
+import { createCombustionSimEngine } from "@slopcad/sim-combustion";
 import { createDynamicsSimEngine } from "@slopcad/sim-dynamics";
 
 /**
@@ -73,20 +77,29 @@ const transport: SimWorkerTransport = {
 };
 
 // The workbench's routed engine: the flow package's default (flow +
-// thermal) with the dynamics engine composed in front — the kind
-// router the hosting below serves.
+// thermal) with the dynamics and combustion engines composed in front
+// — the kind router the hosting below serves (each engine declining
+// the kinds it does not solve, never a silent misroute).
 function createWorkbenchEngine(): SimEngine {
   const routed = createDefaultSimEngine();
   const dynamics = createDynamicsSimEngine();
+  const combustion = createCombustionSimEngine();
   return {
     id: "workbench-routed-sim",
     supportedKinds: [
-      ...new Set([...routed.supportedKinds, ...dynamics.supportedKinds]),
+      ...new Set([
+        ...routed.supportedKinds,
+        ...dynamics.supportedKinds,
+        ...combustion.supportedKinds,
+      ]),
     ],
     backend: "cpu",
     run: (request, onProgress, onFieldChunk) => {
       if (dynamics.supportedKinds.includes(request.compiled.kind)) {
         return dynamics.run(request, onProgress, onFieldChunk);
+      }
+      if (combustion.supportedKinds.includes(request.compiled.kind)) {
+        return combustion.run(request, onProgress, onFieldChunk);
       }
       return routed.run(request, onProgress, onFieldChunk);
     },
