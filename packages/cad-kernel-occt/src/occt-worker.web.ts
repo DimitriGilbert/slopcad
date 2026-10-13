@@ -5,12 +5,16 @@
  * entry, with the same two browser-specific disciplines plus one addition.
  *
  * Composition only — `./occt-worker` holds the shared hosting core. The
- * browser runtime pins the ~22 MB WASM asset exactly as the pre-spike proved
- * necessary (and as the Manifold entry does for its asset): `import wasmUrl
- * from "replicad-opencascadejs/wasm?url"` handed to the runtime as
+ * browser runtime resolves the ~22 MB WASM binary from the version-pinned
+ * jsDelivr URL first (`OCCT_WASM_CDN_URL`, `replicad-opencascadejs@1.1.0`)
+ * and, when that initialization fails, falls back to the bundled asset
+ * pinned exactly as the pre-spike proved necessary (and as the Manifold
+ * entry does for its asset): `import wasmUrl from
+ * "replicad-opencascadejs/wasm?url"` handed to the runtime as
  * `locateFile`, because the emscripten glue's own `new URL(...,
  * import.meta.url)` resolution points into Vite's prebundle directory where
- * the asset does not exist.
+ * the asset does not exist. The bundled asset stays in the build as the
+ * spare (see `createOcctRuntimeWithFallback`).
  *
  * ## A synchronous port subscription that buffers until the server is live
  *
@@ -41,8 +45,9 @@
  * Because OCCT's boot cost is a documented, load-bearing number (the
  * pre-spike's ~176–181 ms Node init plus the ~22 MB asset fetch), the entry
  * measures its own initialization — from module evaluation to runtime
- * ready — and posts it together with the bundler-pinned URL of the asset it
- * fetched as the boot report (see `./occt-worker-boot-report`) before
+ * ready — and posts it together with the URL of the asset the runtime
+ * actually booted from (the CDN pin, or the bundled spare) as the boot
+ * report (see `./occt-worker-boot-report`) before
  * hosting starts, so hosting surfaces (the `/worker-occt` fixture) can
  * display honest numbers instead of hiding the cost. The report is one
  * plain non-protocol message; every protocol endpoint's parse boundary
@@ -58,7 +63,10 @@ import {
   OCCT_WORKER_BOOT_REPORT_KEY,
   OCCT_WORKER_BOOT_WASM_URL_KEY,
 } from "./occt-worker-boot-report";
-import { createOcctRuntime } from "./occt-runtime";
+import {
+  createOcctRuntimeWithFallback,
+  OCCT_WASM_CDN_URL,
+} from "./occt-runtime";
 
 const scope: unknown = globalThis;
 if (!isWebWorkerMessagePort(scope)) {
@@ -111,8 +119,9 @@ const bootStartedAt = performance.now();
 void hostOcctWorker({
   transport,
   createRuntime: async () => {
-    const runtime = await createOcctRuntime({
-      locateFile: () => wasmUrl,
+    const located = await createOcctRuntimeWithFallback({
+      primaryUrl: OCCT_WASM_CDN_URL,
+      fallbackUrl: wasmUrl,
     });
     // The boot report rides before any protocol response can: the hosted
     // server has not subscribed yet, and the report is plain non-protocol
@@ -120,8 +129,8 @@ void hostOcctWorker({
     // along because only this side of the channel knows it.
     transport.send({
       [OCCT_WORKER_BOOT_REPORT_KEY]: performance.now() - bootStartedAt,
-      [OCCT_WORKER_BOOT_WASM_URL_KEY]: wasmUrl,
+      [OCCT_WORKER_BOOT_WASM_URL_KEY]: located.wasmUrl,
     });
-    return runtime;
+    return located.runtime;
   },
 });
