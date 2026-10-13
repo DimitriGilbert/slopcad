@@ -7192,6 +7192,7 @@ function runKernelOperation(
         };
       }
       const result = kernel.createBox({
+        featureId: feature.id,
         width: lengthValue(width),
         depth: lengthValue(depth),
         height: lengthValue(height),
@@ -7214,7 +7215,10 @@ function runKernelOperation(
           ),
         };
       }
-      const result = kernel.createSphere({ radius: lengthValue(radius) });
+      const result = kernel.createSphere({
+        featureId: feature.id,
+        radius: lengthValue(radius),
+      });
       return result.ok
         ? { ok: true, solid: result.value }
         : operationFailure(feature, result.error.code, result.error.message);
@@ -7237,6 +7241,7 @@ function runKernelOperation(
         };
       }
       const result = kernel.createCylinder({
+        featureId: feature.id,
         radius: lengthValue(radius),
         height: lengthValue(height),
       });
@@ -7267,6 +7272,7 @@ function runKernelOperation(
         };
       }
       const result = kernel.createCone({
+        featureId: feature.id,
         bottomRadius: lengthValue(bottomRadius),
         topRadius: lengthValue(topRadius),
         height: lengthValue(height),
@@ -7525,6 +7531,7 @@ function runKernelOperation(
         };
       }
       const sheetResult = kernel.extrude({
+        featureId: feature.id,
         loop: sheetProfile.value.loop,
         height: lengthValue(Math.abs(sheetDistance.mm)),
         direction: sheetDistance.mm > 0 ? 1 : -1,
@@ -8117,6 +8124,7 @@ function runKernelOperation(
         }
       }
       const result = kernel.extrude({
+        featureId: feature.id,
         loop: resolvedProfile.value.loop,
         height: lengthValue(Math.abs(distance.mm)),
         direction: distance.mm > 0 ? 1 : -1,
@@ -8319,6 +8327,7 @@ function runKernelOperation(
         axisDirection = [Math.cos(axisAngle.rad), Math.sin(axisAngle.rad)];
       }
       const revolveInput: ProfileRevolveInput = {
+        featureId: feature.id,
         loop: resolvedProfile.value.loop,
         axis: {
           point: [...axisPoint],

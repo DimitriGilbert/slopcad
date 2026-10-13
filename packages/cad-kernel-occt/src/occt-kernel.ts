@@ -233,6 +233,8 @@ import {
 } from "@slopcad/cad-core";
 import type {
   BRepBuilderAPI_MakeEdge,
+  BRepPrimAPI_MakePrism,
+  BRepPrimAPI_MakeRevol,
   gp_Pnt,
   OpenCascadeInstance,
   TopoDS_Edge,
@@ -339,9 +341,18 @@ import {
 } from "./occt-runtime";
 import {
   OCCT_TOPOLOGY_DEFAULT_KINDS,
-  OCCT_TOPOLOGY_IDENTITY_SCHEMA,
+  OCCT_TOPOLOGY_IDENTITY_SCHEMAS,
+  type OcctFaceNames,
+  type OcctNamedFace,
+  occtContainsSame,
+  occtDisposeHistory,
+  occtDistinctSubShapes,
   occtEdgesAtOrdinals,
   occtFacesAtOrdinals,
+  occtHistoryFaceNamer,
+  occtListShapes,
+  occtNameFaces,
+  occtNameHistoryFaces,
   occtShapeTopology,
 } from "./occt-topology";
 import {
@@ -511,10 +522,29 @@ export const OCCT_TESSELLATION_ANGULAR_TOLERANCE_RAD = 0.5;
  * `volume` and every solid-consuming operation decline it structurally
  * (an open shell bounds no material; a closed-solid approximation of one
  * would be a fabrication, the no-silent-wrong-number rule).
+ *
+ * `faceNames` (Phase N1) carries the construction names of the shape's
+ * faces, in collapsed face-exploration order, when the producing operation
+ * named them by history (primitives, extrude, revolve); `null` for every
+ * operation whose history is not tracked yet — its snapshot reports the
+ * legacy hash identities.
  */
 interface SolidPayload {
   shape: TopoDS_Shape | null;
   sheet: boolean;
+  faceNames: OcctFaceNames | null;
+}
+
+/** A profile-wire edge as the wire holds it, keyed by its loop segment. */
+interface KeyedProfileEdge {
+  readonly edge: TopoDS_Shape;
+  readonly key: string;
+}
+
+/** A built shape and its construction face names (Phase N1). */
+interface NamedShape {
+  readonly shape: TopoDS_Shape;
+  readonly faceNames: OcctFaceNames | null;
 }
 
 /**
@@ -725,8 +755,26 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const oc = runtime[RUNTIME_BRAND];
   const tag = createSolidTag<SolidPayload>();
 
-  const wrapSolid = (shape: TopoDS_Shape): KernelSolid =>
-    tag.wrap({ shape, sheet: shapeIsSheet(shape, oc) });
+  const wrapSolid = (
+    shape: TopoDS_Shape,
+    faceNames: OcctFaceNames | null = null,
+  ): KernelSolid =>
+    tag.wrap({ shape, sheet: shapeIsSheet(shape, oc), faceNames });
+
+  /**
+   * Names a builder's own result faces from its history (Phase N1), freeing
+   * the history faces either way.
+   */
+  const namedByHistory = (
+    shape: TopoDS_Shape,
+    history: readonly OcctNamedFace[],
+  ): OcctFaceNames | null => {
+    try {
+      return occtNameFaces(oc, shape, occtHistoryFaceNamer(history));
+    } finally {
+      occtDisposeHistory(history);
+    }
+  };
 
   const shapeOf = (
     solid: KernelSolid,
@@ -1000,8 +1048,70 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     return shape;
   };
 
-  const newBox = (width: number, depth: number, height: number) =>
-    buildShape(new oc.BRepPrimAPI_MakeBox(width, depth, height));
+  /**
+   * The box with its faces named by construction (Phase N1): the maker's
+   * own face accessors, mapped to the box frame's `±X`/`±Y`/`±Z` roles
+   * (probed: OCCT's Back/Front are the x = 0 / x = width faces, Left/Right
+   * the y = 0 / y = depth faces).
+   */
+  const newBox = (
+    width: number,
+    depth: number,
+    height: number,
+    prefix: string,
+  ): NamedShape => {
+    const maker = new oc.BRepPrimAPI_MakeBox(width, depth, height);
+    try {
+      const shape = maker.Shape();
+      const history: OcctNamedFace[] = [
+        { face: maker.BackFace(), name: `${prefix}/-X` },
+        { face: maker.FrontFace(), name: `${prefix}/+X` },
+        { face: maker.LeftFace(), name: `${prefix}/-Y` },
+        { face: maker.RightFace(), name: `${prefix}/+Y` },
+        { face: maker.BottomFace(), name: `${prefix}/-Z` },
+        { face: maker.TopFace(), name: `${prefix}/+Z` },
+      ];
+      return { shape, faceNames: namedByHistory(shape, history) };
+    } finally {
+      maker.delete();
+    }
+  };
+
+  /**
+   * The role namer of the z-axis cylinder and cone (Phase N1): the
+   * `BRepPrimAPI_MakeOneAxis` makers expose only the lateral `Face()` and
+   * no cap accessors, and the cone is not a maker at all (`newCone` is a
+   * `MakeRevol` composition), so roles are classified in the construction
+   * frame — a planar face on the `z = 0` base is `start`, any other planar
+   * face `end`, every curved face `lateral`. Classification compares
+   * against the primitive's own height; the NAMES carry no dimension.
+   */
+  const primitiveRoleNamer =
+    (prefix: string, height: number) =>
+    (face: TopoDS_Shape): string => {
+      const occFace = oc.TopoDS.Face(face);
+      const adaptor = new oc.BRepAdaptor_Surface(occFace, true);
+      try {
+        if (adaptor.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+          return `${prefix}/lateral`;
+        }
+      } finally {
+        adaptor.delete();
+        occFace.delete();
+      }
+      const props = new oc.GProp_GProps();
+      try {
+        oc.BRepGProp.SurfaceProperties(face, props, true, false);
+        const com = props.CentreOfMass();
+        try {
+          return `${prefix}/${com.Z() < height / 2 ? "start" : "end"}`;
+        } finally {
+          com.delete();
+        }
+      } finally {
+        props.delete();
+      }
+    };
 
   const newSphere = (radius: number) =>
     buildShape(new oc.BRepPrimAPI_MakeSphere(radius));
@@ -1112,20 +1222,34 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const profileWire = (
     loop: ProfileExtrudeInput["loop"],
     z = 0,
+    keyed?: KeyedProfileEdge[],
   ): TopoDS_Wire => {
     const mkWire = new oc.BRepBuilderAPI_MakeWire();
     const edges: TopoDS_Edge[] = [];
     const disposeWireAndEdges = (): void => {
       mkWire.delete();
       for (const edge of edges) edge.delete();
+      if (keyed !== undefined) {
+        for (const entry of keyed) entry.edge.delete();
+        keyed.length = 0;
+      }
     };
+    // Phase N1: `keyed` collects each edge AS THE WIRE HOLDS IT
+    // (`MakeWire.Edge()` — the wire may rebuild an added edge onto shared
+    // vertices), keyed by its loop-segment index; a spline's Bézier pieces
+    // key `<index>.<piece>`.
+    let segmentKey = "0";
     const addEdge = (mkEdge: BRepBuilderAPI_MakeEdge): void => {
       const edge = mkEdge.Edge();
       mkEdge.delete();
       mkWire.Add(edge);
       edges.push(edge);
+      if (keyed !== undefined) {
+        keyed.push({ edge: mkWire.Edge(), key: segmentKey });
+      }
     };
-    for (const segment of loop) {
+    for (const [segmentIndex, segment] of loop.entries()) {
+      segmentKey = String(segmentIndex);
       if (segment.kind === "line") {
         const p1 = new oc.gp_Pnt(segment.start[0], segment.start[1], z);
         const p2 = new oc.gp_Pnt(segment.end[0], segment.end[1], z);
@@ -1162,7 +1286,10 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       }
       if (segment.kind === "spline") {
         const chain = splineBezierChain(segment.flavor, segment.points);
-        for (const piece of chain) {
+        for (const [pieceIndex, piece] of chain.entries()) {
+          if (chain.length > 1) {
+            segmentKey = `${String(segmentIndex)}.${String(pieceIndex)}`;
+          }
           const array = new oc.NCollection_Array1_gp_Pnt(1, 4);
           array.SetValue(1, new oc.gp_Pnt(piece.b0.x, piece.b0.y, z));
           array.SetValue(2, new oc.gp_Pnt(piece.b1.x, piece.b1.y, z));
@@ -1223,6 +1350,23 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * {@link profileFace} for a keyed profile (Phase N1): a face that does
+   * not build also frees the keyed edges `profileWire` collected, so the
+   * error path disposes exactly what the `IsDone` failures do.
+   */
+  const keyedProfileFace = (
+    wire: TopoDS_Shape,
+    keyed: readonly KeyedProfileEdge[],
+  ): TopoDS_Shape => {
+    try {
+      return profileFace(wire);
+    } catch (error) {
+      for (const entry of keyed) entry.edge.delete();
+      throw error;
+    }
+  };
+
+  /**
    * Extracts the face of a UV-bounded `BRepBuilderAPI_MakeFace` build
    * (Phase 48's `createSheet` patch route), disposing the maker either
    * way and failing total inside the caller's no-throw boundary.
@@ -1241,6 +1385,81 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * Reads a sweep builder's history into named faces (Phase N1): each
+   * keyed profile edge's `Generated` faces are `<prefix>/side/<key>`, and
+   * with `caps` the `FirstShape`/`LastShape` faces are `<prefix>/start` /
+   * `<prefix>/end`. The keyed edges are freed here.
+   *
+   * Probed: a FULL revolution rebuilds the planar faces its
+   * axis-perpendicular edges sweep (`IsDeleted(edge)`, empty `Generated`),
+   * while the circles its vertices sweep survive. Such an edge's face is
+   * then the one unclaimed result face bounded by every circle its
+   * vertices generated; zero or several candidates leave it unnamed (and
+   * so the whole solid unnamed) — never a guess.
+   */
+  const sweepHistory = (
+    maker: BRepPrimAPI_MakePrism | BRepPrimAPI_MakeRevol,
+    shape: TopoDS_Shape,
+    keyed: readonly KeyedProfileEdge[],
+    prefix: string,
+    caps: boolean,
+  ): OcctNamedFace[] => {
+    const FACE = oc.TopAbs_ShapeEnum.TopAbs_FACE;
+    const EDGE = oc.TopAbs_ShapeEnum.TopAbs_EDGE;
+    const history: OcctNamedFace[] = [];
+    const rebuilt: KeyedProfileEdge[] = [];
+    for (const entry of keyed) {
+      const generated = maker.Generated(entry.edge);
+      const faces = occtListShapes(oc, generated, FACE);
+      generated.delete();
+      if (faces.length === 0) {
+        rebuilt.push(entry);
+        continue;
+      }
+      history.push(
+        ...occtNameHistoryFaces(faces, `${prefix}/side/${entry.key}`),
+      );
+      entry.edge.delete();
+    }
+    if (caps) {
+      history.push({ face: maker.FirstShape(), name: `${prefix}/start` });
+      history.push({ face: maker.LastShape(), name: `${prefix}/end` });
+    }
+    for (const { edge, key } of rebuilt) {
+      const circles: TopoDS_Shape[] = [];
+      for (const vertex of occtDistinctSubShapes(
+        oc,
+        edge,
+        oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+      )) {
+        const generated = maker.Generated(vertex);
+        circles.push(...occtListShapes(oc, generated, EDGE));
+        generated.delete();
+        vertex.delete();
+      }
+      edge.delete();
+      if (circles.length === 0) continue;
+      const candidates = occtDistinctSubShapes(oc, shape, FACE).filter(
+        (face) => {
+          const fits =
+            !history.some((entry) => entry.face.IsSame(face)) &&
+            circles.every((circle) => occtContainsSame(oc, face, circle, EDGE));
+          if (!fits) face.delete();
+          return fits;
+        },
+      );
+      for (const circle of circles) circle.delete();
+      const [only, ...others] = candidates;
+      if (only !== undefined && others.length === 0) {
+        history.push({ face: only, name: `${prefix}/side/${key}` });
+      } else {
+        for (const face of candidates) face.delete();
+      }
+    }
+    return history;
+  };
+
+  /**
    * The exact prism (Phase 26.1): profile wire → face →
    * `BRepPrimAPI_MakePrism` along local z, then the placement transform
    * (rotation first about the world-origin axis, translation second).
@@ -1254,8 +1473,10 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const newExtrusion = (
     input: ProfileExtrudeInput,
     height: number,
-  ): TopoDS_Shape => {
-    const wire = profileWire(input.loop);
+  ): NamedShape => {
+    const keyed: KeyedProfileEdge[] = [];
+    const wire = profileWire(input.loop, 0, keyed);
+    const prefix = input.featureId ?? "extrude";
     if (input.sheet === true) {
       const sweep =
         input.direction === -1
@@ -1266,11 +1487,15 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       sweep.delete();
       if (!mkPrism.IsDone()) {
         mkPrism.delete();
+        for (const entry of keyed) entry.edge.delete();
         throw new Error("the sheet prism did not build.");
       }
-      return buildShape(mkPrism);
+      const shape = mkPrism.Shape();
+      const history = sweepHistory(mkPrism, shape, keyed, prefix, false);
+      mkPrism.delete();
+      return { shape, faceNames: namedByHistory(shape, history) };
     }
-    const face = profileFace(wire);
+    const face = keyedProfileFace(wire, keyed);
     const sweep =
       input.direction === -1
         ? new oc.gp_Vec(0, 0, -height)
@@ -1280,9 +1505,13 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     sweep.delete();
     if (!mkPrism.IsDone()) {
       mkPrism.delete();
+      for (const entry of keyed) entry.edge.delete();
       throw new Error("the prism did not build.");
     }
-    return buildShape(mkPrism);
+    const shape = mkPrism.Shape();
+    const history = sweepHistory(mkPrism, shape, keyed, prefix, true);
+    mkPrism.delete();
+    return { shape, faceNames: namedByHistory(shape, history) };
   };
 
   /**
@@ -1381,8 +1610,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const newRevolution = (
     input: ProfileRevolveInput,
     sweep: number,
-  ): TopoDS_Shape => {
-    const wire = profileWire(input.loop);
+  ): NamedShape => {
+    const keyed: KeyedProfileEdge[] = [];
+    const wire = profileWire(input.loop, 0, keyed);
+    // Phase 48 sheet variant: revolve the WIRE — the surface of revolution
+    // the loop's own boundary sweeps, no start/end meridian caps (probed:
+    // the π-swept 5..10×0..5 rectangle answers exactly walls + annuli).
+    const carrier: TopoDS_Shape =
+      input.sheet === true ? wire : keyedProfileFace(wire, keyed);
     const [px, py] = input.axis.point;
     const [dx, dy] = input.axis.direction;
     const origin = new oc.gp_Pnt(px, py, 0);
@@ -1390,19 +1625,26 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     const axis = new oc.gp_Ax1(origin, direction);
     origin.delete();
     direction.delete();
-    // Phase 48 sheet variant: revolve the WIRE — the surface of revolution
-    // the loop's own boundary sweeps, no start/end meridian caps (probed:
-    // the π-swept 5..10×0..5 rectangle answers exactly walls + annuli).
-    const carrier: TopoDS_Shape =
-      input.sheet === true ? wire : profileFace(wire);
     const mkRevol = new oc.BRepPrimAPI_MakeRevol(carrier, axis, sweep, false);
     axis.delete();
     carrier.delete();
     if (!mkRevol.IsDone()) {
       mkRevol.delete();
+      for (const entry of keyed) entry.edge.delete();
       throw new Error("the revolution did not build.");
     }
-    return buildShape(mkRevol);
+    // A full turn closes on itself: its start/end meridians are not faces
+    // of the result, so only a partial sweep names caps.
+    const shape = mkRevol.Shape();
+    const history = sweepHistory(
+      mkRevol,
+      shape,
+      keyed,
+      input.featureId ?? "revolve",
+      input.sheet !== true && sweep < Math.PI * 2,
+    );
+    mkRevol.delete();
+    return { shape, faceNames: namedByHistory(shape, history) };
   };
 
   /**
@@ -2049,7 +2291,13 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         if (!depth.ok) return fail(depth.error);
         const height = positiveLength(input.height, "height", "createBox");
         if (!height.ok) return fail(height.error);
-        return ok(wrapSolid(newBox(width.value, depth.value, height.value)));
+        const box = newBox(
+          width.value,
+          depth.value,
+          height.value,
+          input.featureId ?? "box",
+        );
+        return ok(wrapSolid(box.shape, box.faceNames));
       });
     },
 
@@ -2057,7 +2305,18 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       return run("createSphere", KERNEL_ERROR_CODES.invalidLength, () => {
         const radius = positiveLength(input.radius, "radius", "createSphere");
         if (!radius.ok) return fail(radius.error);
-        return ok(wrapSolid(newSphere(radius.value)));
+        const sphere = newSphere(radius.value);
+        return ok(
+          wrapSolid(
+            sphere,
+            occtNameFaces(
+              oc,
+              sphere,
+              // A sphere has one face and no planar caps: a constant role.
+              () => `${input.featureId ?? "sphere"}/surface`,
+            ),
+          ),
+        );
       });
     },
 
@@ -2067,7 +2326,17 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         if (!radius.ok) return fail(radius.error);
         const height = positiveLength(input.height, "height", "createCylinder");
         if (!height.ok) return fail(height.error);
-        return ok(wrapSolid(newCylinder(radius.value, height.value)));
+        const cylinder = newCylinder(radius.value, height.value);
+        return ok(
+          wrapSolid(
+            cylinder,
+            occtNameFaces(
+              oc,
+              cylinder,
+              primitiveRoleNamer(input.featureId ?? "cylinder", height.value),
+            ),
+          ),
+        );
       });
     },
 
@@ -2087,8 +2356,16 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         if (!topRadius.ok) return fail(topRadius.error);
         const height = positiveLength(input.height, "height", "createCone");
         if (!height.ok) return fail(height.error);
+        const cone = newCone(bottomRadius.value, topRadius.value, height.value);
         return ok(
-          wrapSolid(newCone(bottomRadius.value, topRadius.value, height.value)),
+          wrapSolid(
+            cone,
+            occtNameFaces(
+              oc,
+              cone,
+              primitiveRoleNamer(input.featureId ?? "cone", height.value),
+            ),
+          ),
         );
       });
     },
@@ -2507,8 +2784,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        let prism = newExtrusion(input, height.value);
+        const built = newExtrusion(input, height.value);
+        let prism = built.shape;
+        // Phase N1: the draft rebuilds the lateral faces, a history not
+        // tracked yet — a tapered prism reports hash identities. The
+        // placement only re-locates the shape, keeping the names' order.
+        let faceNames = built.faceNames;
         if (taper !== undefined) {
+          faceNames = null;
           const drafted = draftPrismFaces(prism, taper, input.direction);
           prism.delete();
           if (!drafted.ok) return fail(drafted.error);
@@ -2538,7 +2821,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         );
         trsf.delete();
         prism.delete();
-        return ok(wrapSolid(placed));
+        return ok(wrapSolid(placed, faceNames));
       });
     },
 
@@ -2630,7 +2913,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        const revolved = newRevolution(input, sweep);
+        const { shape: revolved, faceNames } = newRevolution(input, sweep);
         // Placement: the transform composition (rotation first, translation
         // second), applied via BRepBuilderAPI_Transform like every placed
         // shape here.
@@ -2655,7 +2938,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         );
         trsf.delete();
         revolved.delete();
-        return ok(wrapSolid(placed));
+        return ok(wrapSolid(placed, faceNames));
       });
     },
 
@@ -5663,13 +5946,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         return ok({
           kernelId: OCCT_BACKEND_ID,
           persistentTopology: true,
-          identitySchemas: [OCCT_TOPOLOGY_IDENTITY_SCHEMA],
+          identitySchemas: OCCT_TOPOLOGY_IDENTITY_SCHEMAS,
           bodyId: options.bodyId,
           regeneration: options.regeneration,
           entities: occtShapeTopology(
             oc,
             shape.value,
             options.kinds ?? OCCT_TOPOLOGY_DEFAULT_KINDS,
+            tag.unwrap(solid)?.faceNames ?? null,
           ),
         });
       } catch (error) {

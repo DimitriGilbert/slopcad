@@ -15,16 +15,30 @@
  */
 
 import { readFileSync } from "node:fs";
+import {
+  angle,
+  createBodyId,
+  length,
+  type TopologyEntitySnapshot,
+} from "@slopcad/cad-core";
+import {
+  type KernelSolid,
+  type ProfileSegmentInput,
+  unwrapKernelResult,
+} from "@slopcad/cad-kernel";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { OpenCascadeInstance, TopoDS_Shape } from "replicad-opencascadejs";
 
+import { occtKernelFromRuntime } from "./occt-kernel";
 import {
   createOcctRuntime,
   RUNTIME_BRAND,
   type OcctRuntime,
 } from "./occt-runtime";
 import {
+  OCCT_NAME_IDENTITY_SCHEMA,
   OCCT_SHAPE_HASH_UPPER_BOUND,
+  occtRankDuplicateNames,
   occtShapeTopology,
 } from "./occt-topology";
 
@@ -455,5 +469,450 @@ describe("experiment (j): occurrence exploration (the snapshot's dedupe ground)"
     );
     expect(edgeIdentityCounts.size).toBe(15);
     shape.delete();
+  });
+});
+
+// --- Phase N1: history-based names (through the kernel adapter) -----------
+
+type Kernel = ReturnType<typeof occtKernelFromRuntime>;
+
+const namingBody = createBodyId("body_named");
+
+function namedEntities(
+  kernel: Kernel,
+  solid: KernelSolid,
+): readonly TopologyEntitySnapshot[] {
+  return unwrapKernelResult(
+    kernel.topologySnapshot(solid, { bodyId: namingBody, regeneration: 0 }),
+    "topologySnapshot",
+  ).entities;
+}
+
+/** `kind` → the entity names in snapshot order. */
+function namesByKind(
+  entities: readonly TopologyEntitySnapshot[],
+): Record<string, string[]> {
+  const out: Record<string, string[]> = { face: [], edge: [], vertex: [] };
+  for (const entity of entities) {
+    expect(entity.identity?.schema).toBe(OCCT_NAME_IDENTITY_SCHEMA);
+    const name = entity.identity?.data.name;
+    expect(typeof name).toBe("string");
+    out[entity.kind]?.push(String(name));
+  }
+  return out;
+}
+
+function expectUniquePerKind(names: Record<string, string[]>): void {
+  for (const list of Object.values(names)) {
+    expect(new Set(list).size).toBe(list.length);
+  }
+}
+
+/** The named entity's absolute centroid (or point). */
+function positionOf(
+  entities: readonly TopologyEntitySnapshot[],
+  kind: string,
+  name: string,
+): readonly number[] {
+  const entity = entities.find(
+    (candidate) =>
+      candidate.kind === kind && candidate.identity?.data.name === name,
+  );
+  const position =
+    entity?.geometry.centroidAbsoluteMm ?? entity?.geometry.pointAbsoluteMm;
+  if (position === undefined) throw new Error(`no ${kind} named ${name}`);
+  return position;
+}
+
+/** The named face's cylindrical radius (undefined off a cylinder). */
+function cylinderRadiusOf(
+  entities: readonly TopologyEntitySnapshot[],
+  name: string,
+): number | undefined {
+  const entity = entities.find(
+    (candidate) =>
+      candidate.kind === "face" && candidate.identity?.data.name === name,
+  );
+  if (entity === undefined) throw new Error(`no face named ${name}`);
+  return entity.geometry.cylinderRadiusMm;
+}
+
+function expectCloseVector(
+  actual: readonly number[],
+  expected: readonly number[],
+): void {
+  expect(actual).toHaveLength(expected.length);
+  expected.forEach((value, index) => {
+    expect(actual[index]).toBeCloseTo(value);
+  });
+}
+
+function boxSolid(
+  kernel: Kernel,
+  width: number,
+  depth: number,
+  height: number,
+): KernelSolid {
+  return unwrapKernelResult(
+    kernel.createBox({
+      featureId: "feat_box",
+      width: length(width),
+      depth: length(depth),
+      height: length(height),
+    }),
+    "createBox",
+  );
+}
+
+function rectangle(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): ProfileSegmentInput[] {
+  return [
+    { kind: "line", start: [x0, y0], end: [x1, y0] },
+    { kind: "line", start: [x1, y0], end: [x1, y1] },
+    { kind: "line", start: [x1, y1], end: [x0, y1] },
+    { kind: "line", start: [x0, y1], end: [x0, y0] },
+  ];
+}
+
+const AT_ORIGIN = {
+  rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+  translation: { x: length(0), y: length(0), z: length(0) },
+};
+
+function extrudeSolid(
+  kernel: Kernel,
+  loop: readonly ProfileSegmentInput[],
+  height: number,
+): KernelSolid {
+  return unwrapKernelResult(
+    kernel.extrude({
+      featureId: "feat_pad",
+      loop,
+      height: length(height),
+      direction: 1,
+      placement: {
+        rotation: { axis: [1, 0, 0], angle: angle(30, "deg") },
+        translation: { x: length(4), y: length(-2), z: length(9) },
+      },
+    }),
+    "extrude",
+  );
+}
+
+function revolveSolid(
+  kernel: Kernel,
+  loop: readonly ProfileSegmentInput[],
+  degrees: number,
+): KernelSolid {
+  return unwrapKernelResult(
+    kernel.revolve({
+      featureId: "feat_turn",
+      loop,
+      axis: { point: [0, 0], direction: [0, 1] },
+      angle: angle(degrees, "deg"),
+      placement: AT_ORIGIN,
+    }),
+    "revolve",
+  );
+}
+
+describe("Phase N1: history-based names replace the allocation hash", () => {
+  it("names box faces by their box-frame role, prefixed by the feature id", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const entities = namedEntities(kernel, boxSolid(kernel, 30, 20, 10));
+    const names = namesByKind(entities);
+    expect([...(names.face ?? [])].sort()).toEqual(
+      ["+X", "+Y", "+Z", "-X", "-Y", "-Z"].map((role) => `feat_box/${role}`),
+    );
+    expect(positionOf(entities, "face", "feat_box/+X")[0]).toBeCloseTo(30);
+    expect(positionOf(entities, "face", "feat_box/-X")[0]).toBeCloseTo(0);
+    expect(positionOf(entities, "face", "feat_box/+Y")[1]).toBeCloseTo(20);
+    expect(positionOf(entities, "face", "feat_box/-Y")[1]).toBeCloseTo(0);
+    expect(positionOf(entities, "face", "feat_box/+Z")[2]).toBeCloseTo(10);
+    expect(positionOf(entities, "face", "feat_box/-Z")[2]).toBeCloseTo(0);
+    // Derived names: an edge is the sorted pair of its faces, a vertex the
+    // sorted set of its three faces.
+    expect(names.edge).toContain("feat_box/+X|feat_box/+Z");
+    expect(names.vertex).toContain("feat_box/+X&feat_box/+Y&feat_box/+Z");
+    expect(names.edge).toHaveLength(12);
+    expect(names.vertex).toHaveLength(8);
+    expectUniquePerKind(names);
+  });
+
+  it("produces identical names on identical rebuilds and across dimension edits (box)", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const first = namesByKind(
+      namedEntities(kernel, boxSolid(kernel, 30, 20, 10)),
+    );
+    const again = namesByKind(
+      namedEntities(kernel, boxSolid(kernel, 30, 20, 10)),
+    );
+    expect(again).toEqual(first);
+    const resized = namedEntities(kernel, boxSolid(kernel, 31, 25, 12.5));
+    expect(namesByKind(resized)).toEqual(first);
+    expect(
+      positionOf(resized, "vertex", "feat_box/+X&feat_box/+Y&feat_box/+Z"),
+    ).toEqual([31, 25, 12.5]);
+  });
+
+  it("names cylinder, cone and sphere faces start/end/lateral/surface, dimension-free", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const cylinder = (radius: number, height: number) =>
+      namedEntities(
+        kernel,
+        unwrapKernelResult(
+          kernel.createCylinder({
+            featureId: "feat_post",
+            radius: length(radius),
+            height: length(height),
+          }),
+          "createCylinder",
+        ),
+      );
+    const small = cylinder(5, 10);
+    const names = namesByKind(small);
+    expect([...(names.face ?? [])].sort()).toEqual([
+      "feat_post/end",
+      "feat_post/lateral",
+      "feat_post/start",
+    ]);
+    // The seam lists its one face twice.
+    expect(names.edge).toContain("feat_post/lateral|feat_post/lateral");
+    expectUniquePerKind(names);
+    expect(positionOf(small, "face", "feat_post/end")[2]).toBeCloseTo(10);
+    expect(namesByKind(cylinder(5, 10))).toEqual(names);
+    expect(namesByKind(cylinder(7.5, 3))).toEqual(names);
+
+    const cone = (bottom: number, top: number, height: number) =>
+      namesByKind(
+        namedEntities(
+          kernel,
+          unwrapKernelResult(
+            kernel.createCone({
+              featureId: "feat_tip",
+              bottomRadius: length(bottom),
+              topRadius: length(top),
+              height: length(height),
+            }),
+            "createCone",
+          ),
+        ),
+      );
+    const frustum = cone(5, 2, 10);
+    expect([...(frustum.face ?? [])].sort()).toEqual([
+      "feat_tip/end",
+      "feat_tip/lateral",
+      "feat_tip/start",
+    ]);
+    expectUniquePerKind(frustum);
+    expect(cone(8, 3, 4)).toEqual(frustum);
+    const sharp = cone(5, 0, 10);
+    expect([...(sharp.face ?? [])].sort()).toEqual([
+      "feat_tip/lateral",
+      "feat_tip/start",
+    ]);
+    expectUniquePerKind(sharp);
+  });
+
+  it("orders duplicate derived names by body-relative geometry (the sphere's two poles)", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const sphere = (radius: number) =>
+      namedEntities(
+        kernel,
+        unwrapKernelResult(
+          kernel.createSphere({
+            featureId: "feat_ball",
+            radius: length(radius),
+          }),
+          "createSphere",
+        ),
+      );
+    const entities = sphere(5);
+    const names = namesByKind(entities);
+    expect(names.face).toEqual(["feat_ball/surface"]);
+    // Both poles touch only the one face: the base name repeats and ranks
+    // by body-relative position — `#0` the lower pole, `#1` the upper.
+    expect([...(names.vertex ?? [])].sort()).toEqual([
+      "feat_ball/surface#0",
+      "feat_ball/surface#1",
+    ]);
+    expect(
+      positionOf(entities, "vertex", "feat_ball/surface#0")[2],
+    ).toBeCloseTo(-5);
+    expect(
+      positionOf(entities, "vertex", "feat_ball/surface#1")[2],
+    ).toBeCloseTo(5);
+    expectUniquePerKind(names);
+    expect(namesByKind(sphere(12))).toEqual(names);
+  });
+
+  it("refuses to guess when no geometry separates duplicates: tied entities share one name", () => {
+    expect(
+      occtRankDuplicateNames(
+        ["a", "b", "a", "a"],
+        [
+          [0, 0, 1],
+          [9, 9, 9],
+          [0, 0, -1],
+          [0, 0, 1],
+        ],
+      ),
+    ).toEqual(["a#1", "b", "a#0", "a#1"]);
+  });
+
+  it("names extrude sides by profile segment and caps start/end, through the placement", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const entities = namedEntities(
+      kernel,
+      extrudeSolid(kernel, rectangle(0, 0, 10, 5), 7),
+    );
+    const names = namesByKind(entities);
+    // `extrudeSolid`'s placement: 30° about world x, then (4, -2, 9).
+    const cos = Math.cos(Math.PI / 6);
+    const sin = Math.sin(Math.PI / 6);
+    const placed = ([x, y, z]: readonly [number, number, number]) => [
+      x + 4,
+      y * cos - z * sin - 2,
+      y * sin + z * cos + 9,
+    ];
+    // Each name sits on its own face: the caps on the local z = 0 and
+    // z = height planes, side/<i> on segment i swept up the height.
+    expectCloseVector(
+      positionOf(entities, "face", "feat_pad/start"),
+      placed([5, 2.5, 0]),
+    );
+    expectCloseVector(
+      positionOf(entities, "face", "feat_pad/end"),
+      placed([5, 2.5, 7]),
+    );
+    expectCloseVector(
+      positionOf(entities, "face", "feat_pad/side/0"),
+      placed([5, 0, 3.5]),
+    );
+    expectCloseVector(
+      positionOf(entities, "face", "feat_pad/side/1"),
+      placed([10, 2.5, 3.5]),
+    );
+    expectCloseVector(
+      positionOf(entities, "face", "feat_pad/side/2"),
+      placed([5, 5, 3.5]),
+    );
+    expectCloseVector(
+      positionOf(entities, "face", "feat_pad/side/3"),
+      placed([0, 2.5, 3.5]),
+    );
+    expect([...(names.face ?? [])].sort()).toEqual([
+      "feat_pad/end",
+      "feat_pad/side/0",
+      "feat_pad/side/1",
+      "feat_pad/side/2",
+      "feat_pad/side/3",
+      "feat_pad/start",
+    ]);
+    expect(names.edge).toHaveLength(12);
+    expect(names.vertex).toHaveLength(8);
+    expectUniquePerKind(names);
+    // Rebuilt identically and with every dimension edited: same names.
+    expect(
+      namesByKind(
+        namedEntities(kernel, extrudeSolid(kernel, rectangle(0, 0, 10, 5), 7)),
+      ),
+    ).toEqual(names);
+    expect(
+      namesByKind(
+        namedEntities(kernel, extrudeSolid(kernel, rectangle(-3, 1, 22, 9), 2)),
+      ),
+    ).toEqual(names);
+    const circle = namesByKind(
+      namedEntities(
+        kernel,
+        extrudeSolid(
+          kernel,
+          [{ kind: "circle", center: [0, 0], radius: 4 }],
+          3,
+        ),
+      ),
+    );
+    expect([...(circle.face ?? [])].sort()).toEqual([
+      "feat_pad/end",
+      "feat_pad/side/0",
+      "feat_pad/start",
+    ]);
+    expectUniquePerKind(circle);
+  });
+
+  it("names revolve sides by segment, caps only on a partial sweep, dimension-free", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const partial = namesByKind(
+      namedEntities(kernel, revolveSolid(kernel, rectangle(2, 0, 12, 5), 90)),
+    );
+    expect([...(partial.face ?? [])].sort()).toEqual([
+      "feat_turn/end",
+      "feat_turn/side/0",
+      "feat_turn/side/1",
+      "feat_turn/side/2",
+      "feat_turn/side/3",
+      "feat_turn/start",
+    ]);
+    expectUniquePerKind(partial);
+    expect(
+      namesByKind(
+        namedEntities(kernel, revolveSolid(kernel, rectangle(3, 1, 9, 4), 135)),
+      ),
+    ).toEqual(partial);
+    // A full turn rebuilds its planar annuli (no `Generated` history); the
+    // vertex circles still pin them to their segments.
+    const fullEntities = namedEntities(
+      kernel,
+      revolveSolid(kernel, rectangle(2, 0, 12, 5), 360),
+    );
+    const full = namesByKind(fullEntities);
+    // The inferred annuli land on their segments: side/0 (y = 0) and
+    // side/2 (y = 5) are the planar rings centred on the axis; side/1
+    // (x = 12) and side/3 (x = 2) the outer and inner cylinders.
+    expectCloseVector(
+      positionOf(fullEntities, "face", "feat_turn/side/0"),
+      [0, 0, 0],
+    );
+    expect(cylinderRadiusOf(fullEntities, "feat_turn/side/0")).toBeUndefined();
+    expectCloseVector(
+      positionOf(fullEntities, "face", "feat_turn/side/2"),
+      [0, 5, 0],
+    );
+    expect(cylinderRadiusOf(fullEntities, "feat_turn/side/2")).toBeUndefined();
+    expect(cylinderRadiusOf(fullEntities, "feat_turn/side/1")).toBeCloseTo(12);
+    expect(cylinderRadiusOf(fullEntities, "feat_turn/side/3")).toBeCloseTo(2);
+    expect([...(full.face ?? [])].sort()).toEqual([
+      "feat_turn/side/0",
+      "feat_turn/side/1",
+      "feat_turn/side/2",
+      "feat_turn/side/3",
+    ]);
+    expectUniquePerKind(full);
+    expect(
+      namesByKind(
+        namedEntities(kernel, revolveSolid(kernel, rectangle(4, 2, 7, 3), 360)),
+      ),
+    ).toEqual(full);
+  });
+
+  it("keeps the legacy hash schema for solids whose history is not tracked yet", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const moved = unwrapKernelResult(
+      kernel.transform(boxSolid(kernel, 3, 3, 3), {
+        x: length(1),
+        y: length(0),
+        z: length(0),
+      }),
+      "transform",
+    );
+    for (const entity of namedEntities(kernel, moved)) {
+      expect(entity.identity?.schema).toBe("occt-shape-hash-v1");
+      expect(typeof entity.identity?.data.hash).toBe("number");
+    }
   });
 });

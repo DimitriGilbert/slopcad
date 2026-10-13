@@ -168,8 +168,9 @@ export type TopologyIdentityDatum = string | number | boolean;
 /**
  * The kernel-agnostic topology-identity payload: which kernel minted it,
  * under which schema, and the opaque data only that kernel interprets (for
- * OCCT the shape hash — see `OCCT_TOPOLOGY_IDENTITY_SCHEMA` in
- * `cad-kernel-occt`). No raw kernel handle ever crosses this type.
+ * OCCT the history-based construction name, or the legacy shape hash — see
+ * `OCCT_NAME_IDENTITY_SCHEMA` in `cad-kernel-occt`). No raw kernel handle
+ * ever crosses this type.
  */
 export interface TopologyIdentityPayload {
   readonly kernelId: string;

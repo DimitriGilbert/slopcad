@@ -28,6 +28,26 @@
  *   the rigid-motion-invariant form the reference model's repair heuristic
  *   consumes.
  *
+ * ## History-based names (Phase N1)
+ *
+ * Because the hash cannot survive a rebuild, a solid whose construction
+ * named its faces (the solid store keeps {@link OcctFaceNames} beside the
+ * shape) reports {@link OCCT_NAME_IDENTITY_SCHEMA} identities instead:
+ * `data = { name }`, a deterministic string. Faces carry their construction
+ * name (`<feature>/+X`, `<feature>/side/<segment>`, `<feature>/end`, …);
+ * an edge's base name is the sorted multiset of the face names of its
+ * face occurrences joined by `|` (a seam lists its face twice, a degenerate
+ * pole edge once); a vertex's base name is the sorted SET of its adjacent
+ * face names joined by `&`. Names never read a dimension, so identical
+ * rebuilds and dimension edits reproduce them. Entities sharing a base name
+ * are ordered by their body-relative geometry and suffixed `#<rank>`; a tie
+ * no geometry separates keeps ONE shared name so the resolver reports
+ * `ambiguous` rather than guessing. A solid without construction names (an
+ * operation whose history is not yet tracked) reports the legacy
+ * {@link OCCT_SHAPE_HASH_IDENTITY_SCHEMA} identity, still parseable: an old
+ * hash reference resolves to `missing` against named snapshots, never a
+ * crash.
+ *
  * All measures use exact BREP integration (`UseTriangulation = false`), in
  * the kernel's canonical millimetres, and every embind wrapper is deleted
  * exactly once on the success path.
@@ -45,7 +65,9 @@ import type {
 import { topologyIdentityPayloadEqual } from "@slopcad/cad-core";
 import type { KernelSolid } from "@slopcad/cad-kernel";
 import type {
+  NCollection_List_TopoDS_Shape,
   OpenCascadeInstance,
+  TopAbs_ShapeEnum,
   TopoDS_Edge,
   TopoDS_Face,
   TopoDS_Shape,
@@ -55,13 +77,24 @@ import type { OcctKernel } from "./occt-kernel";
 import { OCCT_BACKEND_ID } from "./occt-backend";
 
 /**
- * The identity schema of this kernel's snapshots: `data` carries
- * `hash` — `ReplicadShapeHasher.HashCode(shape, upper)` of the entity's
- * `TopoDS_Shape` (TShape + location, orientation ignored). A
- * within-regeneration identity by the experiments' finding; see the module
- * doc.
+ * The history-based name schema (Phase N1): `data` carries `name` — the
+ * deterministic construction name of the entity (see the module doc).
+ * Survives identical rebuilds and dimension edits.
  */
-export const OCCT_TOPOLOGY_IDENTITY_SCHEMA = "occt-shape-hash-v1";
+export const OCCT_NAME_IDENTITY_SCHEMA = "occt-name/1";
+
+/**
+ * The legacy hash schema: `data` carries `hash` —
+ * `ReplicadShapeHasher.HashCode(shape, upper)` of the entity's
+ * `TopoDS_Shape` (TShape + location, orientation ignored). A
+ * within-regeneration identity by the experiments' finding; reported only
+ * by solids without construction names, and kept parseable for references
+ * minted before names existed.
+ */
+export const OCCT_SHAPE_HASH_IDENTITY_SCHEMA = "occt-shape-hash-v1";
+
+/** The primary identity schema this kernel mints: the name schema. */
+export const OCCT_TOPOLOGY_IDENTITY_SCHEMA = OCCT_NAME_IDENTITY_SCHEMA;
 
 /**
  * The upper bound handed to `ReplicadShapeHasher.HashCode`: hashes land in
@@ -70,14 +103,32 @@ export const OCCT_TOPOLOGY_IDENTITY_SCHEMA = "occt-shape-hash-v1";
  */
 export const OCCT_SHAPE_HASH_UPPER_BOUND = 2147483647;
 
-/** The identity schemas this producer understands (one: its own). */
+/** The identity schemas this producer understands: names, then hashes. */
 export const OCCT_TOPOLOGY_IDENTITY_SCHEMAS: readonly string[] = Object.freeze([
-  OCCT_TOPOLOGY_IDENTITY_SCHEMA,
+  OCCT_NAME_IDENTITY_SCHEMA,
+  OCCT_SHAPE_HASH_IDENTITY_SCHEMA,
 ]);
+
+/**
+ * The construction names of a solid's faces, in the solid's collapsed
+ * face-exploration order (the snapshot's face order): stored beside the
+ * `TopoDS_Shape` in the kernel's solid store.
+ */
+export type OcctFaceNames = readonly string[];
+
+/** One builder-history face and the construction name it carries. */
+export interface OcctNamedFace {
+  readonly face: TopoDS_Shape;
+  readonly name: string;
+}
 
 /** The kinds a snapshot reports by default: faces, edges, and vertices. */
 export const OCCT_TOPOLOGY_DEFAULT_KINDS: readonly TopologyReferenceKind[] =
   Object.freeze(["face", "edge", "vertex"]);
+
+function hashOf(oc: OpenCascadeInstance, shape: TopoDS_Shape): number {
+  return oc.ReplicadShapeHasher.HashCode(shape, OCCT_SHAPE_HASH_UPPER_BOUND);
+}
 
 function identityOf(
   oc: OpenCascadeInstance,
@@ -85,10 +136,8 @@ function identityOf(
 ): TopologyIdentityPayload {
   return Object.freeze({
     kernelId: OCCT_BACKEND_ID,
-    schema: OCCT_TOPOLOGY_IDENTITY_SCHEMA,
-    data: Object.freeze({
-      hash: oc.ReplicadShapeHasher.HashCode(shape, OCCT_SHAPE_HASH_UPPER_BOUND),
-    }),
+    schema: OCCT_SHAPE_HASH_IDENTITY_SCHEMA,
+    data: Object.freeze({ hash: hashOf(oc, shape) }),
   });
 }
 
@@ -297,13 +346,375 @@ export function occtShapeTopology(
   oc: OpenCascadeInstance,
   shape: TopoDS_Shape,
   kinds: readonly TopologyReferenceKind[] = OCCT_TOPOLOGY_DEFAULT_KINDS,
+  faceNames: OcctFaceNames | null = null,
 ): readonly TopologyEntitySnapshot[] {
   const bodyCentroid = bodyCentroidOf(oc, shape);
   const entities: TopologyEntitySnapshot[] = [];
   for (const kind of kinds) {
     entities.push(...exploreKind(oc, shape, kind, bodyCentroid));
   }
+  if (faceNames !== null) {
+    const named = namedEntities(oc, shape, faceNames, entities, bodyCentroid);
+    if (named !== null) return Object.freeze(named);
+  }
   return Object.freeze(entities);
+}
+
+// ---------------------------------------------------------------------------
+// History-based names (Phase N1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The distinct sub-shapes of one type in exploration order, collapsed by
+ * hash exactly like {@link exploreKind}: the face order a
+ * {@link OcctFaceNames} array indexes. The shapes are owned by the caller.
+ */
+export function occtDistinctSubShapes(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  toFind: TopAbs_ShapeEnum,
+): TopoDS_Shape[] {
+  const seen = new Set<number>();
+  const found: TopoDS_Shape[] = [];
+  const explorer = new oc.TopExp_Explorer(shape, toFind);
+  try {
+    while (explorer.More()) {
+      const current = explorer.Value();
+      const hash = hashOf(oc, current);
+      if (seen.has(hash)) {
+        current.delete();
+      } else {
+        seen.add(hash);
+        found.push(current);
+      }
+      explorer.Next();
+    }
+  } finally {
+    explorer.delete();
+  }
+  return found;
+}
+
+/**
+ * Names every face of a freshly built shape by construction: `nameOf`
+ * answers each collapsed face's name (from builder history or the
+ * primitive's construction frame). One face the construction cannot name
+ * leaves the whole solid unnamed (null) — a partial naming would mint names
+ * for some entities and hashes for others in one snapshot.
+ */
+export function occtNameFaces(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  nameOf: (face: TopoDS_Shape) => string | null,
+): OcctFaceNames | null {
+  const faces = occtDistinctSubShapes(
+    oc,
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+  );
+  try {
+    const names: string[] = [];
+    for (const face of faces) {
+      const name = nameOf(face);
+      if (name === null) return null;
+      names.push(name);
+    }
+    return Object.freeze(names);
+  } finally {
+    for (const face of faces) face.delete();
+  }
+}
+
+/**
+ * The `nameOf` of builder history, applied to the builder's own result
+ * (before any placement): a result face is named by the history face it
+ * `IsSame`s (same TShape AND location — a prism's two caps share one
+ * TShape, so a partner test cannot tell them apart), unnamed when none
+ * matches. The placement transform (`BRepBuilderAPI_Transform`, no copy)
+ * only re-locates the shape, so the names keep their face order.
+ */
+export function occtHistoryFaceNamer(
+  history: readonly OcctNamedFace[],
+): (face: TopoDS_Shape) => string | null {
+  return (face) => {
+    const hit = history.find((entry) => entry.face.IsSame(face));
+    return hit === undefined ? null : hit.name;
+  };
+}
+
+/**
+ * The shapes of one type in a builder-history list (`Generated`), owned by
+ * the caller. The list is copied before being drained so the builder's own
+ * list is never mutated; the caller still frees `list`.
+ */
+export function occtListShapes(
+  oc: OpenCascadeInstance,
+  list: NCollection_List_TopoDS_Shape,
+  type: TopAbs_ShapeEnum,
+): TopoDS_Shape[] {
+  const copy = new oc.NCollection_List_TopoDS_Shape(list);
+  const found: TopoDS_Shape[] = [];
+  try {
+    while (!copy.IsEmpty()) {
+      const item = copy.First();
+      copy.RemoveFirst();
+      if (item.ShapeType() === type) found.push(item);
+      else item.delete();
+    }
+  } finally {
+    copy.delete();
+  }
+  return found;
+}
+
+/**
+ * Names the faces of one history list: a single face is `name`, several
+ * rank `name#<k>` in the builder's own (deterministic) order.
+ */
+export function occtNameHistoryFaces(
+  faces: readonly TopoDS_Shape[],
+  name: string,
+): OcctNamedFace[] {
+  return faces.map((face, index) => ({
+    face,
+    name: faces.length === 1 ? name : `${name}#${String(index)}`,
+  }));
+}
+
+/** Whether `shape` holds a sub-shape `IsSame` as `part`. */
+export function occtContainsSame(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  part: TopoDS_Shape,
+  type: TopAbs_ShapeEnum,
+): boolean {
+  const explorer = new oc.TopExp_Explorer(shape, type);
+  try {
+    while (explorer.More()) {
+      const current = explorer.Value();
+      const same = current.IsSame(part);
+      current.delete();
+      if (same) return true;
+      explorer.Next();
+    }
+    return false;
+  } finally {
+    explorer.delete();
+  }
+}
+
+/** Frees the history faces a builder-history reader collected. */
+export function occtDisposeHistory(history: readonly OcctNamedFace[]): void {
+  for (const entry of history) entry.face.delete();
+}
+
+/** Body-relative point of a vertex, as a plain triple. */
+function relativePointOf(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  bodyCentroid: { readonly x: number; readonly y: number; readonly z: number },
+): readonly number[] {
+  const vertex = oc.TopoDS.Vertex(shape);
+  try {
+    const point = oc.BRep_Tool.Pnt(vertex);
+    try {
+      return [
+        point.X() - bodyCentroid.x,
+        point.Y() - bodyCentroid.y,
+        point.Z() - bodyCentroid.z,
+      ];
+    } finally {
+      point.delete();
+    }
+  } finally {
+    vertex.delete();
+  }
+}
+
+/** Lexicographic tuple order: -1, 0, 1, comparing each pair within 1e-7. */
+function compareKeys(a: readonly number[], b: readonly number[]): number {
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const left = a[index] ?? 0;
+    const right = b[index] ?? 0;
+    const scale = Math.max(1, Math.abs(left), Math.abs(right));
+    if (Math.abs(left - right) > 1e-7 * scale) return left < right ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Turns base names into unique names: a base carried by one entity stays
+ * as is; a base carried by several ranks them by their body-relative
+ * geometric key and suffixes `#<rank>`. Entities whose keys tie (no
+ * geometry separates them) share one rank, hence one name — the resolver's
+ * honest `ambiguous`, never a guess.
+ */
+export function occtRankDuplicateNames(
+  bases: readonly string[],
+  keys: readonly (readonly number[])[],
+): string[] {
+  const groups = new Map<string, number[]>();
+  bases.forEach((base, index) => {
+    const group = groups.get(base);
+    if (group === undefined) groups.set(base, [index]);
+    else group.push(index);
+  });
+  const names = [...bases];
+  for (const [base, members] of groups) {
+    if (members.length < 2) continue;
+    const ordered = [...members].sort((left, right) =>
+      compareKeys(keys[left] ?? [], keys[right] ?? []),
+    );
+    let rank = 0;
+    ordered.forEach((member, position) => {
+      const previous = position === 0 ? undefined : ordered[position - 1];
+      if (
+        previous !== undefined &&
+        compareKeys(keys[previous] ?? [], keys[member] ?? []) !== 0
+      ) {
+        rank = position;
+      }
+      names[member] = `${base}#${String(rank)}`;
+    });
+  }
+  return names;
+}
+
+/** The geometric ordering key of one entity: its body-relative position. */
+function geometricKeyOf(entity: TopologyEntitySnapshot): number[] {
+  const geometry = entity.geometry;
+  const position = geometry.centroidRelativeMm ??
+    geometry.pointRelativeMm ?? [0, 0, 0];
+  return [...position, geometry.areaMm2 ?? geometry.lengthMm ?? 0];
+}
+
+/**
+ * Re-labels a hash-identified entity list with construction names: faces by
+ * `faceNames`, edges by the sorted multiset of their face occurrences'
+ * names, vertices by the sorted set of their adjacent face names, each
+ * made unique by {@link occtRankDuplicateNames}. Null when `faceNames` does not fit
+ * the shape (a face count mismatch) — the caller keeps the hash identities.
+ */
+function namedEntities(
+  oc: OpenCascadeInstance,
+  shape: TopoDS_Shape,
+  faceNames: OcctFaceNames,
+  entities: readonly TopologyEntitySnapshot[],
+  bodyCentroid: { readonly x: number; readonly y: number; readonly z: number },
+): TopologyEntitySnapshot[] | null {
+  const faces = occtDistinctSubShapes(
+    oc,
+    shape,
+    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+  );
+  const faceNameByHash = new Map<number, string>();
+  const edgeFaces = new Map<number, string[]>();
+  const vertexFaces = new Map<number, Set<string>>();
+  try {
+    if (faces.length !== faceNames.length) return null;
+    faces.forEach((face, index) => {
+      const name = faceNames[index] ?? "";
+      faceNameByHash.set(hashOf(oc, face), name);
+      const edges = new oc.TopExp_Explorer(
+        face,
+        oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      );
+      try {
+        while (edges.More()) {
+          const edge = edges.Value();
+          const hash = hashOf(oc, edge);
+          edge.delete();
+          const list = edgeFaces.get(hash);
+          if (list === undefined) edgeFaces.set(hash, [name]);
+          else list.push(name);
+          edges.Next();
+        }
+      } finally {
+        edges.delete();
+      }
+      const vertices = new oc.TopExp_Explorer(
+        face,
+        oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+      );
+      try {
+        while (vertices.More()) {
+          const vertex = vertices.Value();
+          const hash = hashOf(oc, vertex);
+          vertex.delete();
+          const set = vertexFaces.get(hash);
+          if (set === undefined) vertexFaces.set(hash, new Set([name]));
+          else set.add(name);
+          vertices.Next();
+        }
+      } finally {
+        vertices.delete();
+      }
+    });
+  } finally {
+    for (const face of faces) face.delete();
+  }
+  // An edge's key appends its sorted body-relative end points to its
+  // centroid and length, so edges sharing faces AND a centroid (a sphere's
+  // two poles) still order by geometry.
+  const edgeEndpoints = new Map<number, number[]>();
+  if (entities.some((entity) => entity.kind === "edge")) {
+    const edges = occtDistinctSubShapes(
+      oc,
+      shape,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+    );
+    try {
+      for (const edge of edges) {
+        const points = occtDistinctSubShapes(
+          oc,
+          edge,
+          oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+        );
+        try {
+          const relative = points
+            .map((point) => relativePointOf(oc, point, bodyCentroid))
+            .sort(compareKeys);
+          edgeEndpoints.set(hashOf(oc, edge), relative.flat());
+        } finally {
+          for (const point of points) point.delete();
+        }
+      }
+    } finally {
+      for (const edge of edges) edge.delete();
+    }
+  }
+  const bases: string[] = [];
+  const keys: number[][] = [];
+  for (const entity of entities) {
+    const hash = entity.identity?.data.hash;
+    if (typeof hash !== "number") return null;
+    const base =
+      entity.kind === "face"
+        ? faceNameByHash.get(hash)
+        : entity.kind === "edge"
+          ? edgeFaces.get(hash)?.sort().join("|")
+          : [...(vertexFaces.get(hash) ?? [])].sort().join("&");
+    if (base === undefined || base === "") return null;
+    // Kinds never collide: the base is kind-prefixed for grouping only.
+    bases.push(`${entity.kind}:${base}`);
+    const endpoints =
+      entity.kind === "edge" ? (edgeEndpoints.get(hash) ?? []) : [];
+    keys.push([...geometricKeyOf(entity), ...endpoints]);
+  }
+  const names = occtRankDuplicateNames(bases, keys);
+  return entities.map((entity, index) =>
+    Object.freeze({
+      ...entity,
+      identity: Object.freeze({
+        kernelId: OCCT_BACKEND_ID,
+        schema: OCCT_NAME_IDENTITY_SCHEMA,
+        data: Object.freeze({
+          name: (names[index] ?? "").slice(entity.kind.length + 1),
+        }),
+      }),
+    }),
+  );
 }
 
 /**

@@ -46,6 +46,7 @@ export type {
   ConeInput,
   DrawingViewInput,
   CylinderInput,
+  FeatureNamingInput,
   FilletInput,
   GeometryKernel,
   HelixSpineInput,

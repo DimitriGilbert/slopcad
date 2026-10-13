@@ -334,20 +334,31 @@ export interface KernelError extends ParseFailure {
  */
 export type KernelResult<T> = ParseResult<T, KernelError>;
 
+/**
+ * The producing feature of a kernel-built solid (Phase N1): a kernel with
+ * history-based topological naming prefixes every construction face name
+ * with it (`<featureId>/+X`, `<featureId>/side/0`), so names stay unique
+ * across a document's features and never read a dimension. Absent, the
+ * kernel prefixes with the operation's own name (`box`, `extrude`, …).
+ */
+export interface FeatureNamingInput {
+  readonly featureId?: string;
+}
+
 /** Input of `createBox`: the box's extents along x, y, z (all positive). */
-export interface BoxInput {
+export interface BoxInput extends FeatureNamingInput {
   readonly width: LengthValue;
   readonly depth: LengthValue;
   readonly height: LengthValue;
 }
 
 /** Input of `createSphere`: the radius (positive). */
-export interface SphereInput {
+export interface SphereInput extends FeatureNamingInput {
   readonly radius: LengthValue;
 }
 
 /** Input of `createCylinder`: the radius (positive) and height (positive). */
-export interface CylinderInput {
+export interface CylinderInput extends FeatureNamingInput {
   readonly radius: LengthValue;
   readonly height: LengthValue;
 }
@@ -357,7 +368,7 @@ export interface CylinderInput {
  * (`bottomRadius` positive, `topRadius` non-negative — 0 is a sharp cone),
  * and the height (positive).
  */
-export interface ConeInput {
+export interface ConeInput extends FeatureNamingInput {
   readonly bottomRadius: LengthValue;
   readonly topRadius: LengthValue;
   readonly height: LengthValue;
@@ -511,7 +522,7 @@ export interface ProfileRevolveAxisInput {
  * within the contract suite's curved band (≤ ~1%) of the analytic value,
  * while straight-polygon profiles are exact everywhere.
  */
-export interface ProfileExtrudeInput {
+export interface ProfileExtrudeInput extends FeatureNamingInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly height: LengthValue;
   readonly direction: 1 | -1;
@@ -635,7 +646,7 @@ export interface ProfileExtrudeInput {
  * kernel's revolution is analytic over the same chord polygon (Pappus
  * exactly, no quadrature).
  */
-export interface ProfileRevolveInput {
+export interface ProfileRevolveInput extends FeatureNamingInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly axis: ProfileRevolveAxisInput;
   readonly angle: AngleValue;

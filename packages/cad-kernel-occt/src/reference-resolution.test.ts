@@ -224,7 +224,14 @@ describe("minting and validity against the real kernel", () => {
     const snapshot = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
     expect(snapshot.kernelId).toBe("opencascade");
     expect(snapshot.persistentTopology).toBe(true);
-    expect(snapshot.identitySchemas).toEqual(["occt-shape-hash-v1"]);
+    // Phase N1: the kernel mints names and still understands hashes; the
+    // drilled plate is a subtract output (history not tracked yet), so its
+    // entities carry the legacy hash schema.
+    expect(snapshot.identitySchemas).toEqual([
+      "occt-name/1",
+      "occt-shape-hash-v1",
+    ]);
+    expect(snapshot.entities[0]?.identity?.schema).toBe("occt-shape-hash-v1");
     expect(snapshot.entities).toHaveLength(7);
     for (const entity of snapshot.entities) {
       expect(entity.identity).not.toBeNull();
@@ -694,3 +701,135 @@ function unwrapDocument(result: ReturnType<typeof removeFeature>): CadDocument {
   if (!result.ok) throw new Error(result.error.message);
   return result.value;
 }
+
+describe("Phase N1: history-based names survive the rebuild", () => {
+  function namedBox(
+    kernel: Kernel,
+    width: number,
+    depth: number,
+    height: number,
+  ): KernelSolid {
+    return unwrapKernelResult(
+      kernel.createBox({
+        featureId: boxFeature,
+        width: length(width),
+        depth: length(depth),
+        height: length(height),
+      }),
+      "createBox",
+    );
+  }
+
+  function namedSnapshot(
+    kernel: Kernel,
+    solid: KernelSolid,
+    regeneration: number,
+  ): TopologySnapshot {
+    return unwrapKernelResult(
+      kernel.topologySnapshot(solid, { bodyId: plateBody, regeneration }),
+      "topologySnapshot",
+    );
+  }
+
+  function ordinalNamed(
+    snapshot: TopologySnapshot,
+    kind: "face" | "edge" | "vertex",
+    name: string,
+  ): number {
+    const entity = snapshot.entities.find(
+      (candidate) =>
+        candidate.kind === kind && candidate.identity?.data.name === name,
+    );
+    if (entity === undefined) throw new Error(`no ${kind} named ${name}`);
+    return entity.ordinal;
+  }
+
+  it("resolves a build-1 face/edge/vertex reference VALID on an edited build 2", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const provenance = referenceProvenance(referenceDocument(), plateBody);
+    if (!provenance.ok) throw new Error(provenance.error.message);
+    const v1 = namedSnapshot(kernel, namedBox(kernel, 30, 20, 10), 1);
+    const v2 = namedSnapshot(kernel, namedBox(kernel, 42, 20, 6), 2);
+    for (const [kind, name] of [
+      ["face", `${boxFeature}/+Z`],
+      ["edge", `${boxFeature}/+X|${boxFeature}/+Z`],
+      ["vertex", `${boxFeature}/+X&${boxFeature}/+Y&${boxFeature}/+Z`],
+    ] as const) {
+      const minted = mintTopologyReference(
+        v1,
+        ordinalNamed(v1, kind, name),
+        provenance.value,
+        { id: createReferenceId(`ref_named_${kind}`), kind },
+      );
+      if (!minted.ok) throw new Error(minted.error.message);
+      expect(minted.value.identity).toEqual({
+        kernelId: "opencascade",
+        schema: "occt-name/1",
+        data: { name },
+      });
+      // Through the serialized form, as a document stores it.
+      const parsed = parseTopologyReference(
+        JSON.parse(JSON.stringify(serializeTopologyReference(minted.value))),
+      );
+      if (!parsed.ok) throw new Error(parsed.error.message);
+      const resolved = resolveTopologyReference(parsed.value, v2);
+      expect(resolved.ok).toBe(true);
+      if (!resolved.ok) continue;
+      expect(resolved.value.validity.state).toBe("valid");
+      expect(resolved.value.validity.ordinal).toBe(
+        ordinalNamed(v2, kind, name),
+      );
+    }
+  });
+
+  it("resolves an old hash-schema reference honestly MISSING against a named snapshot", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const provenance = referenceProvenance(referenceDocument(), drilledBody);
+    if (!provenance.ok) throw new Error(provenance.error.message);
+    const legacy = snapshotOf(kernel, drilledPlate(kernel), drilledBody, 1);
+    const minted = mintTopologyReference(legacy, 0, provenance.value, {
+      id: createReferenceId("ref_legacy_hash"),
+      kind: "face",
+    });
+    if (!minted.ok) throw new Error(minted.error.message);
+    expect(minted.value.identity?.schema).toBe("occt-shape-hash-v1");
+    // The same body rebuilt by a NAMING producer (a construction-named
+    // solid): the hash payload matches no name payload.
+    const named = unwrapKernelResult(
+      kernel.topologySnapshot(namedBox(kernel, 30, 20, 10), {
+        bodyId: drilledBody,
+        regeneration: 2,
+        kinds: ["face"],
+      }),
+      "topologySnapshot",
+    );
+    expect(named.entities[0]?.identity?.schema).toBe("occt-name/1");
+    const resolved = resolveTopologyReference(minted.value, named);
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) expect(resolved.value.validity.state).toBe("missing");
+  });
+
+  it("reports two entities sharing one name AMBIGUOUS — never a guess", () => {
+    const kernel = occtKernelFromRuntime(runtime);
+    const provenance = referenceProvenance(referenceDocument(), plateBody);
+    if (!provenance.ok) throw new Error(provenance.error.message);
+    const v1 = namedSnapshot(kernel, namedBox(kernel, 30, 20, 10), 1);
+    const top = ordinalNamed(v1, "face", `${boxFeature}/+Z`);
+    const minted = mintTopologyReference(v1, top, provenance.value, {
+      id: createReferenceId("ref_named_tie"),
+      kind: "face",
+    });
+    if (!minted.ok) throw new Error(minted.error.message);
+    const topEntity = v1.entities.find(
+      (entity) => entity.kind === "face" && entity.ordinal === top,
+    );
+    if (topEntity === undefined) throw new Error("top face missing");
+    const tied: TopologySnapshot = {
+      ...v1,
+      entities: [...v1.entities, { ...topEntity, ordinal: 99 }],
+    };
+    const resolved = resolveTopologyReference(minted.value, tied);
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) expect(resolved.value.validity.state).toBe("ambiguous");
+  });
+});
