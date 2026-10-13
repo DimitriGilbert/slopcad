@@ -105,6 +105,31 @@ export {
   type ComponentsExampleSummary,
 } from "./components/components";
 
+// -- Simulation (the Phase 61 spine; the Phase 62 voxelizer; Phase 63's
+//    known-cases gallery is subpath-only — its minutes-long runs stay
+//    off the docs page's bundle, the node-worker example's precedent) --------
+
+export { runSimSpineExample, type SimSpineExampleSummary } from "./sim/spine";
+export {
+  runSimThermalExample,
+  type SimThermalExampleSummary,
+} from "./sim/thermal";
+export { runSimVoxelExample, type SimVoxelExampleSummary } from "./sim/voxel";
+export { runSimFanExample, type SimFanExampleSummary } from "./sim/fan";
+export {
+  runSimCombustionExample,
+  type SimCombustionExampleSummary,
+} from "./sim/combustion";
+export {
+  runSimStructuralExample,
+  type SimStructuralExampleSummary,
+} from "./sim/structural";
+export {
+  runSimStudyBracketExample,
+  type SimStudyBracketSummary,
+} from "./sim/study";
+export { runSimStudyFanExample, type SimStudyFanSummary } from "./sim/study";
+
 // -- CAD JSX (authoring) ------------------------------------------------------
 
 export {
@@ -113,6 +138,12 @@ export {
   runCadJsxExample,
   type CadJsxExampleSummary,
 } from "./cadjsx/hub-mount";
+export {
+  SimDemoBodyModel,
+  SIM_DEMO_BODY_DOCUMENT_ID,
+  runSimDemoBodyExample,
+  type SimDemoBodyExampleSummary,
+} from "./cadjsx/sim-demo-body";
 
 // -- React (jsdom; the /docs page does not import this module) ---------------
 

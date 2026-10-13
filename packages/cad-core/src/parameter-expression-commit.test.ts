@@ -532,7 +532,7 @@ describe("the native format with expression payloads", () => {
     expect(parameterOf(undone.document, dId).value.value).toBe(10);
   });
 
-  it("migrates v6-, v7-, and v8-stamped files (identity steps) and keeps v9 native", () => {
+  it("migrates v6- through v10-stamped files (identity steps) and keeps v11 native", () => {
     const session = expressionSession();
     const native = requireOk(
       createNativeCadDocument(session.document),
@@ -540,16 +540,16 @@ describe("the native format with expression payloads", () => {
     );
     const serialized = serializeNativeCadDocument(native);
     const text = stringifyNativeCadDocument(serialized);
-    expect(readNativeFormatVersion(JSON.parse(text))).toBe(9);
+    expect(readNativeFormatVersion(JSON.parse(text))).toBe(11);
 
-    // The same content stamped 6, 7, or 8 migrates (the identity) and
-    // re-stamps 9 — the vocabulary-growth steps rewrite nothing.
+    // The same content stamped 6, 7, 8, 9, or 10 migrates (the identity)
+    // and re-stamps 11 — the vocabulary-growth steps rewrite nothing.
     const asV6 = {
       ...(JSON.parse(text) as Record<string, unknown>),
       formatVersion: 6,
     };
     const migrated = requireOk(migrateNativeCadDocument(asV6), "the migration");
-    expect(readNativeFormatVersion(migrated)).toBe(9);
+    expect(readNativeFormatVersion(migrated)).toBe(11);
     const asV7 = {
       ...(JSON.parse(text) as Record<string, unknown>),
       formatVersion: 7,
@@ -558,7 +558,7 @@ describe("the native format with expression payloads", () => {
       migrateNativeCadDocument(asV7),
       "the v7 migration",
     );
-    expect(readNativeFormatVersion(migratedV7)).toBe(9);
+    expect(readNativeFormatVersion(migratedV7)).toBe(11);
     const asV8 = {
       ...(JSON.parse(text) as Record<string, unknown>),
       formatVersion: 8,
@@ -567,7 +567,25 @@ describe("the native format with expression payloads", () => {
       migrateNativeCadDocument(asV8),
       "the v8 migration",
     );
-    expect(readNativeFormatVersion(migratedV8)).toBe(9);
+    expect(readNativeFormatVersion(migratedV8)).toBe(11);
+    const asV9 = {
+      ...(JSON.parse(text) as Record<string, unknown>),
+      formatVersion: 9,
+    };
+    const migratedV9 = requireOk(
+      migrateNativeCadDocument(asV9),
+      "the v9 migration",
+    );
+    expect(readNativeFormatVersion(migratedV9)).toBe(11);
+    const asV10 = {
+      ...(JSON.parse(text) as Record<string, unknown>),
+      formatVersion: 10,
+    };
+    const migratedV10 = requireOk(
+      migrateNativeCadDocument(asV10),
+      "the v10 migration",
+    );
+    expect(readNativeFormatVersion(migratedV10)).toBe(11);
     const reparsed = requireOk(
       parseNativeCadDocumentFromBytes(
         encodeNativeCadDocument({

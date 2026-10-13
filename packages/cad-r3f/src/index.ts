@@ -182,3 +182,55 @@ export type {
   SectionClipPlane,
   SectionClipPlanes,
 } from "./section-clipping";
+
+export {
+  CAD_FIELD_COLORMAPS,
+  CAD_FIELD_COLORMAP_COOLWARM,
+  CAD_FIELD_COLORMAP_IDS,
+  CAD_FIELD_COLORMAP_JET,
+  CAD_FIELD_COLORMAP_VIRIDIS,
+  fieldColormapById,
+  fieldColorRamp,
+  fieldSrgbToLinear,
+  sampleFieldColormap,
+} from "./field-colormaps";
+export type {
+  FieldColormap,
+  FieldColormapStop,
+  FieldColorScale,
+} from "./field-colormaps";
+export {
+  decodedFieldGrid,
+  decodedVectorField,
+  fieldGridContainsPoint,
+  fieldGridSamplePositionMm,
+  sampleFieldGrid,
+  sampleVectorField,
+  sampleVectorMagnitude,
+} from "./field-grid";
+export type {
+  DecodedFieldGrid,
+  DecodedVectorField,
+  FieldVectorComponents,
+} from "./field-grid";
+export { buildFieldSliceGeometry, FIELD_SLICE_AXES } from "./field-slice";
+export type { FieldSliceAxis, FieldSliceSpec } from "./field-slice";
+export { buildFieldContourGeometry } from "./field-contours";
+export type { FieldContourSpec } from "./field-contours";
+export {
+  buildFieldStreamlinesGeometry,
+  integrateFieldStreamline,
+} from "./field-streamlines";
+export type {
+  FieldStreamSeed,
+  FieldStreamlineOptions,
+} from "./field-streamlines";
+export { buildFieldGlyphGeometry, fieldGlyphNodeIndices } from "./field-glyphs";
+export type { FieldGlyphOptions } from "./field-glyphs";
+export {
+  FieldIsoContours,
+  FieldSlicePlane,
+  FieldStreamlines,
+  FieldVectorGlyphs,
+} from "./field-overlays";
+export type { FieldOverlayColorProps } from "./field-overlays";

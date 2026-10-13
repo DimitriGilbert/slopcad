@@ -4,6 +4,20 @@
   "homepage": "https://github.com/slopcad/slopcad",
   "items": [
     {
+      "name": "attachment",
+      "type": "registry:component",
+      "title": "Attachment",
+      "description": "File attachment chip primitives (media, content, title, description, actions, trigger, group) with upload-state and orientation variants over Base UI's render element and the button item.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/attachment.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "badge",
       "type": "registry:component",
       "title": "Badge",
@@ -25,6 +39,19 @@
       "files": [
         {
           "path": "src/components/button.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "card",
+      "type": "registry:component",
+      "title": "Card",
+      "description": "Card layout primitives (header, title, description, action, content, footer) with a compact size variant and image-aware padding.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/card.tsx",
           "type": "registry:component"
         }
       ]
@@ -66,6 +93,32 @@
       "files": [
         {
           "path": "src/components/dialog.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "dropdown-menu",
+      "type": "registry:component",
+      "title": "Dropdown Menu",
+      "description": "Base UI menu primitives (trigger, content, item, checkbox/radio items, label, separator, submenu, shortcut) with anchored positioning and check indicators.",
+      "dependencies": ["@base-ui/react", "lucide-react", "cn"],
+      "files": [
+        {
+          "path": "src/components/dropdown-menu.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "type": "registry:component",
+      "title": "Empty",
+      "description": "Empty-state primitives (header, media, title, description, content) for placeholder regions, with an icon media variant.",
+      "dependencies": ["class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/empty.tsx",
           "type": "registry:component"
         }
       ]
@@ -129,6 +182,59 @@
       ]
     },
     {
+      "name": "bubble",
+      "type": "registry:component",
+      "title": "Bubble",
+      "description": "Chat bubble primitives (group, bubble, content) with muted/ghost variants over Base UI's render element.",
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/bubble.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "message",
+      "type": "registry:component",
+      "title": "Message",
+      "description": "Chat message layout primitives (group, message, content) that align assistant and user turns inside a transcript.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/message.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "message-scroller",
+      "type": "registry:component",
+      "title": "Message Scroller",
+      "description": "Scroll-managed transcript container over @shadcn/react's message-scroller primitives: per-message scroll anchoring, a jump-to-latest button, and stickiness handling while streaming.",
+      "registryDependencies": ["@slopcad/button"],
+      "dependencies": ["@shadcn/react", "cn", "lucide-react"],
+      "files": [
+        {
+          "path": "src/components/message-scroller.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "marker",
+      "type": "registry:component",
+      "title": "Marker",
+      "description": "Small annotation row (icon + content) with default, separator, and border variants over Base UI's render element.",
+      "dependencies": ["@base-ui/react", "class-variance-authority", "cn"],
+      "files": [
+        {
+          "path": "src/components/marker.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "popover",
       "type": "registry:component",
       "title": "Popover",
@@ -181,6 +287,19 @@
       ]
     },
     {
+      "name": "skeleton",
+      "type": "registry:component",
+      "title": "Skeleton",
+      "description": "Pulse-animated placeholder block for loading states.",
+      "dependencies": ["cn"],
+      "files": [
+        {
+          "path": "src/components/skeleton.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "slider",
       "type": "registry:component",
       "title": "Slider",
@@ -189,6 +308,19 @@
       "files": [
         {
           "path": "src/components/slider.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "sonner",
+      "type": "registry:component",
+      "title": "Sonner",
+      "description": "Sonner toaster themed through the design tokens, with lucide status icons and next-themes integration.",
+      "dependencies": ["lucide-react", "next-themes", "sonner"],
+      "files": [
+        {
+          "path": "src/components/sonner.tsx",
           "type": "registry:component"
         }
       ]
@@ -215,6 +347,19 @@
       "files": [
         {
           "path": "src/components/textarea.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
+      "name": "tooltip",
+      "type": "registry:component",
+      "title": "Tooltip",
+      "description": "Base UI tooltip primitives (provider, trigger, content) with anchored positioning, an arrow, and kbd-aware padding.",
+      "dependencies": ["@base-ui/react", "cn"],
+      "files": [
+        {
+          "path": "src/components/tooltip.tsx",
           "type": "registry:component"
         }
       ]
@@ -448,6 +593,19 @@
       ]
     },
     {
+      "name": "cad-configuration-panel",
+      "type": "registry:component",
+      "title": "CAD Configuration Panel",
+      "description": "Configuration surface for parameter-table variants: the switcher radiogroup, the per-configuration override/suppressed/hidden counts table, the Formedible create form, and the CSV import/export row — every mutation stays a host callback, the parameter panel's props discipline.",
+      "registryDependencies": ["@slopcad/button", "@slopcad/formedible"],
+      "files": [
+        {
+          "path": "src/components/cad/cad-configuration-panel.tsx",
+          "type": "registry:component"
+        }
+      ]
+    },
+    {
       "name": "cad-io-dialog",
       "type": "registry:component",
       "title": "CAD Import/Export Dialog",
@@ -628,6 +786,201 @@
           "path": "src/examples/plate-workbench/manifold-wasm.d.ts",
           "type": "registry:lib",
           "target": "src/examples/plate-workbench/manifold-wasm.d.ts"
+        }
+      ]
+    },
+    {
+      "name": "agent-chat-panel",
+      "type": "registry:block",
+      "title": "Agent Chat Panel",
+      "description": "One installable agent chat surface on TanStack AI: the transcript with typed part renderers (markdown text, thinking, tool calls with readable CAD command diffs and capture galleries, diagnostics chips), the composer with its configured-until-open gate, the persistence controller, and the BYOK provider runtime (browser-direct OpenAI/Anthropic/Google/OpenRouter/openai-compatible) plus the keyless server-relay handler. Honest boundary: the host injects every dynamic thing as props - the agent config, the tool surface (name/description/zod schema plus executor), the persistence store (or null for ephemeral chat), the session slot, the document-summary getter, and optionally the whole transport (fetch, relay URL, or an adapter factory). The component never imports the host's stores or RPC client; nothing - provider, model, endpoint - is ever preselected.",
+      "registryDependencies": [
+        "@slopcad/bubble",
+        "@slopcad/button",
+        "@slopcad/input-group",
+        "@slopcad/message",
+        "@slopcad/message-scroller"
+      ],
+      "dependencies": [
+        "@slopcad/cad-core",
+        "@tanstack/ai",
+        "@tanstack/ai-anthropic",
+        "@tanstack/ai-client",
+        "@tanstack/ai-gemini",
+        "@tanstack/ai-openai",
+        "@tanstack/ai-openrouter",
+        "@tanstack/ai-react",
+        "cn",
+        "lucide-react",
+        "react-markdown",
+        "remark-gfm",
+        "zod"
+      ],
+      "files": [
+        {
+          "path": "src/agent/chat/agent-chat-panel.tsx",
+          "type": "registry:block",
+          "target": "src/agent/chat/agent-chat-panel.tsx"
+        },
+        {
+          "path": "src/agent/chat/agent-chat-controller.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/agent-chat-controller.ts"
+        },
+        {
+          "path": "src/agent/chat/composer-gate.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/composer-gate.ts"
+        },
+        {
+          "path": "src/agent/chat/status-lines.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/status-lines.ts"
+        },
+        {
+          "path": "src/agent/chat/prompt-form.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/prompt-form.tsx"
+        },
+        {
+          "path": "src/agent/chat/spinner.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/spinner.tsx"
+        },
+        {
+          "path": "src/agent/chat/safe-http-url.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/safe-http-url.ts"
+        },
+        {
+          "path": "src/agent/chat/session-slot.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/session-slot.ts"
+        },
+        {
+          "path": "src/agent/chat/parts/busy.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/busy.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/decoders.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/parts/decoders.ts"
+        },
+        {
+          "path": "src/agent/chat/parts/diagnostics-chip.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/diagnostics-chip.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/media-parts.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/media-parts.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/message-parts.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/message-parts.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/part-types.ts",
+          "type": "registry:lib",
+          "target": "src/agent/chat/parts/part-types.ts"
+        },
+        {
+          "path": "src/agent/chat/parts/structured-output-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/structured-output-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/subagent-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/subagent-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/text-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/text-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/thinking-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/thinking-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/tool-call-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/tool-call-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/tool-result-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/tool-result-part.tsx"
+        },
+        {
+          "path": "src/agent/chat/parts/ui-resource-part.tsx",
+          "type": "registry:component",
+          "target": "src/agent/chat/parts/ui-resource-part.tsx"
+        },
+        {
+          "path": "src/agent/use-agent-chat.ts",
+          "type": "registry:lib",
+          "target": "src/agent/use-agent-chat.ts"
+        },
+        {
+          "path": "src/agent/model-options.ts",
+          "type": "registry:lib",
+          "target": "src/agent/model-options.ts"
+        },
+        {
+          "path": "src/agent/tools.ts",
+          "type": "registry:lib",
+          "target": "src/agent/tools.ts"
+        },
+        {
+          "path": "src/agent/relay.ts",
+          "type": "registry:lib",
+          "target": "src/agent/relay.ts"
+        },
+        {
+          "path": "src/agent/config/store.ts",
+          "type": "registry:lib",
+          "target": "src/agent/config/store.ts"
+        },
+        {
+          "path": "src/agent/providers/index.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/index.ts"
+        },
+        {
+          "path": "src/agent/providers/openai.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/openai.ts"
+        },
+        {
+          "path": "src/agent/providers/anthropic.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/anthropic.ts"
+        },
+        {
+          "path": "src/agent/providers/google.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/google.ts"
+        },
+        {
+          "path": "src/agent/providers/openrouter.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/openrouter.ts"
+        },
+        {
+          "path": "src/agent/providers/openai-compatible.ts",
+          "type": "registry:lib",
+          "target": "src/agent/providers/openai-compatible.ts"
+        },
+        {
+          "path": "src/agent/testing/mock-provider.ts",
+          "type": "registry:lib",
+          "target": "src/agent/testing/mock-provider.ts"
         }
       ]
     }

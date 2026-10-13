@@ -1,11 +1,14 @@
 /**
- * The eight workbench WebMCP tools against the REAL domain surfaces: a
- * fresh `CadStore` over the app's own workbench session (the same session
- * factory `useWorkbenchStore` boots), the real `parseCommand` /
- * `serializeCommand` round trip, and the engine-level read paths the
- * Measurement block renders. Plus one integration mount: the REAL workbench
- * engine (worker session stubbed, the established workbench-engine test
- * pattern) with the hook registered for its lifetime.
+ * The workbench WebMCP tools against the REAL domain surfaces: a fresh
+ * `CadStore` over the app's own workbench session (the same session factory
+ * `useWorkbenchStore` boots), the real `parseCommand` / `serializeCommand`
+ * round trip, and the engine-level read paths the Measurement block
+ * renders. Plus one integration mount: the REAL workbench engine (worker
+ * session stubbed, the established workbench-engine test pattern) with the
+ * hook registered for its lifetime. The capture tool's angle math and
+ * orchestration live in ./capture-views.test.ts (node env, snapshot
+ * functions mocked); the Phase 2.2 read tools' own suite is
+ * ./document-diagnostics.test.ts.
  */
 
 import { cleanup, render } from "@testing-library/react";
@@ -43,6 +46,7 @@ import { bindWebMcpTools } from "./use-webmcp-tools";
 import {
   createWorkbenchWebMcpTools,
   useWorkbenchWebMcpTools,
+  type WorkbenchCaptureSurface,
 } from "./workbench-tools";
 
 /** The stub session the engine boots against (headless, all no-ops). */
@@ -75,7 +79,7 @@ type ToolRun =
 // The engine mounts boot the demo document (the session module's opt-in).
 window.localStorage.setItem(WORKBENCH_DEMO_SESSION_KEY, "1");
 
-/** The eight tool names, in registration order. */
+/** The twelve workbench tool names, in registration order. */
 const TOOL_NAMES = [
   "cad_get_document_summary",
   "cad_list_commands",
@@ -86,6 +90,9 @@ const TOOL_NAMES = [
   "cad_apply_commands",
   "cad_measure",
   "cad_skill",
+  "cad_capture_views",
+  "cad_get_document",
+  "cad_get_diagnostics",
 ] as const;
 
 /** The mutable live state one test surface reads through accessors. */
@@ -100,14 +107,35 @@ function freshStore(): CadStore {
   return createCadStore({ session: createCadWorkbenchDemoSession() });
 }
 
-/** Binds the nine tools over one store + mutable surface state. */
+/**
+ * The capture surface stub the non-capture tests mount: the viewport is
+ * honestly absent (null canvas), so nothing here touches the DOM. The
+ * capture tool's own tests drive a spied surface in ./capture-views.test.ts.
+ */
+function stubCaptureSurface(): WorkbenchCaptureSurface {
+  return {
+    canvas: () => null,
+    convention: () => "third-angle",
+    renderedFrames: () => 0,
+    rootId: "webmcp-test-root",
+    setUserCamera: () => {},
+    userCamera: () => null,
+  };
+}
+
+/** Binds the twelve workbench tools over one store + mutable surface state. */
 function bindTools(store: CadStore, state: TestSurfaceState): () => void {
   return bindWebMcpTools(
     createWorkbenchWebMcpTools({
       appliedState: () => state.applied,
+      capture: stubCaptureSurface(),
       commands: () => state.commands,
       measureText: () => state.measureText,
+      mode: () => "model",
+      regenerationIssue: () => null,
+      sketchSolve: () => null,
       store,
+      timeline: () => null,
     }),
   );
 }
@@ -673,13 +701,14 @@ describe("the workbench mount (real engine)", () => {
       errorId: "webmcp-test-error",
     });
     useWorkbenchWebMcpTools({
+      capture: stubCaptureSurface(),
       commands: [spyCommand("probe.engine").descriptor],
       engine,
     });
     return <div data-testid="webmcp-engine-harness" />;
   }
 
-  it("registers all nine tools for the mount and unregisters on unmount", () => {
+  it("registers all twelve tools for the mount and unregisters on unmount", () => {
     const { unmount } = render(
       <WorkbenchStoreProvider>
         <EngineHarness />

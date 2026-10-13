@@ -311,6 +311,151 @@ describe("mate and joint vocabulary", () => {
   });
 });
 
+describe("joint friction fields (Phase 67)", () => {
+  it("parses the additive viscous/Coulomb pair with keys present exactly when authored", () => {
+    const both = parseAssemblyJoint({
+      id: "jnt_bearing",
+      name: "Bearing",
+      kind: "revolute",
+      baseOccurrenceId: "occ_base",
+      occurrenceId: "occ_lid",
+      frame: { origin: [0, 0, 0], axis: [0, 0, 1] },
+      viscousDampingNPerMSPerRad: 0.002,
+      frictionLossNPerM: 0.05,
+    });
+    expect(both.ok).toBe(true);
+    if (both.ok) {
+      expect(both.value.viscousDampingNPerMSPerRad).toBe(0.002);
+      expect(both.value.frictionLossNPerM).toBe(0.05);
+    }
+    const bare = parseAssemblyJoint({
+      id: "jnt_hinge",
+      name: "Hinge",
+      kind: "revolute",
+      baseOccurrenceId: "occ_base",
+      occurrenceId: "occ_lid",
+      frame: { origin: [0, 0, 0], axis: [0, 0, 1] },
+    });
+    expect(bare.ok).toBe(true);
+    if (bare.ok) {
+      expect(Object.keys(bare.value)).not.toContain(
+        "viscousDampingNPerMSPerRad",
+      );
+      expect(Object.keys(bare.value)).not.toContain("frictionLossNPerM");
+    }
+  });
+
+  it("rides the fields on every kind, rigid included, and round-trips them", () => {
+    for (const kind of JOINT_KINDS) {
+      const frame =
+        kind === "rigid"
+          ? undefined
+          : kind === "ball"
+            ? { origin: [0, 0, 0] }
+            : { origin: [0, 0, 0], axis: [0, 0, 1] };
+      const parsed = parseAssemblyJoint({
+        id: `jnt_${kind}`,
+        name: kind,
+        kind,
+        baseOccurrenceId: "occ_base",
+        occurrenceId: "occ_lid",
+        ...(frame === undefined ? {} : { frame }),
+        viscousDampingNPerMSPerRad: 1.5,
+        frictionLossNPerM: 0.25,
+      });
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) continue;
+      expect(parsed.value.viscousDampingNPerMSPerRad).toBe(1.5);
+      expect(parsed.value.frictionLossNPerM).toBe(0.25);
+    }
+  });
+
+  it("refuses negative, non-finite, or non-numeric friction fields", () => {
+    for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY, "0.1"]) {
+      const viscous = parseAssemblyJoint({
+        id: "jnt_hinge",
+        name: "Hinge",
+        kind: "revolute",
+        baseOccurrenceId: "occ_base",
+        occurrenceId: "occ_lid",
+        frame: { origin: [0, 0, 0], axis: [0, 0, 1] },
+        viscousDampingNPerMSPerRad: bad,
+      });
+      expect(viscous).toMatchObject({
+        ok: false,
+        error: { code: "assembly/joint-frame-invalid" },
+      });
+      const loss = parseAssemblyJoint({
+        id: "jnt_hinge",
+        name: "Hinge",
+        kind: "slider",
+        baseOccurrenceId: "occ_base",
+        occurrenceId: "occ_lid",
+        frame: { origin: [0, 0, 0], axis: [1, 0, 0] },
+        frictionLossNPerM: bad,
+      });
+      expect(loss).toMatchObject({
+        ok: false,
+        error: { code: "assembly/joint-frame-invalid" },
+      });
+    }
+  });
+
+  it("adds, serializes, and re-parses a joint with friction through the document", () => {
+    const fixture = assemblyDocument();
+    const added = addJoint(fixture.document, {
+      name: "Damped hinge",
+      kind: "revolute",
+      baseOccurrenceId: fixture.firstOccurrence,
+      occurrenceId: fixture.secondOccurrence,
+      frame: { origin: [0, 0, 0], axis: [0, 0, 1] },
+      viscousDampingNPerMSPerRad: 0.002,
+      frictionLossNPerM: 0.05,
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const wire = JSON.parse(
+      JSON.stringify(serializeCadDocument(added.value.document)),
+    ) as {
+      joints?: readonly {
+        viscousDampingNPerMSPerRad?: number;
+        frictionLossNPerM?: number;
+      }[];
+    };
+    expect(wire.joints?.[0]).toMatchObject({
+      viscousDampingNPerMSPerRad: 0.002,
+      frictionLossNPerM: 0.05,
+    });
+    const reSerialized = parseCadDocument(wire);
+    expect(reSerialized.ok).toBe(true);
+    if (reSerialized.ok) {
+      expect(JSON.stringify(serializeCadDocument(reSerialized.value))).toBe(
+        JSON.stringify(serializeCadDocument(added.value.document)),
+      );
+    }
+  });
+
+  it("keeps a frictionless joint byte-identical to its pre-67 wire form", () => {
+    const fixture = assemblyDocument();
+    const added = addJoint(fixture.document, {
+      name: "Plain hinge",
+      kind: "revolute",
+      baseOccurrenceId: fixture.firstOccurrence,
+      occurrenceId: fixture.secondOccurrence,
+      frame: { origin: [0, 0, 0], axis: [0, 0, 1] },
+    });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    const wire = JSON.parse(
+      JSON.stringify(serializeCadDocument(added.value.document)),
+    ) as { joints?: readonly Record<string, unknown>[] };
+    const jointWire = wire.joints?.[0];
+    expect(jointWire !== undefined).toBe(true);
+    expect(jointWire && "viscousDampingNPerMSPerRad" in jointWire).toBe(false);
+    expect(jointWire && "frictionLossNPerM" in jointWire).toBe(false);
+  });
+});
+
 describe("joint motion algebra", () => {
   const hinge: DocumentJoint = {
     id: createJointId("jnt_hinge"),

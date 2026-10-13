@@ -86,9 +86,15 @@ export default defineConfig({
         webServer: {
           // Solo-run wiring, the projects harness's discipline: the
           // committed migrations first (the session's projects stage
-          // persists through them), then the production build and server
-          // with BETTER_AUTH_URL matching the harness port.
-          command: `pnpm --filter @slopcad/db db:migrate && pnpm build && PORT=${PORT} BETTER_AUTH_URL=${baseURL} node --env-file-if-exists=.env .output/server/index.mjs`,
+          // persists through them), then the Phase 6 agent-catalog seed
+          // (the trimmed fixture into the REAL SQLite file — the picker
+          // works with zero network), then the production build, then the
+          // supervised boot: the session-webserver supervisor starts the
+          // loopback agent-fixture server AND the production server as one
+          // tree, wiring MODEL_CATALOG_URL / OPENAI_COMPATIBLE_BASE_URL /
+          // AGENT_SERVER_AI_ALLOW_ALL for the real code paths (B1/D13 —
+          // see e2e-session/scripts/session-webserver.ts).
+          command: `pnpm --filter @slopcad/db db:migrate && node --env-file-if-exists=.env --import tsx e2e-session/scripts/seed-agent-catalog.ts && pnpm build && PORT=${PORT} BETTER_AUTH_URL=${baseURL} node --env-file-if-exists=.env --import tsx e2e-session/scripts/session-webserver.ts`,
           url: baseURL,
           timeout: 300_000,
           reuseExistingServer: false,

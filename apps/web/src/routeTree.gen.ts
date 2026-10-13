@@ -17,6 +17,7 @@ import { Route as IoRouteImport } from './routes/io'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as PerfRouteImport } from './routes/perf'
 import { Route as RenderRouteImport } from './routes/render'
+import { Route as SimGpuRouteImport } from './routes/sim-gpu'
 import { Route as SpikeRouteImport } from './routes/spike'
 import { Route as UiViewportRouteImport } from './routes/ui-viewport'
 import { Route as ViewerRouteImport } from './routes/viewer'
@@ -28,10 +29,12 @@ import { Route as WorkbenchAssemblyMotionRouteImport } from './routes/workbench-
 import { Route as WorkbenchChainRouteImport } from './routes/workbench-chain'
 import { Route as WorkbenchCompleteRouteImport } from './routes/workbench-complete'
 import { Route as WorkbenchCompleteOcctRouteImport } from './routes/workbench-complete-occt'
+import { Route as WorkbenchSimRouteImport } from './routes/workbench-sim'
 import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as WorkerFilletRouteImport } from './routes/worker-fillet'
 import { Route as WorkerOcctRouteImport } from './routes/worker-occt'
 import { Route as AuthDashboardRouteImport } from './routes/_auth/dashboard'
+import { Route as ApiAgentRelayRouteImport } from './routes/api/agent-relay'
 import { Route as ApiHealthRouteImport } from './routes/api/health'
 import { Route as ComponentsComponentIdRouteImport } from './routes/components.$componentId'
 import { Route as AuthDocumentsDocumentIdRouteImport } from './routes/_auth/documents.$documentId'
@@ -79,6 +82,11 @@ const PerfRoute = PerfRouteImport.update({
 const RenderRoute = RenderRouteImport.update({
   id: '/render',
   path: '/render',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SimGpuRoute = SimGpuRouteImport.update({
+  id: '/sim-gpu',
+  path: '/sim-gpu',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SpikeRoute = SpikeRouteImport.update({
@@ -137,6 +145,11 @@ const WorkbenchCompleteOcctRoute = WorkbenchCompleteOcctRouteImport.update({
   path: '/workbench-complete-occt',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkbenchSimRoute = WorkbenchSimRouteImport.update({
+  id: '/workbench-sim',
+  path: '/workbench-sim',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkerRoute = WorkerRouteImport.update({
   id: '/worker',
   path: '/worker',
@@ -156,6 +169,11 @@ const AuthDashboardRoute = AuthDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
   getParentRoute: () => AuthRouteRoute,
+} as any)
+const ApiAgentRelayRoute = ApiAgentRelayRouteImport.update({
+  id: '/api/agent-relay',
+  path: '/api/agent-relay',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiHealthRoute = ApiHealthRouteImport.update({
   id: '/api/health',
@@ -211,6 +229,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
+  '/sim-gpu': typeof SimGpuRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/viewer': typeof ViewerRoute
@@ -222,10 +241,12 @@ export interface FileRoutesByFullPath {
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
+  '/workbench-sim': typeof WorkbenchSimRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/api/agent-relay': typeof ApiAgentRelayRoute
   '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
@@ -244,6 +265,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
+  '/sim-gpu': typeof SimGpuRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/viewer': typeof ViewerRoute
@@ -255,10 +277,12 @@ export interface FileRoutesByTo {
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
+  '/workbench-sim': typeof WorkbenchSimRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/dashboard': typeof AuthDashboardRoute
+  '/api/agent-relay': typeof ApiAgentRelayRoute
   '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
@@ -279,6 +303,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/perf': typeof PerfRoute
   '/render': typeof RenderRoute
+  '/sim-gpu': typeof SimGpuRoute
   '/spike': typeof SpikeRoute
   '/ui-viewport': typeof UiViewportRoute
   '/viewer': typeof ViewerRoute
@@ -290,10 +315,12 @@ export interface FileRoutesById {
   '/workbench-chain': typeof WorkbenchChainRoute
   '/workbench-complete': typeof WorkbenchCompleteRoute
   '/workbench-complete-occt': typeof WorkbenchCompleteOcctRoute
+  '/workbench-sim': typeof WorkbenchSimRoute
   '/worker': typeof WorkerRoute
   '/worker-fillet': typeof WorkerFilletRoute
   '/worker-occt': typeof WorkerOcctRoute
   '/_auth/dashboard': typeof AuthDashboardRoute
+  '/api/agent-relay': typeof ApiAgentRelayRoute
   '/api/health': typeof ApiHealthRoute
   '/components/$componentId': typeof ComponentsComponentIdRoute
   '/_auth/documents/$documentId': typeof AuthDocumentsDocumentIdRoute
@@ -314,6 +341,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/perf'
     | '/render'
+    | '/sim-gpu'
     | '/spike'
     | '/ui-viewport'
     | '/viewer'
@@ -325,10 +353,12 @@ export interface FileRouteTypes {
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
+    | '/workbench-sim'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/api/agent-relay'
     | '/api/health'
     | '/components/$componentId'
     | '/documents/$documentId'
@@ -347,6 +377,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/perf'
     | '/render'
+    | '/sim-gpu'
     | '/spike'
     | '/ui-viewport'
     | '/viewer'
@@ -358,10 +389,12 @@ export interface FileRouteTypes {
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
+    | '/workbench-sim'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
     | '/dashboard'
+    | '/api/agent-relay'
     | '/api/health'
     | '/components/$componentId'
     | '/documents/$documentId'
@@ -381,6 +414,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/perf'
     | '/render'
+    | '/sim-gpu'
     | '/spike'
     | '/ui-viewport'
     | '/viewer'
@@ -392,10 +426,12 @@ export interface FileRouteTypes {
     | '/workbench-chain'
     | '/workbench-complete'
     | '/workbench-complete-occt'
+    | '/workbench-sim'
     | '/worker'
     | '/worker-fillet'
     | '/worker-occt'
     | '/_auth/dashboard'
+    | '/api/agent-relay'
     | '/api/health'
     | '/components/$componentId'
     | '/_auth/documents/$documentId'
@@ -416,6 +452,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   PerfRoute: typeof PerfRoute
   RenderRoute: typeof RenderRoute
+  SimGpuRoute: typeof SimGpuRoute
   SpikeRoute: typeof SpikeRoute
   UiViewportRoute: typeof UiViewportRoute
   ViewerRoute: typeof ViewerRoute
@@ -427,9 +464,11 @@ export interface RootRouteChildren {
   WorkbenchChainRoute: typeof WorkbenchChainRoute
   WorkbenchCompleteRoute: typeof WorkbenchCompleteRoute
   WorkbenchCompleteOcctRoute: typeof WorkbenchCompleteOcctRoute
+  WorkbenchSimRoute: typeof WorkbenchSimRoute
   WorkerRoute: typeof WorkerRoute
   WorkerFilletRoute: typeof WorkerFilletRoute
   WorkerOcctRoute: typeof WorkerOcctRoute
+  ApiAgentRelayRoute: typeof ApiAgentRelayRoute
   ApiHealthRoute: typeof ApiHealthRoute
   ComponentsComponentIdRoute: typeof ComponentsComponentIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -494,6 +533,13 @@ declare module '@tanstack/react-router' {
       path: '/render'
       fullPath: '/render'
       preLoaderRoute: typeof RenderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sim-gpu': {
+      id: '/sim-gpu'
+      path: '/sim-gpu'
+      fullPath: '/sim-gpu'
+      preLoaderRoute: typeof SimGpuRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/spike': {
@@ -573,6 +619,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkbenchCompleteOcctRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workbench-sim': {
+      id: '/workbench-sim'
+      path: '/workbench-sim'
+      fullPath: '/workbench-sim'
+      preLoaderRoute: typeof WorkbenchSimRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/worker': {
       id: '/worker'
       path: '/worker'
@@ -600,6 +653,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthDashboardRouteImport
       parentRoute: typeof AuthRouteRoute
+    }
+    '/api/agent-relay': {
+      id: '/api/agent-relay'
+      path: '/api/agent-relay'
+      fullPath: '/api/agent-relay'
+      preLoaderRoute: typeof ApiAgentRelayRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/health': {
       id: '/api/health'
@@ -694,6 +754,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   PerfRoute: PerfRoute,
   RenderRoute: RenderRoute,
+  SimGpuRoute: SimGpuRoute,
   SpikeRoute: SpikeRoute,
   UiViewportRoute: UiViewportRoute,
   ViewerRoute: ViewerRoute,
@@ -705,9 +766,11 @@ const rootRouteChildren: RootRouteChildren = {
   WorkbenchChainRoute: WorkbenchChainRoute,
   WorkbenchCompleteRoute: WorkbenchCompleteRoute,
   WorkbenchCompleteOcctRoute: WorkbenchCompleteOcctRoute,
+  WorkbenchSimRoute: WorkbenchSimRoute,
   WorkerRoute: WorkerRoute,
   WorkerFilletRoute: WorkerFilletRoute,
   WorkerOcctRoute: WorkerOcctRoute,
+  ApiAgentRelayRoute: ApiAgentRelayRoute,
   ApiHealthRoute: ApiHealthRoute,
   ComponentsComponentIdRoute: ComponentsComponentIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

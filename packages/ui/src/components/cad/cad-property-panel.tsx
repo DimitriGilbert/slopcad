@@ -26,8 +26,13 @@
  * {@link removeFeatureTransaction} (`feature.delete`) applied through the
  * store's `applyTransaction` — the same public path
  * `useCadModel().removeFeature` takes. There is no second write path. A
- * structured refusal surfaces verbatim in the panel's error region. Removal
- * is undoable like any transaction (the host's history surface owns that).
+ * structured refusal surfaces verbatim in the panel's error region: the
+ * store-backed apply unwraps a refused transaction to its command's
+ * structured `cause` (the parameter panel's {@link toOutcome} rule), so the
+ * DOMAIN's refusal — an unknown feature, a dependency conflict — is what
+ * renders, never the transaction envelope's own
+ * `transaction/command-failed` wrapper. Removal is undoable like any
+ * transaction (the host's history surface owns that).
  *
  * ## State: two documented input modes, props first
  *
@@ -61,12 +66,15 @@ import {
   type Body,
   type BodyId,
   type CadDocument,
+  type CadSession,
   type FeatureId,
   type FeatureInputRef,
   type FeatureRecord,
   type FeatureRegenerationStatus,
+  type ParseResult,
   type RegenerationStateMap,
   type SelectionReference,
+  type TransactionError,
 } from "@slopcad/cad-react";
 import { cn } from "cn";
 
@@ -142,6 +150,28 @@ export type CadPropertyRemoveOutcome =
 export type CadPropertyRemove = (
   featureId: FeatureId,
 ) => CadPropertyRemoveOutcome;
+
+/**
+ * Maps a store apply result to the remove outcome. A refused transaction
+ * carries its offending command's structured error as `cause` — the
+ * domain's own refusal (an unknown feature, a dependency conflict) — which
+ * is what the error region surfaces, verbatim; only a cause-less refusal
+ * (the transaction envelope's own shape failures) falls back to the
+ * transaction error itself. The parameter panel's identical rule.
+ */
+function toOutcome(
+  applied: ParseResult<CadSession, TransactionError>,
+): CadPropertyRemoveOutcome {
+  if (applied.ok) return { ok: true };
+  const cause = applied.error.cause;
+  return {
+    ok: false,
+    error: cause ?? {
+      code: applied.error.code,
+      message: applied.error.message,
+    },
+  };
+}
 
 /** Props of {@link CadPropertyPanel}. */
 export interface CadPropertyPanelProps {
@@ -527,14 +557,10 @@ export function CadPropertyPanel({
     onRemoveFeature ??
     (store === null
       ? undefined
-      : (featureId: FeatureId) => {
-          const applied = store.applyTransaction(
-            removeFeatureTransaction(featureId),
-          );
-          return applied.ok
-            ? { ok: true }
-            : { ok: false, error: applied.error };
-        });
+      : (featureId: FeatureId) =>
+          toOutcome(
+            store.applyTransaction(removeFeatureTransaction(featureId)),
+          ));
 
   const [removeFailure, setRemoveFailure] = useState<string | undefined>(
     undefined,

@@ -28,6 +28,10 @@ import {
   HOLE_DEFAULT_DIAMETER_MM,
 } from "../src/cad-workbench/hole";
 import {
+  SIM_FIXTURE_CHUNKS_PER_ROUND,
+  SIM_FIXTURE_FINE_SHAPE,
+} from "../src/sim-workbench/sim-grid-fixture";
+import {
   activateSketchTool,
   annotationsOf,
   assertPngs,
@@ -134,6 +138,7 @@ const PLANNED_ROUTES: readonly string[] = [
   "/io",
   "/projects",
   "/viewer",
+  "/workbench-sim",
 ];
 
 /** The one-process ledger (one worker, serial mode — no cross-process races). */
@@ -220,7 +225,8 @@ const TREE = '[data-slot="cad-model-tree"]';
 const PROPERTY = '[data-slot="cad-property-panel"]';
 const TOOLBAR = '[data-slot="cad-toolbar"]';
 
-/** The eight workbench WebMCP tools the complete page registers (Phase 7). */
+/** The eleven workbench WebMCP tools the complete page registers (Phase 7
+ * + Phase 2.1 capture + the Phase 2.2 read tools). */
 const WORKBENCH_WEBMCP_TOOLS = [
   "cad_get_document_summary",
   "cad_list_commands",
@@ -230,6 +236,32 @@ const WORKBENCH_WEBMCP_TOOLS = [
   "cad_redo",
   "cad_apply_commands",
   "cad_measure",
+  "cad_capture_views",
+  "cad_get_document",
+  "cad_get_diagnostics",
+] as const;
+
+/** The ten assembly WebMCP tools the mutable assembly pages (Phase 2.2)
+ * register — `/workbench-assembly` and `/workbench-assembly-motion`. */
+const ASSEMBLY_WEBMCP_TOOLS = [
+  "cad_get_document",
+  "cad_get_diagnostics",
+  "cad_assembly_add_occurrence",
+  "cad_assembly_remove_occurrence",
+  "cad_assembly_pattern",
+  "cad_assembly_add_mate",
+  "cad_assembly_remove_mate",
+  "cad_assembly_add_joint",
+  "cad_assembly_remove_joint",
+  "cad_assembly_check_interference",
+] as const;
+
+/** The read-only assembly set the interference fixture page (Phase 2.2)
+ * registers — its document is the fixture's constant, so no mutator mints. */
+const ASSEMBLY_READONLY_WEBMCP_TOOLS = [
+  "cad_get_document",
+  "cad_get_diagnostics",
+  "cad_assembly_check_interference",
 ] as const;
 
 /** The projects WebMCP tools the authenticated pages register (Phase 8). */
@@ -287,6 +319,132 @@ const SESSION_USER = {
   email: `session-e2e-${Date.now()}-${Math.round(Math.random() * 1e6)}@slopcad.dev`,
   password: "supercalifragilistic",
 };
+
+// ---------------------------------------------------------------------------
+// The agent-chat walk's loopback fixture (PLAN-AGENT-CHAT Phase 6, B1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The loopback agent-fixture server the harness's supervised webServer
+ * boots (`e2e-session/scripts/`): the real production code is pointed at
+ * it via `MODEL_CATALOG_URL` (catalog refresh) and
+ * `OPENAI_COMPATIBLE_BASE_URL` (client-direct runs AND the server relay),
+ * so the walk exercises real code paths with zero external network.
+ */
+const AGENT_FIXTURE_URL =
+  process.env.AGENT_FIXTURE_URL ?? "http://127.0.0.1:3213";
+
+/** The BYO key the walk configures in the browser (never crosses to us). */
+const AGENT_FIXTURE_USER_KEY = "user-loopback-key";
+
+/** One chat-completions request the loopback fixture recorded. */
+interface AgentFixtureCall {
+  readonly index: number;
+  readonly authorization: string | null;
+  readonly model: string;
+  readonly roles: readonly string[];
+  readonly declaredTools: boolean;
+}
+
+/** One scripted fixture response (exactly the control API's accepted shapes). */
+type AgentFixtureResponse =
+  | { readonly kind: "text"; readonly text: string }
+  | {
+      readonly kind: "tool-call";
+      readonly name: string;
+      readonly input: unknown;
+    }
+  | {
+      readonly kind: "http-error";
+      readonly status: number;
+      readonly message: string;
+    };
+
+/** REPLACES the fixture's scripted queue — stages never inherit scripts. */
+async function scriptAgentResponses(
+  page: Page,
+  responses: readonly AgentFixtureResponse[],
+): Promise<void> {
+  const response = await page.request.post(`${AGENT_FIXTURE_URL}/__script`, {
+    data: { replace: true, responses },
+  });
+  expect(response.ok()).toBeTruthy();
+}
+
+/** The fixture server's recorded chat-completions calls, in order. */
+async function agentFixtureCalls(page: Page): Promise<AgentFixtureCall[]> {
+  const response = await page.request.get(`${AGENT_FIXTURE_URL}/__calls`);
+  expect(response.ok()).toBeTruthy();
+  const payload: unknown = await response.json();
+  const calls = (payload as { calls?: unknown }).calls;
+  return Array.isArray(calls) ? (calls as AgentFixtureCall[]) : [];
+}
+
+/**
+ * The signed-in session's synced conversation titles, through the REAL
+ * tRPC list over the session's own cookies (the Phase 3.4 sync push's
+ * server-side evidence). Empty until the opt-in sync lands rows.
+ */
+async function syncedConversationTitles(page: Page): Promise<string[]> {
+  const response = await page.request.get("/api/trpc/agentConversations.list");
+  if (!response.ok()) {
+    return [];
+  }
+  const payload: unknown = await response.json();
+  return collectTitles(payload);
+}
+
+/** Deep-collects `title` strings off id-carrying objects (the dto's shape). */
+function collectTitles(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectTitles(entry));
+  }
+  if (typeof value !== "object" || value === null) {
+    return [];
+  }
+  const record = value as Record<string, unknown>;
+  const titles =
+    typeof record.title === "string" && typeof record.id === "string"
+      ? [record.title]
+      : [];
+  return [...titles, ...Object.values(record).flatMap(collectTitles)];
+}
+
+/** The boot plate's analytic volume with a ⌀`d` bore (mm³). */
+const bootPlateVolumeWithHole = (d: number): number =>
+  30 * 20 * 10 - Math.PI * (d / 2) ** 2 * 10;
+
+/**
+ * Waits until the chat panel's persistence work is visibly settled: the
+ * sync line GONE, twice with a beat between (the line can transiently
+ * hide between two ops of one completion pass). With the opt-in sync on,
+ * every conversation append rides the outbox and this line is the UI's
+ * own "there is unsynced work" signal — the store commits at run
+ * completion, so navigating while work is pending can tear an in-flight
+ * OPFS write (the resume then finds the conversation but not its rows).
+ */
+async function waitForAgentSyncSettled(page: Page): Promise<void> {
+  const line = page.getByTestId("agent-chat-sync-status");
+  const hidden = async (): Promise<boolean> =>
+    (await line.count()) === 0 || (await line.isVisible()) === false;
+  await expect.poll(hidden, { timeout: 15_000 }).toBe(true);
+  await page.waitForTimeout(400);
+  await expect.poll(hidden, { timeout: 15_000 }).toBe(true);
+}
+
+/** The serialized `parameter.set` the walk's tool call applies (⌀11 mm). */
+const AGENT_SET_HOLE_11 = {
+  formatVersion: 1,
+  type: "parameter.set",
+  id: "param_hole_diameter",
+  value: { dimension: "length", unit: "mm", value: 11 },
+} as const;
+
+/** A deliberately malformed command (wrong format version — D9's chip). */
+const AGENT_BAD_COMMAND = {
+  ...AGENT_SET_HOLE_11,
+  formatVersion: 99,
+} as const;
 
 // ---------------------------------------------------------------------------
 // The stages
@@ -815,9 +973,7 @@ test("s05d delete refusals and the command-vocabulary delete", async ({
       .locator(PROPERTY)
       .getByRole("button", { name: "Delete feature" })
       .click();
-    await expect(page.locator(PROPERTY)).toContainText(
-      "transaction/command-failed",
-    );
+    await expect(page.locator(PROPERTY)).toContainText("document/in-use");
     await expect(page.locator(PROPERTY)).toContainText(
       'referenced by feature "feat_rotate_plate"',
     );
@@ -3041,6 +3197,1255 @@ test("s24 the render fixture recomputes projection, pixels, and volume", async (
   });
 });
 
+test("s24b the sim workbench renders the demo body as a grid (Phase 62)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24b workbench-sim", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    const volumeText = await waitForSettledScene(page, SIM_ROOT);
+    // The demo body: the plate minus its ⌀12 through bore.
+    const analytic = 80 * 48 * 6 - Math.PI * 6 * 6 * 6;
+    expect(Math.abs(Number(volumeText) - analytic)).toBeLessThanOrEqual(
+      analytic * 0.005,
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE GRID (the phase's user-visible outcome): the boot application
+    // commits its chunk round — awaited on the data-sim-* counters,
+    // never a timeout — and the applied grid state pins the resolved
+    // shape with the part provably inside the lattice.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND),
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-notifications",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND),
+    );
+    const bootState = JSON.parse(
+      (await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-grid-state")) ?? "{}",
+    ) as {
+      readonly semantic: string;
+      readonly rounds: number;
+      readonly shape: readonly number[];
+      readonly occupiedNodes: number | null;
+    };
+    expect(bootState.semantic).toBe("occupancy");
+    expect(bootState.rounds).toBe(1);
+    expect(bootState.shape).toEqual([...SIM_FIXTURE_FINE_SHAPE]);
+    expect(bootState.occupiedNodes).not.toBeNull();
+    expect(bootState.occupiedNodes ?? 0).toBeGreaterThan(0);
+    expect(bootState.occupiedNodes ?? 0).toBeLessThan(51 * 35 * 10);
+
+    // The SDF flag: the other semantic's stream applies as its own
+    // committed round; toggling back re-publishes the occupancy field.
+    await page.locator("#sim-sdf-toggle").check();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND * 2),
+    );
+    await expect
+      .poll(async () => {
+        const state = JSON.parse(
+          (await page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-grid-state")) ?? "{}",
+        ) as { readonly semantic: string; readonly unit: string };
+        return state.semantic === "signed-distance" && state.unit === "mm";
+      })
+      .toBe(true);
+    await page.locator("#sim-sdf-toggle").uncheck();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND * 3),
+    );
+    await expect
+      .poll(async () => {
+        const state = JSON.parse(
+          (await page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-grid-state")) ?? "{}",
+        ) as { readonly semantic: string; readonly rounds: number };
+        return state.semantic === "occupancy" && state.rounds === 2;
+      })
+      .toBe(true);
+  });
+});
+
+test("s24c the sim workbench runs a wind tunnel through the real engine (Phase 63)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24c workbench-sim wind tunnel", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the Formedible scenario form's defaults ARE the demo wind
+    // tunnel — one submit saves the record into the document's
+    // simulations section (law S1).
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the real 2D LBM engine in the sim worker, awaited on the
+    // committed-application counters and the run family — never a
+    // timeout. The default budget (240 steps) publishes a preview round
+    // every 10 steps plus the final one.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "240",
+    );
+    const appliedChunks = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    // The Phase 62 grid round (8 chunks of the 2 mm fine preset) plus
+    // the run's preview rounds (240/10 = 24 rounds of one chunk at the
+    // 26×18 slice) — the exact committed-application arithmetic.
+    expect(appliedChunks).toBe(8 + 24);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // The live overlay mounted from the run's committed preview rounds
+    // (the velocity-magnitude slice; law S6 — overlay application IS
+    // committed application).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+
+    // PERSIST: the completed run landed in the local store, keyed by its
+    // scenario-snapshot hash, and the panel lists it.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      "1",
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-hash"),
+      )
+      .toMatch(/^[0-9a-f]{8}$/);
+    await expect(page.getByTestId("workbench-sim-run-row")).toHaveCount(1);
+
+    // EXPORT: the decimated .vti field series (one honest file per
+    // field block) and the force-history CSV — deterministic bytes, and
+    // the counters prove the paths ran.
+    await page.locator("#workbench-sim-export-vti").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-vti",
+      "8",
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      "1",
+    );
+  });
+});
+
+test("s24d the sim workbench compares two persisted runs (Phase 63d)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24d workbench-sim comparison", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // TWO KNOWN-DIFFERENT RUNS: the default tunnel at two inlet speeds
+    // — 0.01 and 0.015 m/s, both inside the heavily-confined demo
+    // plate's stable regime (the tunnel is ~70% blocked by the plate;
+    // 0.02 m/s already diverges the coarse lattice) — as DISTINCTLY
+    // NAMED scenario records (the document declines duplicate names),
+    // so two distinct persisted runs to compare. This stage runs both
+    // itself so it never depends on s24c's residue. (The scenario
+    // count is the PAGE's working document — this load starts empty,
+    // so the saves count 1 and 2; the run list and the compare selects
+    // below read the STORE, which persists across loads.)
+    await page
+      .getByRole("textbox", { name: "Scenario name", exact: true })
+      .fill("tunnel-slow");
+    await page.getByLabel("Inlet speed (m/s)").fill("0.01");
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await page
+      .getByRole("textbox", { name: "Scenario name", exact: true })
+      .fill("tunnel-faster");
+    await page.getByLabel("Inlet speed (m/s)").fill("0.015");
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // Select the two NEW runs — the chronologically last two in the
+    // compare selects (the run list is the store's chronological list).
+    const runIds = await page
+      .locator("#workbench-sim-compare-a option")
+      .evaluateAll((options) =>
+        options
+          .map((option) => (option as HTMLOptionElement).value)
+          .filter((value) => value !== ""),
+      );
+    expect(runIds.length).toBeGreaterThanOrEqual(2);
+    const runA = runIds[runIds.length - 2] ?? "";
+    const runB = runIds[runIds.length - 1] ?? "";
+    await page.locator("#workbench-sim-compare-a").selectOption(runA);
+    await page.locator("#workbench-sim-compare-b").selectOption(runB);
+
+    // The comparison fixture, awaited on the ledger counters — never a
+    // timeout: the diff's chunk round commits through the same
+    // committed-application ledger every other overlay rides, so the
+    // applied-field-chunks counter advances by EXACTLY the diff round's
+    // chunk count (8 — the fixture round shape over the 26×18 slice).
+    const chunksBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    await page.locator("#workbench-sim-compare").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-status",
+      "ready",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-runs",
+      `a:${runA}|b:${runB}`,
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(chunksBefore + 8),
+    );
+    await expect(page.getByTestId("workbench-sim-compare-error")).toHaveText(
+      "",
+    );
+
+    // The FIELD DIFF is rendered: the diffed field id, a nonzero
+    // relative L2 (two known-different inlet speeds), and the diff
+    // stats line in the panel — and the viewport's compare overlay
+    // mounted from the committed round (coolwarm diverging paint over
+    // the symmetric window).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-diff",
+      "speed",
+    );
+    const l2 = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-compare-l2"),
+    );
+    expect(l2).toBeGreaterThan(0);
+    await expect(page.getByTestId("workbench-sim-compare-diff")).toContainText(
+      "diff speed",
+    );
+
+    // The CURVE OVERLAY is rendered as data: both quantities, both
+    // runs — four deterministic polylines inside the compare panel.
+    await expect(
+      page.getByTestId("workbench-sim-compare-curves"),
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-testid="workbench-sim-compare-curves"] polyline[data-series]',
+      ),
+    ).toHaveCount(4);
+  });
+});
+
+test("s24e a gpu-preferred flow scenario completes on the CPU fallback path (Phase 64b)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24e workbench-sim gpu fallback", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR a GPU-PREFERRED scenario: the Formedible backend radio
+    // selects the "gpu" preference (the Phase 64 provider door), one
+    // submit saving it into the document's simulations section (law S1).
+    // (The role query resolves the Base UI radio ITEM — the accessible
+    // span; the twin native input the label also names is aria-hidden.)
+    await page
+      .getByRole("textbox", { name: "Scenario name", exact: true })
+      .fill("tunnel-gpu-preferred");
+    await page.getByRole("radio", { name: "GPU (Phase 64 provider)" }).click();
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // The run list is the law-S7 STORE's chronological list, which
+    // persists across this session's earlier sim stages — the honest
+    // assertion is that this run ADDS one, not an absolute count.
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+
+    // RUN: this harness launches WITHOUT the WebGPU door
+    // (`--enable-unsafe-webgpu` is off — law S5's CPU-oracle stance),
+    // so the router's feature detect finds no adapter and serves the
+    // scenario's CPU twin — the documented Phase 64a fallback. The run
+    // completes end to end, awaited on the committed-application
+    // counters and the honest backend record, never a timeout.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "240",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+  });
+});
+
+test("s24f the sim workbench runs the stove through the real thermal engine — sealed and coupled (Phase 65)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24f workbench-sim thermal stove", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR the SEALED stove: the thermal form's defaults ARE the demo
+    // (steady equilibrium, linearized radiation, the equilibrium
+    // boundary's ambient h) — one submit saves the record with its
+    // kind-locked thermal stance into the document's simulations
+    // section (law S1). The run list is the STORE's chronological list
+    // (it persists across this session's earlier sim stages), so the
+    // honest assertions are deltas, not absolute counts.
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    const chunksBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    await page.getByRole("button", { name: "Save thermal scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN the sealed conduction solve in the sim worker, awaited on the
+    // committed-application counters and the run family — never a
+    // timeout. The engine streams one progress hop per stage and ONE
+    // final temperature preview round (the 65a/65b whole-run driver
+    // discipline), so the chunk counter advances by exactly the round.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    // The temperature overlay mounted from the committed round (law S6).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    const sealedChunks = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(sealedChunks).toBeGreaterThan(chunksBefore);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR + RUN the COUPLED stove: the same form flips to the
+    // transient buoyant plume (fixed-temperature room walls at ambient,
+    // Boussinesq coupling, a short interactive budget) — the second
+    // mode of the demo, reachable from the same surface. The checkbox
+    // is the Base UI styled control (the hidden native twin carries the
+    // same label — the ROLE query resolves the visible one alone).
+    await page.getByLabel("Thermal scenario name").fill("stove-plume");
+    await page.getByRole("radio", { name: "Transient march" }).click();
+    await page
+      .getByRole("checkbox", {
+        name: "Conjugate: convect to the fluid (buoyant plume)",
+      })
+      .click();
+    await page.getByLabel("Transient duration (s)").fill("20");
+    await page.getByLabel("Sample interval (s)").fill("5");
+    await page.getByRole("button", { name: "Save thermal scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24g the sim workbench runs the motor-driven fan demo through the 3D engine (Phase 66)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24g workbench-sim fan demo", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // SWITCH the demo model to the fan-in-tube: the radio preset
+    // re-dispatches the fan document (the cad-jsx tube + rotor through
+    // the real Manifold worker) and resets the working document — the
+    // model fork's own settle, awaited on the scene family.
+    await page.locator("#sim-demo-model-fan").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fan",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the fan form's defaults ARE the motor-driven demo — the
+    // demo motor selection, MRF, four blades — one submit saves the
+    // flow3d stance into the document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save fan scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the 3D reference engine in the sim worker — the ω ladder of
+    // streamed MRF rungs, the operating-point solve, and the
+    // verification rung at the FOUND speed, awaited on the run family
+    // and the committed-application counters, never a timeout. The
+    // progress total spans the ladder's four rungs plus the verify
+    // rung (5 × 120 steps).
+    await page.locator("#workbench-sim-run").click();
+    // The sweep is five rungs (~8-10 s under the session's video
+    // load) — the wait stays attribute-driven (never a sleep); the
+    // longer allowance only clears the 10 s default's race with the
+    // rung ladder's honest duration.
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "600",
+    );
+    // The 3D speed overlay mounted from the verify rung's committed
+    // preview rounds (law S6 — overlay application IS committed
+    // application).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE OPERATING POINT IS VISIBLE: the found rpm sits strictly
+    // inside the motor's domain (0 < rpm < 40 no-load — the demo
+    // motor's own number, `FAN_DEMO_MOTOR_NUMBERS.noLoadSpeedRpm`),
+    // the BPF is the blades arithmetic at it, and the S9 fan Re line
+    // flags the demo's low-Re regime (law S9's honesty field on the
+    // surface).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-fan-chart",
+      "ready",
+    );
+    const foundRpm = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-fan-op-rpm"),
+    );
+    expect(foundRpm).toBeGreaterThan(1);
+    expect(foundRpm).toBeLessThan(39);
+    const bpf = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-fan-bpf-hz"),
+    );
+    expect(bpf).toBeCloseTo((4 * foundRpm) / 60, 2);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-fan-flags",
+      "low-reynolds-fan",
+    );
+
+    // THE CHART IS RENDERED: both curve polylines and the operating
+    // point's superimposed marker, from the persisted result's own
+    // history pair (SVG-as-data, the 63d family).
+    await expect(page.getByTestId("workbench-sim-fan-chart")).toBeVisible();
+    await expect(
+      page
+        .locator(
+          '[data-testid="workbench-sim-fan-chart"] polyline[data-series]',
+        )
+        .first(),
+    ).toBeVisible();
+    const seriesCount = await page
+      .locator('[data-testid="workbench-sim-fan-chart"] polyline[data-series]')
+      .count();
+    expect(seriesCount).toBe(2);
+    expect(
+      await page
+        .locator('[data-testid="workbench-sim-fan-chart"] g[data-marker]')
+        .count(),
+    ).toBe(1);
+
+    // PERSIST + EXPORT: the completed run landed in the store, and the
+    // export paths remain working for 3D runs — the .vti field series
+    // (one honest file per 3D field block) and the CSV (the ladder's
+    // load/motor pair).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const vtiBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-vti"),
+    );
+    await page.locator("#workbench-sim-export-vti").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-vti",
+      String(vtiBefore + 5),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24h the sim workbench runs the slider-crank dynamics demo and animates it (Phase 67)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24h workbench-sim dynamics slider-crank", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // SWITCH the demo model to the slider-crank: the radio preset
+    // re-dispatches the mechanism document (the cad-jsx bodies plus
+    // the joint records and the demo motor through the real Manifold
+    // worker) and resets the working document.
+    await page.locator("#sim-demo-model-slider").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "slider",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the dynamics form's defaults ARE the demo — the demo
+    // motor on the crank joint, the reference kernel, the 2 s march
+    // at 1 ms — one submit saves the dynamics stance into the
+    // document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save dynamics scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the real dynamics engine in the sim worker — the mechanism
+    // wire across the compile seam, the stepped march, the dissipation
+    // preview round through the committed-application ledger (law S6).
+    // Awaited on the run family and the counters, never a timeout:
+    // the march is 2000 steps of 1 ms (2 s of mechanism time), well
+    // inside the allowance the fan ladder already established.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "2000",
+    );
+    // The dissipation preview round painted the live overlay.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "dissipated-power",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // ANIMATE: the mechanism-motion surface mounted from the run's own
+    // joint histories (the assembly-motion path — applyMotionJoint per
+    // scrub, deterministic). The march carries 50 samples (2 s at the
+    // 40 ms cadence); scrubbing a later sample turns the crank and
+    // retracts the piston, and scrubbing back is exact.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-motion",
+      "ready",
+    );
+    const motion = page.getByTestId("workbench-sim-mechanism-motion");
+    await expect(motion).toBeVisible();
+    await expect(
+      page.locator("[data-testid='workbench-sim-mechanism-motion'] svg"),
+    ).toHaveAttribute("data-sim-motion-samples", "50");
+    await expect(
+      page.locator("[data-testid='workbench-sim-mechanism-motion'] svg"),
+    ).toHaveAttribute("data-sim-motion-sample", "0");
+    await page.getByTestId("workbench-sim-motion-scrub").fill("25");
+    await expect(
+      page.locator("[data-testid='workbench-sim-mechanism-motion'] svg"),
+    ).toHaveAttribute("data-sim-motion-sample", "25");
+    const crankDeg = Number(
+      await page
+        .locator("[data-testid='workbench-sim-mechanism-motion'] svg")
+        .getAttribute("data-sim-motion-crank-deg"),
+    );
+    expect(crankDeg).toBeGreaterThan(360);
+    const slideMm = Number(
+      await page
+        .locator("[data-testid='workbench-sim-mechanism-motion'] svg")
+        .getAttribute("data-sim-motion-slide-mm"),
+    );
+    expect(slideMm).toBeLessThan(0);
+
+    // PERSIST + EXPORT: the completed run landed in the store, and the
+    // joint-histories CSV (time first, the joint series) exports.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24i the sim workbench runs the combustion demos — the Otto engine's charts and the stove with fire (Phase 68)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24i workbench-sim combustion", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // --- THE ENGINE DEMO: the 0D Otto cycle. Switch the demo model to
+    // the engine — the 0D chamber needs no geometry, so the PLATE
+    // document stays the rendered scene (the honest split: the panel's
+    // physics is the authored stance).
+    await page.locator("#sim-demo-model-engine").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "engine",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the engine form's defaults ARE the demo — the 0.5 L
+    // single at CR 10, 1500 rpm, WOT stoichiometric, Woschni walls,
+    // the published Chen–Flynn friction, and the spark sweep from 10°
+    // to 50° — one submit saves the kind-locked combustion stance into
+    // the document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save engine scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the combustion engine in the sim worker — the base cycle
+    // plus the 8-interval spark sweep (measured ≈ 3.5 s on the CPU
+    // oracle), awaited on the run family and the counters, never a
+    // timeout; the allowance matches the fan ladder's precedent.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE CHARTS ARE RENDERED (SVG-as-data, the fan-chart family): the
+    // P-vs-crank trace with its motored twin, the torque curve with
+    // BOTH families (indicated + brake), and the knock boundary's
+    // marker on the spark sweep — every polyline from the persisted
+    // result's own histories.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-engine-chart",
+      "ready",
+    );
+    const imepBar = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-imep-bar"),
+    );
+    expect(imepBar).toBeGreaterThan(8);
+    expect(imepBar).toBeLessThan(25);
+    const bmepBar = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-bmep-bar"),
+    );
+    expect(bmepBar).toBeGreaterThan(5);
+    expect(bmepBar).toBeLessThan(imepBar);
+    const brakeTorque = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-brake-torque"),
+    );
+    expect(brakeTorque).toBeGreaterThan(20);
+    const knockBoundary = await page
+      .locator(`#${SIM_ROOT}`)
+      .getAttribute("data-sim-engine-knock-boundary");
+    expect(knockBoundary).not.toBe("");
+    expect(Number(knockBoundary)).toBeGreaterThanOrEqual(10);
+    expect(Number(knockBoundary)).toBeLessThanOrEqual(50);
+    const chart = page.getByTestId("workbench-sim-engine-chart");
+    await expect(chart).toBeVisible();
+    const seriesCount = await chart.locator("polyline[data-series]").count();
+    expect(seriesCount).toBe(4);
+    expect(
+      await chart.locator("line[data-marker='knock-boundary']").count(),
+    ).toBe(1);
+    // The pressure-trace preview round applied through the ledger
+    // (law S6 — the chunk counter advanced past the fixture's own).
+    const chunksAfterEngine = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(chunksAfterEngine).toBeGreaterThan(0);
+
+    // PERSIST + EXPORT: the run landed in the store, and the CSV door
+    // exports BOTH tables (the crank-first cycle trace and the
+    // axis-first sweep).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // --- THE STOVE WITH FIRE: the 65 stove body with a fire source.
+    // The fire form's defaults ARE the demo (lit methane in the
+    // chamber, steel body, the 65-family solve fields) — the same
+    // save → run → persist path, now with the reactor's wall heat
+    // coupling into the conduction march.
+    await page.locator("#sim-demo-model-fire").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fire",
+    );
+    await page.getByRole("button", { name: "Save fire scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The temperature overlay mounted from the committed round (law S6)
+    // — the fire's heat, painted through the 62 family.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24j the sim workbench holds the load — the bracket through the structural engine (Phase 69)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24j workbench-sim structural bracket", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // Switch the demo model to the bracket — the L-bracket's two
+    // bodies (base plate + upright wall) become the rendered scene the
+    // structural form's material assignments address.
+    await page.locator("#sim-demo-model-bracket").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "bracket",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+
+    // AUTHOR: the structural form's defaults ARE the demo — steel, the
+    // bolted zMin base face, the −y tip load at the wall's top, dry —
+    // one submit saves the kind-locked stance into the document's
+    // simulations section (law S1).
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the structural engine in the sim worker — the FULL-3D
+    // voxelization, the Jacobi-CG solve, and both preview rounds
+    // applied through the ledger (measured ≈ 1 s on the CPU oracle),
+    // awaited on the run family and the counters, never a timeout.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    // The displacement overlay mounted from the committed round (law
+    // S6 — the engine publishes von Mises first, displacement LAST, so
+    // the live overlay deterministically names it).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "displacement",
+    );
+    const chunksAfterDry = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(chunksAfterDry).toBeGreaterThan(0);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+
+    // THE SCALAR FAMILY (machine-readable — Phase 70's objective
+    // material): the FoS arithmetic, the tip deflection, and the von
+    // Mises scale, all as attributes off the persisted summary.
+    const dryFos = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-fos"),
+    );
+    const dryDeflection = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-deflection-mm"),
+    );
+    const dryVonMises = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-vonmises-mpa"),
+    );
+    expect(dryFos).toBeGreaterThan(10);
+    expect(dryDeflection).toBeGreaterThan(0.01);
+    expect(dryVonMises).toBeGreaterThan(4);
+
+    // THE OVERLAY FIELD TOGGLE (fixture data — a radio over the
+    // completed result's own two blocks): von Mises repaints and the
+    // attribute family follows.
+    await page.locator("#sim-structural-field-von-mises").check();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-structural-field",
+      "von-mises",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await page.locator("#sim-structural-field-displacement").check();
+
+    // --- THE SELF-WEIGHT VARIANT: the body-force switch. The same
+    // bracket with gravity on deflects measurably more (the measured
+    // ×1.005 — asserted strictly greater, never a rewrite).
+    await page.getByLabel("Structural scenario name").fill("bracket-heavy");
+    await page
+      .getByRole("checkbox", {
+        name: "Self-weight (the scenario's gravity vector)",
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    // The save→run barrier: the submit is async, and Run must not race
+    // the landing selection (the attribute is the commit).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The completion gate that cannot go stale: the run COUNT moves
+    // only when this run persists (a status poll can sample the
+    // previous run's lingering "completed" before this run sets
+    // "compiling" — the scalar reads must not race that window).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+      )
+      .toBe("completed");
+    const heavyDeflection = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-deflection-mm"),
+    );
+    expect(heavyDeflection).toBeGreaterThan(dryDeflection);
+
+    // --- THE HOT BRACKET (the CHT→structural chain): the stance chains
+    // a thermal run's temperature field; the run-to-run selection rides
+    // the native select over the persisted run list (the stove runs the
+    // session persisted at s24f), and the ΔT drives thermal-expansion
+    // loading past the dry run's stress scale.
+    await page.getByLabel("Structural scenario name").fill("bracket-hot");
+    await page
+      .getByRole("checkbox", {
+        name: "Thermal chain (a thermal run's temperature field)",
+      })
+      .click();
+    const thermalSelect = page.locator("#workbench-sim-thermal-chain");
+    const thermalOptions = await thermalSelect.locator("option").all();
+    expect(thermalOptions.length).toBeGreaterThan(1);
+    const thermalValue = await thermalOptions[1]?.getAttribute("value");
+    expect(thermalValue).toBeTruthy();
+    await thermalSelect.selectOption(thermalValue as string);
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    // The save→run barrier again: the hot scenario must BE the selected
+    // record before Run fires (the first harness run raced this and
+    // re-ran the heavy twin — the exact-number tell).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "3",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The same stale-proof gate: the hot run's count increment, then
+    // the completed status, then the scalars.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 3),
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+      )
+      .toBe("completed");
+    const hotVonMises = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-vonmises-mpa"),
+    );
+    // Measured (2026-10-13): the form's sealed stove settles at ~301 K,
+    // so the chained ΔT ≈ 8 K drives the bracket to ~30 MPa ≈ 4× the
+    // dry stress — thermal-dominated, banded with margin (the s24j
+    // measurement, not the engine test's artificial uniform field).
+    expect(hotVonMises).toBeGreaterThan(2 * dryVonMises);
+    expect(hotVonMises).toBeGreaterThan(20);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // PERSIST + EXPORT: the CSV door exports the summary-scalar table
+    // (a statics run's value IS its scalars — no time axis); the run's
+    // count was already gated above.
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24k the sim workbench evolves a study — the Pareto front, its ledger counters, and a replay (Phase 70)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24k workbench-sim optimization study", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // The bracket substrate (s24j's model): the cad-jsx parameters the
+    // study's genome addresses ARE the document's table.
+    await page.locator("#sim-demo-model-bracket").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "bracket",
+    );
+    const scenariosBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-scenario-count"),
+    );
+
+    // AUTHOR — the demo study scenario (the peg-height load over the
+    // genome-grown domain), then the study row itself through the
+    // Formedible form (the bracket demo presets ARE the defaults; the
+    // scenario combobox picks the just-saved record — the template
+    // dialog's combobox-option discipline).
+    await page.locator("#workbench-sim-study-demo-scenario").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      String(scenariosBefore + 1),
+    );
+    await page
+      .getByRole("combobox", { name: "Scenario (every candidate runs it)" })
+      .click();
+    await page
+      .getByRole("option", { name: "bracket-study-load (structural)" })
+      .click();
+    await page.getByRole("button", { name: "Save study" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-count",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // RUN — the campaign through the main-thread driver: every
+    // candidate re-drives the document through the real kernel worker
+    // (the viewport shows each evaluation), every generation notice
+    // lands through the committed-application ledger (law S6), and the
+    // front persists as a law-S7 family. Awaited on the status family,
+    // never a timeout.
+    await page.locator("#workbench-sim-study-run").click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-study-run-status"),
+        { timeout: 180_000 },
+      )
+      .toBe("completed");
+    // The evaluation count is DISTINCT genomes (the engine's cache
+    // excludes plateau collisions): the 18-slot budget spends 6 — the
+    // integer-lattice offspring collide with their parents at this
+    // seed, the fitness-landscape caveat demonstrated live. Determinism
+    // makes the number exact (the same seed ⇒ the same front, every
+    // run).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-evaluations",
+      "6",
+    );
+    // The ledger's optimization-generation counter advanced through the
+    // committed applications (the attribute exists only after one).
+    const generation = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-optimization-generation"),
+    );
+    expect(generation).toBeGreaterThanOrEqual(0);
+    // The Pareto view rendered: the scatter with its front circles and
+    // the store's campaign family.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-pareto",
+      "ready",
+    );
+    await expect(
+      page.locator(
+        '[data-testid="workbench-sim-pareto-scatter"] circle[data-front="true"]',
+      ),
+    ).not.toHaveCount(0);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-campaign-families",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // REPLAY — one front candidate: its exact genome re-driven visibly,
+    // the identical objective vector back (law S2/S5 determinism).
+    const replayButton = page.locator('[id^="workbench-sim-replay-"]').first();
+    await replayButton.click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-study-replay-status"),
+        { timeout: 120_000 },
+      )
+      .toBe("ok");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-replay-matches",
+      "true",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // EXPORT — the Pareto front as deterministic CSV.
+    await page.locator("#workbench-sim-study-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-export-csv",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // FAN — the co-optimization demo's own save path (Phase 70b): a
+    // FRESH fan document through the preset's LOAD path (the study motor
+    // ensured beside the demo's own BEFORE the study form maps — the
+    // ordering a pre-ensuring unit fixture can never see), the demo
+    // study scenario, then the study row through the Formedible form
+    // with the fan presets (the bore gene, the motor gene, the
+    // air-per-watt objective) — saved, no pre-ensure. The page reload
+    // gives the study form a fresh, untouched mount (a touched form
+    // keeps its values across model switches — TanStack's reseed gate),
+    // so the fan presets ARE the form's values, exactly as a user
+    // switching to the fan model on a fresh load sees them.
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    await waitForSettledScene(page, SIM_ROOT);
+    await page.locator("#sim-demo-model-fan").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fan",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await page.locator("#workbench-sim-study-demo-scenario").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page
+      .getByRole("combobox", { name: "Scenario (every candidate runs it)" })
+      .click();
+    await page.getByRole("option", { name: "fan-study (flow)" }).click();
+    await page.getByRole("button", { name: "Save study" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-count",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {
@@ -3332,11 +4737,11 @@ test("s26c the TSX model exchange: import a .tsx model, export TSX, round-trip t
   });
 });
 
-test("s27 the WebMCP agent surface: registry snapshots on the workbench and the projects pages", async ({
+test("s27 the WebMCP agent surface: registry snapshots on the workbench, projects, and assembly pages", async ({
   sessionPage: page,
 }) => {
   await stage("s27 webmcp agent surface", async () => {
-    // THE WORKBENCH SNAPSHOT: the eight CAD tools the complete page
+    // THE WORKBENCH SNAPSHOT: the eleven CAD tools the complete page
     // mounts, each with a JSON object input schema and honest usage
     // annotations (the seam is snapshot-only — see readWebMcpSnapshot).
     await openComplete(page);
@@ -3355,6 +4760,9 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench and the 
     expect(
       annotationsOf(workbenchTools, "cad_get_document_summary"),
     ).toMatchObject({ readOnlyHint: true });
+    expect(annotationsOf(workbenchTools, "cad_capture_views")).toMatchObject({
+      readOnlyHint: true,
+    });
     extra("webmcp-workbench-surface");
 
     // THE PROJECTS SNAPSHOT: the three workspace tools the authenticated
@@ -3380,6 +4788,60 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench and the 
       consequentialHint: true,
     });
     extra("webmcp-projects-surface");
+
+    // THE ASSEMBLY SNAPSHOTS (Phase 2.2): the two mutable assembly pages
+    // register the ten-tool set (reads + the occurrence/pattern/mate/joint
+    // doors + the interference report); the interference fixture's document
+    // is the page's constant, so it registers the reads and the report only.
+    await page.goto("/workbench-assembly");
+    await expect(page.locator("#assembly-workbench-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_WEBMCP_TOOLS]);
+    const assemblyTools = await readWebMcpSnapshot(page);
+    for (const tool of assemblyTools) {
+      expect(schemaTypeOf(tool)).toBe("object");
+    }
+    expect(annotationsOf(assemblyTools, "cad_get_document")).toMatchObject({
+      readOnlyHint: true,
+    });
+    expect(
+      annotationsOf(assemblyTools, "cad_assembly_add_occurrence"),
+    ).toMatchObject({ consequentialHint: true });
+    extra("webmcp-assembly-surface");
+
+    await page.goto("/workbench-assembly-motion");
+    await expect(page.locator("#assembly-motion-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_WEBMCP_TOOLS]);
+    extra("webmcp-assembly-motion-surface");
+
+    await page.goto("/workbench-assembly-interference");
+    await expect(page.locator("#interference-workbench-root")).toHaveAttribute(
+      "data-cad-hydrated",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        (await readWebMcpSnapshot(page)).map((tool) => tool.name),
+      )
+      .toEqual([...ASSEMBLY_READONLY_WEBMCP_TOOLS]);
+    const interferenceTools = await readWebMcpSnapshot(page);
+    expect(
+      annotationsOf(interferenceTools, "cad_assembly_check_interference"),
+    ).toMatchObject({ readOnlyHint: true });
+    extra("webmcp-assembly-interference-surface");
   });
 });
 
@@ -4226,6 +5688,9 @@ test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports
       createCadWorkbenchDemoSession(),
       new Map(),
       null,
+      {},
+      null,
+      new Set(),
     );
     const payload = await encodeNativeForShare(nativeText);
     const sharePayloadUrl = `/viewer#${payload}`;
@@ -4382,6 +5847,463 @@ test("s33 the viewer: a shared part renders, re-drives, refuses, shares, exports
     }
 
     extra("viewer-share-embed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The agent chat walk (PLAN-AGENT-CHAT Phase 6): ONE serial user, the real
+// production server, the real SQLite file, and the loopback agent fixture
+// (see the fixture block near the top) — client-direct runs against the
+// scripted OpenAI-compatible endpoint, the catalog refresh against the
+// fixture's trimmed models.dev JSON, the relay against the same endpoint
+// with the ENV key. Zero external network, zero page.route seams.
+// ---------------------------------------------------------------------------
+
+test("s34 agent chat: the right-sidebar view (D16), settings, and the four palette commands", async ({
+  sessionPage: page,
+}) => {
+  await stage("s34 agent chat view + settings + palette commands", async () => {
+    await openComplete(page);
+    const dock = page.getByTestId("workbench-panels-dock");
+    await expect(dock).toHaveAttribute("data-agent-view", "sidebar");
+    await expect(page.getByTestId("right-sidebar-view-switch")).toBeVisible();
+
+    // D16: the segmented switch flips the dock to the chat; the panels
+    // column is hidden, never unmounted.
+    await page.getByTestId("right-sidebar-view-chat").click();
+    await expect(dock).toHaveAttribute("data-agent-view", "chat");
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+
+    // D5: unconfigured is honest — the composer is disabled WITH a reason
+    // and the empty state points at settings.
+    const composer = page.getByLabel("Chat message");
+    await expect(composer).toBeDisabled();
+    await expect(page.getByTestId("agent-chat-empty")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Pick a provider and a model in agent settings — nothing is preselected.",
+      ),
+    ).toBeVisible();
+
+    // THE FOUR PALETTE COMMANDS (the manifest entries this phase adds):
+    // the toggle round-trips the view through the menu row itself.
+    await runCommand(page, COMPLETE_ROOT, "agent-chat-toggle");
+    await expect(dock).toHaveAttribute("data-agent-view", "sidebar");
+    await runCommand(page, COMPLETE_ROOT, "agent-chat-toggle");
+    await expect(dock).toHaveAttribute("data-agent-view", "chat");
+    cover("agent-chat-toggle");
+
+    // The settings sheet opens through its palette row; the seeded catalog
+    // (zero network) feeds the picker for a NAMED provider, and the model
+    // is chosen through it — nothing preselected, nothing typed by hand.
+    await runCommand(page, COMPLETE_ROOT, "agent-settings");
+    const dialog = page.getByTestId("agent-settings-dialog");
+    await expect(dialog).toBeVisible();
+    cover("agent-settings");
+    await page.getByLabel("Provider", { exact: true }).click();
+    await page.getByRole("option", { name: "OpenAI", exact: true }).click();
+    const modelField = page.getByLabel("Model", { exact: true });
+    await modelField.click();
+    // The catalog option buttons carry the model id beneath the label.
+    const catalogOption = dialog.locator("button:has(span.text-xs)").first();
+    await expect(catalogOption).toBeVisible();
+    await catalogOption.click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(dialog).toBeHidden();
+    extra("agent-settings-catalog-picker");
+
+    // D7 + the palette refresh command: force-refresh the configured named
+    // provider against the loopback fixture's models.dev JSON — the REAL
+    // refresh path runs (fetch → filter → replace rows), and the sheet
+    // reports the outcome.
+    await runCommand(page, COMPLETE_ROOT, "agent-catalog-refresh");
+    cover("agent-catalog-refresh");
+    await runCommand(page, COMPLETE_ROOT, "agent-settings");
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("agent-settings-refresh-row")).toContainText(
+      "Catalog refetched.",
+    );
+
+    // D14: reconfigure onto the BYO endpoint — the endpoint's OWN /models
+    // list (browser-direct, the user's key, CORS against the loopback)
+    // feeds the picker; sync is opted in for the persistence stages.
+    await page.getByLabel("Provider", { exact: true }).click();
+    await page
+      .getByRole("option", { name: "OpenAI-compatible endpoint" })
+      .click();
+    await page.getByPlaceholder("sk-…").fill(AGENT_FIXTURE_USER_KEY);
+    await page.getByLabel("Endpoint base URL").fill(`${AGENT_FIXTURE_URL}/v1`);
+    // The raw model id field remembers the openai choice from the first
+    // save and would OVERRIDE the picker (D5's explicit-string rule), so
+    // it is emptied for the endpoint's own model to be the pick.
+    await page.getByLabel("Model id", { exact: true }).fill("");
+    await page.getByTestId("agent-settings-refetch-endpoint").click();
+    // The picker's dropdown opens on focus; its options arrive from the
+    // re-fetched endpoint list (async, debounced). The remembered Model
+    // field still carries the openai pick, which would FILTER the endpoint
+    // list — it is cleared so the empty query lists the endpoint's models.
+    await modelField.fill("");
+    await modelField.click();
+    const endpointOption = dialog.getByRole("button", {
+      name: "fixture-primary",
+      exact: true,
+    });
+    await expect(endpointOption).toBeVisible();
+    await endpointOption.click();
+    await page
+      .getByRole("switch", { name: "Sync conversations to the server" })
+      .click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(dialog).toBeHidden();
+
+    // Configured (D5): the composer opens and the model slot names the
+    // provider + model pair the picker chose.
+    await expect(composer).toBeEnabled();
+    await expect(
+      page.getByRole("button", { name: "Open agent settings" }),
+    ).toContainText("openai-compatible · fixture-primary");
+    extra("agent-settings-endpoint-picker");
+  });
+});
+
+test("s35 agent client-direct run: a scripted tool call changes the real document", async ({
+  sessionPage: page,
+}) => {
+  await stage("s35 agent tool loop on the real store", async () => {
+    // A fresh boot plate (⌀8 bore); the chat view persisted from s34.
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    await expect
+      .poll(async () =>
+        Number(await rootAttribute(page, "data-cad-rendered-volume")),
+      )
+      .toBeCloseTo(BOOT_PLATE_VOLUME, -1);
+
+    // The scripted wire: a model-emitted cad_apply_commands tool call,
+    // then the text turn the continuation (with the tool result) answers.
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_apply_commands",
+        input: { commands: [AGENT_SET_HOLE_11] },
+      },
+      { kind: "text", text: "The hole diameter is now 11 mm." },
+    ]);
+    const callBaseline = (await agentFixtureCalls(page)).length;
+    await page
+      .getByLabel("Chat message")
+      .fill("Set the hole diameter to 11 mm.");
+    await page.getByRole("button", { name: "Send message" }).click();
+
+    // The request side renders the applied command (D4's display-only diff).
+    await expect(
+      page.getByTestId("agent-tool-call-part").first(),
+    ).toContainText("Apply 1 command");
+    await expect(page.getByTestId("agent-command-row").first()).toContainText(
+      "param_hole_diameter = 11 mm",
+    );
+    // The loop auto-continued and the assistant's final text arrived.
+    await expect(
+      page.getByText("The hole diameter is now 11 mm."),
+    ).toBeVisible();
+
+    // THE DOCUMENT CHANGED through the real store and the real command
+    // path: the settled volume is the boot plate with the ⌀11 bore.
+    await expect
+      .poll(async () =>
+        Number(await rootAttribute(page, "data-cad-rendered-volume")),
+      )
+      .toBeCloseTo(bootPlateVolumeWithHole(11), -1);
+    await waitForRootSettle(page, COMPLETE_ROOT);
+
+    // The wire proves the loop: call #1 declared the tools and carried the
+    // USER's key (D1 — the browser called the endpoint itself); call #2
+    // fed the executed tool's result back as a tool-role message.
+    const runCalls = (await agentFixtureCalls(page)).slice(callBaseline);
+    expect(runCalls).toHaveLength(2);
+    expect(runCalls[0]?.declaredTools).toBe(true);
+    expect(runCalls[0]?.authorization).toBe(`Bearer ${AGENT_FIXTURE_USER_KEY}`);
+    expect(runCalls[1]?.roles).toContain("tool");
+    await waitForAgentSyncSettled(page);
+    extra("agent-client-tool-loop");
+  });
+});
+
+test("s36 agent image feedback: cad_capture_views single view, then multi-angle (D10)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s36 agent capture views", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    // The OPFS resume is async (worker + WASM under SwiftShader): the
+    // prior conversation's tail must be back BEFORE the next send, or the
+    // controller's documented live-work-wins fence would start a second
+    // conversation for the incoming message.
+    await expect(page.getByText("The hole diameter is now 11 mm.")).toBeVisible(
+      { timeout: 15_000 },
+    );
+
+    // ONE view — the common case. The capture runs the page's own camera
+    // overlay + frame-settle + live-canvas machinery under SwiftShader.
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_capture_views",
+        input: { views: [{ preset: "iso" }] },
+      },
+      { kind: "text", text: "Captured the isometric view." },
+    ]);
+    await page
+      .getByLabel("Chat message")
+      .fill("Capture the current model from the iso view.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(page.getByTestId("agent-view-label")).toHaveText("iso");
+    await expect(page.getByTestId("agent-capture-gallery")).toBeVisible();
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(1);
+
+    // SEVERAL angles in ONE call (D10's option): the four standard views,
+    // frame-settled per view, the user's camera restored on exit.
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_capture_views",
+        input: {
+          views: [
+            { preset: "front" },
+            { preset: "top" },
+            { preset: "right" },
+            { preset: "iso" },
+          ],
+        },
+      },
+      { kind: "text", text: "Captured four angles in one call." },
+    ]);
+    await page
+      .getByLabel("Chat message")
+      .fill("Capture front, top, right, and iso in one call.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(
+      page.getByText("Captured four angles in one call."),
+    ).toBeVisible();
+    // 1 (previous gallery) + 4 (this run) images, the gallery's summary
+    // naming all four captured views in order.
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(5);
+    const gallery = page.getByTestId("agent-capture-gallery").last();
+    await expect(gallery).toContainText(
+      "Captured 4 views: view-front.png, view-top.png, view-right.png, view-iso.png.",
+    );
+    await expect(gallery.getByTestId("agent-captured-view")).toHaveCount(4);
+    // The restored camera leaves the scene settled.
+    await waitForRootSettle(page, COMPLETE_ROOT);
+    await waitForAgentSyncSettled(page);
+    extra("agent-capture-views");
+  });
+});
+
+test("s37 agent tool errors: the deliberately bad command surfaces the D9 diagnostics", async ({
+  sessionPage: page,
+}) => {
+  await stage("s37 agent diagnostics + error turn", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    // The resumed conversation's tail (see s36): one conversation, resumed
+    // before the next send.
+    await expect(
+      page.getByText("Captured four angles in one call."),
+    ).toBeVisible({ timeout: 15_000 });
+    // A fresh page load boots the ⌀8 plate (the s35 edit lived in that
+    // page's store); the transcript, not the document, is what persists.
+    const settledVolume = Number(
+      await rootAttribute(page, "data-cad-rendered-volume"),
+    );
+    expect(settledVolume).toBeCloseTo(BOOT_PLATE_VOLUME, -1);
+
+    // A deliberately malformed command (wrong format version): the strict
+    // parser refuses, NOTHING applies, and the refusal surfaces BOTH as
+    // the refused row on the request side and as the structured error part
+    // rendered by the diagnostics chip (code + message, severity-colored).
+    await scriptAgentResponses(page, [
+      {
+        kind: "tool-call",
+        name: "cad_apply_commands",
+        input: { commands: [AGENT_BAD_COMMAND] },
+      },
+      { kind: "text", text: "That command was refused; nothing was applied." },
+    ]);
+    await page
+      .getByLabel("Chat message")
+      .fill("Apply this deliberately malformed command.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    const refusedRow = page.locator(
+      '[data-testid="agent-command-row"][data-refused="true"]',
+    );
+    await expect(refusedRow).toContainText("formatVersion 1");
+    const chip = page.getByTestId("agent-diagnostic-chip");
+    await expect(chip).toHaveAttribute("data-severity", "error");
+    await expect(chip).toContainText("command/version-unsupported");
+    await expect(chip).toContainText("formatVersion 1");
+    await expect(
+      page.getByText("That command was refused; nothing was applied."),
+    ).toBeVisible();
+    // The document was NOT mutated by the refused batch.
+    await expect
+      .poll(async () =>
+        Number(await rootAttribute(page, "data-cad-rendered-volume")),
+      )
+      .toBeCloseTo(BOOT_PLATE_VOLUME, -1);
+    extra("agent-diagnostics-chip");
+
+    // THE ERROR TURN: a provider failure on the next run surfaces as the
+    // run's error line (never silent, never fake success). A 400 — the
+    // OpenAI SDK auto-retries 5xx, which would burn the one scripted
+    // response and then hit the fixture's loud unscripted 500.
+    await scriptAgentResponses(page, [
+      {
+        kind: "http-error",
+        status: 400,
+        message: "fixture provider exploded",
+      },
+    ]);
+    await page.getByLabel("Chat message").fill("This one will fail upstream.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    const errorLine = page.getByTestId("agent-chat-error");
+    await expect(errorLine).toBeVisible();
+    await expect(errorLine).toContainText("fixture provider exploded");
+    await waitForAgentSyncSettled(page);
+    extra("agent-error-turn");
+  });
+});
+
+test("s38 agent chat persistence: drag-resize persists, view switch and reload restore (D16/D3)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s38 agent resize + persistence + sync push", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    // The resumed conversation's tail (see s36): the bad-command exchange.
+    await expect(
+      page.getByText("Apply this deliberately malformed command."),
+    ).toBeVisible({ timeout: 15_000 });
+    const dock = page.getByTestId("workbench-panels-dock");
+    const dockWidth = async (): Promise<number> =>
+      dock.evaluate((element) => element.getBoundingClientRect().width);
+    const widthBefore = await dockWidth();
+
+    // DRAG-RESIZE (D16): pointer capture on the separator handle, dragged
+    // left — the right-anchored dock widens.
+    const handleBox = await page
+      .getByTestId("right-sidebar-resize-handle")
+      .boundingBox();
+    if (handleBox === null) throw new Error("the resize handle has no box");
+    const handleY = handleBox.y + handleBox.height / 2;
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleY);
+    await page.mouse.down();
+    await page.mouse.move(handleBox.x - 120, handleY, { steps: 8 });
+    await page.mouse.up();
+    const widthDragged = await dockWidth();
+    expect(widthDragged).toBeGreaterThan(widthBefore);
+
+    // RELOAD: the size persists, the chat view persists, and the whole
+    // transcript restores from the OPFS-backed store (the 3.1 spike's
+    // contract — one context, reload round-trip).
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+    await expect
+      .poll(dockWidth, { timeout: 15_000 })
+      .toBeCloseTo(widthDragged, 0);
+    await expect(
+      page.getByText("The hole diameter is now 11 mm."),
+    ).toBeVisible();
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(5);
+
+    // VIEW SWITCH away and back: the panels return with their state (the
+    // fresh boot's ⌀8 parameter) and the chat restores its transcript.
+    await page.getByTestId("right-sidebar-view-panels").click();
+    await expect(dock).toHaveAttribute("data-agent-view", "sidebar");
+    await expect(page.getByTestId("agent-chat-panel")).toHaveCount(0);
+    await expect(page.getByLabel("holeDiameter", { exact: true })).toHaveValue(
+      "8",
+    );
+    await page.getByTestId("right-sidebar-view-chat").click();
+    await expect(dock).toHaveAttribute("data-agent-view", "chat");
+    await expect(
+      page.getByText("The hole diameter is now 11 mm."),
+    ).toBeVisible();
+    extra("agent-sidebar-resize-persistence");
+
+    // SYNC PUSH (D3, opt-in since s34): the local conversation reached the
+    // server through the real tRPC mutations — titled by its first user
+    // message, listed for the signed-in session user.
+    await expect
+      .poll(async () => syncedConversationTitles(page), { timeout: 15_000 })
+      .toContain("Set the hole diameter to 11 mm.");
+    extra("agent-sync-push");
+  });
+});
+
+test("s39 agent conversation clear: local rows and the synced server copy", async ({
+  sessionPage: page,
+}) => {
+  await stage("s39 agent conversation clear", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+
+    // The clear rides its palette row (the manifest command), not the
+    // header button.
+    await runCommand(page, COMPLETE_ROOT, "agent-conversation-clear");
+    cover("agent-conversation-clear");
+    await expect(page.getByText("The hole diameter is now 11 mm.")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("agent-captured-view")).toHaveCount(0);
+    await expect(page.getByTestId("agent-chat-header")).toContainText(
+      "Agent chat",
+    );
+
+    // The synced server copy went with it (the outbox's delete drain).
+    await expect
+      .poll(async () => syncedConversationTitles(page), { timeout: 15_000 })
+      .toEqual([]);
+    await waitForAgentSyncSettled(page);
+    extra("agent-conversation-clear");
+  });
+});
+
+test("s40 agent server mode: the real relay against the loopback (env key, never the user's)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s40 agent server relay", async () => {
+    await openComplete(page);
+    await expect(page.getByTestId("agent-chat-panel")).toBeVisible();
+
+    // Server mode (D2/D13): the option exists for this signed-in user
+    // under the harness's AGENT_SERVER_AI_ALLOW_ALL posture; the relay is
+    // the REAL server function calling the loopback with the ENV pair.
+    await runCommand(page, COMPLETE_ROOT, "agent-settings");
+    const dialog = page.getByTestId("agent-settings-dialog");
+    await expect(dialog).toBeVisible();
+    await page.getByLabel("Mode", { exact: true }).click();
+    await page.getByRole("option", { name: "Server (slopcad relay)" }).click();
+    await page.getByRole("button", { name: "Save settings" }).click();
+    await expect(dialog).toBeHidden();
+
+    const callBaseline = (await agentFixtureCalls(page)).length;
+    await scriptAgentResponses(page, [
+      { kind: "text", text: "Server-side reply through the real relay." },
+    ]);
+    await page.getByLabel("Chat message").fill("Answer from the server relay.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await expect(
+      page.getByText("Server-side reply through the real relay."),
+    ).toBeVisible();
+
+    // The provider call was made by the RELAY with the ENV key — and the
+    // user's browser-stored key never crossed to our server (D1/D2).
+    const relayCalls = (await agentFixtureCalls(page)).slice(callBaseline);
+    expect(relayCalls).toHaveLength(1);
+    expect(relayCalls[0]?.authorization).toBe("Bearer fixture-env-key");
+    expect(relayCalls[0]?.model).toBe("fixture-primary");
+    extra("agent-server-relay");
   });
 });
 

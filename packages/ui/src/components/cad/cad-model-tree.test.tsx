@@ -737,6 +737,81 @@ describe("CadModelTree assembly section (Phase 50)", () => {
     ).not.toBeNull();
   });
 
+  it("keeps a depth-2 sub-assembly row in the roving-tabindex list", () => {
+    // The regression: the flat rows array only ever took ONE level of
+    // assembly children while renderRow recursed arbitrarily, so a
+    // depth-2 row rendered but was keyboard-unreachable (its index in the
+    // list was -1 — ArrowDown reset to the first row, ArrowUp no-opped).
+    render(
+      <CadModelTree
+        document={createDocument(createDocumentId("doc_tree_asm4"))}
+        assembly={{
+          nodes: [
+            {
+              key: "occ_000001",
+              label: "Kit",
+              source: "document",
+              sourceName: "kit",
+              children: [
+                {
+                  key: "occ_000001/occ_000002",
+                  label: "Motor",
+                  source: "component",
+                  sourceName: "nema17",
+                  children: [
+                    {
+                      key: "occ_000001/occ_000002/occ_000003",
+                      label: "Rotor",
+                      source: "body",
+                      sourceName: "plate",
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    const kit = row("occ_000001");
+    const motor = row("occ_000001/occ_000002");
+    const rotor = row("occ_000001/occ_000002/occ_000003");
+    expect(rotor.getAttribute("aria-level")).toBe("3");
+    kit.focus();
+    expect(document.activeElement).toBe(kit);
+
+    // ArrowDown walks Kit → Motor → Rotor: the grandchild takes focus.
+    fireEvent.keyDown(kit, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(motor);
+    fireEvent.keyDown(motor, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(rotor);
+
+    // ArrowUp walks back up through the same rows.
+    fireEvent.keyDown(rotor, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(motor);
+    fireEvent.keyDown(motor, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(kit);
+
+    // End lands on the last VISIBLE row — the grandchild — which carries
+    // the roving tabindex; Home returns to the first.
+    fireEvent.keyDown(kit, { key: "End" });
+    expect(document.activeElement).toBe(rotor);
+    expect(rotor.getAttribute("tabindex")).toBe("0");
+    fireEvent.keyDown(rotor, { key: "Home" });
+    expect(document.activeElement).toBe(kit);
+
+    // Collapsing the root drops the whole branch from the list AND the
+    // DOM: the Kit row is the only visible one, so End stays on it.
+    fireEvent.keyDown(kit, { key: "ArrowLeft" });
+    expect(
+      document.querySelector(
+        '[data-node-key="occ_000001/occ_000002/occ_000003"]',
+      ),
+    ).toBeNull();
+    fireEvent.keyDown(kit, { key: "End" });
+    expect(document.activeElement).toBe(kit);
+  });
+
   it("renders no assembly rows when the prop is absent", () => {
     let cadDocument = createDocument(createDocumentId("doc_tree_asm3"));
     cadDocument = requireOk(

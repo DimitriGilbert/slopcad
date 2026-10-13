@@ -349,7 +349,12 @@ export interface JointFrame {
 /**
  * An assembly joint record: one occurrence moves relative to a base
  * occurrence through the joint kind's remaining DOF about the joint
- * frame.
+ * frame. Phase 67's friction ruling (ROADMAP-SIM §7.10) adds two
+ * OPTIONAL friction fields — the `DocumentMaterialRecord` thermal
+ * fields' additive discipline: absent means the joint simply does not
+ * carry one, the dynamics door consumes a PRESENT field in the unit of
+ * its DOF flavour (below), and no geometry kernel ever sees them (the
+ * record stays analysis-free at the consumer layer).
  */
 export interface DocumentJoint {
   readonly id: JointId;
@@ -361,6 +366,20 @@ export interface DocumentJoint {
   /** The occurrence the joint mobilizes. */
   readonly occurrenceId: OccurrenceId;
   readonly frame?: JointFrame;
+  /**
+   * The viscous damping coefficient — N·m·s/rad on a joint's rotational
+   * DOF, N·s/m on a translational one (the per-DOF-flavour reading of
+   * the ruling's rotational unit, the same discipline MuJoCo's
+   * kind-neutral `damping` attribute uses); absent = undamped. Finite ≥ 0.
+   */
+  readonly viscousDampingNPerMSPerRad?: number;
+  /**
+   * The Coulomb friction-loss magnitude — N·m against a rotational DOF's
+   * motion, N against a translational one (the ruling's friction-loss
+   * torque); absent = frictionless. Finite ≥ 0. Breakaway is this same
+   * value: the Phase 67 posture states no separate stiction model.
+   */
+  readonly frictionLossNPerM?: number;
 }
 
 /**
@@ -395,6 +414,8 @@ export function parseAssemblyJoint(
     baseOccurrenceId?: unknown;
     occurrenceId?: unknown;
     frame?: unknown;
+    viscousDampingNPerMSPerRad?: unknown;
+    frictionLossNPerM?: unknown;
   };
   const id = parseJointId(record.id);
   if (!id.ok) {
@@ -458,6 +479,19 @@ export function parseAssemblyJoint(
       ),
     );
   }
+  const friction = parseJointFriction(record);
+  if (friction === undefined) {
+    return fail(
+      mateError(
+        ASSEMBLY_MATE_ERROR_CODES.jointFrameInvalid,
+        "A joint's friction fields must be finite non-negative numbers when present (viscous damping N·m·s/rad, friction loss N·m — each consumed in its DOF flavour's unit).",
+        {
+          viscousDampingNPerMSPerRad: record.viscousDampingNPerMSPerRad,
+          frictionLossNPerM: record.frictionLossNPerM,
+        },
+      ),
+    );
+  }
   if (kind === "rigid") {
     if (record.frame !== undefined) {
       return fail(
@@ -474,6 +508,7 @@ export function parseAssemblyJoint(
       kind,
       baseOccurrenceId: base.value,
       occurrenceId: moved.value,
+      ...friction,
     });
   }
   if (
@@ -508,6 +543,7 @@ export function parseAssemblyJoint(
       baseOccurrenceId: base.value,
       occurrenceId: moved.value,
       frame: { origin: [...origin] },
+      ...friction,
     });
   }
   if (!isFiniteTriple(frameRecord.axis)) {
@@ -536,7 +572,42 @@ export function parseAssemblyJoint(
     baseOccurrenceId: base.value,
     occurrenceId: moved.value,
     frame: { origin: [...origin], axis: [...axis] },
+    ...friction,
   });
+}
+
+/**
+ * Parses the additive friction pair (Phase 67, §7.10) off a joint wire
+ * record: each field is optional, but a PRESENT one must be a finite
+ * non-negative number. Returns the spreadable partial record (each key
+ * present exactly when authored, keeping the wire form canonical), or
+ * `undefined` when a present field is invalid (the caller declines).
+ */
+function parseJointFriction(record: {
+  viscousDampingNPerMSPerRad?: unknown;
+  frictionLossNPerM?: unknown;
+}):
+  | {
+      readonly viscousDampingNPerMSPerRad?: number;
+      readonly frictionLossNPerM?: number;
+    }
+  | undefined {
+  const viscous = parseNonNegativeField(record.viscousDampingNPerMSPerRad);
+  const loss = parseNonNegativeField(record.frictionLossNPerM);
+  if (viscous === null || loss === null) return undefined;
+  return {
+    ...(viscous === undefined ? {} : { viscousDampingNPerMSPerRad: viscous }),
+    ...(loss === undefined ? {} : { frictionLossNPerM: loss }),
+  };
+}
+
+/** A present field must be finite ≥ 0; absent is `undefined`; bad is `null`. */
+function parseNonNegativeField(input: unknown): number | undefined | null {
+  if (input === undefined || input === null) return undefined;
+  if (typeof input !== "number" || !Number.isFinite(input) || input < 0) {
+    return null;
+  }
+  return input;
 }
 
 // ---------------------------------------------------------------------------

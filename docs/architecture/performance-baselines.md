@@ -181,7 +181,34 @@ The hardening sweep's perf-epoch condition — "full `PERF_BASELINE=1`
 re-record if new metrics accumulated" — evaluates to NO-OP at this tip:
 a mechanical diff of `e2e-perf/budgets.json`'s 24 budget keys against
 this file's 24 metric rows closes exactly in both directions, so no
-metric accumulated since the recording epoch and there is nothing new to
-record. The old rows stand untouched, and `test:perf`'s enforcing gate
+metric accumulated since the recording epoch and there is nothing new
+to record. The old rows stand untouched, and `test:perf`'s enforcing gate
 remains the green evidence that the recorded budgets still hold on the
 current build.
+
+## Phase 63 addition (2026-10-08) — the LBM kernel-stepping budget
+
+ROADMAP-SIM Phase 63's validation asks for the kernel's "initial perf
+budget recorded via the sanctioned `PERF_BASELINE=1 pnpm test:perf` mode
+only". The mode existed (above); one metric joined it, recorded the
+sanctioned way on this machine (same environment as every row above):
+
+| Metric                                   | Fixture | N   | Median | p10–p90     | Budget | Headroom rationale                                |
+| ---------------------------------------- | ------- | --- | ------ | ----------- | ------ | ------------------------------------------------- |
+| `kernel.lbm2d.referenceGrid.stepBatchMs` | /perf   | 7   | 240.8  | 236.0–256.1 | 750    | 3.1× median; 2.9× p90 — the batch quantizes large |
+
+The measurement: the Phase 63 D2Q9 reference kernel (pure deterministic
+TS, `@slopcad/sim-flow`) at the roadmap's reference preview grid — a
+512×256 wind tunnel around a cylinder slice (D = 96 cells, 37.5 %
+blockage), TRT at τ⁺ ≈ 0.6, ν chosen for that τ⁺ (≈4.5× real air) —
+stepped in timed batches of 10 steps after a 10-step warmup, in-page
+with `performance.now()` like every other `/perf` metric. One batch's wall time IS the pure stepping cost
+(the stepper is synchronous), so the budget guards exactly the compute
+share of a streaming-preview frame at the reference grid; a divergence
+inside the probe fails it loudly rather than publishing a fabricated
+timing. Budget rationale: batches of ten ~24 ms steps quantize far above
+the sub-millisecond metrics' noise floor, so the headroom ratio carries
+the gate alone (3.1× median, 2.9× the recorded p90; a regression that
+doubles the median trips it with room to spare). The 24 Phase 29 rows
+stand untouched; this is the budgets file's 25th key, and the mechanical
+diff of the next epoch check closes against 25.

@@ -22,6 +22,13 @@
  * Decoding accepts the payload with or without the leading `#` and sniffs
  * the encoding tag, so a `1b` link made by a fallback browser decodes
  * everywhere.
+ *
+ * The route is public and deliberately framable by any page, so the
+ * fragment is fully attacker-chosen input; decoding is therefore BOUNDED
+ * — a ceiling on the accepted payload text and a ceiling on the inflated
+ * output — so a crafted deflate bomb is refused by arithmetic and lands
+ * in the structured error state, never an out-of-memory tab (see
+ * {@link SHARE_PAYLOAD_MAX_CHARS} and {@link SHARE_INFLATE_MAX_BYTES}).
  */
 
 /** The fragment format version (bumped when the encoding ever changes). */
@@ -36,6 +43,26 @@ const TAG_PLAIN = "b";
 /** What the UI tells the user about link size (honest limits, no surprises). */
 export const SHARE_FORMAT_NOTE =
   "Share links carry the whole part in the URL (deflate-compressed, a few KB for a typical part). Very large documents can outgrow browser URL limits.";
+
+/**
+ * The longest base64 fragment body the decoder accepts: 8 MiB (2²³
+ * characters). The payload rides one URL navigation and browsers refuse
+ * URLs far shorter than this anyway, while a real part's native text is
+ * 10–20 KB (a few KB compressed) — so anything longer is not a share
+ * link but an input bomb. Checked before any base64 decode or inflate,
+ * the way the 3MF importer pre-checks a declared size before inflating.
+ */
+export const SHARE_PAYLOAD_MAX_CHARS = 2 ** 23;
+
+/**
+ * The most bytes one decode may inflate to: 64 MiB (2²⁶) of UTF-8 native
+ * text — orders of magnitude beyond any real document, generous enough
+ * that no legitimate link ever trips it. Enforced as a running counter
+ * inside the read loop (the streaming twin of zlib's `maxOutputLength`
+ * the importer passes), so a deflate bomb's allocation stops at the cap
+ * instead of draining the whole expansion into memory first.
+ */
+export const SHARE_INFLATE_MAX_BYTES = 2 ** 26;
 
 /** A decode refusal: the tag/version shape or the bytes themselves. */
 export type ShareDecodeResult =
@@ -95,17 +122,49 @@ function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
   });
 }
 
-/** Drains a stream into one byte array. */
-async function drain(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+/**
+ * Internal control-flow carrier: thrown by the bounded drain the moment
+ * the inflated-output ceiling is crossed, and caught at the single decode
+ * entry point so the public function stays total — a structured refusal,
+ * never an escaping opaque error (the 3MF importer's `ImportReject`
+ * pattern). Never escapes `decodeNativeFromShare`.
+ */
+class InflateCapExceeded extends Error {
+  constructor(bytes: number) {
+    super(
+      `payload inflates past the ${SHARE_INFLATE_MAX_BYTES}-byte output cap (saw ${bytes})`,
+    );
+    this.name = "InflateCapExceeded";
+  }
+}
+
+/**
+ * Drains a stream into one byte array. `maxBytes` is the running
+ * accumulation ceiling: the moment the summed chunk lengths cross it, the
+ * reader is cancelled (the pipe stops inflating) and an
+ * {@link InflateCapExceeded} thrown — a decompression bomb is stopped by
+ * arithmetic mid-loop, allocating at most the cap, never the full
+ * expansion. Unbounded by default: the encode path drains its own
+ * trusted, input-sized output.
+ */
+async function drain(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes = Number.POSITIVE_INFINITY,
+): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
+  let total = 0;
   const reader = stream.getReader();
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    if (value !== undefined) chunks.push(value);
+    if (value === undefined) continue;
+    total += value.length;
+    if (total > maxBytes) {
+      void reader.cancel().catch(() => undefined);
+      throw new InflateCapExceeded(total);
+    }
+    chunks.push(value);
   }
-  let total = 0;
-  for (const chunk of chunks) total += chunk.length;
   const out = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
@@ -134,12 +193,14 @@ async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   return drain(streamOf(bytes).pipeThrough(pair));
 }
 
-/** Inflates a deflate-raw payload through the platform stream. */
+/** Inflates a deflate-raw payload through the platform stream, bounded
+ * by the share decode output cap (untrusted input — see
+ * {@link SHARE_INFLATE_MAX_BYTES}). */
 async function inflateRaw(bytes: Uint8Array): Promise<Uint8Array> {
   const pair = new DecompressionStream(
     "deflate-raw",
   ) as unknown as CompressionPair;
-  return drain(streamOf(bytes).pipeThrough(pair));
+  return drain(streamOf(bytes).pipeThrough(pair), SHARE_INFLATE_MAX_BYTES);
 }
 
 /**
@@ -168,8 +229,11 @@ export function buildSharePath(payload: string): string {
 
 /**
  * Decodes a fragment payload (with or without the leading `#`) back to the
- * native text. Refusals are structured: an unknown version/encoding tag or
- * undecodable bytes never surface as a thrown opaque error.
+ * native text. Refusals are structured: an unknown version/encoding tag,
+ * an oversized payload ({@link SHARE_PAYLOAD_MAX_CHARS}), undecodable
+ * bytes, or an inflate past the output cap
+ * ({@link SHARE_INFLATE_MAX_BYTES}) never surface as a thrown opaque
+ * error — the caller's `setLoadError` degrade renders them instead.
  */
 export async function decodeNativeFromShare(
   fragment: string,
@@ -185,6 +249,14 @@ export async function decodeNativeFromShare(
   const rest = payload.slice(FORMAT_VERSION.length + 2);
   if (version !== FORMAT_VERSION || separator !== "." || rest === "") {
     return { ok: false, error: `unknown share format: ${payload.slice(0, 8)}` };
+  }
+  // The declared-size pre-check: refuse an oversized fragment by
+  // arithmetic, before any base64 decode or inflate can allocate.
+  if (rest.length > SHARE_PAYLOAD_MAX_CHARS) {
+    return {
+      ok: false,
+      error: `share payload of ${rest.length} characters exceeds the ${SHARE_PAYLOAD_MAX_CHARS}-character cap`,
+    };
   }
   let bytes: Uint8Array;
   try {

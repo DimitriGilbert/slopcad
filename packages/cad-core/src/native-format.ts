@@ -20,6 +20,8 @@
  *   },
  *   regeneration: SerializedRegenerationStateMap,
  *   rollback?: { afterFeatureId: string | null }, // Phase 20, optional — see below
+ *   suppressedFeatures?: FeatureId[],           // optional, additive like rollback
+ *   drawing?: SerializedDrawingDocument,        // optional, additive like rollback
  * }
  * ```
  *
@@ -27,7 +29,7 @@
  * stamps and their own parsers; the native envelope carries the single
  * `CAD_NATIVE_FORMAT_VERSION` stamp and evolves on its own schedule.
  *
- * ## The three persistence decisions
+ * ## The persistence decisions
  *
  * - **History: the transaction log AND the document state, dual-persisted
  *   with a replay check.** The Phase 7 architecture keeps a snapshot per
@@ -73,6 +75,18 @@
  *   has. The marker deliberately persists OUTSIDE the transaction log:
  *   it gates execution, not the document, so there is no command to replay
  *   (see `feature-history.ts`).
+ *
+ * - **Suppression: authoring state persists under the marker's discipline.**
+ *   The suppressed-feature set (the timeline's suppress action) is
+ *   page-level authoring data outside the transaction log — there is no
+ *   command to replay, exactly like the marker — so it persists as an
+ *   OPTIONAL `suppressedFeatures` envelope field: emitted only when
+ *   non-empty, as SORTED ids clamped to the features the document declares
+ *   (a stale id — its feature deleted by an undo — never persists), so the
+ *   same suppression state always serializes to identical bytes. Absent
+ *   means an empty set: every pre-field file loads with nothing
+ *   suppressed, and an old reader of a suppressing file ignores the
+ *   unknown field and loads the document.
  *
  * - **References: stable ones persist, synthetic ones are structurally
  *   absent.** Feature input references (parameters, features, bodies — all
@@ -141,6 +155,9 @@ import {
   currentDocument,
 } from "./history";
 import { parseAssemblyJoint, parseAssemblyMate } from "./mates";
+import { parseDocumentMotor } from "./motors";
+import { parseSimScenario } from "./simulation";
+import { parseSimStudy } from "./study";
 import {
   CAD_ID_KINDS,
   parseBodyId,
@@ -148,10 +165,14 @@ import {
   parseDatumId,
   parseOccurrenceId,
   parseDocumentId,
+  type FeatureId,
   parseFeatureId,
+  parseMotorId,
   parseParameterId,
   parseReferenceId,
+  parseSimulationId,
   parseSketchDocumentId,
+  parseStudyId,
 } from "./ids";
 import {
   type NativeMigrationError,
@@ -213,6 +234,16 @@ export interface NativeCadDocument {
    */
   readonly rollback: FeatureRollbackPoint | null;
   /**
+   * The authoring-suppressed feature set (the timeline chips' suppress
+   * action), persisted as the optional envelope `suppressedFeatures` field
+   * under the same additive-optional discipline as `rollback`: emitted
+   * only when non-empty (sorted, document-declared ids — stale ids are
+   * clamped out at save time), with absent meaning an empty set. Optional
+   * here because "none" is the natural default; the factory and the
+   * parser always populate it.
+   */
+  readonly suppressedFeatures?: ReadonlySet<FeatureId>;
+  /**
    * The document-resident drawing (Phase 53 — sheets and views), or `null`
    * for none. Persisted as the optional envelope `drawing` field (emitted
    * last, only when a drawing exists, the same additive-optional precedent
@@ -249,9 +280,11 @@ export interface SerializedFeatureRollbackPoint {
 /**
  * Canonical JSON form of a native document, in fixed key order:
  * `formatVersion`, `metadata`, `document`, `history`, `regeneration`, and —
- * only when a rollback marker is set — `rollback`. Omitting the field when
- * no marker is set keeps every pre-Phase 20 document's serialization
- * byte-identical.
+ * only when set or non-empty — the optional `rollback`,
+ * `suppressedFeatures`, and `drawing` fields. Omitting an empty optional
+ * field keeps the earlier byte forms unchanged: a document without a
+ * marker serializes as pre-Phase 20 did, one without suppression or a
+ * drawing carries neither key.
  */
 export interface SerializedNativeCadDocument {
   /** The native envelope's own version stamp ({@link CAD_NATIVE_FORMAT_VERSION}). */
@@ -266,6 +299,11 @@ export interface SerializedNativeCadDocument {
   readonly regeneration: SerializedRegenerationStateMap;
   /** The rollback marker; present exactly when one is set. */
   readonly rollback?: SerializedFeatureRollbackPoint;
+  /**
+   * The suppressed feature ids; present exactly when the clamped set is
+   * non-empty, emitted in sorted order.
+   */
+  readonly suppressedFeatures?: readonly string[];
   /** The drawing (sheets and views); present exactly when one exists. */
   readonly drawing?: SerializedDrawingDocument;
 }
@@ -289,6 +327,11 @@ export const NATIVE_FORMAT_ERROR_CODES = {
   regenerationUnknownFeature: "native-format/regeneration-unknown-feature",
   /** The optional rollback field names a feature the document does not have. */
   rollbackUnknownFeature: "native-format/rollback-unknown-feature",
+  /**
+   * The optional suppressed-features field names a feature the document
+   * does not have.
+   */
+  suppressionUnknownFeature: "native-format/suppression-unknown-feature",
   /** Document-level metadata was not a plain object of JSON-safe scalars. */
   metadataInvalid: "native-format/metadata-invalid",
   /** A drawing view's configuration pin names a configuration the document does not have. */
@@ -402,8 +445,8 @@ function parseNativeMetadata(
 /**
  * Starts a native document over the given CAD document: an empty history
  * (the document is its own base), no regeneration states (nothing has
- * executed), no rollback marker, and the given metadata (validated like
- * parameter metadata).
+ * executed), no rollback marker, no suppressed features, and the given
+ * metadata (validated like parameter metadata).
  */
 export function createNativeCadDocument(
   document: CadDocument,
@@ -422,6 +465,7 @@ export function createNativeCadDocument(
       regeneration: new Map(),
       metadata: parsedMetadata.value,
       rollback: null,
+      suppressedFeatures: new Set<FeatureId>(),
       drawing: null,
     }),
   );
@@ -464,6 +508,29 @@ function rollbackMarkerReferencesDeclaredFeature(
 }
 
 /**
+ * Canonicalizes the suppressed set for serialization: ids the document no
+ * longer declares are dropped (the stale-entry clamp the rollback marker
+ * gets — an undo removed the feature) and the rest are emitted in sorted
+ * order, so toggle history never changes the persisted bytes. An absent
+ * set means none.
+ */
+function clampedSuppressedFeatureIds(
+  document: CadDocument,
+  suppressed: ReadonlySet<FeatureId> | undefined,
+): readonly string[] {
+  const ids: string[] = [];
+  if (suppressed !== undefined) {
+    for (const id of suppressed) {
+      if (document.features.some((feature) => feature.id === id)) {
+        ids.push(id);
+      }
+    }
+  }
+  ids.sort();
+  return ids;
+}
+
+/**
  * Serializes a native document to its canonical, deterministic JSON form:
  * fixed key order at every level (inherited from the substrate serializers,
  * plus sorted metadata keys), canonical dimensional values, and stable id
@@ -473,7 +540,9 @@ function rollbackMarkerReferencesDeclaredFeature(
  * start): a stale marker — one whose anchored feature the document no
  * longer declares — is omitted rather than persisted, so a marker-free
  * document serializes to the pre-Phase 20 byte form and the format never
- * emits a file its own parser rejects.
+ * emits a file its own parser rejects. The optional `suppressedFeatures`
+ * field rides the same rule: emitted exactly when the set clamped to the
+ * document's declared features is non-empty, as sorted ids.
  */
 export function serializeNativeCadDocument(
   native: NativeCadDocument,
@@ -484,6 +553,10 @@ export function serializeNativeCadDocument(
     rollbackMarkerReferencesDeclaredFeature(native.document, marker)
       ? marker
       : null;
+  const suppressed = clampedSuppressedFeatureIds(
+    native.document,
+    native.suppressedFeatures,
+  );
   return {
     formatVersion: CAD_NATIVE_FORMAT_VERSION,
     metadata: canonicalMetadata(native.metadata),
@@ -503,6 +576,7 @@ export function serializeNativeCadDocument(
             afterFeatureId: rollback.afterFeatureId,
           },
         }),
+    ...(suppressed.length === 0 ? {} : { suppressedFeatures: suppressed }),
     ...(native.drawing === null
       ? {}
       : { drawing: serializeDrawingDocument(native.drawing) }),
@@ -671,6 +745,51 @@ function parseCurrentNativeCadDocument(
     rollback = shape.value;
   }
 
+  // The optional suppressed-features field: absent (or null) means nothing
+  // suppressed — every pre-field file lands here and parses to an empty
+  // set. Present, it must be an array of valid feature ids that all name
+  // features the document at the cursor declares — the same membership
+  // cross-check the regeneration section and the rollback field carry.
+  let suppressedFeatures: ReadonlySet<FeatureId> = new Set();
+  if (
+    input.suppressedFeatures !== undefined &&
+    input.suppressedFeatures !== null
+  ) {
+    if (!Array.isArray(input.suppressedFeatures)) {
+      return fail(
+        nativeError(
+          NATIVE_FORMAT_ERROR_CODES.malformed,
+          "A native document's suppressedFeatures field must be an array of feature ids.",
+          input.suppressedFeatures,
+        ),
+      );
+    }
+    const ids = new Set<FeatureId>();
+    for (const entry of input.suppressedFeatures) {
+      const parsedId = parseFeatureId(entry);
+      if (!parsedId.ok) {
+        return fail(
+          nativeError(
+            NATIVE_FORMAT_ERROR_CODES.malformed,
+            `A native document's suppressedFeatures field must contain valid feature ids: ${parsedId.error.message}`,
+            input.suppressedFeatures,
+          ),
+        );
+      }
+      if (!atCursor.features.some((feature) => feature.id === parsedId.value)) {
+        return fail(
+          nativeError(
+            NATIVE_FORMAT_ERROR_CODES.suppressionUnknownFeature,
+            `The native document's suppressedFeatures field names feature "${parsedId.value}", which the document does not have.`,
+            input.suppressedFeatures,
+          ),
+        );
+      }
+      ids.add(parsedId.value);
+    }
+    suppressedFeatures = ids;
+  }
+
   // The optional Phase 53 drawing field: absent means no drawing (every
   // pre-Phase 53 file lands here); present, it must parse as a drawing
   // document (sheets and views — the substrate parser's strictness).
@@ -719,6 +838,7 @@ function parseCurrentNativeCadDocument(
       regeneration: regeneration.value,
       metadata: metadata.value,
       rollback,
+      suppressedFeatures,
       drawing,
     }),
   );
@@ -839,6 +959,11 @@ export const NATIVE_FORMAT_ISSUE_CODES = {
   regenerationUnknownFeature: "native-format/regeneration-unknown-feature",
   /** The rollback field names a feature the document section lacks. */
   rollbackUnknownFeature: "native-format/rollback-unknown-feature",
+  /**
+   * The suppressed-features field names a feature the document section
+   * lacks.
+   */
+  suppressionUnknownFeature: "native-format/suppression-unknown-feature",
 } as const;
 
 export type NativeFormatIssueCode =
@@ -1469,6 +1594,13 @@ function validateSerializedCadDocumentShape(
   validateSerializedCurveListShape(input.curves, `${path}.curves`, issues);
   validateSerializedMateListShape(input.mates, `${path}.mates`, issues);
   validateSerializedJointListShape(input.joints, `${path}.joints`, issues);
+  validateSerializedSimulationListShape(
+    input.simulations,
+    `${path}.simulations`,
+    issues,
+  );
+  validateSerializedMotorListShape(input.motors, `${path}.motors`, issues);
+  validateSerializedStudyListShape(input.studies, `${path}.studies`, issues);
 }
 
 /**
@@ -1525,6 +1657,105 @@ function validateSerializedJointListShape(
   }
   input.forEach((entry, index) => {
     const parsed = parseAssemblyJoint(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
+}
+
+/**
+ * Inspects a PRESENT serialized simulation-scenario list through the
+ * simulation module's parse boundary (Phase 61): one structured issue per
+ * malformed row. Absent means empty — the additive discipline.
+ */
+function validateSerializedSimulationListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized simulations must be an array of scenario records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseSimScenario(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
+}
+
+/**
+ * Inspects a PRESENT serialized motor-record list through the motors
+ * module's parse boundary (Phase 61). Absent means empty.
+ */
+function validateSerializedMotorListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized motors must be an array of motor records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseDocumentMotor(entry);
+    if (!parsed.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        `${path}[${String(index)}]`,
+        parsed.error.message,
+      );
+    }
+  });
+}
+
+/**
+ * Inspects a PRESENT serialized study list through the study module's
+ * parse boundary (Phase 70b — ROADMAP-SIM, the finale): one structured
+ * issue per malformed record. Absent means empty — the additive
+ * discipline.
+ */
+function validateSerializedStudyListShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The serialized studies must be an array of study records.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const parsed = parseSimStudy(entry);
     if (!parsed.ok) {
       issue(
         issues,
@@ -1893,6 +2124,66 @@ function validateCommandShape(
     );
     return;
   }
+  // The Phase 61 motor/simulation lifecycle commands and the Phase 70b
+  // study lifecycle commands: identity by wire prefix (optional on
+  // create, required on update/delete) and a plain payload record on
+  // create/update — deletes serialize identity-only
+  // ({formatVersion, type, id}) — the full semantic battery is the module
+  // parse the document substrate runs; the validator checks the shape it
+  // can see.
+  if (
+    type === "motor.create" ||
+    type === "motor.update" ||
+    type === "motor.delete" ||
+    type === "simulation.create" ||
+    type === "simulation.update" ||
+    type === "simulation.delete" ||
+    type === "study.create" ||
+    type === "study.update" ||
+    type === "study.delete"
+  ) {
+    const isCreate =
+      type === "motor.create" ||
+      type === "simulation.create" ||
+      type === "study.create";
+    const isDelete =
+      type === "motor.delete" ||
+      type === "simulation.delete" ||
+      type === "study.delete";
+    const isMotor = type.startsWith("motor.");
+    const isStudy = type.startsWith("study.");
+    if (input.id !== undefined || !isCreate) {
+      const parsed = isMotor
+        ? parseMotorId(input.id)
+        : isStudy
+          ? parseStudyId(input.id)
+          : parseSimulationId(input.id);
+      if (!parsed.ok) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${path}.id`,
+          `A ${type} command's id must be a valid ${isMotor ? "motor" : isStudy ? "study" : "simulation"} id.`,
+        );
+      }
+    }
+    const payloadKey = isMotor ? "motor" : isStudy ? "study" : "scenario";
+    const payload = input[payloadKey];
+    // The payload contract binds creates and updates; a delete travels
+    // identity-only, so its payload is optional (and shape-checked when
+    // present, like every field that shows up).
+    if (!isDelete || payload !== undefined) {
+      if (!isPlainRecord(payload)) {
+        issue(
+          issues,
+          NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+          `${path}.${payloadKey}`,
+          `A ${type} command's ${payloadKey} payload must be a plain object (the module's canonical serialized form).`,
+        );
+      }
+    }
+    return;
+  }
   if (type === "feature.delete") {
     if (!parseFeatureId(input.id).ok) {
       issue(
@@ -2239,6 +2530,53 @@ function validateRollbackShape(
 }
 
 /**
+ * Validates the optional suppressed-features field's shape: absent or null
+ * means nothing suppressed (pre-field files carry neither); otherwise the
+ * field must be an array of valid feature ids and, when the document
+ * section's shape allows reading its features, every id must name one of
+ * them (the membership cross-check the parser enforces as
+ * `native-format/suppression-unknown-feature`).
+ */
+function validateSuppressedFeaturesShape(
+  input: unknown,
+  path: string,
+  issues: Issues,
+  featureIds: ReadonlySet<string>,
+): void {
+  if (input === undefined || input === null) return;
+  if (!Array.isArray(input)) {
+    issue(
+      issues,
+      NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+      path,
+      "The suppressedFeatures field must be an array of feature ids.",
+    );
+    return;
+  }
+  input.forEach((entry, index) => {
+    const entryPath = `${path}[${String(index)}]`;
+    const parsedId = parseFeatureId(entry);
+    if (!parsedId.ok) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.fieldInvalid,
+        entryPath,
+        `A suppressed-feature entry must be a valid feature id: ${parsedId.error.message}`,
+      );
+      return;
+    }
+    if (!featureIds.has(parsedId.value)) {
+      issue(
+        issues,
+        NATIVE_FORMAT_ISSUE_CODES.suppressionUnknownFeature,
+        entryPath,
+        `The suppressedFeatures field names feature "${parsedId.value}", which the document section does not have.`,
+      );
+    }
+  });
+}
+
+/**
  * Validates untrusted input against the native format's structure — fast
  * fail on malformed input, WITHOUT replaying the document. Every check is a
  * pure per-field shape validation through the substrate's own value parsers
@@ -2302,6 +2640,12 @@ export function validateNativeCadDocument(
   validateRollbackShape(
     input.rollback,
     "rollback",
+    issues,
+    collectFeatureIds(input.document),
+  );
+  validateSuppressedFeaturesShape(
+    input.suppressedFeatures,
+    "suppressedFeatures",
     issues,
     collectFeatureIds(input.document),
   );

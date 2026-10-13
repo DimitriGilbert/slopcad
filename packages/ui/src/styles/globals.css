@@ -31,6 +31,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* Chat prose scope (vendored shadcn/typeset) + the scroll utilities
+ * shadcn/tailwind.css doesn't ship (see each file's header). */
+@import "./typeset.css";
+@import "./utilities.css";
 @source "../../../../apps/**/*.{ts,tsx}";
 @source "../**/*.{ts,tsx}";
 

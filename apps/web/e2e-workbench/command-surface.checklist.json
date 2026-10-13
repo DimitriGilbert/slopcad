@@ -1585,6 +1585,86 @@
         "snapshot",
         "export"
       ]
+    },
+    {
+      "id": "agent-chat-toggle",
+      "phase": 60,
+      "capability": "Agent chat (PLAN-AGENT-CHAT Phase 4.4, D16): switch the right sidebar between its panels and the agent chat view",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "agent-chat-toggle",
+      "keywords": [
+        "agent",
+        "chat",
+        "assistant",
+        "ai",
+        "right",
+        "sidebar",
+        "panel",
+        "panels",
+        "switch",
+        "toggle",
+        "show",
+        "hide"
+      ]
+    },
+    {
+      "id": "agent-settings",
+      "phase": 60,
+      "capability": "Agent chat: open the agent settings surface (provider, model, key, reasoning, system prompt, mode, sync)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "agent-settings",
+      "keywords": [
+        "agent",
+        "settings",
+        "configure",
+        "provider",
+        "model",
+        "api",
+        "key",
+        "reasoning",
+        "system",
+        "prompt",
+        "mode",
+        "sync"
+      ]
+    },
+    {
+      "id": "agent-catalog-refresh",
+      "phase": 60,
+      "capability": "Agent chat: force-refresh the server's models.dev catalog cache for the configured provider (D7)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "agent-catalog-refresh",
+      "keywords": [
+        "agent",
+        "model",
+        "catalog",
+        "refresh",
+        "cache",
+        "update",
+        "fetch",
+        "force"
+      ]
+    },
+    {
+      "id": "agent-conversation-clear",
+      "phase": 60,
+      "capability": "Agent chat: clear the active agent conversation (local rows, and the synced server copy when sync is on)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "agent-conversation-clear",
+      "keywords": [
+        "agent",
+        "conversation",
+        "clear",
+        "delete",
+        "reset",
+        "history",
+        "chat",
+        "messages"
+      ]
     }
   ],
   "declines": [

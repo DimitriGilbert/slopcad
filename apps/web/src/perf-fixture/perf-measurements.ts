@@ -39,6 +39,27 @@
  *   document grown with a 40-feature extrude chain whose head parameter is
  *   edited (the whole chain re-executes) — the scaling probe for the
  *   incremental-invalidation ledger.
+ * - `kernel.lbm2d.referenceGrid.stepBatchMs` — the Phase 63 D2Q9
+ *   reference kernel's pure stepping cost at the roadmap's reference
+ *   preview grid (~512×256, a cylinder in a wind tunnel): one timed
+ *   batch of {@link KERNEL_STEP_BATCH} steps per sample after warmup,
+ *   the main-thread compute share of a streaming preview frame budget
+ *   (the kernel is deterministic synchronous TS — law S2 — so this is
+ *   the whole stepping story, no hidden async).
+ * - `kernel.lbm3d-fan.mrfGrid.stepBatchMs` — the Phase 66 3D fan MRF
+ *   stepper at the REDUCED demo resolution (the CPU oracle the e2e
+ *   measures — a reduced-resolution ceiling, honestly labeled, never a
+ *   production-grid claim);
+ * - `kernel.lbm2d-wgsl.referenceGrid.stepBatchMs` — the Phase 64 WGSL
+ *   provider's SAME batch protocol on the SAME reference grid
+ *   (submit ten steps, then await the status readback that completes
+ *   them — the honest submit→completed wall time), recorded only where
+ *   a WebGPU device exists (the perf harness's launch flag exposes
+ *   Dawn's SwiftShader software adapter on headless Linux). The
+ *   recorded budget is a SOFTWARE-DEVICE number — an upper bound on
+ *   the correctness-path cost, not a hardware-GPU perf claim; the
+ *   hardware-class budget is recorded as not-recordable-here in the
+ *   findings doc (`docs/architecture/wgsl-prespike-findings.md`).
  *
  * The page-level metrics (scene settle, the applied → frame window —
  * `applyToFrameMs`, the production-build stand-in for React commit work
@@ -85,6 +106,13 @@ import {
   type WorkerTransport,
 } from "@slopcad/cad-kernel";
 import { manifoldWorkerBootReport } from "@slopcad/cad-kernel-manifold/manifold-worker-boot-report";
+import {
+  type LbmStepperConfig,
+  createLbmStepper,
+  createMrf3dStepper,
+  createWgslLbmStepper,
+  requestWebGpuDevice,
+} from "@slopcad/sim-flow";
 
 import { computePlateWithHole } from "../worker-fixture/plate-scene";
 import { PLATE_HOLE_DIAMETER_DEFAULT_MM } from "../worker-fixture/plate-scene";
@@ -101,12 +129,30 @@ const MAINTHREAD_SAMPLE_COUNT = 25;
 const INVALIDATION_SAMPLE_COUNT = 50;
 /** How many extrude features the invalidation growth probe chains. */
 const GROWN_CHAIN_FEATURES = 40;
+/** The LBM reference grid's extents (the roadmap's ~512×256 preview grid). */
+const KERNEL_REFERENCE_GRID_NX = 512;
+const KERNEL_REFERENCE_GRID_NY = 256;
+/** Warmup steps before the timed kernel batches (JIT and cache settle). */
+const KERNEL_WARMUP_STEPS = 10;
+/** Steps per timed kernel batch (one batch = one sample). */
+const KERNEL_STEP_BATCH = 10;
+/** How many timed kernel batches the kernel probe measures. */
+const KERNEL_BATCH_SAMPLES = 7;
 
 /** The environment block published beside the samples (provenance). */
 export interface PerfEnvironment {
   readonly userAgent: string;
   readonly hardwareConcurrency: number | null;
   readonly deviceMemoryGb: number | null;
+  /**
+   * The WebGPU adapter class the WGSL probe ran against (null when no
+   * device) — the honesty field that keeps the software-device budget
+   * labeled as what it is.
+   */
+  readonly webgpuAdapter: {
+    readonly vendor: string;
+    readonly architecture: string;
+  } | null;
 }
 
 /** The settled geometry context the samples were measured against. */
@@ -137,7 +183,38 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
-function readEnvironment(): PerfEnvironment {
+/** Reads the page-visible WebGPU adapter class (provenance, not the provider seam). */
+async function readWebgpuAdapterProvenance(): Promise<
+  PerfEnvironment["webgpuAdapter"]
+> {
+  const navigatorMaybe = navigator as Navigator & { readonly gpu?: unknown };
+  const gpu = navigatorMaybe.gpu;
+  if (
+    typeof gpu !== "object" ||
+    gpu === null ||
+    typeof (gpu as { readonly requestAdapter?: unknown }).requestAdapter !==
+      "function"
+  ) {
+    return null;
+  }
+  const gpuSurface = gpu as {
+    requestAdapter(): Promise<{ readonly info?: unknown } | null>;
+  };
+  try {
+    const adapter = await gpuSurface.requestAdapter();
+    if (adapter === null || !isPlainRecord(adapter.info)) return null;
+    const info = adapter.info;
+    return {
+      vendor: typeof info.vendor === "string" ? info.vendor : "",
+      architecture:
+        typeof info.architecture === "string" ? info.architecture : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readEnvironmentSync(): Omit<PerfEnvironment, "webgpuAdapter"> {
   const nav = navigator as Navigator & { readonly deviceMemory?: unknown };
   const deviceMemory = nav.deviceMemory;
   return {
@@ -188,6 +265,242 @@ function bootChannel(
       boot.dispose();
     },
   };
+}
+
+/**
+ * The shared reference-grid scenario (the Phase 63 CPU probe's own, the
+ * Phase 64 WGSL probe's twin): a 512×256 wind tunnel around a cylinder
+ * slice (D = 96 cells, 37.5 % blockage), TRT at τ⁺ ≈ 0.6, ν chosen for
+ * that τ⁺ (≈4.5× real air). One definition, two kernels — the S5
+ * oracle-vs-provider posture at the perf layer too.
+ */
+function referenceGridScenario(): LbmStepperConfig {
+  const solid = new Uint8Array(
+    KERNEL_REFERENCE_GRID_NX * KERNEL_REFERENCE_GRID_NY,
+  );
+  for (let y = 0; y < KERNEL_REFERENCE_GRID_NY; y += 1) {
+    for (let x = 0; x < KERNEL_REFERENCE_GRID_NX; x += 1) {
+      if ((x - 170.5) ** 2 + (y - 128) ** 2 <= 48 ** 2) {
+        solid[x + y * KERNEL_REFERENCE_GRID_NX] = 1;
+      }
+    }
+  }
+  return {
+    mask: {
+      nx: KERNEL_REFERENCE_GRID_NX,
+      ny: KERNEL_REFERENCE_GRID_NY,
+      solid,
+    },
+    fluid: {
+      fluidId: "perf-air",
+      temperatureK: 300,
+      densityKgPerM3: 1.2,
+      dynamicViscosityPaS: 1.2 * 6.7e-5,
+      kinematicViscosityM2PerS: 6.7e-5,
+      thermalDiffusivityM2PerS: 6.7e-5 / 0.7,
+      prandtl: 0.7,
+      thermalExpansionPerK: 1 / 300,
+      specificHeatJPerKgK: 1005,
+      thermalConductivityWPerMK: (1.2 * 6.7e-5 * 1005) / 0.7,
+      speedOfSoundMPerS: 347,
+    },
+    cellSizeM: 0.001,
+    characteristicVelocityMPerS: 0.1,
+    collision: { kind: "trt" },
+    west: { kind: "velocity-inlet", velocityMPerS: [0.1, 0] },
+    east: { kind: "pressure-outlet", pressurePa: 0 },
+    south: { kind: "wall", slip: false },
+    north: { kind: "wall", slip: false },
+  };
+}
+
+/**
+ * The kernel-stepping probe (Phase 63b's initial perf budget): the D2Q9
+ * reference kernel at the roadmap's reference preview grid, stepped in
+ * timed batches of {@link KERNEL_STEP_BATCH} steps after a warmup
+ * batch. The stepper is synchronous deterministic TS, so one batch's
+ * wall time IS the pure stepping cost; a divergence mid-probe fails the
+ * probe loudly instead of publishing a fabricated timing.
+ */
+function probeKernelStepping(): Record<string, number[]> {
+  const created = createLbmStepper(referenceGridScenario());
+  if (!created.ok) {
+    throw new Error(
+      `the kernel-stepping probe refused its config: ${created.error.message}`,
+    );
+  }
+  const stepper = created.value;
+  stepper.run(KERNEL_WARMUP_STEPS);
+  if (stepper.diverged) {
+    throw new Error("the kernel-stepping probe diverged during warmup");
+  }
+  const samples: number[] = [];
+  for (let batch = 0; batch < KERNEL_BATCH_SAMPLES; batch += 1) {
+    const started = performance.now();
+    stepper.run(KERNEL_STEP_BATCH);
+    samples.push(performance.now() - started);
+  }
+  if (stepper.diverged) {
+    throw new Error("the kernel-stepping probe diverged inside a timed batch");
+  }
+  return { "kernel.lbm2d.referenceGrid.stepBatchMs": samples };
+}
+
+/**
+ * The WGSL provider stepping probe (Phase 64b's GPU-path budget): the
+ * SAME reference grid and batch protocol as the CPU probe, executed by
+ * the production WGSL stepper on whatever WebGPU device the host
+ * exposes — one sample = submit {@link KERNEL_STEP_BATCH} steps, then
+ * await the status readback that completes them (the honest
+ * submit→completed wall time; the provider's per-step submits are
+ * fire-and-forget, so the readback is the completion gate). Where no
+ * device exists the probe publishes NOTHING for the metric and the
+ * environment's adapter provenance records null — the perf harness's
+ * launch flag is what opens the door (Dawn SwiftShader on headless
+ * Linux); a budgeted-but-unmeasured metric fails the harness gate
+ * loudly instead of passing silently here. A divergence mid-probe
+ * fails loudly (no fabricated timing), and the stepper's buffers are
+ * freed on every path.
+ */
+async function probeWgslKernelStepping(): Promise<Record<string, number[]>> {
+  const device = await requestWebGpuDevice();
+  if (device === undefined) return {};
+  const totalSteps =
+    KERNEL_WARMUP_STEPS + KERNEL_BATCH_SAMPLES * KERNEL_STEP_BATCH;
+  try {
+    const created = await createWgslLbmStepper(
+      referenceGridScenario(),
+      device,
+      {
+        stepCapacity: totalSteps,
+      },
+    );
+    if (!created.ok) {
+      throw new Error(
+        `the WGSL kernel-stepping probe refused its config: ${created.error.message}`,
+      );
+    }
+    const stepper = created.value;
+    const runBatch = async (): Promise<void> => {
+      for (let step = 0; step < KERNEL_STEP_BATCH; step += 1) {
+        stepper.advance();
+      }
+      await stepper.syncStatus();
+    };
+    await runBatch();
+    if (stepper.diverged) {
+      throw new Error("the WGSL kernel-stepping probe diverged during warmup");
+    }
+    const samples: number[] = [];
+    for (let batch = 0; batch < KERNEL_BATCH_SAMPLES; batch += 1) {
+      const started = performance.now();
+      await runBatch();
+      samples.push(performance.now() - started);
+    }
+    if (stepper.diverged) {
+      throw new Error(
+        "the WGSL kernel-stepping probe diverged inside a timed batch",
+      );
+    }
+    stepper.destroy();
+    return { "kernel.lbm2d-wgsl.referenceGrid.stepBatchMs": samples };
+  } finally {
+    device.destroy();
+  }
+}
+
+/**
+ * The 3D fan MRF stepping probe (Phase 66c's perf budget): the
+ * motor-driven fan demo's own kernel path — the frozen-rotor MRF
+ * stepper over the demo-shaped paddle rotor in its duct — at the
+ * REDUCED resolution e2e measures (the demo's 2 mm twin, honestly
+ * labeled: this is the CPU oracle at demo resolution, the sanctioned
+ * reduced-resolution ceiling, not a production-grid claim). The
+ * protocol is the 2D probe's own: a warmup batch, then timed batches
+ * of {@link KERNEL_STEP_BATCH} steps; a divergence mid-probe fails
+ * loudly instead of publishing a fabricated timing.
+ */
+function probe3dFanMrfStepping(): Record<string, number[]> {
+  // The demo twin's lattice: 17 × 17 × 22 at 2 mm, the paddle rotor
+  // (hub + cross-bars) inside the duct shell, the zone a 4-cell
+  // cylinder about the +Z axis.
+  const NX = 17;
+  const NY = 17;
+  const NZ = 22;
+  const AXIS_X = 8;
+  const AXIS_Y = 8;
+  const ROTOR_Z = 10;
+  const DX = 0.002;
+  const solid = new Uint8Array(NX * NY * NZ);
+  const plane = NX * NY;
+  for (let z = 0; z < NZ; z += 1) {
+    for (let y = 0; y < NY; y += 1) {
+      for (let x = 0; x < NX; x += 1) {
+        const wx = (x - AXIS_X) * DX * 1000;
+        const wy = (y - AXIS_Y) * DX * 1000;
+        const wz = (z - ROTOR_Z) * DX * 1000;
+        const radius = Math.hypot(wx, wy);
+        const shell = radius >= 10 && radius <= 14 && Math.abs(wz) <= 18;
+        const rotorZBand = Math.abs(wz) <= 2;
+        const hub = radius <= 2 && rotorZBand;
+        const barY = Math.abs(wx) <= 1 && Math.abs(wy) <= 7 && rotorZBand;
+        const barX = Math.abs(wy) <= 1 && Math.abs(wx) <= 7 && rotorZBand;
+        solid[x + y * NX + z * plane] = shell || hub || barY || barX ? 1 : 0;
+      }
+    }
+  }
+  const created = createMrf3dStepper({
+    mask: { nx: NX, ny: NY, nz: NZ, solid },
+    fluid: {
+      fluidId: "perf-air",
+      temperatureK: 300,
+      densityKgPerM3: 1.2,
+      dynamicViscosityPaS: 1.2 * 1.5e-5,
+      kinematicViscosityM2PerS: 1.5e-5,
+      thermalDiffusivityM2PerS: 1.5e-5 / 0.7,
+      prandtl: 0.7,
+      thermalExpansionPerK: 1 / 300,
+      specificHeatJPerKgK: 1005,
+      thermalConductivityWPerMK: (1.2 * 1.5e-5 * 1005) / 0.7,
+      speedOfSoundMPerS: 347,
+    },
+    cellSizeM: DX,
+    characteristicVelocityMPerS: 0.025,
+    west: { kind: "wall", slip: false },
+    east: { kind: "wall", slip: false },
+    south: { kind: "wall", slip: false },
+    north: { kind: "wall", slip: false },
+    bottom: { kind: "velocity-inlet", velocityMPerS: [0, 0, 0.025] },
+    top: { kind: "convective-outflow" },
+    rotation: { kind: "mrf" },
+    axis: {
+      pointM: [AXIS_X * DX, AXIS_Y * DX, ROTOR_Z * DX],
+      direction: [0, 0, 1],
+    },
+    omegaRadPerS: 4,
+    rotatingZone: (x, y, z) =>
+      Math.hypot(x - AXIS_X, y - AXIS_Y) <= 4 && Math.abs(z - ROTOR_Z) <= 6,
+  });
+  if (!created.ok) {
+    throw new Error(
+      `the 3D fan MRF probe refused its config: ${created.error.message}`,
+    );
+  }
+  const stepper = created.value;
+  stepper.run(KERNEL_WARMUP_STEPS);
+  if (stepper.diverged) {
+    throw new Error("the 3D fan MRF probe diverged during warmup");
+  }
+  const samples: number[] = [];
+  for (let batch = 0; batch < KERNEL_BATCH_SAMPLES; batch += 1) {
+    const started = performance.now();
+    stepper.run(KERNEL_STEP_BATCH);
+    samples.push(performance.now() - started);
+  }
+  if (stepper.diverged) {
+    throw new Error("the 3D fan MRF probe diverged inside a timed batch");
+  }
+  return { "kernel.lbm3d-fan.mrfGrid.stepBatchMs": samples };
 }
 
 /**
@@ -655,12 +968,19 @@ function probeInvalidation(): Record<string, number[]> {
  * fixture page, which owns the coordinator session and the scene.
  */
 export async function runInPageMeasurements(): Promise<InPageMeasurements> {
+  const webgpuAdapter = await readWebgpuAdapterProvenance();
+  const kernel = probeKernelStepping();
+  const kernel3dFan = probe3dFanMrfStepping();
+  const kernelWgsl = await probeWgslKernelStepping();
   const startup = await probeStartup();
   const operations = await probeOperations();
   const projection = probeProjection(operations.tessellation);
   const transfer = probeTransfer(operations.wireResponse);
   const invalidation = probeInvalidation();
   const combined: Record<string, number[]> = {
+    ...kernel,
+    ...kernel3dFan,
+    ...kernelWgsl,
     ...startup,
     ...operations.samples,
     ...projection,
@@ -672,7 +992,7 @@ export async function runInPageMeasurements(): Promise<InPageMeasurements> {
     frozen[key] = Object.freeze([...values]);
   }
   return {
-    environment: readEnvironment(),
+    environment: { ...readEnvironmentSync(), webgpuAdapter },
     geometry: {
       triangles: operations.tessellation.indices.length / 3,
       positions: operations.tessellation.positions.length,

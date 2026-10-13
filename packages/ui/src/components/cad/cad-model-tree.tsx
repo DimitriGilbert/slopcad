@@ -488,9 +488,31 @@ function deriveCadTreeShape(
 }
 
 /**
+ * Flattens one row and — when its group is expanded — its visible
+ * descendants, in depth-first order. The recursion mirrors `renderRow`'s
+ * exactly (children render only while `collapsible && expanded`), so the
+ * flat roving list covers EVERY rendered row at ANY depth: a depth-2
+ * sub-assembly row is as keyboard-reachable as a depth-1 body row.
+ */
+function visibleRowsOf(
+  row: CadTreeRow,
+  collapsed: ReadonlySet<string>,
+  rows: CadTreeRow[],
+): void {
+  rows.push(row);
+  const groupId = row.groupId;
+  if (groupId === undefined || row.childCount === 0) return;
+  if (collapsed.has(groupId)) return;
+  for (const child of row.children) {
+    visibleRowsOf(child, collapsed, rows);
+  }
+}
+
+/**
  * The visible rows in depth-first order — the flat list the roving
  * tabindex navigation moves through. Collapsed groups contribute their
- * row but not their children.
+ * row but not their children; expanded groups recurse, so the list is
+ * exactly the set of rows `renderRow` renders.
  */
 function visibleCadTreeRows(
   shape: CadTreeShape,
@@ -498,25 +520,11 @@ function visibleCadTreeRows(
 ): readonly CadTreeRow[] {
   const rows: CadTreeRow[] = [];
   for (const group of shape.groups) {
-    rows.push(group.row);
-    if (
-      group.row.childCount > 0 &&
-      group.row.groupId !== undefined &&
-      !collapsed.has(group.row.groupId)
-    ) {
-      rows.push(...group.children);
-    }
+    visibleRowsOf(group.row, collapsed, rows);
   }
   rows.push(...shape.rootBodies);
   for (const assemblyRow of shape.assemblyRows) {
-    rows.push(assemblyRow);
-    if (
-      assemblyRow.childCount > 0 &&
-      assemblyRow.groupId !== undefined &&
-      !collapsed.has(assemblyRow.groupId)
-    ) {
-      rows.push(...assemblyRow.children);
-    }
+    visibleRowsOf(assemblyRow, collapsed, rows);
   }
   return rows;
 }

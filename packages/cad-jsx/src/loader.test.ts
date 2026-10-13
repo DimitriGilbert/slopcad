@@ -4,8 +4,10 @@
  * re-exported from the package index the sandbox resolves), the
  * structured refusals (oversized source, broken TSX, forbidden imports,
  * evaluation failures under the vm budget, invalid default exports,
- * compile-error pass-through), and the happy path's native text passing
- * the format's own parser.
+ * compile-error pass-through), the happy path's native text passing
+ * the format's own parser, and the sandbox-escape regression suite
+ * (verified report 8, finding 1): no host-realm value is reachable from
+ * the model's globalThis by property traversal.
  */
 
 import { describe, expect, it } from "vitest";
@@ -15,6 +17,7 @@ import type * as CadJsxSurface from "./index";
 import type { TsxCompileFailure } from "./loader";
 import { createElement } from "react";
 
+import { resolveModelExport } from "./cli";
 import { compileToNative } from "./native";
 import {
   TSX_EVAL_TIMEOUT_MS,
@@ -66,6 +69,40 @@ async function expectFailure(
   if (result.ok) throw new Error("expected a failure");
   expect(result.error.code).toBe(code);
   return result.error;
+}
+
+/**
+ * Builds one escape-probe model: `payload` is an expression the model
+ * evaluates under a guard, and if it yields something process-like (the
+ * escape witness — a host `process` with `getBuiltinModule`), the model
+ * THROWS. A probe model that compiles cleanly therefore PROVES the payload
+ * reached nothing host-realm.
+ */
+function processProbeModel(payload: string): string {
+  return `const escaped = (function () {
+  try {
+    const process = ${payload};
+    return (
+      process !== undefined &&
+      process !== null &&
+      typeof process.getBuiltinModule === "function" &&
+      typeof process.version === "string"
+    );
+  } catch {
+    return false;
+  }
+})();
+if (escaped) throw new Error("ESCAPED: host process obtained");
+export default <Box width={10} depth={10} height={10} />;
+`;
+}
+
+/** Runs one probe model and asserts it compiled — the payload found nothing host-realm. */
+async function expectProbeClean(payload: string): Promise<void> {
+  const result = await compileTsxSource({ source: processProbeModel(payload) });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error.message);
+  expect(parseNativeCadDocumentFromString(result.value).ok).toBe(true);
 }
 
 describe("compileTsxSource happy paths", () => {
@@ -162,6 +199,23 @@ describe("compileTsxSource structured refusals", () => {
     );
   });
 
+  it("reports a throwing default-export component with the CLI's byte-identical message", async () => {
+    const failure = await expectFailure(
+      'export default function () {\n  throw new Error("boom");\n}',
+      "cadjsx-cli/model-component-threw",
+    );
+    // The vm bridge derives the thrown reason the same way the CLI's
+    // host-side render does (`error.message` for Errors), so both entry
+    // points emit the same message for the same authoring mistake.
+    const hostResolved = resolveModelExport(function () {
+      throw new Error("boom");
+    });
+    expect(hostResolved.ok).toBe(false);
+    if (hostResolved.ok) throw new Error("expected a failure");
+    expect(failure.message).toBe(hostResolved.error.message);
+    expect(failure.message).toContain("boom");
+  });
+
   it("passes the compiler's structured rejections through verbatim", async () => {
     const failure = await expectFailure(
       'export default <div id="not-a-model" />;',
@@ -169,6 +223,130 @@ describe("compileTsxSource structured refusals", () => {
     );
     expect("path" in failure).toBe(true);
   });
+
+  it("surfaces a self-referencing children array as the depth guard's refusal", async () => {
+    const failure = await expectFailure(
+      "const ring = [];\nring.push(ring);\nexport default createElement(Fragment, null, ring);\n",
+      "cadjsx/tree-too-deep",
+    );
+    expect(failure.message).toContain("maximum depth of 100");
+  });
+
+  it("surfaces a cyclic component prop as the structured props refusal", async () => {
+    const failure = await expectFailure(
+      'const data = { label: "loop" };\ndata.self = data;\nfunction Cyclic() {\n  return <Box width={1} depth={1} height={1} />;\n}\nexport default <Cyclic data={data} />;\n',
+      "cadjsx/props-invalid",
+    );
+    expect(failure.message).toContain("data.self");
+  });
+});
+
+describe("compileTsxSource sandbox escape regression (verified report 8, finding 1)", () => {
+  it("keeps require.constructor from constructing the host Function", async () => {
+    await expectProbeClean(`require.constructor("return process")()`);
+  });
+
+  it("keeps createElement.constructor from constructing the host Function", async () => {
+    await expectProbeClean(`createElement.constructor("return process")()`);
+  });
+
+  it("keeps the host process global unreachable", async () => {
+    await expectProbeClean(
+      `typeof process === "undefined" ? undefined : process`,
+    );
+  });
+
+  it("keeps every sandbox surface's constructor chain from reaching the host process", async () => {
+    await expectProbeClean(`(function () {
+      const element = <Box width={1} depth={1} height={1} />;
+      const candidates = [
+        Box,
+        Union,
+        length,
+        angle,
+        dimensionless,
+        defineCadElement,
+        isCadElementTag,
+        CAD_ELEMENT_KINDS,
+        module,
+        exports,
+        require,
+        createElement,
+        Fragment,
+        require("react"),
+        require("@slopcad/cad-jsx"),
+        element,
+        element.type,
+        element.props,
+      ];
+      for (const candidate of candidates) {
+        if (candidate === undefined || candidate === null) continue;
+        const constructor = candidate.constructor;
+        if (typeof constructor !== "function") continue;
+        const recovered = constructor("return process")();
+        if (
+          recovered !== undefined &&
+          recovered !== null &&
+          typeof recovered.getBuiltinModule === "function"
+        ) {
+          return recovered;
+        }
+      }
+      return undefined;
+    })()`);
+  });
+
+  it("proves the probe harness detects a real escape (the probes are not vacuous)", async () => {
+    const failure = await expectFailure(
+      processProbeModel(
+        `({ getBuiltinModule: function () { return {}; }, version: "probe" })`,
+      ),
+      TSX_LOAD_ERROR_CODES.evaluationFailed,
+    );
+    expect(failure.message).toContain("ESCAPED");
+  });
+
+  it('still refuses require("node:fs") from model code at runtime', async () => {
+    const failure = await expectFailure(
+      'const fs = require("node:fs");\nexport default <Box width={1} depth={1} height={1} />;',
+      TSX_LOAD_ERROR_CODES.forbiddenImport,
+    );
+    expect(failure.message).toContain("node:fs");
+  });
+
+  it("keeps a caught forbidden-import refusal from leaking the host gate error", async () => {
+    const result = await compileTsxSource({
+      source: `let escaped = false;
+try {
+  require("node:fs");
+} catch (refusal) {
+  try {
+    const process = refusal.constructor.constructor("return process")();
+    escaped =
+      process !== undefined &&
+      process !== null &&
+      typeof process.getBuiltinModule === "function";
+  } catch {
+    escaped = false;
+  }
+}
+if (escaped) throw new Error("ESCAPED: refusal error reached the host realm");
+export default <Box width={10} depth={10} height={10} />;
+`,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+  });
+
+  it("bounds a runaway default-export component with the vm budget", async () => {
+    const failure = await expectFailure(
+      "export default function Loop() {\n  for (;;) {}\n}",
+      TSX_LOAD_ERROR_CODES.evaluationFailed,
+    );
+    expect(failure.message).toContain(
+      `${String(TSX_EVAL_TIMEOUT_MS)} ms evaluation budget`,
+    );
+  }, 10_000);
 });
 
 /**

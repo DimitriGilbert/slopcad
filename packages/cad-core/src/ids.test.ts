@@ -74,6 +74,9 @@ describe("id wire format parsing", () => {
       mate: "mat",
       joint: "jnt",
       configuration: "cfg",
+      simulation: "sim",
+      motor: "mot",
+      study: "study",
     });
     expect(parseDatumId("dtm_a").ok).toBe(true);
     expect(parseOccurrenceId("occ_a").ok).toBe(true);
@@ -245,6 +248,9 @@ describe("createIdGenerator", () => {
       mate: 0,
       joint: 0,
       configuration: 0,
+      simulation: 0,
+      motor: 0,
+      study: 0,
     });
   });
 
@@ -266,6 +272,9 @@ describe("createIdGenerator", () => {
         mate: 0,
         joint: 0,
         configuration: 0,
+        simulation: 0,
+        motor: 0,
+        study: 0,
       }),
     ).toThrow(RangeError);
     expect(() =>
@@ -285,6 +294,9 @@ describe("createIdGenerator", () => {
         mate: 0,
         joint: 0,
         configuration: 0,
+        simulation: 0,
+        motor: 0,
+        study: 0,
       }),
     ).toThrow(RangeError);
   });
@@ -306,6 +318,9 @@ describe("createIdGenerator", () => {
       mate: 0,
       joint: 0,
       configuration: 0,
+      simulation: 0,
+      motor: 0,
+      study: 0,
     });
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);
     try {
@@ -340,6 +355,9 @@ describe("createIdGenerator", () => {
       mate: 0,
       joint: 0,
       configuration: 0,
+      simulation: 0,
+      motor: 0,
+      study: 0,
     });
     expect(generator.nextBodyId()).toBe("body_9007199254740991");
     expect(() => generator.nextBodyId()).toThrow(CadIdGeneratorExhaustedError);

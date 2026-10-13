@@ -20,6 +20,15 @@ export interface BoundsReadoutInput {
   readonly sceneBodyId: BodyId | undefined;
   /** The scene measurement's kernel bounds, or `undefined` before a settle. */
   readonly bounds: RenderBounds | undefined;
+  /**
+   * The document scene's per-body measurements (Phase 16): when present,
+   * the readout answers for EVERY body the settled scene measured — the
+   * selected body's OWN kernel bounds — instead of the single-scene
+   * aggregate. The aggregate fields above stay the single-solid scenes'
+   * contract.
+   */
+  readonly measuredBodies?:
+    ReadonlyMap<string, { readonly bounds: RenderBounds }> | undefined;
   /** The booted kernel's declared `tightBooleanBounds`. */
   readonly tightBooleanBounds: boolean;
 }
@@ -40,11 +49,17 @@ export function boundsReadout(input: BoundsReadoutInput): BoundsReadout {
   const tightness: BoundsTightness = input.tightBooleanBounds
     ? "tight"
     : "possibly-conservative";
+  const body = selectedBoundsBody(input.selected, input.features);
+  if (body === undefined) return { text: null, tightness };
+  // The document scene: the selected body's own kernel measurement.
+  const measured = input.measuredBodies?.get(String(body));
+  if (measured !== undefined) {
+    return { text: `${formatBoundsExtents(measured.bounds)} mm`, tightness };
+  }
   if (input.bounds === undefined || input.sceneBodyId === undefined) {
     return { text: null, tightness };
   }
-  const body = selectedBoundsBody(input.selected, input.features);
-  if (body === undefined || body !== input.sceneBodyId) {
+  if (body !== input.sceneBodyId) {
     return { text: null, tightness };
   }
   return { text: `${formatBoundsExtents(input.bounds)} mm`, tightness };

@@ -15,7 +15,7 @@ import {
 } from "@slopcad/cad-core";
 import type { SerializedCadTransaction } from "@slopcad/cad-core";
 import { Component, createElement, Fragment, useState } from "react";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -32,6 +32,7 @@ import {
   Parameter,
   Sphere,
   Translate,
+  Use,
 } from "./elements";
 
 const V = CAD_DOCUMENT_FORMAT_VERSION;
@@ -804,6 +805,58 @@ describe("rejections", () => {
     expect(error.code).toBe(CAD_JSX_ERROR_CODES.bodyProducerConflict);
   });
 
+  it("counts a <Use> as the <Body>'s one producer (the body stands bare)", () => {
+    const transaction = compiled(
+      createElement(
+        Fragment,
+        null,
+        createElement(Box, {
+          id: "feat_box-1",
+          width: 5,
+          depth: 5,
+          height: 5,
+        }),
+        createElement(
+          Body,
+          { name: "hub" },
+          createElement(Use, { feature: "feat_box-1" }),
+        ),
+      ),
+    );
+    // The referenced feature already produced its own body, so the
+    // captured body closes the model bare — but the <Use> claimed the
+    // capture (a second producer must now fail; pinned below).
+    const last = transaction.commands[transaction.commands.length - 1];
+    expect(last).toEqual({
+      formatVersion: V,
+      type: "body.create",
+      id: "body_hub",
+      name: "hub",
+    });
+  });
+
+  it("rejects a <Body> whose <Use> is followed by a second producer", () => {
+    const error = rejectionOf(
+      createElement(
+        Fragment,
+        null,
+        createElement(Box, {
+          id: "feat_box-1",
+          width: 5,
+          depth: 5,
+          height: 5,
+        }),
+        createElement(
+          Body,
+          { name: "hub" },
+          createElement(Use, { feature: "feat_box-1" }),
+          createElement(Sphere, { radius: 1 }),
+        ),
+      ),
+    );
+    expect(error.code).toBe(CAD_JSX_ERROR_CODES.bodyProducerConflict);
+  });
+
   it("rejects a <Translate> without exactly one producing child", () => {
     const none = rejectionOf(
       createElement(Translate, { x: 1, children: null }),
@@ -848,5 +901,24 @@ describe("rejections", () => {
     }
     const error = rejectionOf(model);
     expect(error.code).toBe(CAD_JSX_ERROR_CODES.treeTooDeep);
+  });
+
+  it("rejects a self-referencing children array with the depth guard", () => {
+    const ring: ReactNode[] = [];
+    ring.push(ring);
+    const error = rejectionOf(createElement(Fragment, null, ring));
+    expect(error.code).toBe(CAD_JSX_ERROR_CODES.treeTooDeep);
+  });
+
+  it("rejects a cyclic component prop instead of overflowing the stack", () => {
+    const loop: Record<string, unknown> = { label: "loop" };
+    loop.self = loop;
+    function Cyclic(): ReactElement {
+      return createElement(Box, { width: 1, depth: 1, height: 1 });
+    }
+    const error = rejectionOf(createElement(Cyclic, { data: loop }));
+    expect(error.code).toBe(CAD_JSX_ERROR_CODES.propsInvalid);
+    expect(error.message).toContain("data.self");
+    expect(error.path).toEqual(["<root>", "Cyclic"]);
   });
 });

@@ -37,6 +37,34 @@ export const env = createEnv({
      * (`http://192.168.1.41:3001`) while `BETTER_AUTH_URL` stays localhost.
      */
     BETTER_AUTH_TRUSTED_ORIGINS: z.string().optional(),
+    /**
+     * Agent-chat server vars (docs/architecture/adr-agent-chat.md) — all
+     * OPTIONAL. Server-emitted chat (D2) is available for a provider only
+     * when that provider's key is present; with no keys at all the server
+     * relay mode is simply disabled. Client keys never reach the server
+     * (D1) and there is no fallback between providers (D6) — a missing key
+     * is a structured per-provider refusal, never a silent switch.
+     */
+    OPENAI_KEY: z.string().optional(),
+    ANTHROPIC_KEY: z.string().optional(),
+    GOOGLE_KEY: z.string().optional(),
+    OPENROUTER_KEY: z.string().optional(),
+    OPENAI_COMPATIBLE_KEY: z.string().optional(),
+    /** Base URL of the OpenAI-compatible endpoint used in server mode. */
+    OPENAI_COMPATIBLE_BASE_URL: z.url().optional(),
+    /**
+     * Instance-level posture (D13): when true, every authenticated user
+     * may use server-emitted chat without a `user_options` row — the
+     * self-host override also used by the e2e harness. Default off.
+     */
+    AGENT_SERVER_AI_ALLOW_ALL: z.stringbool().default(false),
+    /**
+     * Source of the model catalog (D7) — the models.dev API by default;
+     * point it at a self-hosted mirror (the e2e harness points it at a
+     * loopback fixture). models.dev data is MIT-licensed; attribution is
+     * retained in the UI that presents it.
+     */
+    MODEL_CATALOG_URL: z.url().default("https://models.dev/api.json"),
     NODE_ENV: z
       .enum(["development", "production", "test"])
       .default("development"),

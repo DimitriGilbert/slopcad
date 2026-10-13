@@ -12,6 +12,7 @@ import { ColorPickerField } from "./color-picker-field";
 import { ComboboxField } from "./combobox-field";
 import { DateField } from "./date-field";
 import { DurationPickerField } from "./duration-picker-field";
+import { ExpressionNumberField } from "./expression-number-field";
 import { FileUploadField } from "./file-upload-field";
 import { LocationPickerField } from "./location-picker-field";
 import { MaskedField } from "./masked-field";
@@ -42,6 +43,7 @@ const fieldRegistry: Partial<Record<NormalizedFieldType, FieldComponent>> = {
   date: DateField,
   duration: DurationPickerField,
   email: TextField,
+  expressionNumber: ExpressionNumberField,
   file: FileUploadField,
   location: LocationPickerField,
   masked: MaskedField,
