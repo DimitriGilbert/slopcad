@@ -15,6 +15,7 @@ import {
   sceneOperandOfBody,
   type SceneOperand,
 } from "./extrude";
+import { worldAxisDirectionOf } from "./world-axis";
 
 /** The world axes the rotation pair selects (the bridge's selector domain). */
 export const MOVE_BODY_AXES = [1, 2, 3] as const;
@@ -106,15 +107,6 @@ export interface MoveBodySceneRequest {
   readonly bodyId: string;
 }
 
-/** The world-axis selector's direction (the bridge's mapping). */
-const WORLD_AXIS_DIRECTION: Readonly<
-  Record<number, readonly [number, number, number]>
-> = Object.freeze({
-  1: [1, 0, 0] as const,
-  2: [0, 1, 0] as const,
-  3: [0, 0, 1] as const,
-});
-
 /**
  * Reads the document's move-body feature (the first `translate` carrying
  * the move's authored parameters) into its worker-scene request, pairing
@@ -196,7 +188,7 @@ export function documentMoveBodySceneRequest(
     const axisValue = magnitudeOf(axisRef.id, "dimensionless", "1");
     const angleRad = magnitudeOf(angleRef.id, "angle", "rad");
     if (axisValue === null || angleRad === null) return null;
-    const axis = WORLD_AXIS_DIRECTION[axisValue];
+    const axis = worldAxisDirectionOf(axisValue);
     if (axis === undefined) return null;
     rotation = { axis, angleRad };
   }

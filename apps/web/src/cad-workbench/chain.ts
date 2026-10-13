@@ -48,7 +48,6 @@
  */
 
 import type { CadDocument, FeatureRecord } from "@slopcad/cad-core";
-import { valueIn } from "@slopcad/cad-core";
 import type {
   ChainFilletRequest,
   ChainHoleRequest,
@@ -62,6 +61,7 @@ import {
   isStructuredHoleFeature,
   structuredHoleCutInputOfFeature,
 } from "./hole";
+import { magnitudeIn, parameterValueOf } from "./parameter-magnitude";
 
 /** The radius a fillet action creates its radius parameter with (mm). */
 export const CHAIN_FILLET_DEFAULT_RADIUS_MM = 3;
@@ -82,9 +82,11 @@ export function filletBaseFeatureOf(
 /**
  * Reads one fillet feature's inputs in declared role order: one feature or
  * body input (the target) and two parameter inputs — the radius (a length,
- * strictly positive) and the picked edge's snapshot ordinal (dimensionless
- * integer). `null` when the layout is malformed or any parameter no longer
- * resolves.
+ * strictly positive and finite) and the picked edge's snapshot ordinal
+ * (dimensionless whole number, >= 0). `null` when the layout is malformed
+ * or any parameter no longer resolves. The ONE reader of this layout: the
+ * document scene's topology-cut reader (`./topology-cut`) reads the
+ * ordinal form through it too.
  */
 export function chainFilletInputOf(
   document: CadDocument,
@@ -100,22 +102,16 @@ export function chainFilletInputOf(
   const radiusRef = parameterRefs[0];
   const edgeRef = parameterRefs[1];
   if (radiusRef === undefined || edgeRef === undefined) return null;
-  const radiusParameter = document.parameters.parameters.find(
-    (candidate) => candidate.id === radiusRef.id,
+  const radiusMm = magnitudeIn(
+    parameterValueOf(document, radiusRef.id),
+    "length",
+    "mm",
   );
-  const radiusMm =
-    radiusParameter === undefined ||
-    radiusParameter.value.dimension !== "length"
-      ? null
-      : valueIn(radiusParameter.value, "mm");
-  const edgeParameter = document.parameters.parameters.find(
-    (candidate) => candidate.id === edgeRef.id,
+  const edgeRaw = magnitudeIn(
+    parameterValueOf(document, edgeRef.id),
+    "dimensionless",
+    "1",
   );
-  const edgeRaw =
-    edgeParameter === undefined ||
-    edgeParameter.value.dimension !== "dimensionless"
-      ? null
-      : valueIn(edgeParameter.value, "1");
   if (
     radiusMm === null ||
     !(radiusMm > 0) ||

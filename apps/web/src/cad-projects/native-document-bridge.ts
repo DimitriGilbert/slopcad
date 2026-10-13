@@ -30,7 +30,7 @@ import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 
 /** The engine's scene vocabulary (see the workbench engine's dispatch). */
 export type WorkbenchSceneKind =
-  "empty" | "plate" | "extrude" | "revolve" | "hole";
+  "empty" | "plate" | "extrude" | "primitive" | "revolve" | "hole";
 
 /**
  * Serializes a live session into the native format's canonical text. The
@@ -99,9 +99,10 @@ export function parseNativeTextToSession(text: string): ParsedNativeSession {
 
 /**
  * The scene kind a document's features call for: the newest solid feature
- * (extrude, revolve, or hole) wins; a document with none falls to the
- * plate when it carries the fixture's hole parameter (demo-era saves) or
- * the empty scene — the clean bench reopens as the clean bench.
+ * (extrude, revolve, hole, or a box/sphere/cylinder/cone primitive — the
+ * `primitive` scene) wins; a document with none falls to the plate when
+ * it carries the fixture's hole parameter (demo-era saves) or the empty
+ * scene — the clean bench reopens as the clean bench.
  */
 export function sceneKindOfDocument(document: CadDocument): WorkbenchSceneKind {
   let scene: WorkbenchSceneKind =
@@ -113,6 +114,13 @@ export function sceneKindOfDocument(document: CadDocument): WorkbenchSceneKind {
       feature.kind === "hole"
     ) {
       scene = feature.kind;
+    } else if (
+      feature.kind === "box" ||
+      feature.kind === "sphere" ||
+      feature.kind === "cylinder" ||
+      feature.kind === "cone"
+    ) {
+      scene = "primitive";
     }
   }
   return scene;

@@ -25,6 +25,7 @@ import type { FeatureNumberValue } from "./parameter-reference";
 import type { SceneOperand, documentExtrudeRequest } from "./extrude";
 
 import { sceneOperandOfBody } from "./extrude";
+import { worldAxisDirectionOf } from "./world-axis";
 
 /** The world axes the rotation rides (the bridge's selector domain). */
 export const DUPLICATE_AXES = [1, 2, 3] as const;
@@ -180,15 +181,6 @@ export interface DuplicateSceneRequest {
   readonly bodyId: string;
 }
 
-/** The world-axis selector's direction (the bridge's mapping). */
-const WORLD_AXIS_DIRECTION: Readonly<
-  Record<number, readonly [number, number, number]>
-> = Object.freeze({
-  1: [1, 0, 0] as const,
-  2: [0, 1, 0] as const,
-  3: [0, 0, 1] as const,
-});
-
 /**
  * A duplicate feature's parameter magnitudes, read by declared order
  * (the bridge's input layout): dx, dy, dz (length), count (dimensionless),
@@ -244,7 +236,7 @@ function duplicateParametersOf(
   ) {
     return null;
   }
-  const axis = WORLD_AXIS_DIRECTION[axisValue];
+  const axis = worldAxisDirectionOf(axisValue);
   if (axis === undefined) return null;
   return {
     offsetMm: [dx, dy, dz],

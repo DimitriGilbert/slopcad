@@ -146,7 +146,7 @@ function combine(a: DatumVec3, s: number, b: DatumVec3): DatumVec3 {
  * float noise, identical normals yield identical frames, and a +z plane
  * keeps the world +x as its sketch x.
  */
-function inPlaneXAxisOf(normal: DatumVec3): DatumVec3 {
+export function inPlaneXAxisOf(normal: DatumVec3): DatumVec3 {
   const seed: DatumVec3 =
     Math.abs(normal[0]) < 0.9
       ? [1, 0, 0]

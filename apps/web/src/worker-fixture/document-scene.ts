@@ -58,10 +58,13 @@ import { computeHelixScene } from "./helix-scene";
 import { computeHoleScene } from "./hole-scene";
 import { computeLoftScene } from "./loft-scene";
 import { computePadScene } from "./pad-scene";
+import { computeFaceOpScene } from "./face-op-scene";
+import { computePatternFaceScene } from "./pattern-scene";
 import { computePatternFeatureScene } from "./pattern-scene";
 import { computePatternPathScene } from "./pattern-scene";
 import { computePatternTransformScene } from "./pattern-scene";
 import { computeMirrorScene } from "./pattern-scene";
+import { computePrimitiveScene } from "./primitive-scene";
 import { computeRevolveScene } from "./revolve-scene";
 import {
   computeRibScene,
@@ -73,6 +76,7 @@ import { computePlateWithHole } from "./plate-scene";
 import { computeSheetScene } from "./sheet-scene";
 import { computeSweepScene } from "./sweep-scene";
 import { computeThreadScene } from "./thread-scene";
+import { computeTopologyCutScene } from "./topology-cut-scene";
 
 /** One rendered body's measurement, keyed by the body it renders under. */
 export interface DocumentSceneBodyMeasurement {
@@ -165,6 +169,10 @@ async function computeOneBodyScene(
       const composed = await computeHelixScene(context, scene.request);
       return { measurement: composed.measurement, solid: composed.solid };
     }
+    case "primitive": {
+      const composed = await computePrimitiveScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
     case "thread": {
       const composed = await computeThreadScene(context, scene.request);
       return { measurement: composed.measurement, solid: composed.solid };
@@ -203,6 +211,30 @@ async function computeOneBodyScene(
     }
     case "mirror": {
       const composed = await computeMirrorScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "topologyCut": {
+      const composed = await computeTopologyCutScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "faceOp": {
+      const composed = await computeFaceOpScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "patternFace": {
+      const composed = await computePatternFaceScene(
+        context,
+        scene.request,
+        computed,
+      );
       return { measurement: composed.measurement, solid: composed.solid };
     }
     case "boolean": {
@@ -298,8 +330,19 @@ function fallbackSourcesOf(
       return [fallbackSourceOf(scene.request.base)];
     case "duplicate":
       return [fallbackSourceOf(scene.request.base)];
+    // Every target-consuming kind — a transform pattern, a fillet/chamfer/
+    // shell, a face op, a face pattern — renders its target's state when
+    // refused: the lineage's last valid solid (a refused op in a chain
+    // shows the previous op's output).
     case "patternTransform":
+    case "topologyCut":
+    case "faceOp":
+    case "patternFace":
       return [fallbackSourceOf(scene.request.target)];
+    // A primitive consumes nothing — no lineage to fall back to (the
+    // independent kinds' precedent): a refused primitive renders nothing.
+    case "primitive":
+      return [];
     default:
       return [];
   }

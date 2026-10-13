@@ -411,6 +411,7 @@ export type FixtureSessionBackend = "manifold" | "occt";
  */
 export type FeatureSceneKind =
   | "extrude"
+  | "primitive"
   | "revolve"
   | "sweep"
   | "loft"
@@ -425,6 +426,9 @@ export type FeatureSceneKind =
   | "patternFeature"
   | "patternPath"
   | "patternTransform"
+  | "topologyCut"
+  | "faceOp"
+  | "patternFace"
   | "mirror"
   | "duplicate"
   | "hole"

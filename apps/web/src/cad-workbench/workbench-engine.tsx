@@ -295,6 +295,7 @@ export type WorkbenchSceneKind =
   | "empty"
   | "plate"
   | "extrude"
+  | "primitive"
   | "revolve"
   | "sweep"
   | "loft"

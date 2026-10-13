@@ -2,7 +2,8 @@
  * The persistence bridge's open path: the rollback marker rides with the
  * persisted content — parsing a native text that carries a marker must
  * surface it (the review fix for the reopen path dropping it), so the
- * project workbench can restore the same parked timeline that was saved.
+ * project workbench can restore the same parked timeline that was saved —
+ * and the reopen scene kind the document's newest solid feature names.
  */
 
 import { describe, expect, it } from "vitest";
@@ -19,6 +20,7 @@ import {
 import {
   type ParsedNativeSession,
   parseNativeTextToSession,
+  sceneKindOfDocument,
   serializeSessionToNativeText,
 } from "./native-document-bridge";
 
@@ -59,6 +61,36 @@ function sessionWithPadFeature(): CadSession {
     }),
     "the pad feature commit",
   );
+}
+
+/**
+ * A session whose features are exactly the given kinds in order, each a
+ * bare feature over its own output body (the scene kind reads only the
+ * feature kinds, never their inputs).
+ */
+function sessionWithFeatureKinds(kinds: readonly string[]): CadSession {
+  let session = createSession(
+    createDocument(createDocumentId("doc_bridge_scene_kind")),
+  );
+  kinds.forEach((kind, index) => {
+    const body = createBodyId(`body_${kind}_${String(index)}`);
+    session = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          { type: "body.create", id: body, name: kind },
+          {
+            type: "feature.create",
+            id: createFeatureId(`feat_${kind}_${String(index)}`),
+            kind,
+            inputs: [],
+            outputs: [body],
+          },
+        ],
+      }),
+      `the ${kind} feature commit`,
+    );
+  });
+  return session;
 }
 
 function parseOk(
@@ -112,5 +144,29 @@ describe("parseNativeTextToSession surfaces the persisted rollback marker", () =
     if (!parsed.ok) {
       expect(parsed.error).toContain("valid JSON");
     }
+  });
+});
+
+describe("sceneKindOfDocument picks the reopen scene", () => {
+  it("reopens a primitive document on the primitive scene (newest solid wins)", () => {
+    const sceneOf = (kinds: readonly string[]) =>
+      sceneKindOfDocument(sessionWithFeatureKinds(kinds).document);
+    expect(sceneOf(["box"])).toBe("primitive");
+    expect(sceneOf(["sphere"])).toBe("primitive");
+    expect(sceneOf(["cylinder"])).toBe("primitive");
+    expect(sceneOf(["cone"])).toBe("primitive");
+    expect(sceneOf(["box", "extrude"])).toBe("extrude");
+    expect(sceneOf(["extrude", "box"])).toBe("primitive");
+    // The persisted text reopens on the same scene.
+    const parsed = parseOk(
+      parseNativeTextToSession(
+        serializeSessionToNativeText(
+          sessionWithFeatureKinds(["extrude", "box"]),
+          new Map(),
+          null,
+        ),
+      ),
+    );
+    expect(parsed.scene).toBe("primitive");
   });
 });

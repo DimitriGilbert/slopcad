@@ -95,19 +95,29 @@ import {
   type DuplicateSceneRequest,
 } from "./duplicate";
 import {
+  documentFaceOpSceneRequests,
+  type FaceOpSceneRequest,
+} from "./face-op";
+import {
   documentMoveBodySceneRequest,
   type MoveBodySceneRequest,
 } from "./move-body";
 import {
   documentMirrorSceneRequest,
+  documentPatternFaceSceneRequests,
   documentPatternFeatureSceneRequest,
   documentPatternPathSceneRequest,
   documentPatternTransformSceneRequests,
   type MirrorSceneRequest,
+  type PatternFaceSceneRequest,
   type PatternFeatureSceneRequest,
   type PatternPathSceneRequest,
   type PatternTransformSceneRequest,
 } from "./pattern";
+import {
+  primitiveSceneRequestOfFeature,
+  type PrimitiveSceneRequest,
+} from "./primitive";
 import { documentRibSceneRequest, type RibSceneRequest } from "./rib";
 import {
   revolveSceneRequestOfFeature,
@@ -126,6 +136,10 @@ import {
 } from "./surface-scene";
 import { sweepSceneRequestOfFeature, type SweepSceneRequest } from "./sweep";
 import { documentThreadSceneRequest, type ThreadSceneRequest } from "./thread";
+import {
+  documentTopologyCutSceneRequests,
+  type TopologyCutSceneRequest,
+} from "./topology-cut";
 import {
   documentPadSceneRequest,
   extrudeSceneRequestOfFeature,
@@ -149,6 +163,7 @@ export type DocumentBodyScene =
   | { readonly kind: "sweep"; readonly request: SweepSceneRequest }
   | { readonly kind: "loft"; readonly request: LoftSceneRequest }
   | { readonly kind: "helix"; readonly request: HelixSceneRequest }
+  | { readonly kind: "primitive"; readonly request: PrimitiveSceneRequest }
   | { readonly kind: "thread"; readonly request: ThreadSceneRequest }
   | { readonly kind: "rib"; readonly request: RibSceneRequest }
   | { readonly kind: "scale"; readonly request: ScaleSceneRequest }
@@ -167,6 +182,18 @@ export type DocumentBodyScene =
       readonly request: PatternTransformSceneRequest;
     }
   | { readonly kind: "mirror"; readonly request: MirrorSceneRequest }
+  | {
+      readonly kind: "topologyCut";
+      readonly request: TopologyCutSceneRequest;
+    }
+  | {
+      readonly kind: "faceOp";
+      readonly request: FaceOpSceneRequest;
+    }
+  | {
+      readonly kind: "patternFace";
+      readonly request: PatternFaceSceneRequest;
+    }
   | { readonly kind: "boolean"; readonly request: BooleanSceneRequest }
   | { readonly kind: "moveBody"; readonly request: MoveBodySceneRequest }
   | { readonly kind: "duplicate"; readonly request: DuplicateSceneRequest }
@@ -361,10 +388,10 @@ export function documentSceneBodies(
   const activeDocument: CadDocument = { ...document, features: active };
 
   // The per-body scene requests, keyed by body id. The independent kinds
-  // land first (every extrude, revolve, sweep, loft, helix, sheet body of
-  // the active timeline); the consuming readers then overwrite their tip
-  // entries — a tip body's independent form (the pad body's plain extrude)
-  // must not survive its own composition.
+  // land first (every extrude, revolve, sweep, loft, helix, primitive,
+  // sheet body of the active timeline); the consuming readers then
+  // overwrite their tip entries — a tip body's independent form (the pad
+  // body's plain extrude) must not survive its own composition.
   const requests = new Map<string, DocumentBodyScene>();
   for (const feature of active) {
     switch (feature.kind) {
@@ -404,6 +431,18 @@ export function documentSceneBodies(
         const request = helixSceneRequestOfFeature(activeDocument, feature);
         if (request !== null) {
           requests.set(request.bodyId, { kind: "helix", request });
+        }
+        break;
+      }
+      // The primitives: every feature renders its own lineage root (they
+      // consume nothing); an out-of-domain primitive emits no entry.
+      case "box":
+      case "sphere":
+      case "cylinder":
+      case "cone": {
+        const request = primitiveSceneRequestOfFeature(activeDocument, feature);
+        if (request !== null) {
+          requests.set(request.bodyId, { kind: "primitive", request });
         }
         break;
       }
@@ -584,6 +623,40 @@ export function documentSceneBodies(
     admissions.push({
       bodyId: request.bodyId,
       scene: { kind: "patternTransform", request },
+      computedOperands:
+        request.target.kind === "computed" ? [request.target.bodyId] : [],
+      consumesOperands: true,
+    });
+  }
+  // The topology cuts (fillet / chamfer / shell): EVERY feature renders,
+  // each consuming its target's computed solid — the transform patterns'
+  // admission, so a chain orders itself (each cut's output is the next
+  // cut's target, admitted only once that target's entry exists).
+  for (const request of documentTopologyCutSceneRequests(activeDocument)) {
+    admissions.push({
+      bodyId: request.bodyId,
+      scene: { kind: "topologyCut", request },
+      computedOperands:
+        request.target.kind === "computed" ? [request.target.bodyId] : [],
+      consumesOperands: true,
+    });
+  }
+  // The face ops (moveFace / deleteFace / replaceFace) and patternFace:
+  // the topology cuts' admission — EVERY feature renders, each consuming
+  // its target's computed solid, so mixed chains order themselves.
+  for (const request of documentFaceOpSceneRequests(activeDocument)) {
+    admissions.push({
+      bodyId: request.bodyId,
+      scene: { kind: "faceOp", request },
+      computedOperands:
+        request.target.kind === "computed" ? [request.target.bodyId] : [],
+      consumesOperands: true,
+    });
+  }
+  for (const request of documentPatternFaceSceneRequests(activeDocument)) {
+    admissions.push({
+      bodyId: request.bodyId,
+      scene: { kind: "patternFace", request },
       computedOperands:
         request.target.kind === "computed" ? [request.target.bodyId] : [],
       consumesOperands: true,

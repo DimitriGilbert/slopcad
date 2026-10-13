@@ -38,6 +38,7 @@ import {
   documentPatternPathSceneRequest,
 } from "./pattern";
 import { documentDuplicateSceneRequests } from "./duplicate";
+import { documentPrimitiveSceneRequests } from "./primitive";
 
 /**
  * The workbench scene kinds the engine's dispatch can follow (the same
@@ -46,12 +47,14 @@ import { documentDuplicateSceneRequests } from "./duplicate";
  * scenes. Phase 47 adds the `curves` scene (the curve-record authoring
  * surface — it resolves while the document carries at least one curve
  * record and renders them as the curve overlay over the highest solid
- * scene).
+ * scene). The `primitive` scene resolves while the document carries at
+ * least one in-domain box/sphere/cylinder/cone feature.
  */
 export type WorkbenchSceneKind =
   | "empty"
   | "plate"
   | "extrude"
+  | "primitive"
   | "revolve"
   | "sweep"
   | "loft"
@@ -75,9 +78,10 @@ export type WorkbenchSceneKind =
  * The highest scene the document still resolves, in the create actions'
  * precedence: the hole composition when every hole still cuts its base,
  * else the loft, else the sweep, else the revolve, else the extrude, else
- * the plate when the document carries the fixture's hole parameter (the
- * plate computation follows it), else `empty` — the clean bench resolves
- * nothing and renders the honest empty scene.
+ * any in-domain primitive, else the plate when the document carries the
+ * fixture's hole parameter (the plate computation follows it), else
+ * `empty` — the clean bench resolves nothing and renders the honest empty
+ * scene.
  */
 export function highestResolvableScene(
   document: CadDocument,
@@ -104,6 +108,9 @@ export function highestResolvableScene(
   if (documentSweepRequest(document) !== null) return "sweep";
   if (documentRevolveRequest(document) !== null) return "revolve";
   if (documentExtrudeRequest(document) !== null) return "extrude";
+  if (documentPrimitiveSceneRequests(document).length > 0) {
+    return "primitive";
+  }
   return holeDiameterMm(document) !== null ? "plate" : "empty";
 }
 
@@ -164,6 +171,9 @@ export function honestSceneFallback(
                                 ? documentSweepRequest(document) !== null
                                 : activeScene === "revolve"
                                   ? documentRevolveRequest(document) !== null
-                                  : documentExtrudeRequest(document) !== null;
+                                  : activeScene === "primitive"
+                                    ? documentPrimitiveSceneRequests(document)
+                                        .length > 0
+                                    : documentExtrudeRequest(document) !== null;
   return resolved ? null : highestResolvableScene(document);
 }

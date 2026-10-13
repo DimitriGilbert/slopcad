@@ -267,6 +267,51 @@ function solidTargetOf(
   return target;
 }
 
+/**
+ * Appends one `box` primitive in the bridge's canonical layout (width,
+ * depth, height length parameters, one output body); the ids embed `tag`.
+ */
+function withBox(
+  document: CadDocument,
+  tag: string,
+  extentsMm: readonly [number, number, number],
+): CadDocument {
+  let next = document;
+  const parameterIds = extentsMm.map((value, index) => {
+    const id = createParameterId(`param_${tag}_${String(index)}`);
+    const parameter = addDocumentParameter(next, {
+      id,
+      name: `${tag}${String(index)}`,
+      value: length(value),
+    });
+    if (!parameter.ok) throw new Error(parameter.error.message);
+    next = parameter.value.document;
+    return id;
+  });
+  const bodyId = createBodyId(`body_${tag}`);
+  const body = addBody(next, { id: bodyId, name: tag });
+  if (!body.ok) throw new Error(body.error.message);
+  const featured = addFeature(body.value.document, {
+    id: createFeatureId(`feat_${tag}`),
+    kind: "box",
+    inputs: parameterIds.map((id) => ({ kind: "parameter" as const, id })),
+    outputs: [bodyId],
+  });
+  if (!featured.ok) throw new Error(featured.error.message);
+  return featured.value.document;
+}
+
+/** The clean document carrying only the fixture's hole parameter. */
+function platedDocument(): CadDocument {
+  const plated = addDocumentParameter(createDocument(DOC), {
+    id: createParameterId("param_hole_diameter"),
+    name: "holeDiameter",
+    value: length(8),
+  });
+  if (!plated.ok) throw new Error(plated.error.message);
+  return plated.value.document;
+}
+
 describe("highestResolvableScene", () => {
   it("prefers the hole composition when every hole still cuts its base", () => {
     expect(highestResolvableScene(buildSolidDocument("extrude", "hole"))).toBe(
@@ -293,6 +338,27 @@ describe("highestResolvableScene", () => {
     expect(highestResolvableScene(buildSolidDocument("extrude"))).toBe(
       "extrude",
     );
+  });
+
+  it("lands on the primitive below the extrude, above the plate and empty", () => {
+    expect(
+      highestResolvableScene(withBox(createDocument(DOC), "box", [10, 20, 30])),
+    ).toBe("primitive");
+    // The precedence over the plate: an in-domain primitive outranks the
+    // fixture's hole parameter.
+    expect(
+      highestResolvableScene(withBox(platedDocument(), "box", [10, 20, 30])),
+    ).toBe("primitive");
+    // The extrude outranks the primitive, even one committed after it.
+    expect(
+      highestResolvableScene(
+        withBox(buildSolidDocument("extrude"), "box", [10, 20, 30]),
+      ),
+    ).toBe("extrude");
+    // An out-of-domain primitive resolves nothing.
+    expect(
+      highestResolvableScene(withBox(createDocument(DOC), "box", [0, 20, 30])),
+    ).toBe("empty");
   });
 
   it("lands on the plate only while the fixture's hole parameter is stored", () => {
@@ -359,6 +425,39 @@ describe("honestSceneFallback", () => {
     expect(honestSceneFallback(buildSolidDocument("extrude"), "revolve")).toBe(
       "extrude",
     );
+  });
+
+  it("holds the primitive scene only while an in-domain primitive exists", () => {
+    expect(
+      honestSceneFallback(
+        withBox(createDocument(DOC), "box", [10, 20, 30]),
+        "primitive",
+      ),
+    ).toBeNull();
+    // One in-domain primitive keeps the scene even beside a refused one.
+    expect(
+      honestSceneFallback(
+        withBox(
+          withBox(createDocument(DOC), "bad", [10, -1, 30]),
+          "box",
+          [10, 20, 30],
+        ),
+        "primitive",
+      ),
+    ).toBeNull();
+    // The only primitive out of domain: the scene falls back honestly.
+    expect(
+      honestSceneFallback(
+        withBox(createDocument(DOC), "bad", [0, 20, 30]),
+        "primitive",
+      ),
+    ).toBe("empty");
+    expect(
+      honestSceneFallback(
+        withBox(platedDocument(), "bad", [0, 20, 30]),
+        "primitive",
+      ),
+    ).toBe("plate");
   });
 
   it("re-points the extrude scene at the empty scene after the extrude is undone", () => {
