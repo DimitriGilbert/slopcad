@@ -7,7 +7,7 @@
  * boundary against a REAL `CadStore` over the app's own workbench session.
  * The engine-side reads (mode, timeline, regeneration issue, sketch solve)
  * are surface accessors — mocked here; the live binding is the complete
- * workbench's own mount (workbench-tools.test.tsx pins the eleven-tool
+ * workbench's own mount (workbench-tools.test.tsx pins the twelve-tool
  * registration). No DOM, no WebGL.
  *
  * Also pins the phase-wide output-shape constraint: the tools' RESULT field
@@ -39,7 +39,7 @@ import {
 } from "@slopcad/cad-react";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
-import { createCadWorkbenchSession } from "../cad-workbench/session";
+import { createCadWorkbenchDemoSession } from "../cad-workbench/session";
 import {
   executeWebMcpTool,
   registerWebMcpTool,
@@ -107,9 +107,9 @@ function expectNoApiKeyLikeFieldNames(payload: unknown): void {
   scan(payload);
 }
 
-/** A fresh store over the app's own workbench session. */
+/** A fresh store over the app's demo workbench session (the boot fixture). */
 function freshStore(): CadStore {
-  return createCadStore({ session: createCadWorkbenchSession() });
+  return createCadStore({ session: createCadWorkbenchDemoSession() });
 }
 
 /** A store over a purpose-built document (the outline's assembly probe). */

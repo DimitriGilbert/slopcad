@@ -1551,8 +1551,9 @@ export function CompleteCadWorkbench({
     viewSession.userCamera,
   ]);
 
-  // The WebMCP binding (Phase 7 + the Phase 2.1 capture tool): the eleven
-  // workbench tools registered for the page's lifetime — always in the
+  // The WebMCP binding (Phase 7 + the Phase 2.1 capture tool + the site's
+  // authoring skill): the twelve workbench tools registered for the page's
+  // lifetime — always in the
   // internal registry, mirrored to `document.modelContext` when the browser
   // exposes the agent surface. The capture tool drives the page's own
   // camera-overlay writer, frame ledger, and live canvas — the same
