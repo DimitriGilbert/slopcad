@@ -70,6 +70,10 @@ import {
 } from "./duplicate";
 import { sceneOperandOfBody } from "./extrude";
 import { useWorkbenchEngine, WorkbenchStoreProvider } from "./workbench-engine";
+import { WORKBENCH_DEMO_SESSION_KEY } from "./session";
+
+// The engine mounts boot the demo document (the session module's opt-in).
+window.localStorage.setItem(WORKBENCH_DEMO_SESSION_KEY, "1");
 
 afterEach(cleanup);
 

@@ -196,13 +196,15 @@ describe("computeRibScene: the no-op post-condition (Phase 41)", () => {
       ...createFakeKernel(),
       area: () => ok(0),
     };
-    const measured = await computeRibScene(
-      sceneContext(measurable),
-      ribSceneRequest(squareLoop(3, 3, 7, 7), {
-        rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
-        translation: { x: mm(0), y: mm(0), z: mm(10) },
-      }),
-    );
+    const measured = (
+      await computeRibScene(
+        sceneContext(measurable),
+        ribSceneRequest(squareLoop(3, 3, 7, 7), {
+          rotation: { axis: [0, 0, 1] as const, angle: angle(0) },
+          translation: { x: mm(0), y: mm(0), z: mm(10) },
+        }),
+      )
+    ).measurement;
     // The union adds the up-half's full 4×4×1 slab (16 mm³) beyond the
     // base's 1000, judged within the fake kernel's voxel boolean band —
     // the suite's tolerance for every fake-kernel boolean fixture.

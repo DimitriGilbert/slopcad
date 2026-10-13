@@ -1,5 +1,5 @@
 /**
- * The workbench's WebMCP tools (Phase 7): the eight CAD tools the
+ * The workbench's WebMCP tools (Phase 7): the nine CAD tools the
  * workbench-complete page exposes to browser-resident AI agents through the
  * WebMCP binding. Every handler drives ONLY existing domain paths — the
  * SAME `CadStore` operations the command menu, parameter panel, and history
@@ -24,6 +24,10 @@
  * - `cad_measure` — the engine's applied render state: the settled scene's
  *   kernel-measured volume, area, and bounds, the same source the
  *   Measurement block's readouts render.
+ * - `cad_skill` — the agent-facing authoring guide (CAD_SKILL_MARKDOWN):
+ *   the command vocabulary, serialized shapes, ID conventions, and a
+ *   worked batch, served by the site so agents learn the tool from the
+ *   tool.
  *
  * The entries read LIVE state through accessor functions (the page's engine
  * and command list are re-derived every render); the entries themselves —
@@ -59,6 +63,7 @@ import type { FixtureRenderState } from "../render-fixture/fixture-session";
 import type { WorkbenchEngine } from "../cad-workbench/workbench-engine";
 import type { WebMcpToolEntry } from "./registry";
 
+import { CAD_SKILL_MARKDOWN } from "./cad-skill";
 import { defineWebMcpTool } from "./registry";
 import { useWebMcpTools } from "./use-webmcp-tools";
 
@@ -158,7 +163,7 @@ function bodySummaries(document: CadDocument) {
 }
 
 /**
- * Builds the eight workbench tool entries from one live surface. Called
+ * Builds the nine workbench tool entries from one live surface. Called
  * once per mount (the entries read through the surface's accessors, so
  * once-minted entries stay current); the command-id enum is derived from
  * the SAME command list the handlers check live — the mount-time
@@ -412,6 +417,18 @@ export function createWorkbenchWebMcpTools(
         };
       },
     }),
+    defineWebMcpTool({
+      annotations: { readOnlyHint: true },
+      description:
+        "Return the slopcad authoring skill: the complete guide to driving this workbench's tools — command vocabulary, serialized command shapes, ID conventions, a worked parametric-model batch, and the silent failure modes. Call this FIRST before authoring documents; it is the tool's own documentation.",
+      inputSchema: z.object({}),
+      name: "cad_skill",
+      execute: () => ({
+        format: "markdown",
+        ok: true,
+        skill: CAD_SKILL_MARKDOWN,
+      }),
+    }),
   ];
 }
 
@@ -430,7 +447,7 @@ function historyMove(store: CadStore, move: "undo" | "redo") {
 }
 
 /**
- * The workbench mount: registers the eight tools for the page's lifetime,
+ * The workbench mount: registers the nine tools for the page's lifetime,
  * reading the LIVE engine and command vocabulary. One call from the
  * workbench-complete composition — no restructuring, no extra surfaces.
  */

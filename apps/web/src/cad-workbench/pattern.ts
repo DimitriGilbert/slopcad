@@ -20,9 +20,20 @@ import { valueIn, type AnyDimensionalValue } from "@slopcad/cad-core";
 import type { CadDocument, FeatureRecord } from "@slopcad/cad-core";
 import type { ArrayPatternLeg } from "@slopcad/cad-kernel";
 import type { SweepPathSegmentInput } from "@slopcad/cad-kernel";
+import {
+  PATTERN_COUNT_LIMIT,
+  sweepPathProblem,
+  sweepPathStationAt,
+  sweepPathTotalLength,
+} from "@slopcad/cad-kernel";
 
-import { resolveSessionDatumPlane } from "./datum";
-import { documentExtrudeRequest, type ExtrudeSceneRequest } from "./extrude";
+import { resolveSessionDatumAxis, resolveSessionDatumPlane } from "./datum";
+import {
+  documentExtrudeRequest,
+  sceneOperandOfBody,
+  type ExtrudeSceneRequest,
+  type SceneOperand,
+} from "./extrude";
 import { sketchPathResolverOf } from "./sweep";
 
 /** The pattern editor's authoring numbers, in the feature's leg order. */
@@ -47,6 +58,13 @@ export const PATTERN_DEFAULTS: PatternFeatureInput = {
   legs: [{ directionDeg: 0, count: 3, spacingMm: 20 }],
   skips: [],
 };
+
+/**
+ * The circular pattern's total-angle ceiling — the bridge's own domain
+ * (core-bridge's `FULL_CIRCLE_RAD + ANGLE_DOMAIN_TOLERANCE_RAD`): the
+ * sweep is `(0, 2π]`, the 1e-9 float round-trip slack included.
+ */
+const PATTERN_TOTAL_ANGLE_MAX_RAD = Math.PI * 2 + 1e-9;
 
 /** The path pattern's authoring numbers. */
 export interface PatternPathInput {
@@ -452,4 +470,200 @@ export function documentMirrorSceneRequest(
     merge,
     bodyId,
   };
+}
+
+/** The transform patterns' resolved copy step (the bridge's own semantics). */
+export type PatternTransformPlan =
+  | {
+      readonly kind: "linear";
+      /** Copies along the direction, count ≥ 2 (the target is instance 0). */
+      readonly count: number;
+      /** The spacing between neighbouring copies (mm, > 0). */
+      readonly spacingMm: number;
+      /** The unit direction the copies march along. */
+      readonly direction: readonly [number, number, number];
+    }
+  | {
+      readonly kind: "circular";
+      /** Copies around the axis, count ≥ 2 (the target is instance 0). */
+      readonly count: number;
+      /** The pattern's total sweep in radians (step = total ÷ count). */
+      readonly totalAngleRad: number;
+      /** The rotation axis's unit direction. */
+      readonly axis: readonly [number, number, number];
+      /** A point on the rotation axis (the world origin for the
+       * compat axis-selector form, the datum's origin for the
+       * datum-axis form). */
+      readonly axisOrigin: readonly [number, number, number];
+    };
+
+/** The worker-scene payload one patternLinear/patternCircular executes as. */
+export interface PatternTransformSceneRequest {
+  /** The repeated solid's source (the feature's feature/body target). */
+  readonly target: SceneOperand;
+  /** The resolved copy plan. */
+  readonly pattern: PatternTransformPlan;
+  /** The feature's output body id (the rendered body). */
+  readonly bodyId: string;
+}
+
+/**
+ * Reads EVERY patternLinear/patternCircular feature into its
+ * worker-scene request — the real-CAD forms the bridge validates:
+ * three parameters (count, spacing/totalAngle, direction/axis) in the
+ * compat forms, two parameters plus one direction input in the
+ * datum-axis and sketch-line forms. The target resolves through the
+ * shared operand seam (a plain extrusion re-derives, a composition's
+ * output rides the computed pass) — a pattern may repeat ANY solid,
+ * not only the last extrude. A feature whose target, plan, or
+ * direction no longer resolves is skipped honestly, whole — the other
+ * patterns still render.
+ */
+export function documentPatternTransformSceneRequests(
+  document: CadDocument,
+): readonly PatternTransformSceneRequest[] {
+  const requests: PatternTransformSceneRequest[] = [];
+  const byId = new Map(document.features.map((entry) => [entry.id, entry]));
+  for (const feature of document.features) {
+    if (
+      feature.kind !== "patternLinear" &&
+      feature.kind !== "patternCircular"
+    ) {
+      continue;
+    }
+    const bodyId = feature.outputs[0];
+    const targetRefs = feature.inputs.filter(
+      (ref) => ref.kind === "feature" || ref.kind === "body",
+    );
+    const parameterRefs = feature.inputs.filter(
+      (ref) => ref.kind === "parameter",
+    );
+    const datumRefs = feature.inputs.filter((ref) => ref.kind === "datum");
+    const sketchRefs = feature.inputs.filter((ref) => ref.kind === "sketch");
+    if (bodyId === undefined || targetRefs.length !== 1) continue;
+    const targetRef = targetRefs[0];
+    if (targetRef === undefined) continue;
+    const targetBodyId =
+      targetRef.kind === "body"
+        ? targetRef.id
+        : (byId.get(targetRef.id)?.outputs[0] ?? null);
+    if (targetBodyId === null) continue;
+    const target = sceneOperandOfBody(document, targetBodyId);
+    if (target === null) continue;
+    const parameterValue = (index: number) =>
+      document.parameters.parameters.find(
+        (entry) => entry.id === parameterRefs[index]?.id,
+      )?.value;
+    const count = magnitudeIn(parameterValue(0), "dimensionless", "1");
+    // The bridge's count domain (core-bridge's pattern executor): a whole
+    // number in [2, PATTERN_COUNT_LIMIT]. An out-of-domain pattern is a
+    // refused feature — the scene must not compute it and present a
+    // successful verdict over geometry regeneration rejected.
+    if (
+      count === null ||
+      !Number.isInteger(count) ||
+      count < 2 ||
+      count > PATTERN_COUNT_LIMIT
+    ) {
+      continue;
+    }
+    const directionFromDatum = (): {
+      readonly origin: readonly [number, number, number];
+      readonly direction: readonly [number, number, number];
+    } | null => {
+      const datumRef = datumRefs[0];
+      if (datumRef === undefined || datumRef.kind !== "datum") return null;
+      const resolved = resolveSessionDatumAxis(document, datumRef.id);
+      if (!resolved.ok) return null;
+      return { origin: resolved.origin, direction: resolved.direction };
+    };
+    let pattern: PatternTransformPlan | null = null;
+    if (feature.kind === "patternLinear") {
+      const spacingMm = magnitudeIn(parameterValue(1), "length", "mm");
+      // The bridge's linear domain: strictly positive spacing (zero or
+      // negative stacks every copy and degenerates to the target).
+      if (spacingMm === null || !(spacingMm > 0)) continue;
+      if (datumRefs.length === 1 && parameterRefs.length === 2) {
+        const axis = directionFromDatum();
+        if (axis === null) continue;
+        pattern = {
+          kind: "linear",
+          count,
+          spacingMm,
+          direction: axis.direction,
+        };
+      } else if (sketchRefs.length === 1 && parameterRefs.length === 2) {
+        const sketchRef = sketchRefs[0];
+        if (sketchRef === undefined || sketchRef.kind !== "sketch") continue;
+        const path = sketchPathResolverOf(document)(sketchRef.id);
+        if (!path.ok || sweepPathProblem(path.value.path) !== null) continue;
+        const start = sweepPathStationAt(path.value.path, 0).point;
+        const end = sweepPathStationAt(
+          path.value.path,
+          sweepPathTotalLength(path.value.path),
+        ).point;
+        const run: [number, number] = [end[0] - start[0], end[1] - start[1]];
+        const norm = Math.hypot(run[0], run[1]);
+        if (norm === 0) continue;
+        pattern = {
+          kind: "linear",
+          count,
+          spacingMm,
+          direction: [run[0] / norm, 0, run[1] / norm],
+        };
+      } else {
+        const directionRad = magnitudeIn(parameterValue(2), "angle", "rad");
+        if (directionRad === null) continue;
+        pattern = {
+          kind: "linear",
+          count,
+          spacingMm,
+          direction: [Math.cos(directionRad), Math.sin(directionRad), 0],
+        };
+      }
+    } else {
+      const totalAngleRad = magnitudeIn(parameterValue(1), "angle", "rad");
+      // The bridge's circular domain: a strictly positive sweep of at most
+      // one full turn (a longer sweep double-covers the circle).
+      if (
+        totalAngleRad === null ||
+        !(totalAngleRad > 0) ||
+        totalAngleRad > PATTERN_TOTAL_ANGLE_MAX_RAD
+      ) {
+        continue;
+      }
+      if (datumRefs.length === 1 && parameterRefs.length === 2) {
+        const axis = directionFromDatum();
+        if (axis === null) continue;
+        pattern = {
+          kind: "circular",
+          count,
+          totalAngleRad,
+          axis: axis.direction,
+          axisOrigin: axis.origin,
+        };
+      } else {
+        const axisIndex = magnitudeIn(parameterValue(2), "dimensionless", "1");
+        const axis: readonly [number, number, number] | undefined =
+          axisIndex === 1
+            ? [1, 0, 0]
+            : axisIndex === 2
+              ? [0, 1, 0]
+              : axisIndex === 3
+                ? [0, 0, 1]
+                : undefined;
+        if (axis === undefined) continue;
+        pattern = {
+          kind: "circular",
+          count,
+          totalAngleRad,
+          axis,
+          axisOrigin: [0, 0, 0],
+        };
+      }
+    }
+    if (pattern === null) continue;
+    requests.push({ target, pattern, bodyId });
+  }
+  return requests;
 }

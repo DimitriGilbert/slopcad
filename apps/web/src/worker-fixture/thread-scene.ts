@@ -16,7 +16,7 @@
 import { length } from "@slopcad/cad-core";
 import type { ComputationContext, WorkerSolidId } from "@slopcad/cad-kernel";
 import { planThreadCut } from "@slopcad/cad-kernel";
-import type { PlateMeasurement } from "./plate-scene";
+import type { ComposedSceneResult } from "./body-ops-scenes";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
 import type { ThreadCutInput } from "../cad-workbench/thread";
 
@@ -50,7 +50,7 @@ const NOOP_EPSILON_RELATIVE = 1e-9;
 export async function computeThreadScene(
   context: ComputationContext,
   request: ThreadSceneRequest,
-): Promise<PlateMeasurement> {
+): Promise<ComposedSceneResult> {
   const mm = (value: number) => length(value, "mm");
   const extruded = await context.request("solid.extrude", {
     loop: request.base.loop,
@@ -126,11 +126,14 @@ export async function computeThreadScene(
   const bounds = await context.request("solid.bounds", { solid });
   const tessellation = await context.request("solid.tessellate", { solid });
   return {
-    volume: volume.volume,
-    area: area.area,
-    bounds: bounds.bounds,
-    triangles: tessellation.tessellation.indices.length / 3,
-    tessellation: tessellation.tessellation,
+    measurement: {
+      volume: volume.volume,
+      area: area.area,
+      bounds: bounds.bounds,
+      triangles: tessellation.tessellation.indices.length / 3,
+      tessellation: tessellation.tessellation,
+    },
+    solid,
   };
 }
 

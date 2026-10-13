@@ -60,6 +60,7 @@ import { computeLoftScene } from "./loft-scene";
 import { computePadScene } from "./pad-scene";
 import { computePatternFeatureScene } from "./pattern-scene";
 import { computePatternPathScene } from "./pattern-scene";
+import { computePatternTransformScene } from "./pattern-scene";
 import { computeMirrorScene } from "./pattern-scene";
 import { computeRevolveScene } from "./revolve-scene";
 import {
@@ -140,40 +141,70 @@ async function computeOneBodyScene(
           scene.request.holeDiameterMm,
         ),
       };
-    case "extrude":
-      return { measurement: await computeExtrudeScene(context, scene.request) };
     case "pad": {
       const composed = await computePadScene(context, scene.request);
       return { measurement: composed.measurement, solid: composed.solid };
     }
-    case "revolve":
-      return { measurement: await computeRevolveScene(context, scene.request) };
-    case "sweep":
-      return { measurement: await computeSweepScene(context, scene.request) };
-    case "loft":
-      return { measurement: await computeLoftScene(context, scene.request) };
-    case "helix":
-      return { measurement: await computeHelixScene(context, scene.request) };
-    case "thread":
-      return { measurement: await computeThreadScene(context, scene.request) };
-    case "rib":
-      return { measurement: await computeRibScene(context, scene.request) };
-    case "scale":
-      return { measurement: await computeScaleScene(context, scene.request) };
-    case "thicken":
-      return { measurement: await computeThickenScene(context, scene.request) };
-    case "split":
-      return { measurement: await computeSplitScene(context, scene.request) };
-    case "patternFeature":
-      return {
-        measurement: await computePatternFeatureScene(context, scene.request),
-      };
-    case "patternPath":
-      return {
-        measurement: await computePatternPathScene(context, scene.request),
-      };
-    case "mirror":
-      return { measurement: await computeMirrorScene(context, scene.request) };
+    case "extrude": {
+      const composed = await computeExtrudeScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "revolve": {
+      const composed = await computeRevolveScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "sweep": {
+      const composed = await computeSweepScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "loft": {
+      const composed = await computeLoftScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "helix": {
+      const composed = await computeHelixScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "thread": {
+      const composed = await computeThreadScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "rib": {
+      const composed = await computeRibScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "scale": {
+      const composed = await computeScaleScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "thicken": {
+      const composed = await computeThickenScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "split": {
+      const composed = await computeSplitScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "patternFeature": {
+      const composed = await computePatternFeatureScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "patternPath": {
+      const composed = await computePatternPathScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "patternTransform": {
+      const composed = await computePatternTransformScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "mirror": {
+      const composed = await computeMirrorScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
     case "boolean": {
       const composed = await computeBooleanScene(
         context,
@@ -234,9 +265,12 @@ function fallbackSourceOf(operand: SceneOperand): FallbackSource {
  * renders its own extrusion; a computed operand renders the measurement
  * its scene already produced earlier in the pass — a refused boolean over
  * a holed block shows the HOLED block, the lineage's honest current
- * state. The pad renders its base extrusion; the independent kinds and
- * the sheet chain carry nothing (a refused sheet renders no partial
- * chain).
+ * state. The pad renders its base extrusion; the transform pattern
+ * renders its target's state (a refused copy transform must not strand a
+ * still-valid operand — the target's scene ran compute-only for the
+ * pattern, so its measurement is right there in the pass); the
+ * independent kinds and the sheet chain carry nothing (a refused sheet
+ * renders no partial chain).
  */
 function fallbackSourcesOf(
   scene: DocumentBodyScene,
@@ -264,6 +298,8 @@ function fallbackSourcesOf(
       return [fallbackSourceOf(scene.request.base)];
     case "duplicate":
       return [fallbackSourceOf(scene.request.base)];
+    case "patternTransform":
+      return [fallbackSourceOf(scene.request.target)];
     default:
       return [];
   }
@@ -355,10 +391,9 @@ export async function computeDocumentScene(
       if (!renderableBodyIds.has(fallback.request.bodyId)) continue;
       if (renderedIds.has(fallback.request.bodyId)) continue;
       try {
-        const measurement = await computeExtrudeScene(
-          context,
-          fallback.request,
-        );
+        const measurement = (
+          await computeExtrudeScene(context, fallback.request)
+        ).measurement;
         rendered.push({
           bodyId: fallback.request.bodyId,
           measurement,

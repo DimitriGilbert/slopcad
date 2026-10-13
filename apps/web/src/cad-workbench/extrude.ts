@@ -360,31 +360,90 @@ export function sceneOperandOfBody(
       ? null
       : { kind: "extrude", request: derivation };
   }
-  if (
-    producer.kind === "hole" ||
-    producer.kind === "union" ||
-    producer.kind === "subtract" ||
-    producer.kind === "intersect"
-  ) {
+  if (producer.kind === "hole") {
+    // The hole scene renders ONLY the last hole feature's output (the
+    // chain's accumulated state) — an earlier hole's output carries no
+    // scene entry, so it cannot hand a computed solid to a consumer.
+    const holeFeatures = document.features.filter(
+      (entry) => entry.kind === "hole",
+    );
+    return holeFeatures[holeFeatures.length - 1]?.id === producer.id
+      ? { kind: "computed", bodyId }
+      : null;
+  }
+  if (EVERY_FEATURE_OPERAND_PRODUCER_KINDS.has(producer.kind)) {
     return { kind: "computed", bodyId };
   }
-  // A duplicate feature's copy bodies are computed solids (Phase 60): each
-  // copy's scene applies the planned T^i transform to the source's solid,
-  // and a LATER consumer (another duplicate, a boolean) composes from the
-  // copy's own output — the iterative use the verb is for.
-  if (producer.kind === "duplicate") {
-    return { kind: "computed", bodyId };
+  if (FIRST_FEATURE_OPERAND_PRODUCER_KINDS.has(producer.kind)) {
+    // The single-feature readers compose only the document's FIRST
+    // feature of the kind — a body produced by a later feature of the
+    // same kind carries no scene entry and cannot serve as an operand.
+    return document.features.find((entry) => entry.kind === producer.kind)
+      ?.id === producer.id
+      ? { kind: "computed", bodyId }
+      : null;
   }
   // The move-body feature is the translate kind carrying the authored
-  // parameter pair (the move reader's own gate).
+  // parameter pair (the move reader's own gate — and it too serves only
+  // the FIRST qualifying translate); a display-state translate (fewer
+  // parameter inputs — the fixture plate's chain) stays data-only.
   if (
     producer.kind === "translate" &&
     producer.inputs.filter((ref) => ref.kind === "parameter").length >= 4
   ) {
-    return { kind: "computed", bodyId };
+    const served = document.features.find(
+      (entry) =>
+        entry.kind === "translate" &&
+        entry.inputs.filter((ref) => ref.kind === "parameter").length >= 4,
+    );
+    return served?.id === producer.id ? { kind: "computed", bodyId } : null;
   }
   return null;
 }
+
+/**
+ * Feature kinds whose readers emit a scene entry for EVERY feature of the
+ * kind — so a body produced by any of them may serve as a computed
+ * operand: the independent scenes' per-feature loop (revolve, sweep,
+ * loft, helix) and the plural request readers (the booleans, the
+ * duplicates, the transform patterns). Deliberately OUT: extrude (rides
+ * its raw derivation — the datum re-resolution the composition order
+ * demands), sheets (an open shell carries no solid a boolean may
+ * consume), wires/curves/sections (no volume), and the data-only kinds
+ * (rotate, the short translate) the callers' own comments decline.
+ */
+const EVERY_FEATURE_OPERAND_PRODUCER_KINDS: ReadonlySet<string> = new Set([
+  "revolve",
+  "sweep",
+  "loft",
+  "helix",
+  "union",
+  "subtract",
+  "intersect",
+  "duplicate",
+  "patternLinear",
+  "patternCircular",
+]);
+
+/**
+ * Feature kinds whose readers emit a scene entry for only the document's
+ * FIRST feature of the kind: the thread/rib family, the single-parameter
+ * body ops, the mirror, and the legacy pattern readers. A body produced
+ * by a later feature of the same kind carries no scene entry — the seam
+ * declines it rather than advertise an operand the document pass cannot
+ * supply. Kinds with NO scene producer at all (the primitives, the face
+ * ops, patternFace, shell) are out of both sets for the same reason.
+ */
+const FIRST_FEATURE_OPERAND_PRODUCER_KINDS: ReadonlySet<string> = new Set([
+  "thread",
+  "rib",
+  "scale",
+  "thicken",
+  "split",
+  "mirror",
+  "patternFeature",
+  "patternPath",
+]);
 
 /**
  * Reads ONE extrude feature into its worker-scene request, resolving the

@@ -424,6 +424,7 @@ export type FeatureSceneKind =
   | "split"
   | "patternFeature"
   | "patternPath"
+  | "patternTransform"
   | "mirror"
   | "duplicate"
   | "hole"
@@ -738,7 +739,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeExtrudeScene(context, request),
+            (await computeExtrudeScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -754,7 +755,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeRevolveScene(context, request),
+            (await computeRevolveScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -798,7 +799,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeSweepScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeSweepScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(
           settleWithVerdict("sweep", bodyId),
@@ -811,7 +815,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeLoftScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeLoftScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(
           settleWithVerdict("loft", bodyId),
@@ -824,7 +831,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeHelixScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeHelixScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(
           settleWithVerdict("helix", bodyId),
@@ -838,7 +848,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeThreadScene(context, request),
+            (await computeThreadScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -853,7 +863,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeRibScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeRibScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(settleWithVerdict("rib", bodyId), failWithVerdict("rib", bodyId));
     },
@@ -863,7 +876,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeScaleScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeScaleScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(
           settleWithVerdict("scale", bodyId),
@@ -877,7 +893,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeThickenScene(context, request),
+            (await computeThickenScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -905,7 +921,10 @@ export function bootRenderFixtureSession(
       writeSurface();
       coordinator
         .update(async (context) =>
-          extrudeRenderState(await computeSplitScene(context, request), bodyId),
+          extrudeRenderState(
+            (await computeSplitScene(context, request)).measurement,
+            bodyId,
+          ),
         )
         .then(
           settleWithVerdict("split", bodyId),
@@ -922,7 +941,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computePatternFeatureScene(context, request),
+            (await computePatternFeatureScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -941,7 +960,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computePatternPathScene(context, request),
+            (await computePatternPathScene(context, request)).measurement,
             bodyId,
           ),
         )
@@ -957,7 +976,7 @@ export function bootRenderFixtureSession(
       coordinator
         .update(async (context) =>
           extrudeRenderState(
-            await computeMirrorScene(context, request),
+            (await computeMirrorScene(context, request)).measurement,
             bodyId,
           ),
         )

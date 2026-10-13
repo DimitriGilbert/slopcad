@@ -44,12 +44,11 @@
  *    JSCAD for the plate (the Phase 21 pre-spike's §7 note,
  *    docs/architecture/occt-prespike-findings.md, now three-way) — so only
  *    counts > 0 and structural validity are asserted, never counts
- *    equality. Rotation is declared by OCCT AND JSCAD but not Manifold
- *    (`transformRotation` differs), which scopes the translation-only
- *    common-op comparisons; both rotating kernels are judged on the same
- *    analytic rotated bounds and agree exactly with each other, and volume
- *    is rotation-invariant so the measure still agrees cross-kernel in the
- *    curved band. `persistentTopology` likewise differs (OCCT true; the
+ *    equality. Rotation is declared by ALL THREE kernels
+ *    (`transformRotation`) — Manifold's rigid mesh transform joined the
+ *    OCCT/JSCAD analytic rotation — so the rotated bounds agree exactly
+ *    across all three, and volume is rotation-invariant so the measure
+ *    still agrees cross-kernel in the curved band. `persistentTopology` likewise differs (OCCT true; the
  *    mesh/BSP kernels false) — Phase 22's concern, not compared here.
  */
 
@@ -251,9 +250,8 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     expect(occt.capabilities.exactBooleanVolumes).toBe(true);
     expect(manifold.capabilities.exactBooleanVolumes).toBe(true);
     expect(jscad.capabilities.exactBooleanVolumes).toBe(false);
-    // Documented divergences: rotation is declared by OCCT and JSCAD but
-    // not Manifold, which scopes cross-kernel equivalence to the
-    // translation-only common ops between the pairs that include Manifold;
+    // Documented divergences: rotation is now universal — Manifold's
+    // transform applies the rigid rotation it previously declined;
     // persistent topology is OCCT-only (Phase 22's concern); the Phase
     // 26.3 sweep is implemented by OCCT (exact pipe) and JSCAD (station
     // loft) but honestly declined by Manifold (no sweep or loft primitive
@@ -261,7 +259,7 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     // is not universal; and the Phase 26.4 loft follows the same matrix
     // (OCCT exact ruled ThruSections, JSCAD slice loft, Manifold
     // declined — no multi-section constructor in the engine, probed).
-    expect(manifold.capabilities.transformRotation).toBe(false);
+    expect(manifold.capabilities.transformRotation).toBe(true);
     expect(occt.capabilities.transformRotation).toBe(true);
     expect(jscad.capabilities.transformRotation).toBe(true);
     expect(manifold.capabilities.persistentTopology).toBe(false);
@@ -828,17 +826,16 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     );
   });
 
-  it("keeps rotation a Manifold-absent extension whose measure and bounds still agree cross-kernel", () => {
-    // Manifold does not declare transformRotation (asserted by the
-    // capability test), so the rotated scene has no Manifold twin — the
-    // documented difference, not a comparison gap. OCCT and JSCAD BOTH
-    // rotate: each is judged on its own invariants (volume preserved
-    // exactly, tight bounds equal to the analytically rotated plate,
-    // x ∈ [-20, 0], y ∈ [0, 30]), the two rotating kernels agree exactly
+  it("rotates on all three kernels, whose measure and bounds agree cross-kernel", () => {
+    // All three kernels declare transformRotation — Manifold's rigid
+    // mesh transform joined the OCCT/JSCAD analytic rotation (asserted
+    // by the capability test). Each is judged on its own invariants
+    // (volume preserved exactly, tight bounds equal to the analytically
+    // rotated plate, x ∈ [-20, 0], y ∈ [0, 30]), all three agree exactly
     // with each other on those bounds, and because volume is
-    // rotation-invariant the rotated measures still agree with Manifold's
-    // unrotated one inside the curved band — the cross-kernel volume
-    // criterion survives rigid motion on all three kernels.
+    // rotation-invariant the rotated measures agree cross-kernel inside
+    // the curved band — the cross-kernel volume criterion survives rigid
+    // motion on all three kernels.
     const manifold = makeManifold();
     const occt = makeOcct();
     const jscad = makeJscad();
@@ -852,6 +849,10 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
       rotation: { axis: [0, 0, 1] as const, angle: angle(90, "deg") },
     };
     const rotatedBounds = { min: [-20, 0, 0], max: [0, 30, 10] } as const;
+    const manifoldRotated = unwrapKernelResult(
+      manifold.transform(m.result, quarterTurn),
+      "manifold rotate",
+    );
     const occtRotated = unwrapKernelResult(
       occt.transform(o.result, quarterTurn),
       "occt rotate",
@@ -859,6 +860,11 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     const jscadRotated = unwrapKernelResult(
       jscad.transform(j.result, quarterTurn),
       "jscad rotate",
+    );
+    const manifoldRotatedVolume = volumeOf(
+      manifold,
+      manifoldRotated,
+      "manifold rotated volume",
     );
     const occtRotatedVolume = volumeOf(
       occt,
@@ -872,6 +878,11 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
     );
     // Each rotating kernel preserves its own volume exactly.
     assertVolumeClose(
+      manifoldRotatedVolume,
+      volumeOf(manifold, m.result, "manifold plate volume"),
+      EXACT_VOLUME_TOLERANCE,
+    );
+    assertVolumeClose(
       occtRotatedVolume,
       volumeOf(occt, o.result, "occt plate volume"),
       EXACT_VOLUME_TOLERANCE,
@@ -881,8 +892,13 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
       volumeOf(jscad, j.result, "jscad plate volume"),
       EXACT_VOLUME_TOLERANCE,
     );
-    // Both rotating kernels hit the analytic rotated bounds exactly, and
-    // therefore agree exactly with each other.
+    // All three rotating kernels hit the analytic rotated bounds exactly,
+    // and therefore agree exactly with each other.
+    assertBoundsEqual(
+      boundsOf(manifold, manifoldRotated, "manifold rotated bounds"),
+      rotatedBounds,
+      EXACT_BOUNDS_TOLERANCE,
+    );
     assertBoundsEqual(
       boundsOf(occt, occtRotated, "occt rotated bounds"),
       rotatedBounds,
@@ -899,15 +915,15 @@ describe("cross-kernel semantic equivalence: manifold, opencascade, and jscad", 
       EXACT_BOUNDS_TOLERANCE,
     );
     // Rotation-invariant measures agree cross-kernel inside the curved
-    // band, Manifold's unrotated twin included.
+    // band.
     assertVolumeClose(
+      manifoldRotatedVolume,
       occtRotatedVolume,
-      volumeOf(manifold, m.result, "manifold plate volume"),
       CURVED_VOLUME_TOLERANCE,
     );
     assertVolumeClose(
       jscadRotatedVolume,
-      volumeOf(manifold, m.result, "manifold plate volume"),
+      manifoldRotatedVolume,
       CURVED_VOLUME_TOLERANCE,
     );
     assertVolumeClose(

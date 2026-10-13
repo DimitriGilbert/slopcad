@@ -1,0 +1,1417 @@
+{
+  "formatVersion": 9,
+  "metadata": {
+    "generator": "@slopcad/cad-jsx"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_multi-handle-cup",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_cup-body-angle",
+          "name": "cupbodyAngle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 6.283185307179586
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_cup-body-axis",
+          "name": "cupbodyAxis",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 1.5707963267948966
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-1-angle",
+          "name": "handle1Angle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 6.283185307179586
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-1-axis",
+          "name": "handle1Axis",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-2-angle",
+          "name": "handle2Angle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 6.283185307179586
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-2-axis",
+          "name": "handle2Axis",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-3-angle",
+          "name": "handle3Angle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 6.283185307179586
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-3-axis",
+          "name": "handle3Axis",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-4-angle",
+          "name": "handle4Angle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 6.283185307179586
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-4-axis",
+          "name": "handle4Axis",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-5-angle",
+          "name": "handle5Angle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 6.283185307179586
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-5-axis",
+          "name": "handle5Axis",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-6-angle",
+          "name": "handle6Angle",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 6.283185307179586
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_handle-6-axis",
+          "name": "handle6Axis",
+          "value": {
+            "dimension": "angle",
+            "unit": "rad",
+            "value": 0
+          },
+          "expression": null,
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_cup",
+        "name": "cup"
+      },
+      {
+        "id": "body_cup-body",
+        "name": "cup body"
+      },
+      {
+        "id": "body_handle-1",
+        "name": "handle 1"
+      },
+      {
+        "id": "body_handle-2",
+        "name": "handle 2"
+      },
+      {
+        "id": "body_handle-3",
+        "name": "handle 3"
+      },
+      {
+        "id": "body_handle-4",
+        "name": "handle 4"
+      },
+      {
+        "id": "body_handle-5",
+        "name": "handle 5"
+      },
+      {
+        "id": "body_handle-6",
+        "name": "handle 6"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_cup-body",
+        "kind": "revolve",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_cup-profile"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_cup-body-angle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_cup-body-axis"
+          }
+        ],
+        "outputs": ["body_cup-body"]
+      },
+      {
+        "id": "feat_handle-1",
+        "kind": "revolve",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_handle-1"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-1-angle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-1-axis"
+          }
+        ],
+        "outputs": ["body_handle-1"]
+      },
+      {
+        "id": "feat_handle-2",
+        "kind": "revolve",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_handle-2"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-2-angle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-2-axis"
+          }
+        ],
+        "outputs": ["body_handle-2"]
+      },
+      {
+        "id": "feat_handle-3",
+        "kind": "revolve",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_handle-3"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-3-angle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-3-axis"
+          }
+        ],
+        "outputs": ["body_handle-3"]
+      },
+      {
+        "id": "feat_handle-4",
+        "kind": "revolve",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_handle-4"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-4-angle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-4-axis"
+          }
+        ],
+        "outputs": ["body_handle-4"]
+      },
+      {
+        "id": "feat_handle-5",
+        "kind": "revolve",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_handle-5"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-5-angle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-5-axis"
+          }
+        ],
+        "outputs": ["body_handle-5"]
+      },
+      {
+        "id": "feat_handle-6",
+        "kind": "revolve",
+        "inputs": [
+          {
+            "kind": "sketch",
+            "id": "skd_handle-6"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-6-angle"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_handle-6-axis"
+          }
+        ],
+        "outputs": ["body_handle-6"]
+      },
+      {
+        "id": "feat_cup",
+        "kind": "union",
+        "inputs": [
+          {
+            "kind": "feature",
+            "id": "feat_cup-body"
+          },
+          {
+            "kind": "feature",
+            "id": "feat_handle-1"
+          },
+          {
+            "kind": "feature",
+            "id": "feat_handle-2"
+          },
+          {
+            "kind": "feature",
+            "id": "feat_handle-3"
+          },
+          {
+            "kind": "feature",
+            "id": "feat_handle-4"
+          },
+          {
+            "kind": "feature",
+            "id": "feat_handle-5"
+          },
+          {
+            "kind": "feature",
+            "id": "feat_handle-6"
+          }
+        ],
+        "outputs": ["body_cup"]
+      }
+    ],
+    "sketches": [
+      {
+        "id": "skd_cup-profile",
+        "name": "cup profile",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "normal": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            },
+            "xAxis": {
+              "x": 0,
+              "y": 1,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_line-1",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 0,
+              "x2": 30,
+              "y2": 0
+            },
+            {
+              "id": "skent_line-2",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 30,
+              "y1": 0,
+              "x2": 40,
+              "y2": 50
+            },
+            {
+              "id": "skent_line-3",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 40,
+              "y1": 50,
+              "x2": 37,
+              "y2": 50
+            },
+            {
+              "id": "skent_line-4",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 37,
+              "y1": 50,
+              "x2": 27,
+              "y2": 3
+            },
+            {
+              "id": "skent_line-5",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 27,
+              "y1": 3,
+              "x2": 0,
+              "y2": 3
+            },
+            {
+              "id": "skent_line-6",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 3,
+              "x2": 0,
+              "y2": 0
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_handle-1",
+        "name": "handle loop 0",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 40,
+              "y": 0,
+              "z": 30
+            },
+            "normal": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            },
+            "xAxis": {
+              "x": 0,
+              "y": 1,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_circle-1",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": -9,
+              "radius": 3
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_handle-2",
+        "name": "handle loop 1.0471975511965976",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 20.000000000000004,
+              "y": 34.64101615137754,
+              "z": 30
+            },
+            "normal": {
+              "x": 0.5000000000000001,
+              "y": 0.8660254037844386,
+              "z": 0
+            },
+            "xAxis": {
+              "x": -0.8660254037844386,
+              "y": 0.5000000000000001,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_circle-2",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": -9,
+              "radius": 3
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_handle-3",
+        "name": "handle loop 2.0943951023931953",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": -19.999999999999993,
+              "y": 34.64101615137755,
+              "z": 30
+            },
+            "normal": {
+              "x": -0.4999999999999998,
+              "y": 0.8660254037844387,
+              "z": 0
+            },
+            "xAxis": {
+              "x": -0.8660254037844387,
+              "y": -0.4999999999999998,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_circle-3",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": -9,
+              "radius": 3
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_handle-4",
+        "name": "handle loop 3.141592653589793",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": -40,
+              "y": 4.898587196589413e-15,
+              "z": 30
+            },
+            "normal": {
+              "x": -1,
+              "y": 1.2246467991473532e-16,
+              "z": 0
+            },
+            "xAxis": {
+              "x": -1.2246467991473532e-16,
+              "y": -1,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_circle-4",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": -9,
+              "radius": 3
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_handle-5",
+        "name": "handle loop 4.1887902047863905",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": -20.000000000000018,
+              "y": -34.64101615137754,
+              "z": 30
+            },
+            "normal": {
+              "x": -0.5000000000000004,
+              "y": -0.8660254037844385,
+              "z": 0
+            },
+            "xAxis": {
+              "x": 0.8660254037844385,
+              "y": -0.5000000000000004,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_circle-5",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": -9,
+              "radius": 3
+            }
+          ],
+          "constraints": []
+        }
+      },
+      {
+        "id": "skd_handle-6",
+        "name": "handle loop 5.235987755982989",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 20.000000000000004,
+              "y": -34.64101615137754,
+              "z": 30
+            },
+            "normal": {
+              "x": 0.5000000000000001,
+              "y": -0.8660254037844386,
+              "z": 0
+            },
+            "xAxis": {
+              "x": 0.8660254037844386,
+              "y": 0.5000000000000001,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_circle-6",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": -9,
+              "radius": 3
+            }
+          ],
+          "constraints": []
+        }
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_multi-handle-cup",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": []
+      },
+      "bodies": [],
+      "features": []
+    },
+    "transactions": [
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "sketch.create",
+            "id": "skd_cup-profile",
+            "name": "cup profile",
+            "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 0,
+                  "y": 0,
+                  "z": 0
+                },
+                "normal": {
+                  "x": 1,
+                  "y": 0,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": 0,
+                  "y": 1,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_line-1",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 30,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_line-2",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 30,
+                  "y1": 0,
+                  "x2": 40,
+                  "y2": 50
+                },
+                {
+                  "id": "skent_line-3",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 40,
+                  "y1": 50,
+                  "x2": 37,
+                  "y2": 50
+                },
+                {
+                  "id": "skent_line-4",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 37,
+                  "y1": 50,
+                  "x2": 27,
+                  "y2": 3
+                },
+                {
+                  "id": "skent_line-5",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 27,
+                  "y1": 3,
+                  "x2": 0,
+                  "y2": 3
+                },
+                {
+                  "id": "skent_line-6",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 0,
+                  "y1": 3,
+                  "x2": 0,
+                  "y2": 0
+                }
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "sketch.create",
+            "id": "skd_handle-1",
+            "name": "handle loop 0",
+            "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 40,
+                  "y": 0,
+                  "z": 30
+                },
+                "normal": {
+                  "x": 1,
+                  "y": 0,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": 0,
+                  "y": 1,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_circle-1",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": -9,
+                  "radius": 3
+                }
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "sketch.create",
+            "id": "skd_handle-2",
+            "name": "handle loop 1.0471975511965976",
+            "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 20.000000000000004,
+                  "y": 34.64101615137754,
+                  "z": 30
+                },
+                "normal": {
+                  "x": 0.5000000000000001,
+                  "y": 0.8660254037844386,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": -0.8660254037844386,
+                  "y": 0.5000000000000001,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_circle-2",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": -9,
+                  "radius": 3
+                }
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "sketch.create",
+            "id": "skd_handle-3",
+            "name": "handle loop 2.0943951023931953",
+            "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": -19.999999999999993,
+                  "y": 34.64101615137755,
+                  "z": 30
+                },
+                "normal": {
+                  "x": -0.4999999999999998,
+                  "y": 0.8660254037844387,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": -0.8660254037844387,
+                  "y": -0.4999999999999998,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_circle-3",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": -9,
+                  "radius": 3
+                }
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "sketch.create",
+            "id": "skd_handle-4",
+            "name": "handle loop 3.141592653589793",
+            "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": -40,
+                  "y": 4.898587196589413e-15,
+                  "z": 30
+                },
+                "normal": {
+                  "x": -1,
+                  "y": 1.2246467991473532e-16,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": -1.2246467991473532e-16,
+                  "y": -1,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_circle-4",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": -9,
+                  "radius": 3
+                }
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "sketch.create",
+            "id": "skd_handle-5",
+            "name": "handle loop 4.1887902047863905",
+            "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": -20.000000000000018,
+                  "y": -34.64101615137754,
+                  "z": 30
+                },
+                "normal": {
+                  "x": -0.5000000000000004,
+                  "y": -0.8660254037844385,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": 0.8660254037844385,
+                  "y": -0.5000000000000004,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_circle-5",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": -9,
+                  "radius": 3
+                }
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "sketch.create",
+            "id": "skd_handle-6",
+            "name": "handle loop 5.235987755982989",
+            "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 20.000000000000004,
+                  "y": -34.64101615137754,
+                  "z": 30
+                },
+                "normal": {
+                  "x": 0.5000000000000001,
+                  "y": -0.8660254037844386,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": 0.8660254037844386,
+                  "y": 0.5000000000000001,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_circle-6",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": -9,
+                  "radius": 3
+                }
+              ],
+              "constraints": []
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_cup",
+            "name": "cup"
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_cup-body-angle",
+            "name": "cupbodyAngle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 6.283185307179586
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_cup-body-axis",
+            "name": "cupbodyAxis",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 1.5707963267948966
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_cup-body",
+            "name": "cup body"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_cup-body",
+            "kind": "revolve",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_cup-profile"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_cup-body-angle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_cup-body-axis"
+              }
+            ],
+            "outputs": ["body_cup-body"]
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-1-angle",
+            "name": "handle1Angle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 6.283185307179586
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-1-axis",
+            "name": "handle1Axis",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_handle-1",
+            "name": "handle 1"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_handle-1",
+            "kind": "revolve",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_handle-1"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-1-angle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-1-axis"
+              }
+            ],
+            "outputs": ["body_handle-1"]
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-2-angle",
+            "name": "handle2Angle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 6.283185307179586
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-2-axis",
+            "name": "handle2Axis",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_handle-2",
+            "name": "handle 2"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_handle-2",
+            "kind": "revolve",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_handle-2"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-2-angle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-2-axis"
+              }
+            ],
+            "outputs": ["body_handle-2"]
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-3-angle",
+            "name": "handle3Angle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 6.283185307179586
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-3-axis",
+            "name": "handle3Axis",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_handle-3",
+            "name": "handle 3"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_handle-3",
+            "kind": "revolve",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_handle-3"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-3-angle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-3-axis"
+              }
+            ],
+            "outputs": ["body_handle-3"]
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-4-angle",
+            "name": "handle4Angle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 6.283185307179586
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-4-axis",
+            "name": "handle4Axis",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_handle-4",
+            "name": "handle 4"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_handle-4",
+            "kind": "revolve",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_handle-4"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-4-angle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-4-axis"
+              }
+            ],
+            "outputs": ["body_handle-4"]
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-5-angle",
+            "name": "handle5Angle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 6.283185307179586
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-5-axis",
+            "name": "handle5Axis",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_handle-5",
+            "name": "handle 5"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_handle-5",
+            "kind": "revolve",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_handle-5"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-5-angle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-5-axis"
+              }
+            ],
+            "outputs": ["body_handle-5"]
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-6-angle",
+            "name": "handle6Angle",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 6.283185307179586
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_handle-6-axis",
+            "name": "handle6Axis",
+            "value": {
+              "dimension": "angle",
+              "unit": "rad",
+              "value": 0
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_handle-6",
+            "name": "handle 6"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_handle-6",
+            "kind": "revolve",
+            "inputs": [
+              {
+                "kind": "sketch",
+                "id": "skd_handle-6"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-6-angle"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_handle-6-axis"
+              }
+            ],
+            "outputs": ["body_handle-6"]
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_cup",
+            "kind": "union",
+            "inputs": [
+              {
+                "kind": "feature",
+                "id": "feat_cup-body"
+              },
+              {
+                "kind": "feature",
+                "id": "feat_handle-1"
+              },
+              {
+                "kind": "feature",
+                "id": "feat_handle-2"
+              },
+              {
+                "kind": "feature",
+                "id": "feat_handle-3"
+              },
+              {
+                "kind": "feature",
+                "id": "feat_handle-4"
+              },
+              {
+                "kind": "feature",
+                "id": "feat_handle-5"
+              },
+              {
+                "kind": "feature",
+                "id": "feat_handle-6"
+              }
+            ],
+            "outputs": ["body_cup"]
+          }
+        ]
+      }
+    ],
+    "cursor": 1
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": []
+  }
+}

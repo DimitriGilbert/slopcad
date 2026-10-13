@@ -109,7 +109,7 @@ import {
 import { documentSceneBodies, renderableBodyIds } from "./document-scene";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
-import { createCadWorkbenchSession } from "./session";
+import { workbenchSessionForBoot } from "./session";
 import {
   computedFacePickOrdinal,
   hasComputedAnchoredExtrude,
@@ -261,15 +261,15 @@ export interface WorkbenchEngineSurface {
 }
 
 /**
- * Creates the workbench store: one store over the workbench session (the
- * plate, the bore diameter, the translate + rotate chain, the
- * expression-driven `volumeHint`) with the tools the document supports
- * registered. Call ONCE above the `CadProvider`.
+ * Creates the workbench store: one store over the boot session (the clean
+ * empty document, or the demo plate when the session module's demo flag is
+ * set) with the tools the document supports registered. Call ONCE above
+ * the `CadProvider`.
  */
 export function useWorkbenchStore() {
   const [store] = useState(() =>
     createCadStore({
-      session: createCadWorkbenchSession(),
+      session: workbenchSessionForBoot(),
       tools: [
         registerTool(selectTool),
         registerTool(measureTool),
@@ -281,15 +281,18 @@ export function useWorkbenchStore() {
 }
 
 /**
- * The scene kinds the dispatch effect follows — the plate computation until
- * the first solid action commits, then the worker-executed composition the
- * document names (Phase 38 adds the sweep and loft scenes; Phase 43 adds
- * the pattern and mirror scenes). Phase 47 adds the `curves` scene: a
- * curve-record authoring surface whose dispatch re-drives the highest
- * solid scene the document still resolves beneath the curve overlay (the
- * plate when there is none) — creating a curve never blanks the solids.
+ * The scene kinds the dispatch effect follows — `empty` while the document
+ * resolves nothing (the clean boot: a blank bench, grid only), the plate
+ * computation for a document carrying the fixture's `holeDiameter`
+ * parameter, then the worker-executed composition the document names
+ * (Phase 38 adds the sweep and loft scenes; Phase 43 adds the pattern and
+ * mirror scenes). Phase 47 adds the `curves` scene: a curve-record
+ * authoring surface whose dispatch re-drives the highest solid scene the
+ * document still resolves beneath the curve overlay (the plate when there
+ * is none) — creating a curve never blanks the solids.
  */
 export type WorkbenchSceneKind =
+  | "empty"
   | "plate"
   | "extrude"
   | "revolve"
@@ -803,11 +806,14 @@ export function useWorkbenchEngine(
   );
   const previousRef = useRef<DerivationPrevious | null>(null);
 
-  // The Phase 26.1/26.2/26.10 scene state: the plate computation until the
-  // first solid action commits a feature; afterwards the worker executes
-  // the document's extrude, revolve, or hole composition (parameter edits
-  // re-dispatch).
-  const [activeScene, setActiveScene] = useState<WorkbenchSceneKind>("plate");
+  // The Phase 26.1/26.2/26.10 scene state: `empty` on the clean bench (the
+  // plate computation for a document carrying the fixture hole parameter),
+  // until the first solid action commits a feature; afterwards the worker
+  // executes the document's extrude, revolve, or hole composition
+  // (parameter edits re-dispatch).
+  const [activeScene, setActiveScene] = useState<WorkbenchSceneKind>(() =>
+    storedHole !== null ? "plate" : "empty",
+  );
   const [extrudeCount, setExtrudeCount] = useState(0);
   const [revolveCount, setRevolveCount] = useState(0);
   const [holeCount, setHoleCount] = useState(0);
@@ -3692,7 +3698,15 @@ export function useWorkbenchEngine(
     }
     if (storedHole !== null) {
       sessionRef.current?.dispatch(storedHole, activeSectionRequest);
+      return;
     }
+    // The clean bench: a document that resolves no scene and carries no
+    // fixture plate dispatches the EMPTY document scene — the honest
+    // settle (volume 0, grid only) instead of a never-mounting viewport.
+    sessionRef.current?.dispatchDocument(
+      [],
+      renderableBodyIds(workbenchDocument),
+    );
   }, [
     activeScene,
     workbenchDocument,

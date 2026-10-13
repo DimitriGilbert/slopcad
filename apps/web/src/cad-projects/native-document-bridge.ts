@@ -26,8 +26,11 @@ import {
   type RegenerationStateMap,
 } from "@slopcad/cad-core";
 
+import { holeDiameterMm } from "../workbench-fixture/workbench-document";
+
 /** The engine's scene vocabulary (see the workbench engine's dispatch). */
-export type WorkbenchSceneKind = "plate" | "extrude" | "revolve" | "hole";
+export type WorkbenchSceneKind =
+  "empty" | "plate" | "extrude" | "revolve" | "hole";
 
 /**
  * Serializes a live session into the native format's canonical text. The
@@ -96,11 +99,13 @@ export function parseNativeTextToSession(text: string): ParsedNativeSession {
 
 /**
  * The scene kind a document's features call for: the newest solid feature
- * (extrude, revolve, or hole) wins; a document with none stays on the
- * plate scene.
+ * (extrude, revolve, or hole) wins; a document with none falls to the
+ * plate when it carries the fixture's hole parameter (demo-era saves) or
+ * the empty scene — the clean bench reopens as the clean bench.
  */
 export function sceneKindOfDocument(document: CadDocument): WorkbenchSceneKind {
-  let scene: WorkbenchSceneKind = "plate";
+  let scene: WorkbenchSceneKind =
+    holeDiameterMm(document) !== null ? "plate" : "empty";
   for (const feature of document.features) {
     if (
       feature.kind === "extrude" ||
