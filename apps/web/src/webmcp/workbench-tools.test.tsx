@@ -14,18 +14,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createBodyId,
   createParameterId,
+  createReferenceId,
   createRenderProjection,
   getParameter,
   length,
+  parseReferenceId,
   printExpression,
   projectTessellation,
   serializeCommand,
 } from "@slopcad/cad-core";
+import type { TopologySnapshot } from "@slopcad/cad-core";
 import { createCadStore, setParameterCommand } from "@slopcad/cad-react";
 import type { CadStore } from "@slopcad/cad-react";
 import type { CadCommandDescriptor } from "@slopcad/ui/components/cad/cad-command-menu";
+import type {
+  DocumentTopologyInventory,
+  FixtureRenderState,
+} from "../render-fixture/fixture-session";
 import type { PlateRenderState } from "../render-fixture/plate-render-scene";
 
+import { topologyReferenceOf } from "../cad-workbench/topology-cut";
+import { FEATURE_KIND_VOCABULARY } from "./feature-vocabulary";
 import {
   createCadWorkbenchDemoSession,
   WORKBENCH_DEMO_SESSION_KEY,
@@ -90,9 +99,13 @@ const TOOL_NAMES = [
 
 /** The mutable live state one test surface reads through accessors. */
 interface TestSurfaceState {
-  applied: PlateRenderState | null;
+  applied: FixtureRenderState | null;
   commands: readonly CadCommandDescriptor[];
   measureText: string | null;
+  /** What the on-demand topology query answers. */
+  topology: DocumentTopologyInventory | null;
+  /** How many times a tool issued the on-demand topology query. */
+  topologyQueries: number;
 }
 
 /** A fresh store over the app's demo workbench session. */
@@ -106,6 +119,10 @@ function bindTools(store: CadStore, state: TestSurfaceState): () => void {
     createWorkbenchWebMcpTools({
       appliedState: () => state.applied,
       commands: () => state.commands,
+      documentTopology: () => {
+        state.topologyQueries += 1;
+        return Promise.resolve(state.topology);
+      },
       measureText: () => state.measureText,
       store,
     }),
@@ -194,11 +211,131 @@ function renderStateOf(bodyId: string): PlateRenderState {
   };
 }
 
+/**
+ * A hand-built persistent snapshot for one body (the fixture-view
+ * precedent of the bridge's fillet tests): two edges and one face, each
+ * with a kernel identity and its geometric descriptor.
+ */
+function snapshotOf(bodyId: string): TopologySnapshot {
+  return {
+    bodyId: createBodyId(bodyId),
+    entities: [
+      {
+        geometry: { centroidAbsoluteMm: [5, 0, 0], lengthMm: 10 },
+        identity: { data: { hash: 11 }, kernelId: "occt", schema: "probe" },
+        kind: "edge",
+        ordinal: 0,
+      },
+      {
+        geometry: { centroidAbsoluteMm: [10, 5, 0], lengthMm: 10 },
+        identity: { data: { hash: 12 }, kernelId: "occt", schema: "probe" },
+        kind: "edge",
+        ordinal: 1,
+      },
+      {
+        geometry: { areaMm2: 100, centroidAbsoluteMm: [5, 5, 10] },
+        identity: { data: { hash: 21 }, kernelId: "occt", schema: "probe" },
+        kind: "face",
+        ordinal: 0,
+      },
+    ],
+    identitySchemas: ["probe"],
+    kernelId: "occt",
+    persistentTopology: true,
+    regeneration: 3,
+  };
+}
+
+/**
+ * What the on-demand topology query answers for a visible document scene
+ * that computed these snapshots' bodies (rendered or compute-only consumed
+ * targets alike — the query snapshots every computed solid).
+ */
+function inventoryOf(
+  ...snapshots: readonly TopologySnapshot[]
+): DocumentTopologyInventory {
+  return {
+    revision: 3,
+    snapshots: new Map(
+      snapshots.map((snapshot) => [String(snapshot.bodyId), snapshot]),
+    ),
+  };
+}
+
+/** A serialized length `parameter.create` (canonical mm). */
+function lengthParameter(id: string, value: number) {
+  return {
+    formatVersion: 1,
+    id,
+    name: id.slice("param_".length),
+    type: "parameter.create",
+    value: { dimension: "length", unit: "mm", value },
+  };
+}
+
+/** The serialized batch authoring a 10 mm box `feat_box` under `bodyId`. */
+function boxBatch(bodyId: string) {
+  return [
+    lengthParameter("param_w", 10),
+    lengthParameter("param_d", 10),
+    lengthParameter("param_h", 10),
+    { formatVersion: 1, id: bodyId, name: "box", type: "body.create" },
+    {
+      formatVersion: 1,
+      id: "feat_box",
+      inputs: [
+        { id: "param_w", kind: "parameter" },
+        { id: "param_d", kind: "parameter" },
+        { id: "param_h", kind: "parameter" },
+      ],
+      kind: "box",
+      outputs: [bodyId],
+      type: "feature.create",
+    },
+  ];
+}
+
+/** The serialized batch authoring a 10 mm box under `body_box`. */
+const BOX_BATCH = boxBatch("body_box");
+
+/** One summary inventory entry, as the tool serializes it. */
+interface InventoryEntry {
+  readonly geometry: Record<string, unknown>;
+  readonly ordinal: number;
+  readonly reference: Record<string, unknown> | null;
+  readonly referenceId: string | null;
+  readonly referenced: boolean;
+}
+
+/** One summary body record with its topology inventory. */
+interface SummaryBody {
+  readonly id: string;
+  readonly topology: {
+    readonly edges: readonly InventoryEntry[];
+    readonly faces: readonly InventoryEntry[];
+    readonly persistent: boolean;
+    readonly regeneration: number;
+  } | null;
+}
+
+/** The summary's body records (the tool must succeed). */
+async function summaryBodies(): Promise<readonly SummaryBody[]> {
+  const run = await runTool("cad_get_document_summary", {});
+  if (!run.ok) throw new Error(run.message);
+  return (run.payload as { readonly bodies: readonly SummaryBody[] }).bodies;
+}
+
 /** The empty surface state every test starts from. */
 function surfaceState(
   commands: readonly CadCommandDescriptor[],
 ): TestSurfaceState {
-  return { applied: null, commands, measureText: null };
+  return {
+    applied: null,
+    commands,
+    measureText: null,
+    topology: null,
+    topologyQueries: 0,
+  };
 }
 
 afterEach(() => {
@@ -223,13 +360,346 @@ describe("cad_get_document_summary", () => {
       parameters: { name: string; value: { dimension: string } }[];
     };
     expect(payload.bodies).toEqual([
-      { id: "body_plate", kind: "solid", name: "plate", visible: true },
+      {
+        id: "body_plate",
+        kind: "solid",
+        name: "plate",
+        topology: null,
+        visible: true,
+      },
     ]);
     expect(payload.featureKinds).toContain("translate");
     expect(payload.featureKinds).toContain("rotate");
     expect(payload.parameters.map((p) => p.name)).toContain("holeDiameter");
     const hole = payload.parameters.find((p) => p.name === "holeDiameter");
     expect(hole?.value.dimension).toBe("length");
+    unbind();
+  });
+
+  it("reports featureKinds as the kinds IN THE TIMELINE, not the vocabulary", async () => {
+    const store = freshStore();
+    const unbind = bindTools(store, surfaceState([]));
+    await runTool("cad_apply_commands", { commands: BOX_BATCH });
+    const run = await runTool("cad_get_document_summary", {});
+    if (!run.ok) throw new Error(run.message);
+    const payload = run.payload as {
+      featureKinds: string[];
+      featureVocabulary?: unknown;
+    };
+    expect(payload.featureKinds).toEqual([
+      ...new Set(store.getDocument().features.map((f) => String(f.kind))),
+    ]);
+    expect(payload.featureKinds).toContain("box");
+    // A vocabulary kind absent from the timeline is not reported.
+    expect(payload.featureKinds).not.toContain("fillet");
+    expect(payload.featureVocabulary).toBeUndefined();
+    unbind();
+  });
+
+  it("queries the topology inventory ONLY when the summary is called", async () => {
+    const store = freshStore();
+    const state = surfaceState([]);
+    const unbind = bindTools(store, state);
+    await runTool("cad_apply_commands", { commands: BOX_BATCH });
+    state.applied = renderStateOf("body_plate");
+    state.topology = inventoryOf(snapshotOf("body_box"));
+    // No other tool — nor binding the tools — pays for a topology query.
+    await runTool("cad_list_commands", {});
+    await runTool("cad_measure", {});
+    await runTool("cad_skill", {});
+    expect(state.topologyQueries).toBe(0);
+    await runTool("cad_get_document_summary", {});
+    expect(state.topologyQueries).toBe(1);
+    await runTool("cad_get_document_summary", {});
+    expect(state.topologyQueries).toBe(2);
+    unbind();
+  });
+
+  it("reports every body's topology null when the query answers nothing", async () => {
+    const store = freshStore();
+    const state = surfaceState([]);
+    const unbind = bindTools(store, state);
+    await runTool("cad_apply_commands", { commands: BOX_BATCH });
+    const bodies = await summaryBodies();
+    expect(bodies.map((body) => body.topology)).toEqual([null, null]);
+    unbind();
+  });
+
+  it("exposes the settled scene's persistent edge/face inventory per body", async () => {
+    const store = freshStore();
+    const state = surfaceState([]);
+    const unbind = bindTools(store, state);
+    expect(
+      (await runTool("cad_apply_commands", { commands: BOX_BATCH })).ok,
+    ).toBe(true);
+    state.topology = inventoryOf(snapshotOf("body_box"));
+    const box = (await summaryBodies()).find((body) => body.id === "body_box");
+    expect(box?.topology).toMatchObject({ persistent: true, regeneration: 3 });
+    expect(box?.topology?.edges.map((edge) => edge.referenceId)).toEqual([
+      "ref_body_box_edge_0",
+      "ref_body_box_edge_1",
+    ]);
+    const face = box?.topology?.faces[0];
+    expect(face).toMatchObject({
+      geometry: { areaMm2: 100 },
+      ordinal: 0,
+      referenceId: "ref_body_box_face_0",
+      referenced: false,
+    });
+    // The ready-to-store payload is the canonical persistent reference:
+    // bound to the body, its producing feature path, and the identity.
+    expect(face?.reference).toMatchObject({
+      bodyId: "body_box",
+      id: "ref_body_box_face_0",
+      identity: { data: { hash: 21 }, kernelId: "occt", schema: "probe" },
+      kind: "face",
+      provenance: { bodyId: "body_box", featurePath: ["feat_box"] },
+    });
+    // A body without a settled snapshot reports no inventory.
+    const plate = (await summaryBodies()).find(
+      (body) => body.id === "body_plate",
+    );
+    expect(plate?.topology).toBeNull();
+    unbind();
+  });
+
+  it("bounds the reference id of a body whose id would overflow it", async () => {
+    const longBodyId = `body_${"a".repeat(55)}`;
+    // The canonical `ref_<body>_<kind>_<ordinal>` id overflows the payload.
+    expect(parseReferenceId(`ref_${longBodyId}_edge_0`).ok).toBe(false);
+    const store = freshStore();
+    const state = surfaceState([]);
+    const unbind = bindTools(store, state);
+    expect(
+      (await runTool("cad_apply_commands", { commands: boxBatch(longBodyId) }))
+        .ok,
+    ).toBe(true);
+    state.topology = inventoryOf(snapshotOf(longBodyId));
+    const bodies = await summaryBodies();
+    expect(
+      bodies.find((body) => body.id === "body_plate")?.topology,
+    ).toBeNull();
+    const box = bodies.find((body) => body.id === longBodyId);
+    const ids = box?.topology?.edges.map((edge) => edge.referenceId) ?? [];
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    for (const id of ids) {
+      expect(id?.startsWith(`ref_${longBodyId.slice(0, 40)}-`)).toBe(true);
+      expect(parseReferenceId(id).ok).toBe(true);
+    }
+    const edge = box?.topology?.edges[0];
+    if (edge?.reference == null || edge.referenceId === null) {
+      throw new Error("no minted edge reference");
+    }
+    expect(edge.reference).toMatchObject({
+      bodyId: longBodyId,
+      id: edge.referenceId,
+    });
+    expect(
+      (
+        await runTool("cad_apply_commands", {
+          commands: [
+            {
+              formatVersion: 1,
+              id: edge.referenceId,
+              name: "edge0",
+              reference: edge.reference,
+              type: "reference.create",
+            },
+          ],
+        })
+      ).ok,
+    ).toBe(true);
+    const again = (await summaryBodies()).find(
+      (body) => body.id === longBodyId,
+    );
+    expect(again?.topology?.edges[0]?.referenceId).toBe(edge.referenceId);
+    expect(again?.topology?.edges[0]?.referenced).toBe(true);
+    unbind();
+  });
+
+  it("offers no payload when the kernel keeps no persistent topology", async () => {
+    const store = freshStore();
+    const state = surfaceState([]);
+    const unbind = bindTools(store, state);
+    await runTool("cad_apply_commands", { commands: BOX_BATCH });
+    state.topology = inventoryOf({
+      ...snapshotOf("body_box"),
+      persistentTopology: false,
+    });
+    const box = (await summaryBodies()).find((body) => body.id === "body_box");
+    expect(box?.topology?.persistent).toBe(false);
+    expect(box?.topology?.edges.every((edge) => edge.reference === null)).toBe(
+      true,
+    );
+    unbind();
+  });
+
+  it("round-trips an inventory reference into a fillet the reader accepts", async () => {
+    const store = freshStore();
+    const state = surfaceState([]);
+    const unbind = bindTools(store, state);
+    await runTool("cad_apply_commands", { commands: BOX_BATCH });
+    state.topology = inventoryOf(snapshotOf("body_box"));
+    const edge = (await summaryBodies()).find((body) => body.id === "body_box")
+      ?.topology?.edges[1];
+    if (edge?.reference == null || edge.referenceId === null) {
+      throw new Error("no minted edge reference");
+    }
+    const run = await runTool("cad_apply_commands", {
+      commands: [
+        {
+          formatVersion: 1,
+          id: edge.referenceId,
+          name: "edge1",
+          reference: edge.reference,
+          type: "reference.create",
+        },
+        lengthParameter("param_radius", 1),
+        {
+          formatVersion: 1,
+          id: "body_round",
+          name: "round",
+          type: "body.create",
+        },
+        {
+          formatVersion: 1,
+          id: "feat_round",
+          inputs: [
+            { id: "feat_box", kind: "feature" },
+            { id: edge.referenceId, kind: "reference" },
+            { id: "param_radius", kind: "parameter" },
+          ],
+          kind: "fillet",
+          outputs: ["body_round"],
+          type: "feature.create",
+        },
+      ],
+    });
+    expect(run.ok).toBe(true);
+    // The document-side reader the fillet scene uses accepts the record.
+    expect(
+      topologyReferenceOf(
+        store.getDocument(),
+        createReferenceId(edge.referenceId),
+        "edge",
+        "body_box",
+      ),
+    ).not.toBeNull();
+    const again = (await summaryBodies()).find(
+      (body) => body.id === "body_box",
+    );
+    expect(again?.topology?.edges[1]?.referenced).toBe(true);
+    expect(again?.topology?.edges[0]?.referenced).toBe(false);
+    unbind();
+  });
+
+  it("keeps a consumed target's inventory and re-selects through feature.update", async () => {
+    const store = freshStore();
+    const state = surfaceState([]);
+    const unbind = bindTools(store, state);
+    await runTool("cad_apply_commands", { commands: BOX_BATCH });
+    state.topology = inventoryOf(snapshotOf("body_box"));
+    const first = (await summaryBodies()).find((body) => body.id === "body_box")
+      ?.topology?.edges[1];
+    if (first?.reference == null || first.referenceId === null) {
+      throw new Error("no minted edge reference");
+    }
+    const filletOf = (type: string, referenceId: string) => ({
+      formatVersion: 1,
+      id: "feat_round",
+      inputs: [
+        { id: "feat_box", kind: "feature" },
+        { id: referenceId, kind: "reference" },
+        { id: "param_radius", kind: "parameter" },
+      ],
+      kind: "fillet",
+      outputs: ["body_round"],
+      type,
+    });
+    expect(
+      (
+        await runTool("cad_apply_commands", {
+          commands: [
+            {
+              formatVersion: 1,
+              id: first.referenceId,
+              name: "edge1",
+              reference: first.reference,
+              type: "reference.create",
+            },
+            lengthParameter("param_radius", 1),
+            {
+              formatVersion: 1,
+              id: "body_round",
+              name: "round",
+              type: "body.create",
+            },
+            filletOf("feature.create", first.referenceId),
+          ],
+        })
+      ).ok,
+    ).toBe(true);
+    // The fillet renders in the box's place; the box's regenerated
+    // snapshot (a new identity for edge 1) rides the consumed channel.
+    const regenerated: TopologySnapshot = {
+      ...snapshotOf("body_box"),
+      entities: snapshotOf("body_box").entities.map((entity) =>
+        entity.kind === "edge" && entity.ordinal === 1
+          ? {
+              ...entity,
+              identity: {
+                data: { hash: 99 },
+                kernelId: "occt",
+                schema: "probe",
+              },
+            }
+          : entity,
+      ),
+      regeneration: 4,
+    };
+    state.topology = inventoryOf(snapshotOf("body_round"), regenerated);
+    const bodies = await summaryBodies();
+    const box = bodies.find((body) => body.id === "body_box");
+    expect(box?.topology).toMatchObject({ persistent: true, regeneration: 4 });
+    expect(
+      bodies.find((body) => body.id === "body_round")?.topology?.edges,
+    ).toHaveLength(2);
+    // The stored record keeps its old identity; the inventory offers the
+    // current one — store it under a fresh id and update the op.
+    const current = box?.topology?.edges[1];
+    expect(current?.referenced).toBe(true);
+    expect(current?.reference).toMatchObject({
+      identity: { data: { hash: 99 } },
+    });
+    const freshId = "ref_body_box_edge_1_b";
+    const reselect = await runTool("cad_apply_commands", {
+      commands: [
+        {
+          formatVersion: 1,
+          id: freshId,
+          name: "edge1b",
+          reference: current?.reference,
+          type: "reference.create",
+        },
+        filletOf("feature.update", freshId),
+      ],
+    });
+    expect(reselect.ok).toBe(true);
+    expect(
+      topologyReferenceOf(
+        store.getDocument(),
+        createReferenceId(freshId),
+        "edge",
+        "body_box",
+      )?.identity.data,
+    ).toEqual({ hash: 99 });
+    expect(
+      store
+        .getDocument()
+        .features.find((feature) => String(feature.id) === "feat_round")
+        ?.inputs.map((input) => String(input.id)),
+    ).toEqual(["feat_box", freshId, "param_radius"]);
     unbind();
   });
 });
@@ -253,6 +723,81 @@ describe("cad_list_commands", () => {
         ],
       });
     }
+    unbind();
+  });
+
+  it("serves the authorable feature kinds with their canonical layouts", async () => {
+    const store = freshStore();
+    const unbind = bindTools(store, surfaceState([]));
+    const run = await runTool("cad_list_commands", {});
+    if (!run.ok) throw new Error(run.message);
+    const payload = run.payload as {
+      featureKinds?: unknown;
+      featureVocabulary: typeof FEATURE_KIND_VOCABULARY;
+    };
+    // The authoring list is `featureVocabulary`; `featureKinds` stays the
+    // summary's "kinds in the timeline" and is not served here.
+    expect(payload.featureKinds).toBeUndefined();
+    const { featureVocabulary } = payload;
+    expect(featureVocabulary.map((entry) => entry.kind)).toEqual([
+      "box",
+      "sphere",
+      "cylinder",
+      "cone",
+      "fillet",
+      "chamfer",
+      "shell",
+      "moveFace",
+      "deleteFace",
+      "replaceFace",
+      "patternFace",
+    ]);
+    const layout = (kind: string) =>
+      featureVocabulary
+        .find((entry) => entry.kind === kind)
+        ?.inputs.map((slot) => `${slot.kind}:${slot.count}`);
+    expect(layout("cone")).toEqual([
+      "parameter:1",
+      "parameter:1",
+      "parameter:1",
+    ]);
+    expect(layout("fillet")).toEqual([
+      "feature:1",
+      "reference:1+",
+      "parameter:1",
+    ]);
+    expect(layout("moveFace")).toEqual([
+      "feature:1",
+      "reference:1",
+      "parameter:1",
+      "parameter:1",
+    ]);
+    expect(layout("replaceFace")).toEqual([
+      "feature:1",
+      "reference:1",
+      "datum:1",
+    ]);
+    expect(layout("patternFace")).toHaveLength(8);
+    // patternFace's bounding face is a persistent FACE reference, so it
+    // needs a kernel with persistent topology — not "any kernel".
+    expect(
+      featureVocabulary.find((entry) => entry.kind === "patternFace")
+        ?.capability,
+    ).toBe("persistentTopology");
+    expect(
+      featureVocabulary
+        .filter((entry) =>
+          entry.inputs.some((slot) => slot.kind === "reference"),
+        )
+        .every((entry) => entry.capability !== null),
+    ).toBe(true);
+    expect(
+      featureVocabulary
+        .find((entry) => entry.kind === "shell")
+        ?.inputs.find((slot) => slot.kind === "reference")?.domain,
+    ).toContain("FACE");
+    // The served data IS the module's vocabulary (one source of truth).
+    expect(featureVocabulary).toEqual(FEATURE_KIND_VOCABULARY);
     unbind();
   });
 
@@ -593,7 +1138,42 @@ describe("cad_skill", () => {
     expect(payload.skill).toContain("skcon_");
     expect(payload.skill).toContain("formatVersion");
     expect(payload.skill).toContain("parametric-cup.commands.json");
+    // It teaches every new feature kind and the selection addressing.
+    for (const entry of FEATURE_KIND_VOCABULARY) {
+      expect(payload.skill).toContain(`| ${entry.kind} |`);
+    }
+    expect(payload.skill).toContain("## Selection addressing");
+    expect(payload.skill).toContain("topology.edges");
+    expect(payload.skill).toContain('"kind": "reference"');
+    expect(payload.skill).toContain("reference.create");
+    // The authoring list's name, distinct from the timeline kinds.
+    expect(payload.skill).toContain("featureVocabulary");
+    expect(payload.skill).toContain("`featureKinds` (the feature kinds IN THE");
+    // The real guarantee, with the failure modes and the named states.
+    expect(payload.skill).toContain("### The guarantee");
+    expect(payload.skill).toContain("SURVIVES\nrebuilds and dimension edits");
+    expect(payload.skill).toContain("DELETED, SPLIT into an ambiguous set");
+    expect(payload.skill).toContain("unnamed-op entity");
+    expect(payload.skill).toContain("`valid`, `repaired`, or `missing`");
+    expect(payload.skill).toContain("reference-unresolved");
     unbind();
+  });
+
+  it("states the same guarantee in the summary tool's own description", () => {
+    const summary = createWorkbenchWebMcpTools({
+      appliedState: () => null,
+      commands: () => [],
+      documentTopology: () => Promise.resolve(null),
+      measureText: () => null,
+      store: freshStore(),
+    }).find((entry) => entry.name === "cad_get_document_summary");
+    const description = summary?.description ?? "";
+    expect(description).toContain("survives rebuilds and dimension edits");
+    expect(description).toContain("deleted, split ambiguously");
+    expect(description).toContain(
+      "repaired or refused, and the state is named",
+    );
+    expect(description).toContain("featureVocabulary");
   });
 });
 

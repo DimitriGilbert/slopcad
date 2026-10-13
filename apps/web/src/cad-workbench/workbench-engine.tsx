@@ -101,6 +101,7 @@ import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene
 
 import {
   bootRenderFixtureSession,
+  type DocumentTopologyInventory,
   faceAnchorSurface,
   type FixtureRenderState,
   type RenderFixtureSession,
@@ -383,6 +384,13 @@ export interface WorkbenchEngine {
   readonly historyApi: ReturnType<typeof useCadHistory>;
   /** The applied render state, or `null` before the first settle. */
   readonly applied: AppliedRenderState | null;
+  /**
+   * Queries the visible document scene's per-body topology snapshots ON
+   * DEMAND (the agent plane's edge/face inventory) — the render pass does
+   * no topology work for it. `null` before a document scene settled or
+   * without a booted session.
+   */
+  readonly documentTopology: () => Promise<DocumentTopologyInventory | null>;
   /** The settled render-frame count (the scene's frame counter). */
   readonly renderedFrames: number;
   /**
@@ -769,6 +777,11 @@ export function useWorkbenchEngine(
 
   const [renderedFrames, setRenderedFrames] = useState(0);
   const sessionRef = useRef<RenderFixtureSession | null>(null);
+  const documentTopology = useCallback(
+    (): Promise<DocumentTopologyInventory | null> =>
+      sessionRef.current?.documentTopology() ?? Promise.resolve(null),
+    [],
+  );
 
   /**
    * Counts one settled projection frame and — synchronously, in the
@@ -4259,6 +4272,7 @@ export function useWorkbenchEngine(
     toolsApi,
     historyApi,
     applied,
+    documentTopology,
     renderedFrames,
     noteRenderedFrame,
     suppressed,

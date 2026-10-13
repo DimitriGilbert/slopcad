@@ -1498,3 +1498,92 @@ describe("computeDocumentScene: the face-op and patternFace scenes", () => {
     );
   });
 });
+
+describe("computeDocumentScene: the computed-solid report (agent plane)", () => {
+  /** Wraps a context so every operation the pass issues is recorded. */
+  function recordingContext(context: ComputationContext): {
+    readonly context: ComputationContext;
+    readonly operations: WorkerOperationId[];
+  } {
+    const operations: WorkerOperationId[] = [];
+    return {
+      context: {
+        revision: context.revision,
+        request: (operation, input) => {
+          operations.push(operation);
+          return context.request(operation, input);
+        },
+      },
+      operations,
+    };
+  }
+
+  it("reports every computed solid by body id and issues no topology request", async () => {
+    const { context, operations } = recordingContext(
+      sceneContext(measuringKernel()),
+    );
+    const result = await computeDocumentScene(
+      context,
+      [
+        extrusionOf("body_shown", squareLoop(0, 0, 10, 10)),
+        extrusionOf("body_hidden", squareLoop(20, 0, 30, 10)),
+      ],
+      new Set(["body_shown"]),
+    );
+    expect(result.solids.map((entry) => entry.bodyId)).toEqual(["body_shown"]);
+    expect(String(result.solids[0]?.solid)).toMatch(/^wsol_doc_/);
+    // The inventory is queried on demand elsewhere: the render pass never
+    // pays for per-body topology.
+    expect(operations).not.toContain("solid.topology");
+  });
+
+  it("reports a refused lineage's fallback solids, still without a topology request", async () => {
+    const { context, operations } = recordingContext(
+      sceneContext({ ...measuringKernel(), union: () => kernelRefusal() }),
+    );
+    const result = await computeDocumentScene(
+      context,
+      [
+        {
+          bodyId: "body_boolean",
+          scene: {
+            kind: "boolean",
+            request: {
+              target: {
+                kind: "extrude",
+                request: {
+                  loop: squareLoop(0, 0, 10, 10),
+                  placement: IDENTITY_PLACEMENT,
+                  distanceMm: 10,
+                  bodyId: "body_target",
+                },
+              },
+              tools: [
+                {
+                  kind: "extrude",
+                  request: {
+                    loop: squareLoop(20, 0, 30, 10),
+                    placement: IDENTITY_PLACEMENT,
+                    distanceMm: 10,
+                    bodyId: "body_tool",
+                  },
+                },
+              ],
+              operation: "union",
+              bodyId: "body_boolean",
+            },
+          },
+        },
+      ],
+      new Set(["body_boolean", "body_target", "body_tool"]),
+    );
+    expect(result.failures.map((failure) => failure.bodyId)).toEqual([
+      "body_boolean",
+    ]);
+    expect(result.solids.map((entry) => entry.bodyId)).toEqual([
+      "body_target",
+      "body_tool",
+    ]);
+    expect(operations).not.toContain("solid.topology");
+  });
+});
