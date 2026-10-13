@@ -32,7 +32,7 @@
  * solid — or the bare extrusion when no hole exists: the snapshot whose
  * edge ordinals both the picking layer and `solid.fillet` address), then
  * one `solid.fillet` per fillet feature in document order (each applied to
- * the previous result), measuring every stage (`solid.volume`,
+ * the previous result — see "The fillet edges" below), measuring every stage (`solid.volume`,
  * `solid.bounds`, `solid.tessellate`). A parameter edit upstream therefore
  * re-executes the whole chain — the regeneration cascade IS the dispatch.
  *
@@ -47,6 +47,20 @@
  * never ran far enough to fail, and the page feeds the verdict into the
  * domain regeneration so the timeline shows exactly
  * extrude=valid, hole=valid, fillet=failed — recovery re-dispatches green.
+ *
+ * ## The fillet edges (Phase N3)
+ *
+ * The workbench's pick mints a PERSISTENT reference (the OCCT kernel's
+ * history-based `occt-name/1` identity) from the applied scene's target
+ * snapshot, so a fillet's selection is normally the reference form: each
+ * dispatch resolves it against the solid the fillet actually rounds — the
+ * target's snapshot for the first fillet, the previous fillet's output for
+ * the next (the names carry through `solid.fillet`) — via the topology-cut
+ * scene's shared resolution (`valid`, or a `missing` reference's bounded
+ * repair, else the stage's structured refusal). The name reads no
+ * dimension, so the pick survives every upstream parameter edit. The
+ * legacy ordinal form (documents authored before names) passes its target
+ * snapshot ordinals straight to the kernel, which judges them.
  */
 
 import { angle, createBodyId, length } from "@slopcad/cad-core";
@@ -61,8 +75,11 @@ import {
 } from "@slopcad/cad-kernel";
 import type { ComputationContext, WorkerSolidId } from "@slopcad/cad-kernel";
 import type { HoleSceneEntry } from "../cad-workbench/hole";
+import type { TopologyCutSelection } from "../cad-workbench/topology-cut";
 import type { PlateMeasurement } from "./plate-scene";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
+
+import { referenceOrdinalsIn } from "./topology-cut-scene";
 
 /**
  * One hole plus the feature id failures attribute to (Phase 52 chain
@@ -81,11 +98,14 @@ function chainHoleDescription(hole: ChainHoleRequest): string {
     : `Ø${String(hole.diameterMm)} × ${String(hole.depthMm)} mm at in-plane (${String(hole.positionXMm)}, ${String(hole.positionYMm)})`;
 }
 
-/** One fillet's edge address, radius, and feature id (failure attribution). */
+/** One fillet's edge selection, radius, and feature id (failure attribution). */
 export interface ChainFilletRequest {
   readonly featureId: FeatureId;
-  /** The target snapshot's edge ordinal — the pick-by-snapshot address. */
-  readonly edgeOrdinal: number;
+  /**
+   * The edges: the persistent references the pick minted (resolved per
+   * dispatch — see the module doc), or the legacy target-snapshot ordinals.
+   */
+  readonly selection: TopologyCutSelection;
   readonly radiusMm: number;
 }
 
@@ -116,7 +136,8 @@ export interface ChainScene {
    *  edge-ordinal address space both the picking layer and `solid.fillet`
    *  consume, at THIS dispatch's regeneration. */
   readonly snapshot: TopologySnapshot;
-  /** The ordinals the executed fillets consumed, in document order. */
+  /** The ordinals the executed fillets consumed (each fillet's resolved
+   *  edges, flattened), in document order. */
   readonly filletEdges: readonly number[];
   /** The radii the executed fillets used, in document order. */
   readonly filletRadii: readonly number[];
@@ -207,6 +228,34 @@ async function measure(
  * chain refuses it as a stage failure instead of silently continuing.
  */
 const NOOP_EPSILON_RELATIVE = 1e-9;
+
+/**
+ * One fillet's kernel edge ordinals on the solid it rounds: the legacy
+ * ordinal form verbatim, the reference form resolved against `snapshot`
+ * when the solid IS the target (the snapshot already in hand), else
+ * against a fresh `solid.topology` of `solid` labeled with the target body
+ * (the earlier fillets carried the names). Throws the resolution's
+ * structured refusal.
+ */
+async function chainFilletEdges(
+  context: ComputationContext,
+  selection: TopologyCutSelection,
+  snapshot: TopologySnapshot | null,
+  solid: WorkerSolidId,
+  targetBodyId: string,
+): Promise<readonly number[]> {
+  if (selection.kind === "ordinals") return selection.ordinals;
+  const current =
+    snapshot ??
+    (
+      await context.request("solid.topology", {
+        solid,
+        bodyId: createBodyId(targetBodyId),
+        regeneration: context.revision,
+      })
+    ).snapshot;
+  return referenceOrdinalsIn(current, selection.references, "edge", "fillet");
+}
 
 /**
  * Runs the whole chain through the worker operation matrix: extrude →
@@ -383,14 +432,21 @@ export async function computeChainScene(
   const filletRadii: number[] = [];
   for (const fillet of request.fillets) {
     try {
+      const edges = await chainFilletEdges(
+        context,
+        fillet.selection,
+        latestSolid === targetSolid ? snapshot : null,
+        latestSolid,
+        request.targetBodyId,
+      );
       const rounded = await context.request("solid.fillet", {
         target: latestSolid,
-        edges: [fillet.edgeOrdinal],
+        edges,
         radius: mm(fillet.radiusMm),
       });
       latestSolid = rounded.solid;
       filleted = await measure(context, latestSolid);
-      filletEdges.push(fillet.edgeOrdinal);
+      filletEdges.push(...edges);
       filletRadii.push(fillet.radiusMm);
     } catch (failure) {
       throw stageFailure("fillet", fillet.featureId, failure);

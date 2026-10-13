@@ -113,6 +113,35 @@ function fixtureView(
   };
 }
 
+/**
+ * `view` with every entity moved 5 mm along x — a vanished entity with no
+ * geometric repair candidate either (the Phase N3 fallback refuses).
+ */
+function movedView(view: TopologyView): TopologyView {
+  const shifted = (
+    point: readonly [number, number, number] | undefined,
+  ): readonly [number, number, number] | undefined =>
+    point === undefined ? undefined : [point[0] + 5, point[1], point[2]];
+  return {
+    ...view,
+    snapshotOf: (id) => {
+      const snapshot = view.snapshotOf(id);
+      if (snapshot === null) return null;
+      return {
+        ...snapshot,
+        entities: snapshot.entities.map((entity) => ({
+          ...entity,
+          geometry: {
+            ...entity.geometry,
+            centroidAbsoluteMm: shifted(entity.geometry.centroidAbsoluteMm),
+            centroidRelativeMm: shifted(entity.geometry.centroidRelativeMm),
+          },
+        })),
+      };
+    },
+  };
+}
+
 /** Builds the chamfer document: box feature + reference record + chamfer feature. */
 function buildChamferDocument(distanceMm: number): CadDocument {
   let document = createDocument(createDocumentId("doc_bridge_chamfer"));
@@ -266,10 +295,11 @@ describe("bridge chamfer: target + edge references + distance → kernel chamfer
   });
 
   it("fails with a structured stale-reference diagnostic when the edge vanished", () => {
-    // A view whose snapshot carries a DIFFERENT hash: the minted identity
-    // died (the Phase 22 rebuild finding) → the reference stands missing →
+    // A view whose snapshot carries a DIFFERENT hash AND a moved entity:
+    // the minted identity died and no geometric repair candidate remains
+    // (Phase N3's fallback refuses) → the reference stands missing →
     // the chamfer feature fails regeneration with the state named.
-    const stale = fixtureView(bBlock, 999999);
+    const stale = movedView(fixtureView(bBlock, 999999));
     const { states } = runChamfer(buildChamferDocument(2), { view: stale });
     const status = states.get(fChamfer);
     expect(status?.state).toBe("failed");

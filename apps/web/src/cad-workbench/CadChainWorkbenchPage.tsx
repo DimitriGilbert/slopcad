@@ -44,9 +44,12 @@
  * settle; the page projects its edge centroids through the scene camera
  * and publishes them as `data-edge-anchors`. A click on the viewport
  * selects the nearest anchor within {@link CHAIN_EDGE_PICK_RADIUS_PX} —
- * the pick IS a snapshot ordinal, the address `solid.fillet` consumes (the
- * /worker-fillet precedent; the ordinal rides the document as a
- * dimensionless parameter — see `./chain` for the disclosed decision).
+ * the pick is a snapshot ordinal of the APPLIED scene (`data-selected-edge`).
+ * The fillet action mints a persistent topology reference from that
+ * ordinal on the applied snapshot (the OCCT kernel's history-based name)
+ * and commits it as a document reference record, so the pick survives
+ * every rebuild and upstream parameter edit (Phase N3 — see `./chain` for
+ * the decision).
  *
  * ## Machine surface (`#chain-root`)
  *
@@ -103,11 +106,15 @@ import {
   createDatumId,
   createFeatureId,
   createParameterId,
+  createReferenceId,
   createSketchDocumentId,
   dimensionless,
   formatBoundsExtents,
   length,
+  mintTopologyReference,
   parseDatumPayload,
+  referenceProvenance,
+  serializeTopologyReference,
   type CadCommand,
   type Parameter,
   type ParameterId,
@@ -166,7 +173,7 @@ import {
   type StructuredHoleSubmission,
 } from "./hole-dialog";
 import {
-  chainFilletInputOf,
+  chainFilletOf,
   CHAIN_FILLET_DEFAULT_RADIUS_MM,
   documentChainSceneRequest,
   filletBaseFeatureOf,
@@ -269,9 +276,9 @@ function structuralOutcome(
     );
   }
   if (feature.kind === "fillet") {
-    return chainFilletInputOf(document, feature) !== null
+    return chainFilletOf(document, feature) !== null
       ? { ok: true }
-      : unresolvable("the target, the radius, or the edge ordinal is gone");
+      : unresolvable("the target, the radius, or the edge selection is gone");
   }
   return unresolvable("the chain workbench does not execute this kind");
 }
@@ -921,22 +928,42 @@ function CadChainWorkbenchBody({
     setSelectedEdge(null);
   };
 
-  // The fillet action: commits the radius parameter, the picked snapshot
-  // ordinal (a dimensionless parameter — the hole axis selector's
-  // precedent), the body, and the fillet feature targeting the newest
-  // solid stage. Needs a picked edge — the button states that.
+  // The fillet action: commits the radius parameter, the persistent
+  // reference minted from the picked ordinal on the applied target
+  // snapshot (a document reference record), the body, and the fillet
+  // feature targeting the newest solid stage in the bridge's canonical
+  // layout. Needs a picked edge — the button states that.
   const filletBase = useMemo(
     () => filletBaseFeatureOf(workbenchDocument),
     [workbenchDocument],
   );
   const handleFillet = useCallback((): void => {
     if (filletBase === undefined || selectedEdge === null) return;
+    if (applied === null) return;
+    const targetBodyId = filletBase.outputs[0];
+    // The pick addresses the APPLIED scene's target; a scene still settling
+    // onto a newer target has nothing this pick could reference.
+    if (
+      targetBodyId === undefined ||
+      applied.scene.snapshot.bodyId !== targetBodyId
+    ) {
+      return;
+    }
     const n = filletCount + 1;
     const suffix = String(n);
     const radiusId = createParameterId(`param_fillet_radius${suffix}`);
-    const edgeId = createParameterId(`param_fillet_edge${suffix}`);
+    const edgeId = createReferenceId(`ref_fillet_edge${suffix}`);
     const bodyId = createBodyId(`body_fillet${suffix}`);
     const featureId = createFeatureId(`feat_fillet${suffix}`);
+    const provenance = referenceProvenance(workbenchDocument, targetBodyId);
+    if (!provenance.ok) return;
+    const minted = mintTopologyReference(
+      applied.scene.snapshot,
+      selectedEdge,
+      provenance.value,
+      { id: edgeId, kind: "edge" },
+    );
+    if (!minted.ok) return;
     const committed = documentApi.applyTransaction({
       commands: [
         {
@@ -946,10 +973,10 @@ function CadChainWorkbenchBody({
           value: length(CHAIN_FILLET_DEFAULT_RADIUS_MM),
         },
         {
-          type: "parameter.create",
+          type: "reference.create",
           id: edgeId,
           name: `filletEdge${suffix}`,
-          value: dimensionless(selectedEdge),
+          reference: { ...serializeTopologyReference(minted.value) },
         },
         { type: "body.create", id: bodyId, name: `rounded ${String(n)}` },
         {
@@ -958,8 +985,8 @@ function CadChainWorkbenchBody({
           kind: "fillet",
           inputs: [
             { kind: "feature", id: filletBase.id },
+            { kind: "reference", id: edgeId },
             { kind: "parameter", id: radiusId },
-            { kind: "parameter", id: edgeId },
           ],
           outputs: [bodyId],
         },
@@ -968,7 +995,14 @@ function CadChainWorkbenchBody({
     if (!committed.ok) return;
     setFilletCount(n);
     setSelectedEdge(null);
-  }, [documentApi, filletBase, filletCount, selectedEdge]);
+  }, [
+    applied,
+    documentApi,
+    filletBase,
+    filletCount,
+    selectedEdge,
+    workbenchDocument,
+  ]);
 
   // -- Derived surfaces ----------------------------------------------------
   const timeline: readonly FeatureTimelineEntry[] | null = useMemo(() => {

@@ -924,6 +924,7 @@ describe("computeDocumentScene: the topology-cut scenes", () => {
     bodyId: BodyId,
     regeneration: number,
     hash: number,
+    shiftMm = 0,
   ): TopologySnapshot {
     return {
       kernelId: FIXTURE_KERNEL_ID,
@@ -942,8 +943,12 @@ describe("computeDocumentScene: the topology-cut scenes", () => {
           },
           geometry: {
             lengthMm: BOX.depthMm,
-            centroidAbsoluteMm: [BOX.widthMm, BOX.depthMm / 2, 0],
-            centroidRelativeMm: [BOX.widthMm / 2, 0, -BOX.heightMm / 2],
+            centroidAbsoluteMm: [BOX.widthMm + shiftMm, BOX.depthMm / 2, 0],
+            centroidRelativeMm: [
+              BOX.widthMm / 2 + shiftMm,
+              0,
+              -BOX.heightMm / 2,
+            ],
           },
         },
       ],
@@ -1026,9 +1031,32 @@ describe("computeDocumentScene: the topology-cut scenes", () => {
     );
   });
 
-  it("a stale reference refuses — the target's state renders in its place", async () => {
+  it("a missing reference repairs onto its unmoved edge before refusing (Phase N3)", async () => {
     const context = sceneContext(measuringKernel(), (bodyId, regeneration) =>
       fixtureSnapshot(bodyId, regeneration, 9999),
+    );
+    const result = await computeDocumentScene(
+      context,
+      [
+        boxOf("body_box"),
+        cutOf("body_fillet", "fillet", "body_box", 2, {
+          kind: "references",
+          references: [mintedEdgeReference("body_box")],
+        }),
+      ],
+      new Set(["body_fillet"]),
+    );
+    expect(result.failures).toEqual([]);
+    expect(result.bodies.map((body) => body.bodyId)).toEqual(["body_fillet"]);
+    expect(result.volume).toBeCloseTo(
+      BOX_VOLUME - (1 - Math.PI / 4) * 2 * 2 * BOX.depthMm,
+      6,
+    );
+  });
+
+  it("a stale reference with no repair candidate refuses — the target's state renders in its place", async () => {
+    const context = sceneContext(measuringKernel(), (bodyId, regeneration) =>
+      fixtureSnapshot(bodyId, regeneration, 9999, 5),
     );
     const result = await computeDocumentScene(
       context,
@@ -1044,9 +1072,10 @@ describe("computeDocumentScene: the topology-cut scenes", () => {
     expect(result.failures.map((failure) => failure.scene)).toEqual([
       "topologyCut",
     ]);
-    expect(String(result.failures[0]?.failure)).toContain(
-      "reference-unresolved",
-    );
+    const message = String(result.failures[0]?.failure);
+    expect(message).toContain("reference-unresolved");
+    expect(message).toContain("stands missing");
+    expect(message).toContain("repair refused");
     expect(result.bodies.map((body) => body.bodyId)).toEqual(["body_box"]);
     expect(result.volume).toBeCloseTo(BOX_VOLUME, 6);
   });

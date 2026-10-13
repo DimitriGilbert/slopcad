@@ -429,8 +429,10 @@ import {
   type FeatureId,
   type FeatureInputRef,
   type FeatureRecord,
+  type ReferenceId,
   type ResolvedDatumAxis,
   type ResolvedDatumPlane,
+  type TopologyEntityReference,
   type TopologyView,
   angle as angleValue,
   length as lengthValue,
@@ -441,6 +443,7 @@ import {
   getDocumentReference,
   parseDatumPayload,
   parseTopologyReference,
+  repairMissingReference,
   resolveDatumPayload,
   resolveDocumentReference,
   transientSelectionOf,
@@ -2281,6 +2284,69 @@ function referenceKindOf(kind: TopologyCutKind): "edge" | "face" {
 }
 
 /**
+ * The current-regeneration resolution every topology-addressed executor
+ * shares (Phase N3): `resolveDocumentReference` against the view, then —
+ * for a `missing` reference (a deleted / split entity, or one inside an
+ * unnamed operation's output) — cad-core's `repairMissingReference`
+ * against the body's current snapshot before refusing. A name-based
+ * reference re-resolves `valid` across rebuilds on its own. Answers the
+ * resolved (`valid`) or `repaired` reference; every other outcome is a
+ * structured diagnostic whose data carries the validity state, its
+ * structural reason, and the repair's refusal code when one was tried.
+ */
+function resolveExecutorReference(
+  feature: FeatureRecord,
+  kind: string,
+  referenceId: ReferenceId,
+  entityLabel: string,
+  reference: TopologyEntityReference,
+  view: TopologyView,
+  document: CadDocument,
+):
+  | { readonly ok: true; readonly reference: TopologyEntityReference }
+  | { readonly ok: false; readonly diagnostic: Diagnostic } {
+  const resolved = resolveDocumentReference(document, reference, view);
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" could not resolve reference "${referenceId}": ${resolved.error.message}`,
+        location: { primary: feature.id, related: [referenceId] },
+        data: { referenceCode: resolved.error.code },
+      },
+    };
+  }
+  const { reference: outcome, repairError } = repairMissingReference(
+    resolved.value,
+    resolved.value.validity.state === "missing"
+      ? view.snapshotOf(resolved.value.bodyId)
+      : null,
+  );
+  const { state, reason } = outcome.validity;
+  if (state !== "valid" && state !== "repaired") {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" has an unresolved ${entityLabel} reference ("${referenceId}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration${repairError === undefined ? "" : `, and its repair refused: ${repairError.message}`}. Re-select the ${entityLabel} to mint a fresh reference.`,
+        location: { primary: feature.id, related: [referenceId] },
+        data: {
+          validityState: state,
+          ...(reason !== undefined ? { reason } : {}),
+          ...(repairError !== undefined
+            ? { repairCode: repairError.code }
+            : {}),
+        },
+      },
+    };
+  }
+  return { ok: true, reference: outcome };
+}
+
+/**
  * The shared executor path of the topology-addressed kinds — `fillet`
  * (Phase 26.5), `chamfer` (Phase 26.6), and `shell` (Phase 26.7, on the
  * FACE reference kind): the input layout is ONE feature/body input (the
@@ -2439,40 +2505,17 @@ function runEdgeCutOperation(
         ),
       };
     }
-    const resolved = resolveDocumentReference(
-      readers.document,
+    const resolved = resolveExecutorReference(
+      feature,
+      kind,
+      edgeRef.id,
+      referenceKind,
       parsed.value,
       view,
+      readers.document,
     );
-    if (!resolved.ok) {
-      return {
-        ok: false,
-        diagnostic: {
-          severity: "error",
-          code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-          message: `Feature "${feature.id}" of kind "${kind}" could not resolve reference "${edgeRef.id}": ${resolved.error.message}`,
-          location: { primary: feature.id, related: [edgeRef.id] },
-          data: { referenceCode: resolved.error.code },
-        },
-      };
-    }
-    const { state, reason } = resolved.value.validity;
-    if (state !== "valid" && state !== "repaired") {
-      return {
-        ok: false,
-        diagnostic: {
-          severity: "error",
-          code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-          message: `Feature "${feature.id}" of kind "${kind}" has an unresolved ${referenceKind} reference ("${edgeRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the ${referenceKind} to mint a fresh reference.`,
-          location: { primary: feature.id, related: [edgeRef.id] },
-          data: {
-            validityState: state,
-            ...(reason !== undefined ? { reason } : {}),
-          },
-        },
-      };
-    }
-    const selection = transientSelectionOf(resolved.value);
+    if (!resolved.ok) return resolved;
+    const selection = transientSelectionOf(resolved.reference);
     if (!selection.ok) {
       return {
         ok: false,
@@ -4127,39 +4170,16 @@ function runPatternFaceOperation(
       ),
     };
   }
-  const resolved = resolveDocumentReference(
-    readers.document,
+  const resolved = resolveExecutorReference(
+    feature,
+    "patternFace",
+    referenceRef.id,
+    "face",
     parsed.value,
     view,
+    readers.document,
   );
-  if (!resolved.ok) {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "patternFace" could not resolve reference "${referenceRef.id}": ${resolved.error.message}`,
-        location: { primary: feature.id, related: [referenceRef.id] },
-        data: { referenceCode: resolved.error.code },
-      },
-    };
-  }
-  const { state, reason } = resolved.value.validity;
-  if (state !== "valid" && state !== "repaired") {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "patternFace" has an unresolved face reference ("${referenceRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the face to mint a fresh reference.`,
-        location: { primary: feature.id, related: [referenceRef.id] },
-        data: {
-          validityState: state,
-          ...(reason !== undefined ? { reason } : {}),
-        },
-      },
-    };
-  }
+  if (!resolved.ok) return resolved;
   const datumSeam = readers.datumTopology;
   if (datumSeam === undefined) {
     return {
@@ -6903,40 +6923,17 @@ function resolveLocalFaceReference(
       ),
     };
   }
-  const resolved = resolveDocumentReference(
-    readers.document,
+  const resolved = resolveExecutorReference(
+    feature,
+    kind,
+    faceRef.id,
+    "face",
     parsed.value,
     view,
+    readers.document,
   );
-  if (!resolved.ok) {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "${kind}" could not resolve reference "${faceRef.id}": ${resolved.error.message}`,
-        location: { primary: feature.id, related: [faceRef.id] },
-        data: { referenceCode: resolved.error.code },
-      },
-    };
-  }
-  const { state, reason } = resolved.value.validity;
-  if (state !== "valid" && state !== "repaired") {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "${kind}" has an unresolved face reference ("${faceRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the face to mint a fresh reference.`,
-        location: { primary: feature.id, related: [faceRef.id] },
-        data: {
-          validityState: state,
-          ...(reason !== undefined ? { reason } : {}),
-        },
-      },
-    };
-  }
-  const selection = transientSelectionOf(resolved.value);
+  if (!resolved.ok) return resolved;
+  const selection = transientSelectionOf(resolved.reference);
   if (!selection.ok) {
     return {
       ok: false,

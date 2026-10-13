@@ -21,16 +21,17 @@
  *   runs in the worker, where the target's solid exists
  *   (`../worker-fixture/topology-cut-scene`). A stale reference refuses
  *   there with its validity state named, never a silent re-attach.
- * - The chain workbench's ORDINAL form (`./chain`'s `chainFilletInputOf`,
- *   exactly what its fillet action authors — FILLET only): ONE
+ * - The chain workbench's legacy ORDINAL form ({@link chainFilletInputOf},
+ *   what its fillet action authored before Phase N3 — FILLET only): ONE
  *   feature/body input, no reference inputs, and EXACTLY two parameters —
  *   the radius (LENGTH) first, then ONE DIMENSIONLESS whole-number edge
  *   ordinal of the target's snapshot, judged by the kernel at execution
  *   (a stale ordinal is the kernel's structured refusal). A chamfer or
  *   shell without references, or a fillet with any other parameter
  *   layout, is no layout anything authors — it emits no scene entry. The
- *   reader delegates this form to `chainFilletInputOf` itself, so the
- *   chain workbench and the document scene judge one layout.
+ *   chain workbench (`./chain`) reads BOTH forms through
+ *   {@link topologyCutInputOf}, so the chain and the document scene judge
+ *   one layout.
  *
  * ## The domain (enforced BEFORE any scene exists)
  *
@@ -60,7 +61,6 @@ import {
   provenanceIntact,
 } from "@slopcad/cad-core";
 
-import { chainFilletInputOf } from "./chain";
 import { sceneOperandOfBody, type SceneOperand } from "./extrude";
 import { magnitudeIn, parameterValueOf } from "./parameter-magnitude";
 
@@ -121,6 +121,51 @@ function isTopologyCutKind(kind: string): kind is TopologyCutKind {
 function positiveLengthMm(document: CadDocument, id: string): number | null {
   const mm = magnitudeIn(parameterValueOf(document, id), "length", "mm");
   return mm !== null && mm > 0 ? mm : null;
+}
+
+/**
+ * Reads one fillet feature's inputs in declared role order: one feature or
+ * body input (the target) and two parameter inputs — the radius (a length,
+ * strictly positive and finite) and the picked edge's snapshot ordinal
+ * (dimensionless whole number, >= 0). `null` when the layout is malformed
+ * or any parameter no longer resolves. The ONE reader of this legacy layout
+ * (what the chain workbench authored before Phase N3's references):
+ * {@link topologyCutInputOf} reads the ordinal form through it.
+ */
+export function chainFilletInputOf(
+  document: CadDocument,
+  feature: FeatureRecord,
+): { readonly radiusMm: number; readonly edgeOrdinal: number } | null {
+  const targetRefs = feature.inputs.filter(
+    (ref) => ref.kind === "feature" || ref.kind === "body",
+  );
+  const parameterRefs = feature.inputs.filter(
+    (ref) => ref.kind === "parameter",
+  );
+  if (targetRefs.length !== 1 || parameterRefs.length !== 2) return null;
+  const radiusRef = parameterRefs[0];
+  const edgeRef = parameterRefs[1];
+  if (radiusRef === undefined || edgeRef === undefined) return null;
+  const radiusMm = magnitudeIn(
+    parameterValueOf(document, radiusRef.id),
+    "length",
+    "mm",
+  );
+  const edgeRaw = magnitudeIn(
+    parameterValueOf(document, edgeRef.id),
+    "dimensionless",
+    "1",
+  );
+  if (
+    radiusMm === null ||
+    !(radiusMm > 0) ||
+    edgeRaw === null ||
+    !Number.isInteger(edgeRaw) ||
+    edgeRaw < 0
+  ) {
+    return null;
+  }
+  return { radiusMm, edgeOrdinal: edgeRaw };
 }
 
 /**
@@ -190,8 +235,8 @@ export function topologyCutInputOf(
     }
     return { sizeMm, selection: { kind: "references", references } };
   }
-  // The chain workbench's single-ordinal fillet — the only ordinal layout
-  // anything authors.
+  // The chain workbench's legacy single-ordinal fillet — the only ordinal
+  // layout anything authored.
   if (kind !== "fillet") return null;
   const chainInput = chainFilletInputOf(document, feature);
   if (chainInput === null) return null;
