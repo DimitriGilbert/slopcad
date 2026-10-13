@@ -448,7 +448,7 @@
           "value": {
             "dimension": "length",
             "unit": "mm",
-            "value": 3
+            "value": 2
           },
           "expression": null,
           "metadata": {}
@@ -551,7 +551,7 @@
           "value": {
             "dimension": "length",
             "unit": "mm",
-            "value": 40.6
+            "value": 39.6
           },
           "expression": {
             "kind": "binary",
@@ -583,7 +583,8 @@
     "bodies": [
       {
         "id": "body_plate",
-        "name": "plate"
+        "name": "plate",
+        "visible": false
       },
       {
         "id": "body_cup-shell",
@@ -648,9 +649,7 @@
             "id": "param_translate_z"
           }
         ],
-        "outputs": [
-          "body_plate"
-        ]
+        "outputs": ["body_plate"]
       },
       {
         "id": "feat_rotate_plate",
@@ -669,9 +668,7 @@
             "id": "param_rotate_z"
           }
         ],
-        "outputs": [
-          "body_plate"
-        ]
+        "outputs": ["body_plate"]
       },
       {
         "id": "feat_cup-revolve",
@@ -690,9 +687,7 @@
             "id": "param_cup-revolve-axis"
           }
         ],
-        "outputs": [
-          "body_cup-shell"
-        ]
+        "outputs": ["body_cup-shell"]
       },
       {
         "id": "feat_handle-0",
@@ -711,9 +706,7 @@
             "id": "param_handle-0-axis"
           }
         ],
-        "outputs": [
-          "body_handle-0"
-        ]
+        "outputs": ["body_handle-0"]
       },
       {
         "id": "feat_handle-1",
@@ -732,9 +725,7 @@
             "id": "param_handle-1-axis"
           }
         ],
-        "outputs": [
-          "body_handle-1"
-        ]
+        "outputs": ["body_handle-1"]
       },
       {
         "id": "feat_handle-2",
@@ -753,9 +744,7 @@
             "id": "param_handle-2-axis"
           }
         ],
-        "outputs": [
-          "body_handle-2"
-        ]
+        "outputs": ["body_handle-2"]
       },
       {
         "id": "feat_handle-3",
@@ -774,9 +763,7 @@
             "id": "param_handle-3-axis"
           }
         ],
-        "outputs": [
-          "body_handle-3"
-        ]
+        "outputs": ["body_handle-3"]
       },
       {
         "id": "feat_handle-4",
@@ -795,9 +782,7 @@
             "id": "param_handle-4-axis"
           }
         ],
-        "outputs": [
-          "body_handle-4"
-        ]
+        "outputs": ["body_handle-4"]
       },
       {
         "id": "feat_handle-5",
@@ -816,9 +801,7 @@
             "id": "param_handle-5-axis"
           }
         ],
-        "outputs": [
-          "body_handle-5"
-        ]
+        "outputs": ["body_handle-5"]
       },
       {
         "id": "feat_cavity",
@@ -837,9 +820,7 @@
             "id": "param_cup-revolve-axis"
           }
         ],
-        "outputs": [
-          "body_cavity"
-        ]
+        "outputs": ["body_cavity"]
       },
       {
         "id": "feat_cup-union",
@@ -874,9 +855,7 @@
             "id": "feat_handle-5"
           }
         ],
-        "outputs": [
-          "body_cup-union"
-        ]
+        "outputs": ["body_cup-union"]
       },
       {
         "id": "feat_cup",
@@ -891,9 +870,7 @@
             "id": "feat_cavity"
           }
         ],
-        "outputs": [
-          "body_cup"
-        ]
+        "outputs": ["body_cup"]
       }
     ],
     "sketches": [
@@ -1040,7 +1017,6 @@
               },
               "id": "skcon_d14",
               "kind": "distanceX",
-              "parameterId": "param_bandZ1",
               "second": {
                 "entity": "skent_l2",
                 "point": "end"
@@ -1048,7 +1024,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 22
+                "value": 26
               }
             },
             {
@@ -1058,7 +1034,6 @@
               },
               "id": "skcon_d15",
               "kind": "distanceX",
-              "parameterId": "param_bandZ2",
               "second": {
                 "entity": "skent_l3",
                 "point": "end"
@@ -1066,7 +1041,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 38
+                "value": 34
               }
             },
             {
@@ -1166,7 +1141,6 @@
               },
               "id": "skcon_d23",
               "kind": "distanceY",
-              "parameterId": "param_rBoss",
               "second": {
                 "entity": "skent_l2",
                 "point": "end"
@@ -1174,7 +1148,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 40.6
+                "value": 35.2
               }
             },
             {
@@ -1184,7 +1158,6 @@
               },
               "id": "skcon_d24",
               "kind": "distanceY",
-              "parameterId": "param_rBoss",
               "second": {
                 "entity": "skent_l3",
                 "point": "end"
@@ -1192,7 +1165,7 @@
               "value": {
                 "dimension": "length",
                 "unit": "mm",
-                "value": 40.6
+                "value": 36.8
               }
             },
             {
@@ -1432,12 +1405,12 @@
           "formatVersion": 2,
           "workplane": {
             "normal": {
-              "x": 0.7071067811865476,
+              "x": 0.6427876096865394,
               "y": 0,
-              "z": 0.7071067811865476
+              "z": 0.766044443118978
             },
             "origin": {
-              "x": 45.17,
+              "x": 42.5,
               "y": 0,
               "z": 30
             },
@@ -1525,18 +1498,18 @@
           "formatVersion": 2,
           "workplane": {
             "normal": {
-              "x": 0.3535533905932738,
-              "y": 0.6123724357067981,
-              "z": 0.7071067811865476
+              "x": 0.32139380484326974,
+              "y": 0.5566703992264194,
+              "z": 0.766044443118978
             },
             "origin": {
-              "x": 22.585,
-              "y": 39.118367489646005,
+              "x": 21.250000000000004,
+              "y": 36.80607966083864,
               "z": 30
             },
             "xAxis": {
-              "x": -0.8660254038,
-              "y": 0.5,
+              "x": -0.8660254037844386,
+              "y": 0.5000000000000001,
               "z": 0
             }
           }
@@ -1618,18 +1591,18 @@
           "formatVersion": 2,
           "workplane": {
             "normal": {
-              "x": -0.3535533905932738,
-              "y": 0.6123724357067981,
-              "z": 0.7071067811865476
+              "x": -0.3213938048432695,
+              "y": 0.5566703992264195,
+              "z": 0.766044443118978
             },
             "origin": {
-              "x": -22.585,
-              "y": 39.118367489646005,
+              "x": -21.24999999999999,
+              "y": 36.80607966083865,
               "z": 30
             },
             "xAxis": {
-              "x": -0.8660254038,
-              "y": -0.5,
+              "x": -0.8660254037844387,
+              "y": -0.4999999999999998,
               "z": 0
             }
           }
@@ -1711,17 +1684,17 @@
           "formatVersion": 2,
           "workplane": {
             "normal": {
-              "x": -0.7071067811865476,
-              "y": 0,
-              "z": 0.7071067811865476
+              "x": -0.6427876096865394,
+              "y": 7.871877887341985e-17,
+              "z": 0.766044443118978
             },
             "origin": {
-              "x": -45.17,
-              "y": 0,
+              "x": -42.5,
+              "y": 5.204748896376251e-15,
               "z": 30
             },
             "xAxis": {
-              "x": 0,
+              "x": -1.2246467991473532e-16,
               "y": -1,
               "z": 0
             }
@@ -1804,18 +1777,18 @@
           "formatVersion": 2,
           "workplane": {
             "normal": {
-              "x": -0.3535533905932738,
-              "y": -0.6123724357067981,
-              "z": 0.7071067811865476
+              "x": -0.32139380484326996,
+              "y": -0.5566703992264193,
+              "z": 0.766044443118978
             },
             "origin": {
-              "x": -22.585,
-              "y": -39.118367489646005,
+              "x": -21.250000000000018,
+              "y": -36.806079660838634,
               "z": 30
             },
             "xAxis": {
-              "x": 0.8660254038,
-              "y": -0.5,
+              "x": 0.8660254037844384,
+              "y": -0.5000000000000004,
               "z": 0
             }
           }
@@ -1897,18 +1870,18 @@
           "formatVersion": 2,
           "workplane": {
             "normal": {
-              "x": 0.3535533905932738,
-              "y": -0.6123724357067981,
-              "z": 0.7071067811865476
+              "x": 0.32139380484326974,
+              "y": -0.5566703992264194,
+              "z": 0.766044443118978
             },
             "origin": {
-              "x": 22.585,
-              "y": -39.118367489646005,
+              "x": 21.250000000000004,
+              "y": -36.80607966083864,
               "z": 30
             },
             "xAxis": {
-              "x": 0.8660254038,
-              "y": 0.5,
+              "x": 0.8660254037844386,
+              "y": 0.5000000000000001,
               "z": 0
             }
           }
@@ -2187,16 +2160,8 @@
       {
         "id": "sec_mid_height",
         "name": "mid-height",
-        "origin": [
-          15,
-          10,
-          5
-        ],
-        "normal": [
-          0,
-          0,
-          1
-        ],
+        "origin": [15, 10, 5],
+        "normal": [0, 0, 1],
         "keepSide": 1,
         "enabled": false
       }
@@ -2344,9 +2309,7 @@
               "id": "param_translate_z"
             }
           ],
-          "outputs": [
-            "body_plate"
-          ]
+          "outputs": ["body_plate"]
         },
         {
           "id": "feat_rotate_plate",
@@ -2365,25 +2328,15 @@
               "id": "param_rotate_z"
             }
           ],
-          "outputs": [
-            "body_plate"
-          ]
+          "outputs": ["body_plate"]
         }
       ],
       "sections": [
         {
           "id": "sec_mid_height",
           "name": "mid-height",
-          "origin": [
-            15,
-            10,
-            5
-          ],
-          "normal": [
-            0,
-            0,
-            1
-          ],
+          "origin": [15, 10, 5],
+          "normal": [0, 0, 1],
           "keepSide": 1,
           "enabled": false
         }
@@ -2755,7 +2708,7 @@
             "value": {
               "dimension": "length",
               "unit": "mm",
-              "value": 3
+              "value": 2
             }
           },
           {
@@ -2936,7 +2889,6 @@
                   },
                   "id": "skcon_d14",
                   "kind": "distanceX",
-                  "parameterId": "param_bandZ1",
                   "second": {
                     "entity": "skent_l2",
                     "point": "end"
@@ -2944,7 +2896,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 22
+                    "value": 26
                   }
                 },
                 {
@@ -2954,7 +2906,6 @@
                   },
                   "id": "skcon_d15",
                   "kind": "distanceX",
-                  "parameterId": "param_bandZ2",
                   "second": {
                     "entity": "skent_l3",
                     "point": "end"
@@ -2962,7 +2913,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 38
+                    "value": 34
                   }
                 },
                 {
@@ -3062,7 +3013,6 @@
                   },
                   "id": "skcon_d23",
                   "kind": "distanceY",
-                  "parameterId": "param_rBoss",
                   "second": {
                     "entity": "skent_l2",
                     "point": "end"
@@ -3070,7 +3020,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 40.6
+                    "value": 35.2
                   }
                 },
                 {
@@ -3080,7 +3030,6 @@
                   },
                   "id": "skcon_d24",
                   "kind": "distanceY",
-                  "parameterId": "param_rBoss",
                   "second": {
                     "entity": "skent_l3",
                     "point": "end"
@@ -3088,7 +3037,7 @@
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
-                    "value": 40.6
+                    "value": 36.8
                   }
                 },
                 {
@@ -3330,12 +3279,12 @@
               "formatVersion": 2,
               "workplane": {
                 "normal": {
-                  "x": 0.7071067811865476,
+                  "x": 0.6427876096865394,
                   "y": 0,
-                  "z": 0.7071067811865476
+                  "z": 0.766044443118978
                 },
                 "origin": {
-                  "x": 45.17,
+                  "x": 42.5,
                   "y": 0,
                   "z": 30
                 },
@@ -3425,18 +3374,18 @@
               "formatVersion": 2,
               "workplane": {
                 "normal": {
-                  "x": 0.3535533905932738,
-                  "y": 0.6123724357067981,
-                  "z": 0.7071067811865476
+                  "x": 0.32139380484326974,
+                  "y": 0.5566703992264194,
+                  "z": 0.766044443118978
                 },
                 "origin": {
-                  "x": 22.585,
-                  "y": 39.118367489646005,
+                  "x": 21.250000000000004,
+                  "y": 36.80607966083864,
                   "z": 30
                 },
                 "xAxis": {
-                  "x": -0.8660254038,
-                  "y": 0.5,
+                  "x": -0.8660254037844386,
+                  "y": 0.5000000000000001,
                   "z": 0
                 }
               }
@@ -3520,18 +3469,18 @@
               "formatVersion": 2,
               "workplane": {
                 "normal": {
-                  "x": -0.3535533905932738,
-                  "y": 0.6123724357067981,
-                  "z": 0.7071067811865476
+                  "x": -0.3213938048432695,
+                  "y": 0.5566703992264195,
+                  "z": 0.766044443118978
                 },
                 "origin": {
-                  "x": -22.585,
-                  "y": 39.118367489646005,
+                  "x": -21.24999999999999,
+                  "y": 36.80607966083865,
                   "z": 30
                 },
                 "xAxis": {
-                  "x": -0.8660254038,
-                  "y": -0.5,
+                  "x": -0.8660254037844387,
+                  "y": -0.4999999999999998,
                   "z": 0
                 }
               }
@@ -3615,17 +3564,17 @@
               "formatVersion": 2,
               "workplane": {
                 "normal": {
-                  "x": -0.7071067811865476,
-                  "y": 0,
-                  "z": 0.7071067811865476
+                  "x": -0.6427876096865394,
+                  "y": 7.871877887341985e-17,
+                  "z": 0.766044443118978
                 },
                 "origin": {
-                  "x": -45.17,
-                  "y": 0,
+                  "x": -42.5,
+                  "y": 5.204748896376251e-15,
                   "z": 30
                 },
                 "xAxis": {
-                  "x": 0,
+                  "x": -1.2246467991473532e-16,
                   "y": -1,
                   "z": 0
                 }
@@ -3710,18 +3659,18 @@
               "formatVersion": 2,
               "workplane": {
                 "normal": {
-                  "x": -0.3535533905932738,
-                  "y": -0.6123724357067981,
-                  "z": 0.7071067811865476
+                  "x": -0.32139380484326996,
+                  "y": -0.5566703992264193,
+                  "z": 0.766044443118978
                 },
                 "origin": {
-                  "x": -22.585,
-                  "y": -39.118367489646005,
+                  "x": -21.250000000000018,
+                  "y": -36.806079660838634,
                   "z": 30
                 },
                 "xAxis": {
-                  "x": 0.8660254038,
-                  "y": -0.5,
+                  "x": 0.8660254037844384,
+                  "y": -0.5000000000000004,
                   "z": 0
                 }
               }
@@ -3805,18 +3754,18 @@
               "formatVersion": 2,
               "workplane": {
                 "normal": {
-                  "x": 0.3535533905932738,
-                  "y": -0.6123724357067981,
-                  "z": 0.7071067811865476
+                  "x": 0.32139380484326974,
+                  "y": -0.5566703992264194,
+                  "z": 0.766044443118978
                 },
                 "origin": {
-                  "x": 22.585,
-                  "y": -39.118367489646005,
+                  "x": 21.250000000000004,
+                  "y": -36.80607966083864,
                   "z": 30
                 },
                 "xAxis": {
-                  "x": 0.8660254038,
-                  "y": 0.5,
+                  "x": 0.8660254037844386,
+                  "y": 0.5000000000000001,
                   "z": 0
                 }
               }
@@ -3889,9 +3838,7 @@
                 "id": "param_cup-revolve-axis"
               }
             ],
-            "outputs": [
-              "body_cup-shell"
-            ]
+            "outputs": ["body_cup-shell"]
           },
           {
             "formatVersion": 1,
@@ -3912,9 +3859,7 @@
                 "id": "param_handle-0-axis"
               }
             ],
-            "outputs": [
-              "body_handle-0"
-            ]
+            "outputs": ["body_handle-0"]
           },
           {
             "formatVersion": 1,
@@ -3935,9 +3880,7 @@
                 "id": "param_handle-1-axis"
               }
             ],
-            "outputs": [
-              "body_handle-1"
-            ]
+            "outputs": ["body_handle-1"]
           },
           {
             "formatVersion": 1,
@@ -3958,9 +3901,7 @@
                 "id": "param_handle-2-axis"
               }
             ],
-            "outputs": [
-              "body_handle-2"
-            ]
+            "outputs": ["body_handle-2"]
           },
           {
             "formatVersion": 1,
@@ -3981,9 +3922,7 @@
                 "id": "param_handle-3-axis"
               }
             ],
-            "outputs": [
-              "body_handle-3"
-            ]
+            "outputs": ["body_handle-3"]
           },
           {
             "formatVersion": 1,
@@ -4004,9 +3943,7 @@
                 "id": "param_handle-4-axis"
               }
             ],
-            "outputs": [
-              "body_handle-4"
-            ]
+            "outputs": ["body_handle-4"]
           },
           {
             "formatVersion": 1,
@@ -4027,9 +3964,7 @@
                 "id": "param_handle-5-axis"
               }
             ],
-            "outputs": [
-              "body_handle-5"
-            ]
+            "outputs": ["body_handle-5"]
           },
           {
             "formatVersion": 1,
@@ -4502,9 +4437,7 @@
                 "id": "param_cup-revolve-axis"
               }
             ],
-            "outputs": [
-              "body_cavity"
-            ]
+            "outputs": ["body_cavity"]
           },
           {
             "formatVersion": 1,
@@ -4541,9 +4474,7 @@
                 "id": "feat_handle-5"
               }
             ],
-            "outputs": [
-              "body_cup-union"
-            ]
+            "outputs": ["body_cup-union"]
           },
           {
             "formatVersion": 1,
@@ -4560,44 +4491,18 @@
                 "id": "feat_cavity"
               }
             ],
-            "outputs": [
-              "body_cup"
-            ]
-          }
-        ]
-      },
-      {
-        "formatVersion": 1,
-        "commands": [
+            "outputs": ["body_cup"]
+          },
           {
             "formatVersion": 1,
-            "type": "parameter.set",
-            "id": "param_height",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 70
-            }
-          }
-        ]
-      },
-      {
-        "formatVersion": 1,
-        "commands": [
-          {
-            "formatVersion": 1,
-            "type": "parameter.set",
-            "id": "param_height",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 50
-            }
+            "type": "body.update",
+            "id": "body_plate",
+            "visible": false
           }
         ]
       }
     ],
-    "cursor": 3
+    "cursor": 1
   },
   "regeneration": {
     "formatVersion": 1,

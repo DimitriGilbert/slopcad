@@ -85,6 +85,7 @@ const TOOL_NAMES = [
   "cad_redo",
   "cad_apply_commands",
   "cad_measure",
+  "cad_skill",
 ] as const;
 
 /** The mutable live state one test surface reads through accessors. */
@@ -99,7 +100,7 @@ function freshStore(): CadStore {
   return createCadStore({ session: createCadWorkbenchDemoSession() });
 }
 
-/** Binds the eight tools over one store + mutable surface state. */
+/** Binds the nine tools over one store + mutable surface state. */
 function bindTools(store: CadStore, state: TestSurfaceState): () => void {
   return bindWebMcpTools(
     createWorkbenchWebMcpTools({
@@ -574,6 +575,28 @@ describe("cad_apply_commands", () => {
   });
 });
 
+describe("cad_skill", () => {
+  it("serves the authoring guide as a markdown document", async () => {
+    const store = freshStore();
+    const unbind = bindTools(store, surfaceState([]));
+    const run = await runTool("cad_skill", {});
+    expect(run.ok).toBe(true);
+    if (!run.ok) return;
+    const payload = run.payload as {
+      format: string;
+      skill: string;
+    };
+    expect(payload.format).toBe("markdown");
+    // The doc teaches the write path, the strict-parse contract, the
+    // silent skcon_ failure, and points at the reference batch.
+    expect(payload.skill).toContain("cad_apply_commands");
+    expect(payload.skill).toContain("skcon_");
+    expect(payload.skill).toContain("formatVersion");
+    expect(payload.skill).toContain("parametric-cup.commands.json");
+    unbind();
+  });
+});
+
 describe("cad_measure", () => {
   it("refuses before the scene has settled", async () => {
     const store = freshStore();
@@ -656,7 +679,7 @@ describe("the workbench mount (real engine)", () => {
     return <div data-testid="webmcp-engine-harness" />;
   }
 
-  it("registers all eight tools for the mount and unregisters on unmount", () => {
+  it("registers all nine tools for the mount and unregisters on unmount", () => {
     const { unmount } = render(
       <WorkbenchStoreProvider>
         <EngineHarness />

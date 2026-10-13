@@ -223,9 +223,7 @@
             "id": "param_cup-body-axis"
           }
         ],
-        "outputs": [
-          "body_cup-body"
-        ]
+        "outputs": ["body_cup-body"]
       },
       {
         "id": "feat_handle-1",
@@ -244,9 +242,7 @@
             "id": "param_handle-1-axis"
           }
         ],
-        "outputs": [
-          "body_handle-1"
-        ]
+        "outputs": ["body_handle-1"]
       },
       {
         "id": "feat_handle-2",
@@ -265,9 +261,7 @@
             "id": "param_handle-2-axis"
           }
         ],
-        "outputs": [
-          "body_handle-2"
-        ]
+        "outputs": ["body_handle-2"]
       },
       {
         "id": "feat_handle-3",
@@ -286,9 +280,7 @@
             "id": "param_handle-3-axis"
           }
         ],
-        "outputs": [
-          "body_handle-3"
-        ]
+        "outputs": ["body_handle-3"]
       },
       {
         "id": "feat_handle-4",
@@ -307,9 +299,7 @@
             "id": "param_handle-4-axis"
           }
         ],
-        "outputs": [
-          "body_handle-4"
-        ]
+        "outputs": ["body_handle-4"]
       },
       {
         "id": "feat_handle-5",
@@ -328,9 +318,7 @@
             "id": "param_handle-5-axis"
           }
         ],
-        "outputs": [
-          "body_handle-5"
-        ]
+        "outputs": ["body_handle-5"]
       },
       {
         "id": "feat_handle-6",
@@ -349,9 +337,7 @@
             "id": "param_handle-6-axis"
           }
         ],
-        "outputs": [
-          "body_handle-6"
-        ]
+        "outputs": ["body_handle-6"]
       },
       {
         "id": "feat_cup",
@@ -386,9 +372,7 @@
             "id": "feat_handle-6"
           }
         ],
-        "outputs": [
-          "body_cup"
-        ]
+        "outputs": ["body_cup"]
       }
     ],
     "sketches": [
@@ -1088,9 +1072,7 @@
                 "id": "param_cup-body-axis"
               }
             ],
-            "outputs": [
-              "body_cup-body"
-            ]
+            "outputs": ["body_cup-body"]
           },
           {
             "formatVersion": 1,
@@ -1139,9 +1121,7 @@
                 "id": "param_handle-1-axis"
               }
             ],
-            "outputs": [
-              "body_handle-1"
-            ]
+            "outputs": ["body_handle-1"]
           },
           {
             "formatVersion": 1,
@@ -1190,9 +1170,7 @@
                 "id": "param_handle-2-axis"
               }
             ],
-            "outputs": [
-              "body_handle-2"
-            ]
+            "outputs": ["body_handle-2"]
           },
           {
             "formatVersion": 1,
@@ -1241,9 +1219,7 @@
                 "id": "param_handle-3-axis"
               }
             ],
-            "outputs": [
-              "body_handle-3"
-            ]
+            "outputs": ["body_handle-3"]
           },
           {
             "formatVersion": 1,
@@ -1292,9 +1268,7 @@
                 "id": "param_handle-4-axis"
               }
             ],
-            "outputs": [
-              "body_handle-4"
-            ]
+            "outputs": ["body_handle-4"]
           },
           {
             "formatVersion": 1,
@@ -1343,9 +1317,7 @@
                 "id": "param_handle-5-axis"
               }
             ],
-            "outputs": [
-              "body_handle-5"
-            ]
+            "outputs": ["body_handle-5"]
           },
           {
             "formatVersion": 1,
@@ -1394,9 +1366,7 @@
                 "id": "param_handle-6-axis"
               }
             ],
-            "outputs": [
-              "body_handle-6"
-            ]
+            "outputs": ["body_handle-6"]
           },
           {
             "formatVersion": 1,
@@ -1433,9 +1403,7 @@
                 "id": "feat_handle-6"
               }
             ],
-            "outputs": [
-              "body_cup"
-            ]
+            "outputs": ["body_cup"]
           }
         ]
       }
