@@ -165,6 +165,12 @@ function coupledFacesOf(
   };
   const solid: Partial<Record<SimDomainFace, ThermalSurfaceCondition>> = {};
   for (const condition of request.compiled.conditions) {
+    if (condition.face === undefined) {
+      return refuse(
+        `A "${condition.kind}" condition addresses no domain face — the structural point set (Phase 69) is not the coupled march's vocabulary.`,
+        condition,
+      );
+    }
     if (condition.face === "zMin" || condition.face === "zMax") {
       return refuse(
         `A condition on the "${condition.face}" face is outside the coupled march's 2D statement — the slab consumes the four lateral faces, its front and back are the per-metre depth's adiabatic planes.`,
@@ -354,7 +360,7 @@ async function runChtEngine(
   const compiled = request.compiled;
   if (!CHT_SUPPORTED_KINDS.includes(compiled.kind)) {
     return refuse(
-      `The coupled thermal engine does not solve the "${compiled.kind}" scenario kind (it solves thermal's coupled stance; structural is Phase 69's carve).`,
+      `The coupled thermal engine does not solve the "${compiled.kind}" scenario kind (it solves thermal's coupled stance; structural is served by the structural engine through the routed default engine).`,
       compiled.kind,
     );
   }

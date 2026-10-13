@@ -226,53 +226,65 @@ describe("the 0D constant-volume reactor", () => {
     ).toBe(false);
   });
 
-  it("converges the wall-heat integral at the stove adapter's march resolution", () => {
-    // The ladder fixture behind the 68c stove adapter's resolution
-    // claim (sim-engine.ts): the reactor runs the demo fire's own
-    // wall-loss shape (CH4, φ 1, a 1400 K lit charge at 1 bar over
-    // 30 s, h = 30 W/(m²·K) over the bar fixture's ~0.06 m²/m wetted
-    // interface at the authored 293.15 K wall) on a step ladder. The
-    // MEASURED band: every rung from 1000 steps upward lands within
-    // 0.02% of the 4000-step integral, and the 4000-step default sits
-    // within half a hundred-thousandth of the 8000/16000 refinements —
-    // the number the adapter's comment states, pinned here instead of
-    // asserted from nowhere.
-    const wallHeatAt = (steps: number): number =>
-      must(
-        runConstantVolumeReactor({
-          combustionMode: "premixed",
-          fuel: "CH4",
-          equivalenceRatio: 1,
-          initialTK: 1400,
-          pressureBar: 1,
-          durationS: 30,
-          steps,
-          wall: {
-            temperatureK: 293.15,
-            areaM2: 0.06,
-            heatTransferCoefficientWPerM2K: 30,
-          },
-        }),
-        `ladder rung ${String(steps)}`,
-      ).audit.wallHeatRemovedJ;
-    const ladder = [1000, 2000, 4000, 8000, 16000].map(wallHeatAt);
-    const reference = ladder[2] ?? 0;
-    // The scale anchor: the demo fire's own integral class, J.
-    for (const value of ladder) {
-      expect(value).toBeGreaterThan(1.65e5);
-      expect(value).toBeLessThan(1.75e5);
-      expect(Math.abs(value - reference) / reference).toBeLessThan(2e-4);
-    }
-    // The ladder climbs monotonically onto its plateau at this scale.
-    for (let index = 1; index < ladder.length; index += 1) {
-      expect(ladder[index]).toBeGreaterThanOrEqual(ladder[index - 1] ?? 0);
-    }
-    // The convergence claim itself: the 4000-step default is within
-    // 0.005% of both refinements (measured 0.0036% and 0.0045%).
-    for (const value of [ladder[3], ladder[4]]) {
-      expect(Math.abs((value ?? 0) - reference) / reference).toBeLessThan(5e-5);
-    }
-  });
+  // MEASURED timeout, the 68b suite's discipline: the ladder runs
+  // ≈ 8 s serial but 38–42 s under the full-gate turbo fan-out
+  // (`pnpm run verify`'s parallel package tests contending for cores —
+  // contention, not the algorithm), past the 20 s default. 120 s (the
+  // docs-examples Phase 69 precedent) carries ~3x over the worst
+  // measured loaded run, not a guess.
+  it(
+    "converges the wall-heat integral at the stove adapter's march resolution",
+    { timeout: 120_000 },
+    () => {
+      // The ladder fixture behind the 68c stove adapter's resolution
+      // claim (sim-engine.ts): the reactor runs the demo fire's own
+      // wall-loss shape (CH4, φ 1, a 1400 K lit charge at 1 bar over
+      // 30 s, h = 30 W/(m²·K) over the bar fixture's ~0.06 m²/m wetted
+      // interface at the authored 293.15 K wall) on a step ladder. The
+      // MEASURED band: every rung from 1000 steps upward lands within
+      // 0.02% of the 4000-step integral, and the 4000-step default sits
+      // within half a hundred-thousandth of the 8000/16000 refinements —
+      // the number the adapter's comment states, pinned here instead of
+      // asserted from nowhere.
+      const wallHeatAt = (steps: number): number =>
+        must(
+          runConstantVolumeReactor({
+            combustionMode: "premixed",
+            fuel: "CH4",
+            equivalenceRatio: 1,
+            initialTK: 1400,
+            pressureBar: 1,
+            durationS: 30,
+            steps,
+            wall: {
+              temperatureK: 293.15,
+              areaM2: 0.06,
+              heatTransferCoefficientWPerM2K: 30,
+            },
+          }),
+          `ladder rung ${String(steps)}`,
+        ).audit.wallHeatRemovedJ;
+      const ladder = [1000, 2000, 4000, 8000, 16000].map(wallHeatAt);
+      const reference = ladder[2] ?? 0;
+      // The scale anchor: the demo fire's own integral class, J.
+      for (const value of ladder) {
+        expect(value).toBeGreaterThan(1.65e5);
+        expect(value).toBeLessThan(1.75e5);
+        expect(Math.abs(value - reference) / reference).toBeLessThan(2e-4);
+      }
+      // The ladder climbs monotonically onto its plateau at this scale.
+      for (let index = 1; index < ladder.length; index += 1) {
+        expect(ladder[index]).toBeGreaterThanOrEqual(ladder[index - 1] ?? 0);
+      }
+      // The convergence claim itself: the 4000-step default is within
+      // 0.005% of both refinements (measured 0.0036% and 0.0045%).
+      for (const value of [ladder[3], ladder[4]]) {
+        expect(Math.abs((value ?? 0) - reference) / reference).toBeLessThan(
+          5e-5,
+        );
+      }
+    },
+  );
 
   it("is bitwise deterministic on repeat runs (law S2)", () => {
     const input = {

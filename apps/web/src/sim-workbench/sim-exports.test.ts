@@ -15,6 +15,7 @@ import {
   exportSimResultCombustionCsvs,
   exportSimResultForceHistoryCsv,
   exportSimResultJointHistoryCsv,
+  exportSimResultSummaryCsv,
   exportSimResultVtiSeries,
 } from "./sim-exports";
 
@@ -188,5 +189,26 @@ describe("exportSimResultCombustionCsvs", () => {
     expect(fire.text.split("\n")[0]).toBe("time (s),fire:progress (1)");
     // A result whose series carry neither family exports nothing.
     expect(exportSimResultCombustionCsvs(storedResult())).toEqual([]);
+  });
+});
+
+describe("exportSimResultSummaryCsv", () => {
+  it("emits the one-row-per-quantity summary table, deterministically", () => {
+    const first = exportSimResultSummaryCsv(storedResult());
+    const second = exportSimResultSummaryCsv(storedResult());
+    expect(second).toBe(first);
+    // One `name,value,unit` row per projected quantity — the statics
+    // run's machine-readable table (its histories are empty).
+    expect(first).toBe(
+      ["name,value,unit", "mean-drag-force,0.5,N", ""].join("\n"),
+    );
+    // A summary with no quantities exports nothing through THIS door —
+    // never a fabricated table.
+    expect(
+      exportSimResultSummaryCsv({
+        ...storedResult(),
+        summary: { ...storedResult().summary, quantities: [] },
+      }),
+    ).toBeNull();
   });
 });

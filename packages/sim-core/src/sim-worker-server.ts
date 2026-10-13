@@ -230,6 +230,9 @@ export function createSimWorkerServer(
             ...(request.input.mechanism === undefined
               ? {}
               : { mechanism: request.input.mechanism }),
+            ...(request.input.structuralChain === undefined
+              ? {}
+              : { structuralChain: request.input.structuralChain }),
           });
           return compiled.ok
             ? { status: "compiled", compiled: compiled.value }

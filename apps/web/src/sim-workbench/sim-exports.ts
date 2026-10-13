@@ -181,6 +181,23 @@ export function exportSimResultCombustionCsvs(
   return files;
 }
 
+/**
+ * Exports one run's SUMMARY SCALARS as a deterministic CSV file (Phase
+ * 69, law S7): one `name,value,unit` row per projected quantity — the
+ * machine-readable table a statics run's own value lives in (its
+ * histories are empty; max deflection and the factor of safety ARE the
+ * run). Returns `null` when the summary carries no quantities (nothing
+ * to export — never a fabricated table).
+ */
+export function exportSimResultSummaryCsv(result: SimResult): string | null {
+  if (result.summary.quantities.length === 0) return null;
+  const lines = ["name,value,unit"];
+  for (const quantity of result.summary.quantities) {
+    lines.push(`${quantity.name},${String(quantity.value)},${quantity.unit}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 /** Triggers a browser download of the exported files (best-effort UI sugar). */
 export function downloadSimExportFiles(files: readonly SimExportFile[]): void {
   for (const file of files) {

@@ -20,6 +20,9 @@
     "./cadjsx/slider-crank": {
       "default": "./src/cadjsx/slider-crank.tsx"
     },
+    "./cadjsx/bracket": {
+      "default": "./src/cadjsx/bracket.tsx"
+    },
     "./*": {
       "default": [
         "./src/*.ts",
@@ -48,7 +51,8 @@
     "@slopcad/sim-combustion": "workspace:*",
     "@slopcad/sim-core": "workspace:*",
     "@slopcad/sim-flow": "workspace:*",
-    "@slopcad/sim-thermal": "workspace:*"
+    "@slopcad/sim-thermal": "workspace:*",
+    "@slopcad/sim-structural": "workspace:*"
   },
   "peerDependencies": {
     "react": "catalog:"

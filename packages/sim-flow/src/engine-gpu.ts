@@ -160,7 +160,7 @@ export async function runWgslLbmEngine(
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioKindUnsupported,
-        `The WGSL flow provider does not solve the "${compiled.kind}" scenario kind (it solves flow only; thermal is served by the real conduction/CHT engines on the CPU path through the routed default engine, and structural is Phase 69's carve).`,
+        `The WGSL flow provider does not solve the "${compiled.kind}" scenario kind (it solves flow only; thermal is served by the real conduction/CHT engines on the CPU path and structural by the structural engine through the routed default engine).`,
         compiled.kind,
       ),
     );

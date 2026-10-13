@@ -4048,6 +4048,230 @@ test("s24i the sim workbench runs the combustion demos — the Otto engine's cha
   });
 });
 
+test("s24j the sim workbench holds the load — the bracket through the structural engine (Phase 69)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24j workbench-sim structural bracket", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // Switch the demo model to the bracket — the L-bracket's two
+    // bodies (base plate + upright wall) become the rendered scene the
+    // structural form's material assignments address.
+    await page.locator("#sim-demo-model-bracket").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "bracket",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+
+    // AUTHOR: the structural form's defaults ARE the demo — steel, the
+    // bolted zMin base face, the −y tip load at the wall's top, dry —
+    // one submit saves the kind-locked stance into the document's
+    // simulations section (law S1).
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the structural engine in the sim worker — the FULL-3D
+    // voxelization, the Jacobi-CG solve, and both preview rounds
+    // applied through the ledger (measured ≈ 1 s on the CPU oracle),
+    // awaited on the run family and the counters, never a timeout.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    // The displacement overlay mounted from the committed round (law
+    // S6 — the engine publishes von Mises first, displacement LAST, so
+    // the live overlay deterministically names it).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "displacement",
+    );
+    const chunksAfterDry = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(chunksAfterDry).toBeGreaterThan(0);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+
+    // THE SCALAR FAMILY (machine-readable — Phase 70's objective
+    // material): the FoS arithmetic, the tip deflection, and the von
+    // Mises scale, all as attributes off the persisted summary.
+    const dryFos = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-fos"),
+    );
+    const dryDeflection = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-deflection-mm"),
+    );
+    const dryVonMises = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-vonmises-mpa"),
+    );
+    expect(dryFos).toBeGreaterThan(10);
+    expect(dryDeflection).toBeGreaterThan(0.01);
+    expect(dryVonMises).toBeGreaterThan(4);
+
+    // THE OVERLAY FIELD TOGGLE (fixture data — a radio over the
+    // completed result's own two blocks): von Mises repaints and the
+    // attribute family follows.
+    await page.locator("#sim-structural-field-von-mises").check();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-structural-field",
+      "von-mises",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await page.locator("#sim-structural-field-displacement").check();
+
+    // --- THE SELF-WEIGHT VARIANT: the body-force switch. The same
+    // bracket with gravity on deflects measurably more (the measured
+    // ×1.005 — asserted strictly greater, never a rewrite).
+    await page.getByLabel("Structural scenario name").fill("bracket-heavy");
+    await page
+      .getByRole("checkbox", {
+        name: "Self-weight (the scenario's gravity vector)",
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    // The save→run barrier: the submit is async, and Run must not race
+    // the landing selection (the attribute is the commit).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The completion gate that cannot go stale: the run COUNT moves
+    // only when this run persists (a status poll can sample the
+    // previous run's lingering "completed" before this run sets
+    // "compiling" — the scalar reads must not race that window).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+      )
+      .toBe("completed");
+    const heavyDeflection = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-deflection-mm"),
+    );
+    expect(heavyDeflection).toBeGreaterThan(dryDeflection);
+
+    // --- THE HOT BRACKET (the CHT→structural chain): the stance chains
+    // a thermal run's temperature field; the run-to-run selection rides
+    // the native select over the persisted run list (the stove runs the
+    // session persisted at s24f), and the ΔT drives thermal-expansion
+    // loading past the dry run's stress scale.
+    await page.getByLabel("Structural scenario name").fill("bracket-hot");
+    await page
+      .getByRole("checkbox", {
+        name: "Thermal chain (a thermal run's temperature field)",
+      })
+      .click();
+    const thermalSelect = page.locator("#workbench-sim-thermal-chain");
+    const thermalOptions = await thermalSelect.locator("option").all();
+    expect(thermalOptions.length).toBeGreaterThan(1);
+    const thermalValue = await thermalOptions[1]?.getAttribute("value");
+    expect(thermalValue).toBeTruthy();
+    await thermalSelect.selectOption(thermalValue as string);
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    // The save→run barrier again: the hot scenario must BE the selected
+    // record before Run fires (the first harness run raced this and
+    // re-ran the heavy twin — the exact-number tell).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "3",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The same stale-proof gate: the hot run's count increment, then
+    // the completed status, then the scalars.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 3),
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+      )
+      .toBe("completed");
+    const hotVonMises = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-vonmises-mpa"),
+    );
+    // Measured (2026-10-13): the form's sealed stove settles at ~301 K,
+    // so the chained ΔT ≈ 8 K drives the bracket to ~30 MPa ≈ 4× the
+    // dry stress — thermal-dominated, banded with margin (the s24j
+    // measurement, not the engine test's artificial uniform field).
+    expect(hotVonMises).toBeGreaterThan(2 * dryVonMises);
+    expect(hotVonMises).toBeGreaterThan(20);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // PERSIST + EXPORT: the CSV door exports the summary-scalar table
+    // (a statics run's value IS its scalars — no time axis); the run's
+    // count was already gated above.
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
 test("s25 the io fixture round-trips the plate through STL", async ({
   sessionPage: page,
 }) => {

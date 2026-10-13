@@ -92,6 +92,12 @@ export function mapFaces(
   let outletPressure: number | undefined;
   for (const condition of request.compiled.conditions) {
     const face = condition.face;
+    if (face === undefined) {
+      return refuse(
+        `A "${condition.kind}" condition addresses no domain face — the structural point set (Phase 69) is not the flow kernel's vocabulary.`,
+        condition,
+      );
+    }
     if (face === "zMin" || face === "zMax") {
       return refuse(
         `A condition on the "${face}" face is outside the 2D wind tunnel's slice — the kernel consumes the four lateral faces (xMin, xMax, yMin, yMax) of the slice plane.`,

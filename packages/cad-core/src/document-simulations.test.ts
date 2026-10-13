@@ -34,6 +34,7 @@ import {
   type SimScenarioCombustionSpec,
   type SimScenarioDynamicsSpec,
   type SimScenarioInput,
+  type SimScenarioStructuralSpec,
   type SimScenarioThermalSpec,
   encodeNativeCadDocument,
   MATERIAL_RECORD_ERROR_CODES,
@@ -226,16 +227,18 @@ describe("the simulations document section", () => {
     expect(added.scenario.conditions).toHaveLength(2);
   });
 
-  it("stores the reserved structural kind without a solver (the Phase 69 carve)", () => {
+  it("stores the structural kind with its stance (Phase 69 live)", () => {
     const added = requireOk(
       addDocumentSimulation(baseDocument(), {
         ...scenarioFields(),
         kind: "structural",
         conditions: [{ kind: "fixed-support", face: "zMax" }],
+        structural: { selfWeight: false },
       }),
       "the structural add",
     );
     expect(added.scenario.kind).toBe("structural");
+    expect(added.scenario.structural?.selfWeight).toBe(false);
   });
 
   it("carries the Phase 63c run controls additively through add, serialize, and parse", () => {
@@ -765,6 +768,117 @@ describe("the thermal material fields", () => {
   });
 });
 
+describe("the structural material fields (Phase 69, the thermal precedent)", () => {
+  it("parse additively with physical ordering enforced", () => {
+    const record: DocumentMaterialRecord = requireOk(
+      parseDocumentMaterialRecord({
+        id: "mat_steel",
+        name: "Steel S235",
+        densityGPerCm3: 7.85,
+        youngsModulusPa: 210e9,
+        poissonRatio: 0.3,
+        yieldStrengthPa: 235e6,
+        thermalExpansionPerK: 1.2e-5,
+      }),
+      "the structural material parse",
+    );
+    expect(record.youngsModulusPa).toBe(210e9);
+    expect(record.poissonRatio).toBe(0.3);
+    expect(record.yieldStrengthPa).toBe(235e6);
+    expect(record.thermalExpansionPerK).toBe(1.2e-5);
+
+    // A negative expansion coefficient is physical (shrinkage materials);
+    // only non-finite values decline.
+    const shrinker = requireOk(
+      parseDocumentMaterialRecord({
+        id: "mat_shrink",
+        name: "Shrinking polymer",
+        densityGPerCm3: 1.1,
+        youngsModulusPa: 3e9,
+        poissonRatio: 0.4,
+        thermalExpansionPerK: -5e-5,
+      }),
+      "the negative-expansion parse",
+    );
+    expect(shrinker.thermalExpansionPerK).toBe(-5e-5);
+    expect(shrinker.yieldStrengthPa).toBeUndefined();
+
+    // The thermal fields ride beside the structural ones unchanged.
+    expect(record.thermalConductivityWPerMK).toBeUndefined();
+
+    const decline = (
+      input: Record<string, unknown>,
+    ): { code: string; message: string } | undefined => {
+      const parsed = parseDocumentMaterialRecord({
+        id: "mat_bad",
+        name: "Bad alloy",
+        densityGPerCm3: 1.2,
+        ...input,
+      });
+      if (parsed.ok) return undefined;
+      return parsed.error;
+    };
+    expect(decline({ youngsModulusPa: 0 })?.code).toBe(
+      MATERIAL_RECORD_ERROR_CODES.structuralInvalid,
+    );
+    expect(decline({ youngsModulusPa: Number.NaN })?.code).toBe(
+      MATERIAL_RECORD_ERROR_CODES.structuralInvalid,
+    );
+    expect(decline({ poissonRatio: 0.5 })?.code).toBe(
+      MATERIAL_RECORD_ERROR_CODES.structuralInvalid,
+    );
+    expect(decline({ poissonRatio: -1 })?.code).toBe(
+      MATERIAL_RECORD_ERROR_CODES.structuralInvalid,
+    );
+    expect(decline({ yieldStrengthPa: -1 })?.code).toBe(
+      MATERIAL_RECORD_ERROR_CODES.structuralInvalid,
+    );
+    expect(
+      decline({ thermalExpansionPerK: Number.POSITIVE_INFINITY })?.code,
+    ).toBe(MATERIAL_RECORD_ERROR_CODES.structuralInvalid);
+    // An absent Poisson ratio alone is additive-honest: the record parses.
+    expect(
+      decline({ youngsModulusPa: 210e9, poissonRatio: undefined }),
+    ).toBeUndefined();
+  });
+
+  it("serialize and round-trip through canonical JSON byte-identically", () => {
+    const record: DocumentMaterialRecord = requireOk(
+      parseDocumentMaterialRecord({
+        id: "mat_ti",
+        name: "Titanium Ti-6Al-4V",
+        densityGPerCm3: 4.43,
+        thermalConductivityWPerMK: 6.7,
+        youngsModulusPa: 113.8e9,
+        poissonRatio: 0.342,
+        yieldStrengthPa: 880e6,
+        thermalExpansionPerK: 8.6e-6,
+      }),
+      "the structural material parse",
+    );
+    const wire = JSON.parse(JSON.stringify(record)) as Record<string, unknown>;
+    expect(JSON.stringify(wire)).toBe(JSON.stringify(record));
+    const reparsed = requireOk(
+      parseDocumentMaterialRecord(wire),
+      "the round-trip parse",
+    );
+    expect(reparsed).toEqual(record);
+    // The sparse record stays sparse through the same ride: no structural
+    // key is fabricated on the wire.
+    const sparse = requireOk(
+      parseDocumentMaterialRecord({
+        id: "mat_plain",
+        name: "Plain alloy",
+        densityGPerCm3: 1.2,
+      }),
+      "the sparse parse",
+    );
+    expect(
+      Object.keys(JSON.parse(JSON.stringify(sparse)) as object).sort(),
+    ).toEqual(["densityGPerCm3", "id", "name"]);
+  });
+});
+
 describe("the thermal solve stance (Phase 65c)", () => {
   /** The stove stance's authored fields. */
   function thermalStance(
@@ -1084,6 +1198,242 @@ describe("the combustion solve stance (Phase 68c)", () => {
     if (!offLattice.ok) {
       expect(offLattice.error.message).toContain("integer multiple");
     }
+  });
+});
+
+describe("the structural solve stance (Phase 69)", () => {
+  /** The bracket stance's authored fields. */
+  function structuralStance(
+    overrides?: Partial<SimScenarioStructuralSpec>,
+  ): SimScenarioStructuralSpec {
+    return { selfWeight: false, ...overrides };
+  }
+
+  /** A structural scenario over the base document's body. */
+  function structuralFields(stance?: SimScenarioStructuralSpec) {
+    return {
+      name: "Bracket",
+      kind: "structural" as const,
+      domain: {
+        kind: "explicit" as const,
+        min: [-60, -40, 0] as const,
+        max: [60, 40, 80] as const,
+        resolutionMm: 5,
+      },
+      conditions: [
+        { kind: "fixed-support" as const, face: "zMin" as const },
+        {
+          kind: "point-load" as const,
+          atWorldPointMm: [0, -36, 80] as const,
+          forceN: [0, -500, 0] as const,
+        },
+      ],
+      fluid: "air",
+      materials: [],
+      ...(stance === undefined ? {} : { structural: stance }),
+    };
+  }
+
+  /**
+   * The malformed-stance decline harness (the wire form, untrusted):
+   * a valid self-weight-off stance by default, so condition-only cases
+   * exercise the conditions array alone.
+   */
+  const declinedAdd = (
+    stance: unknown = { selfWeight: false },
+    conditions: readonly unknown[] = [{ kind: "fixed-support", face: "zMin" }],
+  ): ReturnType<typeof addDocumentSimulation> =>
+    addDocumentSimulation(baseDocument(), {
+      name: "Bracket",
+      kind: "structural",
+      domain: {
+        kind: "explicit",
+        min: [-60, -40, 0],
+        max: [60, 40, 80],
+        resolutionMm: 5,
+      },
+      conditions,
+      fluid: "air",
+      materials: [],
+      structural: stance,
+    } as unknown as SimScenarioInput);
+
+  it("adds a structural scenario with its stance and conditions, round-tripping canonically", () => {
+    const added = requireOk(
+      addDocumentSimulation(
+        baseDocument(),
+        structuralFields(
+          structuralStance({
+            selfWeight: true,
+            centrifugal: {
+              axisPointMm: [0, 0, 0],
+              axisDirection: [0, 0, 1],
+              rpmMode: "fan-run",
+            },
+            thermal: { referenceTemperatureK: 293.15 },
+          }),
+        ),
+      ),
+      "the structural add",
+    );
+    const scenario = added.scenario;
+    expect(scenario.structural).toBeDefined();
+    if (scenario.structural === undefined) return;
+    expect(scenario.structural.selfWeight).toBe(true);
+    expect(scenario.structural.centrifugal?.rpmMode).toBe("fan-run");
+    expect(scenario.structural.centrifugal?.fixedRpm).toBeUndefined();
+    expect(scenario.structural.thermal?.referenceTemperatureK).toBe(293.15);
+    expect(scenario.conditions).toHaveLength(2);
+    const serialized = requireOk(
+      parseCadDocument(serializeCadDocument(added.document)),
+      "the serialized round-trip",
+    );
+    const restored = serialized.simulations[0];
+    if (restored === undefined) throw new Error("the scenario did not survive");
+    expect(restored.structural).toEqual(scenario.structural);
+    expect(restored.conditions).toEqual(scenario.conditions);
+  });
+
+  it("kind-locks the stance: structural requires it, every other kind refuses it", () => {
+    const missing = addDocumentSimulation(
+      baseDocument(),
+      structuralFields(undefined),
+    );
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.error.message).toContain("structural solve stance");
+    }
+    const stray = addDocumentSimulation(baseDocument(), {
+      ...scenarioFields(),
+      structural: structuralStance(),
+    });
+    expect(stray.ok).toBe(false);
+    if (!stray.ok) {
+      expect(stray.error.message).toContain("structural kind's alone");
+    }
+  });
+
+  it("cross-checks the stance's own fields (the iff rules)", () => {
+    const noRpm = declinedAdd({
+      selfWeight: false,
+      centrifugal: {
+        axisPointMm: [0, 0, 0],
+        axisDirection: [0, 0, 1],
+        rpmMode: "fixed",
+      },
+    });
+    expect(noRpm.ok).toBe(false);
+    const bothRates = declinedAdd({
+      selfWeight: false,
+      centrifugal: {
+        axisPointMm: [0, 0, 0],
+        axisDirection: [0, 0, 1],
+        rpmMode: "fan-run",
+        fixedRpm: 3000,
+      },
+    });
+    expect(bothRates.ok).toBe(false);
+    if (!bothRates.ok) {
+      expect(bothRates.error.message).toContain("operating point");
+    }
+    const zeroAxis = declinedAdd({
+      selfWeight: false,
+      centrifugal: {
+        axisPointMm: [0, 0, 0],
+        axisDirection: [0, 0, 0],
+        rpmMode: "fixed",
+        fixedRpm: 3000,
+      },
+    });
+    expect(zeroAxis.ok).toBe(false);
+    const badMode = declinedAdd({
+      selfWeight: false,
+      centrifugal: {
+        axisPointMm: [0, 0, 0],
+        axisDirection: [0, 0, 1],
+        rpmMode: "motor" as unknown as never,
+        fixedRpm: 3000,
+      },
+    });
+    expect(badMode.ok).toBe(false);
+    const badSwitch = declinedAdd({ selfWeight: "no" });
+    expect(badSwitch.ok).toBe(false);
+    const badReference = declinedAdd({
+      selfWeight: false,
+      thermal: { referenceTemperatureK: -40 },
+    });
+    expect(badReference.ok).toBe(false);
+  });
+
+  it("stores the point-set conditions kind-locked to structural, one per face among the face set", () => {
+    // The roller and the point fix parse and round-trip.
+    const rolled = requireOk(
+      addDocumentSimulation(baseDocument(), {
+        ...structuralFields(
+          structuralStance({
+            centrifugal: {
+              axisPointMm: [0, 0, 0],
+              axisDirection: [0, 0, 1],
+              rpmMode: "fixed",
+              fixedRpm: 3000,
+            },
+          }),
+        ),
+        conditions: [
+          { kind: "axis-fix" as const, face: "yMin" as const, axis: "y" },
+          { kind: "point-fix" as const, atWorldPointMm: [10, 0, 0] as const },
+        ],
+      }),
+      "the roller add",
+    );
+    const kinds = rolled.scenario.conditions.map((condition) => condition.kind);
+    expect(kinds).toEqual(["axis-fix", "point-fix"]);
+
+    // A structural condition on another kind declines; a foreign
+    // condition on the structural kind declines.
+    const stray = addDocumentSimulation(baseDocument(), {
+      ...scenarioFields(),
+      conditions: [{ kind: "fixed-support", face: "zMin" }],
+    });
+    expect(stray.ok).toBe(false);
+    const foreign = declinedAdd(undefined, [
+      {
+        kind: "velocity-inlet",
+        face: "xMin",
+        speedMPerS: 1,
+        direction: [1, 0, 0],
+      },
+    ]);
+    expect(foreign.ok).toBe(false);
+
+    // Two face-bearing conditions on one face decline; a point pair
+    // beside a face condition does not (the point set is exempt).
+    const duplicateFace = declinedAdd(undefined, [
+      { kind: "fixed-support", face: "zMin" },
+      { kind: "pressure-load", face: "zMin", pressurePa: 1e5 },
+    ]);
+    expect(duplicateFace.ok).toBe(false);
+    if (!duplicateFace.ok) {
+      // The document add path wraps the simulation module's structured
+      // failure as simulation-invalid, keeping its message — the add
+      // boundary's own discipline, asserted by content.
+      expect(duplicateFace.error.code).toBe(
+        DOCUMENT_ERROR_CODES.simulationInvalid,
+      );
+      expect(duplicateFace.error.message).toContain(
+        "More than one boundary condition",
+      );
+    }
+    const pointPair = declinedAdd(undefined, [
+      { kind: "fixed-support", face: "zMin" },
+      {
+        kind: "point-load",
+        atWorldPointMm: [0, -36, 80],
+        forceN: [0, -500, 0],
+      },
+      { kind: "point-fix", atWorldPointMm: [0, -36, 80] },
+    ]);
+    expect(pointPair.ok).toBe(true);
   });
 });
 

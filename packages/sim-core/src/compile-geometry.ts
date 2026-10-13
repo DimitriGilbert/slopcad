@@ -109,6 +109,15 @@ export interface GeometrySimCompileInput extends SimCompileInput {
    * (deterministic, the author's ambiguity stated).
    */
   readonly bodyTessellations?: readonly SimBodyTessellation[];
+  /**
+   * Phase 69 (the structural branch's run-time inputs): a persisted 65
+   * run's temperature field (the thermal chain's ΔT source) and/or a
+   * persisted 66 fan run's found operating point (the centrifugal
+   * `fan-run` rate source). Consumed ONLY when the stance asks for each
+   * — a supplied-but-unasked chain input declines loudly, never silently
+   * drops.
+   */
+  readonly structuralChain?: SimStructuralChainInput;
 }
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
@@ -542,6 +551,9 @@ export interface CompiledSimFlow3d {
 
 /** The 3D occupancy grid's name — the compiled problem's own, fixed. */
 const OCCUPANCY_3D_NAME = "flow3d-domain";
+
+/** The structural grid's name — the compiled problem's own, fixed. */
+const STRUCTURAL_GRID_NAME = "structural-body";
 
 /** rpm → rad/s at the compile door (the motor record's own constant). */
 const RPM_TO_RAD_PER_S = (2 * Math.PI) / 60;
@@ -1025,6 +1037,581 @@ function compileThermalProducts(
       materials: solid.value.materials,
       materialIndex: solid.value.materialIndex,
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The structural compile products (Phase 69)
+// ---------------------------------------------------------------------------
+
+/**
+ * The run-to-run chain inputs a structural compile may consume (Phase 69,
+ * the `mechanism` wire's discipline — run-time data, never document
+ * records): a persisted Phase 65 run's temperature field (document space,
+ * mm + K — the CHT→structural chaining seam, sampled onto the voxelized
+ * grid at this door) and a persisted Phase 66 fan run's FOUND operating
+ * point (rpm — the centrifugal stance's `fan-run` rate source).
+ */
+export interface SimStructuralChainInput {
+  /** The ΔT source: a thermal run's temperature block, document space. */
+  readonly thermal?: {
+    readonly field: {
+      readonly originMm: readonly [number, number, number];
+      readonly spacingMm: readonly [number, number, number];
+      readonly extent: readonly [number, number, number];
+      readonly values: readonly number[];
+    };
+  };
+  /** The ω source: a fan run's found operating point, rpm (> 0). */
+  readonly fanRpm?: number;
+}
+
+/**
+ * The structural compile products a `structural` scenario carries
+ * (Phase 69): the re-validated body-force stance in SI (self-weight's
+ * switch, the centrifugal stance with its rate RESOLVED — fixed authored
+ * rpm or the referenced fan run's operating point — and the thermal
+ * chain sampled to a per-node ΔT field over the voxelized solids), plus
+ * the per-node material map over {@link CompiledSimScenario.occupancy3d}
+ * (the thermal branch's pairing discipline on the FULL-3D grid).
+ * Worker-side-only, like every compile product.
+ */
+export interface CompiledSimStructural {
+  /** Whether self-weight applies through the compiled gravity vector. */
+  readonly selfWeight: boolean;
+  /** The centrifugal stance in SI with its rate resolved; absent = no spin. */
+  readonly centrifugal?: {
+    readonly axisPointM: readonly [number, number, number];
+    readonly axisDirection: readonly [number, number, number];
+    readonly omegaRadPerS: number;
+  };
+  /** Per solid grid node ΔT, K; present iff the stance chains a thermal run. */
+  readonly thermalDeltaTK?: Float64Array;
+  readonly materials: readonly CompiledSimThermalMaterial[];
+  /** Per grid node 1-based material index over the 3D grid; 0 on void. */
+  readonly materialIndex: Uint16Array;
+}
+
+/** The structural stance's rpm-mode vocabulary, restated at this door. */
+const STRUCTURAL_RPM_MODES = ["fixed", "fan-run"] as const;
+
+type StructuralRpmMode = (typeof STRUCTURAL_RPM_MODES)[number];
+
+function isStructuralRpmMode(input: unknown): input is StructuralRpmMode {
+  return (
+    typeof input === "string" &&
+    STRUCTURAL_RPM_MODES.includes(input as StructuralRpmMode)
+  );
+}
+
+/**
+ * Re-reads the structural stance from the raw scenario record (the
+ * `parseThermalStance` precedent — the record boundary validated the same
+ * fields; this door re-validates every field it consumes, kind-locks the
+ * stance, and converts the authored millimetres to SI).
+ */
+function parseStructuralStance(
+  scenario: Record<string, unknown>,
+  kind: string,
+): SimParseResult<
+  {
+    readonly selfWeight: boolean;
+    readonly centrifugal:
+      | {
+          readonly axisPointMm: readonly [number, number, number];
+          readonly axisDirection: readonly [number, number, number];
+          readonly rpmMode: StructuralRpmMode;
+          readonly fixedRpm?: number;
+        }
+      | undefined;
+    readonly thermalReferenceK: number | undefined;
+  },
+  SimError
+> {
+  const refuse = (
+    message: string,
+    at: unknown,
+  ): SimParseResult<never, SimError> =>
+    simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
+  const stance = scenario.structural;
+  if (stance === undefined || stance === null) {
+    if (kind === "structural") {
+      return refuse(
+        "A structural scenario must carry its structural solve stance (the self-weight switch at minimum) — the compile door refuses to guess body forces.",
+        stance,
+      );
+    }
+    return simOk({
+      selfWeight: false,
+      centrifugal: undefined,
+      thermalReferenceK: undefined,
+    });
+  }
+  if (kind !== "structural") {
+    return refuse(
+      `A "${kind}" scenario cannot carry a structural solve stance; it is the structural kind's alone.`,
+      stance,
+    );
+  }
+  if (!isPlainRecord(stance)) {
+    return refuse(
+      "A structural solve stance must be an object with a selfWeight field.",
+      stance,
+    );
+  }
+  if (typeof stance.selfWeight !== "boolean") {
+    return refuse(
+      "A structural stance's self-weight switch must be a boolean.",
+      stance.selfWeight,
+    );
+  }
+  let centrifugal:
+    | {
+        readonly axisPointMm: readonly [number, number, number];
+        readonly axisDirection: readonly [number, number, number];
+        readonly rpmMode: StructuralRpmMode;
+        readonly fixedRpm?: number;
+      }
+    | undefined;
+  if (stance.centrifugal !== undefined && stance.centrifugal !== null) {
+    const authored = stance.centrifugal;
+    if (!isPlainRecord(authored)) {
+      return refuse(
+        "A structural stance's centrifugal stance must be an object with axis, mode, and rate fields.",
+        authored,
+      );
+    }
+    const axisPointMm = finiteTriple(
+      authored.axisPointMm,
+      "A centrifugal stance's axis point",
+    );
+    if (!axisPointMm.ok) return axisPointMm;
+    const axisDirection = finiteTriple(
+      authored.axisDirection,
+      "A centrifugal stance's axis direction",
+    );
+    if (!axisDirection.ok) return axisDirection;
+    const [dx, dy, dz] = [
+      axisDirection.value[0] ?? 0,
+      axisDirection.value[1] ?? 0,
+      axisDirection.value[2] ?? 0,
+    ];
+    const directionNorm = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (!(directionNorm > 0)) {
+      return refuse(
+        "A centrifugal stance's axis direction must be non-zero.",
+        authored.axisDirection,
+      );
+    }
+    if (!isStructuralRpmMode(authored.rpmMode)) {
+      return refuse(
+        `A centrifugal stance's rpm mode must be one of: ${STRUCTURAL_RPM_MODES.join(", ")}.`,
+        authored.rpmMode,
+      );
+    }
+    const rpmMode = authored.rpmMode;
+    let fixedRpm: number | undefined;
+    if (rpmMode === "fixed") {
+      if (
+        typeof authored.fixedRpm !== "number" ||
+        !Number.isFinite(authored.fixedRpm) ||
+        authored.fixedRpm <= 0
+      ) {
+        return refuse(
+          "A fixed-mode centrifugal stance's shaft rate must be a positive finite rpm value.",
+          authored.fixedRpm,
+        );
+      }
+      fixedRpm = authored.fixedRpm;
+    } else if (authored.fixedRpm !== undefined && authored.fixedRpm !== null) {
+      return refuse(
+        "A fan-run centrifugal stance cannot also author a fixed rpm — the referenced fan run's operating point solves the speed.",
+        authored.fixedRpm,
+      );
+    }
+    centrifugal = {
+      axisPointMm: axisPointMm.value,
+      axisDirection: [
+        dx / directionNorm,
+        dy / directionNorm,
+        dz / directionNorm,
+      ],
+      rpmMode,
+      ...(fixedRpm === undefined ? {} : { fixedRpm }),
+    };
+  }
+  let thermalReferenceK: number | undefined;
+  if (stance.thermal !== undefined && stance.thermal !== null) {
+    if (!isPlainRecord(stance.thermal)) {
+      return refuse(
+        "A structural stance's thermal chain must be an object with the stress-free reference temperature.",
+        stance.thermal,
+      );
+    }
+    const reference = stance.thermal.referenceTemperatureK;
+    if (
+      typeof reference !== "number" ||
+      !Number.isFinite(reference) ||
+      reference <= 0
+    ) {
+      return refuse(
+        "A thermal chain's stress-free reference temperature must be a positive finite kelvin value.",
+        reference,
+      );
+    }
+    thermalReferenceK = reference;
+  }
+  return simOk({
+    selfWeight: stance.selfWeight,
+    centrifugal,
+    thermalReferenceK,
+  });
+}
+
+/**
+ * The structural compile branch (Phase 69): the FULL-3D per-body
+ * voxelization unioned with its per-node material map (the thermal
+ * branch's discipline on `voxelizeSimTessellation` grids), the stance in
+ * SI with the centrifugal rate resolved (fixed authored rpm, or the
+ * referenced fan run's supplied operating point — declining loudly when
+ * the fan-run mode names no run), and the thermal chain sampled onto
+ * every solid node (nearest thermal-block node, clamped at its edges —
+ * the honest coarse chain of a 2D field onto the 3D grid, stated).
+ */
+function compileStructuralProducts(
+  scenario: Record<string, unknown>,
+  input: GeometrySimCompileInput,
+  bodyBounds: readonly SimBodyBoundsMm[],
+): SimParseResult<
+  Pick<CompiledSimScenario, "occupancy3d" | "structural">,
+  SimError
+> {
+  const refuse = (
+    message: string,
+    at: unknown,
+  ): SimParseResult<never, SimError> =>
+    simFail(simError(SIM_ERROR_CODES.scenarioInvalid, message, at));
+  const scenarioKind =
+    typeof scenario.kind === "string" ? scenario.kind : "structural";
+  const stance = parseStructuralStance(scenario, scenarioKind);
+  if (!stance.ok) return stance;
+
+  // --- The per-body 3D voxelization and material map ------------------------
+  const bodies = input.bodyTessellations ?? [];
+  if (bodies.length === 0) {
+    return refuse(
+      "A structural compile needs the referenced bodies' tessellations (one entry per body); the compile door refuses to fabricate an empty solid.",
+      input.bodyTessellations,
+    );
+  }
+  const domain = resolveDomainMm(scenario, bodyBounds);
+  if (!domain.ok) return domain;
+  const [minMm, maxMm, resolutionMm] = domain.value;
+  const gridDomain = {
+    kind: "explicit" as const,
+    minMm,
+    maxMm,
+    resolutionMm,
+  };
+  const recordsById = new Map<string, unknown>();
+  for (const record of input.materials ?? []) {
+    if (!isPlainRecord(record) || typeof record.id !== "string") {
+      return refuse(
+        "The compile's material records must be plain objects carrying a string id.",
+        record,
+      );
+    }
+    recordsById.set(record.id, record);
+  }
+  const assignments = Array.isArray(scenario.materials)
+    ? (scenario.materials as readonly unknown[])
+    : [];
+  const materialOfBody = new Map<string, string>();
+  for (const entry of assignments) {
+    if (!isPlainRecord(entry)) {
+      return refuse(
+        "A scenario's material assignment must be a plain object with bodyId and materialId fields.",
+        entry,
+      );
+    }
+    if (
+      typeof entry.bodyId !== "string" ||
+      typeof entry.materialId !== "string"
+    ) {
+      return refuse(
+        "A scenario's material assignment must carry string bodyId and materialId values.",
+        entry,
+      );
+    }
+    materialOfBody.set(entry.bodyId, entry.materialId);
+  }
+  const materials: {
+    readonly bodyId: string;
+    readonly record: unknown;
+  }[] = [];
+  const indexByMaterialId = new Map<string, number>();
+  let union: SimOccupancyGrid | undefined;
+  const materialIndexParts: Uint16Array[] = [];
+  for (const body of bodies) {
+    if (!isPlainRecord(body) || typeof body.bodyId !== "string") {
+      return refuse(
+        "The compile's body tessellations must carry a string bodyId beside the tessellation.",
+        body,
+      );
+    }
+    const materialId = materialOfBody.get(body.bodyId);
+    if (materialId === undefined) {
+      return refuse(
+        `The scenario voxelizes body "${body.bodyId}" but assigns it no material; every solid the stiffness assembly sees must carry one, and the compile door declines instead of guessing.`,
+        body.bodyId,
+      );
+    }
+    let materialListIndex = indexByMaterialId.get(materialId);
+    if (materialListIndex === undefined) {
+      const record = recordsById.get(materialId);
+      if (record === undefined) {
+        return refuse(
+          `The scenario assigns material "${materialId}" but no supplied material record carries that id; the compile refuses a selection it cannot resolve.`,
+          materialId,
+        );
+      }
+      materialListIndex = materials.length + 1;
+      indexByMaterialId.set(materialId, materialListIndex);
+      materials.push({ bodyId: body.bodyId, record });
+    }
+    const grid = voxelizeSimTessellation({
+      tessellation: body.tessellation,
+      domain: gridDomain,
+      name: STRUCTURAL_GRID_NAME,
+    });
+    if (!grid.ok) return grid;
+    if (union === undefined) {
+      union = grid.value;
+    } else {
+      if (
+        grid.value.shape[0] !== union.shape[0] ||
+        grid.value.shape[1] !== union.shape[1] ||
+        grid.value.shape[2] !== union.shape[2]
+      ) {
+        return refuse(
+          "The compile's per-body grids disagree on their lattice shape; every body must voxelize over the SAME domain at the SAME resolution.",
+          { first: [...union.shape], body: [...grid.value.shape] },
+        );
+      }
+      for (let cell = 0; cell < union.cells.length; cell += 1) {
+        union.cells[cell] =
+          union.cells[cell] === 1 ? 1 : (grid.value.cells[cell] ?? 0);
+      }
+    }
+    const assigned = materialListIndex;
+    const bodyIndex = new Uint16Array(grid.value.cells.length);
+    for (let cell = 0; cell < bodyIndex.length; cell += 1) {
+      bodyIndex[cell] = grid.value.cells[cell] === 1 ? assigned : 0;
+    }
+    materialIndexParts.push(bodyIndex);
+  }
+  const grid = union;
+  if (grid === undefined) {
+    return refuse(
+      "The compile needs at least one body tessellation.",
+      input.bodyTessellations,
+    );
+  }
+  const materialIndex = new Uint16Array(grid.cells.length);
+  for (const part of materialIndexParts) {
+    for (let cell = 0; cell < materialIndex.length; cell += 1) {
+      const claimed = part[cell] ?? 0;
+      if (claimed !== 0 && materialIndex[cell] === 0) {
+        materialIndex[cell] = claimed;
+      }
+    }
+  }
+  let solidNodes = 0;
+  for (let cell = 0; cell < grid.cells.length; cell += 1) {
+    if (grid.cells[cell] === 1) {
+      solidNodes += 1;
+      if (materialIndex[cell] === 0) {
+        return refuse(
+          "A solid voxel resolved no material — the per-node material map must cover every solid node.",
+          cell,
+        );
+      }
+    }
+  }
+  if (solidNodes === 0) {
+    return simFail(
+      simError(
+        SIM_ERROR_CODES.geometryUnavailable,
+        "The compiled solids voxelized to an empty grid — there is nothing to hold a load, and the compile declines instead of assembling an empty structure.",
+        grid.shape,
+      ),
+    );
+  }
+
+  // --- The centrifugal rate (fixed authored, or the referenced fan run) -----
+  const chain = input.structuralChain;
+  let centrifugal: CompiledSimStructural["centrifugal"];
+  const authored = stance.value.centrifugal;
+  if (authored !== undefined) {
+    let omegaRadPerS: number;
+    if (authored.rpmMode === "fixed") {
+      // The fixed rate survives the record door's validation; the
+      // rpm → rad/s conversion happens HERE (the compile's one site).
+      omegaRadPerS = (authored.fixedRpm ?? 0) * RPM_TO_RAD_PER_S;
+      if (chain?.fanRpm !== undefined) {
+        return refuse(
+          "The scenario authors a fixed centrifugal rate but the compile carries a fan run's operating point — one rate source, never both.",
+          chain.fanRpm,
+        );
+      }
+    } else {
+      const fanRpm = chain?.fanRpm;
+      if (fanRpm === undefined) {
+        return refuse(
+          "The scenario's centrifugal stance rides a referenced fan run's operating point (rpmMode \"fan-run\"), but no fan-run rate crossed the compile — select the fan run and run again; the door declines instead of guessing a speed.",
+          scenario.name,
+        );
+      }
+      if (
+        typeof fanRpm !== "number" ||
+        !Number.isFinite(fanRpm) ||
+        fanRpm <= 0
+      ) {
+        return refuse(
+          "A referenced fan run's operating point must be a positive finite rpm value.",
+          fanRpm,
+        );
+      }
+      omegaRadPerS = fanRpm * RPM_TO_RAD_PER_S;
+    }
+    const axisPointM: readonly [number, number, number] = [
+      (authored.axisPointMm[0] ?? 0) / MM_PER_M,
+      (authored.axisPointMm[1] ?? 0) / MM_PER_M,
+      (authored.axisPointMm[2] ?? 0) / MM_PER_M,
+    ];
+    centrifugal = Object.freeze({
+      axisPointM,
+      axisDirection: authored.axisDirection,
+      omegaRadPerS,
+    });
+  } else if (chain?.fanRpm !== undefined) {
+    return refuse(
+      "The compile carries a fan run's operating point but the stance spins nothing — chain inputs ride the stance's own selections, never silently.",
+      chain.fanRpm,
+    );
+  }
+
+  // --- The thermal chain (sampled onto every solid node) --------------------
+  let thermalDeltaTK: Float64Array | undefined;
+  const reference = stance.value.thermalReferenceK;
+  if (reference !== undefined) {
+    const field = chain?.thermal?.field;
+    if (field === undefined) {
+      return refuse(
+        "The scenario chains a thermal run's temperature field (the hot-bracket stance) but no temperature block crossed the compile — select the thermal run and run again; the door declines instead of guessing a temperature.",
+        scenario.name,
+      );
+    }
+    const [ex, ey, ez] = field.extent;
+    if (
+      !Number.isInteger(ex) ||
+      ex <= 0 ||
+      !Number.isInteger(ey) ||
+      ey <= 0 ||
+      !Number.isInteger(ez) ||
+      ez <= 0 ||
+      field.values.length !== ex * ey * ez
+    ) {
+      return refuse(
+        "A chained thermal run's temperature block extent and value count disagree.",
+        field,
+      );
+    }
+    for (const value of field.values) {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        return refuse(
+          "A chained thermal run's temperature block carries a non-finite value.",
+          value,
+        );
+      }
+    }
+    for (const spacing of field.spacingMm) {
+      if (
+        typeof spacing !== "number" ||
+        !Number.isFinite(spacing) ||
+        spacing <= 0
+      ) {
+        return refuse(
+          "A chained thermal run's temperature block spacing must be positive finite millimetres.",
+          field.spacingMm,
+        );
+      }
+    }
+    // Nearest-node sampling with edge clamping: a solid node outside the
+    // thermal block's box takes the nearest edge node's temperature —
+    // the honest coarse chain of a 2D field onto the 3D grid, stated.
+    thermalDeltaTK = new Float64Array(grid.cells.length);
+    const [nx, ny, nz] = grid.shape;
+    const [hx, hy, hz] = grid.spacingM;
+    const sample = (xMm: number, yMm: number, zMm: number): number => {
+      const clampIndex = (
+        position: number,
+        origin: number,
+        spacing: number,
+        nodes: number,
+      ): number =>
+        Math.min(
+          nodes - 1,
+          Math.max(0, Math.round((position - origin) / spacing)),
+        );
+      const ix = clampIndex(
+        xMm,
+        field.originMm[0] ?? 0,
+        field.spacingMm[0] ?? 1,
+        ex,
+      );
+      const iy = clampIndex(
+        yMm,
+        field.originMm[1] ?? 0,
+        field.spacingMm[1] ?? 1,
+        ey,
+      );
+      const iz = clampIndex(
+        zMm,
+        field.originMm[2] ?? 0,
+        field.spacingMm[2] ?? 1,
+        ez,
+      );
+      return field.values[ix + iy * ex + iz * ex * ey] ?? reference;
+    };
+    for (let k = 0; k < nz; k += 1) {
+      for (let j = 0; j < ny; j += 1) {
+        for (let i = 0; i < nx; i += 1) {
+          const cell = i + j * nx + k * nx * ny;
+          if (grid.cells[cell] !== 1) continue;
+          const xMm = ((grid.originM[0] ?? 0) + i * (hx ?? 1)) * MM_PER_M;
+          const yMm = ((grid.originM[1] ?? 0) + j * (hy ?? 1)) * MM_PER_M;
+          const zMm = ((grid.originM[2] ?? 0) + k * (hz ?? 1)) * MM_PER_M;
+          thermalDeltaTK[cell] = sample(xMm, yMm, zMm) - reference;
+        }
+      }
+    }
+  } else if (chain?.thermal !== undefined) {
+    return refuse(
+      "The compile carries a thermal run's temperature field but the stance chains no thermal load — chain inputs ride the stance's own selections, never silently.",
+      chain.thermal,
+    );
+  }
+
+  return simOk({
+    occupancy3d: grid,
+    structural: Object.freeze({
+      selfWeight: stance.value.selfWeight,
+      ...(centrifugal === undefined ? {} : { centrifugal }),
+      ...(thermalDeltaTK === undefined ? {} : { thermalDeltaTK }),
+      materials: Object.freeze(materials),
+      materialIndex,
+    }),
   });
 }
 
@@ -1931,6 +2518,19 @@ export function compileSimScenarioWithGeometry(
     );
     if (!combustion.ok) return combustion;
     return simOk({ ...compiled.value, ...combustion.value });
+  }
+  if (compiled.value.kind === "structural") {
+    // The structural branch (Phase 69): the FULL-3D per-body voxelization
+    // with its per-node material map, the body-force stance in SI (the
+    // centrifugal rate and the thermal chain resolved against the
+    // run-time inputs this branch alone consumes).
+    const structural = compileStructuralProducts(
+      input.scenario,
+      input,
+      input.bodyBounds ?? [],
+    );
+    if (!structural.ok) return structural;
+    return simOk({ ...compiled.value, ...structural.value });
   }
   if (compiled.value.kind === "thermal") {
     // The 3D stance is the flow kind's alone: a thermal record carrying

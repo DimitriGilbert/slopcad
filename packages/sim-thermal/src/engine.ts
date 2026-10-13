@@ -126,6 +126,13 @@ function thermalFaceConditions(
 ): SimParseResult<readonly ThermalFaceConditionEntry[], SimError> {
   const entries: ThermalFaceConditionEntry[] = [];
   for (const condition of request.compiled.conditions) {
+    if (condition.face === undefined) {
+      return refuse(
+        SIM_ERROR_CODES.scenarioInvalid,
+        `A "${condition.kind}" condition addresses no domain face — the structural point set (Phase 69) is not the conduction solve's vocabulary.`,
+        condition,
+      );
+    }
     if (condition.face === "zMin" || condition.face === "zMax") {
       return refuse(
         SIM_ERROR_CODES.scenarioInvalid,
@@ -267,7 +274,7 @@ async function runThermalEngine(
   if (!THERMAL_SUPPORTED_KINDS.includes(compiled.kind)) {
     return refuse(
       SIM_ERROR_CODES.scenarioKindUnsupported,
-      `The conduction thermal engine does not solve the "${compiled.kind}" scenario kind (it solves thermal; structural is Phase 69's carve).`,
+      `The conduction thermal engine does not solve the "${compiled.kind}" scenario kind (it solves thermal; structural is served by the structural engine through the routed default engine).`,
       compiled.kind,
     );
   }

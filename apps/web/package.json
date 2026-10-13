@@ -86,7 +86,8 @@
     "tailwindcss": "catalog:",
     "three": "0.186.0",
     "zod": "catalog:",
-    "@slopcad/sim-combustion": "workspace:*"
+    "@slopcad/sim-combustion": "workspace:*",
+    "@slopcad/sim-structural": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

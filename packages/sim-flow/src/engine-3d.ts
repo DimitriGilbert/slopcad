@@ -202,6 +202,12 @@ function mapFaces3d(
   let outletPressure: number | undefined;
   for (const condition of request.compiled.conditions) {
     const face = condition.face;
+    if (face === undefined) {
+      return refuse(
+        `A "${condition.kind}" condition addresses no domain face — the structural point set (Phase 69) is not the 3D flow kernel's vocabulary.`,
+        condition,
+      );
+    }
     switch (condition.kind) {
       case "velocity-inlet": {
         const velocity = condition.velocityMPerS;
@@ -501,7 +507,7 @@ async function runFlow3dEngine(
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioKindUnsupported,
-        `The 3D reference flow engine does not solve the "${compiled.kind}" scenario kind (it serves flow scenarios with a 3D stance; structural is Phase 69's carve).`,
+        `The 3D reference flow engine does not solve the "${compiled.kind}" scenario kind (it serves flow scenarios with a 3D stance; structural is served by the structural engine through the routed default engine).`,
         compiled.kind,
       ),
     );

@@ -18,11 +18,10 @@
  * is the wire-absent default; GPU is a provider hint, never a correctness
  * claim — laws S2/S5).
  *
- * The kind vocabulary reserves `structural` now (Phase 69's carve: the
- * spine lays the vocabulary so Phase 69 never reworks it). A structural
- * scenario is a valid RECORD — it stores, round-trips, and hashes — but
- * compiling it declines with a `sim/*` code until the Phase 69 solver
- * lands; the decline lives at the sim-core compile boundary, not here.
+ * The kind vocabulary carries `structural` (Phase 69, live): its records
+ * store, round-trip, and hash like every other kind, its boundary
+ * conditions are the fixture/load set (faces, rollers, and points), and
+ * its body forces ride the kind-locked `structural` stance below.
  *
  * Units: the document is canonical millimetres, so lengths (domain
  * bounds, resolution, margins) are mm; velocities are m/s, pressures Pa,
@@ -52,11 +51,11 @@ import { type ParseFailure, type ParseResult, fail, ok } from "./result";
 export type SimVec3 = readonly [number, number, number];
 
 /**
- * The scenario kinds (Phase 61 carve; `structural` is reserved for Phase 69
- * and declines at the sim-core compile boundary until that phase lands;
- * `dynamics` is Phase 67's mechanism-dynamics kind — its solve stance is
- * the dynamics kind's alone; `combustion` is Phase 68's kind — the stove
- * with fire and the 0D Otto engine, its two mode-locked stances below).
+ * The scenario kinds (`structural` is Phase 69's kind — its solve stance
+ * and fixture/load condition set below; `dynamics` is Phase 67's
+ * mechanism-dynamics kind — its solve stance is the dynamics kind's
+ * alone; `combustion` is Phase 68's kind — the stove with fire and the
+ * 0D Otto engine, its two mode-locked stances below).
  */
 export const SIM_SCENARIO_KINDS = [
   "flow",
@@ -128,12 +127,14 @@ export type SimScenarioDomain =
     };
 
 /**
- * One boundary condition on one domain-box face. The flow set (inlet,
+ * One boundary condition: on one domain-box face, or — the structural
+ * kind's point set (Phase 69) — at a world point. The flow set (inlet,
  * outlet, wall, symmetry — the Phase 63 wind-tunnel vocabulary) is allowed
  * on flow AND thermal scenarios (conjugate heat transfer has a flow side);
  * the thermal set (Phase 65) and the structural set (Phase 69, fixtures
- * and loads) are kind-locked. One condition per face — two conditions on
- * one face is a modeling conflict refused at build time.
+ * and loads) are kind-locked. One condition per face among the
+ * face-bearing set — two conditions on one face is a modeling conflict
+ * refused at build time.
  */
 export type SimBoundaryCondition =
   | {
@@ -191,6 +192,24 @@ export type SimBoundaryCondition =
       readonly face: SimDomainFace;
       /** The applied pressure, Pa (positive pushes on the face). */
       readonly pressurePa: number;
+    }
+  | {
+      readonly kind: "axis-fix";
+      readonly face: SimDomainFace;
+      /** The single displacement component the symmetry roller fixes. */
+      readonly axis: "x" | "y" | "z";
+    }
+  | {
+      readonly kind: "point-fix";
+      /** The fixture's world point, mm (the nearest mesh node hosts it). */
+      readonly atWorldPointMm: SimVec3;
+    }
+  | {
+      readonly kind: "point-load";
+      /** The load's world application point, mm. */
+      readonly atWorldPointMm: SimVec3;
+      /** The applied force vector, N. */
+      readonly forceN: SimVec3;
     };
 
 /**
@@ -212,6 +231,9 @@ export const SIM_CONDITION_KIND_SCENARIOS: Readonly<
   "fixed-support": Object.freeze(["structural"] as const),
   "force-load": Object.freeze(["structural"] as const),
   "pressure-load": Object.freeze(["structural"] as const),
+  "axis-fix": Object.freeze(["structural"] as const),
+  "point-fix": Object.freeze(["structural"] as const),
+  "point-load": Object.freeze(["structural"] as const),
 });
 
 /** One solid material assignment: a document body, a consumer-layer material. */
@@ -265,7 +287,8 @@ export type SimFlow3dRpmMode = (typeof SIM_FLOW3D_RPM_MODES)[number];
  * treatment; `cut-cell` is a RESERVED record value — it stores and
  * round-trips here, and the sim-core compile boundary declines it
  * loudly (`sim/boundary-treatment-unsupported`) until a dedicated
- * cut-cell phase exists, exactly the `structural` carve's discipline.
+ * cut-cell phase exists, exactly the unsupported-kind decline's
+ * discipline (`sim/scenario-kind-unsupported`).
  */
 export const SIM_FLOW3D_BOUNDARY_TREATMENTS = [
   "staircase",
@@ -380,6 +403,71 @@ export interface SerializedSimScenarioFlow3dSpec {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The structural solve stance (Phase 69, law S1-additive)
+// ---------------------------------------------------------------------------
+
+/**
+ * How a structural scenario's centrifugal stance sources its shaft rate
+ * (Phase 69): a `fixed` authored rpm, or the `fan-run` mode — the rate a
+ * REFERENCED Phase 66 fan run FOUND as its operating point (the
+ * run-to-run selection at the workbench, never a document record: runs
+ * are store data, and the compile resolves the rate from the selected
+ * run's summary at run time).
+ */
+export const SIM_STRUCTURAL_RPM_MODES = ["fixed", "fan-run"] as const;
+
+export type SimStructuralRpmMode = (typeof SIM_STRUCTURAL_RPM_MODES)[number];
+
+/**
+ * A structural scenario's solve stance (Phase 69, kind-locked): the
+ * body-force family's authored switches — self-weight through the
+ * scenario's gravity vector (on/off), the centrifugal stance (the
+ * fan-blade root case, ω²·r⊥ about an authored axis), and the thermal
+ * chain (a selected Phase 65 run's temperature field as the ΔT of
+ * thermal-expansion loading — "will the bracket warp when hot", with the
+ * stress-free reference temperature the part was assembled at). Required
+ * on `structural` scenarios, refused on every other kind — the thermal
+ * stance's discipline.
+ */
+export interface SimScenarioStructuralSpec {
+  /** Whether self-weight applies through the scenario's gravity vector. */
+  readonly selfWeight: boolean;
+  /** The centrifugal stance; absent = the scenario does not spin. */
+  readonly centrifugal?: {
+    /** One point on the axis, mm (document space). */
+    readonly axisPointMm: SimVec3;
+    /** The axis direction, unnormalized, non-zero. */
+    readonly axisDirection: SimVec3;
+    readonly rpmMode: SimStructuralRpmMode;
+    /** The fixed rate, rpm (> 0); required exactly when the mode is fixed. */
+    readonly fixedRpm?: number;
+  };
+  /**
+   * The thermal chain; present = the run consumes a selected thermal
+   * run's temperature field as ΔT (the stress-free reference is the
+   * authored assembly temperature).
+   */
+  readonly thermal?: {
+    /** The stress-free (assembly) temperature, K (> 0). */
+    readonly referenceTemperatureK: number;
+  };
+}
+
+/** Canonical JSON form of the structural stance; fixed key order, optionals last. */
+export interface SerializedSimScenarioStructuralSpec {
+  readonly selfWeight: boolean;
+  readonly centrifugal?: {
+    readonly axisPointMm: readonly [number, number, number];
+    readonly axisDirection: readonly [number, number, number];
+    readonly rpmMode: SimStructuralRpmMode;
+    readonly fixedRpm?: number;
+  };
+  readonly thermal?: {
+    readonly referenceTemperatureK: number;
+  };
+}
+
 function isSimThermalRadiationMode(
   input: unknown,
 ): input is SimThermalRadiationMode {
@@ -409,6 +497,13 @@ function isSimFlow3dRpmMode(input: unknown): input is SimFlow3dRpmMode {
   return (
     typeof input === "string" &&
     SIM_FLOW3D_RPM_MODES.includes(input as SimFlow3dRpmMode)
+  );
+}
+
+function isSimStructuralRpmMode(input: unknown): input is SimStructuralRpmMode {
+  return (
+    typeof input === "string" &&
+    SIM_STRUCTURAL_RPM_MODES.includes(input as SimStructuralRpmMode)
   );
 }
 
@@ -1819,6 +1914,156 @@ function parseFlow3dSpec(
 }
 
 /**
+ * Parses the structural solve stance, kind-locked (the thermal stance's
+ * discipline): a `structural` scenario without one declines (there is no
+ * default physics), any other kind carrying one declines (the stance is
+ * the structural kind's alone), and the stance's own fields are
+ * cross-checked (a non-zero axis; the fixed rpm exactly when the fixed
+ * mode; the thermal chain's positive reference temperature).
+ */
+function parseStructuralSpec(
+  input: unknown,
+  kind: SimScenarioKind,
+): ParseResult<SimScenarioStructuralSpec | undefined, SimulationError> {
+  const code = SIMULATION_ERROR_CODES.structuralSpecInvalid;
+  if (input === undefined || input === null) {
+    if (kind === "structural") {
+      return fail(
+        simulationError(
+          code,
+          "A structural scenario must carry its structural solve stance (the self-weight switch at minimum).",
+          input,
+        ),
+      );
+    }
+    return ok(undefined);
+  }
+  if (kind !== "structural") {
+    return fail(
+      simulationError(
+        code,
+        `A "${kind}" scenario cannot carry a structural solve stance; it is the structural kind's alone.`,
+        input,
+      ),
+    );
+  }
+  if (!isPlainRecord(input)) {
+    return fail(
+      simulationError(
+        code,
+        "A structural solve stance must be an object with a selfWeight field.",
+        input,
+      ),
+    );
+  }
+  if (typeof input.selfWeight !== "boolean") {
+    return fail(
+      simulationError(
+        code,
+        "A structural stance's self-weight switch must be a boolean.",
+        input.selfWeight,
+      ),
+    );
+  }
+  let centrifugal: SimScenarioStructuralSpec["centrifugal"];
+  if (input.centrifugal !== undefined && input.centrifugal !== null) {
+    const stance = input.centrifugal;
+    if (!isPlainRecord(stance)) {
+      return fail(
+        simulationError(
+          code,
+          "A structural stance's centrifugal stance must be an object with axis, mode, and rate fields.",
+          stance,
+        ),
+      );
+    }
+    const axisPointMm = parseVec3(
+      stance.axisPointMm,
+      code,
+      "A centrifugal stance's axis point",
+    );
+    if (!axisPointMm.ok) return axisPointMm;
+    const axisDirection = parseVec3(
+      stance.axisDirection,
+      code,
+      "A centrifugal stance's axis direction",
+    );
+    if (!axisDirection.ok) return axisDirection;
+    if (axisDirection.value.every((component) => component === 0)) {
+      return fail(
+        simulationError(
+          code,
+          "A centrifugal stance's axis direction must be non-zero.",
+          stance.axisDirection,
+        ),
+      );
+    }
+    if (!isSimStructuralRpmMode(stance.rpmMode)) {
+      return fail(
+        simulationError(
+          code,
+          `A centrifugal stance's rpm mode must be one of: ${SIM_STRUCTURAL_RPM_MODES.join(", ")}.`,
+          stance.rpmMode,
+        ),
+      );
+    }
+    const rpmMode = stance.rpmMode;
+    let fixedRpm: number | undefined;
+    if (rpmMode === "fixed") {
+      const parsed = parsePositiveNumber(
+        stance.fixedRpm,
+        code,
+        "A fixed-mode centrifugal stance's shaft rate",
+      );
+      if (!parsed.ok) return parsed;
+      fixedRpm = parsed.value;
+    } else if (stance.fixedRpm !== undefined && stance.fixedRpm !== null) {
+      return fail(
+        simulationError(
+          code,
+          "A fan-run centrifugal stance cannot also author a fixed rpm — the referenced fan run's operating point solves the speed.",
+          stance.fixedRpm,
+        ),
+      );
+    }
+    centrifugal = Object.freeze({
+      axisPointMm: axisPointMm.value,
+      axisDirection: axisDirection.value,
+      rpmMode,
+      ...(fixedRpm === undefined ? {} : { fixedRpm }),
+    });
+  }
+  let thermal: SimScenarioStructuralSpec["thermal"];
+  if (input.thermal !== undefined && input.thermal !== null) {
+    if (!isPlainRecord(input.thermal)) {
+      return fail(
+        simulationError(
+          code,
+          "A structural stance's thermal chain must be an object with the stress-free reference temperature.",
+          input.thermal,
+        ),
+      );
+    }
+    const referenceTemperatureK = parsePositiveNumber(
+      input.thermal.referenceTemperatureK,
+      code,
+      "A thermal chain's stress-free reference temperature",
+    );
+    if (!referenceTemperatureK.ok) return referenceTemperatureK;
+    thermal = Object.freeze({
+      referenceTemperatureK: referenceTemperatureK.value,
+    });
+  }
+  return ok(
+    Object.freeze({
+      selfWeight: input.selfWeight,
+      ...(centrifugal === undefined ? {} : { centrifugal }),
+      ...(thermal === undefined ? {} : { thermal }),
+    }),
+  );
+}
+
+/**
  * Parses the thermal solve stance, kind-locked: a `thermal` scenario
  * without one declines (there is no default physics), and any other
  * kind carrying one declines (the stance is thermal's alone).
@@ -2022,6 +2267,12 @@ export interface SimScenarioBody {
    * scenarios (mode stove or engine), refused on every other kind.
    */
   readonly combustion?: SimScenarioCombustionSpec;
+  /**
+   * The structural solve stance (Phase 69): required on `structural`
+   * scenarios (the body-force family's switches), refused on every
+   * other kind.
+   */
+  readonly structural?: SimScenarioStructuralSpec;
   /** The selected motor record for fan scenarios; absent = motor-less. */
   readonly motorId?: MotorId;
   /** The backend preference; absent = the CPU default. */
@@ -2049,6 +2300,7 @@ export interface SimScenarioInput {
   readonly flow3d?: SimScenarioFlow3dSpec;
   readonly dynamics?: SimScenarioDynamicsSpec;
   readonly combustion?: SimScenarioCombustionSpec;
+  readonly structural?: SimScenarioStructuralSpec;
   readonly motorId?: MotorId;
   readonly backend?: SimBackendPreference;
 }
@@ -2081,6 +2333,7 @@ export const SIMULATION_ERROR_CODES = {
   flow3dSpecInvalid: "simulation/flow3d-spec-invalid",
   dynamicsSpecInvalid: "simulation/dynamics-spec-invalid",
   combustionSpecInvalid: "simulation/combustion-spec-invalid",
+  structuralSpecInvalid: "simulation/structural-spec-invalid",
 } as const;
 
 export type SimulationErrorCode =
@@ -2361,7 +2614,7 @@ function parseCondition(
     return fail(
       simulationError(
         SIMULATION_ERROR_CODES.conditionInvalid,
-        "A boundary condition must be an object with kind and face fields.",
+        "A boundary condition must be an object with a kind field.",
         input,
       ),
     );
@@ -2371,8 +2624,13 @@ function parseCondition(
     `A boundary condition's face must be one of: ${SIM_DOMAIN_FACES.join(", ")}.`,
     input.face,
   );
-  if (!isSimDomainFace(input.face)) return fail(faceError);
-  const face = input.face;
+  // The structural point set (Phase 69) addresses world points, not
+  // faces; every other kind carries a face.
+  const pointKinds = ["point-fix", "point-load"] as const;
+  if (!pointKinds.includes(input.kind as (typeof pointKinds)[number])) {
+    if (!isSimDomainFace(input.face)) return fail(faceError);
+  }
+  const face = input.face as SimDomainFace;
   switch (input.kind) {
     case "velocity-inlet": {
       const speedMPerS = parsePositiveNumber(
@@ -2535,6 +2793,53 @@ function parseCondition(
         }),
       );
     }
+    case "axis-fix": {
+      if (input.axis !== "x" && input.axis !== "y" && input.axis !== "z") {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.conditionInvalid,
+            'An axis-fix\'s axis must be "x", "y", or "z" — the single component the symmetry roller fixes.',
+            input.axis,
+          ),
+        );
+      }
+      return ok(Object.freeze({ kind: "axis-fix", face, axis: input.axis }));
+    }
+    case "point-fix": {
+      const atWorldPointMm = parseVec3(
+        input.atWorldPointMm,
+        SIMULATION_ERROR_CODES.conditionInvalid,
+        "A point-fix's application point",
+      );
+      if (!atWorldPointMm.ok) return atWorldPointMm;
+      return ok(
+        Object.freeze({
+          kind: "point-fix",
+          atWorldPointMm: atWorldPointMm.value,
+        }),
+      );
+    }
+    case "point-load": {
+      const atWorldPointMm = parseVec3(
+        input.atWorldPointMm,
+        SIMULATION_ERROR_CODES.conditionInvalid,
+        "A point-load's application point",
+      );
+      if (!atWorldPointMm.ok) return atWorldPointMm;
+      const forceN = parseVec3(
+        input.forceN,
+        SIMULATION_ERROR_CODES.conditionInvalid,
+        "A point-load's force",
+      );
+      if (!forceN.ok) return forceN;
+      return ok(
+        Object.freeze({
+          kind: "point-load",
+          atWorldPointMm: atWorldPointMm.value,
+          forceN: forceN.value,
+        }),
+      );
+    }
     default:
       return fail(
         simulationError(
@@ -2590,6 +2895,20 @@ export type SerializedSimBoundaryCondition =
       readonly kind: "pressure-load";
       readonly face: string;
       readonly pressurePa: number;
+    }
+  | {
+      readonly kind: "axis-fix";
+      readonly face: string;
+      readonly axis: "x" | "y" | "z";
+    }
+  | {
+      readonly kind: "point-fix";
+      readonly atWorldPointMm: readonly [number, number, number];
+    }
+  | {
+      readonly kind: "point-load";
+      readonly atWorldPointMm: readonly [number, number, number];
+      readonly forceN: readonly [number, number, number];
     };
 
 function serializeCondition(
@@ -2650,6 +2969,23 @@ function serializeCondition(
         face: condition.face,
         pressurePa: condition.pressurePa,
       };
+    case "axis-fix":
+      return {
+        kind: "axis-fix",
+        face: condition.face,
+        axis: condition.axis,
+      };
+    case "point-fix":
+      return {
+        kind: "point-fix",
+        atWorldPointMm: [...condition.atWorldPointMm],
+      };
+    case "point-load":
+      return {
+        kind: "point-load",
+        atWorldPointMm: [...condition.atWorldPointMm],
+        forceN: [...condition.forceN],
+      };
   }
 }
 
@@ -2685,16 +3021,21 @@ function parseConditions(
         ),
       );
     }
-    if (facesSeen.has(condition.face)) {
-      return fail(
-        simulationError(
-          SIMULATION_ERROR_CODES.conditionFaceDuplicate,
-          `More than one boundary condition addresses the "${condition.face}" face.`,
-          entry,
-        ),
-      );
+    // The one-per-face rule covers the face-bearing set only (the
+    // structural point set addresses world points, and several may share
+    // a plane legitimately).
+    if ("face" in condition) {
+      if (facesSeen.has(condition.face)) {
+        return fail(
+          simulationError(
+            SIMULATION_ERROR_CODES.conditionFaceDuplicate,
+            `More than one boundary condition addresses the "${condition.face}" face.`,
+            entry,
+          ),
+        );
+      }
+      facesSeen.add(condition.face);
     }
-    facesSeen.add(condition.face);
     conditions.push(condition);
   }
   return ok(Object.freeze(conditions));
@@ -2795,6 +3136,7 @@ export function buildSimScenarioBody(
   flow3d?: unknown,
   dynamics?: unknown,
   combustion?: unknown,
+  structural?: unknown,
 ): ParseResult<SimScenarioBody, SimulationError> {
   if (typeof name !== "string" || !isValidSimulationName(name)) {
     return fail(
@@ -2907,6 +3249,8 @@ export function buildSimScenarioBody(
   if (!parsedDynamics.ok) return parsedDynamics;
   const parsedCombustion = parseCombustionSpec(combustion, kind);
   if (!parsedCombustion.ok) return parsedCombustion;
+  const parsedStructural = parseStructuralSpec(structural, kind);
+  if (!parsedStructural.ok) return parsedStructural;
   // The engine mode carries no domain-face boundary conditions — the
   // 0D chamber's physics is its authored stance, the dynamics kind's
   // rule (the stove mode consumes the thermal set through the table).
@@ -2949,6 +3293,9 @@ export function buildSimScenarioBody(
       ...(parsedCombustion.value === undefined
         ? {}
         : { combustion: parsedCombustion.value }),
+      ...(parsedStructural.value === undefined
+        ? {}
+        : { structural: parsedStructural.value }),
       ...(parsedMotorId === undefined ? {} : { motorId: parsedMotorId }),
       ...(parsedBackend === undefined ? {} : { backend: parsedBackend }),
     }),
@@ -2973,6 +3320,7 @@ export interface SerializedSimScenarioBody {
   readonly flow3d?: SerializedSimScenarioFlow3dSpec;
   readonly dynamics?: SerializedSimScenarioDynamicsSpec;
   readonly combustion?: SerializedSimScenarioCombustionSpec;
+  readonly structural?: SerializedSimScenarioStructuralSpec;
   readonly motorId?: string;
   /** Present exactly when the preference is not the CPU default. */
   readonly backend?: Exclude<SimBackendPreference, "cpu">;
@@ -3153,6 +3501,39 @@ export function serializeSimScenarioBody(
       : {
           combustion: serializeSimScenarioCombustionSpec(scenario.combustion),
         }),
+    ...(scenario.structural === undefined
+      ? {}
+      : {
+          structural: {
+            selfWeight: scenario.structural.selfWeight,
+            ...(scenario.structural.centrifugal === undefined
+              ? {}
+              : {
+                  centrifugal: {
+                    axisPointMm: [
+                      ...scenario.structural.centrifugal.axisPointMm,
+                    ],
+                    axisDirection: [
+                      ...scenario.structural.centrifugal.axisDirection,
+                    ],
+                    rpmMode: scenario.structural.centrifugal.rpmMode,
+                    ...(scenario.structural.centrifugal.fixedRpm === undefined
+                      ? {}
+                      : {
+                          fixedRpm: scenario.structural.centrifugal.fixedRpm,
+                        }),
+                  },
+                }),
+            ...(scenario.structural.thermal === undefined
+              ? {}
+              : {
+                  thermal: {
+                    referenceTemperatureK:
+                      scenario.structural.thermal.referenceTemperatureK,
+                  },
+                }),
+          },
+        }),
     ...(scenario.motorId === undefined ? {} : { motorId: scenario.motorId }),
     ...(scenario.backend === undefined || scenario.backend === "cpu"
       ? {}
@@ -3193,6 +3574,7 @@ export function parseSimScenarioBody(
     input.flow3d,
     input.dynamics,
     input.combustion,
+    input.structural,
   );
 }
 

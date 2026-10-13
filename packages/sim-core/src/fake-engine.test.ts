@@ -153,7 +153,7 @@ describe("the deterministic reference", () => {
     ]);
   });
 
-  it("declines the reserved structural kind loudly", async () => {
+  it("declines a structural run the fake engine does not solve", async () => {
     const engine = createFakeSimEngine();
     const structural = {
       id: "sim_000003",
@@ -169,12 +169,12 @@ describe("the deterministic reference", () => {
       fluid: "air",
       materials: [],
     };
-    // The compile boundary declines it before any engine sees it — the
-    // Phase 69 carve; the engine's own gate is pinned the same way below.
+    // The compile boundary accepts the kind (Phase 69 is live: the
+    // structural solver exists behind the same contract); the FAKE
+    // engine's own kind gate still declines it — the contract's rule
+    // that an engine declares only the kinds it solves.
     const compiled = compileSimScenario({ scenario: structural });
-    expect(compiled.ok).toBe(false);
-    if (compiled.ok) return;
-    expect(compiled.error.code).toBe(SIM_ERROR_CODES.scenarioKindUnsupported);
+    expect(compiled.ok).toBe(true);
     const direct = await engine.run({
       compiled: {
         ...compiledOf(flowScenario()),

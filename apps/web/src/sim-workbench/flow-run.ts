@@ -29,6 +29,7 @@ import type {
   SimResultFieldBlock,
   SimResultRunRecord,
   SimResultStore,
+  SimStructuralChainInput,
   SimWorkerClient,
 } from "@slopcad/sim-core";
 import type { Tessellation } from "@slopcad/cad-kernel";
@@ -148,6 +149,14 @@ export interface FlowRunOptions {
    * branch's own `mechanism` seam.
    */
   readonly mechanism?: SimMechanismWire;
+  /**
+   * Phase 69 (the structural runs ride the same controller): the
+   * run-to-run chain inputs — a thermal run's temperature block (the
+   * hot-bracket ΔT source) and/or a fan run's found operating rpm —
+   * across the `sim.compile` wire verbatim, the structural branch's
+   * own seam, consumed only when the stance asks.
+   */
+  readonly structuralChain?: SimStructuralChainInput;
   /** The run persists against this document version id. */
   readonly documentVersionId: string;
   /** The law-S7 store the completed run persists through. */
@@ -219,6 +228,9 @@ export async function runFlowScenario(
         ...(options.mechanism === undefined
           ? {}
           : { mechanism: options.mechanism }),
+        ...(options.structuralChain === undefined
+          ? {}
+          : { structuralChain: options.structuralChain }),
       });
     } catch (error) {
       throw wireFailure(error);

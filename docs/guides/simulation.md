@@ -12,11 +12,10 @@ known-cases gallery closing the phase. Phase 65 added the **thermal
 domain**: FVM conduction with real materials and equilibrium
 boundaries, the conjugate buoyant coupling to the flow field, and the
 stove demo — a heated solid conducting through its wall and convecting
-to air, without fire. What does NOT exist yet: 3D flow and rotating
-machinery with motor operating points (66), mechanism dynamics (67),
-combustion (68), structural FEM (69 — the kind declines with
-`sim/scenario-kind-unsupported` today), and parametric optimization
-(70). The plan is `ROADMAP-SIM.md`; the decision record is
+to air, without fire. Phase 69 added the **structural domain**: coarse
+voxel FEM — fixtures and loads on the bracket, displacement/von Mises
+overlays, the factor of safety. What does NOT exist yet: parametric
+optimization (70). The plan is `ROADMAP-SIM.md`; the decision record is
 `docs/architecture/adr-simulation.md`.
 
 ## Scenarios are document records (law S1)
@@ -105,7 +104,8 @@ the interim fake-engine thermal route): the coupled conjugate march
 the scenario flags the coupling, the sealed conduction solve
 (`@slopcad/sim-thermal`'s engine, `thermal-fvm-cpu-reference`)
 otherwise — the split is exactly where the solvers live; `structural`
-is declined by no engine's kind list — the Phase 69 carve. A
+scenarios run the coarse voxel FEM engine (`@slopcad/sim-structural`,
+`structural-voxel-fem-cpu-reference`, Phase 69). A
 `gpu`-preferred flow scenario routes to the **WGSL compute provider**
 (Phase 64a) when the feature detect finds a WebGPU device, and falls
 back GRACEFULLY to the CPU oracle twin when it does not — never a
@@ -638,11 +638,85 @@ the time-first fire march (stove).
   comparative-trustworthy (trends against CR/φ/spark), not a
   calibrated engine simulator.
 
+## The bracket: coarse voxel FEM (Phase 69)
+
+A `structural` scenario rides S1 exactly as flow and thermal do — the
+reserved carve is retired, the kind compiles for real. The
+geometry-aware compile's STRUCTURAL branch voxelizes each referenced
+body's tessellation into the FULL-3D occupancy grid (one 8-node hex
+per occupied voxel node — the thermal cell-interpretation precedent on
+the 3D twin), resolves the per-node material map (the `youngsModulus`/
+`poissonRatio`/`yieldStrength`/`thermalExpansionPerK` fields Phase 69a
+added to `DocumentMaterialRecord`), and attaches the body-force stance
+in SI; the routed engine (`@slopcad/sim-structural`, behind the Phase
+61 contract) assembles and solves with the owned Jacobi-preconditioned
+CG, then persists displacement + von Mises as overlay blocks and
+**max deflection, von Mises max, and the factor of safety** as summary
+scalars — machine-readable, which is precisely what Phase 70 optimizes
+against.
+
+**Boundary conditions** are the fixture/load set, kind-locked to the
+structural scenario: `fixed-support` (a domain face), `axis-fix` (the
+symmetry roller — one displacement component per node on a face),
+`point-fix` (the nearest mesh node), `force-load` (a total force
+spread uniformly over a face's boundary nodes), `pressure-load` (the
+consistent traction on a face), and `point-load` (the shape-function
+load on the voxel hosting the point). Loads that would land on nothing
+decline loudly — a vanished load is a lie, never a silent zero. The
+selection UX rides honest axis/face/point selectors in the Formedible
+form (points as explicit mm triples against the demo body's authored
+geometry): the Phase 62 overlay family deliberately never enters the
+pick path, and no pickable plane/point widget precedent exists on the
+sim grid — stated selectors over a half-built picker.
+
+**The body-force family** rides the kind-locked `structural` stance:
+self-weight through the scenario's gravity vector (on/off), the
+centrifugal stance (ω²·r⊥ about an authored axis — a fixed authored
+rpm, or `fan-run` mode sourcing ω from a referenced Phase 66 fan run's
+FOUND operating point), and the thermal chain (a selected Phase 65
+run's temperature field as ΔT against an authored stress-free
+reference — "will the bracket warp when hot"). The chain selections
+are run-to-run: native selects over the persisted run list (the 63d
+comparison surface's precedent), consumed only when the stance asks —
+runs are store data, never document records.
+
+**Both demos are on `/workbench-sim`** (the demo-model selector's
+BRACKET entry — the cad-jsx L-bracket, its `thickness` and
+`wallHeight` real parameters the Phase 70 study will drive): the form's
+defaults are the bolted base + −y tip load; the self-weight and
+hot-bracket variants are one checkbox away, the overlay field toggle
+(viridis over the field's own range) switches displacement/von Mises,
+and a statics run exports its summary scalars as the name/value/unit
+CSV. The session stage s24j walks all of it; the render baseline pins
+the displacement paint under SwiftShader.
+
+**Honest scope** (stated, never hidden):
+
+- **Comparative positioning.** The results are stiffness-adjacent and
+  trustworthy comparatively — geometry A vs geometry B, one stance vs
+  another. Absolute stresses carry the coarse element-center recovery
+  band: the demo bracket's wall is two voxels thick at the 5 mm
+  resolution, and its measured von Mises sits at ~0.3× the
+  thin-cantilever twin while the deflection sits at ~0.6× (the 69a
+  published convergence tables state the band per resolution).
+- **Staircase bands.** The voxel staircase is law S3's standing
+  honesty: refine before believing a second digit, and read the
+  solver-discipline numbers (iterations, residual) the summary carries
+  beside every field.
+- **Linear-elastic statics only.** No buckling, no FSI, one-way load
+  application (§6 stands); the empty regime report is law S9's honest
+  structural claim.
+- **MFEM stays the raised path.** Coarse voxel FEM is the committed
+  default; tet/adaptive FEM through MFEM (BSD-3 wasm, behind the same
+  provider contract) remains declined by default — raising it re-opens
+  the roadmap, it does not patch this surface.
+
 ## What does not exist yet
 
-Honest inventory, per phase: structural FEM (69 —
-the kind declines with `sim/scenario-kind-unsupported` today), and
-parametric optimization (70). Combustion (68) landed with the gaps
+Honest inventory, per phase: parametric optimization (70) alone
+remains. Structural FEM (69) landed with the comparative bands its
+section above states (coarse element-center recovery, staircase
+geometry, no 3D picking on the sim grid). Combustion (68) landed with the gaps
 its section above states: the closed-cycle subset (gas exchange
 deferred, PMEP authored), one-way fire coupling, comparative-only
 knock, and the CH4/octane fuel set. 3D flow and rotating machinery (66)
@@ -665,7 +739,8 @@ authors the wind-tunnel scenario, proves the snapshot hash's key-order
 stability and edit sensitivity, compiles through the units/S9 boundary
 (Re = ρ·V·L/μ ≈ 3.19e5 at the air record's 300 K fits — flagged
 `turbulence-dominated`, Ma below the compressibility line), pins the
-structural decline, encodes and decodes the `SMR1` payload, and exports
+structural kind's live compile (the empty regime report — Phase 69),
+encodes and decodes the `SMR1` payload, and exports
 the `.vti` and CSV bytes. The suite runs it and asserts every one of
 those sentences.
 
@@ -685,6 +760,10 @@ geometry-aware compile into the full-3D grid, and the motor-driven run
 that FINDS its operating point inside the ladder, extracts the
 performance at it, reports the BPF arithmetic and the S9 fan Re line,
 carries the chart's history pair, and repeats deterministically.
+`packages/docs-examples/src/sim/structural.ts` is
+the Phase 69 bracket walk: the kind-locked stance decline, the dry run's
+scalar family with the FoS arithmetic, the hot-bracket thermal chain,
+the centrifugal stance, and the engine's determinism.
 `packages/docs-examples/src/cadjsx/sim-demo-body.tsx` is
 the `/workbench-sim` fixture's demo model — the plate-with-bore
 cad-jsx authoring the page voxelizes. Its Phase 66 sibling

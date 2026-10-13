@@ -298,7 +298,7 @@ async function runDynamicsEngine(
   if (!DYNAMICS_SUPPORTED_KINDS.includes(compiled.kind)) {
     return refuse(
       SIM_ERROR_CODES.scenarioKindUnsupported,
-      `The dynamics engine does not solve the "${compiled.kind}" scenario kind (it solves dynamics; structural is Phase 69's carve).`,
+      `The dynamics engine does not solve the "${compiled.kind}" scenario kind (it solves dynamics; structural is served by the structural engine through the routed default engine).`,
       compiled.kind,
     );
   }

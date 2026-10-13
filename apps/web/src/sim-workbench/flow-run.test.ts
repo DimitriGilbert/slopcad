@@ -32,6 +32,8 @@ import {
   LBM_PREVIEW_CHUNK_MAX_VALUES,
   createDefaultSimEngine,
 } from "@slopcad/sim-flow";
+import { createStructuralSimEngine } from "@slopcad/sim-structural";
+import type { SimEngine } from "@slopcad/sim-core";
 
 import { createSimApplicationLedger } from "../cad-workbench/sim-application-ledger";
 import { FlowRunFailure, type FlowRunPhase, runFlowScenario } from "./flow-run";
@@ -85,6 +87,116 @@ function bootChannel(): SimWorkerClient {
     createEngine: createDefaultSimEngine,
   });
   return createSimWorkerClient({ transport: pair.client });
+}
+
+/**
+ * Boots the in-process channel with the STRUCTURAL engine routed in
+ * front (the page's worker-entry routing restated — the kind router the
+ * production host serves).
+ */
+function bootStructuralChannel(): SimWorkerClient {
+  const pair = createSimInMemoryTransportPair();
+  void hostSimWorker({
+    transport: pair.server,
+    createEngine: (): SimEngine => {
+      const routed = createDefaultSimEngine();
+      const structural = createStructuralSimEngine();
+      return {
+        id: "test-routed-sim",
+        supportedKinds: [
+          ...new Set([...routed.supportedKinds, ...structural.supportedKinds]),
+        ],
+        backend: "cpu",
+        run: (request, onProgress, onFieldChunk) => {
+          if (structural.supportedKinds.includes(request.compiled.kind)) {
+            return structural.run(request, onProgress, onFieldChunk);
+          }
+          return routed.run(request, onProgress, onFieldChunk);
+        },
+      };
+    },
+  });
+  return createSimWorkerClient({ transport: pair.client });
+}
+
+/** The bracket demo's serialized scenario record (document wire form). */
+function structuralScenarioRecord(): Record<string, unknown> {
+  return {
+    id: "sim_000002",
+    name: "controller-bracket",
+    kind: "structural",
+    domain: {
+      kind: "explicit",
+      min: [-60, -40, 0],
+      max: [60, 40, 80],
+      resolutionMm: 5,
+    },
+    conditions: [
+      { kind: "fixed-support", face: "zMin" },
+      {
+        kind: "point-load",
+        atWorldPointMm: [0, -36, 80],
+        forceN: [0, -500, 0],
+      },
+    ],
+    fluid: "air",
+    materials: [
+      { bodyId: "body_bracket-base", materialId: "mat_steel" },
+      { bodyId: "body_bracket-wall", materialId: "mat_steel" },
+    ],
+    gravityMPerS2: [0, -9.80665, 0],
+    structural: { selfWeight: false },
+  };
+}
+
+/** The steel record + the two bodies' box tessellations (the wire form). */
+const STEEL_RECORD = {
+  id: "mat_steel",
+  name: "Steel S235",
+  densityGPerCm3: 7.85,
+  youngsModulusPa: 210e9,
+  poissonRatio: 0.3,
+  yieldStrengthPa: 250e6,
+  thermalExpansionPerK: 1.2e-5,
+} as const;
+
+/** An axis-aligned box's triangle soup, mm (the voxelizer's wire form). */
+function boxTessellation(
+  minMm: readonly [number, number, number],
+  maxMm: readonly [number, number, number],
+): { positions: number[]; indices: number[] } {
+  const [x0, y0, z0] = minMm;
+  const [x1, y1, z1] = maxMm;
+  const v: readonly (readonly [number, number, number])[] = [
+    [x0, y0, z0],
+    [x1, y0, z0],
+    [x1, y1, z0],
+    [x0, y1, z0],
+    [x0, y0, z1],
+    [x1, y0, z1],
+    [x1, y1, z1],
+    [x0, y1, z1],
+  ];
+  const quads: readonly (readonly [number, number, number, number])[] = [
+    [0, 3, 2, 1],
+    [4, 5, 6, 7],
+    [0, 1, 5, 4],
+    [1, 2, 6, 5],
+    [2, 3, 7, 6],
+    [3, 0, 4, 7],
+  ];
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (const [a, b, c, d] of quads) {
+    const base = positions.length / 3;
+    for (const index of [a, b, c, d]) {
+      const corner = v[index];
+      if (corner === undefined) continue;
+      positions.push(corner[0], corner[1], corner[2]);
+    }
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  return { positions, indices };
 }
 
 describe("runFlowScenario: compile, stream, finalize, persist", () => {
@@ -184,4 +296,149 @@ describe("runFlowScenario: compile, stream, finalize, persist", () => {
       expect(listed.value).toHaveLength(0);
     }
   });
+});
+
+describe("runFlowScenario: the structural run (Phase 69)", () => {
+  it(
+    "routes the bracket through the structural engine with its chain inputs and persists the scalars",
+    { timeout: 120_000 },
+    async () => {
+      const channel = bootStructuralChannel();
+      const storage = createInMemorySimResultStorage();
+      const store = createLocalSimResultStore({
+        storage,
+        now: () => new Date("2026-10-13T00:00:00Z"),
+      });
+      const ledger = createSimApplicationLedger();
+      const appliedBlocks: unknown[] = [];
+      const outcome = await runFlowScenario({
+        client: channel,
+        scenario: structuralScenarioRecord(),
+        materials: [STEEL_RECORD],
+        bodyTessellations: [
+          {
+            bodyId: "body_bracket-base",
+            tessellation: boxTessellation([-60, -40, 0], [60, 40, 8]),
+          },
+          {
+            bodyId: "body_bracket-wall",
+            tessellation: boxTessellation([-60, -40, 0], [60, -32, 80]),
+          },
+        ],
+        documentVersionId: "doc_controller_structural",
+        store,
+        ledger,
+        events: {
+          onApplied: ({ block }) => {
+            if (block !== null) appliedBlocks.push(block);
+          },
+        },
+      });
+      // Both preview rounds reassembled — von Mises first, the
+      // displacement block applied LAST (the deterministic overlay
+      // order the engine pins).
+      expect(appliedBlocks.length).toBe(2);
+      expect(appliedBlocks[0]).toMatchObject({ id: "von-mises", unit: "Pa" });
+      expect(appliedBlocks[1]).toMatchObject({
+        id: "displacement",
+        unit: "mm",
+      });
+      // The persisted summary carries the machine-readable scalar
+      // family Phase 70 optimizes against.
+      const names = outcome.result.summary.quantities.map(
+        (quantity) => quantity.name,
+      );
+      expect(names).toContain("max-deflection");
+      expect(names).toContain("von-mises-max");
+      expect(names).toContain("factor-of-safety");
+      expect(outcome.result.histories).toEqual([]);
+      // The store round-trip: the run lists and gets back identical
+      // bytes, keyed by the scenario-snapshot hash.
+      const listed = await store.list("doc_controller_structural");
+      expect(listed.ok).toBe(true);
+      if (listed.ok) {
+        expect(listed.value).toHaveLength(1);
+        expect(listed.value[0]?.scenarioSnapshotHash).toBe(
+          outcome.result.summary.scenarioSnapshotHash,
+        );
+      }
+
+      // The chain inputs cross the wire: a thermal-chained stance with
+      // a supplied temperature block compiles and solves hotter (the
+      // wire codec's structuralChain round-trip is the seam this pins).
+      const hotOutcome = await runFlowScenario({
+        client: channel,
+        scenario: {
+          ...structuralScenarioRecord(),
+          name: "controller-bracket-hot",
+          structural: {
+            selfWeight: false,
+            thermal: { referenceTemperatureK: 293.15 },
+          },
+        },
+        materials: [STEEL_RECORD],
+        bodyTessellations: [
+          {
+            bodyId: "body_bracket-base",
+            tessellation: boxTessellation([-60, -40, 0], [60, 40, 8]),
+          },
+          {
+            bodyId: "body_bracket-wall",
+            tessellation: boxTessellation([-60, -40, 0], [60, -32, 80]),
+          },
+        ],
+        structuralChain: {
+          thermal: {
+            field: {
+              originMm: [-60, -40, 0],
+              spacingMm: [5, 5, 5],
+              extent: [25, 17, 1],
+              values: new Array<number>(25 * 17).fill(393.15),
+            },
+          },
+        },
+        documentVersionId: "doc_controller_structural",
+        store,
+        ledger,
+      });
+      const quantityOf = (name: string): number | undefined =>
+        hotOutcome.result.summary.quantities.find(
+          (entry) => entry.name === name,
+        )?.value;
+      expect(quantityOf("von-mises-max")).toBeDefined();
+      const coldVonMises = outcome.result.summary.quantities.find(
+        (entry) => entry.name === "von-mises-max",
+      )?.value;
+      const hotVonMises = quantityOf("von-mises-max");
+      if (coldVonMises !== undefined && hotVonMises !== undefined) {
+        expect(hotVonMises).toBeGreaterThan(coldVonMises);
+      }
+
+      // The unchained stance with a supplied chain declines loudly
+      // through the wire (never a silently dropped input).
+      const strayChain = runFlowScenario({
+        client: channel,
+        scenario: structuralScenarioRecord(),
+        materials: [STEEL_RECORD],
+        bodyTessellations: [
+          {
+            bodyId: "body_bracket-base",
+            tessellation: boxTessellation([-60, -40, 0], [60, 40, 8]),
+          },
+          {
+            bodyId: "body_bracket-wall",
+            tessellation: boxTessellation([-60, -40, 0], [60, -32, 80]),
+          },
+        ],
+        structuralChain: { fanRpm: 3000 },
+        documentVersionId: "doc_controller_structural",
+        store,
+        ledger,
+      });
+      await expect(strayChain).rejects.toMatchObject({
+        name: "FlowRunFailure",
+        code: "sim/scenario-invalid",
+      });
+    },
+  );
 });

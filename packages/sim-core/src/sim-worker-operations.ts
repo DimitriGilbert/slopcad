@@ -65,6 +65,7 @@ import type {
   SimBodyBoundsMm,
   SimMechanismWire,
 } from "./units";
+import type { SimStructuralChainInput } from "./compile-geometry";
 import type { SimDomainFace } from "./vocabulary";
 import type { SimQualitativeFlag } from "./regime";
 
@@ -138,6 +139,13 @@ export interface WorkerSimCompileInput {
    * structural gate (the compile boundary re-validates).
    */
   readonly mechanism?: SimMechanismWire;
+  /**
+   * Phase 69: the structural branch's run-time chain inputs — a thermal
+   * run's temperature block and/or a fan run's found operating rpm,
+   * crossing after the structural gate for the structural compile
+   * branch's own re-validation (each consumed only when the stance asks).
+   */
+  readonly structuralChain?: SimStructuralChainInput;
 }
 
 /** Result of `sim.compile`: the minted problem id plus the compiled scenario. */
@@ -212,10 +220,14 @@ export interface SerializedSimBodyBounds {
   readonly maxMm: readonly [number, number, number];
 }
 
-/** The canonical wire form of a compiled boundary condition. */
+/**
+ * The canonical wire form of a compiled boundary condition. The face is
+ * absent on the structural point set (Phase 69), which carries the
+ * world application point in metres (SI, converted at the 61a door).
+ */
 export interface SerializedSimCondition {
   readonly kind: string;
-  readonly face: string;
+  readonly face?: string;
   readonly velocityMPerS?: readonly [number, number, number];
   readonly pressurePa?: number;
   readonly slip?: boolean;
@@ -225,6 +237,8 @@ export interface SerializedSimCondition {
   readonly ambientTemperatureK?: number;
   readonly emissivity?: number;
   readonly forceN?: readonly [number, number, number];
+  readonly axis?: string;
+  readonly atWorldPointM?: readonly [number, number, number];
 }
 
 /** The canonical wire form of a compiled scenario (pure SI, fixed keys). */
@@ -261,6 +275,17 @@ export interface SerializedSimWorkerOperationInputs {
       readonly joints: readonly unknown[];
       readonly masses: readonly unknown[];
       readonly grounded?: readonly string[];
+    };
+    readonly structuralChain?: {
+      readonly thermal?: {
+        readonly field: {
+          readonly originMm: readonly [number, number, number];
+          readonly spacingMm: readonly [number, number, number];
+          readonly extent: readonly [number, number, number];
+          readonly values: readonly number[];
+        };
+      };
+      readonly fanRpm?: number;
     };
   };
   readonly "sim.run": {
@@ -461,7 +486,132 @@ function serializeCompileInput(
               : { grounded: [...input.mechanism.grounded] }),
           },
         }),
+    ...(input.structuralChain === undefined
+      ? {}
+      : {
+          structuralChain: serializeStructuralChain(input.structuralChain),
+        }),
   };
+}
+
+/** Canonical wire form of the structural branch's chain inputs. */
+function serializeStructuralChain(
+  chain: SimStructuralChainInput,
+): SerializedSimWorkerOperationInputs["sim.compile"]["structuralChain"] {
+  return {
+    ...(chain.thermal === undefined
+      ? {}
+      : {
+          thermal: {
+            field: {
+              originMm: [...chain.thermal.field.originMm] as [
+                number,
+                number,
+                number,
+              ],
+              spacingMm: [...chain.thermal.field.spacingMm] as [
+                number,
+                number,
+                number,
+              ],
+              extent: [...chain.thermal.field.extent] as [
+                number,
+                number,
+                number,
+              ],
+              values: [...chain.thermal.field.values],
+            },
+          },
+        }),
+    ...(chain.fanRpm === undefined ? {} : { fanRpm: chain.fanRpm }),
+  };
+}
+
+/**
+ * Parses the structural branch's chain inputs (structure only — the
+ * compile door re-validates every consumed magnitude).
+ */
+function parseStructuralChain(
+  input: unknown,
+): ParseOutcome<SimStructuralChainInput | undefined> {
+  if (input === undefined || input === null) return parseOk(undefined);
+  const record = requirePayloadRecord("sim.compile", input);
+  if (!record.ok) return record;
+  let thermal: SimStructuralChainInput["thermal"];
+  if (record.value.thermal !== undefined && record.value.thermal !== null) {
+    const thermalRecord = requirePayloadRecord(
+      "sim.compile",
+      record.value.thermal,
+    );
+    if (!thermalRecord.ok) return thermalRecord;
+    const fieldRecord = requirePayloadRecord(
+      "sim.compile",
+      thermalRecord.value.field,
+    );
+    if (!fieldRecord.ok) return fieldRecord;
+    const originMm = finiteTriple(
+      fieldRecord.value.originMm,
+      "sim.compile",
+      "structuralChain.thermal.field.originMm",
+    );
+    if (!originMm.ok) return originMm;
+    const spacingMm = finiteTriple(
+      fieldRecord.value.spacingMm,
+      "sim.compile",
+      "structuralChain.thermal.field.spacingMm",
+    );
+    if (!spacingMm.ok) return spacingMm;
+    const extent = finiteTriple(
+      fieldRecord.value.extent,
+      "sim.compile",
+      "structuralChain.thermal.field.extent",
+    );
+    if (!extent.ok) return extent;
+    if (!extent.value.every((entry) => Number.isInteger(entry) && entry > 0)) {
+      return payloadError(
+        'The "sim.compile" field "structuralChain.thermal.field.extent" must be three positive integers.',
+        fieldRecord.value.extent,
+      );
+    }
+    if (!Array.isArray(fieldRecord.value.values)) {
+      return payloadError(
+        'The "sim.compile" field "structuralChain.thermal.field.values" must be an array of finite numbers.',
+        fieldRecord.value.values,
+      );
+    }
+    const values: number[] = [];
+    for (const value of fieldRecord.value.values) {
+      const parsed = requireFinite(
+        value,
+        "sim.compile",
+        "structuralChain.thermal.field.values",
+      );
+      if (!parsed.ok) return parsed;
+      values.push(parsed.value);
+    }
+    thermal = {
+      field: {
+        originMm: originMm.value,
+        spacingMm: spacingMm.value,
+        extent: extent.value,
+        values,
+      },
+    };
+  }
+  let fanRpm: number | undefined;
+  if (record.value.fanRpm !== undefined && record.value.fanRpm !== null) {
+    const parsed = requireFinite(
+      record.value.fanRpm,
+      "sim.compile",
+      "structuralChain.fanRpm",
+    );
+    if (!parsed.ok) return parsed;
+    fanRpm = parsed.value;
+  }
+  return parseOk({
+    ...(thermal === undefined ? {} : { thermal }),
+    ...(fanRpm === undefined ? {} : { fanRpm }),
+  });
 }
 
 function parseBodyBoundsEntry(input: unknown): ParseOutcome<SimBodyBoundsMm> {
@@ -614,6 +764,8 @@ function parseCompileInput(
       ...(groundedIds === undefined ? {} : { grounded: groundedIds }),
     };
   }
+  const chain = parseStructuralChain(record.value.structuralChain);
+  if (!chain.ok) return chain;
   return parseOk({
     scenario: record.value.scenario,
     ...(record.value.motor === undefined ? {} : { motor: record.value.motor }),
@@ -624,6 +776,7 @@ function parseCompileInput(
     ...(materials === undefined ? {} : { materials }),
     ...(bodyTessellations === undefined ? {} : { bodyTessellations }),
     ...(mechanism === undefined ? {} : { mechanism }),
+    ...(chain.value === undefined ? {} : { structuralChain: chain.value }),
   });
 }
 
@@ -638,7 +791,12 @@ const CONDITION_OPTIONAL_FIELDS = [
   "ambientTemperatureK",
   "emissivity",
   "forceN",
+  "axis",
+  "atWorldPointM",
 ] as const;
+
+/** The structural point set (Phase 69): conditions addressing world points. */
+const CONDITION_POINT_KINDS = ["point-fix", "point-load"] as const;
 
 /**
  * The condition's accumulation shape — every field typed, so the assembled
@@ -648,7 +806,7 @@ const CONDITION_OPTIONAL_FIELDS = [
  */
 interface SimConditionBuilder {
   kind: string;
-  face: SimDomainFace;
+  face?: SimDomainFace;
   velocityMPerS?: readonly [number, number, number];
   pressurePa?: number;
   slip?: boolean;
@@ -658,6 +816,8 @@ interface SimConditionBuilder {
   ambientTemperatureK?: number;
   emissivity?: number;
   forceN?: readonly [number, number, number];
+  axis?: "x" | "y" | "z";
+  atWorldPointM?: readonly [number, number, number];
 }
 
 function serializeCondition(
@@ -665,7 +825,7 @@ function serializeCondition(
 ): SerializedSimCondition {
   return {
     kind: condition.kind,
-    face: condition.face,
+    ...(condition.face === undefined ? {} : { face: condition.face }),
     ...(condition.velocityMPerS === undefined
       ? {}
       : {
@@ -702,6 +862,16 @@ function serializeCondition(
       : {
           forceN: [...condition.forceN] as [number, number, number],
         }),
+    ...(condition.axis === undefined ? {} : { axis: condition.axis }),
+    ...(condition.atWorldPointM === undefined
+      ? {}
+      : {
+          atWorldPointM: [...condition.atWorldPointM] as [
+            number,
+            number,
+            number,
+          ],
+        }),
   };
 }
 
@@ -716,19 +886,22 @@ function parseConditionEntry(
     "conditions.kind",
   );
   if (!kind.ok) return kind;
-  if (
-    typeof record.value.face !== "string" ||
-    !SIM_CORE_DOMAIN_FACES.includes(record.value.face as SimDomainFace)
-  ) {
-    return payloadError(
-      `The "sim.compile" field "conditions.face" must be one of: ${SIM_CORE_DOMAIN_FACES.join(", ")}.`,
-      record.value.face,
-    );
+  const isPointKind = CONDITION_POINT_KINDS.includes(
+    kind.value as (typeof CONDITION_POINT_KINDS)[number],
+  );
+  const output: SimConditionBuilder = { kind: kind.value };
+  if (!isPointKind) {
+    if (
+      typeof record.value.face !== "string" ||
+      !SIM_CORE_DOMAIN_FACES.includes(record.value.face as SimDomainFace)
+    ) {
+      return payloadError(
+        `The "sim.compile" field "conditions.face" must be one of: ${SIM_CORE_DOMAIN_FACES.join(", ")}.`,
+        record.value.face,
+      );
+    }
+    output.face = record.value.face as SimDomainFace;
   }
-  const output: SimConditionBuilder = {
-    kind: kind.value,
-    face: record.value.face as SimDomainFace,
-  };
   for (const field of CONDITION_OPTIONAL_FIELDS) {
     const value = record.value[field];
     if (value === undefined) continue;
@@ -742,10 +915,24 @@ function parseConditionEntry(
       output[field] = value;
       continue;
     }
-    if (field === "velocityMPerS" || field === "forceN") {
+    if (
+      field === "velocityMPerS" ||
+      field === "forceN" ||
+      field === "atWorldPointM"
+    ) {
       const triple = finiteTriple(value, "sim.compile", `conditions.${field}`);
       if (!triple.ok) return triple;
       output[field] = triple.value;
+      continue;
+    }
+    if (field === "axis") {
+      if (value !== "x" && value !== "y" && value !== "z") {
+        return payloadError(
+          'The "sim.compile" condition field "axis" must be "x", "y", or "z".',
+          value,
+        );
+      }
+      output[field] = value;
       continue;
     }
     const number = requireFinite(value, "sim.compile", `conditions.${field}`);

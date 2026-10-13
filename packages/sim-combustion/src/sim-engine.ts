@@ -900,7 +900,7 @@ async function runCombustionEngine(
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioKindUnsupported,
-        `The combustion engine does not solve the "${compiled.kind}" scenario kind (it solves combustion; structural is Phase 69's carve).`,
+        `The combustion engine does not solve the "${compiled.kind}" scenario kind (it solves combustion; structural is served by the structural engine through the routed default engine).`,
         compiled.kind,
       ),
     );

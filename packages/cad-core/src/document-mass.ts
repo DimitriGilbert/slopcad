@@ -56,6 +56,7 @@ export const MATERIAL_RECORD_ERROR_CODES = {
   nameInvalid: "analysis/material-name-invalid",
   densityInvalid: "analysis/material-density-invalid",
   thermalInvalid: "analysis/material-thermal-invalid",
+  structuralInvalid: "analysis/material-structural-invalid",
 } as const;
 
 export type MaterialRecordErrorCode =
@@ -100,6 +101,16 @@ export function parseMaterialId(raw: string): ParseResult<MaterialId> {
  * never fabricates a value. The geometry-kernel contract stays
  * analysis-free — these fields live here, at the consumer layer, and no
  * kernel ever sees them.
+ *
+ * Phase 69's structural extension is the same move once more: three
+ * optional linear-elastic fields — `youngsModulusPa`, `poissonRatio`,
+ * `yieldStrengthPa` — plus the thermal-chaining seam the structural
+ * expansion load needs, `thermalExpansionPerK` (1/K, any finite sign:
+ * shrinkage materials exist). A structural run consuming a record
+ * without its elasticity pair declines at the structural door; a record
+ * without a yield strength runs but reports no factor of safety; a
+ * thermal-expansion load against a record without a coefficient
+ * declines. The exact additive-fields honesty, again.
  */
 export interface DocumentMaterialRecord {
   readonly id: MaterialId;
@@ -112,6 +123,14 @@ export interface DocumentMaterialRecord {
   readonly specificHeatJPerKgK?: number;
   /** The hemispherical total emissivity, dimensionless, [0, 1]; absent = unknown. */
   readonly emissivity?: number;
+  /** Young's modulus, Pa; absent = unknown (the structural pair's first half). */
+  readonly youngsModulusPa?: number;
+  /** Poisson's ratio, dimensionless, strictly inside (−1, 0.5); absent = unknown. */
+  readonly poissonRatio?: number;
+  /** The tensile yield strength, Pa; absent = unknown (no factor-of-safety). */
+  readonly yieldStrengthPa?: number;
+  /** The coefficient of thermal expansion, 1/K; absent = unknown. */
+  readonly thermalExpansionPerK?: number;
 }
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
@@ -159,13 +178,47 @@ function parseThermalField(
 }
 
 /**
+ * Parses one optional structural field — finite and strictly inside
+ * (lower, upper) when present (Young's modulus and yield strength take
+ * (0, ∞); Poisson's ratio takes the isotropic-stability band (−1, 0.5)).
+ */
+function parseStructuralField(
+  input: unknown,
+  field: string,
+  lowerBound: number,
+  upperBound: number | undefined,
+): ParseResult<number | undefined, MaterialRecordError> {
+  if (input === undefined || input === null) return ok(undefined);
+  if (
+    typeof input !== "number" ||
+    !Number.isFinite(input) ||
+    input <= lowerBound ||
+    (upperBound !== undefined && input >= upperBound)
+  ) {
+    return fail(
+      materialRecordError(
+        MATERIAL_RECORD_ERROR_CODES.structuralInvalid,
+        upperBound === undefined
+          ? `A material record's ${field} must be a finite number > ${String(lowerBound)} when present.`
+          : `A material record's ${field} must be a finite number strictly inside (${String(lowerBound)}, ${String(upperBound)}) when present.`,
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
+
+/**
  * Validates and freezes untrusted input as a
  * {@link DocumentMaterialRecord} — the record's parse boundary (the
  * consumer layer's host owns record authoring; this is the shape contract
- * the thermal path relies on). The identity, name, and density follow the
- * mass aggregate's own rules; the additive thermal fields are strictly
- * optional, but a PRESENT one must be physically ordered: conductivity
- * and specific heat non-negative (finite and ≥ 0), emissivity in [0, 1].
+ * the thermal and structural paths rely on). The identity, name, and
+ * density follow the mass aggregate's own rules; the additive thermal
+ * and structural fields are strictly optional, but a PRESENT one must be
+ * physically ordered: conductivity and specific heat non-negative
+ * (finite and ≥ 0), emissivity in [0, 1], Young's modulus and yield
+ * strength positive finite, Poisson's ratio strictly inside (−1, 0.5),
+ * and the expansion coefficient finite (either sign).
  */
 export function parseDocumentMaterialRecord(
   input: unknown,
@@ -236,6 +289,46 @@ export function parseDocumentMaterialRecord(
   if (!specificHeatJPerKgK.ok) return specificHeatJPerKgK;
   const emissivity = parseThermalField(input.emissivity, "emissivity", 0, 1);
   if (!emissivity.ok) return emissivity;
+  const youngsModulusPa = parseStructuralField(
+    input.youngsModulusPa,
+    "Young's modulus (Pa)",
+    0,
+    undefined,
+  );
+  if (!youngsModulusPa.ok) return youngsModulusPa;
+  const poissonRatio = parseStructuralField(
+    input.poissonRatio,
+    "Poisson's ratio",
+    -1,
+    0.5,
+  );
+  if (!poissonRatio.ok) return poissonRatio;
+  const yieldStrengthPa = parseStructuralField(
+    input.yieldStrengthPa,
+    "yield strength (Pa)",
+    0,
+    undefined,
+  );
+  if (!yieldStrengthPa.ok) return yieldStrengthPa;
+  let thermalExpansionPerK: number | undefined;
+  if (
+    input.thermalExpansionPerK !== undefined &&
+    input.thermalExpansionPerK !== null
+  ) {
+    if (
+      typeof input.thermalExpansionPerK !== "number" ||
+      !Number.isFinite(input.thermalExpansionPerK)
+    ) {
+      return fail(
+        materialRecordError(
+          MATERIAL_RECORD_ERROR_CODES.structuralInvalid,
+          "A material record's thermal expansion coefficient (1/K) must be a finite number when present (either sign: shrinkage materials exist).",
+          input.thermalExpansionPerK,
+        ),
+      );
+    }
+    thermalExpansionPerK = input.thermalExpansionPerK;
+  }
   return ok(
     Object.freeze({
       id: parsedId.value,
@@ -250,6 +343,16 @@ export function parseDocumentMaterialRecord(
       ...(emissivity.value === undefined
         ? {}
         : { emissivity: emissivity.value }),
+      ...(youngsModulusPa.value === undefined
+        ? {}
+        : { youngsModulusPa: youngsModulusPa.value }),
+      ...(poissonRatio.value === undefined
+        ? {}
+        : { poissonRatio: poissonRatio.value }),
+      ...(yieldStrengthPa.value === undefined
+        ? {}
+        : { yieldStrengthPa: yieldStrengthPa.value }),
+      ...(thermalExpansionPerK === undefined ? {} : { thermalExpansionPerK }),
     }),
   );
 }

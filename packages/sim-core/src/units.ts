@@ -23,6 +23,7 @@ import type {
   CompiledSimCombustion,
   CompiledSimFlow3d,
   CompiledSimRunControls,
+  CompiledSimStructural,
   CompiledSimThermal,
 } from "./compile-geometry";
 import type { SimOccupancyGrid } from "./voxel-grid";
@@ -221,7 +222,8 @@ function parseDomain(input: unknown): SimParseResult<ParsedDomain, SimError> {
 /** A compiled boundary condition: the wire fields, magnitudes re-checked. */
 export interface CompiledSimCondition {
   readonly kind: string;
-  readonly face: SimDomainFace;
+  /** The addressed domain face; absent on the structural point set (Phase 69). */
+  readonly face?: SimDomainFace;
   /** The inlet velocity VECTOR in m/s (direction normalized × speed). */
   readonly velocityMPerS?: readonly [number, number, number];
   readonly pressurePa?: number;
@@ -232,6 +234,10 @@ export interface CompiledSimCondition {
   readonly ambientTemperatureK?: number;
   readonly emissivity?: number;
   readonly forceN?: readonly [number, number, number];
+  /** The axis-fix roller's single fixed component (the structural set). */
+  readonly axis?: "x" | "y" | "z";
+  /** The point set's world application point, m (authored mm, converted HERE). */
+  readonly atWorldPointM?: readonly [number, number, number];
 }
 
 function parseCondition(
@@ -247,16 +253,35 @@ function parseCondition(
     );
   }
   const faces = ["xMin", "xMax", "yMin", "yMax", "zMin", "zMax"];
-  if (typeof input.face !== "string" || !faces.includes(input.face)) {
+  if (typeof input.kind !== "string" || input.kind.length === 0) {
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioInvalid,
-        `A boundary condition's face must be one of: ${faces.join(", ")}.`,
-        input.face,
+        "A boundary condition must carry a non-empty kind.",
+        input.kind,
       ),
     );
   }
-  const face = input.face as SimDomainFace;
+  // The structural point set (Phase 69) addresses world points (authored
+  // document mm, converted to SI HERE — the one length-conversion site);
+  // every other kind addresses a domain face.
+  const pointKinds = ["point-fix", "point-load"] as const;
+  const isPointKind = pointKinds.includes(
+    input.kind as (typeof pointKinds)[number],
+  );
+  let face: SimDomainFace | undefined;
+  if (!isPointKind) {
+    if (typeof input.face !== "string" || !faces.includes(input.face)) {
+      return simFail(
+        simError(
+          SIM_ERROR_CODES.scenarioInvalid,
+          `A boundary condition's face must be one of: ${faces.join(", ")}.`,
+          input.face,
+        ),
+      );
+    }
+    face = input.face as SimDomainFace;
+  }
   const checkFinite = (
     value: unknown,
     what: string,
@@ -420,6 +445,52 @@ function parseCondition(
         kind: "pressure-load",
         face,
         pressurePa: pressurePa.value,
+      });
+    }
+    case "axis-fix": {
+      if (input.axis !== "x" && input.axis !== "y" && input.axis !== "z") {
+        return simFail(
+          simError(
+            SIM_ERROR_CODES.scenarioInvalid,
+            'An axis-fix\'s axis must be "x", "y", or "z" — the single component the roller fixes.',
+            input.axis,
+          ),
+        );
+      }
+      return simOk({ kind: "axis-fix", face, axis: input.axis });
+    }
+    case "point-fix": {
+      const atWorldPointMm = finiteTriple(
+        input.atWorldPointMm,
+        "A point-fix's application point",
+      );
+      if (!atWorldPointMm.ok) return atWorldPointMm;
+      // The S4 conversion: authored document millimetres → metres, HERE.
+      return simOk({
+        kind: "point-fix",
+        atWorldPointM: [
+          atWorldPointMm.value[0] / MM_PER_M,
+          atWorldPointMm.value[1] / MM_PER_M,
+          atWorldPointMm.value[2] / MM_PER_M,
+        ],
+      });
+    }
+    case "point-load": {
+      const atWorldPointMm = finiteTriple(
+        input.atWorldPointMm,
+        "A point-load's application point",
+      );
+      if (!atWorldPointMm.ok) return atWorldPointMm;
+      const forceN = finiteTriple(input.forceN, "A point-load's force");
+      if (!forceN.ok) return forceN;
+      return simOk({
+        kind: "point-load",
+        atWorldPointM: [
+          atWorldPointMm.value[0] / MM_PER_M,
+          atWorldPointMm.value[1] / MM_PER_M,
+          atWorldPointMm.value[2] / MM_PER_M,
+        ],
+        forceN: forceN.value,
       });
     }
     default:
@@ -745,7 +816,8 @@ export interface CompiledSimScenario {
   /**
    * The FULL-3D occupancy twin (Phase 66c): the voxelized geometry of a
    * flow scenario carrying a 3D stance — the D3Q19 kernel's native
-   * input, worker-side-only exactly like {@link occupancySlice}.
+   * input — and of every structural scenario (Phase 69's FEM grid),
+   * worker-side-only exactly like {@link occupancySlice}.
    */
   readonly occupancy3d?: SimOccupancyGrid;
   /**
@@ -794,6 +866,15 @@ export interface CompiledSimScenario {
    * worker-side by the combustion engine, never part of the wire form.
    */
   readonly combustion?: CompiledSimCombustion;
+  /**
+   * The structural compile products (Phase 69): the re-validated
+   * body-force stance in SI (the centrifugal rate resolved, the thermal
+   * chain sampled to a per-node ΔT field) plus the per-node material map
+   * over {@link occupancy3d}'s FULL-3D grid. Attached by the
+   * geometry-aware compile for structural scenarios; consumed worker-side
+   * by the structural engine, never part of the wire form.
+   */
+  readonly structural?: CompiledSimStructural;
 }
 
 /**
@@ -802,8 +883,8 @@ export interface CompiledSimScenario {
  * body bounds), evaluates the fluid at its reference temperature,
  * converts the motor's authored datasheet units to SI (the ONLY site),
  * computes the S9 regime numbers, and stamps the scenario-snapshot hash.
- * The `structural` kind declines with `sim/scenario-kind-unsupported` —
- * the Phase 69 carve: the vocabulary exists, the solver does not yet.
+ * The `structural` kind compiles like every other (Phase 69 is live: its
+ * geometry and body-force products attach at the geometry-aware door).
  */
 export function compileSimScenario(
   input: SimCompileInput,
@@ -833,15 +914,6 @@ export function compileSimScenario(
         SIM_ERROR_CODES.scenarioInvalid,
         `A scenario kind must be one of: ${SIM_CORE_SCENARIO_KINDS.join(", ")}.`,
         scenario.kind,
-      ),
-    );
-  }
-  if (scenario.kind === "structural") {
-    return simFail(
-      simError(
-        SIM_ERROR_CODES.scenarioKindUnsupported,
-        'The "structural" scenario kind is a reserved record vocabulary (Phase 69); no solver exists for it yet, and this boundary declines loudly instead of fabricating a result.',
-        scenario,
       ),
     );
   }
@@ -1105,18 +1177,20 @@ export function compileSimScenario(
       deltaTemperatureK = Math.max(deltaTemperatureK ?? 0, magnitude);
     }
   }
-  // Law S9 for mechanism dynamics: NONE of the flow/thermal
-  // dimensionless gates (Re, Ma, Pr, Ra) applies — the run's validity
-  // gates are the integration budget and the loop-closure tolerance,
-  // which the result states on its own. The compile computes NOTHING
-  // here rather than carrying an inapplicable number forward: an empty
-  // regime report is the honest dynamics claim. The combustion kind's
+  // Law S9 for mechanism dynamics and linear-elastic statics: NONE of the
+  // flow/thermal dimensionless gates (Re, Ma, Pr, Ra) applies — a
+  // dynamics run's validity gates are the integration budget and the
+  // loop-closure tolerance, a structural run's the solver discipline's
+  // residual and iteration count, each stated on its own result. The
+  // compile computes NOTHING here rather than carrying an inapplicable
+  // number forward: an empty regime report is the honest claim. The
+  // combustion kind's
   // claim is the same shape plus the fluid's Prandtl (the stove mode's
   // conduction solve convects to the scenario's fluid; the engine mode
   // has no flow domain at all, and its honesty fields are the chemistry
   // fit bands the 68b result carries).
   const regime =
-    kind === "dynamics"
+    kind === "dynamics" || kind === "structural"
       ? simRegimeReport({})
       : simRegimeReport({
           ...(speedMPerS === undefined

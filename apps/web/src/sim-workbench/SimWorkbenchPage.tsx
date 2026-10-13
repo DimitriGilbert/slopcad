@@ -2,8 +2,9 @@
  * The `/workbench-sim` fixture page (ROADMAP-SIM Phase 62c, extended
  * 63c — the flow ENGINE + PRODUCT SURFACE —, 63d — the run
  * COMPARISON SURFACE —, 65c — the THERMAL ENGINE + the STOVE DEMO —,
- * 66c — the FAN DEMO —, and 67c — the DYNAMICS ENGINE + the
- * SLIDER-CRANK DEMO).
+ * 66c — the FAN DEMO —, 67c — the DYNAMICS ENGINE + the
+ * SLIDER-CRANK DEMO —, and 69 — the STRUCTURAL ENGINE + the
+ * BRACKET DEMO).
  *
  * ## Phase 62 (unchanged): "here is your part as a grid"
  *
@@ -130,6 +131,7 @@ import {
 import type { SimResultFieldBlock } from "@slopcad/sim-core";
 import type { SimResultRunRecord } from "@slopcad/sim-core";
 import type { SimResultStore } from "@slopcad/sim-core";
+import type { SimStructuralChainInput } from "@slopcad/sim-core";
 import type { SimResult } from "@slopcad/sim-core";
 import type { BootedSimWorkerChannel } from "@slopcad/sim-core";
 import type { DecodedFieldGrid } from "@slopcad/cad-r3f";
@@ -171,6 +173,9 @@ import { fanChartOf, FanChartPanel } from "./fan-chart";
 import { fanDemoDocument } from "./fan-demo";
 import { ThermalScenarioForm } from "./thermal-scenario-form";
 import { thermalMaterialPresetOf } from "./thermal-materials";
+import { StructuralScenarioForm } from "./structural-scenario-form";
+import { structuralMaterialPresetOf } from "./structural-materials";
+import { bracketDemoDocument } from "./bracket-demo";
 import { CombustionStoveForm } from "./combustion-stove-form";
 import { CombustionEngineForm } from "./combustion-engine-form";
 import { engineChartOf, EngineChartPanel } from "./engine-chart";
@@ -201,6 +206,7 @@ import {
   exportSimResultCombustionCsvs,
   exportSimResultForceHistoryCsv,
   exportSimResultJointHistoryCsv,
+  exportSimResultSummaryCsv,
   exportSimResultVtiSeries,
   type SimExportFile,
 } from "./sim-exports";
@@ -252,6 +258,27 @@ const SLIDER_DEMO_BODIES = documentSceneBodies(
 );
 const SLIDER_DEMO_RENDERABLE = renderableBodyIds(SLIDER_DEMO_DOCUMENT);
 /**
+ * The bracket demo's own document (computed once, pure — the plate
+ * demo's discipline): the cad-jsx L-bracket's two bodies (the base
+ * plate and the upright wall), the substrate the structural form's
+ * defaults load.
+ */
+const BRACKET_DEMO_DOCUMENT = bracketDemoDocument();
+const BRACKET_DEMO_BODIES = documentSceneBodies(
+  BRACKET_DEMO_DOCUMENT,
+  new Set(),
+  null,
+);
+const BRACKET_DEMO_RENDERABLE = renderableBodyIds(BRACKET_DEMO_DOCUMENT);
+/**
+ * The bracket demo's scenario body ids, in document order — the two
+ * bodies the form's material assignments address (branded ids, the
+ * thermal form's DEMO_BODY discipline).
+ */
+const BRACKET_BODY_IDS = BRACKET_DEMO_DOCUMENT.bodies
+  .filter((body) => BRACKET_DEMO_RENDERABLE.has(body.id as string))
+  .map((body) => body.id);
+/**
  * The demo-model selector's vocabulary (fixture data, the plate boot).
  * The FIRE and ENGINE models (Phase 68c) render the PLATE document —
  * the 65 stove body — the fire demo voxelizes it (the 65-family
@@ -264,6 +291,7 @@ const DEMO_MODELS = [
   { id: "slider", label: "Slider-crank mechanism (dynamics, Phase 67)" },
   { id: "fire", label: "Stove with fire (combustion, Phase 68)" },
   { id: "engine", label: "Otto engine cycle (combustion, Phase 68)" },
+  { id: "bracket", label: "L-bracket (structural, Phase 69)" },
 ] as const;
 
 /** The demo-model selector's id vocabulary. */
@@ -300,19 +328,26 @@ interface LiveFieldOverlay {
   readonly valueRange: readonly [number, number];
 }
 
+/** The fields painting over their OWN range (no authored band exists). */
+const OWN_RANGE_FIELD_IDS = new Set([
+  "temperature",
+  "displacement",
+  "von-mises",
+]);
+
 /**
  * Derives the live overlay from a reassembled preview block: the
- * temperature block paints the cool–warm colormap over its OWN range
- * (a data-derived window — deterministic because the block is); the
- * speed block keeps the viridis colormap over the inlet band (the
- * original 63c paint).
+ * temperature, displacement, and von Mises blocks paint their colormap
+ * over their OWN range (a data-derived window — deterministic because
+ * the block is); the speed block keeps the viridis colormap over the
+ * inlet band (the original 63c paint).
  */
 function liveOverlayOf(block: SimResultFieldBlock): LiveFieldOverlay {
   const decoded = decodedFieldGrid(block);
-  const isTemperature = block.id === "temperature";
+  const ownRange = OWN_RANGE_FIELD_IDS.has(block.id);
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
-  if (isTemperature) {
+  if (ownRange) {
     for (const value of block.values) {
       if (value < min) min = value;
       if (value > max) max = value;
@@ -410,6 +445,16 @@ export function SimWorkbenchPage(): ReactElement {
     null,
   );
   const [compareError, setCompareError] = useState("");
+  // --- Phase 69 state (the structural chain selections + overlay field) --
+  // The run-to-run chain inputs: persisted-run selects, not form fields
+  // (runs are store data — the 63d comparison surface's precedent).
+  const [thermalChainRun, setThermalChainRun] = useState("");
+  const [fanChainRun, setFanChainRun] = useState("");
+  // Which structural field the viewport paints (fixture data — a radio
+  // over the completed result's own two blocks).
+  const [structuralField, setStructuralField] = useState<
+    "displacement" | "von-mises"
+  >("displacement");
   const channelRef = useRef<BootedSimWorkerChannel | null>(null);
   // The store-boot promise: a run awaits it, so a fast click after load
   // never races the IndexedDB open (it declines only on a real failure).
@@ -439,12 +484,16 @@ export function SimWorkbenchPage(): ReactElement {
         ? FAN_DEMO_BODIES
         : demoModel === "slider"
           ? SLIDER_DEMO_BODIES
-          : DEMO_BODIES,
+          : demoModel === "bracket"
+            ? BRACKET_DEMO_BODIES
+            : DEMO_BODIES,
       demoModel === "fan"
         ? FAN_DEMO_RENDERABLE
         : demoModel === "slider"
           ? SLIDER_DEMO_RENDERABLE
-          : DEMO_RENDERABLE,
+          : demoModel === "bracket"
+            ? BRACKET_DEMO_RENDERABLE
+            : DEMO_RENDERABLE,
     );
     return () => {
       session.dispose();
@@ -542,7 +591,9 @@ export function SimWorkbenchPage(): ReactElement {
         ? FAN_DEMO_DOCUMENT
         : model === "slider"
           ? SLIDER_DEMO_DOCUMENT
-          : DEMO_DOCUMENT,
+          : model === "bracket"
+            ? BRACKET_DEMO_DOCUMENT
+            : DEMO_DOCUMENT,
     );
     setSelectedScenario(null);
     setOverlay(null);
@@ -552,6 +603,9 @@ export function SimWorkbenchPage(): ReactElement {
     setEngineChart(null);
     setMechanismMotion(null);
     setGridState("");
+    setThermalChainRun("");
+    setFanChainRun("");
+    setStructuralField("displacement");
   };
 
   /** Saves a scenario record into the document's simulations section. */
@@ -623,6 +677,14 @@ export function SimWorkbenchPage(): ReactElement {
     const isCombustionStove =
       selectedScenario.kind === "combustion" &&
       selectedScenario.combustion?.mode === "stove";
+    // Phase 69: a structural scenario's compile carries the thermal
+    // branch's own pair (the per-body tessellations plus the STRUCTURAL
+    // material records) plus the run-to-run chain inputs the stance
+    // asks for — the selected thermal run's temperature field and/or
+    // the selected fan run's found operating rpm, read through the
+    // law-S7 store at launch (runs are store data, never document
+    // records).
+    const isStructural = selectedScenario.kind === "structural";
     const bodies = settled.state.measurement.bodies;
     // Phase 66c: a flow3d scenario's motor selection rides the compile
     // wire (the serialized record of the working document's motors
@@ -639,10 +701,12 @@ export function SimWorkbenchPage(): ReactElement {
       );
       return;
     }
-    const materialsWithMaps = isThermal || isCombustionStove;
+    const materialsWithMaps = isThermal || isCombustionStove || isStructural;
     const materials = materialsWithMaps
-      ? selectedScenario.materials.map(
-          (assignment) => thermalMaterialPresetOf(assignment.materialId).record,
+      ? selectedScenario.materials.map((assignment) =>
+          isStructural
+            ? structuralMaterialPresetOf(assignment.materialId).record
+            : thermalMaterialPresetOf(assignment.materialId).record,
         )
       : undefined;
     const bodyTessellations = materialsWithMaps
@@ -657,6 +721,86 @@ export function SimWorkbenchPage(): ReactElement {
     const mechanism = isDynamics
       ? sliderCrankMechanismWire(workingDocument)
       : undefined;
+    let structuralChain: SimStructuralChainInput | undefined;
+    if (isStructural) {
+      const stance = selectedScenario.structural;
+      if (stance === undefined) {
+        setSimError(
+          "simulation/structural-spec-invalid: The scenario carries no structural stance — re-save it from the form.",
+        );
+        setRunStatus("failed");
+        return;
+      }
+      let thermal: SimStructuralChainInput["thermal"];
+      if (stance.thermal !== undefined) {
+        if (thermalChainRun === "") {
+          setSimError(
+            "sim/chain-run-missing: The stance chains a thermal run — pick which persisted run's temperature field feeds ΔT.",
+          );
+          setRunStatus("failed");
+          return;
+        }
+        const fetched = await store.get(thermalChainRun);
+        if (!fetched.ok || fetched.value === null) {
+          setSimError(
+            "sim/chain-run-not-found: The selected thermal run is no longer in the store.",
+          );
+          setRunStatus("failed");
+          return;
+        }
+        const block = fetched.value.result.fields.find(
+          (field) => field.id === "temperature",
+        );
+        if (block === undefined) {
+          setSimError(
+            "sim/chain-run-not-thermal: The selected run carries no temperature field — pick a thermal run.",
+          );
+          setRunStatus("failed");
+          return;
+        }
+        thermal = {
+          field: {
+            originMm: [...block.originMm] as [number, number, number],
+            spacingMm: [...block.spacingMm] as [number, number, number],
+            extent: [...block.extent] as [number, number, number],
+            values: [...block.values],
+          },
+        };
+      }
+      let fanRpm: number | undefined;
+      if (stance.centrifugal?.rpmMode === "fan-run") {
+        if (fanChainRun === "") {
+          setSimError(
+            "sim/chain-run-missing: The stance rides a fan run's operating point — pick which persisted fan run solves the shaft rate.",
+          );
+          setRunStatus("failed");
+          return;
+        }
+        const fetched = await store.get(fanChainRun);
+        if (!fetched.ok || fetched.value === null) {
+          setSimError(
+            "sim/chain-run-not-found: The selected fan run is no longer in the store.",
+          );
+          setRunStatus("failed");
+          return;
+        }
+        const rpm = fetched.value.result.summary.quantities.find(
+          (quantity) => quantity.name === "operating-rpm",
+        );
+        if (rpm === undefined) {
+          setSimError(
+            "sim/chain-run-not-fan: The selected run reports no operating point — pick a motor-driven fan run.",
+          );
+          setRunStatus("failed");
+          return;
+        }
+        fanRpm = rpm.value;
+      }
+      structuralChain = {
+        ...(thermal === undefined ? {} : { thermal }),
+        ...(fanRpm === undefined ? {} : { fanRpm }),
+      };
+    }
     setRunStatus("compiling");
     try {
       const outcome: FlowRunOutcome = await runFlowScenario({
@@ -669,6 +813,7 @@ export function SimWorkbenchPage(): ReactElement {
           ? {}
           : { motor: serializeDocumentMotor(motorRecord) }),
         ...(mechanism === undefined ? {} : { mechanism }),
+        ...(structuralChain === undefined ? {} : { structuralChain }),
         documentVersionId: DOCUMENT_VERSION_ID,
         store,
         ledger: simLedger,
@@ -718,6 +863,21 @@ export function SimWorkbenchPage(): ReactElement {
     if (combustionFiles.length > 0) {
       downloadSimExportFiles(combustionFiles);
       setExportedCsv((count) => count + combustionFiles.length);
+      return;
+    }
+    // A statics run (Phase 69) has no time axis — its histories are
+    // empty and its value IS the summary scalar family, so the export
+    // writes the name/value/unit table instead.
+    if (lastResult.histories.length === 0) {
+      const summaryCsv = exportSimResultSummaryCsv(lastResult);
+      if (summaryCsv === null) return;
+      downloadSimExportFiles([
+        {
+          filename: `${lastResult.summary.scenarioSnapshotHash}-summary.csv`,
+          text: summaryCsv,
+        },
+      ]);
+      setExportedCsv((count) => count + 1);
       return;
     }
     const dynamicsCsv = exportSimResultJointHistoryCsv(lastResult);
@@ -819,6 +979,26 @@ export function SimWorkbenchPage(): ReactElement {
     setCompareStatus("ready");
   };
 
+  /** Reads one summary quantity off the last completed result. */
+  const quantityOf = (name: string): number | undefined =>
+    lastResult?.summary.quantities.find((entry) => entry.name === name)?.value;
+
+  /**
+   * Switches which structural field the viewport paints (fixture data:
+   * a radio over the completed result's own two blocks, re-derived
+   * through the same overlay path the applied round painted).
+   */
+  const onSelectStructuralField = (
+    fieldId: "displacement" | "von-mises",
+  ): void => {
+    if (lastResult === null) return;
+    const block = lastResult.fields.find((field) => field.id === fieldId);
+    if (block === undefined) return;
+    setStructuralField(fieldId);
+    setLiveOverlay(liveOverlayOf(block));
+    setOverlayMode("live");
+  };
+
   const lastHash = runs.length > 0 ? runs[runs.length - 1] : undefined;
 
   return (
@@ -877,6 +1057,27 @@ export function SimWorkbenchPage(): ReactElement {
             : String(engineChart.torque.knockBoundary)
       }
       data-sim-motion={mechanismMotion === null ? "" : "ready"}
+      data-sim-structural-field={
+        lastResult !== null &&
+        lastResult.fields.some((field) => field.id === "displacement")
+          ? structuralField
+          : ""
+      }
+      data-sim-structural-fos={
+        quantityOf("factor-of-safety") === undefined
+          ? ""
+          : (quantityOf("factor-of-safety") as number).toFixed(4)
+      }
+      data-sim-structural-deflection-mm={
+        quantityOf("max-deflection") === undefined
+          ? ""
+          : (quantityOf("max-deflection") as number).toExponential(4)
+      }
+      data-sim-structural-vonmises-mpa={
+        quantityOf("von-mises-max") === undefined
+          ? ""
+          : ((quantityOf("von-mises-max") as number) / 1e6).toFixed(4)
+      }
       data-sim-fan-op-rpm={
         fanChart === null ? "" : fanChart.headline.operatingRpm.toFixed(3)
       }
@@ -1090,7 +1291,8 @@ export function SimWorkbenchPage(): ReactElement {
             <legend className="font-medium">Flow scenario (Phase 63)</legend>
             {demoModel === "slider" ||
             demoModel === "fire" ||
-            demoModel === "engine" ? null : (
+            demoModel === "engine" ||
+            demoModel === "bracket" ? null : (
               <FlowScenarioForm onSubmitScenario={onSaveScenario} />
             )}
             {demoModel === "fan" ? (
@@ -1141,6 +1343,76 @@ export function SimWorkbenchPage(): ReactElement {
                   Engine scenario — the 0D Otto cycle (Phase 68)
                 </legend>
                 <CombustionEngineForm onSubmitScenario={onSaveScenario} />
+              </fieldset>
+            ) : demoModel === "bracket" ? (
+              <fieldset className="space-y-2 border-t pt-2">
+                <legend className="font-medium">
+                  Structural scenario — the bracket (Phase 69)
+                </legend>
+                <StructuralScenarioForm
+                  bodyIds={BRACKET_BODY_IDS}
+                  onSubmitScenario={onSaveScenario}
+                />
+                <div className="space-y-1 border-t pt-2">
+                  <p className="text-xs text-muted-foreground">
+                    Run-to-run chains (persisted runs, not document records) —
+                    consumed only when the stance asks.
+                  </p>
+                  <label
+                    className="block space-y-1"
+                    htmlFor="workbench-sim-thermal-chain"
+                  >
+                    <span>Thermal run (the ΔT source)</span>
+                    <select
+                      id="workbench-sim-thermal-chain"
+                      className="w-full border px-1 py-0.5 font-mono text-xs"
+                      value={thermalChainRun}
+                      onChange={(event) => {
+                        setThermalChainRun(event.target.value);
+                      }}
+                    >
+                      <option value="">— pick a thermal run —</option>
+                      {runs
+                        .filter((run) =>
+                          run.summary.quantities.some(
+                            (quantity) => quantity.name === "max-temperature",
+                          ),
+                        )
+                        .map((run) => (
+                          <option key={run.id} value={run.id}>
+                            {run.id} {run.scenarioSnapshotHash}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label
+                    className="block space-y-1"
+                    htmlFor="workbench-sim-fan-chain"
+                  >
+                    <span>Fan run (the operating-rpm source)</span>
+                    <select
+                      id="workbench-sim-fan-chain"
+                      className="w-full border px-1 py-0.5 font-mono text-xs"
+                      value={fanChainRun}
+                      onChange={(event) => {
+                        setFanChainRun(event.target.value);
+                      }}
+                    >
+                      <option value="">— pick a fan run —</option>
+                      {runs
+                        .filter((run) =>
+                          run.summary.quantities.some(
+                            (quantity) => quantity.name === "operating-rpm",
+                          ),
+                        )
+                        .map((run) => (
+                          <option key={run.id} value={run.id}>
+                            {run.id} {run.scenarioSnapshotHash}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
               </fieldset>
             ) : (
               <fieldset className="space-y-2 border-t pt-2">
@@ -1199,6 +1471,48 @@ export function SimWorkbenchPage(): ReactElement {
               >
                 Export force-history CSV
               </button>
+              {lastResult !== null &&
+              lastResult.fields.some((field) => field.id === "displacement") ? (
+                <fieldset className="space-y-1 border-t pt-2">
+                  <legend className="font-medium">Structural field</legend>
+                  {(["displacement", "von-mises"] as const).map((fieldId) => (
+                    <label
+                      key={fieldId}
+                      className="block"
+                      htmlFor={`sim-structural-field-${fieldId}`}
+                    >
+                      <input
+                        id={`sim-structural-field-${fieldId}`}
+                        className="mr-1"
+                        type="radio"
+                        name="sim-structural-field"
+                        value={fieldId}
+                        checked={structuralField === fieldId}
+                        onChange={() => {
+                          onSelectStructuralField(fieldId);
+                        }}
+                      />
+                      {fieldId}
+                    </label>
+                  ))}
+                  <p className="font-mono text-[10px]">
+                    FoS{" "}
+                    {quantityOf("factor-of-safety") === undefined
+                      ? "—"
+                      : (quantityOf("factor-of-safety") as number).toFixed(
+                          3,
+                        )}{" "}
+                    · max deflection{" "}
+                    {quantityOf("max-deflection") === undefined
+                      ? "—"
+                      : `${(quantityOf("max-deflection") as number).toFixed(4)} mm`}{" "}
+                    · von Mises{" "}
+                    {quantityOf("von-mises-max") === undefined
+                      ? "—"
+                      : `${((quantityOf("von-mises-max") as number) / 1e6).toFixed(3)} MPa`}
+                  </p>
+                </fieldset>
+              ) : null}
             </div>
           </fieldset>
           <div className="space-y-1 text-sm">

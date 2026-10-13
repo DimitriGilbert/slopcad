@@ -89,10 +89,12 @@ export {
   type CompiledSimFlow3d,
   type CompiledSimFlow3dRotation,
   type CompiledSimRunControls,
+  type CompiledSimStructural,
   type CompiledSimThermal,
   type CompiledSimThermalMaterial,
   type GeometrySimCompileInput,
   type SimBodyTessellation,
+  type SimStructuralChainInput,
   SIM_FLOW_DEFAULT_STEP_BUDGET,
   compileSimScenarioWithGeometry,
 } from "./compile-geometry";

@@ -48,6 +48,7 @@ import {
 import { runSimSpineExample } from "./sim/spine";
 import { runSimThermalExample } from "./sim/thermal";
 import { runSimFanExample } from "./sim/fan";
+import { runSimStructuralExample } from "./sim/structural";
 import { runSimCombustionExample } from "./sim/combustion";
 import { runSimVoxelExample } from "./sim/voxel";
 import { runSimDemoBodyExample } from "./cadjsx/sim-demo-body";
@@ -448,9 +449,9 @@ describe("guide example: simulation spine (Phase 61)", () => {
     // Re ≈ 3.19e5 crosses the 4000 turbulence threshold; Ma ≈ 0.029
     // stays under the 0.3 compressibility line — one honest flag.
     expect(summary.qualitative).toEqual(["turbulence-dominated"]);
-    // The Phase 69 carve: the structural vocabulary exists, the solver
-    // does not, and the boundary declines loudly.
-    expect(summary.structuralDeclineCode).toBe("sim/scenario-kind-unsupported");
+    // Phase 69 flipped the carve live: the structural kind compiles like
+    // every other, its law-S9 claim the empty regime report.
+    expect(summary.structuralRegimeEmpty).toBe(true);
     // S7: the SMR1 payload decodes back to the authored block, and both
     // deterministic exports carry their bytes.
     expect(summary.payloadBytes).toBeGreaterThan(0);
@@ -670,4 +671,40 @@ describe("guide example: the premixed Otto engine (Phase 68)", () => {
     // Determinism (law S2).
     expect(summary.deterministic).toBe(true);
   }, 300_000);
+});
+
+describe("guide example: the bracket (Phase 69 — coarse voxel FEM)", () => {
+  it(
+    "holds the load, reports the FoS family, and chains hot and spun variants",
+    { timeout: 120_000 },
+    async () => {
+      const summary = await runSimStructuralExample();
+      // The kind-lock: a structural record without its stance declines
+      // at the document boundary.
+      expect(summary.stanceDeclined).toBe(true);
+      // The machine-readable scalar family Phase 70 optimizes against.
+      // Measured (2026-10-13, the demo fixture): 0.0353 mm tip
+      // deflection at 8.09 MPa — the coarse element-center recovery's
+      // comparative band, stated.
+      expect(summary.deflectionMm).toBeGreaterThan(0.01);
+      expect(summary.deflectionMm).toBeLessThan(0.1);
+      expect(summary.vonMisesPa).toBeGreaterThan(4e6);
+      expect(summary.vonMisesPa).toBeLessThan(2e7);
+      expect(summary.factorOfSafety).toBeGreaterThan(10);
+      // The FoS arithmetic: yield / max von Mises.
+      expect(summary.fosArithmeticHolds).toBe(true);
+      // Both overlay blocks persist — displacement first in the
+      // result's own field array (the preview stream publishes von
+      // Mises first and displacement last, the live-overlay order).
+      expect(summary.fieldIds).toEqual(["displacement", "von-mises"]);
+      // The hot bracket (ΔT = +100 K uniform): the CHT→structural
+      // seam's thermal load dominates the dry tip load.
+      expect(summary.hotVonMisesPa).toBeGreaterThan(10 * summary.vonMisesPa);
+      // The spun bracket (3000 rpm): the centrifugal body force bends
+      // the wall past the dry run's stress.
+      expect(summary.spunVonMisesPa).toBeGreaterThan(2 * summary.vonMisesPa);
+      // Determinism (law S2).
+      expect(summary.deterministic).toBe(true);
+    },
+  );
 });

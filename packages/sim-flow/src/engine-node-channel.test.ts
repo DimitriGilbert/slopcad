@@ -15,8 +15,8 @@
  * - cooperative cancellation through the wire: a cancel mid-run acks
  *   `worker/cancelled` and mints no run;
  * - engine selection: a thermal scenario on the same channel rides the
- *   fake engine (the routed default), and `structural` declines with
- *   the Phase 69 carve code.
+ *   fake engine (the routed default), and a stance-less `structural`
+ *   record declines at the Phase 69 compile branch's own door.
  *
  * Node-env vitest, no network — the law-S2/S5 stance.
  */
@@ -242,7 +242,7 @@ describe("the routed engine over the node worker channel", () => {
     }
   });
 
-  it("routes thermal to the real conduction engine on the same channel and declines structural with the Phase 69 carve", async () => {
+  it("routes thermal to the real conduction engine on the same channel and declines a stance-less structural record loudly", async () => {
     const channel = createLbmNodeWorkerChannel();
     try {
       // Phase 65c: the retired fake thermal route's channel proof — a
@@ -312,6 +312,10 @@ describe("the routed engine over the node worker channel", () => {
         expect(maxTemperature.value).toBeLessThan(600);
       }
 
+      // Phase 69: the kind compiles like every other (the carve retired);
+      // this channel's compile door still declines the stance-less record
+      // loudly — the structural branch demands its solve stance and the
+      // bodies' tessellations, never a fabricated structure.
       const structuralId = createSimWorkerRequestId("req_structural");
       const structuralPromise = channel.client.request(
         "sim.compile",
@@ -333,7 +337,7 @@ describe("the routed engine over the node worker channel", () => {
       );
       await expect(structuralPromise).rejects.toMatchObject({
         name: "SimRequestFailure",
-        error: { data: { simCode: "sim/scenario-kind-unsupported" } },
+        error: { data: { simCode: "sim/scenario-invalid" } },
       });
     } finally {
       await channel.close();

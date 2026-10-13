@@ -172,7 +172,7 @@ validation fixtures — Poiseuille vs the analytic parabola, the
 cylinder force audit, bitwise determinism, the half-domain symmetry
 fixture (`packages/sim-flow/src/symmetry.test.ts`), and the
 session-harness stages s24b/s24c/s24d. The WGSL GPU provider (Phase 64) is next; thermal stays the fake engine's until Phase 65;
-`structural` still declines with `sim/scenario-kind-unsupported` until
+`structural` declined with `sim/scenario-kind-unsupported` until
 Phase 69.
 
 ## Implementation status (2026-10-08): Phase 64 is implemented (provider + spike + fallback e2e)
@@ -429,3 +429,60 @@ door's stance parse); the phase
 stays PROVISIONAL (closed-cycle subset, one-way fire coupling,
 comparative knock — the gaps the guide states). `structural` still
 declines until Phase 69.
+
+## Implementation status (2026-10-13): Phase 69 is implemented (coarse voxel FEM)
+
+Phase 69a (landed first): `packages/sim-structural` — the pure-TS
+linear-elastic reference kernel (law S2): the uniform 8-node-hex mesh
+over the Phase 62 occupancy grid (one element per occupied voxel
+node), the 24-dof element stiffness with exact 2×2×2 Gauss
+integration, the consistent load family (faces, rollers, points,
+pressure tractions, the body-force set: self-weight, centrifugal
+ω²·r⊥, thermal-expansion initial strain), the owned
+Jacobi-preconditioned CG with the deterministic residual discipline
+and loud iteration caps, the per-element strain/stress recovery with
+the von Mises field, and the FoS family against yield — validated
+against beam theory, the patch test, the thin-ring closed form, the
+constrained-bar thermal case, and a published convergence table;
+beside it the additive structural material fields on
+`DocumentMaterialRecord` (`youngsModulusPa`, `poissonRatio`,
+`yieldStrengthPa`, `thermalExpansionPerK` — the Phase 61 thermal
+precedent). Phase 69b (this slice): the PRODUCT SURFACE — the
+`structural` kind FLIPPED LIVE (the 61a reserved decline retired at
+the compile boundary; the empty regime report is law S9's honest
+structural claim, the dynamics precedent), the additive structural
+condition vocabulary at the record boundary (axis-fix, point-fix,
+point-load beside the carved fixed-support/force-load/pressure-load,
+kind-locked, the one-per-face rule covering the face-bearing set
+alone), the kind-locked `structural` solve stance (the self-weight
+switch, the centrifugal stance with the fixed-iff rpm rule and the
+`fan-run` mode sourcing ω from a referenced 66 run's found operating
+point, the thermal chain with its stress-free reference), the
+geometry-aware compile branch (the FULL-3D per-body voxelization
+unioned with its per-node material map; the run-to-run chain inputs —
+a 65 run's temperature block sampled onto every solid node as ΔT
+(nearest-node, edge-clamped, stated) and a fan run's operating rpm —
+crossing the `sim.compile` wire through their own codec, consumed
+only when the stance asks, never silently), the structural engine
+behind the Phase 61 contract (compile/run/finalize, both overlay
+blocks streamed with displacement applied LAST — the deterministic
+live-overlay order, the summary scalar family: max deflection, von
+Mises max, factor-of-safety, the solver discipline's own numbers),
+the `/workbench-sim` BRACKET demo (the cad-jsx L-bracket with
+thickness/wallHeight as real parameters — the Phase 70 substrate),
+the Formedible structural form with the honest axis/face/point
+selectors (the stated UX decision: no 3D picking against the sim
+grid — the overlay family never enters the pick path and no pickable
+plane/point precedent exists), the run-to-run chain selects over the
+persisted run list, the summary-scalar CSV export (a statics run has
+no time axis — its scalars ARE its table), the session stage s24j
+(dry, self-weight, and hot-bracket variants walked attribute-driven),
+the render baseline (`e2e-render/sim-structural.spec.ts`), the
+guide's Phase 69 section with its honest-scope list (comparative
+positioning, the measured coarse-recovery band — 0.3× stress /
+0.6× deflection against the cantilever twin at the demo resolution —
+staircase bands, MFEM declined-by-default as the raised path), and
+the runnable docs example. The `fan-run` centrifugal mode and the
+thermal chain are run-time selections by design: runs are store data
+keyed to document versions, never document records — the stance
+records the intent, the launch resolves the source.

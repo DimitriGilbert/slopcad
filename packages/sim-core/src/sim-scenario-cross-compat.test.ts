@@ -6,8 +6,8 @@
  * stay pinned — this suite fails the moment they drift. The condition and
  * backend vocabularies have no restated sim-core arrays (the compile
  * boundary re-validates them structurally), so they are pinned behaviorally:
- * every condition kind the document may store compiles — or declines by the
- * structural carve, never as wire-invalid — and both backend preferences
+ * every condition kind the document may store compiles — or declines by a
+ * `sim/*` code, never as wire-invalid — and both backend preferences
  * survive the boundary. The cad-core package is a dev-only import: it
  * appears in no runtime graph of sim-core, exactly as the kernel package
  * does in the wire pin (sim-worker-cross-compat.test.ts).
@@ -29,7 +29,6 @@ import {
 } from "@slopcad/cad-core";
 import { describe, expect, it } from "vitest";
 
-import { SIM_ERROR_CODES } from "./errors";
 import { compileSimScenario } from "./units";
 import { SIM_CORE_DOMAIN_FACES, SIM_CORE_SCENARIO_KINDS } from "./vocabulary";
 
@@ -87,6 +86,13 @@ const CONDITION_EXEMPLARS: Readonly<
     kind: "pressure-load",
     face: "yMax",
     pressurePa: 1000,
+  },
+  "axis-fix": { kind: "axis-fix", face: "yMax", axis: "y" },
+  "point-fix": { kind: "point-fix", atWorldPointMm: [-10, 0, 20] },
+  "point-load": {
+    kind: "point-load",
+    atWorldPointMm: [10, 0, 20],
+    forceN: [0, -50, 0],
   },
 };
 
@@ -152,6 +158,12 @@ describe("the condition vocabulary pin", () => {
                   },
                 }
               : {}),
+            // Phase 69: a structural scenario carries its solve stance
+            // (the record boundary kind-locks it), so the structural-only
+            // condition exemplars author one.
+            ...(compilableKind === undefined
+              ? { structural: { selfWeight: false as const } }
+              : {}),
           },
         ),
         "the scenario add",
@@ -159,19 +171,9 @@ describe("the condition vocabulary pin", () => {
       const compiled = compileSimScenario({
         scenario: wireSection(document, "simulations")[0],
       });
-      if (compilableKind === undefined) {
-        // The structural carve: the input is wire-valid cad-core output, so
-        // the decline must be the kind gate — never a wire parse failure.
-        expect(compiled.ok).toBe(false);
-        if (compiled.ok) return;
-        expect(compiled.error.code).toBe(
-          SIM_ERROR_CODES.scenarioKindUnsupported,
-        );
-        return;
-      }
       expect(compiled.ok).toBe(true);
       if (!compiled.ok) return;
-      expect(compiled.value.kind).toBe(compilableKind);
+      expect(compiled.value.kind).toBe(compilableKind ?? "structural");
       expect(compiled.value.conditions[0]?.kind).toBe(conditionKind);
       // The backend preference is validated inline at the compile boundary
       // (no restated array): the wire-absent default lands as the CPU oracle.

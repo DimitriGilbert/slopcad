@@ -120,6 +120,10 @@ export {
   runSimCombustionExample,
   type SimCombustionExampleSummary,
 } from "./sim/combustion";
+export {
+  runSimStructuralExample,
+  type SimStructuralExampleSummary,
+} from "./sim/structural";
 
 // -- CAD JSX (authoring) ------------------------------------------------------
 

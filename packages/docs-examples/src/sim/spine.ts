@@ -2,9 +2,9 @@
  * The `simulation` guide's runnable example (docs/guides/simulation.md):
  * the Phase 61 spine walk-through — author a scenario record, compute its
  * scenario-snapshot hash, compile it through the units/S9 boundary (the
- * regime numbers), pin the reserved `structural` kind's loud decline,
- * encode and decode a {@link SimResult} payload, and export the CSV/.vti
- * bytes every run ships with. The example is the spine ONLY: no solver
+ * regime numbers), pin the `structural` kind's live compile (the empty
+ * regime report — Phase 69), encode and decode a {@link SimResult}
+ * payload, and export the CSV/.vti bytes every run ships with. The example is the spine ONLY: no solver
  * runs here (the deterministic fake engine exercises the worker protocol
  * in `@slopcad/sim-core`'s own suite; the first real solver is Phase 63's
  * flow kernel).
@@ -46,8 +46,8 @@ export interface SimSpineExampleSummary {
   readonly qualitative: readonly string[];
   /** The compile stamps the record's snapshot hash into the compiled form. */
   readonly compiledSnapshotHash: string;
-  /** The reserved structural kind declines with its `sim/*` code (Phase 69 carve). */
-  readonly structuralDeclineCode: string;
+  /** The structural kind compiles with the empty regime report (Phase 69 live). */
+  readonly structuralRegimeEmpty: boolean;
   /** The `SMR1` payload's byte length. */
   readonly payloadBytes: number;
   /** The decoded payload reproduces the authored block exactly. */
@@ -162,12 +162,17 @@ export function runSimSpineExample(): SimSpineExampleSummary {
     compileSimScenario({ scenario }),
     "the scenario compile",
   );
+  // Phase 69 flipped the carve live: the structural kind compiles like
+  // every other, and its law-S9 claim is the EMPTY regime report (none
+  // of the flow/thermal dimensionless gates applies to a linear-elastic
+  // static solve — the dynamics precedent).
   const structural = compileSimScenario({
     scenario: { ...scenario, kind: "structural" },
   });
-  if (structural.ok) {
+  const structuralCompiled = unwrap(structural, "the structural kind compile");
+  if (structuralCompiled.regime.qualitative.length !== 0) {
     throw new Error(
-      "The reserved structural kind must decline loudly, never fabricate a result.",
+      "The structural compile must carry the empty regime report — its honesty claim.",
     );
   }
 
@@ -242,7 +247,7 @@ export function runSimSpineExample(): SimSpineExampleSummary {
     prandtl: compiled.regime.prandtl ?? NaN,
     qualitative: compiled.regime.qualitative,
     compiledSnapshotHash: compiled.scenarioSnapshotHash,
-    structuralDeclineCode: structural.error.code,
+    structuralRegimeEmpty: structuralCompiled.regime.qualitative.length === 0,
     payloadBytes: payload.length,
     decodedRoundTrip,
     vtiBytes: vti.length,

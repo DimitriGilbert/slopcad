@@ -195,13 +195,18 @@ describe("scenario compile (document → solver)", () => {
     expect(result.error.code).toBe(SIM_ERROR_CODES.geometryUnavailable);
   });
 
-  it("declines the structural kind loudly (the Phase 69 carve)", () => {
+  it("compiles the structural kind with the empty regime report (Phase 69 live)", () => {
     const scenario = flowScenario();
     scenario.kind = "structural";
     const result = compileSimScenario({ scenario });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe(SIM_ERROR_CODES.scenarioKindUnsupported);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Law S9 for linear-elastic statics: none of the flow/thermal
+    // dimensionless gates applies — the empty report is the honest claim
+    // (the dynamics precedent), and the compile declines to carry an
+    // inapplicable number.
+    expect(result.value.kind).toBe("structural");
+    expect(result.value.regime.qualitative).toEqual([]);
   });
 
   it("declines unknown fluids and malformed scenarios", () => {

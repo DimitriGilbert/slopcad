@@ -190,7 +190,7 @@ async function runLbmEngine(
     return simFail(
       simError(
         SIM_ERROR_CODES.scenarioKindUnsupported,
-        `The 2D reference flow engine does not solve the "${compiled.kind}" scenario kind (it solves flow only; thermal is served by the real conduction/CHT engines through the routed default engine, and structural is Phase 69's carve).`,
+        `The 2D reference flow engine does not solve the "${compiled.kind}" scenario kind (it solves flow only; thermal is served by the real conduction/CHT engines and structural by the structural engine through the routed default engine).`,
         compiled.kind,
       ),
     );
@@ -391,9 +391,10 @@ export function createLbmSimEngine(): SimEngine {
  * thermal scenarios (the coupled conjugate march when the scenario
  * flags `cht`, the sealed conduction engine otherwise — the split is
  * exactly where the solvers live: the coupled march is this package's
- * `./cht`, the conduction solve is `@slopcad/sim-thermal`'s), and
- * `structural` declined by no engine's kind list — the Phase 69 carve,
- * exactly as the contract demands.
+ * `./cht`, the conduction solve is `@slopcad/sim-thermal`'s); the
+ * structural kind lives with its own engine (`@slopcad/sim-structural`,
+ * routed at the workbench's worker entry — Phase 69), and this router
+ * declines it, exactly as the contract demands.
  *
  * The backend routing (Phase 64a, requirement 2): a GPU-PREFERRED flow
  * scenario goes to the WGSL provider when the device source finds a
@@ -462,7 +463,7 @@ export function createDefaultSimEngine(
         return simFail(
           simError(
             SIM_ERROR_CODES.scenarioKindUnsupported,
-            `The routed default engine does not solve the "${kind}" scenario kind (it solves flow and thermal; structural is Phase 69's carve).`,
+            `The routed default engine does not solve the "${kind}" scenario kind (it solves flow and thermal; structural is served by the structural engine routed at the workbench's worker entry).`,
             kind,
           ),
         );

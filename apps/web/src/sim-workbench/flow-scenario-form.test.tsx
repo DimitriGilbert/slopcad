@@ -76,7 +76,12 @@ describe("the flow-scenario form config", () => {
     expect(scenario.stepBudget).toBe(FLOW_FORM_DEFAULT_VALUES.stepBudget);
     expect(scenario.gridConvergence).toBe(false);
     expect(scenario.conditions).toHaveLength(3);
-    const faces = scenario.conditions.map((condition) => condition.face);
+    // The flow set is face-bearing throughout, so every condition
+    // narrows to its face (the structural point set aside — Phase 69's
+    // faceless variants are another kind's).
+    const faces = scenario.conditions.map((condition) =>
+      "face" in condition ? condition.face : undefined,
+    );
     expect(faces).toEqual(["xMin", "yMin", "yMax"]);
     const inlet = scenario.conditions[0];
     expect(inlet?.kind).toBe("velocity-inlet");
@@ -103,10 +108,14 @@ describe("the flow-scenario form config", () => {
       conditions.find((condition) => condition.kind === "pressure-outlet"),
     ).toMatchObject({ pressurePa: 12.5 });
     expect(
-      conditions.find((condition) => condition.face === "yMax"),
+      conditions.find(
+        (condition) => "face" in condition && condition.face === "yMax",
+      ),
     ).toMatchObject({ kind: "wall", slip: true });
     expect(
-      conditions.find((condition) => condition.face === "yMin"),
+      conditions.find(
+        (condition) => "face" in condition && condition.face === "yMin",
+      ),
     ).toMatchObject({ kind: "symmetry" });
   });
 });

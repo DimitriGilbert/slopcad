@@ -9,8 +9,7 @@
  *
  * The contract's semantics: an engine declares the scenario kinds it can
  * solve (a kind it does not list declines with
- * `sim/scenario-kind-unsupported` — the `structural` carve until Phase
- * 69); it consumes a scenario the S4 boundary already compiled into
+ * `sim/scenario-kind-unsupported`); it consumes a scenario the S4 boundary already compiled into
  * solver space; and it produces a {@link SimResult} whose summary
  * carries the compile-time regime report and scenario-snapshot hash, so
  * provenance survives the provider seam. A GPU-preferring engine on a

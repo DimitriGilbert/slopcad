@@ -17,9 +17,10 @@ export const SIM_ERROR_CODES = {
   /** A serialized scenario did not structurally parse at the compile door. */
   scenarioInvalid: "sim/scenario-invalid",
   /**
-   * The scenario kind is a valid record but no solver for it exists yet —
-   * `structural` until Phase 69 lands (the vocabulary is carved now, the
-   * decline is loud, and the run never fabricates a result).
+   * The scenario kind is a valid record but no engine on this host
+   * solves it (`structural` is live through its own engine — the
+   * decline stays for genuinely unsupported kinds: loud, and the
+   * run never fabricates a result).
    */
   scenarioKindUnsupported: "sim/scenario-kind-unsupported",
   /** The scenario's fluid names no record of the starter fluid property set. */
@@ -109,7 +110,8 @@ export const SIM_ERROR_CODES = {
    * `cut-cell` beside the implemented `staircase`, and the compile
    * boundary declines it loudly — pointing at the recorded raise-or-
    * decline verdict — instead of silently accepting the staircase. The
-   * `structural`-carve discipline applied to law S3's geometry half.
+   * `scenarioKindUnsupported` discipline applied to law S3's geometry
+   * half.
    */
   boundaryTreatmentUnsupported: "sim/boundary-treatment-unsupported",
   /**
