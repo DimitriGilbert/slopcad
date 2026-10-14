@@ -153,6 +153,40 @@ describe("WorkbenchShareBar", () => {
     expect(url).toBe(`${window.location.origin}/viewer?p=${UPLOADED_SHARE_ID}`);
   });
 
+  it("surfaces a missing clipboard API as the error line (the sync-throw funnel)", async () => {
+    // Insecure contexts have no navigator.clipboard at all: the property
+    // access throws SYNCHRONOUSLY. After a successful upload, the funnel
+    // must turn that throw into the error line — not an unhandled
+    // rejection that wedges the busy state forever.
+    Object.defineProperty(navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify([{ result: { data: { id: UPLOADED_SHARE_ID } } }]),
+            { headers: { "content-type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+    renderBar();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose viewer link format" }),
+    );
+    fireEvent.click(await screen.findByTestId("workbench-share-server"));
+    await waitFor(() => {
+      expect(screen.getByTestId("workbench-share-state").textContent).toMatch(
+        /^share failed: /,
+      );
+    });
+    // Nothing was copied (there is no clipboard to copy to).
+    expect(writeTextMock).not.toHaveBeenCalled();
+  });
+
   it("surfaces a clipboard failure as the error line", async () => {
     writeTextMock.mockRejectedValue(new Error("clipboard refused"));
     renderBar();

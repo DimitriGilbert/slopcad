@@ -21,7 +21,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 
-import { ViewerSurface, type ServerShareState } from "@/viewer/ViewerSurface";
+import {
+  ViewerSurface,
+  NO_SERVER_SHARE,
+  type ServerShareState,
+} from "@/viewer/ViewerSurface";
 import { useTRPC } from "@/utils/trpc";
 
 export const Route = createFileRoute("/viewer")({
@@ -72,7 +76,7 @@ function ViewerRouteComponent(): ReactElement | null {
 
   const serverShare: ServerShareState =
     p === undefined
-      ? { kind: "none" }
+      ? NO_SERVER_SHARE
       : shareQuery.isError
         ? { kind: "error", message: shareQuery.error.message }
         : shareQuery.data === undefined

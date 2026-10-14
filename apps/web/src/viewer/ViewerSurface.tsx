@@ -115,6 +115,16 @@ function downloadNameOf(title: string, extension: string): string {
 }
 
 /**
+ * The identity-stable `"none"` state (the standalone mount's default and
+ * the route's no-`?p=` arm): a module constant, so the adoption effect's
+ * dependency never churns on re-renders that change nothing.
+ */
+const NO_SERVER_SHARE_VALUE: ServerShareState = { kind: "none" };
+export const NO_SERVER_SHARE: Readonly<ServerShareState> = Object.freeze(
+  NO_SERVER_SHARE_VALUE,
+);
+
+/**
  * The store composition + provider shell: composed ONCE above the engine
  * body, exactly the workbench pages' structure.
  */
@@ -122,7 +132,7 @@ export function ViewerSurface({
   embed = false,
   injectedNativeText = null,
   injectedTitle = null,
-  serverShare = { kind: "none" },
+  serverShare = NO_SERVER_SHARE,
   variant,
   workerFactory,
 }: ViewerSurfaceProps): ReactElement {
