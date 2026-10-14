@@ -6504,10 +6504,10 @@ async function addPrimitive(
   return submitDialogAndSettle(page, rootId, "Create");
 }
 
-test("s37 primitives: box, sphere, cylinder and cone through their command rows", async ({
+test("s41 primitives: box, sphere, cylinder and cone through their command rows", async ({
   sessionPage: page,
 }) => {
-  await stage("s37 primitives", async () => {
+  await stage("s41 primitives", async () => {
     // The document scene renders EVERY visible body, so each primitive is
     // measured as the settled volume's delta over the previous settle.
     let previous = Number(await openComplete(page, OCCT_ROOT));
@@ -6593,10 +6593,10 @@ const FILLET_LOSS = (radiusMm: number, lengthMm: number): number =>
 const CHAMFER_LOSS = (distanceMm: number, lengthMm: number): number =>
   0.5 * distanceMm ** 2 * lengthMm;
 
-test("s38 fillet an edge, edit the box width, the fillet still renders; then chamfer", async ({
+test("s42 fillet an edge, edit the box width, the fillet still renders; then chamfer", async ({
   sessionPage: page,
 }) => {
-  await stage("s38 fillet + width edit + chamfer", async () => {
+  await stage("s42 fillet + width edit + chamfer", async () => {
     const plate = Number(await openComplete(page, OCCT_ROOT));
     const boxed = Number(
       await addPrimitive(page, OCCT_ROOT, "box", {
@@ -6689,10 +6689,10 @@ test("s38 fillet an edge, edit the box width, the fillet still renders; then cha
   });
 });
 
-test("s38b shell a box open at a picked face", async ({
+test("s42b shell a box open at a picked face", async ({
   sessionPage: page,
 }) => {
-  await stage("s38b shell", async () => {
+  await stage("s42b shell", async () => {
     // SHELL a fresh 20 mm cube open at ANY picked face (all six are
     // 20 × 20): the 1 mm wall leaves the cube minus its 18 × 18 × 19
     // hollow.
@@ -6723,10 +6723,10 @@ test("s38b shell a box open at a picked face", async ({
   });
 });
 
-test("s39 local face operations: move, delete and replace a picked face", async ({
+test("s43 local face operations: move, delete and replace a picked face", async ({
   sessionPage: page,
 }) => {
-  await stage("s39 face ops", async () => {
+  await stage("s43 face ops", async () => {
     const plate = Number(await openComplete(page, OCCT_ROOT));
     const boxed = Number(
       await addPrimitive(page, OCCT_ROOT, "box", {
