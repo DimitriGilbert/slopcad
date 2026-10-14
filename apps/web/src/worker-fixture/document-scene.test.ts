@@ -713,6 +713,7 @@ describe("computeDocumentScene: the operand handoff (composition)", () => {
       scene: {
         kind: "patternTransform",
         request: {
+          featureId: "feat_pattern",
           target: {
             kind: "extrude",
             request: {
@@ -756,6 +757,7 @@ describe("computeDocumentScene: the operand handoff (composition)", () => {
       scene: {
         kind: "patternTransform",
         request: {
+          featureId: "feat_pattern",
           target: { kind: "computed", bodyId: "body_holed" },
           pattern: {
             kind: "circular",
@@ -794,7 +796,10 @@ describe("computeDocumentScene: the primitive scenes", () => {
     return {
       bodyId,
       ...(consumedOnly ? { consumedOnly: true } : {}),
-      scene: { kind: "primitive", request: { shape, bodyId } },
+      scene: {
+        kind: "primitive",
+        request: { shape, bodyId, featureId: bodyId },
+      },
     };
   }
 
@@ -888,7 +893,7 @@ describe("computeDocumentScene: the topology-cut scenes", () => {
       consumedOnly: true,
       scene: {
         kind: "primitive",
-        request: { shape: { kind: "box", ...BOX }, bodyId },
+        request: { shape: { kind: "box", ...BOX }, bodyId, featureId: bodyId },
       },
     };
   }
@@ -1232,7 +1237,7 @@ describe("computeDocumentScene: the face-op and patternFace scenes", () => {
       consumedOnly: true,
       scene: {
         kind: "primitive",
-        request: { shape: { kind: "box", ...BOX }, bodyId },
+        request: { shape: { kind: "box", ...BOX }, bodyId, featureId: bodyId },
       },
     };
   }
@@ -1269,6 +1274,7 @@ describe("computeDocumentScene: the face-op and patternFace scenes", () => {
       scene: {
         kind: "patternFace",
         request: {
+          featureId: "feat_pattern",
           target: { kind: "computed", bodyId: targetBodyId },
           targetBodyId,
           face: faceReference(targetBodyId),

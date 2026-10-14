@@ -25,11 +25,13 @@ import { measure } from "./body-ops-scenes";
 async function createPrimitive(
   context: ComputationContext,
   shape: PrimitiveShape,
+  featureId: string,
 ): Promise<WorkerSolidId> {
   switch (shape.kind) {
     case "box":
       return (
         await context.request("solid.createBox", {
+          featureId,
           width: length(shape.widthMm, "mm"),
           depth: length(shape.depthMm, "mm"),
           height: length(shape.heightMm, "mm"),
@@ -38,12 +40,14 @@ async function createPrimitive(
     case "sphere":
       return (
         await context.request("solid.createSphere", {
+          featureId,
           radius: length(shape.radiusMm, "mm"),
         })
       ).solid;
     case "cylinder":
       return (
         await context.request("solid.createCylinder", {
+          featureId,
           radius: length(shape.radiusMm, "mm"),
           height: length(shape.heightMm, "mm"),
         })
@@ -51,6 +55,7 @@ async function createPrimitive(
     case "cone":
       return (
         await context.request("solid.createCone", {
+          featureId,
           bottomRadius: length(shape.bottomRadiusMm, "mm"),
           topRadius: length(shape.topRadiusMm, "mm"),
           height: length(shape.heightMm, "mm"),
@@ -64,7 +69,11 @@ export async function computePrimitiveScene(
   context: ComputationContext,
   request: PrimitiveSceneRequest,
 ): Promise<ComposedSceneResult> {
-  const solid = await createPrimitive(context, request.shape);
+  const solid = await createPrimitive(
+    context,
+    request.shape,
+    request.featureId,
+  );
   const measurement = await measure(context, solid);
   return { measurement, solid };
 }

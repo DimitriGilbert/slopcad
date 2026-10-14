@@ -28,6 +28,7 @@ import {
 import type { DatumVec3, ResolvedDatumPlane } from "@slopcad/cad-core";
 import type {
   ComputationContext,
+  PatternInstanceNamingInput,
   Tessellation,
   WorkerSolidId,
 } from "@slopcad/cad-kernel";
@@ -69,6 +70,7 @@ async function extrudeBase(
     height: mm(Math.abs(base.distanceMm)),
     direction: base.distanceMm > 0 ? 1 : -1,
     placement: base.placement,
+    ...(base.featureId === undefined ? {} : { featureId: base.featureId }),
   });
 }
 
@@ -90,16 +92,22 @@ async function measure(
   };
 }
 
-/** One translated copy of `solid` (the zero offset returns the solid itself). */
+/**
+ * One translated copy of `solid` (the zero offset returns the solid itself,
+ * keeping its names). A pattern `instance` renames the copy's faces
+ * `<featureId>/instance/<index>/…`, exactly as the bridge's executor does.
+ */
 async function translatedCopy(
   context: ComputationContext,
   solid: WorkerSolidId,
   offset: readonly [number, number, number],
+  instance?: PatternInstanceNamingInput,
 ): Promise<WorkerSolidId> {
   if (offset[0] === 0 && offset[1] === 0 && offset[2] === 0) return solid;
   const placed = await context.request("solid.transform", {
     solid,
     translation: { x: mm(offset[0]), y: mm(offset[1]), z: mm(offset[2]) },
+    ...(instance === undefined ? {} : { instance }),
   });
   return placed.solid;
 }
@@ -121,7 +129,12 @@ export async function computePatternFeatureScene(
     if (skips.has(ordinal)) continue;
     const offset = plan.offsets[ordinal];
     if (offset === undefined) continue;
-    copies.push(await translatedCopy(context, extruded.solid, offset));
+    copies.push(
+      await translatedCopy(context, extruded.solid, offset, {
+        featureId: request.featureId,
+        index: ordinal,
+      }),
+    );
   }
   const merged = await context.request("solid.union", { operands: copies });
   return {
@@ -161,6 +174,7 @@ export async function computePatternPathScene(
       const placed = await context.request("solid.transform", {
         solid: extruded.solid,
         translation,
+        instance: { featureId: request.featureId, index: i },
       });
       copies.push(placed.solid);
       continue;
@@ -178,6 +192,7 @@ export async function computePatternPathScene(
       solid: extruded.solid,
       translation,
       rotation: { axis: turn.axis, angle: angle(turn.angle) },
+      instance: { featureId: request.featureId, index: i },
     });
     copies.push(placed.solid);
   }
@@ -285,11 +300,16 @@ export async function computePatternTransformScene(
     const { count, spacingMm, direction } = request.pattern;
     for (let i = 1; i < count; i += 1) {
       copies.push(
-        await translatedCopy(context, target, [
-          direction[0] * spacingMm * i,
-          direction[1] * spacingMm * i,
-          direction[2] * spacingMm * i,
-        ]),
+        await translatedCopy(
+          context,
+          target,
+          [
+            direction[0] * spacingMm * i,
+            direction[1] * spacingMm * i,
+            direction[2] * spacingMm * i,
+          ],
+          { featureId: request.featureId, index: i },
+        ),
       );
     }
   } else {
@@ -313,6 +333,7 @@ export async function computePatternTransformScene(
           z: mm(axisOrigin[2]),
         },
         rotation: { axis, angle: angle(i * step, "rad") },
+        instance: { featureId: request.featureId, index: i },
       });
       copies.push(placed.solid);
     }
@@ -479,7 +500,7 @@ export async function computePatternFaceScene(
   );
   const plan = planArrayPatternInstances(request.legs);
   const copies: WorkerSolidId[] = [];
-  for (const offset of plan.offsets) {
+  for (const [ordinal, offset] of plan.offsets.entries()) {
     const world: DatumVec3 = [
       offset[0] * xAxis[0] + offset[1] * yAxis[0],
       offset[0] * xAxis[1] + offset[1] * yAxis[1],
@@ -489,7 +510,12 @@ export async function computePatternFaceScene(
     if (!region.some((triangle) => triangleContains(triangle, point))) {
       continue;
     }
-    copies.push(await translatedCopy(context, target, world));
+    copies.push(
+      await translatedCopy(context, target, world, {
+        featureId: request.featureId,
+        index: ordinal,
+      }),
+    );
   }
   if (copies.length < 2) {
     throw new Error(

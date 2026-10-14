@@ -54,6 +54,8 @@ import { topologyCutCreateCommands } from "../cad-workbench/topology-pick";
 import FIXTURE_COMMANDS_TEXT from "../../../../packages/cad-jsx/fillet-box.commands.json?raw";
 import FIXTURE_TEXT from "../../../../packages/cad-jsx/fillet-box.native.json?raw";
 import { computeDocumentScene } from "./document-scene";
+import { computePatternTransformScene } from "./pattern-scene";
+import { computePrimitiveScene } from "./primitive-scene";
 
 const BOX_BODY = "body_box";
 const FILLET_BODY = "body_fillet";
@@ -109,6 +111,19 @@ function passContext(
         const id = mint(box.value);
         created.push(id);
         return { solid: id };
+      }
+      case "solid.transform": {
+        const placed = kernel.transform(owned(input.solid), {
+          ...input.translation,
+          ...(input.instance === undefined ? {} : { instance: input.instance }),
+        });
+        if (!placed.ok) throw new Error(placed.error.message);
+        return { solid: mint(placed.value) };
+      }
+      case "solid.union": {
+        const merged = kernel.union(input.operands.map(owned));
+        if (!merged.ok) throw new Error(merged.error.message);
+        return { solid: mint(merged.value) };
       }
       case "solid.fillet": {
         const cut = kernel.fillet({ ...input, target: owned(input.target) });
@@ -174,6 +189,7 @@ function boxOf(widthMm: number, rendered = false): DocumentBodySceneRequest {
           heightMm: HEIGHT_MM,
         },
         bodyId: BOX_BODY,
+        featureId: "feat_box",
       },
     },
   };
@@ -398,5 +414,104 @@ describe("the cad-jsx primitive + fillet fixture through the document scene", ()
       plan.bodyId,
     ]);
     expect(second.scene.volume).toBeCloseTo(filletedVolume(26), 4);
+  });
+});
+
+/** The face names a snapshot reports, in ordinal order. */
+function faceNames(snapshot: TopologySnapshot): readonly string[] {
+  return snapshot.entities.flatMap((entity) => {
+    const name = entity.identity?.data.name;
+    return entity.kind === "face" && typeof name === "string" ? [name] : [];
+  });
+}
+
+async function namesOf(
+  context: ComputationContext,
+  solid: WorkerSolidId,
+  regeneration: number,
+): Promise<readonly string[]> {
+  const { snapshot } = await context.request("solid.topology", {
+    solid,
+    bodyId: createBodyId("body_named"),
+    regeneration,
+  });
+  return faceNames(snapshot);
+}
+
+const BOX_SHAPE = {
+  kind: "box",
+  widthMm: 10,
+  depthMm: 10,
+  heightMm: 10,
+} as const;
+
+describe("worker scenes carry the producing feature into OCCT naming", () => {
+  it("names two primitives by their own features, so their fusion keeps unique names", async () => {
+    const context = passContext(1, []);
+    const first = await computePrimitiveScene(context, {
+      shape: BOX_SHAPE,
+      bodyId: "body_a",
+      featureId: "feat_a",
+    });
+    const second = await computePrimitiveScene(context, {
+      shape: BOX_SHAPE,
+      bodyId: "body_b",
+      featureId: "feat_b",
+    });
+    const firstNames = await namesOf(context, first.solid, 1);
+    const secondNames = await namesOf(context, second.solid, 1);
+    expect(firstNames).toHaveLength(6);
+    expect(firstNames.every((name) => name.startsWith("feat_a/"))).toBe(true);
+    expect(secondNames.every((name) => name.startsWith("feat_b/"))).toBe(true);
+
+    const shifted = await context.request("solid.transform", {
+      solid: second.solid,
+      translation: { x: length(5), y: length(5), z: length(5) },
+    });
+    const fused = await context.request("solid.union", {
+      operands: [first.solid, shifted.solid],
+    });
+    const fusedNames = await namesOf(context, fused.solid, 1);
+    expect(new Set(fusedNames).size).toBe(fusedNames.length);
+    expect(fusedNames.some((name) => name.startsWith("feat_a/"))).toBe(true);
+    expect(fusedNames.some((name) => name.startsWith("feat_b/"))).toBe(true);
+  });
+
+  it("names every pattern copy as its own instance, identically on rebuild", async () => {
+    const patternNames = async (regeneration: number) => {
+      const context = passContext(regeneration, []);
+      const seed = await computePrimitiveScene(context, {
+        shape: BOX_SHAPE,
+        bodyId: "body_seed",
+        featureId: "feat_seed",
+      });
+      const pattern = await computePatternTransformScene(
+        context,
+        {
+          target: { kind: "computed", bodyId: "body_seed" },
+          pattern: {
+            kind: "linear",
+            count: 3,
+            spacingMm: 15,
+            direction: [1, 0, 0],
+          },
+          bodyId: "body_pattern",
+          featureId: "feat_pattern",
+        },
+        new Map([["body_seed", seed.solid]]),
+      );
+      return namesOf(context, pattern.solid, regeneration);
+    };
+    const first = await patternNames(1);
+    expect(first).toHaveLength(18);
+    expect(new Set(first).size).toBe(first.length);
+    for (const prefix of [
+      "feat_seed/",
+      "feat_pattern/instance/1/feat_seed/",
+      "feat_pattern/instance/2/feat_seed/",
+    ]) {
+      expect(first.filter((name) => name.startsWith(prefix))).toHaveLength(6);
+    }
+    expect([...(await patternNames(2))].sort()).toEqual([...first].sort());
   });
 });

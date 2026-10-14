@@ -310,6 +310,8 @@ export interface ExtrudeSceneRequest {
   readonly taperRad?: number;
   /** The extrude feature's output body id (the rendered body). */
   readonly bodyId: string;
+  /** The extrude feature's id (the topological-naming namespace). */
+  readonly featureId?: string;
 }
 
 function signedLengthMm(value: AnyDimensionalValue): number | null {
@@ -545,6 +547,7 @@ export function extrudeSceneRequestOfFeature(
     distanceMm,
     ...(taperRad === undefined ? {} : { taperRad }),
     bodyId,
+    featureId: feature.id,
   };
 }
 

@@ -542,6 +542,9 @@ export function createWorkerServer(options: WorkerServerOptions): WorkerServer {
             ...(request.input.scale === undefined
               ? {}
               : { scale: request.input.scale }),
+            ...(request.input.instance === undefined
+              ? {}
+              : { instance: request.input.instance }),
             x: translation.x,
             y: translation.y,
             z: translation.z,

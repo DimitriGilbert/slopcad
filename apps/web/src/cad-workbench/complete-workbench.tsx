@@ -921,11 +921,19 @@ export function CompleteCadWorkbench({
     setTopologyPickTargets(null);
     setTopologyPickQueryError(null);
     setTopologyPicks(null);
-    if (applied === null) return;
+    // Only a scene settled on THIS document may be queried: while an edit's
+    // pass is in flight the visible scene is still the previous document's,
+    // and its snapshots would pair with the edited bodies. Picking stays
+    // disabled (no targets) until the matching scene is visible.
+    if (applied === null || !settled) return;
+    const queriedRevision = applied.revision;
     let current = true;
     void documentTopology().then(
       (inventory) => {
         if (!current) return;
+        if (inventory !== null && inventory.revision !== queriedRevision) {
+          return;
+        }
         setTopologyPickTargets(
           workbenchDocument.bodies.flatMap((body) => {
             const snapshot = inventory?.snapshots.get(body.id);
@@ -947,7 +955,13 @@ export function CompleteCadWorkbench({
     return () => {
       current = false;
     };
-  }, [applied, documentTopology, topologyPickDialog, workbenchDocument]);
+  }, [
+    applied,
+    documentTopology,
+    settled,
+    topologyPickDialog,
+    workbenchDocument,
+  ]);
   // The camera the anchors project through: the one the canvas renders
   // (the session's user camera over the settled scene's own).
   const topologyPickCamera =

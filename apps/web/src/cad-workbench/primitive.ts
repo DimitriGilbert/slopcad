@@ -73,6 +73,8 @@ export interface PrimitiveSceneRequest {
   readonly shape: PrimitiveShape;
   /** The primitive feature's output body id (the rendered body). */
   readonly bodyId: string;
+  /** The primitive feature's id (the topological-naming namespace). */
+  readonly featureId: string;
 }
 
 /** The primitive feature kinds, in the verbs' display order. */
@@ -214,7 +216,7 @@ export function primitiveSceneRequestOfFeature(
   const lengths = primitiveLengthsMm(document, feature, count);
   if (lengths === null) return null;
   const shape = primitiveShapeOf(feature.kind, lengths);
-  return shape === null ? null : { shape, bodyId };
+  return shape === null ? null : { shape, bodyId, featureId: feature.id };
 }
 
 /**

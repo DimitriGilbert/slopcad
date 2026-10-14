@@ -260,6 +260,8 @@ export interface PatternFeatureSceneRequest {
   readonly skips: readonly number[];
   /** The feature's output body id (the rendered body). */
   readonly bodyId: string;
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
 }
 
 /**
@@ -311,11 +313,13 @@ export function documentPatternFeatureSceneRequest(
   }
   const base = documentExtrudeRequest(document);
   if (base === null) return null;
-  return { base, legs, skips, bodyId };
+  return { base, legs, skips, bodyId, featureId: feature.id };
 }
 
 /** The worker-scene payload one patternPath feature executes as. */
 export interface PatternPathSceneRequest {
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
   /** The base extrusion every instance repeats. */
   readonly base: ExtrudeSceneRequest;
   /** The resolved path chain (the kernel contract's local XZ vocabulary). */
@@ -396,6 +400,7 @@ export function documentPatternPathSceneRequest(
     spacingMm: spacing,
     orientation,
     bodyId,
+    featureId: feature.id,
   };
 }
 
@@ -494,6 +499,8 @@ export type PatternTransformPlan =
 
 /** The worker-scene payload one patternLinear/patternCircular executes as. */
 export interface PatternTransformSceneRequest {
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
   /** The repeated solid's source (the feature's feature/body target). */
   readonly target: SceneOperand;
   /** The resolved copy plan. */
@@ -658,13 +665,15 @@ export function documentPatternTransformSceneRequests(
       }
     }
     if (pattern === null) continue;
-    requests.push({ target, pattern, bodyId });
+    requests.push({ target, pattern, bodyId, featureId: feature.id });
   }
   return requests;
 }
 
 /** The worker-scene payload one patternFace feature executes as. */
 export interface PatternFaceSceneRequest {
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
   /** The repeated solid's source (the feature's feature/body target). */
   readonly target: SceneOperand;
   /** The target's body id — the snapshot label the reference resolves on. */
@@ -737,7 +746,14 @@ export function patternFaceSceneRequestOfFeature(
   if (legOne.count * legTwo.count > PATTERN_COUNT_LIMIT) return null;
   const target = sceneOperandOfBody(document, targetBodyId);
   if (target === null) return null;
-  return { target, targetBodyId, face, legs: [legOne, legTwo], bodyId };
+  return {
+    target,
+    targetBodyId,
+    face,
+    legs: [legOne, legTwo],
+    bodyId,
+    featureId: feature.id,
+  };
 }
 
 /**
