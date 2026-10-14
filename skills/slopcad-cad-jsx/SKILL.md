@@ -135,7 +135,8 @@ references), not in a standalone `.tsx`.
 
 ```bash
 pnpm --filter @slopcad/cad-jsx compile \
-  ../docs-examples/src/cadjsx/hub-mount.tsx [--out <path>]
+  ../docs-examples/src/cadjsx/hub-mount.tsx [--out <path>] \
+  [--commands <path>]
 ```
 
 - **cwd caveat**: `pnpm --filter` runs the script from
@@ -150,6 +151,22 @@ pnpm --filter @slopcad/cad-jsx compile \
   bytes (an extensionless path gains `.native.json`; the path resolves
   relative to `packages/cad-jsx`). The output is exactly what the
   documents API stores as `nativeContent` and the workbench opens.
+- `--commands <path>` additionally writes the command batch (every
+  committed transaction's commands, in order) as a JSON array; an
+  extensionless path gains `.commands.json`. This is the generation path
+  for the cad-jsx-compiled `packages/cad-jsx/*.commands.json` fixtures
+  (e.g. `fillet-box`) — regenerate those, never hand-edit them.
+  `parametric-cup.commands.json` is outside this path: it is a
+  hand-authored raw-CadCommand batch, not a cad-jsx model, and the CLI
+  cannot produce it. The primitive fixture (`fillet-box.native.json` +
+  `fillet-box.commands.json`) regenerates with:
+
+  ```bash
+  pnpm --filter @slopcad/cad-jsx compile \
+    ../docs-examples/src/cadjsx/fillet-box.tsx \
+    --out fillet-box --commands fillet-box
+  ```
+
 - The emitted document id derives from the model file's basename
   (`hub-mount.tsx` → `doc_hub-mount`). Exit codes: `0` success, `1`
   compile/validation error (stderr, structured `cadjsx…` code), `2`

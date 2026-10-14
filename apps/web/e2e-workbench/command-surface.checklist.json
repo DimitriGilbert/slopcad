@@ -1,6 +1,6 @@
 {
   "$comment": "Phase 60 command-surface audit \u2014 the capability -> surface map. Curated data; two mechanical checks keep it honest: scripts/command-surface-audit.mjs proves every ROADMAP-CAD-PARITY.md requirements bullet of phases 36-56 is claimed by an entry here, and command-surface.spec.ts proves on the production build that the mapped surfaces actually mount and that the complete workbench's command-menu row set matches the command entries EXACTLY (both directions \u2014 no undocumented command, no dead checklist row). Kinds: command = a row with this id in the route's command menu; command-panel = the row, run, mounts the named panel targets; panel = the named panel/controls exist on the route. Declines record capabilities that are kernel-reachable but deliberately have no workbench verb at this epoch, with their evidence.",
-  "epoch": "phase-59 @ wt-phase-59 tip (visualization II; base audit phase-60 @ 8e5de07; phases 57 and later couriers extend this checklist as data)",
+  "epoch": "phase-59 @ wt-phase-59 tip (visualization II; base audit phase-60 @ 8e5de07; phases 57 and later couriers extend this checklist as data); document-feature-ops phase 4 adds the primitive, fillet/chamfer/shell and local face-op verbs and retires the local-face-operations decline",
   "source": "ROADMAP-CAD-PARITY.md section 4, phases 36-56",
   "entries": [
     {
@@ -1585,6 +1585,143 @@
         "snapshot",
         "export"
       ]
+    },
+    {
+      "id": "primitive-box",
+      "phase": 0,
+      "capability": "Primitive box: a sketch-free box from width/depth/height named parameters plus a placement offset (document-feature-ops)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "primitive-box",
+      "keywords": ["primitive", "box", "width", "depth", "height", "placement"]
+    },
+    {
+      "id": "primitive-sphere",
+      "phase": 0,
+      "capability": "Primitive sphere: a sketch-free sphere from a radius named parameter plus a placement offset (document-feature-ops)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "primitive-sphere",
+      "keywords": ["primitive", "sphere", "radius", "placement"]
+    },
+    {
+      "id": "primitive-cylinder",
+      "phase": 0,
+      "capability": "Primitive cylinder: a sketch-free cylinder from radius/height named parameters plus a placement offset (document-feature-ops)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "primitive-cylinder",
+      "keywords": ["primitive", "cylinder", "radius", "height", "placement"]
+    },
+    {
+      "id": "primitive-cone",
+      "phase": 0,
+      "capability": "Primitive cone: a sketch-free cone or frustum from bottom/top radius and height named parameters plus a placement offset (document-feature-ops)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "primitive-cone",
+      "keywords": [
+        "primitive",
+        "cone",
+        "frustum",
+        "radius",
+        "height",
+        "placement"
+      ]
+    },
+    {
+      "id": "topology-fillet",
+      "phase": 0,
+      "capability": "Fillet edges picked in the viewport, stored as persistent name-based topology references that survive rebuilds and dimension edits (document-feature-ops)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "fillet",
+      "keywords": [
+        "fillet",
+        "edge",
+        "radius",
+        "pick",
+        "persistent",
+        "reference"
+      ]
+    },
+    {
+      "id": "topology-chamfer",
+      "phase": 0,
+      "capability": "Chamfer edges picked in the viewport, stored as persistent name-based topology references (document-feature-ops)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "chamfer",
+      "keywords": [
+        "chamfer",
+        "edge",
+        "distance",
+        "pick",
+        "persistent",
+        "reference"
+      ]
+    },
+    {
+      "id": "topology-shell",
+      "phase": 0,
+      "capability": "Shell a body to a uniform wall, opened at faces picked in the viewport and stored as persistent topology references (document-feature-ops)",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "shell",
+      "keywords": ["shell", "hollow", "wall", "thickness", "face", "pick"]
+    },
+    {
+      "id": "local-face-move",
+      "phase": 44,
+      "capability": "Local face operations, OCCT-first: move face \u2014 the picked face travels a signed distance along a world axis (draft-free offset along direction), the pick a persistent reference",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "move-face",
+      "keywords": [
+        "local",
+        "face",
+        "operations",
+        "move",
+        "offset",
+        "direction",
+        "occt",
+        "brepfeat"
+      ]
+    },
+    {
+      "id": "local-face-delete",
+      "phase": 44,
+      "capability": "Local face operations, OCCT-first: delete face with and without heal \u2014 honest structured refusal when the kernel cannot close the solid",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "delete-face",
+      "keywords": [
+        "local",
+        "face",
+        "operations",
+        "delete",
+        "heal",
+        "occt",
+        "decline"
+      ]
+    },
+    {
+      "id": "local-face-replace",
+      "phase": 44,
+      "capability": "Local face operations, OCCT-first: replace face with a datum plane/surface picked from the document's datums",
+      "route": "/workbench-complete",
+      "kind": "command",
+      "target": "replace-face",
+      "keywords": [
+        "local",
+        "face",
+        "operations",
+        "replace",
+        "datum",
+        "plane",
+        "surface",
+        "occt"
+      ]
     }
   ],
   "declines": [
@@ -1594,13 +1731,6 @@
       "capability": "IGES export and DWG import as workbench exchange verbs",
       "reason": "Documented declines, not missing surfaces: the primary OCCT binding ships zero callable IGES writing classes and the DWG reverse-engineering surface is out of scope, so both are honest structured refusals the guides pin rather than dialogs that pretend.",
       "evidence": "docs/guides/step-iges.md ('IGES export is a documented decline (Phase 56 probe)'); docs/guides/mesh-exchange.md ('DWG stays a documented decline')."
-    },
-    {
-      "id": "local-face-operations-verb",
-      "phase": 44,
-      "capability": "Local face operations (move/replace/delete face) as workbench verbs",
-      "reason": "Kernel/bridge capability shipped (core bridge + OCCT adapter, composition route probed exact) but no workbench command or panel reaches it at this epoch \u2014 the audit's open reachability finding, recorded for the owner instead of a rushed verb.",
-      "evidence": "docs/architecture/occt-prespike-findings.md addendum: BRepFeat limited to MakeDPrism (CUT mode untrustworthy), deleteFace probed OUT (invalid solid); apps/web/src/cad-workbench/complete-workbench.tsx command list carries no face-op id."
     }
   ]
 }

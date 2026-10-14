@@ -15,14 +15,21 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   addBody,
+  applyCommand,
+  applyTransaction,
   createBodyId,
   createDocument,
   createDocumentId,
+  createParameterId,
   createReferenceId,
+  length,
   mintTopologyReference,
+  parseCommand,
+  parseNativeCadDocumentFromString,
   referenceProvenance,
   resolveTopologyReference,
   type BodyId,
+  type CadDocument,
   type TopologyEntityReference,
   type TopologySnapshot,
 } from "@slopcad/cad-core";
@@ -37,8 +44,15 @@ import {
   type WorkerSolidId,
 } from "@slopcad/cad-kernel";
 import { createOcctKernel, type OcctKernel } from "@slopcad/cad-kernel-occt";
-import type { DocumentBodySceneRequest } from "../cad-workbench/document-scene";
 
+import {
+  documentSceneBodies,
+  renderableBodyIds,
+  type DocumentBodySceneRequest,
+} from "../cad-workbench/document-scene";
+import { topologyCutCreateCommands } from "../cad-workbench/topology-pick";
+import FIXTURE_COMMANDS_TEXT from "../../../../packages/cad-jsx/fillet-box.commands.json?raw";
+import FIXTURE_TEXT from "../../../../packages/cad-jsx/fillet-box.native.json?raw";
 import { computeDocumentScene } from "./document-scene";
 
 const BOX_BODY = "body_box";
@@ -281,5 +295,108 @@ describe("name-based references across computeDocumentScene passes (Phase N3)", 
     );
     if (!edited.ok) throw new Error(edited.error.message);
     expect(edited.value.validity.state).toBe("valid");
+  });
+});
+
+/**
+ * The cad-jsx primitive + fillet fixture: `packages/cad-jsx/fillet-box.native.json`
+ * and its command batch `fillet-box.commands.json` are the compile CLI's
+ * `--out`/`--commands` output for
+ * `packages/docs-examples/src/cadjsx/fillet-box.tsx` (a box whose width is
+ * the `filletBoxWidth` parameter). A static tree cannot mint the fillet's
+ * edge reference, so the fillet is added the way the workbench adds it:
+ * the box renders, its topology is read, and the fillet verb's authoring
+ * plan mints the reference and commits the feature.
+ */
+const FIXTURE_WIDTH = createParameterId("param_filletBoxWidth");
+
+/** One document-scene pass over `document`, its pass context returned too. */
+async function documentPass(
+  document: CadDocument,
+  regeneration: number,
+): Promise<{
+  readonly context: ComputationContext;
+  readonly created: readonly WorkerSolidId[];
+  readonly scene: Awaited<ReturnType<typeof computeDocumentScene>>;
+}> {
+  const created: WorkerSolidId[] = [];
+  const context = passContext(regeneration, created);
+  const scene = await computeDocumentScene(
+    context,
+    documentSceneBodies(document, new Set(), null),
+    renderableBodyIds(document),
+  );
+  return { context, created, scene };
+}
+
+describe("the cad-jsx primitive + fillet fixture through the document scene", () => {
+  it("renders the compiled box, fillets a minted edge, and re-renders it after a width edit", async () => {
+    const parsed = parseNativeCadDocumentFromString(FIXTURE_TEXT);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const compiled = parsed.value.document;
+    expect(compiled.features.map((feature) => feature.kind)).toEqual(["box"]);
+
+    // The command batch replays over a fresh document to the same document.
+    const batch: unknown = JSON.parse(FIXTURE_COMMANDS_TEXT);
+    if (!Array.isArray(batch)) throw new Error("the batch is not an array");
+    const entries: readonly unknown[] = batch;
+    const commands = entries.map((entry) => {
+      const command = parseCommand(entry);
+      if (!command.ok) throw new Error(command.error.message);
+      return command.value;
+    });
+    const replayed = applyTransaction(createDocument(compiled.id), {
+      commands,
+    });
+    if (!replayed.ok) throw new Error(replayed.error.message);
+    expect(replayed.value).toEqual(compiled);
+
+    // Pass 0: the compiled box renders at 20 × 20 × 30.
+    const boxed = await documentPass(compiled, 0);
+    expect(boxed.scene.failures).toEqual([]);
+    expect(boxed.scene.bodies.map((body) => body.bodyId)).toEqual([BOX_BODY]);
+    expect(boxed.scene.volume).toBeCloseTo(20 * DEPTH_MM * HEIGHT_MM, 4);
+
+    // The fillet verb's plan mints the picked vertical edge's reference
+    // on the rendered box's snapshot and commits the feature.
+    const snapshot = await boxSnapshot(boxed.context, boxed.created, 0);
+    const edge = snapshot.entities.find(
+      (entity) =>
+        entity.kind === "edge" &&
+        Math.abs((entity.geometry.lengthMm ?? 0) - HEIGHT_MM) < 1e-6,
+    );
+    if (edge === undefined) throw new Error("the box reports no vertical edge");
+    const plan = topologyCutCreateCommands(compiled, {
+      kind: "fillet",
+      snapshot,
+      ordinals: [edge.ordinal],
+      sizeMm: RADIUS_MM,
+    });
+    if (!plan.ok) throw new Error(plan.message);
+    const applied = applyTransaction(compiled, { commands: plan.commands });
+    if (!applied.ok) throw new Error(applied.error.message);
+    const filleted = applied.value;
+
+    // Pass 1: a full rebuild — the fillet renders in place of the box.
+    const first = await documentPass(filleted, 1);
+    expect(first.scene.failures).toEqual([]);
+    expect(first.scene.bodies.map((body) => body.bodyId)).toEqual([
+      plan.bodyId,
+    ]);
+    expect(first.scene.volume).toBeCloseTo(filletedVolume(20), 4);
+
+    // Pass 2: the compiled width parameter edit — the fillet still renders.
+    const widened = applyCommand(filleted, {
+      type: "parameter.set",
+      id: FIXTURE_WIDTH,
+      value: length(26),
+    });
+    if (!widened.ok) throw new Error(widened.error.message);
+    const second = await documentPass(widened.value, 2);
+    expect(second.scene.failures).toEqual([]);
+    expect(second.scene.bodies.map((body) => body.bodyId)).toEqual([
+      plan.bodyId,
+    ]);
+    expect(second.scene.volume).toBeCloseTo(filletedVolume(26), 4);
   });
 });

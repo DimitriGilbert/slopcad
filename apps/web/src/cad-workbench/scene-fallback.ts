@@ -83,6 +83,19 @@ export type WorkbenchSceneKind =
   | "sheet";
 
 /**
+ * Whether the `moveBody` scene still resolves: a move the document scene
+ * reads ({@link documentMoveBodySceneRequests} — the placed primitive, the
+ * rotating move), or a translation-only move's base, the extrusion it
+ * carries (the engine's move-body create action follows the extrude).
+ */
+function moveBodySceneResolves(document: CadDocument): boolean {
+  return (
+    documentMoveBodySceneRequests(document).length > 0 ||
+    documentExtrudeRequest(document) !== null
+  );
+}
+
+/**
  * The highest scene the document still resolves, in the create actions'
  * precedence: the hole composition when every hole still cuts its base,
  * else the loft, else the sweep, else the revolve, else the extrude, else
@@ -191,9 +204,7 @@ export function honestSceneFallback(
                                       ? documentRevolveRequest(document) !==
                                         null
                                       : activeScene === "moveBody"
-                                        ? documentMoveBodySceneRequests(
-                                            document,
-                                          ).length > 0
+                                        ? moveBodySceneResolves(document)
                                         : activeScene === "primitive"
                                           ? documentPrimitiveSceneRequests(
                                               document,

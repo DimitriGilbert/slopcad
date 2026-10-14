@@ -14,20 +14,26 @@ import { describe, expect, it } from "vitest";
 import { Box } from "./elements";
 import {
   CLI_MODEL_ERROR_CODES,
+  COMMANDS_OUTPUT_EXTENSION,
   compileCliHelp,
   deriveDocumentId,
   NATIVE_OUTPUT_EXTENSION,
+  nativeCommandBatchText,
   parseCompileArguments,
   resolveModelExport,
   resolveOutPath,
 } from "./cli";
-import { DEFAULT_NATIVE_DOCUMENT_ID } from "./native";
+import { compileToNative, DEFAULT_NATIVE_DOCUMENT_ID } from "./native";
 
 describe("parseCompileArguments", () => {
   it("parses one model path and an optional --out value", () => {
     expect(parseCompileArguments(["model.tsx"])).toEqual({
       kind: "parsed",
-      arguments: { modelPath: "model.tsx", outPath: undefined },
+      arguments: {
+        modelPath: "model.tsx",
+        outPath: undefined,
+        commandsPath: undefined,
+      },
     });
     expect(
       parseCompileArguments(["model.tsx", "--out", "build/model.json"]),
@@ -36,6 +42,26 @@ describe("parseCompileArguments", () => {
       arguments: {
         modelPath: "model.tsx",
         outPath: "build/model.json",
+        commandsPath: undefined,
+      },
+    });
+  });
+
+  it("parses an optional --commands value, extensionless gaining .commands.json", () => {
+    expect(
+      parseCompileArguments([
+        "model.tsx",
+        "--commands",
+        "build/model",
+        "--out",
+        "build/model",
+      ]),
+    ).toEqual({
+      kind: "parsed",
+      arguments: {
+        modelPath: "model.tsx",
+        outPath: `build/model${NATIVE_OUTPUT_EXTENSION}`,
+        commandsPath: `build/model${COMMANDS_OUTPUT_EXTENSION}`,
       },
     });
   });
@@ -60,11 +86,20 @@ describe("parseCompileArguments", () => {
     expect(
       parseCompileArguments(["m.tsx", "--out", "a", "--out", "b"]).kind,
     ).toBe("usageError");
+    expect(parseCompileArguments(["model.tsx", "--commands"]).kind).toBe(
+      "usageError",
+    );
+    expect(
+      parseCompileArguments(["m.tsx", "--commands", "a", "--commands", "b"])
+        .kind,
+    ).toBe("usageError");
   });
 
   it("exposes the full contract in the help text", () => {
     expect(compileCliHelp).toContain("pnpm --filter @slopcad/cad-jsx compile");
     expect(compileCliHelp).toContain(NATIVE_OUTPUT_EXTENSION);
+    expect(compileCliHelp).toContain("--commands <path>");
+    expect(compileCliHelp).toContain(COMMANDS_OUTPUT_EXTENSION);
     expect(compileCliHelp).toContain("Exit codes: 0 success");
   });
 });
@@ -83,6 +118,37 @@ describe("resolveOutPath", () => {
       `build/model${NATIVE_OUTPUT_EXTENSION}`,
     );
     expect(resolveOutPath("model")).toBe(`model${NATIVE_OUTPUT_EXTENSION}`);
+  });
+});
+
+describe("nativeCommandBatchText", () => {
+  it("extracts the native history's commands, in order, as a JSON array", () => {
+    const native = compileToNative(
+      createElement(Box, { id: "feat_box", width: 10, depth: 20, height: 30 }),
+    );
+    if (!native.ok) throw new Error(native.error.message);
+    const batch = nativeCommandBatchText(native.value);
+    if (!batch.ok) throw new Error(batch.error.message);
+    expect(batch.value.endsWith("]\n")).toBe(true);
+    const parsed: unknown = JSON.parse(batch.value);
+    const history = (
+      JSON.parse(native.value) as {
+        history: { transactions: { commands: unknown[] }[] };
+      }
+    ).history;
+    expect(parsed).toEqual(
+      history.transactions.flatMap((transaction) => transaction.commands),
+    );
+    expect(Array.isArray(parsed) && parsed.length > 0).toBe(true);
+  });
+
+  it("refuses text that is not a native document with a transaction log", () => {
+    for (const text of ["{", "{}", '{"history":{"transactions":[{}]}}']) {
+      const batch = nativeCommandBatchText(text);
+      expect(batch.ok).toBe(false);
+      if (batch.ok) continue;
+      expect(batch.error.code).toBe(CLI_MODEL_ERROR_CODES.commandBatchInvalid);
+    }
   });
 });
 

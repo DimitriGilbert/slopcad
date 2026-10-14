@@ -387,6 +387,15 @@ describe("honestSceneFallback", () => {
     ).toBeNull();
   });
 
+  it("holds the move-body scene while its extruded base resolves", () => {
+    // A translation-only move over the extrude: the scene stays put.
+    expect(
+      honestSceneFallback(buildSolidDocument("extrude"), "moveBody"),
+    ).toBeNull();
+    // Nothing left to move: the honest fallback to the empty scene.
+    expect(honestSceneFallback(createDocument(DOC), "moveBody")).toBe("empty");
+  });
+
   it("holds the plate scene only while the fixture's hole parameter is stored", () => {
     const plated = addDocumentParameter(createDocument(DOC), {
       id: createParameterId("param_hole_diameter"),
