@@ -9,12 +9,14 @@ import {
   DropdownMenuTrigger,
 } from "@slopcad/ui/components/dropdown-menu";
 import { Skeleton } from "@slopcad/ui/components/skeleton";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import { authClient } from "@/lib/auth-client";
 
 export default function UserMenu() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: session, isPending } = authClient.useSession();
 
   if (isPending) {
@@ -45,6 +47,11 @@ export default function UserMenu() {
               void authClient.signOut({
                 fetchOptions: {
                   onSuccess: () => {
+                    // Sign-out must drop every cached tRPC payload before the
+                    // client-side navigation: the QueryClient is a singleton
+                    // per SPA session, so the next account in this tab would
+                    // otherwise render the previous account's data.
+                    queryClient.clear();
                     void navigate({
                       to: "/",
                     });

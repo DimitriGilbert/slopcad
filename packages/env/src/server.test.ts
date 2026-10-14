@@ -128,3 +128,108 @@ describe("server env", () => {
     });
   });
 });
+
+describe("agent chat env", () => {
+  const AGENT_VARS = [
+    "OPENAI_KEY",
+    "ANTHROPIC_KEY",
+    "GOOGLE_KEY",
+    "OPENROUTER_KEY",
+    "OPENAI_COMPATIBLE_KEY",
+    "OPENAI_COMPATIBLE_BASE_URL",
+    "AGENT_SERVER_AI_ALLOW_ALL",
+    "MODEL_CATALOG_URL",
+  ] as const;
+
+  function absentAgentVars(): Record<(typeof AGENT_VARS)[number], undefined> {
+    return Object.fromEntries(AGENT_VARS.map((name) => [name, undefined])) as {
+      [K in (typeof AGENT_VARS)[number]]: undefined;
+    };
+  }
+
+  it("accepts an env with no agent vars and applies the documented defaults", async () => {
+    await withMockedEnv({ ...VALID_ENV, ...absentAgentVars() }, async () => {
+      const env = await importServerEnv();
+      expect(env.OPENAI_KEY).toBeUndefined();
+      expect(env.ANTHROPIC_KEY).toBeUndefined();
+      expect(env.GOOGLE_KEY).toBeUndefined();
+      expect(env.OPENROUTER_KEY).toBeUndefined();
+      expect(env.OPENAI_COMPATIBLE_KEY).toBeUndefined();
+      expect(env.OPENAI_COMPATIBLE_BASE_URL).toBeUndefined();
+      expect(env.AGENT_SERVER_AI_ALLOW_ALL).toBe(false);
+      expect(env.MODEL_CATALOG_URL).toBe("https://models.dev/api.json");
+    });
+  });
+
+  it("enables server mode for exactly the providers whose keys are present", async () => {
+    await withMockedEnv(
+      {
+        ...VALID_ENV,
+        ...absentAgentVars(),
+        OPENAI_KEY: "sk-test",
+      },
+      async () => {
+        const env = await importServerEnv();
+        expect(env.OPENAI_KEY).toBe("sk-test");
+        expect(env.ANTHROPIC_KEY).toBeUndefined();
+      },
+    );
+  });
+
+  it("parses AGENT_SERVER_AI_ALLOW_ALL as a boolean", async () => {
+    await withMockedEnv(
+      { ...VALID_ENV, ...absentAgentVars(), AGENT_SERVER_AI_ALLOW_ALL: "true" },
+      async () => {
+        const env = await importServerEnv();
+        expect(env.AGENT_SERVER_AI_ALLOW_ALL).toBe(true);
+      },
+    );
+    await withMockedEnv(
+      { ...VALID_ENV, ...absentAgentVars(), AGENT_SERVER_AI_ALLOW_ALL: "1" },
+      async () => {
+        const env = await importServerEnv();
+        expect(env.AGENT_SERVER_AI_ALLOW_ALL).toBe(true);
+      },
+    );
+    await withMockedEnv(
+      {
+        ...VALID_ENV,
+        ...absentAgentVars(),
+        AGENT_SERVER_AI_ALLOW_ALL: "false",
+      },
+      async () => {
+        const env = await importServerEnv();
+        expect(env.AGENT_SERVER_AI_ALLOW_ALL).toBe(false);
+      },
+    );
+  });
+
+  it("accepts a MODEL_CATALOG_URL override for self-hosted mirrors", async () => {
+    await withMockedEnv(
+      {
+        ...VALID_ENV,
+        ...absentAgentVars(),
+        MODEL_CATALOG_URL: "http://127.0.0.1:9999/models.json",
+      },
+      async () => {
+        const env = await importServerEnv();
+        expect(env.MODEL_CATALOG_URL).toBe("http://127.0.0.1:9999/models.json");
+      },
+    );
+  });
+
+  it("rejects a malformed OPENAI_COMPATIBLE_BASE_URL", async () => {
+    await withMockedEnv(
+      {
+        ...VALID_ENV,
+        ...absentAgentVars(),
+        OPENAI_COMPATIBLE_BASE_URL: "not-a-url",
+      },
+      async () => {
+        await expect(importServerEnv()).rejects.toThrow(
+          /Invalid environment variables/,
+        );
+      },
+    );
+  });
+});

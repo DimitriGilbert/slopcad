@@ -12,6 +12,15 @@
  * One value field for the selected constraint's dimensional value (the
  * canonical magnitude in the constraint's own unit — mm for
  * distance/radius/diameter, deg for angle), applied through `onEditDimension`.
+ * The editor's form is mounted PER selection — keyed by the constraint id —
+ * so every selection starts a fresh form seeded with that constraint's live
+ * document value (form-core seeds a mounted field only from the form's
+ * `defaultValues`, and its defaults reseed is gated on a form-wide untouched
+ * state; a form shared across selections would show an empty field on a
+ * switch and resurrect a stale typed value on re-select). While a constraint
+ * STAYS selected, host updates to its dimension value follow the same
+ * no-unsubmitted-edits rule: a field still holding the last-seeded value
+ * adopts the committed one; in-progress typing is preserved.
  * When the host threads the document's parameter names (`parameterNames`),
  * the field is the `expressionNumber` type: it accepts a literal number OR a
  * `$name` token with the clickable autocomplete, and a bound dimension shows
@@ -41,7 +50,7 @@
  * messages, and codes are host data rendered verbatim.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "cn";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
@@ -293,6 +302,143 @@ const SOLVE_CLASSES: Readonly<Record<CadSketchSolveStatus, string>> =
 type DimensionFormValues = Record<string, number | string | undefined>;
 
 /**
+ * The dimension editor's Formedible form. The parent mounts it keyed by the
+ * selected constraint id, so every selection starts a FRESH form whose
+ * defaults are that constraint's live document value: form-core seeds a
+ * mounted field only from the form's `defaultValues`, and its defaults
+ * reseed is gated on a form-wide untouched state, so a form shared across
+ * selections would render an empty field on a switch (the new field's key
+ * has no store value) and resurrect a stale typed value on re-select once
+ * anything had been touched. While a constraint STAYS selected, host
+ * updates to its dimension value adopt per the no-unsubmitted-edits rule:
+ * a field still holding the last-seeded value resets to the committed one;
+ * a field carrying in-progress typing is preserved.
+ */
+function DimensionEditorForm({
+  dimension,
+  labels,
+  onApplyFailure,
+  onEditDimension,
+  parameterNames,
+}: {
+  readonly dimension: CadSketchInspectorDimension;
+  readonly labels: CadSketchInspectorLabels;
+  readonly onApplyFailure: (message: string | undefined) => void;
+  readonly onEditDimension: CadSketchInspectorProps["onEditDimension"];
+  readonly parameterNames: readonly string[] | undefined;
+}) {
+  const name = `value:${dimension.constraintId}`;
+  // A bound dimension defaults to its `$name` token; an unbound one to the
+  // canonical magnitude rounded to the host's decimals.
+  const defaultValue =
+    dimension.parameterName === undefined
+      ? Number(dimension.value.toFixed(dimension.decimals))
+      : `$${dimension.parameterName}`;
+
+  const formConfig = useMemo(() => {
+    const fields: FormedibleFieldConfig<DimensionFormValues>[] = [
+      parameterNames === undefined
+        ? {
+            name,
+            type: "number",
+            label: `${labels.dimensionHeading} (${dimension.unit})`,
+            inputClassName: "font-mono",
+            validation: (value) =>
+              typeof value === "number" && Number.isFinite(value)
+                ? null
+                : labels.dimensionValueInvalid,
+          }
+        : {
+            name,
+            type: "expressionNumber",
+            label: `${labels.dimensionHeading} (${dimension.unit})`,
+            inputClassName: "font-mono",
+            expressionNumberConfig: { parameterNames },
+            validation: (value) =>
+              expressionNumberProblem(value, {
+                parameterNames,
+                acceptsNumber: Number.isFinite,
+                message: labels.dimensionValueInvalid,
+              }),
+          },
+    ];
+    return {
+      fields,
+      onSubmit: ({ value }: { readonly value: DimensionFormValues }) => {
+        onApplyFailure(undefined);
+        if (onEditDimension === undefined) return;
+        const submitted = value[name];
+        if (typeof submitted === "number" && Number.isFinite(submitted)) {
+          const outcome = onEditDimension(dimension.constraintId, submitted);
+          if (!outcome.ok) {
+            onApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
+          }
+          return;
+        }
+        // The token gate is the grammar's own, not a `$`-prefix sniff: the
+        // negated form (`-$name`, Phase 30) reaches the apply surface too —
+        // which owns the per-kind semantics (it refuses where the domain's
+        // binding rules say so) and surfaces the refusal verbatim below.
+        if (
+          typeof submitted === "string" &&
+          expressionNumberTokenName(submitted) !== null
+        ) {
+          const outcome = onEditDimension(dimension.constraintId, submitted);
+          if (!outcome.ok) {
+            onApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
+          }
+        }
+      },
+    };
+  }, [
+    dimension,
+    labels,
+    name,
+    onApplyFailure,
+    onEditDimension,
+    parameterNames,
+  ]);
+
+  const dimensionForm = useFormedible<DimensionFormValues>({
+    fields: formConfig.fields,
+    formOptions: {
+      defaultValues: { [name]: defaultValue },
+      onSubmit: formConfig.onSubmit,
+    },
+    // Submitted values survive the commit; the reseed effect below adopts
+    // later host updates while the constraint stays selected.
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.apply,
+    submitButtonClassName: "w-full",
+    showSubmitButton: onEditDimension !== undefined,
+  });
+
+  // Host updates to the selected constraint's dimension value (R12F4):
+  // form-core's defaults reseed is gated on a sticky form-wide touched
+  // state, so a committed change would never reach a touched field. The
+  // no-unsubmitted-edits rule: a field still holding the last-seeded value
+  // adopts the committed one; typed-but-unsubmitted input is preserved.
+  // `keepDefaultValues` is load bearing: reset clears the touched state,
+  // and react-form reinstalls the hook's defaultValues on every render, so
+  // a reset that also replaced them would be reseeded right back over the
+  // preserved typing.
+  const seededValueRef = useRef(defaultValue);
+  useEffect(() => {
+    const form = dimensionForm.form;
+    const formValue = form.state.values[name];
+    if (
+      Object.is(formValue, seededValueRef.current) &&
+      !Object.is(formValue, defaultValue)
+    ) {
+      form.reset({ [name]: defaultValue }, { keepDefaultValues: true });
+    }
+    seededValueRef.current = defaultValue;
+  }, [defaultValue, dimensionForm.form, name]);
+
+  return <dimensionForm.Form className="space-y-2" />;
+}
+
+/**
  * The sketch inspector: solver readout, constraint list, dimension editor,
  * diagnostics feed — the sketch's numbers, in one docked palette.
  */
@@ -323,93 +469,6 @@ export function CadSketchInspector({
   const [convertFailure, setConvertFailure] = useState<string | undefined>(
     undefined,
   );
-
-  const formConfig = useMemo(() => {
-    const name =
-      dimension === null ? "idle" : `value:${dimension.constraintId}`;
-    const boundToken =
-      dimension?.parameterName === undefined
-        ? undefined
-        : `$${dimension.parameterName}`;
-    const defaultValue =
-      dimension === null
-        ? undefined
-        : (boundToken ?? Number(dimension.value.toFixed(dimension.decimals)));
-    const fields: FormedibleFieldConfig<DimensionFormValues>[] =
-      dimension === null
-        ? []
-        : [
-            parameterNames === undefined
-              ? {
-                  name,
-                  type: "number",
-                  label: `${labels.dimensionHeading} (${dimension.unit})`,
-                  inputClassName: "font-mono",
-                  validation: (value) =>
-                    typeof value === "number" && Number.isFinite(value)
-                      ? null
-                      : labels.dimensionValueInvalid,
-                }
-              : {
-                  name,
-                  type: "expressionNumber",
-                  label: `${labels.dimensionHeading} (${dimension.unit})`,
-                  inputClassName: "font-mono",
-                  expressionNumberConfig: { parameterNames },
-                  validation: (value) =>
-                    expressionNumberProblem(value, {
-                      parameterNames,
-                      acceptsNumber: Number.isFinite,
-                      message: labels.dimensionValueInvalid,
-                    }),
-                },
-          ];
-    return {
-      name,
-      defaultValue,
-      fields,
-      onSubmit: ({ value }: { readonly value: DimensionFormValues }) => {
-        setApplyFailure(undefined);
-        if (dimension === null || onEditDimension === undefined) return;
-        const submitted = value[name];
-        if (typeof submitted === "number" && Number.isFinite(submitted)) {
-          const outcome = onEditDimension(dimension.constraintId, submitted);
-          if (!outcome.ok) {
-            setApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
-          }
-          return;
-        }
-        // The token gate is the grammar's own, not a `$`-prefix sniff: the
-        // negated form (`-$name`, Phase 30) reaches the apply surface too —
-        // which owns the per-kind semantics (it refuses where the domain's
-        // binding rules say so) and surfaces the refusal verbatim below.
-        if (
-          typeof submitted === "string" &&
-          expressionNumberTokenName(submitted) !== null
-        ) {
-          const outcome = onEditDimension(dimension.constraintId, submitted);
-          if (!outcome.ok) {
-            setApplyFailure(`${outcome.error.code}: ${outcome.error.message}`);
-          }
-        }
-      },
-    };
-  }, [dimension, labels, onEditDimension, parameterNames]);
-
-  const dimensionForm = useFormedible<DimensionFormValues>({
-    fields: formConfig.fields,
-    formOptions: {
-      defaultValues: { [formConfig.name]: formConfig.defaultValue },
-      onSubmit: formConfig.onSubmit,
-    },
-    resetOnSubmitSuccess: false,
-    submitLabel: labels.apply,
-    submitButtonClassName: "w-full",
-    showSubmitButton:
-      dimension !== null &&
-      onEditDimension !== undefined &&
-      formConfig.fields.length > 0,
-  });
 
   // ----- The Phase 37 array-pattern form ------------------------------------
   // One Formedible form per tool (the fields genuinely differ); each renders
@@ -695,7 +754,17 @@ export function CadSketchInspector({
           </p>
         ) : (
           <>
-            <dimensionForm.Form className="space-y-2" />
+            {/* The dimension editor is mounted PER constraint (the key):
+                each selection remounts a fresh form seeded with that
+                constraint's live document value — see the editor's doc. */}
+            <DimensionEditorForm
+              key={dimension.constraintId}
+              dimension={dimension}
+              labels={labels}
+              onApplyFailure={setApplyFailure}
+              onEditDimension={onEditDimension}
+              parameterNames={parameterNames}
+            />
             {applyFailure !== undefined ? (
               <div
                 className="text-destructive pt-1 text-xs leading-4"

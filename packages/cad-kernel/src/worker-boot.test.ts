@@ -3,9 +3,10 @@
  * FAKE port (the `worker-web-transport` testing pattern): the boot's
  * structural `WorkerCrashPort` means no real thread is needed to stage
  * every terminal case deterministically — a request left pending, the
- * thread's `error`/`messageerror` event, a deliberate `dispose()`.
+ * thread's `error`/`messageerror` event, the worker's own boot-failure
+ * report, a deliberate `dispose()`.
  *
- * The load-bearing rule: a request pending when the thread dies SETTLES
+ * The load-bearing rule: a request pending when the channel dies SETTLES
  * (with the structured `worker/transport-closed` failure) instead of
  * hanging forever — every assertion below is bounded by the test timeout,
  * so a regression to the old never-settling behavior fails loudly.
@@ -14,6 +15,7 @@
 import { length } from "@slopcad/cad-core";
 import { describe, expect, it } from "vitest";
 
+import { WORKER_BOOT_FAILURE_KEY } from "./worker-boot-failure-report";
 import {
   bootWorkerChannel,
   type WorkerBootFailure,
@@ -75,6 +77,16 @@ class FakeWorkerPort implements WorkerCrashPort {
   /** Stages the thread's `messageerror` event. */
   messageError(): void {
     for (const listener of [...this.messageErrorListeners]) listener();
+  }
+
+  /** Stages an arbitrary message arriving from the worker thread. */
+  emit(data: unknown): void {
+    for (const listener of [...this.messageListeners]) listener({ data });
+  }
+
+  /** Stages the worker entry's own boot-failure report (its death note). */
+  bootFailure(message: string): void {
+    this.emit({ [WORKER_BOOT_FAILURE_KEY]: message });
   }
 }
 
@@ -142,6 +154,88 @@ describe("the crash-settling worker boot", () => {
     expect(harness.port.terminated).toBe(true);
   });
 
+  it("settles a pending request with worker/transport-closed when the worker reports a boot failure", async () => {
+    const harness = setup();
+    const pending = harness.pendingRequest();
+    harness.port.bootFailure(
+      "hosting the OpenCascade kernel failed: out of memory",
+    );
+    await expect(pending).rejects.toMatchObject({
+      error: { code: "worker/transport-closed" },
+    });
+    expect(harness.port.terminated).toBe(true);
+    expect(harness.crashes).toEqual([
+      {
+        kind: "boot-failure",
+        message: "hosting the OpenCascade kernel failed: out of memory",
+      },
+    ]);
+  });
+
+  it("reports a worker boot failure even with no request in flight", () => {
+    const harness = setup();
+    harness.port.bootFailure("hosting the Manifold kernel failed: bad wasm");
+    expect(harness.crashes).toEqual([
+      {
+        kind: "boot-failure",
+        message: "hosting the Manifold kernel failed: bad wasm",
+      },
+    ]);
+    expect(harness.port.terminated).toBe(true);
+  });
+
+  it("plain non-protocol traffic never settles the channel; only the boot-failure report does", async () => {
+    const harness = setup();
+    const pending = harness.pendingRequest();
+    let settled = false;
+    void pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    // Success-shaped boot reports and arbitrary uncorrelatable data are
+    // dropped by the channel — they must not settle (or terminate) it.
+    harness.port.emit({
+      slopcadManifoldWorkerBootMs: 42,
+      slopcadManifoldWorkerWasmUrl: "a.wasm",
+    });
+    harness.port.emit({ requestId: "1", operation: "solid.createBox" });
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(settled).toBe(false);
+    expect(harness.crashes).toEqual([]);
+    expect(harness.port.terminated).toBe(false);
+    // The report itself settles exactly the requests that were hanging.
+    harness.port.bootFailure("hosting the Manifold kernel failed: link error");
+    await expect(pending).rejects.toMatchObject({
+      error: { code: "worker/transport-closed" },
+    });
+  });
+
+  it("a boot-failure-settled channel refuses later requests locally, and a fresh boot settles on its own failure too", async () => {
+    const harness = setup();
+    harness.port.bootFailure("the WASM boot failed");
+    // Requests issued after the settlement are refused locally — never
+    // pending — which is what lets the hosting surface's next exchange
+    // fail fast instead of hanging while it re-boots a fresh worker.
+    await expect(harness.pendingRequest()).rejects.toMatchObject({
+      error: { code: "worker/transport-closed" },
+    });
+    const fresh = setup();
+    const freshPending = fresh.pendingRequest();
+    fresh.port.bootFailure("the re-boot failed too");
+    await expect(freshPending).rejects.toMatchObject({
+      error: { code: "worker/transport-closed" },
+    });
+    expect(fresh.crashes).toEqual([
+      { kind: "boot-failure", message: "the re-boot failed too" },
+    ]);
+  });
+
   it("settles terminally exactly once: a second crash event is silent", async () => {
     const harness = setup();
     const pending = harness.pendingRequest();
@@ -151,6 +245,7 @@ describe("the crash-settling worker boot", () => {
     });
     harness.port.crash("second crash");
     harness.port.messageError();
+    harness.port.bootFailure("a late boot-failure report");
     expect(harness.crashes).toHaveLength(1);
   });
 

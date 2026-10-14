@@ -34,10 +34,16 @@
  *
  * Module evaluation completes synchronously: the hosting is *started*, not
  * awaited, and the WASM boot proceeds over the worker's normal event loop
- * while early requests buffer. A hosting failure rejects the started
- * promise — an unhandled rejection on the worker scope (browser console
- * and error reporting) with a channel that will never answer; requests
- * dispatched to the dead channel simply never settle on their own.
+ * while early requests buffer. A hosting failure cannot hang the channel:
+ * the floated promise is caught, and while the thread can still speak the
+ * failure is posted to the main thread as the boot-failure report (see
+ * `@slopcad/cad-kernel`'s `worker-boot-failure-report`) — the marker
+ * `bootWorkerChannel` settles every in-flight request terminally on, so the
+ * hosting surface learns the failure and re-boots on the next exchange —
+ * after which the entry closes itself. (Without the bridge the rejection
+ * would stay inside this scope — an unhandled rejection with a channel that
+ * never answers.)
+ *
  * ## The boot report
  *
  * Phase 29's performance baselines made Manifold's boot cost a documented,
@@ -52,8 +58,14 @@
  */
 
 import wasmUrl from "manifold-3d/manifold.wasm?url";
-import type { WorkerTransport } from "@slopcad/cad-kernel";
-import { isWebWorkerMessagePort } from "@slopcad/cad-kernel";
+import type {
+  WebWorkerMessagePort,
+  WorkerTransport,
+} from "@slopcad/cad-kernel";
+import {
+  isWebWorkerMessagePort,
+  WORKER_BOOT_FAILURE_KEY,
+} from "@slopcad/cad-kernel";
 
 import { hostManifoldWorker } from "./manifold-worker";
 import {
@@ -62,10 +74,26 @@ import {
 } from "./manifold-worker-boot-report";
 import { createManifoldRuntime } from "./manifold-runtime";
 
+/**
+ * The dedicated-worker scope this entry needs: the message-port surface
+ * plus `close()`, the self-termination the boot-failure bridge uses to
+ * retire the thread once its report has crossed the channel.
+ */
+interface SelfCloseableWorkerScope extends WebWorkerMessagePort {
+  close(): void;
+}
+
+function isSelfCloseableWorkerScope(
+  input: unknown,
+): input is SelfCloseableWorkerScope {
+  if (!isWebWorkerMessagePort(input)) return false;
+  return typeof (input as { readonly close?: unknown }).close === "function";
+}
+
 const scope: unknown = globalThis;
-if (!isWebWorkerMessagePort(scope)) {
+if (!isSelfCloseableWorkerScope(scope)) {
   throw new Error(
-    "manifold-worker.web needs the dedicated worker message scope (postMessage/addEventListener on self).",
+    "manifold-worker.web needs the dedicated worker message scope (postMessage/addEventListener/close on self).",
   );
 }
 
@@ -103,13 +131,15 @@ scope.addEventListener("message", (event: { readonly data: unknown }) => {
   }
 });
 
-// Started, deliberately not awaited (the `void` operator marks the float
-// explicit): module evaluation returns synchronously so the worker's event
-// loop stays free for the WASM boot, while early requests buffer above. A
-// hosting failure remains visible — the rejected promise reports as an
-// unhandled rejection on the worker scope, and the channel never answers.
+// Started, deliberately not awaited: module evaluation returns synchronously
+// so the worker's event loop stays free for the WASM boot, while early
+// requests buffer above. The `.catch` is the hosting-failure bridge: the
+// rejection never fires the main thread's Worker `error` event, so it is
+// reported as the boot-failure report — `bootWorkerChannel`'s marker for
+// settling every in-flight request terminally — and the thread retires
+// itself instead of lingering as a channel that never answers.
 const bootStartedAt = performance.now();
-void hostManifoldWorker({
+hostManifoldWorker({
   transport,
   createRuntime: async () => {
     const runtime = await createManifoldRuntime({ locateFile: () => wasmUrl });
@@ -123,4 +153,10 @@ void hostManifoldWorker({
     });
     return runtime;
   },
+}).catch((error: unknown) => {
+  const detail = error instanceof Error ? error.message : String(error);
+  transport.send({
+    [WORKER_BOOT_FAILURE_KEY]: `hosting the Manifold kernel failed: ${detail}`,
+  });
+  scope.close();
 });

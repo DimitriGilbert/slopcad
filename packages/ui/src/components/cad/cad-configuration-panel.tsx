@@ -15,7 +15,11 @@
  * - **The create form**: a Formedible form (the schema + field-config
  *   surface, never hand-rolled inputs) collecting the new row's name.
  * - **The CSV row**: an export affordance calling `onExportCsv` and a file
- *   input calling `onImportCsv` with the chosen file's text.
+ *   input calling `onImportCsv` with the chosen file's text. A failed file
+ *   read is caught — the fire-and-forget promise never rejects — and the
+ *   error's own message surfaces through `onImportError`, the host's
+ *   notice-surface channel; without the prop the refusal stays caught but
+ *   unrendered (the inert discipline: the panel never invents a surface).
  *
  * ## State honesty
  *
@@ -86,6 +90,12 @@ export interface CadConfigurationPanelProps {
   readonly onExportCsv?: () => string;
   /** Imports CSV text as parameter-table edits. */
   readonly onImportCsv?: (text: string) => void;
+  /**
+   * Reports a failed CSV file read: the error's own message, verbatim, for
+   * the host's notice surface. Absent, a failed read is still caught (the
+   * input's promise never rejects) but surfaces nowhere.
+   */
+  readonly onImportError?: (message: string) => void;
   /** The host's last configuration notice (error region text). */
   readonly notice?: string | null;
   readonly labels?: Partial<CadConfigurationPanelLabels>;
@@ -127,6 +137,7 @@ export function CadConfigurationPanel({
   onDelete,
   onExportCsv,
   onImportCsv,
+  onImportError,
   notice = null,
   labels: labelOverrides,
   className = "",
@@ -148,11 +159,18 @@ export function CadConfigurationPanel({
     onExportCsv();
   };
 
+  // Fire-and-forget by the file input, so the promise must never reject: a
+  // failed read (or a throwing host callback) is caught and reported through
+  // onImportError — the host's notice channel — instead of dying unhandled.
   const importCsv = async (files: FileList | null): Promise<void> => {
     const file = files?.[0];
     if (file === undefined || onImportCsv === undefined) return;
-    const text = await file.text();
-    onImportCsv(text);
+    try {
+      const text = await file.text();
+      onImportCsv(text);
+    } catch (error) {
+      onImportError?.(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const canSwitch = onSwitch !== undefined;

@@ -173,6 +173,29 @@ export interface CliModelError {
 }
 
 /**
+ * The three default-export render refusals' messages, in one place: the
+ * CLI's {@link resolveModelExport} and the loader's vm-side render outcome
+ * mapping (which cannot reuse {@link resolveModelExport} across the sandbox
+ * boundary) must emit byte-identical messages for the same authoring
+ * mistake.
+ */
+
+/** The {@link CLI_MODEL_ERROR_CODES.defaultInvalid} message; `received` is the value's `typeof` text (`"null"` for null). */
+export function modelDefaultInvalidMessage(received: string): string {
+  return `The model file's default export must be a React element or a component function; got ${received}.`;
+}
+
+/** The {@link CLI_MODEL_ERROR_CODES.componentThrew} message; `reason` is the thrown value's text. */
+export function modelComponentThrewMessage(reason: string): string {
+  return `The default-export component threw when invoked with no props: ${reason} — a CLI model must be pure (no hooks, no effects).`;
+}
+
+/** The {@link CLI_MODEL_ERROR_CODES.componentReturnInvalid} message; `received` is the returned value's `typeof` text. */
+export function modelComponentReturnInvalidMessage(received: string): string {
+  return `The default-export component must return a React element; got ${received}.`;
+}
+
+/**
  * Renders a model module's default export into the element
  * `compileToNative` consumes: an element passes through; a function is
  * invoked once with no props (the documented CLI form for models authored
@@ -200,7 +223,9 @@ export function resolveModelExport(
     } catch (error) {
       return fail({
         code: CLI_MODEL_ERROR_CODES.componentThrew,
-        message: `The default-export component threw when invoked with no props: ${error instanceof Error ? error.message : String(error)} — a CLI model must be pure (no hooks, no effects).`,
+        message: modelComponentThrewMessage(
+          error instanceof Error ? error.message : String(error),
+        ),
         input: defaultExport,
       });
     }
@@ -209,13 +234,15 @@ export function resolveModelExport(
     }
     return fail({
       code: CLI_MODEL_ERROR_CODES.componentReturnInvalid,
-      message: `The default-export component must return a React element; got ${typeof returned}.`,
+      message: modelComponentReturnInvalidMessage(typeof returned),
       input: returned,
     });
   }
   return fail({
     code: CLI_MODEL_ERROR_CODES.defaultInvalid,
-    message: `The model file's default export must be a React element or a component function; got ${defaultExport === null ? "null" : typeof defaultExport}.`,
+    message: modelDefaultInvalidMessage(
+      defaultExport === null ? "null" : typeof defaultExport,
+    ),
     input: defaultExport,
   });
 }

@@ -3,7 +3,9 @@
  * hit-test contract — workplane-to-screen transform (y flipped), construction
  * and selection styling, the semantic pick event carrying workplane mm plus
  * the topmost entity under the pointer, arc sweep hit restriction, and the
- * machine attributes per entity.
+ * machine attributes per entity. The grid guards pin the bounded-render
+ * contract: degenerate steps/scales (and extents past the line budget)
+ * render no grid at all instead of an unbounded loop.
  */
 
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
@@ -466,5 +468,71 @@ describe("CadSketchCanvas Phase 37 — drag, ink, dimensions", () => {
     // Arrowheads ride the dimension line ends.
     expect(node?.querySelectorAll("polygon")).toHaveLength(2);
     expect(node?.getAttribute("data-sketch-dimension-id")).toBe("skcon_d");
+  });
+});
+
+describe("CadSketchCanvas grid guards", () => {
+  /** Minor grid lines carry the border ink; the axes are the only 1.25s. */
+  function gridLineCount(container: HTMLElement): number {
+    return container.querySelectorAll(
+      'line[stroke="var(--color-border, #e4e4e7)"]',
+    ).length;
+  }
+
+  function axisLineCount(container: HTMLElement): number {
+    return container.querySelectorAll('line[stroke-width="1.25"]').length;
+  }
+
+  it("draws a bounded grid for valid props", () => {
+    const { view } = renderCanvas();
+    // x: extent 125 mm / 10 mm step → 12 nonzero steps × the ± pair = 24;
+    // y: extent 50 mm → 5 nonzero steps × the ± pair = 10. The zero pair of
+    // each axis renders nothing (the axes draw there instead).
+    expect(gridLineCount(view.container)).toBe(34);
+    expect(axisLineCount(view.container)).toBe(2);
+  });
+
+  it("renders no grid — and never hangs — for a zero grid step", () => {
+    const { view } = renderCanvas({ gridStep: 0 });
+    expect(gridLineCount(view.container)).toBe(0);
+    expect(axisLineCount(view.container)).toBe(2);
+  });
+
+  it("renders no grid for a negative grid step", () => {
+    const { view } = renderCanvas({ gridStep: -10 });
+    expect(gridLineCount(view.container)).toBe(0);
+    expect(axisLineCount(view.container)).toBe(2);
+  });
+
+  it("renders no grid for a zero scale (an infinite extent)", () => {
+    const { view } = renderCanvas({ scale: 0 });
+    expect(gridLineCount(view.container)).toBe(0);
+    expect(axisLineCount(view.container)).toBe(2);
+  });
+
+  it("renders no grid for a non-finite scale", () => {
+    // A NaN scale smears NaN coordinates into the axis nodes too; jsdom
+    // reports each one, so the console is silenced around the render (the
+    // property panel's duplicate-key precedent) while the grid contract
+    // stands alone.
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    try {
+      const { view } = renderCanvas({ entities: [], scale: Number.NaN });
+      expect(gridLineCount(view.container)).toBe(0);
+      expect(axisLineCount(view.container)).toBe(2);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("renders no grid when a finite extent still exceeds the line budget", () => {
+    // A valid-but-pathological near-zero scale: the extent stays finite but
+    // the 10 mm step cannot cover it within the budget, so the grid skips
+    // instead of minting hundreds of thousands of nodes.
+    const { view } = renderCanvas({ scale: 0.0001 });
+    expect(gridLineCount(view.container)).toBe(0);
+    expect(axisLineCount(view.container)).toBe(2);
   });
 });

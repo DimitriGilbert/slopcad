@@ -53,6 +53,23 @@
  * surface (see the manager module doc); refusals from either mode surface
  * in the SAME alert region. The default edit-in-place flow is untouched.
  *
+ * ## Reseed: the fields follow the committed document
+ *
+ * The form keeps its submitted values (`resetOnSubmitSuccess: false`), and
+ * form-core's own defaults reseed is gated on a FORM-WIDE untouched state
+ * that the first edit disables permanently — without help, a foreign
+ * document change (an undo, a manage-mode edit) would never reach the
+ * fields and the next Apply would re-commit the stale typed values over
+ * it. The panel therefore reseeds explicitly whenever the committed
+ * document moves, field by field under one rule: a field whose value still
+ * equals the last-seeded document state has no unsubmitted edit and adopts
+ * the new committed value, while a field carrying in-progress typing is
+ * preserved. The explicit `form.reset(..., { keepDefaultValues: true })`
+ * also clears the sticky touched state, re-arming the cycle; the flag
+ * keeps the Formedible adoption gate's baseline authoritative (TanStack
+ * reinstalls the hook's defaults on every render, and a reset that also
+ * replaced them would be reseeded right back over preserved typing).
+ *
  * ## Error surfacing (domain-validated, never re-implemented)
  *
  * Expression correctness is checked by the DOMAIN, not by the form: each
@@ -95,7 +112,7 @@
  * quantities, and error code/message text are domain data rendered verbatim.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CadProviderError,
   CANONICAL_UNITS,
@@ -566,14 +583,51 @@ export function CadParameterPanel({
       defaultValues: formConfig.defaultValues,
       onSubmit: formConfig.onSubmit,
     },
-    // Submitted values survive the commit; the adopted defaults then re-sync
-    // the fields to the committed document state on the next render.
+    // Submitted values survive the commit; the reseed effect below keeps
+    // the fields following the committed document afterwards (the
+    // "Reseed" section of the module doc — form-core's own defaults
+    // reseed stays disabled once any field is touched).
     resetOnSubmitSuccess: false,
     submitLabel: mergedLabels.submit,
     // Inert discipline: no apply surface, no submit button, disabled fields.
     showSubmitButton: false,
     disabled: apply === undefined,
   });
+
+  // The explicit reseed (R12F1): form-core reseeds from changed defaults
+  // only while NO field is touched, and the sticky form-wide flag never
+  // clears on its own — so after the first edit a foreign document change
+  // (undo, manage-mode edit) would never reach the fields and the next
+  // Apply would re-commit the stale typed values over it. Whenever the
+  // committed values move, every field still holding the last-seeded
+  // document value adopts the committed one; a diverged field is
+  // in-progress typing and is preserved. `keepDefaultValues` is load
+  // bearing: reset clears the touched state, and react-form reinstalls the
+  // hook's defaultValues on every render, so a reset that also replaced
+  // them would be reseeded right back over the preserved typing.
+  const seededDocumentRef = useRef(formConfig.defaultValues);
+  useEffect(() => {
+    const documentValues = formConfig.defaultValues;
+    const seeded = seededDocumentRef.current;
+    const form = parameterForm.form;
+    const formValues = form.state.values;
+    const merged: CadParameterPanelFormValues = {};
+    let differs = false;
+    const keys = new Set([
+      ...Object.keys(seeded),
+      ...Object.keys(documentValues),
+    ]);
+    for (const key of keys) {
+      const formValue = formValues[key];
+      const next = Object.is(formValue, seeded[key])
+        ? documentValues[key]
+        : formValue;
+      merged[key] = next;
+      if (!Object.is(formValue, next)) differs = true;
+    }
+    if (differs) form.reset(merged, { keepDefaultValues: true });
+    seededDocumentRef.current = documentValues;
+  }, [formConfig, parameterForm.form]);
 
   // The apply action is pinned as the dock's footer: the FIELDS scroll, the
   // terminal action never leaves the viewport. It rides the Formedible

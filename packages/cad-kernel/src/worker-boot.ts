@@ -5,18 +5,24 @@
  *
  * The worker entries document the hazard (see
  * `@slopcad/cad-kernel-manifold`'s `manifold-worker.web`): a hosting
- * failure rejects as an unhandled rejection inside the worker while the
- * main-thread channel stays silent — a request dispatched to the dead
- * channel simply never settles on its own, hanging the hosting surface
+ * failure used to reject as an unhandled rejection inside the worker while
+ * the main-thread channel stayed silent — a request dispatched to the dead
+ * channel simply never settled on its own, hanging the hosting surface
  * forever. The client already owns the settlement rule (`close()` settles
  * every still-pending request with the structured `worker/transport-closed`
  * failure — "the termination rule a real-worker host relies on when its
- * thread exits, deliberately or by crash"); this boot wires the two DOM
- * events that prove the thread died to exactly that rule:
+ * thread exits, deliberately or by crash"); this boot wires the three
+ * triggers that prove the channel dead to exactly that rule:
  *
  * - `error` — the entry script failed to load or threw uncaught;
  * - `messageerror` — a message could not be deserialized on the main
- *   thread; the channel is no longer trustworthy.
+ *   thread; the channel is no longer trustworthy;
+ * - the worker-side boot-failure report (see
+ *   `./worker-boot-failure-report`) — the plain message a web entry posts
+ *   when its own hosting (the WASM boot) rejects. That rejection is a
+ *   *handled* rejection inside the worker, so it never fires the main
+ *   thread's `error` event; the report is the entry's death note, posted
+ *   while the thread can still speak, followed by the entry closing itself.
  *
  * Either event settles the channel TERMINALLY, exactly once: the client
  * closes (in-flight requests reject with `worker/transport-closed`), the
@@ -38,6 +44,7 @@ import type { WorkerTransport } from "./worker-transport";
 import type { WebWorkerMessagePort } from "./worker-web-transport";
 
 import { createWorkerClient } from "./worker-client";
+import { parseWorkerBootFailureReport } from "./worker-boot-failure-report";
 import { createWebWorkerTransport } from "./worker-web-transport";
 
 /**
@@ -64,8 +71,8 @@ export interface WorkerCrashPort extends WebWorkerMessagePort {
 
 /** Why a channel settled terminally by itself. */
 export interface WorkerBootFailure {
-  /** Which DOM event proved the thread dead. */
-  readonly kind: "error" | "messageerror";
+  /** Which trigger proved the channel dead (a DOM event or the worker's own boot-failure report). */
+  readonly kind: "error" | "messageerror" | "boot-failure";
   /** The honest failure text (`messageerror` has none; it says so). */
   readonly message: string;
 }
@@ -96,16 +103,16 @@ const EMPTY_ERROR_TEXT =
  * Boots a worker channel whose crash settles its in-flight requests:
  * wraps the ALREADY-CONSTRUCTED worker (see the module doc for why the
  * `new Worker` stays at the hosting site) in the web transport + worker
- * client and wires `error`/`messageerror` to terminal settlement.
+ * client and wires `error`/`messageerror` plus the worker-side
+ * boot-failure report to terminal settlement.
  */
 export function bootWorkerChannel(
   port: WorkerCrashPort,
   onCrash: (failure: WorkerBootFailure) => void,
 ): BootedWorkerChannel {
-  const transport = createWebWorkerTransport(port);
-  const client = createWorkerClient({ transport });
-  // Terminal exactly once: the first of {crash, deliberate dispose} wins;
-  // later events (a queued crash after dispose, a second error) are no-ops.
+  // Terminal exactly once: the first of {crash, boot-failure report,
+  // deliberate dispose} wins; later triggers (a queued crash after dispose,
+  // a second error) are no-ops.
   let settled = false;
   const settle = (report: WorkerBootFailure | null): void => {
     if (settled) return;
@@ -114,6 +121,20 @@ export function bootWorkerChannel(
     port.terminate();
     if (report !== null) onCrash(report);
   };
+  // Subscribed FIRST, before the transport: the boot-failure report is the
+  // worker's death note and must settle the channel before (and instead of)
+  // reaching the client — which would drop it as non-protocol data and let
+  // the pending requests it exists to settle keep hanging. A listener
+  // removed during dispatch is not invoked, so close()'s unsubscribe inside
+  // settle() keeps the transport from seeing the report at all.
+  port.addEventListener("message", (event) => {
+    const report = parseWorkerBootFailureReport(event.data);
+    if (report !== null) {
+      settle({ kind: "boot-failure", message: report.message });
+    }
+  });
+  const transport = createWebWorkerTransport(port);
+  const client = createWorkerClient({ transport });
   port.addEventListener("error", (event) => {
     settle({
       kind: "error",

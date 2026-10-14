@@ -45,6 +45,8 @@ import {
   type CadModelTreeAssemblyNode,
 } from "@slopcad/ui/components/cad/cad-model-tree";
 
+import { useAssemblyWebMcpTools } from "../webmcp/assembly-tools";
+
 /** The unit-cube soup every instance shares (24 verts would be nicer; a
  * single triangles soup is enough to SEE placement). */
 const BOX_TESSELLATION = {
@@ -173,6 +175,15 @@ export function AssemblyWorkbenchPage(): ReactElement {
   useEffect(() => {
     setHydrated(true);
   }, []);
+
+  // The agent surface (Phase 2.2): the same document doors the buttons
+  // drive, bound where this page's assembly document lives.
+  useAssemblyWebMcpTools({
+    commit: setDocument,
+    document: () => document,
+    interference: null,
+    resolveDocument: null,
+  });
 
   const addInstance = (): void => {
     const next = addOccurrence(document, {

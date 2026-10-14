@@ -272,3 +272,102 @@ describe("CadSketchInspector parameter-bound dimensions", () => {
     expect(document.body.textContent).toContain('Unknown parameter "nope".');
   });
 });
+
+describe("CadSketchInspector dimension editor reseed", () => {
+  const WIDTH = {
+    constraintId: "skcon_width",
+    decimals: 3,
+    unit: "mm",
+    value: 60,
+  };
+  const HEIGHT = {
+    constraintId: "skcon_height",
+    decimals: 3,
+    unit: "mm",
+    value: 100,
+  };
+
+  function dimensionProps(
+    dimension: CadSketchInspectorProps["dimension"],
+  ): CadSketchInspectorProps {
+    return {
+      constraints: CONSTRAINTS,
+      diagnostics: [],
+      dimension,
+      dof: 7,
+      onSelectConstraint: () => {},
+      onEditDimension: () => ({ ok: true }),
+      selectedConstraintId: dimension?.constraintId ?? null,
+      solveStatus: "solved",
+    };
+  }
+
+  function dimensionInput(): HTMLInputElement {
+    const input = screen.getByRole("spinbutton");
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("The dimension field must render an input.");
+    }
+    return input;
+  }
+
+  it("starts each constraint selection from that constraint's live document value", () => {
+    const { view } = renderInspector({
+      dimension: WIDTH,
+      selectedConstraintId: "skcon_width",
+    });
+    expect(dimensionInput().value).toBe("60");
+
+    // Switching the selection remounts the editor (keyed by the constraint
+    // id) and seeds the NEW constraint's value — not an empty field, and
+    // not the previous constraint's number.
+    view.rerender(<CadSketchInspector {...dimensionProps(HEIGHT)} />);
+    expect(dimensionInput().value).toBe("100");
+  });
+
+  it("shows the live document value on re-select, not the stale typed one", () => {
+    const { view } = renderInspector({
+      dimension: WIDTH,
+      selectedConstraintId: "skcon_width",
+    });
+    // Type 80 into width's field WITHOUT applying ...
+    fireEvent.change(dimensionInput(), { target: { value: "80" } });
+
+    // ... switch away ...
+    view.rerender(<CadSketchInspector {...dimensionProps(HEIGHT)} />);
+    expect(dimensionInput().value).toBe("100");
+
+    // ... and re-select: the editor remounts from the document's 60, never
+    // resurrecting the abandoned 80.
+    view.rerender(<CadSketchInspector {...dimensionProps(WIDTH)} />);
+    expect(dimensionInput().value).toBe("60");
+  });
+
+  it("adopts a host update to the selected dimension's value while the field has no unsubmitted edits", () => {
+    const { view } = renderInspector({
+      dimension: WIDTH,
+      selectedConstraintId: "skcon_width",
+    });
+    expect(dimensionInput().value).toBe("60");
+
+    // The same constraint stays selected; the host's dimension value moved
+    // under the mounted editor (a foreign commit). The field adopts it.
+    view.rerender(
+      <CadSketchInspector {...dimensionProps({ ...WIDTH, value: 62 })} />,
+    );
+    expect(dimensionInput().value).toBe("62");
+  });
+
+  it("preserves in-progress typing when the host updates the dimension's value", () => {
+    const { view } = renderInspector({
+      dimension: WIDTH,
+      selectedConstraintId: "skcon_width",
+    });
+    fireEvent.change(dimensionInput(), { target: { value: "80" } });
+
+    view.rerender(
+      <CadSketchInspector {...dimensionProps({ ...WIDTH, value: 62 })} />,
+    );
+    // The typed-but-unsubmitted 80 wins over the committed 62.
+    expect(dimensionInput().value).toBe("80");
+  });
+});
