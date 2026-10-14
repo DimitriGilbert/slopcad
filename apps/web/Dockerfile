@@ -1,4 +1,8 @@
 FROM node:24-slim AS builder
+# better-sqlite3 (agent persistence tests) ships no prebuilt binary: node-gyp needs a toolchain
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@10.34.5
 WORKDIR /app
 ENV SKIP_ENV_VALIDATION=1
