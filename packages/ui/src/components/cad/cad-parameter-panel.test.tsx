@@ -321,6 +321,23 @@ describe("CadParameterPanel", () => {
     expect(entry.commands[0]?.id).toBe("param_width");
   });
 
+  it("re-derives the expression-driven dependents of an applied literal", async () => {
+    const store = buildProviderStore();
+    render(<PanelInProvider store={store} />);
+
+    fireEvent.change(screen.getByLabelText("width"), {
+      target: { value: "6" },
+    });
+    fireEvent.submit(screen.getByRole("form", { name: "Parameters" }));
+
+    await waitFor(() => expect(store.commandLog).toHaveLength(1));
+    const derived = store
+      .getParameters()
+      .parameters.find((parameter) => parameter.id === DERIVED_ID);
+    expect(derived?.value).toEqual(length(12));
+    expect(derived?.expression).not.toBeNull();
+  });
+
   it("does not re-issue anything when an unchanged form resubmits", async () => {
     const store = buildProviderStore();
     render(<PanelInProvider store={store} />);

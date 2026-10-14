@@ -300,6 +300,36 @@ describe("useCadParameters", () => {
     expect(width?.value.value).toBe(20);
   });
 
+  it("a value set after an expression from the same hook result keeps the expression", () => {
+    const store = createTestStore();
+    function SequenceProbe(): ReactNode {
+      const api = useCadParameters();
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            api.setValueFromExpression(TEST_WIDTH_PARAMETER, "height * 4");
+            api.setValue(TEST_WIDTH_PARAMETER, length(30));
+          }}
+        >
+          sequence
+        </button>
+      );
+    }
+    const view = render(
+      <CadProvider store={store}>
+        <SequenceProbe />
+      </CadProvider>,
+    );
+    fireEvent.click(view.getByText("sequence"));
+    expect(store.commandLog).toHaveLength(2);
+    const expression =
+      store.getDocument().parameters.parameters[0]?.expression ?? null;
+    expect(expression === null ? null : printExpression(expression)).toBe(
+      "height * 4",
+    );
+  });
+
   it("surfaces a cycle refusal verbatim and issues nothing", () => {
     const store = createTestStore();
     function CycleProbe(): ReactNode {

@@ -16,8 +16,10 @@
  * editable field per parameter, keyed `value:<id>` or `expression:<id>`:
  *
  * - A LITERAL parameter (`expression === null`) gets a `number` field for
- *   its canonical magnitude; applying commits `setParameterCommand` with the
- *   domain's canonical value of the parameter's own dimension.
+ *   its canonical magnitude; applying commits the clear form
+ *   (`clearParameterExpressionCommand`) with the domain's canonical value of
+ *   the parameter's own dimension, so its expression-driven dependents
+ *   re-derive in the same application.
  * - An EXPRESSION-DRIVEN parameter gets a `text` field whose default is the
  *   domain's own canonical printing of the defining expression
  *   (`printExpression`) — the same field displays and edits the expression.
@@ -116,6 +118,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CadProviderError,
   CANONICAL_UNITS,
+  clearParameterExpressionCommand,
   equalQuantity,
   evaluateExpression,
   parseExpression,
@@ -404,11 +407,17 @@ export function CadParameterPanel({
     if (store === null || collection === undefined) return undefined;
     return (parameter, edit) => {
       if (edit.kind === "value") {
+        const value = canonicalDimensionValue(
+          parameter.value.dimension,
+          edit.value,
+        );
+        // A literal commits through the clear form so the expression-driven
+        // parameters reading it re-derive (and their bound sketches re-solve);
+        // the value-only form leaves dependents' cached values stale.
         const applied = store.applyCommand(
-          setParameterCommand(
-            parameter.id,
-            canonicalDimensionValue(parameter.value.dimension, edit.value),
-          ),
+          parameter.expression === null
+            ? clearParameterExpressionCommand(parameter.id, value)
+            : setParameterCommand(parameter.id, value),
         );
         return toOutcome(applied);
       }
