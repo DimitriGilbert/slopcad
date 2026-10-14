@@ -133,7 +133,7 @@ export function useCadParameters(): CadParametersApi {
     value: AnyDimensionalValue,
   ): ParseResult<CadSession, TransactionError> =>
     store.applyCommand(
-      getParameter(collection, id)?.expression === null
+      getParameter(store.getParameters(), id)?.expression === null
         ? clearParameterExpressionCommand(id, value)
         : setParameterCommand(id, value),
     );
