@@ -384,19 +384,15 @@ export function sceneOperandOfBody(
       : null;
   }
   // The move-body feature is the translate kind carrying the authored
-  // parameter pair (the move reader's own gate — and it too serves only
-  // the FIRST qualifying translate); a display-state translate (fewer
-  // parameter inputs — the fixture plate's chain) stays data-only.
+  // parameter pair (the move reader's own gate — and the move reader
+  // serves EVERY qualifying translate, each its own moved body); a
+  // display-state translate (fewer parameter inputs — the fixture plate's
+  // chain) stays data-only.
   if (
     producer.kind === "translate" &&
     producer.inputs.filter((ref) => ref.kind === "parameter").length >= 4
   ) {
-    const served = document.features.find(
-      (entry) =>
-        entry.kind === "translate" &&
-        entry.inputs.filter((ref) => ref.kind === "parameter").length >= 4,
-    );
-    return served?.id === producer.id ? { kind: "computed", bodyId } : null;
+    return { kind: "computed", bodyId };
   }
   return null;
 }

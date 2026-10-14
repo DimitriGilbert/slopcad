@@ -64,8 +64,16 @@ import {
 import { sceneOperandOfBody, type SceneOperand } from "./extrude";
 import { magnitudeIn, parameterValueOf } from "./parameter-magnitude";
 
+/** The topology-addressed feature kinds, in display order. */
+export const TOPOLOGY_CUT_KINDS = ["fillet", "chamfer", "shell"] as const;
+
 /** The topology-addressed feature kinds (the bridge's `TopologyCutKind`). */
-export type TopologyCutKind = "fillet" | "chamfer" | "shell";
+export type TopologyCutKind = (typeof TOPOLOGY_CUT_KINDS)[number];
+
+/** Whether `kind` names a topology-cut kind. */
+export function isTopologyCutKind(kind: string): kind is TopologyCutKind {
+  return (TOPOLOGY_CUT_KINDS as readonly string[]).includes(kind);
+}
 
 /** The topology entity kind one cut addresses: edges, or faces (shell). */
 export type TopologyCutEntityKind = "edge" | "face";
@@ -105,16 +113,6 @@ export interface TopologyCutSceneRequest {
   readonly selection: TopologyCutSelection;
   /** The feature's output body id (the rendered body). */
   readonly bodyId: string;
-}
-
-const TOPOLOGY_CUT_KINDS: ReadonlySet<string> = new Set([
-  "fillet",
-  "chamfer",
-  "shell",
-]);
-
-function isTopologyCutKind(kind: string): kind is TopologyCutKind {
-  return TOPOLOGY_CUT_KINDS.has(kind);
 }
 
 /** A strictly positive, finite length parameter in mm, else `null`. */

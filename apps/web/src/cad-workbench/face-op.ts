@@ -51,8 +51,11 @@ import { magnitudeIn, parameterValueOf } from "./parameter-magnitude";
 import { topologyCutTargetBodyIdOf, topologyReferenceOf } from "./topology-cut";
 import { worldAxisDirectionOf } from "./world-axis";
 
+/** The local face-op feature kinds (the bridge's own trio), in display order. */
+export const FACE_OP_KINDS = ["moveFace", "deleteFace", "replaceFace"] as const;
+
 /** The local face-op feature kinds (the bridge's own trio). */
-export type FaceOpKind = "moveFace" | "deleteFace" | "replaceFace";
+export type FaceOpKind = (typeof FACE_OP_KINDS)[number];
 
 /** One face op's resolved operation (the kernel call's own inputs). */
 export type FaceOpOperation =
@@ -91,8 +94,9 @@ export interface FaceOpSceneRequest {
   readonly bodyId: string;
 }
 
-function isFaceOpKind(kind: string): kind is FaceOpKind {
-  return kind === "moveFace" || kind === "deleteFace" || kind === "replaceFace";
+/** Whether `kind` names a local face-op kind. */
+export function isFaceOpKind(kind: string): kind is FaceOpKind {
+  return (FACE_OP_KINDS as readonly string[]).includes(kind);
 }
 
 /**

@@ -99,7 +99,7 @@ import {
   type FaceOpSceneRequest,
 } from "./face-op";
 import {
-  documentMoveBodySceneRequest,
+  documentMoveBodySceneRequests,
   type MoveBodySceneRequest,
 } from "./move-body";
 import {
@@ -528,7 +528,6 @@ export function documentSceneBodies(
   }
   const hole = documentHoleSceneRequest(activeDocument);
   const booleanRequests = documentBooleanSceneRequests(activeDocument);
-  const moveBody = documentMoveBodySceneRequest(activeDocument);
   const thread = documentThreadSceneRequest(activeDocument);
   if (thread !== null) {
     requests.set(thread.bodyId, { kind: "thread", request: thread });
@@ -662,12 +661,14 @@ export function documentSceneBodies(
       consumesOperands: true,
     });
   }
-  if (moveBody !== null) {
+  // The moves: EVERY move-body feature renders (a moved extrusion, a
+  // placed primitive), each consuming its target's computed solid.
+  for (const request of documentMoveBodySceneRequests(activeDocument)) {
     admissions.push({
-      bodyId: moveBody.bodyId,
-      scene: { kind: "moveBody", request: moveBody },
+      bodyId: request.bodyId,
+      scene: { kind: "moveBody", request },
       computedOperands:
-        moveBody.base.kind === "computed" ? [moveBody.base.bodyId] : [],
+        request.base.kind === "computed" ? [request.base.bodyId] : [],
       consumesOperands: true,
     });
   }

@@ -39,6 +39,9 @@ import {
 } from "./pattern";
 import { documentDuplicateSceneRequests } from "./duplicate";
 import { documentPrimitiveSceneRequests } from "./primitive";
+import { documentMoveBodySceneRequests } from "./move-body";
+import { documentTopologyCutSceneRequests } from "./topology-cut";
+import { documentFaceOpSceneRequests } from "./face-op";
 
 /**
  * The workbench scene kinds the engine's dispatch can follow (the same
@@ -48,13 +51,18 @@ import { documentPrimitiveSceneRequests } from "./primitive";
  * surface — it resolves while the document carries at least one curve
  * record and renders them as the curve overlay over the highest solid
  * scene). The `primitive` scene resolves while the document carries at
- * least one in-domain box/sphere/cylinder/cone feature.
+ * least one in-domain box/sphere/cylinder/cone feature; the `topologyCut`
+ * scene while it carries at least one in-domain fillet/chamfer/shell; the
+ * `faceOp` scene while it carries at least one in-domain moveFace/
+ * deleteFace/replaceFace.
  */
 export type WorkbenchSceneKind =
   | "empty"
   | "plate"
   | "extrude"
   | "primitive"
+  | "topologyCut"
+  | "faceOp"
   | "revolve"
   | "sweep"
   | "loft"
@@ -78,7 +86,8 @@ export type WorkbenchSceneKind =
  * The highest scene the document still resolves, in the create actions'
  * precedence: the hole composition when every hole still cuts its base,
  * else the loft, else the sweep, else the revolve, else the extrude, else
- * any in-domain primitive, else the plate when the document carries the
+ * any resolving move-body feature (a placed primitive on a blank bench),
+ * else any in-domain primitive, else the plate when the document carries the
  * fixture's hole parameter (the plate computation follows it), else
  * `empty` — the clean bench resolves nothing and renders the honest empty
  * scene.
@@ -89,6 +98,10 @@ export function highestResolvableScene(
   if (documentSheetSceneRequest(document) !== null) return "sheet";
   if (documentHoleSceneRequest(document) !== null) return "hole";
   if (documentThreadSceneRequest(document) !== null) return "thread";
+  if (documentFaceOpSceneRequests(document).length > 0) return "faceOp";
+  if (documentTopologyCutSceneRequests(document).length > 0) {
+    return "topologyCut";
+  }
   if (documentMirrorSceneRequest(document) !== null) return "mirror";
   if (documentPatternPathSceneRequest(document) !== null) {
     return "patternPath";
@@ -108,6 +121,7 @@ export function highestResolvableScene(
   if (documentSweepRequest(document) !== null) return "sweep";
   if (documentRevolveRequest(document) !== null) return "revolve";
   if (documentExtrudeRequest(document) !== null) return "extrude";
+  if (documentMoveBodySceneRequests(document).length > 0) return "moveBody";
   if (documentPrimitiveSceneRequests(document).length > 0) {
     return "primitive";
   }
@@ -147,33 +161,44 @@ export function honestSceneFallback(
         ? documentHoleSceneRequest(document) !== null
         : activeScene === "thread"
           ? documentThreadSceneRequest(document) !== null
-          : activeScene === "mirror"
-            ? documentMirrorSceneRequest(document) !== null
-            : activeScene === "patternPath"
-              ? documentPatternPathSceneRequest(document) !== null
-              : activeScene === "patternFeature"
-                ? documentPatternFeatureSceneRequest(document) !== null
-                : activeScene === "duplicate"
-                  ? documentDuplicateSceneRequests(document).length > 0
-                  : activeScene === "split"
-                    ? documentSplitSceneRequest(document) !== null
-                    : activeScene === "thicken"
-                      ? documentThickenSceneRequest(document) !== null
-                      : activeScene === "scale"
-                        ? documentScaleSceneRequest(document) !== null
-                        : activeScene === "rib"
-                          ? documentRibSceneRequest(document) !== null
-                          : activeScene === "helix"
-                            ? documentHelixRequest(document) !== null
-                            : activeScene === "loft"
-                              ? documentLoftRequest(document) !== null
-                              : activeScene === "sweep"
-                                ? documentSweepRequest(document) !== null
-                                : activeScene === "revolve"
-                                  ? documentRevolveRequest(document) !== null
-                                  : activeScene === "primitive"
-                                    ? documentPrimitiveSceneRequests(document)
-                                        .length > 0
-                                    : documentExtrudeRequest(document) !== null;
+          : activeScene === "faceOp"
+            ? documentFaceOpSceneRequests(document).length > 0
+            : activeScene === "topologyCut"
+              ? documentTopologyCutSceneRequests(document).length > 0
+              : activeScene === "mirror"
+                ? documentMirrorSceneRequest(document) !== null
+                : activeScene === "patternPath"
+                  ? documentPatternPathSceneRequest(document) !== null
+                  : activeScene === "patternFeature"
+                    ? documentPatternFeatureSceneRequest(document) !== null
+                    : activeScene === "duplicate"
+                      ? documentDuplicateSceneRequests(document).length > 0
+                      : activeScene === "split"
+                        ? documentSplitSceneRequest(document) !== null
+                        : activeScene === "thicken"
+                          ? documentThickenSceneRequest(document) !== null
+                          : activeScene === "scale"
+                            ? documentScaleSceneRequest(document) !== null
+                            : activeScene === "rib"
+                              ? documentRibSceneRequest(document) !== null
+                              : activeScene === "helix"
+                                ? documentHelixRequest(document) !== null
+                                : activeScene === "loft"
+                                  ? documentLoftRequest(document) !== null
+                                  : activeScene === "sweep"
+                                    ? documentSweepRequest(document) !== null
+                                    : activeScene === "revolve"
+                                      ? documentRevolveRequest(document) !==
+                                        null
+                                      : activeScene === "moveBody"
+                                        ? documentMoveBodySceneRequests(
+                                            document,
+                                          ).length > 0
+                                        : activeScene === "primitive"
+                                          ? documentPrimitiveSceneRequests(
+                                              document,
+                                            ).length > 0
+                                          : documentExtrudeRequest(document) !==
+                                            null;
   return resolved ? null : highestResolvableScene(document);
 }

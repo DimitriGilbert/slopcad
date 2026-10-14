@@ -108,23 +108,47 @@ export interface MoveBodySceneRequest {
 }
 
 /**
- * Reads the document's move-body feature (the first `translate` carrying
- * the move's authored parameters) into its worker-scene request, pairing
- * it with the moved body's operand source — the feature's own target ref
+ * Whether the feature is a move-body feature: a `translate` carrying the
+ * move's authored parameters (x/y/z plus the rotation pair — four or more
+ * parameter inputs). A display-state translate (fewer parameter inputs —
+ * the fixture plate's chain) is not one and stays data-only.
+ */
+function isMoveBodyFeature(feature: FeatureRecord): boolean {
+  return (
+    feature.kind === "translate" &&
+    feature.inputs.filter((ref) => ref.kind === "parameter").length >= 4
+  );
+}
+
+/**
+ * Reads EVERY move-body feature ({@link isMoveBodyFeature}) into its
+ * worker-scene request, in document order — each move transports its own
+ * target (a moved extrusion, a placed primitive), so a second move renders
+ * beside the first rather than vanishing. Features whose inputs no longer
+ * resolve are skipped (the honest per-feature decline).
+ */
+export function documentMoveBodySceneRequests(
+  document: Parameters<typeof documentExtrudeRequest>[0],
+): readonly MoveBodySceneRequest[] {
+  return document.features.flatMap((feature) => {
+    if (!isMoveBodyFeature(feature)) return [];
+    const request = moveBodySceneRequestOfFeature(document, feature);
+    return request === null ? [] : [request];
+  });
+}
+
+/**
+ * Reads ONE move-body feature into its worker-scene request, pairing it
+ * with the moved body's operand source — the feature's own target ref
  * resolved through `sceneOperandOfBody`, falling back to the document's
  * last extrusion when the ref dangles (the engine's create action
- * guarantees the pairing). `null` when the document carries none, the
- * base no longer resolves, or the parameters no longer read.
+ * guarantees the pairing). `null` when the base no longer resolves or
+ * the parameters no longer read.
  */
-export function documentMoveBodySceneRequest(
+function moveBodySceneRequestOfFeature(
   document: Parameters<typeof documentExtrudeRequest>[0],
+  feature: FeatureRecord,
 ): MoveBodySceneRequest | null {
-  const feature = document.features.find(
-    (entry) =>
-      entry.kind === "translate" &&
-      entry.inputs.filter((ref) => ref.kind === "parameter").length >= 4,
-  );
-  if (feature === undefined) return null;
   const bodyId = feature.outputs[0];
   const parameterRefs = feature.inputs.filter(
     (ref) => ref.kind === "parameter",

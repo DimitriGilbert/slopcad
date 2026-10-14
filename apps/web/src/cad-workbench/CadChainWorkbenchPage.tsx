@@ -43,7 +43,9 @@
  * The chain scene returns the fillet TARGET's topology snapshot at every
  * settle; the page projects its edge centroids through the scene camera
  * and publishes them as `data-edge-anchors`. A click on the viewport
- * selects the nearest anchor within {@link CHAIN_EDGE_PICK_RADIUS_PX} —
+ * selects the nearest anchor within the shared pick radius (the
+ * `./topology-pick` anchor projection and nearest-anchor rule the complete
+ * workbench's topology verbs pick through too) —
  * the pick is a snapshot ordinal of the APPLIED scene (`data-selected-edge`).
  * The fillet action mints a persistent topology reference from that
  * ordinal on the applied snapshot (the OCCT kernel's history-based name)
@@ -111,17 +113,13 @@ import {
   dimensionless,
   formatBoundsExtents,
   length,
-  mintTopologyReference,
   parseDatumPayload,
-  referenceProvenance,
-  serializeTopologyReference,
   type CadCommand,
   type Parameter,
   type ParameterId,
 } from "@slopcad/cad-core";
 import { structuredHoleRoles, structuredHoleTypeOf } from "@slopcad/cad-kernel";
 import { Redo2, Undo2 } from "lucide-react";
-import { renderCameraScreenPoint } from "@slopcad/cad-r3f";
 import { Button } from "@slopcad/ui/components/button";
 import { CadModelTree } from "@slopcad/ui/components/cad/cad-model-tree";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
@@ -186,6 +184,11 @@ import {
   type SketchExtrudeSubmission,
 } from "./SketchMode";
 import { clampedRollbackMarker, rollbackMarkerKey } from "./rollback-marker";
+import {
+  nearestTopologyAnchor,
+  topologyAnchorPointOf,
+  topologyReferenceCreateCommand,
+} from "./topology-pick";
 import { FeatureTimelineStrip } from "./feature-timeline-strip";
 
 /** The chain page's root id — the settle surface's host. */
@@ -194,9 +197,6 @@ const CHAIN_ROOT_ID = "chain-root";
 /** The fixture camera's frame (the viewport's fixed CSS box). */
 const VIEWPORT_CSS_WIDTH = 800;
 const VIEWPORT_CSS_HEIGHT = 520;
-
-/** Maximum distance (CSS px) a click may land from an anchor to pick it. */
-export const CHAIN_EDGE_PICK_RADIUS_PX = 24;
 
 /**
  * The page's threaded regeneration state (the workbench's shape): the
@@ -340,14 +340,12 @@ export function chainEdgeAnchorSurface(scene: ChainScene): string {
     const centroid = entity.geometry.centroidAbsoluteMm;
     const lengthMm = entity.geometry.lengthMm;
     if (centroid === undefined || lengthMm === undefined) continue;
-    const screen = renderCameraScreenPoint(
-      camera,
-      centroid,
-      VIEWPORT_CSS_WIDTH,
-      VIEWPORT_CSS_HEIGHT,
-    );
     anchors[String(entity.ordinal)] = {
-      point: [Number(screen[0].toFixed(1)), Number(screen[1].toFixed(1))],
+      point: topologyAnchorPointOf(centroid, {
+        camera,
+        width: VIEWPORT_CSS_WIDTH,
+        height: VIEWPORT_CSS_HEIGHT,
+      }),
       lengthMm: Number(lengthMm.toFixed(3)),
       centroidMm: [centroid[0], centroid[1], centroid[2]],
     };
@@ -955,15 +953,17 @@ function CadChainWorkbenchBody({
     const edgeId = createReferenceId(`ref_fillet_edge${suffix}`);
     const bodyId = createBodyId(`body_fillet${suffix}`);
     const featureId = createFeatureId(`feat_fillet${suffix}`);
-    const provenance = referenceProvenance(workbenchDocument, targetBodyId);
-    if (!provenance.ok) return;
-    const minted = mintTopologyReference(
+    const edgeReference = topologyReferenceCreateCommand(
+      workbenchDocument,
       applied.scene.snapshot,
-      selectedEdge,
-      provenance.value,
-      { id: edgeId, kind: "edge" },
+      {
+        ordinal: selectedEdge,
+        kind: "edge",
+        id: edgeId,
+        name: `filletEdge${suffix}`,
+      },
     );
-    if (!minted.ok) return;
+    if (edgeReference === null) return;
     const committed = documentApi.applyTransaction({
       commands: [
         {
@@ -972,12 +972,7 @@ function CadChainWorkbenchBody({
           name: `filletRadius${suffix}`,
           value: length(CHAIN_FILLET_DEFAULT_RADIUS_MM),
         },
-        {
-          type: "reference.create",
-          id: edgeId,
-          name: `filletEdge${suffix}`,
-          reference: { ...serializeTopologyReference(minted.value) },
-        },
+        edgeReference,
         { type: "body.create", id: bodyId, name: `rounded ${String(n)}` },
         {
           type: "feature.create",
@@ -1104,16 +1099,14 @@ function CadChainWorkbenchBody({
         string,
         ChainEdgeAnchor
       >;
-      let best: { ordinal: number; distance: number } | null = null;
-      for (const [ordinal, anchor] of Object.entries(parsed)) {
-        const distance = Math.hypot(anchor.point[0] - x, anchor.point[1] - y);
-        if (
-          distance <= CHAIN_EDGE_PICK_RADIUS_PX &&
-          (best === null || distance < best.distance)
-        ) {
-          best = { ordinal: Number(ordinal), distance };
-        }
-      }
+      const best = nearestTopologyAnchor(
+        Object.entries(parsed).map(([ordinal, anchor]) => ({
+          ordinal: Number(ordinal),
+          point: anchor.point,
+        })),
+        x,
+        y,
+      );
       setSelectedEdge(best === null ? null : best.ordinal);
     },
     [applied, edgeAnchors],
