@@ -50,6 +50,46 @@ const client = createClient({ url: databaseUrl });
 await client.execute(
   "CREATE TABLE IF NOT EXISTS `__drizzle_migrations` (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)",
 );
+// Databases migrated before the runner switched to drizzle-kit's journal
+// tracked applied files (`<tag>.sql`) in `_slopcad_migrations`; adopt those rows (with the
+// hash/created_at drizzle-kit would have written) once, so the committed
+// migrations they already ran are not re-applied.
+const legacy = await client.execute(
+  "SELECT `name` FROM `sqlite_master` WHERE `type` = 'table' AND `name` = '_slopcad_migrations'",
+);
+const tracked = await client.execute(
+  "SELECT COUNT(*) AS `count` FROM `__drizzle_migrations`",
+);
+if (legacy.rows.length > 0 && Number(tracked.rows[0].count) === 0) {
+  const appliedTags = new Set(
+    (await client.execute("SELECT `tag` FROM `_slopcad_migrations`")).rows.map(
+      (row) => String(row.tag),
+    ),
+  );
+  const tx = await client.transaction("write");
+  try {
+    for (const entry of entries) {
+      if (!appliedTags.has(`${entry.tag}.sql`)) continue;
+      const content = await readFile(
+        `${migrationsFolder}/${entry.tag}.sql`,
+        "utf8",
+      );
+      await tx.execute({
+        sql: "INSERT INTO `__drizzle_migrations` (`hash`, `created_at`) VALUES (?, ?)",
+        args: [createHash("sha256").update(content).digest("hex"), entry.when],
+      });
+      console.log(`adopted ${entry.tag} from _slopcad_migrations`);
+    }
+    await tx.commit();
+  } catch (error) {
+    await tx.rollback();
+    console.error(
+      "adopting _slopcad_migrations failed; database left untouched.",
+    );
+    throw error;
+  }
+}
+
 const newest = await client.execute(
   "SELECT `created_at` FROM `__drizzle_migrations` ORDER BY `created_at` DESC LIMIT 1",
 );
