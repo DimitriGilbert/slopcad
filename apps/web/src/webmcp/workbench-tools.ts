@@ -1,8 +1,8 @@
 /**
- * The workbench's WebMCP tools (Phase 7, the Phase 2.1 capture tool, and the
- * Phase 2.2 getters): the twelve CAD tools the workbench-complete page
- * exposes to browser-resident AI agents through the WebMCP binding. Every
- * handler drives ONLY existing
+ * The workbench's WebMCP tools (Phase 7, the Phase 2.1 capture tool, the
+ * Phase 2.2 getters, and the site-served authoring skill): the twelve CAD
+ * tools the workbench-complete page exposes to browser-resident AI agents
+ * through the WebMCP binding. Every handler drives ONLY existing
  * domain paths — the SAME `CadStore` operations the command menu, parameter
  * panel, and history hook use — so an agent action and a user action are
  * one write path:

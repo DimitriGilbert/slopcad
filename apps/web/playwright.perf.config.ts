@@ -46,7 +46,16 @@ export default defineConfig({
     deviceScaleFactor: 1,
     screenshot: "only-on-failure",
     launchOptions: {
-      args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+      // `--enable-unsafe-webgpu` opens the Phase 64b GPU-path door: on
+      // headless Linux it exposes Dawn's SwiftShader (software) adapter,
+      // the device class the WGSL step-batch budget is honestly recorded
+      // against (a software-device upper bound, not a hardware claim —
+      // see docs/architecture/wgsl-prespike-findings.md).
+      args: [
+        "--use-angle=swiftshader",
+        "--enable-unsafe-swiftshader",
+        "--enable-unsafe-webgpu",
+      ],
     },
   },
   ...(sharedURL

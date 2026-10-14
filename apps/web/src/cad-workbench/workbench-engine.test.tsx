@@ -77,6 +77,13 @@ import {
   type FeatureFormOutcome,
 } from "./workbench-engine";
 import { CURVE_DEFAULTS } from "./curves";
+import { WORKBENCH_DEMO_SESSION_KEY } from "./session";
+
+// The suite's engine mounts boot the demo plate document — the session
+// module's opt-in flag (the clean bench is the production default).
+window.localStorage.setItem(WORKBENCH_DEMO_SESSION_KEY, "1");
+
+afterEach(cleanup);
 
 /** The last boot's captured options — the verdict and settle seams. */
 const bootedOptions: {
@@ -124,12 +131,6 @@ vi.mock("../render-fixture/fixture-session", () => ({
   },
   faceAnchorSurface: (): string => "[]",
 }));
-
-import { WORKBENCH_DEMO_SESSION_KEY } from "./session";
-
-// The suite's engine mounts boot the demo plate document — the session
-// module's opt-in flag (the clean bench is the production default).
-window.localStorage.setItem(WORKBENCH_DEMO_SESSION_KEY, "1");
 
 afterEach(cleanup);
 

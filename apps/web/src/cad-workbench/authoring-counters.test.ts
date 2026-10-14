@@ -22,12 +22,12 @@ import {
 } from "@slopcad/cad-core";
 
 import { maxAuthoringOccurrencesOf } from "./authoring-counters";
-import { createCadWorkbenchSession } from "./session";
+import { createCadWorkbenchDemoSession } from "./session";
 
-/** Adds parameters with the given ids to a copy of the boot document. */
+/** Adds parameters with the given ids to a copy of the boot fixture. */
 function withParameters(
   ids: readonly string[],
-  document: CadDocument = createCadWorkbenchSession().document,
+  document: CadDocument = createCadWorkbenchDemoSession().document,
 ): CadDocument {
   let next = document;
   for (const [index, raw] of ids.entries()) {
@@ -45,7 +45,7 @@ function withParameters(
 describe("the authoring-counter reseed scan", () => {
   it("reads the boot fixture's engine-convention hole stem (the stem without an occurrence)", () => {
     const maxima = maxAuthoringOccurrencesOf(
-      createCadWorkbenchSession().document,
+      createCadWorkbenchDemoSession().document,
     );
     // The fixture document's hole parameter id IS the stem without a
     // suffix (param_hole_diameter) — the first occurrence the hole verb

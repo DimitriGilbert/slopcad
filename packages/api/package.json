@@ -20,6 +20,7 @@
     "@slopcad/cad-core": "workspace:*",
     "@slopcad/db": "workspace:*",
     "@slopcad/env": "workspace:*",
+    "@slopcad/sim-core": "workspace:*",
     "@trpc/client": "catalog:",
     "@trpc/server": "catalog:",
     "dotenv": "catalog:",

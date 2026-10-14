@@ -29,6 +29,10 @@
  * - The readouts: selection key, face anchors, measure/distance/bounds/
  *   radius/mass-properties inspection states, and the machine timeline
  *   JSON.
+ * - The Phase 61d sim committed-application counters: the surfaced sim
+ *   worker client's notifications applied through the law-S6 ledger
+ *   (`./sim-application-ledger`), stamped synchronously as the
+ *   `data-sim-*` attribute family on the settle root.
  *
  * The host pushes the CURRENT projection into the store (the projection
  * access the active tool reads) — kept here, host-side state push, not
@@ -97,6 +101,7 @@ import {
   structuredHoleTypeOf,
 } from "@slopcad/cad-kernel";
 import type { Workplane } from "@slopcad/cad-sketch";
+import type { SimWorkerClient, SimWorkerNotification } from "@slopcad/sim-core";
 import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene";
 
 import {
@@ -107,6 +112,16 @@ import {
   type SceneDispatchOutcome,
 } from "../render-fixture/fixture-session";
 import { documentSceneBodies, renderableBodyIds } from "./document-scene";
+import {
+  applySimNotification,
+  createSimApplicationLedger,
+  type SimAppliedCounters,
+  SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE,
+  SIM_APPLIED_NOTIFICATIONS_ATTRIBUTE,
+  SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
+  SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
+  simAppliedCountersOf,
+} from "./sim-application-ledger";
 import { maxAuthoringOccurrencesOf } from "./authoring-counters";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
@@ -259,6 +274,18 @@ export interface WorkbenchEngineSurface {
    * the authored frame (byte-identical anchors).
    */
   readonly viewportId?: string;
+  /**
+   * The sim worker channel's client whose notifications the engine applies
+   * as committed applications (Phase 61d, law S6) — the 61b sim worker
+   * host (`bootSimWorkbenchWorker`) hands this out on its booted channel.
+   * Boot-time configuration like `backend`: the client's identity owns the
+   * subscription, so a host changing channels rewires here and remounting
+   * the host is the way to swap engines. Absent (the default): no sim run
+   * streams into this engine and the sim counters stay at their boot
+   * zeros. Rendering the applied fields is Phases 62+63's work; this seam
+   * is only the committed-application accounting.
+   */
+  readonly simClient?: SimWorkerClient;
 }
 
 /**
@@ -391,6 +418,15 @@ export interface WorkbenchEngine {
    * belong to the document projection must not stamp it).
    */
   readonly noteRenderedFrame: (stampVolume: string | null) => void;
+  /**
+   * The sim committed-application counters (Phase 61d, law S6): every sim
+   * notification from the surfaced sim worker client that the engine
+   * ACTUALLY applied — the counter family behind the `data-sim-*`
+   * attributes e2e awaits instead of timeouts. Frozen at its boot zeros
+   * while no sim client rides the surface; a notification that arrives
+   * but does not apply (a gapped chunk, a retrograde step) moves nothing.
+   */
+  readonly simApplied: SimAppliedCounters;
   /** The suppressed feature set (authoring data, page-level). */
   readonly suppressed: ReadonlySet<FeatureId>;
   /** The rollback marker, or `null`. */
@@ -778,7 +814,15 @@ export interface WorkbenchEngine {
 export function useWorkbenchEngine(
   surface: WorkbenchEngineSurface,
 ): WorkbenchEngine {
-  const { rootId, statusId, volumeId, errorId, backend, viewportId } = surface;
+  const {
+    rootId,
+    statusId,
+    volumeId,
+    errorId,
+    backend,
+    viewportId,
+    simClient,
+  } = surface;
   // The workbench mode is page-level authoring state: the model workspace
   // keeps its worker session alive across switches (hidden, not unmounted).
   const [mode, setMode] = useState<WorkbenchMode>("model");
@@ -812,6 +856,63 @@ export function useWorkbenchEngine(
     }
     setRenderedFrames((frames) => frames + 1);
   };
+
+  // The Phase 61d sim committed-application bridge (law S6): the ledger
+  // the sim notifications apply through — the `renderedFrames` discipline
+  // (a counter that moves only on an ACTUAL application, with the
+  // synchronous root stamp beside it) over a `SettleLedger`-shaped stable
+  // object (created once, marked only by this path). A notification that
+  // arrives but does not apply commits nothing, so an e2e await on the
+  // `data-sim-*` family is an await on committed applications — never on
+  // arrivals, never on timeouts. No rAF, no frame loop: the demand-render
+  // law is untouched; rendering the applied fields is Phases 62+63's.
+  const [simLedger] = useState(createSimApplicationLedger);
+  const [simApplied, setSimApplied] = useState<SimAppliedCounters>(() =>
+    simAppliedCountersOf(simLedger),
+  );
+  const noteSimApplication = useCallback(
+    (notification: SimWorkerNotification): void => {
+      const committed = applySimNotification(simLedger, notification);
+      if (committed === null) return;
+      const root = document.getElementById(rootId);
+      if (root !== null) {
+        root.setAttribute(
+          SIM_APPLIED_NOTIFICATIONS_ATTRIBUTE,
+          String(committed.notifications),
+        );
+        root.setAttribute(
+          SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE,
+          String(committed.fieldChunks),
+        );
+        if (committed.progressStep !== null) {
+          root.setAttribute(
+            SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
+            String(committed.progressStep),
+          );
+        }
+        if (committed.optimizationGeneration !== null) {
+          root.setAttribute(
+            SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
+            String(committed.optimizationGeneration),
+          );
+        }
+      }
+      setSimApplied(committed);
+    },
+    [rootId, simLedger],
+  );
+
+  // The 61b sim worker host's notifications wired to the bridge: the
+  // surfaced channel client's notification stream (progress and
+  // field-chunk deliveries for the requests IT holds pending) applies
+  // through the ledger above. Absent client: nothing subscribes and the
+  // counters stay at their boot zeros.
+  useEffect(() => {
+    if (simClient === undefined) return;
+    return simClient.onNotification((delivery) => {
+      noteSimApplication(delivery.notification);
+    });
+  }, [simClient, noteSimApplication]);
 
   // The executor stand-in: the document's hole parameter is the source of
   // truth; the worker computation follows it (the same pipeline as the
@@ -4403,6 +4504,7 @@ export function useWorkbenchEngine(
     applied,
     renderedFrames,
     noteRenderedFrame,
+    simApplied,
     suppressed,
     rollback,
     setRollback,

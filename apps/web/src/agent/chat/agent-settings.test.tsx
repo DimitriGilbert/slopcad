@@ -163,7 +163,14 @@ async function pickModelOption(search: string, optionLabel: string) {
   }
   fireEvent.focus(input);
   fireEvent.change(input, { target: { value: search } });
-  const option = await screen.findByText(optionLabel);
+  // The find window is sized for the LOADED gate: the autocomplete's
+  // 200 ms debounce plus its async resolve ran past findByText's 1 s
+  // default once under `pnpm run verify`'s turbo fan-out (the whole
+  // test 3.1 s loaded vs 0.6 s serial — contention, not the sheet),
+  // so the window carries the same ×5-plus margin, not a guess.
+  const option = await screen.findByText(optionLabel, undefined, {
+    timeout: 10_000,
+  });
   fireEvent.click(option);
 }
 

@@ -138,6 +138,28 @@ export function formatCadCommand(command: CadCommand): string {
       return `Update configuration ${String(command.id)} (${countConfigurationDeltas(command)})`;
     case "configuration.delete":
       return `Delete configuration ${String(command.id)}`;
+    case "motor.create":
+      return `Create motor "${command.motor.name}" (${motorKindSummary(command.motor.kind)})`;
+    case "motor.update":
+      return `Update motor ${String(command.id)}`;
+    case "motor.delete":
+      return `Delete motor ${String(command.id)}`;
+    case "simulation.create":
+      return `Create ${command.scenario.kind} scenario "${command.scenario.name}"`;
+    case "simulation.update":
+      return `Update ${command.scenario.kind} scenario ${String(command.id)}`;
+    case "simulation.delete":
+      return `Delete simulation scenario ${String(command.id)}`;
+    case "study.create":
+      return `Create study "${command.study.name}" (${String(
+        command.study.genes?.length ?? 0,
+      )} gene${(command.study.genes?.length ?? 0) === 1 ? "" : "s"}, ${String(
+        command.study.objectives?.length ?? 0,
+      )} objective${(command.study.objectives?.length ?? 0) === 1 ? "" : "s"})`;
+    case "study.update":
+      return `Update study ${String(command.id)}`;
+    case "study.delete":
+      return `Delete study ${String(command.id)}`;
     default: {
       // Exhaustiveness: a future command type must extend the summaries.
       const exhaustive: never = command;
@@ -162,6 +184,13 @@ function countConfigurationDeltas(
     `${String(hidden)} hidden`,
   ];
   return parts.join(", ");
+}
+
+/** One motor command's kind, in the summary vocabulary's spelling. */
+function motorKindSummary(kind: string): string {
+  if (kind === "dc-brushed") return "DC brushed";
+  if (kind === "bldc") return "BLDC";
+  return "tabulated";
 }
 
 /**

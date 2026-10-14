@@ -14,6 +14,7 @@
     "test:render": "playwright test -c playwright.render.config.ts",
     "probe:floor": "tsx scripts/floor-probe.ts",
     "test:spike": "playwright test -c playwright.spike.config.ts",
+    "test:gpu-spike": "playwright test -c playwright.gpu-spike.config.ts",
     "test:workbench": "playwright test -c playwright.workbench.config.ts",
     "test:session": "playwright test -c playwright.session.config.ts",
     "tutorial:record": "playwright test -c playwright.tutorial.config.ts",
@@ -47,6 +48,10 @@
     "@slopcad/db": "workspace:*",
     "@slopcad/docs-examples": "workspace:*",
     "@slopcad/env": "workspace:*",
+    "@slopcad/sim-core": "workspace:*",
+    "@slopcad/sim-dynamics": "workspace:*",
+    "@slopcad/sim-flow": "workspace:*",
+    "@slopcad/sim-optimization": "workspace:*",
     "@slopcad/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/ai": "^0.64.0",
@@ -81,7 +86,9 @@
     "sonner": "catalog:",
     "tailwindcss": "catalog:",
     "three": "0.186.0",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@slopcad/sim-combustion": "workspace:*",
+    "@slopcad/sim-structural": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

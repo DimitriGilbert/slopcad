@@ -72,7 +72,7 @@ import {
   useState,
 } from "react";
 import * as THREE from "three";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   selectionReferenceKey,
   type RenderCamera,
@@ -303,6 +303,15 @@ export interface CadSceneProps {
    * chain, opt-in and unpinned — see `render-quality.ts`).
    */
   readonly renderQuality?: CadRenderQuality;
+  /**
+   * The field overlay slot (Phase 62b): arbitrary canvas children — the
+   * `field-overlays.tsx` family mounted INTO this scene, after the model.
+   * Absent (the default) renders nothing extra, so every pinned baseline
+   * is byte-identical to the pre-slot scene; overlays themselves follow
+   * the demand-render law (they invalidate on their own data changes and
+   * never run a frame loop).
+   */
+  readonly children?: ReactNode;
 }
 
 /**
@@ -608,6 +617,7 @@ export function CadScene({
   cameraControls = false,
   clippingPlanes,
   cameraOrbitDragEnabled = true,
+  children,
   displayMode,
   lightRig = CAD_LIGHT_RIG_STUDIO,
   onCameraState,
@@ -734,6 +744,9 @@ export function CadScene({
         selection={selection}
         settle={settle}
       />
+      {/* The Phase 62b field overlay slot: absent renders nothing, so the
+          boot raster and every pinned baseline are unchanged. */}
+      {children}
       <SelectionProbe
         onSelectionRendered={onSelectionRendered}
         selection={selection}

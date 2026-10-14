@@ -28,6 +28,10 @@ import {
   HOLE_DEFAULT_DIAMETER_MM,
 } from "../src/cad-workbench/hole";
 import {
+  SIM_FIXTURE_CHUNKS_PER_ROUND,
+  SIM_FIXTURE_FINE_SHAPE,
+} from "../src/sim-workbench/sim-grid-fixture";
+import {
   activateSketchTool,
   annotationsOf,
   assertPngs,
@@ -134,6 +138,7 @@ const PLANNED_ROUTES: readonly string[] = [
   "/io",
   "/projects",
   "/viewer",
+  "/workbench-sim",
 ];
 
 /** The one-process ledger (one worker, serial mode — no cross-process races). */
@@ -3189,6 +3194,1255 @@ test("s24 the render fixture recomputes projection, pixels, and volume", async (
     expect(Number(volumeB)).toBeLessThan(Number(volumeA));
     const shotB = await page.locator("#render-viewport canvas").screenshot();
     expect(shotB.equals(shotA)).toBe(false);
+  });
+});
+
+test("s24b the sim workbench renders the demo body as a grid (Phase 62)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24b workbench-sim", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    const volumeText = await waitForSettledScene(page, SIM_ROOT);
+    // The demo body: the plate minus its ⌀12 through bore.
+    const analytic = 80 * 48 * 6 - Math.PI * 6 * 6 * 6;
+    expect(Math.abs(Number(volumeText) - analytic)).toBeLessThanOrEqual(
+      analytic * 0.005,
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE GRID (the phase's user-visible outcome): the boot application
+    // commits its chunk round — awaited on the data-sim-* counters,
+    // never a timeout — and the applied grid state pins the resolved
+    // shape with the part provably inside the lattice.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND),
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-notifications",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND),
+    );
+    const bootState = JSON.parse(
+      (await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-grid-state")) ?? "{}",
+    ) as {
+      readonly semantic: string;
+      readonly rounds: number;
+      readonly shape: readonly number[];
+      readonly occupiedNodes: number | null;
+    };
+    expect(bootState.semantic).toBe("occupancy");
+    expect(bootState.rounds).toBe(1);
+    expect(bootState.shape).toEqual([...SIM_FIXTURE_FINE_SHAPE]);
+    expect(bootState.occupiedNodes).not.toBeNull();
+    expect(bootState.occupiedNodes ?? 0).toBeGreaterThan(0);
+    expect(bootState.occupiedNodes ?? 0).toBeLessThan(51 * 35 * 10);
+
+    // The SDF flag: the other semantic's stream applies as its own
+    // committed round; toggling back re-publishes the occupancy field.
+    await page.locator("#sim-sdf-toggle").check();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND * 2),
+    );
+    await expect
+      .poll(async () => {
+        const state = JSON.parse(
+          (await page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-grid-state")) ?? "{}",
+        ) as { readonly semantic: string; readonly unit: string };
+        return state.semantic === "signed-distance" && state.unit === "mm";
+      })
+      .toBe(true);
+    await page.locator("#sim-sdf-toggle").uncheck();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(SIM_FIXTURE_CHUNKS_PER_ROUND * 3),
+    );
+    await expect
+      .poll(async () => {
+        const state = JSON.parse(
+          (await page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-grid-state")) ?? "{}",
+        ) as { readonly semantic: string; readonly rounds: number };
+        return state.semantic === "occupancy" && state.rounds === 2;
+      })
+      .toBe(true);
+  });
+});
+
+test("s24c the sim workbench runs a wind tunnel through the real engine (Phase 63)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24c workbench-sim wind tunnel", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the Formedible scenario form's defaults ARE the demo wind
+    // tunnel — one submit saves the record into the document's
+    // simulations section (law S1).
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the real 2D LBM engine in the sim worker, awaited on the
+    // committed-application counters and the run family — never a
+    // timeout. The default budget (240 steps) publishes a preview round
+    // every 10 steps plus the final one.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "240",
+    );
+    const appliedChunks = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    // The Phase 62 grid round (8 chunks of the 2 mm fine preset) plus
+    // the run's preview rounds (240/10 = 24 rounds of one chunk at the
+    // 26×18 slice) — the exact committed-application arithmetic.
+    expect(appliedChunks).toBe(8 + 24);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // The live overlay mounted from the run's committed preview rounds
+    // (the velocity-magnitude slice; law S6 — overlay application IS
+    // committed application).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+
+    // PERSIST: the completed run landed in the local store, keyed by its
+    // scenario-snapshot hash, and the panel lists it.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      "1",
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-hash"),
+      )
+      .toMatch(/^[0-9a-f]{8}$/);
+    await expect(page.getByTestId("workbench-sim-run-row")).toHaveCount(1);
+
+    // EXPORT: the decimated .vti field series (one honest file per
+    // field block) and the force-history CSV — deterministic bytes, and
+    // the counters prove the paths ran.
+    await page.locator("#workbench-sim-export-vti").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-vti",
+      "8",
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      "1",
+    );
+  });
+});
+
+test("s24d the sim workbench compares two persisted runs (Phase 63d)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24d workbench-sim comparison", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // TWO KNOWN-DIFFERENT RUNS: the default tunnel at two inlet speeds
+    // — 0.01 and 0.015 m/s, both inside the heavily-confined demo
+    // plate's stable regime (the tunnel is ~70% blocked by the plate;
+    // 0.02 m/s already diverges the coarse lattice) — as DISTINCTLY
+    // NAMED scenario records (the document declines duplicate names),
+    // so two distinct persisted runs to compare. This stage runs both
+    // itself so it never depends on s24c's residue. (The scenario
+    // count is the PAGE's working document — this load starts empty,
+    // so the saves count 1 and 2; the run list and the compare selects
+    // below read the STORE, which persists across loads.)
+    await page
+      .getByRole("textbox", { name: "Scenario name", exact: true })
+      .fill("tunnel-slow");
+    await page.getByLabel("Inlet speed (m/s)").fill("0.01");
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await page
+      .getByRole("textbox", { name: "Scenario name", exact: true })
+      .fill("tunnel-faster");
+    await page.getByLabel("Inlet speed (m/s)").fill("0.015");
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // Select the two NEW runs — the chronologically last two in the
+    // compare selects (the run list is the store's chronological list).
+    const runIds = await page
+      .locator("#workbench-sim-compare-a option")
+      .evaluateAll((options) =>
+        options
+          .map((option) => (option as HTMLOptionElement).value)
+          .filter((value) => value !== ""),
+      );
+    expect(runIds.length).toBeGreaterThanOrEqual(2);
+    const runA = runIds[runIds.length - 2] ?? "";
+    const runB = runIds[runIds.length - 1] ?? "";
+    await page.locator("#workbench-sim-compare-a").selectOption(runA);
+    await page.locator("#workbench-sim-compare-b").selectOption(runB);
+
+    // The comparison fixture, awaited on the ledger counters — never a
+    // timeout: the diff's chunk round commits through the same
+    // committed-application ledger every other overlay rides, so the
+    // applied-field-chunks counter advances by EXACTLY the diff round's
+    // chunk count (8 — the fixture round shape over the 26×18 slice).
+    const chunksBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    await page.locator("#workbench-sim-compare").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-status",
+      "ready",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-runs",
+      `a:${runA}|b:${runB}`,
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-field-chunks",
+      String(chunksBefore + 8),
+    );
+    await expect(page.getByTestId("workbench-sim-compare-error")).toHaveText(
+      "",
+    );
+
+    // The FIELD DIFF is rendered: the diffed field id, a nonzero
+    // relative L2 (two known-different inlet speeds), and the diff
+    // stats line in the panel — and the viewport's compare overlay
+    // mounted from the committed round (coolwarm diverging paint over
+    // the symmetric window).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-compare-diff",
+      "speed",
+    );
+    const l2 = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-compare-l2"),
+    );
+    expect(l2).toBeGreaterThan(0);
+    await expect(page.getByTestId("workbench-sim-compare-diff")).toContainText(
+      "diff speed",
+    );
+
+    // The CURVE OVERLAY is rendered as data: both quantities, both
+    // runs — four deterministic polylines inside the compare panel.
+    await expect(
+      page.getByTestId("workbench-sim-compare-curves"),
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        '[data-testid="workbench-sim-compare-curves"] polyline[data-series]',
+      ),
+    ).toHaveCount(4);
+  });
+});
+
+test("s24e a gpu-preferred flow scenario completes on the CPU fallback path (Phase 64b)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24e workbench-sim gpu fallback", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR a GPU-PREFERRED scenario: the Formedible backend radio
+    // selects the "gpu" preference (the Phase 64 provider door), one
+    // submit saving it into the document's simulations section (law S1).
+    // (The role query resolves the Base UI radio ITEM — the accessible
+    // span; the twin native input the label also names is aria-hidden.)
+    await page
+      .getByRole("textbox", { name: "Scenario name", exact: true })
+      .fill("tunnel-gpu-preferred");
+    await page.getByRole("radio", { name: "GPU (Phase 64 provider)" }).click();
+    await page.getByRole("button", { name: "Save scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // The run list is the law-S7 STORE's chronological list, which
+    // persists across this session's earlier sim stages — the honest
+    // assertion is that this run ADDS one, not an absolute count.
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+
+    // RUN: this harness launches WITHOUT the WebGPU door
+    // (`--enable-unsafe-webgpu` is off — law S5's CPU-oracle stance),
+    // so the router's feature detect finds no adapter and serves the
+    // scenario's CPU twin — the documented Phase 64a fallback. The run
+    // completes end to end, awaited on the committed-application
+    // counters and the honest backend record, never a timeout.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "240",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+  });
+});
+
+test("s24f the sim workbench runs the stove through the real thermal engine — sealed and coupled (Phase 65)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24f workbench-sim thermal stove", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR the SEALED stove: the thermal form's defaults ARE the demo
+    // (steady equilibrium, linearized radiation, the equilibrium
+    // boundary's ambient h) — one submit saves the record with its
+    // kind-locked thermal stance into the document's simulations
+    // section (law S1). The run list is the STORE's chronological list
+    // (it persists across this session's earlier sim stages), so the
+    // honest assertions are deltas, not absolute counts.
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    const chunksBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    await page.getByRole("button", { name: "Save thermal scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN the sealed conduction solve in the sim worker, awaited on the
+    // committed-application counters and the run family — never a
+    // timeout. The engine streams one progress hop per stage and ONE
+    // final temperature preview round (the 65a/65b whole-run driver
+    // discipline), so the chunk counter advances by exactly the round.
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    // The temperature overlay mounted from the committed round (law S6).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    const sealedChunks = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(sealedChunks).toBeGreaterThan(chunksBefore);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR + RUN the COUPLED stove: the same form flips to the
+    // transient buoyant plume (fixed-temperature room walls at ambient,
+    // Boussinesq coupling, a short interactive budget) — the second
+    // mode of the demo, reachable from the same surface. The checkbox
+    // is the Base UI styled control (the hidden native twin carries the
+    // same label — the ROLE query resolves the visible one alone).
+    await page.getByLabel("Thermal scenario name").fill("stove-plume");
+    await page.getByRole("radio", { name: "Transient march" }).click();
+    await page
+      .getByRole("checkbox", {
+        name: "Conjugate: convect to the fluid (buoyant plume)",
+      })
+      .click();
+    await page.getByLabel("Transient duration (s)").fill("20");
+    await page.getByLabel("Sample interval (s)").fill("5");
+    await page.getByRole("button", { name: "Save thermal scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-status",
+      "completed",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24g the sim workbench runs the motor-driven fan demo through the 3D engine (Phase 66)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24g workbench-sim fan demo", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // SWITCH the demo model to the fan-in-tube: the radio preset
+    // re-dispatches the fan document (the cad-jsx tube + rotor through
+    // the real Manifold worker) and resets the working document — the
+    // model fork's own settle, awaited on the scene family.
+    await page.locator("#sim-demo-model-fan").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fan",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the fan form's defaults ARE the motor-driven demo — the
+    // demo motor selection, MRF, four blades — one submit saves the
+    // flow3d stance into the document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save fan scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the 3D reference engine in the sim worker — the ω ladder of
+    // streamed MRF rungs, the operating-point solve, and the
+    // verification rung at the FOUND speed, awaited on the run family
+    // and the committed-application counters, never a timeout. The
+    // progress total spans the ladder's four rungs plus the verify
+    // rung (5 × 120 steps).
+    await page.locator("#workbench-sim-run").click();
+    // The sweep is five rungs (~8-10 s under the session's video
+    // load) — the wait stays attribute-driven (never a sleep); the
+    // longer allowance only clears the 10 s default's race with the
+    // rung ladder's honest duration.
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "600",
+    );
+    // The 3D speed overlay mounted from the verify rung's committed
+    // preview rounds (law S6 — overlay application IS committed
+    // application).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "speed",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE OPERATING POINT IS VISIBLE: the found rpm sits strictly
+    // inside the motor's domain (0 < rpm < 40 no-load — the demo
+    // motor's own number, `FAN_DEMO_MOTOR_NUMBERS.noLoadSpeedRpm`),
+    // the BPF is the blades arithmetic at it, and the S9 fan Re line
+    // flags the demo's low-Re regime (law S9's honesty field on the
+    // surface).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-fan-chart",
+      "ready",
+    );
+    const foundRpm = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-fan-op-rpm"),
+    );
+    expect(foundRpm).toBeGreaterThan(1);
+    expect(foundRpm).toBeLessThan(39);
+    const bpf = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-fan-bpf-hz"),
+    );
+    expect(bpf).toBeCloseTo((4 * foundRpm) / 60, 2);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-fan-flags",
+      "low-reynolds-fan",
+    );
+
+    // THE CHART IS RENDERED: both curve polylines and the operating
+    // point's superimposed marker, from the persisted result's own
+    // history pair (SVG-as-data, the 63d family).
+    await expect(page.getByTestId("workbench-sim-fan-chart")).toBeVisible();
+    await expect(
+      page
+        .locator(
+          '[data-testid="workbench-sim-fan-chart"] polyline[data-series]',
+        )
+        .first(),
+    ).toBeVisible();
+    const seriesCount = await page
+      .locator('[data-testid="workbench-sim-fan-chart"] polyline[data-series]')
+      .count();
+    expect(seriesCount).toBe(2);
+    expect(
+      await page
+        .locator('[data-testid="workbench-sim-fan-chart"] g[data-marker]')
+        .count(),
+    ).toBe(1);
+
+    // PERSIST + EXPORT: the completed run landed in the store, and the
+    // export paths remain working for 3D runs — the .vti field series
+    // (one honest file per 3D field block) and the CSV (the ladder's
+    // load/motor pair).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const vtiBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-vti"),
+    );
+    await page.locator("#workbench-sim-export-vti").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-vti",
+      String(vtiBefore + 5),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24h the sim workbench runs the slider-crank dynamics demo and animates it (Phase 67)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24h workbench-sim dynamics slider-crank", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // SWITCH the demo model to the slider-crank: the radio preset
+    // re-dispatches the mechanism document (the cad-jsx bodies plus
+    // the joint records and the demo motor through the real Manifold
+    // worker) and resets the working document.
+    await page.locator("#sim-demo-model-slider").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "slider",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the dynamics form's defaults ARE the demo — the demo
+    // motor on the crank joint, the reference kernel, the 2 s march
+    // at 1 ms — one submit saves the dynamics stance into the
+    // document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save dynamics scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the real dynamics engine in the sim worker — the mechanism
+    // wire across the compile seam, the stepped march, the dissipation
+    // preview round through the committed-application ledger (law S6).
+    // Awaited on the run family and the counters, never a timeout:
+    // the march is 2000 steps of 1 ms (2 s of mechanism time), well
+    // inside the allowance the fan ladder already established.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-applied-progress-step",
+      "2000",
+    );
+    // The dissipation preview round painted the live overlay.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "dissipated-power",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // ANIMATE: the mechanism-motion surface mounted from the run's own
+    // joint histories (the assembly-motion path — applyMotionJoint per
+    // scrub, deterministic). The march carries 50 samples (2 s at the
+    // 40 ms cadence); scrubbing a later sample turns the crank and
+    // retracts the piston, and scrubbing back is exact.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-motion",
+      "ready",
+    );
+    const motion = page.getByTestId("workbench-sim-mechanism-motion");
+    await expect(motion).toBeVisible();
+    await expect(
+      page.locator("[data-testid='workbench-sim-mechanism-motion'] svg"),
+    ).toHaveAttribute("data-sim-motion-samples", "50");
+    await expect(
+      page.locator("[data-testid='workbench-sim-mechanism-motion'] svg"),
+    ).toHaveAttribute("data-sim-motion-sample", "0");
+    await page.getByTestId("workbench-sim-motion-scrub").fill("25");
+    await expect(
+      page.locator("[data-testid='workbench-sim-mechanism-motion'] svg"),
+    ).toHaveAttribute("data-sim-motion-sample", "25");
+    const crankDeg = Number(
+      await page
+        .locator("[data-testid='workbench-sim-mechanism-motion'] svg")
+        .getAttribute("data-sim-motion-crank-deg"),
+    );
+    expect(crankDeg).toBeGreaterThan(360);
+    const slideMm = Number(
+      await page
+        .locator("[data-testid='workbench-sim-mechanism-motion'] svg")
+        .getAttribute("data-sim-motion-slide-mm"),
+    );
+    expect(slideMm).toBeLessThan(0);
+
+    // PERSIST + EXPORT: the completed run landed in the store, and the
+    // joint-histories CSV (time first, the joint series) exports.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24i the sim workbench runs the combustion demos — the Otto engine's charts and the stove with fire (Phase 68)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24i workbench-sim combustion", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // --- THE ENGINE DEMO: the 0D Otto cycle. Switch the demo model to
+    // the engine — the 0D chamber needs no geometry, so the PLATE
+    // document stays the rendered scene (the honest split: the panel's
+    // physics is the authored stance).
+    await page.locator("#sim-demo-model-engine").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "engine",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // AUTHOR: the engine form's defaults ARE the demo — the 0.5 L
+    // single at CR 10, 1500 rpm, WOT stoichiometric, Woschni walls,
+    // the published Chen–Flynn friction, and the spark sweep from 10°
+    // to 50° — one submit saves the kind-locked combustion stance into
+    // the document's simulations section (law S1).
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+    await page.getByRole("button", { name: "Save engine scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the combustion engine in the sim worker — the base cycle
+    // plus the 8-interval spark sweep (measured ≈ 3.5 s on the CPU
+    // oracle), awaited on the run family and the counters, never a
+    // timeout; the allowance matches the fan ladder's precedent.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // THE CHARTS ARE RENDERED (SVG-as-data, the fan-chart family): the
+    // P-vs-crank trace with its motored twin, the torque curve with
+    // BOTH families (indicated + brake), and the knock boundary's
+    // marker on the spark sweep — every polyline from the persisted
+    // result's own histories.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-engine-chart",
+      "ready",
+    );
+    const imepBar = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-imep-bar"),
+    );
+    expect(imepBar).toBeGreaterThan(8);
+    expect(imepBar).toBeLessThan(25);
+    const bmepBar = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-bmep-bar"),
+    );
+    expect(bmepBar).toBeGreaterThan(5);
+    expect(bmepBar).toBeLessThan(imepBar);
+    const brakeTorque = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-engine-brake-torque"),
+    );
+    expect(brakeTorque).toBeGreaterThan(20);
+    const knockBoundary = await page
+      .locator(`#${SIM_ROOT}`)
+      .getAttribute("data-sim-engine-knock-boundary");
+    expect(knockBoundary).not.toBe("");
+    expect(Number(knockBoundary)).toBeGreaterThanOrEqual(10);
+    expect(Number(knockBoundary)).toBeLessThanOrEqual(50);
+    const chart = page.getByTestId("workbench-sim-engine-chart");
+    await expect(chart).toBeVisible();
+    const seriesCount = await chart.locator("polyline[data-series]").count();
+    expect(seriesCount).toBe(4);
+    expect(
+      await chart.locator("line[data-marker='knock-boundary']").count(),
+    ).toBe(1);
+    // The pressure-trace preview round applied through the ledger
+    // (law S6 — the chunk counter advanced past the fixture's own).
+    const chunksAfterEngine = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(chunksAfterEngine).toBeGreaterThan(0);
+
+    // PERSIST + EXPORT: the run landed in the store, and the CSV door
+    // exports BOTH tables (the crank-first cycle trace and the
+    // axis-first sweep).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // --- THE STOVE WITH FIRE: the 65 stove body with a fire source.
+    // The fire form's defaults ARE the demo (lit methane in the
+    // chamber, steel body, the 65-family solve fields) — the same
+    // save → run → persist path, now with the reactor's wall heat
+    // coupling into the conduction march.
+    await page.locator("#sim-demo-model-fire").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fire",
+    );
+    await page.getByRole("button", { name: "Save fire scenario" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The temperature overlay mounted from the committed round (law S6)
+    // — the fire's heat, painted through the 62 family.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "temperature",
+    );
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24j the sim workbench holds the load — the bracket through the structural engine (Phase 69)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24j workbench-sim structural bracket", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // Switch the demo model to the bracket — the L-bracket's two
+    // bodies (base plate + upright wall) become the rendered scene the
+    // structural form's material assignments address.
+    await page.locator("#sim-demo-model-bracket").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "bracket",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    const runsBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-count"),
+    );
+
+    // AUTHOR: the structural form's defaults ARE the demo — steel, the
+    // bolted zMin base face, the −y tip load at the wall's top, dry —
+    // one submit saves the kind-locked stance into the document's
+    // simulations section (law S1).
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+
+    // RUN: the structural engine in the sim worker — the FULL-3D
+    // voxelization, the Jacobi-CG solve, and both preview rounds
+    // applied through the ledger (measured ≈ 1 s on the CPU oracle),
+    // awaited on the run family and the counters, never a timeout.
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-served-backend",
+      "cpu",
+    );
+    // The displacement overlay mounted from the committed round (law
+    // S6 — the engine publishes von Mises first, displacement LAST, so
+    // the live overlay deterministically names it).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-live-field",
+      "displacement",
+    );
+    const chunksAfterDry = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-field-chunks"),
+    );
+    expect(chunksAfterDry).toBeGreaterThan(0);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 1),
+    );
+
+    // THE SCALAR FAMILY (machine-readable — Phase 70's objective
+    // material): the FoS arithmetic, the tip deflection, and the von
+    // Mises scale, all as attributes off the persisted summary.
+    const dryFos = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-fos"),
+    );
+    const dryDeflection = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-deflection-mm"),
+    );
+    const dryVonMises = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-vonmises-mpa"),
+    );
+    expect(dryFos).toBeGreaterThan(10);
+    expect(dryDeflection).toBeGreaterThan(0.01);
+    expect(dryVonMises).toBeGreaterThan(4);
+
+    // THE OVERLAY FIELD TOGGLE (fixture data — a radio over the
+    // completed result's own two blocks): von Mises repaints and the
+    // attribute family follows.
+    await page.locator("#sim-structural-field-von-mises").check();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-structural-field",
+      "von-mises",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await page.locator("#sim-structural-field-displacement").check();
+
+    // --- THE SELF-WEIGHT VARIANT: the body-force switch. The same
+    // bracket with gravity on deflects measurably more (the measured
+    // ×1.005 — asserted strictly greater, never a rewrite).
+    await page.getByLabel("Structural scenario name").fill("bracket-heavy");
+    await page
+      .getByRole("checkbox", {
+        name: "Self-weight (the scenario's gravity vector)",
+      })
+      .click();
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    // The save→run barrier: the submit is async, and Run must not race
+    // the landing selection (the attribute is the commit).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "2",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The completion gate that cannot go stale: the run COUNT moves
+    // only when this run persists (a status poll can sample the
+    // previous run's lingering "completed" before this run sets
+    // "compiling" — the scalar reads must not race that window).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 2),
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+      )
+      .toBe("completed");
+    const heavyDeflection = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-deflection-mm"),
+    );
+    expect(heavyDeflection).toBeGreaterThan(dryDeflection);
+
+    // --- THE HOT BRACKET (the CHT→structural chain): the stance chains
+    // a thermal run's temperature field; the run-to-run selection rides
+    // the native select over the persisted run list (the stove runs the
+    // session persisted at s24f), and the ΔT drives thermal-expansion
+    // loading past the dry run's stress scale.
+    await page.getByLabel("Structural scenario name").fill("bracket-hot");
+    await page
+      .getByRole("checkbox", {
+        name: "Thermal chain (a thermal run's temperature field)",
+      })
+      .click();
+    const thermalSelect = page.locator("#workbench-sim-thermal-chain");
+    const thermalOptions = await thermalSelect.locator("option").all();
+    expect(thermalOptions.length).toBeGreaterThan(1);
+    const thermalValue = await thermalOptions[1]?.getAttribute("value");
+    expect(thermalValue).toBeTruthy();
+    await thermalSelect.selectOption(thermalValue as string);
+    await page
+      .getByRole("button", { name: "Save structural scenario" })
+      .click();
+    // The save→run barrier again: the hot scenario must BE the selected
+    // record before Run fires (the first harness run raced this and
+    // re-ran the heavy twin — the exact-number tell).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "3",
+    );
+    await page.locator("#workbench-sim-run").click();
+    await expect
+      .poll(
+        async () =>
+          page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    // The same stale-proof gate: the hot run's count increment, then
+    // the completed status, then the scalars.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-run-count",
+      String(runsBefore + 3),
+    );
+    await expect
+      .poll(async () =>
+        page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-run-status"),
+      )
+      .toBe("completed");
+    const hotVonMises = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-structural-vonmises-mpa"),
+    );
+    // Measured (2026-10-13): the form's sealed stove settles at ~301 K,
+    // so the chained ΔT ≈ 8 K drives the bracket to ~30 MPa ≈ 4× the
+    // dry stress — thermal-dominated, banded with margin (the s24j
+    // measurement, not the engine test's artificial uniform field).
+    expect(hotVonMises).toBeGreaterThan(2 * dryVonMises);
+    expect(hotVonMises).toBeGreaterThan(20);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // PERSIST + EXPORT: the CSV door exports the summary-scalar table
+    // (a statics run's value IS its scalars — no time axis); the run's
+    // count was already gated above.
+    const csvBefore = Number(
+      await page.locator(`#${SIM_ROOT}`).getAttribute("data-sim-export-csv"),
+    );
+    await page.locator("#workbench-sim-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-export-csv",
+      String(csvBefore + 1),
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+  });
+});
+
+test("s24k the sim workbench evolves a study — the Pareto front, its ledger counters, and a replay (Phase 70)", async ({
+  sessionPage: page,
+}) => {
+  await stage("s24k workbench-sim optimization study", async () => {
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    const SIM_ROOT = "workbench-sim-root";
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // The bracket substrate (s24j's model): the cad-jsx parameters the
+    // study's genome addresses ARE the document's table.
+    await page.locator("#sim-demo-model-bracket").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "bracket",
+    );
+    const scenariosBefore = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-scenario-count"),
+    );
+
+    // AUTHOR — the demo study scenario (the peg-height load over the
+    // genome-grown domain), then the study row itself through the
+    // Formedible form (the bracket demo presets ARE the defaults; the
+    // scenario combobox picks the just-saved record — the template
+    // dialog's combobox-option discipline).
+    await page.locator("#workbench-sim-study-demo-scenario").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      String(scenariosBefore + 1),
+    );
+    await page
+      .getByRole("combobox", { name: "Scenario (every candidate runs it)" })
+      .click();
+    await page
+      .getByRole("option", { name: "bracket-study-load (structural)" })
+      .click();
+    await page.getByRole("button", { name: "Save study" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-count",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // RUN — the campaign through the main-thread driver: every
+    // candidate re-drives the document through the real kernel worker
+    // (the viewport shows each evaluation), every generation notice
+    // lands through the committed-application ledger (law S6), and the
+    // front persists as a law-S7 family. Awaited on the status family,
+    // never a timeout.
+    await page.locator("#workbench-sim-study-run").click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-study-run-status"),
+        { timeout: 180_000 },
+      )
+      .toBe("completed");
+    // The evaluation count is DISTINCT genomes (the engine's cache
+    // excludes plateau collisions): the 18-slot budget spends 6 — the
+    // integer-lattice offspring collide with their parents at this
+    // seed, the fitness-landscape caveat demonstrated live. Determinism
+    // makes the number exact (the same seed ⇒ the same front, every
+    // run).
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-evaluations",
+      "6",
+    );
+    // The ledger's optimization-generation counter advanced through the
+    // committed applications (the attribute exists only after one).
+    const generation = Number(
+      await page
+        .locator(`#${SIM_ROOT}`)
+        .getAttribute("data-sim-applied-optimization-generation"),
+    );
+    expect(generation).toBeGreaterThanOrEqual(0);
+    // The Pareto view rendered: the scatter with its front circles and
+    // the store's campaign family.
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-pareto",
+      "ready",
+    );
+    await expect(
+      page.locator(
+        '[data-testid="workbench-sim-pareto-scatter"] circle[data-front="true"]',
+      ),
+    ).not.toHaveCount(0);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-campaign-families",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // REPLAY — one front candidate: its exact genome re-driven visibly,
+    // the identical objective vector back (law S2/S5 determinism).
+    const replayButton = page.locator('[id^="workbench-sim-replay-"]').first();
+    await replayButton.click();
+    await expect
+      .poll(
+        async () =>
+          page
+            .locator(`#${SIM_ROOT}`)
+            .getAttribute("data-sim-study-replay-status"),
+        { timeout: 120_000 },
+      )
+      .toBe("ok");
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-replay-matches",
+      "true",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // EXPORT — the Pareto front as deterministic CSV.
+    await page.locator("#workbench-sim-study-export-csv").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-export-csv",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+
+    // FAN — the co-optimization demo's own save path (Phase 70b): a
+    // FRESH fan document through the preset's LOAD path (the study motor
+    // ensured beside the demo's own BEFORE the study form maps — the
+    // ordering a pre-ensuring unit fixture can never see), the demo
+    // study scenario, then the study row through the Formedible form
+    // with the fan presets (the bore gene, the motor gene, the
+    // air-per-watt objective) — saved, no pre-ensure. The page reload
+    // gives the study form a fresh, untouched mount (a touched form
+    // keeps its values across model switches — TanStack's reseed gate),
+    // so the fan presets ARE the form's values, exactly as a user
+    // switching to the fan model on a fresh load sees them.
+    walk("/workbench-sim");
+    await page.goto("/workbench-sim");
+    await waitForSettledScene(page, SIM_ROOT);
+    await page.locator("#sim-demo-model-fan").check();
+    await waitForSettledScene(page, SIM_ROOT);
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-demo-model",
+      "fan",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
+    await page.locator("#workbench-sim-study-demo-scenario").click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-scenario-count",
+      "1",
+    );
+    await page
+      .getByRole("combobox", { name: "Scenario (every candidate runs it)" })
+      .click();
+    await page.getByRole("option", { name: "fan-study (flow)" }).click();
+    await page.getByRole("button", { name: "Save study" }).click();
+    await expect(page.locator(`#${SIM_ROOT}`)).toHaveAttribute(
+      "data-sim-study-count",
+      "1",
+    );
+    await expect(page.getByTestId("workbench-sim-error")).toHaveText("");
   });
 });
 

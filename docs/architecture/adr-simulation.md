@@ -1,0 +1,551 @@
+# ADR: Simulation — deterministic cores, providers, and the voxel interface
+
+Phase 61 groundwork. Status: accepted. Supersedes none; complements
+`adr-configurations.md` (additive document sections, identity migrations)
+and `adr-assembly-mates.md` (the joint records the dynamics layer consumes).
+The phased execution plan lives in `ROADMAP-SIM.md`.
+
+## Context
+
+The owner asked for simulation in slopcad, client-side first: aero profiles
+and wind tunnels, fans, stoves with combustion and heat transfer through
+real materials, and engines — the last implying mechanism dynamics over
+joints. WASM and WebGPU are on the table.
+
+Exploration (2026-09-25) established three load-bearing facts. First, no
+production-grade CFD runs in a browser today: the only full-solver precedent
+is a minimal OpenFOAM wasm proof-of-concept (GPL, tens of MB); the realistic
+client-side fluid path is lattice-Boltzmann on GPU compute, for which
+current WebGPU implementations exist as references. Second, the licensing
+terrain is a minefield: FluidX3D (non-commercial custom license, OpenCL),
+Palabos (AGPL), TetGen (AGPL), Triangle (non-commercial), and the GPL family
+(OpenFOAM, XFOIL, AVL, gmsh, CalculiX, Elmer) — a wasm build of any of them
+shipped in the bundle is distribution, and this repo is MIT. Third, the one
+clean dodge for the hardest infrastructure problem (3D tet meshing for
+FEM/CFD) is to not mesh at all: voxel/cut-cell methods consume a
+tessellation directly, and slopcad already has watertight tessellations from
+Manifold plus a mature worker protocol with cancellation.
+
+The repo also already owns the "engines need joints" concern: `JOINT_KINDS`
+with DOF accounting and an LM pose solver exist (`mates.ts`, `mate-solver.ts`),
+inertias derive from existing mass properties (`document-mass.ts`), and the
+kernel-contract pattern (`GeometryKernel` + a deterministic fake for tests)
+shows exactly how pluggable engines are hosted here.
+
+## Decision
+
+1. **Simulation intent is a document section, not a fork.** `SimScenario`
+   records ride an additive `simulations` section — the configurations
+   pattern: deltas over the same document, ids enforced at the add boundary
+   and re-enforced at native parse, removal refusing with a
+   `document/simulation-in-use` style code when referenced. Native format
+   bumps to v10 — the next free stamp; v7–v9 (expression payloads,
+   parameter lifecycle, `duplicate`) landed after this ADR was written —
+   as a content-additive identity migration.
+
+2. **Every solver domain = an own deterministic TS reference kernel + a
+   contract + pluggable providers.** The reference kernel is bitwise
+   deterministic, dependency-free, and runnable in plain vitest — it is the
+   oracle and the zero-dependency baseline (the `fake-kernel.ts` precedent
+   at solver scale). High-performance implementations are providers behind
+   the contract: WGSL compute for flow, MuJoCo wasm for dynamics. GPU is
+   mandatory per the owner's ruling, so the WGSL provider is committed
+   immediately after the CPU slice, not deferred.
+
+3. **The voxel is the geometry interface.** `Tessellation` → occupancy grid
+   (+ signed-distance field for future cut-cells). No tetrahedral meshing in
+   scope. Staircase boundary accuracy is stated in published accuracy bands;
+   cut-cell accuracy is a dedicated later phase, not a hidden approximation.
+   This decision exists as much for licensing (S8 of the roadmap) as for
+   engineering: it removes the browser-meshing dependency entirely.
+
+4. **Units: SI inside the sim boundary, canonical millimetres outside.**
+   Conversion happens only in scenario compile and result projection; every
+   projected quantity carries explicit units through the existing
+   dimensional-value types.
+
+5. **Interaction is a batch spine with a streaming preview.** Runs are
+   deterministic jobs producing versioned results; while running, field
+   updates stream to the viewport where each application is a committed,
+   ledger-counted render application (`data-sim-*`). The demand-render law
+   holds; there is no ambient frame loop.
+
+6. **Results are versioned records with first-class local use.** A
+   `simulation_run` table keyed to `document_version` holds binary payloads
+   server-side; a local (IndexedDB) backend makes client-only use a mode,
+   not a degradation; exports are deterministic `.vti` (VTK uniform grids —
+   ParaView-compatible), CSV histories, and images through the existing
+   snapshot pipeline. Field data never enters the document or its undo
+   history.
+
+7. **Dynamics is providerised.** A `DynamicsEngine` contract maps document
+   occurrences + joint records + mass-derived inertias to a step-able model.
+   The own TS reference kernel (Featherstone-style, loop closure through the
+   existing LM machinery) ships first; MuJoCo (Apache-2.0, official wasm)
+   follows as the performance/fidelity provider — the owner's ruling: if
+   external, use the best. Rapier remains eligible later through the same
+   contract.
+
+8. **Licensing: permissive-only defaults, GPL only as separated opt-ins.**
+   Own code MIT; externals Apache-2.0/BSD-3. The GPL watchlist (OpenFOAM,
+   XFOIL, AVL, gmsh, CalculiX, Elmer, Palabos, TetGen, Triangle, FluidX3D)
+   is documented in ROADMAP-SIM §9 and may only ever return as a
+   clearly-separated plugin, never as a default dependency.
+
+## Consequences
+
+- Phase 63's CPU kernel can be seeded by the owner's own `cfd-ts` (D2Q9 BGK,
+  bounce-back, momentum-exchange forces) — rewritten clean under MIT
+  informed by it; its flaws (four-edge equilibrium boundaries, broken
+  resize, commented-out worker path) become the rewrite spec.
+- e2e always exercises the CPU path; GPU correctness is a tolerance harness
+  against the oracle plus a manual device matrix. Bitwise determinism is
+  claimed for the CPU path only — stated, not hidden.
+- Boundary accuracy is voxel-limited until a cut-cell phase exists; guides
+  and result panels must present accuracy bands, not false precision.
+- The v10 native bump is required even though the migration is identity —
+  old readers would silently drop the new section.
+- Simulation failure modes join the structured-decline family (`sim/*`
+  codes): an unsupported scenario is a loud decline, never a fake result.
+- Phase 68 (combustion) stays deliberately provisional; reduced chemistry,
+  equilibrium, and the 0D premixed (Otto) engine cycle are in scope;
+  resolved reacting flow and spray (diesel-class) combustion are not —
+  declined loudly, never approximated with fitted burn curves.
+
+## Addendum (2026-10-07): phases 69–70 stay inside these decisions
+
+The roadmap extended (ROADMAP-SIM §5, phases 69–70; owner rulings
+§7.6–7.8). No decision here is reversed. Phase 69 (coarse voxel FEM) rides
+Decision 3's voxel interface: "no tetrahedral meshing" still holds — the
+elements are the occupancy grid's own hex cells, and MFEM remains the
+raised-path escape hatch, never a default. Phase 70 (parametric
+optimization, `SimStudy`) rides Decision 1's additive-section pattern and
+Decision 5's deterministic batch spine — a study is a record, a campaign
+is a versioned run family, and the GA loop is bitwise deterministic on the
+CPU path.
+
+## Implementation status (2026-10-08): the Phase 61 spine has landed
+
+Phase 61 is implemented: the `simulations` and `motors` document sections
+ride the native v10 identity migration (`@slopcad/cad-core`); the
+`@slopcad/sim-core` package carries the S4 compile/projection boundary,
+the S9 regime report, the starter fluid set (air/water/glycol), the
+scenario-snapshot hash, the `SimResult` model with its `SMR1` binary
+payload and the `.vti`/CSV exporters; the `sim.*` worker vocabulary over
+the kernel envelope — including the progress/field-chunk notification
+class, exercised end to end by the deterministic fake engine — is live
+with the workbench sim worker host (`apps/web/src/sim-workbench/`); the
+`SimResultStore` ships with its server backend (the `simulation_run`
+table and the tRPC `simulations` router) and its local first-class
+backend; and the workbench engine threads the `data-sim-*`
+committed-application counters (Decision 5's ledger discipline, law S6).
+Documented in `docs/guides/simulation.md` with a machine-verified
+runnable example (`packages/docs-examples/src/sim/spine.ts`). No solver
+exists yet: the first (2D LBM flow) is Phase 63's, the voxelizer and
+field overlays Phase 62's, and the `structural` kind still declines with
+`sim/scenario-kind-unsupported` until Phase 69.
+
+## Implementation status (2026-10-08): Phase 63 is implemented
+
+Phase 62 (the voxelizer, the signed-distance field, the field-overlay
+family, the `/workbench-sim` fixture) and Phase 63 are implemented.
+Phase 63 in full: the deterministic D2Q9 LBM reference kernel in
+`@slopcad/sim-flow` (BGK/TRT collision, push streaming with full-way
+bounce-back, Zou/He velocity and pressure boundaries, convective
+outflow, no-slip/slip walls and symmetry planes, momentum-exchange
+force integration with the exact per-step momentum audit); the run
+orchestration layer (fixed step budgets, force histories, post-hoc
+mean/fluctuation averaging per law S9, the regime wiring, the
+scenario-snapshot provenance); the factor-2 grid-convergence
+self-check; the real flow engine behind the `SimEngine` contract with
+the geometry-aware compile door; the `/workbench-sim` product surface
+(Formedible scenario authoring, the streamed run through the
+committed-application ledger, persistence through the local store,
+exports); the run comparison surface (two-run curve overlay + field
+diff, `apps/web/src/sim-workbench/sim-compare.ts` — risk S17's exact
+boundary); the known-cases gallery
+(`packages/docs-examples/src/sim/gallery.ts` — cylinder Strouhal vs
+Roshko's public-domain band, NACA 0012 lift slope vs the public-domain
+reference with blockage stated, and the shock tube DECLINED loudly on
+three machine-verified walls per the prior-art note); and the
+validation fixtures — Poiseuille vs the analytic parabola, the
+cylinder force audit, bitwise determinism, the half-domain symmetry
+fixture (`packages/sim-flow/src/symmetry.test.ts`), and the
+session-harness stages s24b/s24c/s24d. The WGSL GPU provider (Phase 64) is next; thermal stays the fake engine's until Phase 65;
+`structural` declined with `sim/scenario-kind-unsupported` until
+Phase 69.
+
+## Implementation status (2026-10-08): Phase 64 is implemented (provider + spike + fallback e2e)
+
+Phase 64a: the WGSL compute provider lives in `@slopcad/sim-flow` —
+the narrow `WgslDevice` seam with its honest feature detect
+(`requestWebGpuDevice`), the D2Q9 WGSL shader mirrored buffer-for-
+buffer onto the CPU layout, the provider stepper/engine behind the
+Phase 61 contract, and the routed default engine serving gpu-preferred
+flow scenarios on the provider with a GRACEFUL CPU-twin fallback.
+Phase 64b: the WebGPU-under-Playwright/Dawn spike ran the S5
+oracle-vs-GPU matrix in-browser against the production build under
+Dawn's SwiftShader adapter (launch door: `--enable-unsafe-webgpu`,
+probed and recorded) — every case, every repeat inside the recorded
+tolerances with three-plus orders of headroom, bitwise-stable across
+repeats and full harness runs — and the decision was **ADOPT into e2e
+as a dedicated door** (`pnpm test:gpu-spike`), law S5 unchanged (the
+session/render harnesses stay CPU-launched; the CPU oracle stays the
+test truth). The spike found and fixed two real 64a defects (the
+missing required pipeline `layout`; the symmetric-case zero-lift
+normalizer refusal) — evidence the gate works. The WGSL step-batch
+perf budget is recorded as a SOFTWARE-device ceiling (median 1228.3 ms
+vs the CPU's 268 ms on the identical protocol); the hardware-class
+budget is honestly not-recordable-here (no hardware adapter is
+enumerable in headless Chromium on this machine). The fallback path is
+e2e-pinned (session stage s24e: a gpu-preferred scenario completes on
+the CPU twin when WebGPU is absent), and result summaries now carry
+`servedBackend` — the machine-readable record of which kernel
+executed a run. Evidence and rationale:
+`docs/architecture/wgsl-prespike-findings.md` (the
+`occt-prespike-findings` precedent). Thermal stays the fake engine's
+until Phase 65.
+
+## Implementation status (2026-10-10): Phase 65 is implemented (conduction, conjugate coupling, the stove)
+
+Phase 65a: the FVM conduction domain lives in `@slopcad/sim-thermal` —
+the cell-centred energy balance over the voxel cells with per-cell
+materials from the extended `DocumentMaterialRecord` (re-validated at
+the package's own material door), the deterministic implicit steady
+solve (Jacobi-preconditioned CG, Picard-lagged full radiation, loud
+iteration-cap declines) and the explicit/implicit transient march, the
+complete boundary set (Dirichlet, Neumann, convection-to-ambient,
+surface-to-ambient Stefan–Boltzmann in both the linearized and the
+exact quartic form, and the grey-diffuse uniform-radiosity enclosure
+exchange), the per-connected-component steady-anchor analysis, the
+energy-conservation audit, and the S9 wiring (Prandtl always, Rayleigh
+under the 61a ΔT magnitude rule). Phase 65b: the conjugate coupling
+lives in `@slopcad/sim-flow` — the passive-scalar fluid thermal march
+(decided over double-distribution on measured fixtures: conservative
+by construction, interface-continuous at the stove's 1700:1 contrast),
+the Boussinesq buoyancy force through Guo collision forcing, and the
+lockstep coupled march (flow → fluid thermal → solid per coupling
+interval) whose interface exchange is conservative BY CONSTRUCTION and
+whose energy ledger is measured, never assumed. Phase 65c: the product
+surface — the real thermal engines behind the Phase 61 `SimEngine`
+contract (`@slopcad/sim-thermal`'s conduction engine for the sealed
+stance, `@slopcad/sim-flow`'s CHT engine for the coupled stance — the
+split exactly where the solvers live, composed by the routed default
+engine which retired the interim fake-engine thermal route); the
+geometry-aware compile's thermal branch (per-body tessellations → the
+union occupancy slice + the per-cell material map, with the serialized
+material records riding the `sim.compile` wire); the scenario record's
+kind-locked thermal stance (radiation mode, steady/transient budget,
+source, ambient equilibrium boundary, coupling flag); the stove demo on
+`/workbench-sim` (the Formedible thermal form beside the flow form, the
+temperature overlay through the Phase 62 family with the cool–warm
+colormap, persistence through the same SimResultStore panel family);
+the render baselines for the temperature overlay under SwiftShader and
+the session stage s24f (both stove modes driven from the UI, awaited on
+`data-sim-*` counters); and the runnable docs example
+(`packages/docs-examples/src/sim/thermal.ts`). Honest scope stated in
+the guide: the enclosure exchange is the coarse uniform-radiosity form,
+the sealed mode's ambient convection is the authored constant h, and
+the S9 numbers are advisory regime honesty, never CFD-grade
+certificates. `structural` still declines with
+`sim/scenario-kind-unsupported` until Phase 69.
+
+## The cut-cell decision (2026-10-11, Phase 66c's named decision point)
+
+Phase 66's roadmap names the cut-cell question explicitly: "the
+cut-cell decision point — raise or decline explicitly against the
+distance field from Phase 62." This is that decision, recorded.
+
+**What cut-cells would buy.** Second-order boundary accuracy where the
+staircase is first-order: the boundary condition would apply at the
+true wall position (interpolated by the Phase 62 signed-distance
+field) instead of at the voxel face, removing the O(dx) geometry error
+from wall shear, pressure loss through gaps, and the rotor torque
+integration. For the fan line specifically it would attack exactly the
+terms the accuracy bands flag — tip-clearance losses and blade
+momentum exchange.
+
+**What they would cost.** Population redistribution at every cut link
+(the bounce-back reflection becomes a sub-grid interpolation), a mass
+and momentum bookkeeping that is no longer the exact
+impulse-counting audit the current kernel pins (the ledger discipline
+of 63a/66a would need a tolerance, not an identity), moving-wall
+cut-cells on the rotating doors (the MRF wall-velocity correction is
+already the formulation's one first-order piece — cut-cells multiply
+that surface), and a determinism surface strictly larger than the
+current one. The Phase 62 distance field itself is READY (analytic
+fixtures, exact signs, the grid ↔ block door round-trips) — the
+unreadiness is not the data, it is the solvers' audit discipline and
+the rotating-boundary interaction.
+
+**Law S3's stance.** "Staircase boundaries are stated honestly in
+accuracy bands; cut-cell accuracy is a dedicated later phase if the
+owner raises it." The bands are now published (the guide's Phase 66
+resolution-guidance section), the grid-convergence precedent exists in
+2D, and the fan Re guidance line states the demo regime — the honesty
+machinery S3 demands is in place without cut-cells.
+
+**Verdict: DECLINE, for now.** At the demo's resolutions the dominant
+error sources are the low-Re regime, the four-rung ladder, and the
+first-order MRF wall treatment — a second-order boundary would refine
+the third-largest term. The raise path stays open and cheap to walk:
+the distance field is ready, the refusal is one branch
+(`sim/boundary-treatment-unsupported` at the compile door, the
+`structural`-carve discipline), and a dedicated phase lands it if the
+owner rules it in. Until then the reserved `cut-cell` treatment value
+declines loudly — never a silent staircase under a cut-cell label.
+
+## Implementation status (2026-10-11): Phase 66 is implemented (3D flow, rotating machinery, the fan demo)
+
+Phase 66a: the D3Q19 CPU oracle and its WGSL provider
+(`@slopcad/sim-flow`'s `d3q19/state-3d/streaming-3d/relaxation-3d/
+boundaries-3d/forces-3d/stepper-3d` and the 3D shader/stepper twins)
+— BGK/TRT, full-way bounce-back on the voxelizer's native 3D output,
+three-component momentum exchange, the exact momentum audit, and the
+S5 3D tolerance harness. Phase 66b: rotating machinery — the rotation
+vocabulary with its routing MARKER (every static door refuses a
+marked config by value), MRF as the honest steady default (the
+one-Coriolis lab-variable frozen-rotor form, exact interface
+exchange, pinned fixed points), resolved rotation as the immersed
+moving-boundary showcase, axial torque integration, the
+operating-point solve (hand-solvable fixtures pin the intersection,
+the stability criterion, the BPF arithmetic, and the
+multiple-intersection decline), and the fan analysis (the ω-ladder
+load curve with the Phase 67 friction seam, the performance
+extraction, the S9 fan Re line). Phase 66c (this slice): the ENGINE
+AND PRODUCT ROUTING — the flow scenario's additive, kind-locked
+`flow3d` stance at the cad-core record boundary and the sim-core
+compile door (the full-3D occupancy grid, the SI rotation products,
+the cut-cell decline above, the loud no-3D-ladder decline); the 3D
+reference engine behind the Phase 61 contract (`engine-3d.ts`: the
+static door, the MRF fixed-rpm and motor-driven operating-point doors
+with streamed rungs, the resolved-rotation showcase with its
+mean/fluctuation split, per-step cooperative-cancellation windows and
+S6 preview rounds, loud cross-declines with the 2D engine, and the
+routed default engine's 3D branch); the fan-in-a-tube demo (the
+cad-jsx body, the demo motor record in the document's `motors`
+section, the `/workbench-sim` demo-model selector, the Formedible fan
+form, and the published fan performance chart as deterministic data —
+the curve pair plus the superimposed found point, the 63d
+chart-as-data family); the guide's Phase 66 section (resolution
+guidance, accuracy bands, the fan Re line, MRF-vs-resolved guidance,
+the speed-resolution coupling); the runnable docs example
+(`packages/docs-examples/src/sim/fan.ts`); and the sanctioned perf
+budget (`kernel.lbm3d-fan.mrfGrid.stepBatchMs` — the CPU oracle at
+the reduced demo resolution, honestly labeled a reduced-resolution
+ceiling). `structural` still declines until Phase 69.
+
+## Implementation status (2026-10-12): Phase 67 is implemented (mechanism dynamics, providerised)
+
+Phase 67a (landed first): the `DynamicsEngine` contract
+(`@slopcad/sim-dynamics`' pure-type provider seam), the document→SI
+wire door (occurrences, serialized joint records with the additive
+friction pair, mass properties, motor records — mm/grams/datasheet
+units in, SI out), the world-aligned spatial algebra, and the own TS
+reference kernel — Featherstone-style articulated-body dynamics over
+`JOINT_KINDS` with gravity as a first-class body force, friction as
+force-limited constraints with emergent slip inside `step`,
+per-joint dissipated power/work as result data, the 61 motor
+abstraction, and loop closure through the restated LM machinery; the
+energy/momentum conservation audit, the analytic fixtures (pendulum,
+free fall, spin-down, drag, four-bar loop), and the determinism pin.
+Phase 67b (landed second): the MuJoCo provider — the MJCF document
+builder (deterministic XML, the friction fields as native
+`damping`/`frictionloss` attributes), the state round-trip, the wasm
+loading seam, and the cross-tolerance matrix against the reference
+oracle (friction-bearing fixtures first-class; tabulated motors
+covered on both paths). Phase 67c (this slice): the PRODUCT SURFACE —
+the additive, kind-locked `dynamics` scenario kind at the cad-core
+record boundary (the march budget on an integer step lattice, the
+motor selection riding exactly one named joint, the quasi-static load
+couplings as time series, the provider selection with the reference
+default and the MuJoCo opt-in), the sim-core compile branch (the
+mechanism wire crossing beside the motor record, the empty S9 regime
+report — no inapplicable dimensionless claims — and the loud declines
+for missing wires and off-lattice budgets), the dynamics engine
+behind the Phase 61 contract (the stepped march with per-sample
+progress and the one committed dissipation preview round, the
+per-joint dissipated power/work summaries as projected quantities,
+the energy ledger and joint histories), the quasi-static load
+coupling module (flow-force histories and named combustion torque
+estimates, piecewise-linear with constant ends, into the
+gravity-sharing loads term and joint efforts), the engine-kinematics
+demo (the cad-jsx slider-crank document — occurrences, the four joint
+records with the wrist pin closing the loop friction-free, the demo
+motor — animated through the assembly-motion surface from the run's
+own histories, deterministic under scrub), the `/workbench-sim`
+dynamics mode with its Formedible form and the joint-histories CSV
+export, the Phase 66 fan-transient cross-reference (the 66 demo motor
+and its measured aero load settling on the 66 operating point within
+the measured band), and the session stage s24h. `structural` still
+declines until Phase 69; combustion torque stays an INPUT series
+until Phase 68.
+
+## Implementation status (2026-10-13): Phase 68 is implemented (combustion, provisional)
+
+Phase 68a (landed first): `packages/sim-combustion` — born PROMOTED
+(the §7.13 ruling) — carrying the curated NASA-7 species database,
+the polynomial evaluator in its published dimensionless forms, the
+premixed reactant streams, the element-potential Gibbs-minimization
+equilibrium solver (TP and HP), and the adiabatic-flame/fuel–air-table
+surface with its deterministic CSV projection. Phase 68b (landed
+second): the one-step Arrhenius kinetics with the shared
+induction-time definition, the Metghalchi–Keck flame-speed
+correlation, the conservative-by-construction 0D constant-volume
+reactor (an RK4-stage extent clamp fixed the depletion-asymptote NaN
+at rich burnout — the march statement unchanged, tests green), the
+frozen/equilibrium property machinery, the slider-crank chamber
+geometry pinned bitwise against the Phase 67 kernel, the two-zone 0D
+Otto closed cycle (Wiebe release grounded in the flame speed, Woschni
+wall heat, Chen–Flynn brake family, the closing audit, the
+Livengood–Wu knock integral), and the CR/φ/spark sweeps. Phase 68c
+(this slice): the PRODUCT SURFACE — the additive, kind-locked
+`combustion` scenario kind at the cad-core record boundary with its
+two mode-locked stances (stove/engine, the engine subset of fuels
+carrying flame-speed fits, the engine mode carrying no domain-face
+conditions), the sim-core compile branch (the stove mode reusing the
+65c per-body material-map voxelization through a shared walker; the
+engine mode converting the chamber mm → m at the one S4 site with NO
+voxelization), the combustion engine behind the Phase 61 contract
+(the 0D cycle adapter with the P-vs-crank histories, the
+indicated/brake/loss families side by side, the pressure-trace
+preview round as a history-grid block, and the sweeps; the stove
+adapter coupling the reactor's progress-variable wall heat into the
+65 implicit march over sim-thermal's exported FVM pieces — the CHT
+engine's own precedent, one-way and frozen-wall, stated), the
+`/workbench-sim` FIRE and ENGINE demos (the Formedible forms, the
+published engine charts as deterministic SVG-as-data — the P–θ trace,
+the two-family torque curve, the knock-boundary marker), the
+combustion CSV exports (crank-first cycle trace, axis-first sweep,
+time-first fire march), the session stage s24i, the render baseline
+(`e2e-render/sim-combustion.spec.ts`), the guide's Phase 68 section
+with its honest-scope list, and the runnable docs example. Spray is
+declined everywhere, never approximated — with
+`sim/combustion-mode-unsupported` at the library doors (the reactor,
+the cycle, the sweeps), and through the authoring doors' own mode
+vocabularies (`simulation/combustion-spec-invalid` at the record
+boundary's stove/engine lock, `sim/scenario-invalid` at the compile
+door's stance parse); the phase
+stays PROVISIONAL (closed-cycle subset, one-way fire coupling,
+comparative knock — the gaps the guide states). `structural` still
+declines until Phase 69.
+
+## Implementation status (2026-10-13): Phase 69 is implemented (coarse voxel FEM)
+
+Phase 69a (landed first): `packages/sim-structural` — the pure-TS
+linear-elastic reference kernel (law S2): the uniform 8-node-hex mesh
+over the Phase 62 occupancy grid (one element per occupied voxel
+node), the 24-dof element stiffness with exact 2×2×2 Gauss
+integration, the consistent load family (faces, rollers, points,
+pressure tractions, the body-force set: self-weight, centrifugal
+ω²·r⊥, thermal-expansion initial strain), the owned
+Jacobi-preconditioned CG with the deterministic residual discipline
+and loud iteration caps, the per-element strain/stress recovery with
+the von Mises field, and the FoS family against yield — validated
+against beam theory, the patch test, the thin-ring closed form, the
+constrained-bar thermal case, and a published convergence table;
+beside it the additive structural material fields on
+`DocumentMaterialRecord` (`youngsModulusPa`, `poissonRatio`,
+`yieldStrengthPa`, `thermalExpansionPerK` — the Phase 61 thermal
+precedent). Phase 69b (this slice): the PRODUCT SURFACE — the
+`structural` kind FLIPPED LIVE (the 61a reserved decline retired at
+the compile boundary; the empty regime report is law S9's honest
+structural claim, the dynamics precedent), the additive structural
+condition vocabulary at the record boundary (axis-fix, point-fix,
+point-load beside the carved fixed-support/force-load/pressure-load,
+kind-locked, the one-per-face rule covering the face-bearing set
+alone), the kind-locked `structural` solve stance (the self-weight
+switch, the centrifugal stance with the fixed-iff rpm rule and the
+`fan-run` mode sourcing ω from a referenced 66 run's found operating
+point, the thermal chain with its stress-free reference), the
+geometry-aware compile branch (the FULL-3D per-body voxelization
+unioned with its per-node material map; the run-to-run chain inputs —
+a 65 run's temperature block sampled onto every solid node as ΔT
+(nearest-node, edge-clamped, stated) and a fan run's operating rpm —
+crossing the `sim.compile` wire through their own codec, consumed
+only when the stance asks, never silently), the structural engine
+behind the Phase 61 contract (compile/run/finalize, both overlay
+blocks streamed with displacement applied LAST — the deterministic
+live-overlay order, the summary scalar family: max deflection, von
+Mises max, factor-of-safety, the solver discipline's own numbers),
+the `/workbench-sim` BRACKET demo (the cad-jsx L-bracket with
+thickness/wallHeight as real parameters — the Phase 70 substrate),
+the Formedible structural form with the honest axis/face/point
+selectors (the stated UX decision: no 3D picking against the sim
+grid — the overlay family never enters the pick path and no pickable
+plane/point precedent exists), the run-to-run chain selects over the
+persisted run list, the summary-scalar CSV export (a statics run has
+no time axis — its scalars ARE its table), the session stage s24j
+(dry, self-weight, and hot-bracket variants walked attribute-driven),
+the render baseline (`e2e-render/sim-structural.spec.ts`), the
+guide's Phase 69 section with its honest-scope list (comparative
+positioning, the measured coarse-recovery band — 0.3× stress /
+0.6× deflection against the cantilever twin at the demo resolution —
+staircase bands, MFEM declined-by-default as the raised path), and
+the runnable docs example. The `fan-run` centrifugal mode and the
+thermal chain are run-time selections by design: runs are store data
+keyed to document versions, never document records — the stance
+records the intent, the launch resolves the source.
+
+## Implementation status (2026-10-13): Phase 70 is implemented — the finale; the roadmap's phases are all landed
+
+Phase 70a (landed first): `packages/sim-optimization` — the NSGA-II
+engine over the simulation spine (law S2: deterministic given the
+study's seed and the deterministic kernels; single-objective the
+degenerate case), the evaluation driver on the batch spine
+(parametric re-drive through the document's own parameter machinery →
+constraint expressions → geometry-aware compile → routed engine solve
+→ objective extraction from the run's own summary scalars; every
+refusal a structured `sim/*` decline the engine counts as
+dominated/penalized, never a crash), the campaign persistence and
+export family (`persistSimCampaign` with the additive `campaign` tag
+on `SimResultSummary` — study + deterministic family + generation +
+the exact replay genome, law S7's run families; the quoting-free
+deterministic Pareto CSV), the `sim.optimize` worker operation behind
+the host-injected executor seam, and the cad-core study vocabulary
+(`SimStudy` records, the cross-checks, the wire codec) with the
+`data-sim-applied-optimization-generation` ledger counter (law S6).
+
+Phase 70b (this slice): the STUDY PRODUCT SURFACE. The document lift:
+the additive `studies` section (add/update/remove with the study
+module's cross-checks and the parameter/motor/scenario in-use
+refusals — the configurations precedent), the `study.*` command
+vocabulary through the log codec, native v10 → v11 as a
+content-additive identity migration (byte-identical round-trips, the
+migration fixture), and the agent-chat command decoder's study
+summaries. The engine-side additive scalars the named objectives
+needed: the structural run's own `mass` (the voxelized total — the
+staircase-honest mass of the same grid the stresses live on) and the
+3D fan engine's `airflow-per-electrical-watt` at the found operating
+point (the §7.9 motor-in-the-loop system objective; a new
+`volumetricFlowPerPower` dimension in the S4 projection table). The
+geometry provider seam widened to sync-or-async — a browser host
+re-drives its kernel worker per candidate and the candidate's
+evaluation awaits the settle; determinism is the VALUES, never the
+scheduling (the sync analytic providers the docs walks use are
+unchanged). The `/workbench-sim` study panel: the Formedible study
+form (parameter genes with bounds from the document's literal table,
+the discrete motor gene, objectives with directions, the constraint
+expression, algorithm and budget), the main-thread campaign runner
+(the workbench's routed engines composed at the host; every
+candidate's re-driven document dispatches through the real kernel
+worker — the re-drive VISIBLE in the viewport — and every generation
+notice lands through the committed-application ledger), the Pareto
+view (the Phase 63 comparison surface generalized to N runs: the
+front scatter with dominated survivors, the best-of-generation
+progression, per-candidate replay with the identical-vector pin), the
+campaign family list from the store, and the Pareto CSV export. The
+two named demos — "the lightest bracket that survives the load"
+(thickness/wallHeight integer genome, mass vs FoS, the slenderness
+constraint declining the thin-tall corner; the dominated-front
+structure pinned) and "the most efficient fan" (the bore gene beside
+the discrete motor gene, air-per-electrical-watt at each candidate's
+found operating point) — runnable from the UI at e2e-sized budgets
+and pinned as the runnable docs example. The session stage s24k
+(attribute-driven: author, run, Pareto rendered, one replay, the CSV
+door). The guide's studies section states the fitness-landscape
+caveat (the staircase's plateaus and jumps) with the two committed
+mitigations — resolution ladders per study and multi-seed campaigns,
+the family key encoding the seed — and both demos as walkthroughs.
+Distance-field-smoothed objectives remain deferred to a cut-cell
+phase (§6 stands).

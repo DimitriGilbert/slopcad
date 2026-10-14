@@ -147,6 +147,9 @@ describe("createDocument", () => {
       mate: 0,
       joint: 0,
       configuration: 0,
+      simulation: 0,
+      motor: 0,
+      study: 0,
     });
     expect(Object.isFrozen(document)).toBe(true);
     expect(Object.isFrozen(document.bodies)).toBe(true);
@@ -1265,6 +1268,9 @@ describe("parseCadDocument rejects malformed input", () => {
       mate: 0,
       joint: 0,
       configuration: 0,
+      simulation: 0,
+      motor: 0,
+      study: 0,
     });
   });
 });

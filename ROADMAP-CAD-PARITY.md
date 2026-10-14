@@ -1144,6 +1144,9 @@ as a later feature batch over the sweep/loft/draft machinery if the owner
 wants it; it is absent above only because the reference set treats it as a
 workbench, not a core axis). Each is a product decision, not a geometry
 gap — raising any of them re-opens planning, not this document's phases.
+FEM/simulation has since been raised by the owner: its plan (flow, thermal,
+combustion, mechanism dynamics — Phases 61+) lives in `ROADMAP-SIM.md` and
+stays out of this document's phases.
 
 ---
 

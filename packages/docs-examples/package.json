@@ -8,6 +8,21 @@
     ".": {
       "default": "./src/index.ts"
     },
+    "./react/store": {
+      "default": "./src/react/store.tsx"
+    },
+    "./cadjsx/sim-demo-body": {
+      "default": "./src/cadjsx/sim-demo-body.tsx"
+    },
+    "./cadjsx/fan-in-tube": {
+      "default": "./src/cadjsx/fan-in-tube.tsx"
+    },
+    "./cadjsx/slider-crank": {
+      "default": "./src/cadjsx/slider-crank.tsx"
+    },
+    "./cadjsx/bracket": {
+      "default": "./src/cadjsx/bracket.tsx"
+    },
     "./*": {
       "default": [
         "./src/*.ts",
@@ -26,13 +41,19 @@
     "@slopcad/cad-components": "workspace:*",
     "@slopcad/cad-core": "workspace:*",
     "@slopcad/cad-io": "workspace:*",
-    "@slopcad/cad-jsx": "workspace:*",
     "@slopcad/cad-jscad": "workspace:*",
+    "@slopcad/cad-jsx": "workspace:*",
     "@slopcad/cad-kernel": "workspace:*",
     "@slopcad/cad-kernel-manifold": "workspace:*",
     "@slopcad/cad-kernel-occt": "workspace:*",
     "@slopcad/cad-react": "workspace:*",
-    "@slopcad/cad-sketch": "workspace:*"
+    "@slopcad/cad-sketch": "workspace:*",
+    "@slopcad/sim-combustion": "workspace:*",
+    "@slopcad/sim-core": "workspace:*",
+    "@slopcad/sim-flow": "workspace:*",
+    "@slopcad/sim-optimization": "workspace:*",
+    "@slopcad/sim-thermal": "workspace:*",
+    "@slopcad/sim-structural": "workspace:*"
   },
   "peerDependencies": {
     "react": "catalog:"
