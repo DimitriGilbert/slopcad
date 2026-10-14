@@ -26,14 +26,20 @@ import {
   createDocumentId,
   createFeatureId,
   createParameterId,
+  createReferenceId,
   createSketchDocumentId,
   dimensionless,
   length,
+  mintTopologyReference,
+  referenceProvenance,
+  serializeTopologyReference,
   type AnyDimensionalValue,
   type BodyId,
   type CadDocument,
   type FeatureInputRef,
   type FeatureRecord,
+  type TopologyEntityReference,
+  type TopologySnapshot,
 } from "@slopcad/cad-core";
 import {
   createLineEntity,
@@ -58,7 +64,6 @@ import {
   type ChainSceneRequest,
 } from "../worker-fixture/chain-scene";
 import {
-  chainFilletInputOf,
   documentChainSceneRequest,
   filletBaseFeatureOf,
   CHAIN_FILLET_DEFAULT_RADIUS_MM,
@@ -71,6 +76,7 @@ import {
   HOLE_DEFAULT_DEPTH_MM,
   HOLE_DEFAULT_DIAMETER_MM,
 } from "./hole";
+import { chainFilletInputOf } from "./topology-cut";
 
 const DOC = createDocumentId("doc_chain_wiring");
 const SKETCH = createSketchDocumentId("skd_profile");
@@ -238,6 +244,95 @@ function featureOf(document: CadDocument, id: typeof FILLET): FeatureRecord {
   const feature = document.features.find((candidate) => candidate.id === id);
   if (feature === undefined) throw new Error(`Feature ${id} missing`);
   return feature;
+}
+
+/** A one-edge persistent snapshot of the holed body (the pure-reader case). */
+function fixtureHoleSnapshot(): TopologySnapshot {
+  return {
+    kernelId: "fixture-kernel",
+    persistentTopology: true,
+    identitySchemas: ["fixture-name/1"],
+    bodyId: HOLE_BODY,
+    regeneration: 0,
+    entities: [
+      {
+        kind: "edge",
+        ordinal: 0,
+        identity: {
+          kernelId: "fixture-kernel",
+          schema: "fixture-name/1",
+          data: { name: "corner" },
+        },
+        geometry: {
+          lengthMm: 10,
+          centroidAbsoluteMm: [30, 25, 5],
+          centroidRelativeMm: [10, 7.5, 0],
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * The chain pick's mint: the edge at `ordinal` of the target snapshot,
+ * with the holed body's provenance (what the page's fillet action does).
+ */
+function mintedHoleEdge(
+  snapshot: TopologySnapshot,
+  ordinal = 0,
+): TopologyEntityReference {
+  const provenance = referenceProvenance(buildDocument(null), HOLE_BODY);
+  if (!provenance.ok) throw new Error(provenance.error.message);
+  const minted = mintTopologyReference(snapshot, ordinal, provenance.value, {
+    id: createReferenceId("ref_fillet_edge"),
+    kind: "edge",
+  });
+  if (!minted.ok) throw new Error(minted.error.message);
+  return minted.value;
+}
+
+/**
+ * Commits the page's reference-form fillet transaction onto `document`:
+ * the radius parameter, the reference record, the output body, and the
+ * fillet feature in the bridge's canonical layout.
+ */
+function withReferenceFillet(
+  document: CadDocument,
+  reference: TopologyEntityReference,
+  radiusMm: number,
+): CadDocument {
+  let next = document;
+  for (const command of [
+    {
+      type: "parameter.create",
+      id: pRadius,
+      name: "filletRadius",
+      value: length(radiusMm),
+    },
+    {
+      type: "reference.create",
+      id: reference.id,
+      name: "filletEdge",
+      reference: { ...serializeTopologyReference(reference) },
+    },
+    { type: "body.create", id: FILLET_BODY, name: "rounded" },
+    {
+      type: "feature.create",
+      id: FILLET,
+      kind: "fillet",
+      inputs: [
+        { kind: "feature", id: HOLE },
+        { kind: "reference", id: reference.id },
+        { kind: "parameter", id: pRadius },
+      ],
+      outputs: [FILLET_BODY],
+    },
+  ] as const) {
+    const applied = applyCommand(next, command);
+    if (!applied.ok) throw new Error(applied.error.message);
+    next = applied.value;
+  }
+  return next;
 }
 
 /** Adds one parameter, failing the test on refusal. */
@@ -491,8 +586,23 @@ describe("documentChainSceneRequest", () => {
     expect(derived?.request.fillets).toEqual([
       {
         featureId: FILLET,
-        edgeOrdinal: 2,
+        selection: { kind: "ordinals", ordinals: [2] },
         radiusMm: CHAIN_FILLET_DEFAULT_RADIUS_MM,
+      },
+    ]);
+  });
+
+  it("reads the pick's reference-form fillet (Phase N3) into a reference selection", () => {
+    const reference = mintedHoleEdge(fixtureHoleSnapshot());
+    const document = withReferenceFillet(buildDocument(null), reference, 3);
+    const derived = documentChainSceneRequest(document);
+    expect(derived).not.toBeNull();
+    expect(derived?.bodyId).toBe(FILLET_BODY);
+    expect(derived?.request.fillets).toEqual([
+      {
+        featureId: FILLET,
+        selection: { kind: "references", references: [reference] },
+        radiusMm: 3,
       },
     ]);
   });
@@ -869,7 +979,11 @@ describe("computeChainScene against the real OpenCascade kernel", () => {
     const picked: ChainSceneRequest = {
       ...preFilletRequest,
       fillets: [
-        { featureId: FILLET, edgeOrdinal: cornerOrdinalOf(pre), radiusMm: 3 },
+        {
+          featureId: FILLET,
+          selection: { kind: "ordinals", ordinals: [cornerOrdinalOf(pre)] },
+          radiusMm: 3,
+        },
       ],
     };
     const scene = await runChain(picked);
@@ -881,12 +995,50 @@ describe("computeChainScene against the real OpenCascade kernel", () => {
     expect(scene.filletRadii).toEqual([3]);
   }, 180_000);
 
+  it("a name-based reference picked in one dispatch fillets the next — and survives the depth cascade (Phase N3)", async () => {
+    // The pick path: mint from the first dispatch's target snapshot (a
+    // fresh OCCT worker each run — nothing shared but the reference).
+    const pre = await runChain(preFilletRequest);
+    const reference = mintedHoleEdge(pre.snapshot, cornerOrdinalOf(pre));
+    expect(reference.identity.schema).toBe("occt-name/1");
+    const fillets = [
+      {
+        featureId: FILLET,
+        selection: { kind: "references", references: [reference] },
+        radiusMm: 3,
+      },
+    ] as const;
+    const scene = await runChain({ ...preFilletRequest, fillets });
+    const analytic = cornerFilletVolume(3);
+    const filleted = scene.filleted?.volume ?? 0;
+    expect(Math.abs(filleted - analytic) / analytic).toBeLessThan(EXACT_BAND);
+    expect(scene.filletEdges).toEqual([cornerOrdinalOf(pre)]);
+
+    // The upstream depth edit: the corner edge grows to 12 mm, its name
+    // does not change — the same reference still drives the fillet.
+    const deeper = await runChain({
+      ...preFilletRequest,
+      base: { ...preFilletRequest.base, distanceMm: 12 },
+      fillets,
+    });
+    const holed = deeper.holed?.volume ?? 0;
+    const deeperAnalytic = holed - 3 * 3 * (1 - Math.PI / 4) * 12;
+    expect(
+      Math.abs((deeper.filleted?.volume ?? 0) - deeperAnalytic) /
+        deeperAnalytic,
+    ).toBeLessThan(EXACT_BAND);
+  }, 240_000);
+
   it("attributes an oversized radius to the fillet feature with the kernel code", async () => {
     const pre = await runChain(preFilletRequest);
     const oversized: ChainSceneRequest = {
       ...preFilletRequest,
       fillets: [
-        { featureId: FILLET, edgeOrdinal: cornerOrdinalOf(pre), radiusMm: 25 },
+        {
+          featureId: FILLET,
+          selection: { kind: "ordinals", ordinals: [cornerOrdinalOf(pre)] },
+          radiusMm: 25,
+        },
       ],
     };
     await expect(runChain(oversized)).rejects.toMatchObject({

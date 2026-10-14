@@ -196,14 +196,16 @@ interface OcctWorkerSession {
 }
 
 export function CompleteWorkbenchPage({
-  backend,
+  backend = "occt",
   rootId = "workbench-complete-root",
 }: {
   /**
    * The worker backend the workbench boots (see
-   * {@link CompleteCadWorkbenchProps.backend}); the default `"manifold"` is
-   * the boot state the established baselines pin, and `"occt"` serves the
-   * sweep-capable route (Phase 38).
+   * {@link CompleteCadWorkbenchProps.backend}). The default `"occt"` is the
+   * workbench's backend: OpenCascade implements the core CAD features
+   * (sweep, loft, fillet, chamfer, shell, local face ops) that Manifold
+   * honestly declines. `"manifold"` stays available to the fixtures that
+   * pin it explicitly, so their established baselines do not move.
    */
   readonly backend?: FixtureSessionBackendId;
   /** The root element id (the machine surface's anchor; per route). */

@@ -29,22 +29,31 @@
 import { describe, expect, it } from "vitest";
 import {
   addBody,
+  addDocumentDatum,
   addDocumentParameter,
+  addDocumentReference,
   addDocumentSketch,
   addFeature,
   angle,
   createBodyId,
+  createDatumId,
   createDocument,
   createDocumentId,
   createFeatureId,
   createParameterId,
+  createReferenceId,
   createSketchDocumentId,
+  DATUM_FORMAT_VERSION,
   dimensionless,
   length,
+  mintTopologyReference,
+  referenceProvenance,
+  serializeTopologyReference,
   updateBody,
   type AnyDimensionalValue,
   type CadDocument,
   type FeatureInputRef,
+  type TopologySnapshot,
 } from "@slopcad/cad-core";
 import {
   createLineEntity,
@@ -54,6 +63,10 @@ import {
   serializeSketch,
   xyWorkplane,
 } from "@slopcad/cad-sketch";
+import type { FaceOpSceneRequest } from "./face-op";
+import type { PatternFaceSceneRequest } from "./pattern";
+import type { PrimitiveShape } from "./primitive";
+import type { TopologyCutSceneRequest } from "./topology-cut";
 
 import { documentSceneBodies, renderableBodyIds } from "./document-scene";
 import { REVOLVE_AXIS_X_RAD } from "./revolve";
@@ -1151,10 +1164,10 @@ describe("the computed-operand admissions (the cup fix)", () => {
     ]);
   });
 
-  it("a boolean over a primitive declines — the seam never advertises an operand with no scene", () => {
-    // `box` produces a real solid but NO scene entry: the operand seam
-    // declines it, so the union skips honestly instead of promising a
-    // computed solid the document pass cannot supply.
+  it("a boolean over a primitive admits — the primitive rides consumed-only", () => {
+    // `box` renders through its own every-feature primitive scene, so the
+    // operand seam admits it as a computed operand: the union composes
+    // from the box's computed solid, which rides compute-only.
     let document = withStages(bootPlateDocument(), { kind: "extrude" });
     for (const [id, name, value] of [
       [createParameterId("param_box_w"), "boxW", length(10)],
@@ -1195,7 +1208,8 @@ describe("the computed-operand admissions (the cup fix)", () => {
     ).document;
     expect(bodyIdsOf(document)).toEqual([
       { bodyId: "body_plate", kind: "plate" },
-      { bodyId: "body_stage1", kind: "extrude" },
+      { bodyId: "body_box", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_union", kind: "boolean" },
     ]);
   });
 
@@ -1255,6 +1269,1176 @@ describe("the computed-operand admissions (the cup fix)", () => {
       { bodyId: "body_plate", kind: "plate" },
       { bodyId: "body_stage1", kind: "extrude" },
       { bodyId: "body_pf1", kind: "patternFeature" },
+    ]);
+  });
+});
+
+/**
+ * Adds one primitive feature over fresh length parameters (the bridge's
+ * canonical positional layout) and its output body; the ids embed `tag`.
+ */
+function withPrimitive(
+  document: CadDocument,
+  tag: string,
+  kind: "box" | "sphere" | "cylinder" | "cone",
+  valuesMm: readonly number[],
+): CadDocument {
+  const parameters: StageParameters = valuesMm.map((value, index) => [
+    createParameterId(`param_${tag}_${String(index)}`),
+    `${tag}${String(index)}`,
+    length(value),
+  ]);
+  return commit(
+    document,
+    parameters,
+    null,
+    createSketchDocumentId(`skd_${tag}`),
+    createBodyId(`body_${tag}`),
+    tag,
+    createFeatureId(`feat_${tag}`),
+    kind,
+    parameters.map(([id]) => ({ kind: "parameter" as const, id })),
+  );
+}
+
+/** The primitive shapes the document scene emits, in request order. */
+function primitiveShapesOf(
+  document: CadDocument,
+  suppressed: ReadonlySet<ReturnType<typeof createFeatureId>> = new Set(),
+): readonly { readonly bodyId: string; readonly shape: PrimitiveShape }[] {
+  return documentSceneBodies(document, suppressed, null).flatMap((entry) =>
+    entry.scene.kind === "primitive"
+      ? [{ bodyId: entry.bodyId, shape: entry.scene.request.shape }]
+      : [],
+  );
+}
+
+describe("the primitive scene readers", () => {
+  it("renders each in-domain primitive as its own scene entry", () => {
+    expect(
+      primitiveShapesOf(
+        withPrimitive(createDocument(DOC), "b", "box", [10, 20, 30]),
+      ),
+    ).toEqual([
+      {
+        bodyId: "body_b",
+        shape: { kind: "box", widthMm: 10, depthMm: 20, heightMm: 30 },
+      },
+    ]);
+    expect(
+      primitiveShapesOf(withPrimitive(createDocument(DOC), "s", "sphere", [5])),
+    ).toEqual([{ bodyId: "body_s", shape: { kind: "sphere", radiusMm: 5 } }]);
+    expect(
+      primitiveShapesOf(
+        withPrimitive(createDocument(DOC), "c", "cylinder", [4, 12]),
+      ),
+    ).toEqual([
+      {
+        bodyId: "body_c",
+        shape: { kind: "cylinder", radiusMm: 4, heightMm: 12 },
+      },
+    ]);
+    expect(
+      primitiveShapesOf(
+        withPrimitive(createDocument(DOC), "k", "cone", [6, 0, 9]),
+      ),
+    ).toEqual([
+      {
+        bodyId: "body_k",
+        shape: { kind: "cone", bottomRadiusMm: 6, topRadiusMm: 0, heightMm: 9 },
+      },
+    ]);
+  });
+
+  it.each([
+    ["box width 0", "box", [0, 20, 30]],
+    ["box depth negative", "box", [10, -1, 30]],
+    ["box height 0", "box", [10, 20, 0]],
+    ["sphere radius 0", "sphere", [0]],
+    ["sphere radius negative", "sphere", [-5]],
+    ["cylinder radius 0", "cylinder", [0, 12]],
+    ["cylinder height negative", "cylinder", [4, -12]],
+    ["cone bottom radius 0", "cone", [0, 2, 9]],
+    ["cone top radius negative", "cone", [6, -1, 9]],
+    ["cone height 0", "cone", [6, 2, 0]],
+  ] as const)(
+    "emits no scene entry for an out-of-domain primitive (%s)",
+    (_label, kind, valuesMm) => {
+      const document = withPrimitive(createDocument(DOC), "p", kind, valuesMm);
+      expect(bodyIdsOf(document)).toEqual([]);
+    },
+  );
+
+  it("emits no scene entry when the canonical layout breaks", () => {
+    // Too few parameters for a cylinder (radius alone).
+    expect(
+      bodyIdsOf(withPrimitive(createDocument(DOC), "c", "cylinder", [4])),
+    ).toEqual([]);
+    // A non-length parameter in the radius slot.
+    const radius = createParameterId("param_angle_radius");
+    const document = commit(
+      createDocument(DOC),
+      [[radius, "angleRadius", angle(1)]],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_s"),
+      "s",
+      createFeatureId("feat_s"),
+      "sphere",
+      [{ kind: "parameter", id: radius }],
+    );
+    expect(bodyIdsOf(document)).toEqual([]);
+  });
+
+  it("skips a suppressed primitive and keeps the others", () => {
+    let document = withPrimitive(createDocument(DOC), "b", "box", [10, 10, 10]);
+    document = withPrimitive(document, "s", "sphere", [5]);
+    expect(bodyIdsOf(document, new Set([createFeatureId("feat_b")]))).toEqual([
+      { bodyId: "body_s", kind: "primitive" },
+    ]);
+  });
+
+  it("renders every primitive of the document — one entry per feature", () => {
+    let document = withPrimitive(createDocument(DOC), "b", "box", [10, 10, 10]);
+    document = withPrimitive(document, "s", "sphere", [5]);
+    document = withPrimitive(document, "c", "cylinder", [4, 12]);
+    document = withPrimitive(document, "k", "cone", [6, 2, 9]);
+    document = withPrimitive(document, "b2", "box", [1, 2, 3]);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive" },
+      { bodyId: "body_s", kind: "primitive" },
+      { bodyId: "body_c", kind: "primitive" },
+      { bodyId: "body_k", kind: "primitive" },
+      { bodyId: "body_b2", kind: "primitive" },
+    ]);
+  });
+
+  it("a boolean between two primitives admits both as computed operands", () => {
+    let document = withPrimitive(createDocument(DOC), "b", "box", [10, 10, 10]);
+    document = withPrimitive(document, "c", "cylinder", [3, 20]);
+    document = commit(
+      document,
+      [],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_cut"),
+      "cut",
+      createFeatureId("feat_cut"),
+      "subtract",
+      [
+        { kind: "feature", id: createFeatureId("feat_b") },
+        { kind: "feature", id: createFeatureId("feat_c") },
+      ],
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_c", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_cut", kind: "boolean" },
+    ]);
+  });
+
+  it("a patternLinear over a primitive admits — the target rides consumed-only", () => {
+    const document = commit(
+      withPrimitive(createDocument(DOC), "s", "sphere", [5]),
+      [
+        [createParameterId("param_pat_count"), "patCount", dimensionless(3)],
+        [createParameterId("param_pat_spacing"), "patSpacing", length(15)],
+        [createParameterId("param_pat_dir"), "patDir", angle(0)],
+      ],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_pat1"),
+      "pattern",
+      createFeatureId("feat_pat1"),
+      "patternLinear",
+      [
+        { kind: "feature", id: createFeatureId("feat_s") },
+        { kind: "parameter", id: createParameterId("param_pat_count") },
+        { kind: "parameter", id: createParameterId("param_pat_spacing") },
+        { kind: "parameter", id: createParameterId("param_pat_dir") },
+      ],
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_s", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_pat1", kind: "patternTransform" },
+    ]);
+  });
+
+  it("an out-of-domain primitive target declines its consumer honestly", () => {
+    let document = withPrimitive(createDocument(DOC), "b", "box", [0, 10, 10]);
+    document = withPrimitive(document, "c", "cylinder", [3, 20]);
+    document = commit(
+      document,
+      [],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_cut"),
+      "cut",
+      createFeatureId("feat_cut"),
+      "subtract",
+      [
+        { kind: "feature", id: createFeatureId("feat_b") },
+        { kind: "feature", id: createFeatureId("feat_c") },
+      ],
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_c", kind: "primitive" },
+    ]);
+  });
+});
+
+/** The fixture snapshot kernel identity the cut references are minted on. */
+const CUT_KERNEL_ID = "fixture-kernel";
+const CUT_SCHEMA = "fixture-snapshot-v1";
+
+/** A hand-built persistent snapshot: one edge (ordinal 5), one face (0). */
+function cutSnapshot(
+  bodyId: ReturnType<typeof createBodyId>,
+): TopologySnapshot {
+  const identity = (hash: number) => ({
+    kernelId: CUT_KERNEL_ID,
+    schema: CUT_SCHEMA,
+    data: { hash },
+  });
+  return {
+    kernelId: CUT_KERNEL_ID,
+    persistentTopology: true,
+    identitySchemas: [CUT_SCHEMA],
+    bodyId,
+    regeneration: 0,
+    entities: [
+      {
+        kind: "edge",
+        ordinal: 5,
+        identity: identity(55),
+        geometry: {
+          lengthMm: 10,
+          centroidAbsoluteMm: [10, 5, 0],
+          centroidRelativeMm: [5, 0, -5],
+        },
+      },
+      {
+        kind: "face",
+        ordinal: 0,
+        identity: identity(11),
+        geometry: {
+          areaMm2: 100,
+          centroidAbsoluteMm: [5, 5, 10],
+          centroidRelativeMm: [0, 0, 5],
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Mints one persistent reference to `bodyTag`'s fixture edge or face and
+ * stores it as the document reference record `ref_<refTag>` (the picking
+ * layer's minting path).
+ */
+function withCutReference(
+  document: CadDocument,
+  refTag: string,
+  bodyTag: string,
+  kind: "edge" | "face",
+): CadDocument {
+  const bodyId = createBodyId(`body_${bodyTag}`);
+  const id = createReferenceId(`ref_${refTag}`);
+  const provenance = requireOk(referenceProvenance(document, bodyId));
+  const minted = requireOk(
+    mintTopologyReference(
+      cutSnapshot(bodyId),
+      kind === "edge" ? 5 : 0,
+      provenance,
+      { id, kind },
+    ),
+  );
+  return requireOk(
+    addDocumentReference(document, {
+      id,
+      name: refTag,
+      reference: { ...serializeTopologyReference(minted) },
+    }),
+  ).document;
+}
+
+/**
+ * Adds one fillet/chamfer/shell feature in the canonical bridge layout:
+ * the target feature, the reference records, then ONE length parameter.
+ */
+function withCut(
+  document: CadDocument,
+  tag: string,
+  kind: "fillet" | "chamfer" | "shell",
+  targetTag: string,
+  sizeMm: number,
+  refTags: readonly string[],
+): CadDocument {
+  const size = createParameterId(`param_${tag}_size`);
+  return commit(
+    document,
+    [[size, `${tag}Size`, length(sizeMm)]],
+    null,
+    createSketchDocumentId("skd_unused"),
+    createBodyId(`body_${tag}`),
+    tag,
+    createFeatureId(`feat_${tag}`),
+    kind,
+    [
+      { kind: "feature", id: createFeatureId(`feat_${targetTag}`) },
+      ...refTags.map((refTag) => ({
+        kind: "reference" as const,
+        id: createReferenceId(`ref_${refTag}`),
+      })),
+      { kind: "parameter", id: size },
+    ],
+  );
+}
+
+/** The box every cut test targets (10 mm cube, `body_b`). */
+function cutBase(): CadDocument {
+  return withPrimitive(createDocument(DOC), "b", "box", [10, 10, 10]);
+}
+
+/** The topology-cut requests the document scene emits, in emission order. */
+function cutsOf(document: CadDocument): readonly TopologyCutSceneRequest[] {
+  return documentSceneBodies(document, new Set(), null).flatMap((entry) =>
+    entry.scene.kind === "topologyCut" ? [entry.scene.request] : [],
+  );
+}
+
+describe("the topology-cut scene readers (fillet / chamfer / shell)", () => {
+  it.each([
+    ["fillet", "edge"],
+    ["chamfer", "edge"],
+    ["shell", "face"],
+  ] as const)(
+    "renders an in-domain %s over its target's computed solid",
+    (kind, entity) => {
+      let document = withCutReference(cutBase(), "sel", "b", entity);
+      document = withCut(document, "cut", kind, "b", 2, ["sel"]);
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+        { bodyId: "body_cut", kind: "topologyCut" },
+      ]);
+      const [request] = cutsOf(document);
+      expect(request?.kind).toBe(kind);
+      expect(request?.target).toEqual({ kind: "computed", bodyId: "body_b" });
+      expect(request?.targetBodyId).toBe("body_b");
+      expect(request?.sizeMm).toBe(2);
+      expect(request?.bodyId).toBe("body_cut");
+      expect(
+        request?.selection.kind === "references"
+          ? request.selection.references.map((reference) => reference.kind)
+          : [],
+      ).toEqual([entity]);
+    },
+  );
+
+  it.each([
+    ["fillet radius 0", "fillet", "edge", 0],
+    ["fillet radius negative", "fillet", "edge", -1],
+    ["chamfer distance 0", "chamfer", "edge", 0],
+    ["chamfer distance negative", "chamfer", "edge", -2],
+    ["shell thickness 0", "shell", "face", 0],
+    ["shell thickness negative", "shell", "face", -1],
+  ] as const)(
+    "emits no scene entry for an out-of-domain cut (%s)",
+    (_label, kind, entity, sizeMm) => {
+      let document = withCutReference(cutBase(), "sel", "b", entity);
+      document = withCut(document, "cut", kind, "b", sizeMm, ["sel"]);
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive" },
+      ]);
+    },
+  );
+
+  it.each(["fillet", "chamfer", "shell"] as const)(
+    "emits no scene entry for a %s with an empty selection",
+    (kind) => {
+      const document = withCut(cutBase(), "cut", kind, "b", 2, []);
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive" },
+      ]);
+    },
+  );
+
+  it("refuses a reference of the wrong entity kind or another body", () => {
+    // A fillet over a FACE and a shell over an EDGE break the bridge rule.
+    let document = withCutReference(cutBase(), "face", "b", "face");
+    document = withCutReference(document, "edge", "b", "edge");
+    document = withCut(document, "f", "fillet", "b", 2, ["face"]);
+    document = withCut(document, "s", "shell", "b", 1, ["edge"]);
+    // A chamfer on body_b whose edge reference addresses another box.
+    document = withPrimitive(document, "o", "box", [5, 5, 5]);
+    document = withCutReference(document, "other", "o", "edge");
+    document = withCut(document, "c", "chamfer", "b", 1, ["other"]);
+    expect(cutsOf(document)).toEqual([]);
+  });
+
+  it("skips a suppressed cut — its target renders unconsumed", () => {
+    let document = withCutReference(cutBase(), "sel", "b", "edge");
+    document = withCut(document, "cut", "fillet", "b", 2, ["sel"]);
+    expect(bodyIdsOf(document, new Set([createFeatureId("feat_cut")]))).toEqual(
+      [{ bodyId: "body_b", kind: "primitive" }],
+    );
+  });
+
+  it("renders every cut of the document — sibling cuts on one target", () => {
+    let document = withCutReference(cutBase(), "edge", "b", "edge");
+    document = withCutReference(document, "face", "b", "face");
+    document = withCut(document, "f", "fillet", "b", 2, ["edge"]);
+    document = withCut(document, "c", "chamfer", "b", 1, ["edge"]);
+    document = withCut(document, "s", "shell", "b", 1, ["face"]);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_f", kind: "topologyCut" },
+      { bodyId: "body_c", kind: "topologyCut" },
+      { bodyId: "body_s", kind: "topologyCut" },
+    ]);
+  });
+
+  /** box → chamfer → fillet → shell, each cut targeting the previous. */
+  function chainDocument(filletRadiusMm: number): CadDocument {
+    let document = withCutReference(cutBase(), "e1", "b", "edge");
+    document = withCut(document, "c1", "chamfer", "b", 1, ["e1"]);
+    document = withCutReference(document, "e2", "c1", "edge");
+    document = withCut(document, "f2", "fillet", "c1", filletRadiusMm, ["e2"]);
+    document = withCutReference(document, "s3face", "f2", "face");
+    return withCut(document, "s3", "shell", "f2", 1, ["s3face"]);
+  }
+
+  it("a chain renders in order — each cut's output is the next cut's target", () => {
+    const document = chainDocument(2);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_c1", kind: "topologyCut", consumedOnly: true },
+      { bodyId: "body_f2", kind: "topologyCut", consumedOnly: true },
+      { bodyId: "body_s3", kind: "topologyCut" },
+    ]);
+    expect(cutsOf(document).map((request) => request.target)).toEqual([
+      { kind: "computed", bodyId: "body_b" },
+      { kind: "computed", bodyId: "body_c1" },
+      { kind: "computed", bodyId: "body_f2" },
+    ]);
+  });
+
+  it("a refused cut mid-chain falls back to its target's scene", () => {
+    // The zero-radius fillet refuses: its consumer declines (no computed
+    // solid to compose), and the chamfer — the fillet's target — renders
+    // as the lineage's tip.
+    expect(bodyIdsOf(chainDocument(0))).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_c1", kind: "topologyCut" },
+    ]);
+  });
+
+  it("a cut's output serves a boolean as a computed operand", () => {
+    let document = withCutReference(cutBase(), "sel", "b", "edge");
+    document = withCut(document, "f", "fillet", "b", 2, ["sel"]);
+    document = withPrimitive(document, "k", "cylinder", [2, 20]);
+    document = commit(
+      document,
+      [],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_cut"),
+      "cut",
+      createFeatureId("feat_bool"),
+      "subtract",
+      [
+        { kind: "feature", id: createFeatureId("feat_f") },
+        { kind: "feature", id: createFeatureId("feat_k") },
+      ],
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_f", kind: "topologyCut", consumedOnly: true },
+      { bodyId: "body_k", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_cut", kind: "boolean" },
+    ]);
+  });
+});
+
+/**
+ * Adds one cut in the chain workbench's ORDINAL layout (`./chain`'s
+ * fillet action): the target feature, the length size parameter, then
+ * the given trailing parameters — no reference inputs.
+ */
+function withOrdinalCut(
+  document: CadDocument,
+  tag: string,
+  kind: "fillet" | "chamfer" | "shell",
+  sizeMm: number,
+  trailing: readonly AnyDimensionalValue[],
+): CadDocument {
+  const size = createParameterId(`param_${tag}_size`);
+  const parameters: StageParameters = [
+    [size, `${tag}Size`, length(sizeMm)],
+    ...trailing.map(
+      (value, index) =>
+        [
+          createParameterId(`param_${tag}_ordinal${String(index)}`),
+          `${tag}Ordinal${String(index)}`,
+          value,
+        ] as const,
+    ),
+  ];
+  return commit(
+    document,
+    parameters,
+    null,
+    createSketchDocumentId("skd_unused"),
+    createBodyId(`body_${tag}`),
+    tag,
+    createFeatureId(`feat_${tag}`),
+    kind,
+    [
+      { kind: "feature", id: createFeatureId("feat_b") },
+      ...parameters.map(([id]) => ({ kind: "parameter" as const, id })),
+    ],
+  );
+}
+
+describe("the topology-cut ordinal form (the chain workbench's fillet)", () => {
+  it("renders a fillet of one length radius and one whole edge ordinal", () => {
+    const document = withOrdinalCut(cutBase(), "f", "fillet", 2, [
+      dimensionless(5),
+    ]);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_f", kind: "topologyCut" },
+    ]);
+    expect(cutsOf(document)).toEqual([
+      {
+        kind: "fillet",
+        target: { kind: "computed", bodyId: "body_b" },
+        targetBodyId: "body_b",
+        sizeMm: 2,
+        selection: { kind: "ordinals", ordinals: [5] },
+        bodyId: "body_f",
+      },
+    ]);
+  });
+
+  it.each([
+    ["a non-integer ordinal", [dimensionless(1.5)]],
+    ["a negative ordinal", [dimensionless(-1)]],
+    ["a length-typed ordinal", [length(5)]],
+    ["no ordinal at all", []],
+    ["two ordinals", [dimensionless(1), dimensionless(2)]],
+  ] as const)(
+    "emits no scene entry for a fillet with %s",
+    (_label, trailing) => {
+      const document = withOrdinalCut(cutBase(), "f", "fillet", 2, trailing);
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive" },
+      ]);
+    },
+  );
+
+  it("emits no scene entry when the ordinal parameter no longer resolves", () => {
+    const document = withOrdinalCut(cutBase(), "f", "fillet", 2, [
+      dimensionless(5),
+    ]);
+    const dangling: CadDocument = {
+      ...document,
+      parameters: {
+        ...document.parameters,
+        parameters: document.parameters.parameters.filter(
+          (entry) => entry.id !== createParameterId("param_f_ordinal0"),
+        ),
+      },
+    };
+    expect(bodyIdsOf(dangling)).toEqual([
+      { bodyId: "body_b", kind: "primitive" },
+    ]);
+  });
+
+  it("emits no scene entry for a fillet whose radius leaves its domain", () => {
+    const document = withOrdinalCut(cutBase(), "f", "fillet", 0, [
+      dimensionless(5),
+    ]);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive" },
+    ]);
+  });
+
+  it.each(["chamfer", "shell"] as const)(
+    "emits no scene entry for a %s in the ordinal form (fillet only)",
+    (kind) => {
+      const document = withOrdinalCut(cutBase(), "c", kind, 1, [
+        dimensionless(0),
+      ]);
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive" },
+      ]);
+    },
+  );
+});
+
+/** Adds the explicit z = 12 datum plane `dtm_<tag>` (replaceFace's datum). */
+function withPlaneDatum(document: CadDocument, tag: string): CadDocument {
+  return requireOk(
+    addDocumentDatum(document, {
+      id: createDatumId(`dtm_${tag}`),
+      name: tag,
+      datum: {
+        formatVersion: DATUM_FORMAT_VERSION,
+        datumType: "plane",
+        definition: "originFrame",
+        origin: [0, 0, 12],
+        normal: [0, 0, 1],
+        xAxis: [1, 0, 0],
+      },
+    }),
+  ).document;
+}
+
+/** The canonical-layout trailing inputs of one face op (see `./face-op`). */
+type FaceOpLayout =
+  | { readonly kind: "moveFace"; readonly axis: number; readonly mm: number }
+  | { readonly kind: "deleteFace"; readonly heal: number }
+  | { readonly kind: "replaceFace"; readonly datumTag: string };
+
+/**
+ * Adds one face-op feature in the bridge's canonical layout: the target
+ * feature, the face reference, then the kind's parameters or datum.
+ */
+function withFaceOp(
+  document: CadDocument,
+  tag: string,
+  targetTag: string,
+  refTag: string,
+  layout: FaceOpLayout,
+): CadDocument {
+  const parameters: StageParameters =
+    layout.kind === "moveFace"
+      ? [
+          [
+            createParameterId(`param_${tag}_axis`),
+            `${tag}Axis`,
+            dimensionless(layout.axis),
+          ],
+          [
+            createParameterId(`param_${tag}_dist`),
+            `${tag}Dist`,
+            length(layout.mm),
+          ],
+        ]
+      : layout.kind === "deleteFace"
+        ? [
+            [
+              createParameterId(`param_${tag}_heal`),
+              `${tag}Heal`,
+              dimensionless(layout.heal),
+            ],
+          ]
+        : [];
+  const trailing: FeatureInputRef[] =
+    layout.kind === "replaceFace"
+      ? [{ kind: "datum", id: createDatumId(`dtm_${layout.datumTag}`) }]
+      : parameters.map(([id]) => ({ kind: "parameter" as const, id }));
+  return commit(
+    document,
+    parameters,
+    null,
+    createSketchDocumentId("skd_unused"),
+    createBodyId(`body_${tag}`),
+    tag,
+    createFeatureId(`feat_${tag}`),
+    layout.kind,
+    [
+      { kind: "feature", id: createFeatureId(`feat_${targetTag}`) },
+      { kind: "reference", id: createReferenceId(`ref_${refTag}`) },
+      ...trailing,
+    ],
+  );
+}
+
+/** The face-op requests the document scene emits, in emission order. */
+function faceOpsOf(document: CadDocument): readonly FaceOpSceneRequest[] {
+  return documentSceneBodies(document, new Set(), null).flatMap((entry) =>
+    entry.scene.kind === "faceOp" ? [entry.scene.request] : [],
+  );
+}
+
+describe("the face-op scene readers (moveFace / deleteFace / replaceFace)", () => {
+  it("renders an in-domain moveFace over its target's computed solid", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withFaceOp(document, "m", "b", "f", {
+      kind: "moveFace",
+      axis: 3,
+      mm: -2,
+    });
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_m", kind: "faceOp" },
+    ]);
+    const [request] = faceOpsOf(document);
+    expect(request?.target).toEqual({ kind: "computed", bodyId: "body_b" });
+    expect(request?.targetBodyId).toBe("body_b");
+    expect(request?.face.kind).toBe("face");
+    expect(request?.operation).toEqual({
+      kind: "moveFace",
+      direction: [0, 0, 1],
+      distanceMm: -2,
+    });
+  });
+
+  it("reads deleteFace's heal flag and replaceFace's resolved datum plane", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withPlaneDatum(document, "top");
+    document = withFaceOp(document, "d", "b", "f", {
+      kind: "deleteFace",
+      heal: 1,
+    });
+    document = withFaceOp(document, "r", "b", "f", {
+      kind: "replaceFace",
+      datumTag: "top",
+    });
+    expect(faceOpsOf(document).map((request) => request.operation)).toEqual([
+      { kind: "deleteFace", heal: true },
+      { kind: "replaceFace", plane: { origin: [0, 0, 12], normal: [0, 0, 1] } },
+    ]);
+  });
+
+  it.each([
+    ["moveFace axis 0", { kind: "moveFace", axis: 0, mm: 1 }],
+    ["moveFace axis 4", { kind: "moveFace", axis: 4, mm: 1 }],
+    ["moveFace fractional axis", { kind: "moveFace", axis: 1.5, mm: 1 }],
+    ["deleteFace heal 2", { kind: "deleteFace", heal: 2 }],
+    ["deleteFace heal 0.5", { kind: "deleteFace", heal: 0.5 }],
+  ] as const)(
+    "emits no scene entry for an out-of-domain face op (%s)",
+    (_label, layout) => {
+      let document = withCutReference(cutBase(), "f", "b", "face");
+      document = withFaceOp(document, "op", "b", "f", layout);
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive" },
+      ]);
+    },
+  );
+
+  it("refuses an edge reference, another body's face, or a broken layout", () => {
+    let document = withCutReference(cutBase(), "edge", "b", "edge");
+    document = withCutReference(document, "face", "b", "face");
+    document = withFaceOp(document, "e", "b", "edge", {
+      kind: "deleteFace",
+      heal: 0,
+    });
+    document = withPrimitive(document, "o", "box", [5, 5, 5]);
+    document = withCutReference(document, "other", "o", "face");
+    document = withFaceOp(document, "x", "b", "other", {
+      kind: "deleteFace",
+      heal: 0,
+    });
+    // A moveFace with a single parameter breaks the two-parameter layout.
+    const lone = createParameterId("param_lone");
+    document = commit(
+      document,
+      [[lone, "lone", dimensionless(3)]],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_l"),
+      "l",
+      createFeatureId("feat_l"),
+      "moveFace",
+      [
+        { kind: "feature", id: createFeatureId("feat_b") },
+        { kind: "reference", id: createReferenceId("ref_face") },
+        { kind: "parameter", id: lone },
+      ],
+    );
+    // A replaceFace with no datum breaks the one-datum layout.
+    document = commit(
+      document,
+      [],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_nd"),
+      "nd",
+      createFeatureId("feat_nd"),
+      "replaceFace",
+      [
+        { kind: "feature", id: createFeatureId("feat_b") },
+        { kind: "reference", id: createReferenceId("ref_face") },
+      ],
+    );
+    expect(faceOpsOf(document)).toEqual([]);
+  });
+
+  /** A face op over `feat_b`/`ref_f` whose parameters carry `values`. */
+  function withRawFaceOp(
+    document: CadDocument,
+    kind: "moveFace" | "deleteFace",
+    values: readonly AnyDimensionalValue[],
+  ): CadDocument {
+    const parameters: StageParameters = values.map((value, index) => [
+      createParameterId(`param_raw${String(index)}`),
+      `raw${String(index)}`,
+      value,
+    ]);
+    return commit(
+      document,
+      parameters,
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_op"),
+      "op",
+      createFeatureId("feat_op"),
+      kind,
+      [
+        { kind: "feature", id: createFeatureId("feat_b") },
+        { kind: "reference", id: createReferenceId("ref_f") },
+        ...parameters.map(([id]) => ({ kind: "parameter" as const, id })),
+      ],
+    );
+  }
+
+  it.each<[string, (document: CadDocument) => CadDocument]>([
+    [
+      "replaceFace over an unknown datum id",
+      (document) => {
+        // The document API refuses a dangling input, so the stale record
+        // (a hand-edited or partially-loaded document) is dropped after.
+        const withDatum = withFaceOp(
+          withPlaneDatum(document, "gone"),
+          "op",
+          "b",
+          "f",
+          { kind: "replaceFace", datumTag: "gone" },
+        );
+        return {
+          ...withDatum,
+          datums: withDatum.datums.filter(
+            (datum) => datum.id !== createDatumId("dtm_gone"),
+          ),
+        };
+      },
+    ],
+    [
+      "replaceFace over an axis datum",
+      (document) =>
+        withFaceOp(
+          requireOk(
+            addDocumentDatum(document, {
+              id: createDatumId("dtm_axis"),
+              name: "axis",
+              datum: {
+                formatVersion: DATUM_FORMAT_VERSION,
+                datumType: "axis",
+                definition: "twoPoints",
+                first: [0, 0, 0],
+                second: [0, 0, 10],
+              },
+            }),
+          ).document,
+          "op",
+          "b",
+          "f",
+          { kind: "replaceFace", datumTag: "axis" },
+        ),
+    ],
+    [
+      "moveFace with a length-valued axis",
+      (document) => withRawFaceOp(document, "moveFace", [length(3), length(1)]),
+    ],
+    [
+      "moveFace with a dimensionless distance",
+      (document) =>
+        withRawFaceOp(document, "moveFace", [
+          dimensionless(3),
+          dimensionless(1),
+        ]),
+    ],
+    [
+      "deleteFace with a length-valued heal",
+      (document) => withRawFaceOp(document, "deleteFace", [length(1)]),
+    ],
+  ])(
+    "emits no scene entry for an unresolvable or wrong-dimension face op (%s)",
+    (_label, build) => {
+      const document = build(withCutReference(cutBase(), "f", "b", "face"));
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive" },
+      ]);
+    },
+  );
+
+  it("admits a face op carrying an extra sketch input (the bridge ignores it)", () => {
+    const heal = createParameterId("param_d_heal");
+    const sketchId = createSketchDocumentId("skd_d");
+    const document = commit(
+      withCutReference(cutBase(), "f", "b", "face"),
+      [[heal, "dHeal", dimensionless(1)]],
+      extrudeSketchPayload(),
+      sketchId,
+      createBodyId("body_d"),
+      "d",
+      createFeatureId("feat_d"),
+      "deleteFace",
+      [
+        { kind: "feature", id: createFeatureId("feat_b") },
+        { kind: "reference", id: createReferenceId("ref_f") },
+        { kind: "parameter", id: heal },
+        { kind: "sketch", id: sketchId },
+      ],
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_d", kind: "faceOp" },
+    ]);
+  });
+
+  it("skips a suppressed face op — its target renders unconsumed", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withFaceOp(document, "d", "b", "f", {
+      kind: "deleteFace",
+      heal: 1,
+    });
+    expect(bodyIdsOf(document, new Set([createFeatureId("feat_d")]))).toEqual([
+      { bodyId: "body_b", kind: "primitive" },
+    ]);
+  });
+
+  it("renders every face op of the document — one entry per feature", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withPlaneDatum(document, "top");
+    document = withFaceOp(document, "m", "b", "f", {
+      kind: "moveFace",
+      axis: 1,
+      mm: 1,
+    });
+    document = withFaceOp(document, "d", "b", "f", {
+      kind: "deleteFace",
+      heal: 0,
+    });
+    document = withFaceOp(document, "r", "b", "f", {
+      kind: "replaceFace",
+      datumTag: "top",
+    });
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_m", kind: "faceOp" },
+      { bodyId: "body_d", kind: "faceOp" },
+      { bodyId: "body_r", kind: "faceOp" },
+    ]);
+  });
+
+  /** box → fillet → moveFace → deleteFace, each op targeting the previous. */
+  function chainDocument(moveAxis: number): CadDocument {
+    let document = withCutReference(cutBase(), "e1", "b", "edge");
+    document = withCut(document, "f1", "fillet", "b", 1, ["e1"]);
+    document = withCutReference(document, "m2face", "f1", "face");
+    document = withFaceOp(document, "m2", "f1", "m2face", {
+      kind: "moveFace",
+      axis: moveAxis,
+      mm: 2,
+    });
+    document = withCutReference(document, "d3face", "m2", "face");
+    return withFaceOp(document, "d3", "m2", "d3face", {
+      kind: "deleteFace",
+      heal: 1,
+    });
+  }
+
+  it("a chain over a topology cut renders in document order", () => {
+    const document = chainDocument(3);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_f1", kind: "topologyCut", consumedOnly: true },
+      { bodyId: "body_m2", kind: "faceOp", consumedOnly: true },
+      { bodyId: "body_d3", kind: "faceOp" },
+    ]);
+    expect(faceOpsOf(document).map((request) => request.target)).toEqual([
+      { kind: "computed", bodyId: "body_f1" },
+      { kind: "computed", bodyId: "body_m2" },
+    ]);
+  });
+
+  it("a refused face op mid-chain falls back to its target's scene", () => {
+    expect(bodyIdsOf(chainDocument(7))).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_f1", kind: "topologyCut" },
+    ]);
+  });
+});
+
+/**
+ * Adds one patternFace feature in the bridge's canonical layout: the
+ * target feature, the face reference, then two direction/count/spacing
+ * leg triples (and any `extraInputs` after them).
+ */
+function withPatternFace(
+  document: CadDocument,
+  tag: string,
+  targetTag: string,
+  refTag: string,
+  legs: readonly (readonly [number, number, number])[],
+  extraInputs: readonly FeatureInputRef[] = [],
+): CadDocument {
+  const parameters: [
+    ReturnType<typeof createParameterId>,
+    string,
+    AnyDimensionalValue,
+  ][] = [];
+  legs.forEach(([directionRad, count, spacingMm], index) => {
+    const id = (part: string) =>
+      createParameterId(`param_${tag}_${part}${String(index)}`);
+    parameters.push(
+      [id("dir"), `${tag}Dir${String(index)}`, angle(directionRad, "rad")],
+      [id("count"), `${tag}Count${String(index)}`, dimensionless(count)],
+      [id("spacing"), `${tag}Spacing${String(index)}`, length(spacingMm)],
+    );
+  });
+  return commit(
+    document,
+    parameters,
+    null,
+    createSketchDocumentId("skd_unused"),
+    createBodyId(`body_${tag}`),
+    tag,
+    createFeatureId(`feat_${tag}`),
+    "patternFace",
+    [
+      { kind: "feature", id: createFeatureId(`feat_${targetTag}`) },
+      { kind: "reference", id: createReferenceId(`ref_${refTag}`) },
+      ...parameters.map(([id]) => ({ kind: "parameter" as const, id })),
+      ...extraInputs,
+    ],
+  );
+}
+
+/** The patternFace requests the document scene emits, in emission order. */
+function patternFacesOf(
+  document: CadDocument,
+): readonly PatternFaceSceneRequest[] {
+  return documentSceneBodies(document, new Set(), null).flatMap((entry) =>
+    entry.scene.kind === "patternFace" ? [entry.scene.request] : [],
+  );
+}
+
+const GRID: readonly (readonly [number, number, number])[] = [
+  [0, 2, 3],
+  [Math.PI / 2, 2, 3],
+];
+
+describe("the patternFace scene reader", () => {
+  it("renders an in-domain patternFace over its target's computed solid", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withPatternFace(document, "p", "b", "f", GRID);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_p", kind: "patternFace" },
+    ]);
+    const [request] = patternFacesOf(document);
+    expect(request?.target).toEqual({ kind: "computed", bodyId: "body_b" });
+    expect(request?.face.kind).toBe("face");
+    expect(request?.legs).toEqual([
+      { directionRad: 0, count: 2, spacingMm: 3 },
+      { directionRad: Math.PI / 2, count: 2, spacingMm: 3 },
+    ]);
+  });
+
+  it.each([
+    ["count 1", [[0, 1, 3], GRID[1]]],
+    ["fractional count", [[0, 2.5, 3], GRID[1]]],
+    ["spacing 0", [[0, 2, 0], GRID[1]]],
+    ["negative spacing", [GRID[0], [0, 2, -1]]],
+    [
+      "grid over the count limit",
+      [
+        [0, 101, 1],
+        [0, 101, 1],
+      ],
+    ],
+    ["one leg only", [GRID[0]]],
+  ] as const)(
+    "emits no scene entry for an out-of-domain patternFace (%s)",
+    (_label, legs) => {
+      let document = withCutReference(cutBase(), "f", "b", "face");
+      document = withPatternFace(
+        document,
+        "p",
+        "b",
+        "f",
+        legs.flatMap((leg) => (leg === undefined ? [] : [leg])),
+      );
+      expect(bodyIdsOf(document)).toEqual([
+        { bodyId: "body_b", kind: "primitive" },
+      ]);
+    },
+  );
+
+  it("refuses an edge reference or another body's face", () => {
+    let document = withCutReference(cutBase(), "edge", "b", "edge");
+    document = withPatternFace(document, "e", "b", "edge", GRID);
+    document = withPrimitive(document, "o", "box", [5, 5, 5]);
+    document = withCutReference(document, "other", "o", "face");
+    document = withPatternFace(document, "x", "b", "other", GRID);
+    expect(patternFacesOf(document)).toEqual([]);
+  });
+
+  it("admits a patternFace carrying extra sketch and datum inputs (the bridge ignores them)", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withPlaneDatum(document, "top");
+    const sketchId = createSketchDocumentId("skd_extra");
+    document = requireOk(
+      addDocumentSketch(document, {
+        id: sketchId,
+        name: "extra sketch",
+        sketch: extrudeSketchPayload(),
+      }),
+    ).document;
+    document = withPatternFace(document, "p", "b", "f", GRID, [
+      { kind: "sketch", id: sketchId },
+      { kind: "datum", id: createDatumId("dtm_top") },
+    ]);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_p", kind: "patternFace" },
+    ]);
+  });
+
+  it("skips a suppressed patternFace and renders every other one", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withPatternFace(document, "p", "b", "f", GRID);
+    document = withPatternFace(document, "q", "b", "f", GRID);
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_p", kind: "patternFace" },
+      { bodyId: "body_q", kind: "patternFace" },
+    ]);
+    expect(bodyIdsOf(document, new Set([createFeatureId("feat_p")]))).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_q", kind: "patternFace" },
+    ]);
+  });
+
+  it("a patternFace's output serves a later boolean as a computed operand", () => {
+    let document = withCutReference(cutBase(), "f", "b", "face");
+    document = withPatternFace(document, "p", "b", "f", GRID);
+    document = withPrimitive(document, "k", "cylinder", [2, 20]);
+    document = commit(
+      document,
+      [],
+      null,
+      createSketchDocumentId("skd_unused"),
+      createBodyId("body_u"),
+      "u",
+      createFeatureId("feat_u"),
+      "union",
+      [
+        { kind: "feature", id: createFeatureId("feat_p") },
+        { kind: "feature", id: createFeatureId("feat_k") },
+      ],
+    );
+    expect(bodyIdsOf(document)).toEqual([
+      { bodyId: "body_b", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_p", kind: "patternFace", consumedOnly: true },
+      { bodyId: "body_k", kind: "primitive", consumedOnly: true },
+      { bodyId: "body_u", kind: "boolean" },
     ]);
   });
 });

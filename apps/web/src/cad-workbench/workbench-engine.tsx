@@ -106,6 +106,7 @@ import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene
 
 import {
   bootRenderFixtureSession,
+  type DocumentTopologyInventory,
   faceAnchorSurface,
   type FixtureRenderState,
   type RenderFixtureSession,
@@ -207,6 +208,12 @@ import {
   moveBodyTargetFeatureOf,
   validateMoveBodySubmission,
 } from "./move-body";
+import { primitiveCreateCommands, type PrimitiveSubmission } from "./primitive";
+import {
+  topologyCutCreateCommands,
+  type TopologyCutSubmission,
+} from "./topology-pick";
+import { faceOpCreateCommands, type FaceOpSubmission } from "./face-op-pick";
 import {
   duplicateProducingFeature,
   validateDuplicateSubmission,
@@ -323,6 +330,9 @@ export type WorkbenchSceneKind =
   | "empty"
   | "plate"
   | "extrude"
+  | "primitive"
+  | "topologyCut"
+  | "faceOp"
   | "revolve"
   | "sweep"
   | "loft"
@@ -410,6 +420,13 @@ export interface WorkbenchEngine {
   readonly historyApi: ReturnType<typeof useCadHistory>;
   /** The applied render state, or `null` before the first settle. */
   readonly applied: AppliedRenderState | null;
+  /**
+   * Queries the visible document scene's per-body topology snapshots ON
+   * DEMAND (the agent plane's edge/face inventory) — the render pass does
+   * no topology work for it. `null` before a document scene settled or
+   * without a booted session.
+   */
+  readonly documentTopology: () => Promise<DocumentTopologyInventory | null>;
   /** The settled render-frame count (the scene's frame counter). */
   readonly renderedFrames: number;
   /**
@@ -703,6 +720,37 @@ export interface WorkbenchEngine {
     readonly keepToolBodies: boolean;
   }) => FeatureFormOutcome;
   /**
+   * The primitive create action (box / sphere / cylinder / cone): commits
+   * the dimension parameters, the output body, and the primitive feature
+   * — plus, for a non-zero placement, the move-layout `translate` over it
+   * — in ONE atomic transaction (`primitiveCreateCommands`). Primitives
+   * consume nothing, so the verb needs no prior geometry. A refusal
+   * commits nothing.
+   */
+  readonly handlePrimitive: (
+    submission: PrimitiveSubmission,
+  ) => FeatureFormOutcome;
+  /**
+   * The fillet / chamfer / shell create action (the chain workbench's
+   * pick surface on the complete bench): mints one persistent reference
+   * per picked snapshot ordinal on the snapshot the picks address, then
+   * commits the size parameter, the reference records, the output body,
+   * and the feature in the canonical bridge layout in ONE atomic
+   * transaction (`topologyCutCreateCommands`). A refusal commits nothing.
+   */
+  readonly handleTopologyCut: (
+    submission: TopologyCutSubmission,
+  ) => FeatureFormOutcome;
+  /**
+   * The moveFace / deleteFace / replaceFace create action (the topology
+   * cuts' pick surface with ONE face picked): mints the persistent face
+   * reference on the snapshot the pick addresses, then commits the kind's
+   * parameters, the reference record, the output body, and the feature in
+   * the canonical bridge layout in ONE atomic transaction
+   * (`faceOpCreateCommands`). A refusal commits nothing.
+   */
+  readonly handleFaceOp: (submission: FaceOpSubmission) => FeatureFormOutcome;
+  /**
    * The Phase 44 move-body create action: commits the translate
    * parameters and the translate feature (the existing kind, grown with
    * the optional rotation pair) targeting the document's last extrude in
@@ -838,6 +886,11 @@ export function useWorkbenchEngine(
 
   const [renderedFrames, setRenderedFrames] = useState(0);
   const sessionRef = useRef<RenderFixtureSession | null>(null);
+  const documentTopology = useCallback(
+    (): Promise<DocumentTopologyInventory | null> =>
+      sessionRef.current?.documentTopology() ?? Promise.resolve(null),
+    [],
+  );
 
   /**
    * Counts one settled projection frame and — synchronously, in the
@@ -3328,6 +3381,71 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The primitive action: plan the transaction (the plan enforces the
+  // reader's own domain, so a committed primitive always renders), then
+  // commit it — the ids mint from the document itself, so repeated verbs
+  // never collide.
+  const handlePrimitive = (
+    submission: PrimitiveSubmission,
+  ): FeatureFormOutcome => {
+    const plan = primitiveCreateCommands(workbenchDocument, submission);
+    if (!plan.ok) return plan;
+    const committed = documentApi.applyTransaction({
+      commands: plan.commands,
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setActiveScene(plan.placed ? "moveBody" : "primitive");
+    return { ok: true };
+  };
+
+  // The topology-cut action: plan the transaction from the picked snapshot
+  // (the plan enforces the reader's domain and mints every pick), then
+  // commit it — the ids mint from the document itself.
+  const handleTopologyCut = (
+    submission: TopologyCutSubmission,
+  ): FeatureFormOutcome => {
+    const plan = topologyCutCreateCommands(workbenchDocument, submission);
+    if (!plan.ok) return plan;
+    const committed = documentApi.applyTransaction({
+      commands: plan.commands,
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setActiveScene("topologyCut");
+    return { ok: true };
+  };
+
+  // The face-op action: plan the transaction from the picked snapshot
+  // (the plan enforces the reader's domain and mints the pick), then
+  // commit it — the ids mint from the document itself.
+  const handleFaceOp = (submission: FaceOpSubmission): FeatureFormOutcome => {
+    const plan = faceOpCreateCommands(workbenchDocument, submission);
+    if (!plan.ok) return plan;
+    const committed = documentApi.applyTransaction({
+      commands: plan.commands,
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setActiveScene("faceOp");
+    return { ok: true };
+  };
+
   // The Phase 44 move-body action: commit the translate parameters and
   // the translate feature (the EXISTING kind, grown with the optional
   // rotation pair) targeting the document's LAST EXTRUDE in ONE atomic
@@ -4502,6 +4620,7 @@ export function useWorkbenchEngine(
     toolsApi,
     historyApi,
     applied,
+    documentTopology,
     renderedFrames,
     noteRenderedFrame,
     simApplied,
@@ -4563,6 +4682,9 @@ export function useWorkbenchEngine(
     handlePatternPath,
     handleMirror,
     handleBoolean,
+    handlePrimitive,
+    handleTopologyCut,
+    handleFaceOp,
     handleMoveBody,
     handleDuplicate,
     handleBodyRename,

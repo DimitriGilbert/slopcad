@@ -15,8 +15,23 @@
  *   the merge option — one `solid.union` with the original.
  */
 
-import { angle, length } from "@slopcad/cad-core";
-import type { ComputationContext, WorkerSolidId } from "@slopcad/cad-kernel";
+import {
+  angle,
+  datumAdd,
+  datumCross,
+  datumDot,
+  datumSubtract,
+  length,
+  orthonormalDatumFrame,
+  unitDatumVec3,
+} from "@slopcad/cad-core";
+import type { DatumVec3, ResolvedDatumPlane } from "@slopcad/cad-core";
+import type {
+  ComputationContext,
+  PatternInstanceNamingInput,
+  Tessellation,
+  WorkerSolidId,
+} from "@slopcad/cad-kernel";
 import {
   planArrayPatternInstances,
   planDatumMirror,
@@ -28,17 +43,20 @@ import type { PlateMeasurement } from "./plate-scene";
 import type { ExtrudeSceneRequest } from "./extrude-scene";
 import type {
   MirrorSceneRequest,
+  PatternFaceSceneRequest,
   PatternFeatureSceneRequest,
   PatternPathSceneRequest,
   PatternTransformSceneRequest,
 } from "../cad-workbench/pattern";
 
+import { inPlaneXAxisOf } from "../cad-workbench/datum";
 import {
   type ComposedSceneResult,
   type ComputedSolids,
   NO_COMPUTED_SOLIDS,
   operandSolid,
 } from "./body-ops-scenes";
+import { resolveReferenceOrdinals } from "./topology-cut-scene";
 
 const mm = (value: number) => length(value, "mm");
 
@@ -52,6 +70,7 @@ async function extrudeBase(
     height: mm(Math.abs(base.distanceMm)),
     direction: base.distanceMm > 0 ? 1 : -1,
     placement: base.placement,
+    ...(base.featureId === undefined ? {} : { featureId: base.featureId }),
   });
 }
 
@@ -73,16 +92,22 @@ async function measure(
   };
 }
 
-/** One translated copy of `solid` (the zero offset returns the solid itself). */
+/**
+ * One translated copy of `solid` (the zero offset returns the solid itself,
+ * keeping its names). A pattern `instance` renames the copy's faces
+ * `<featureId>/instance/<index>/…`, exactly as the bridge's executor does.
+ */
 async function translatedCopy(
   context: ComputationContext,
   solid: WorkerSolidId,
   offset: readonly [number, number, number],
+  instance?: PatternInstanceNamingInput,
 ): Promise<WorkerSolidId> {
   if (offset[0] === 0 && offset[1] === 0 && offset[2] === 0) return solid;
   const placed = await context.request("solid.transform", {
     solid,
     translation: { x: mm(offset[0]), y: mm(offset[1]), z: mm(offset[2]) },
+    ...(instance === undefined ? {} : { instance }),
   });
   return placed.solid;
 }
@@ -104,7 +129,12 @@ export async function computePatternFeatureScene(
     if (skips.has(ordinal)) continue;
     const offset = plan.offsets[ordinal];
     if (offset === undefined) continue;
-    copies.push(await translatedCopy(context, extruded.solid, offset));
+    copies.push(
+      await translatedCopy(context, extruded.solid, offset, {
+        featureId: request.featureId,
+        index: ordinal,
+      }),
+    );
   }
   const merged = await context.request("solid.union", { operands: copies });
   return {
@@ -144,6 +174,7 @@ export async function computePatternPathScene(
       const placed = await context.request("solid.transform", {
         solid: extruded.solid,
         translation,
+        instance: { featureId: request.featureId, index: i },
       });
       copies.push(placed.solid);
       continue;
@@ -161,6 +192,7 @@ export async function computePatternPathScene(
       solid: extruded.solid,
       translation,
       rotation: { axis: turn.axis, angle: angle(turn.angle) },
+      instance: { featureId: request.featureId, index: i },
     });
     copies.push(placed.solid);
   }
@@ -268,11 +300,16 @@ export async function computePatternTransformScene(
     const { count, spacingMm, direction } = request.pattern;
     for (let i = 1; i < count; i += 1) {
       copies.push(
-        await translatedCopy(context, target, [
-          direction[0] * spacingMm * i,
-          direction[1] * spacingMm * i,
-          direction[2] * spacingMm * i,
-        ]),
+        await translatedCopy(
+          context,
+          target,
+          [
+            direction[0] * spacingMm * i,
+            direction[1] * spacingMm * i,
+            direction[2] * spacingMm * i,
+          ],
+          { featureId: request.featureId, index: i },
+        ),
       );
     }
   } else {
@@ -296,9 +333,194 @@ export async function computePatternTransformScene(
           z: mm(axisOrigin[2]),
         },
         rotation: { axis, angle: angle(i * step, "rad") },
+        instance: { featureId: request.featureId, index: i },
       });
       copies.push(placed.solid);
     }
+  }
+  const merged = await context.request("solid.union", { operands: copies });
+  return {
+    measurement: await measure(context, merged.solid),
+    solid: merged.solid,
+  };
+}
+
+/** The bridge's on-plane tolerance for the face's tessellated region. */
+const PATTERN_FACE_COPLANAR_TOLERANCE_MM = 1e-6;
+
+/** The bridge's barycentric slack for the point-in-region test. */
+const PATTERN_FACE_CONTAINMENT_EPSILON = 1e-9;
+
+/** The tessellation's triangles as world-space vertex triples. */
+function trianglesOf(
+  tessellation: Tessellation,
+): readonly [DatumVec3, DatumVec3, DatumVec3][] {
+  const { positions, indices } = tessellation;
+  const vertex = (index: number): DatumVec3 => [
+    positions[index * 3] ?? 0,
+    positions[index * 3 + 1] ?? 0,
+    positions[index * 3 + 2] ?? 0,
+  ];
+  const triangles: [DatumVec3, DatumVec3, DatumVec3][] = [];
+  for (let triangle = 0; triangle < indices.length / 3; triangle += 1) {
+    triangles.push([
+      vertex(indices[triangle * 3] ?? 0),
+      vertex(indices[triangle * 3 + 1] ?? 0),
+      vertex(indices[triangle * 3 + 2] ?? 0),
+    ]);
+  }
+  return triangles;
+}
+
+/** Whether `point` lies on the plane through `origin` with unit `normal`. */
+function onPlane(
+  point: DatumVec3,
+  origin: DatumVec3,
+  normal: DatumVec3,
+): boolean {
+  return (
+    Math.abs(datumDot(datumSubtract(point, origin), normal)) <=
+    PATTERN_FACE_COPLANAR_TOLERANCE_MM
+  );
+}
+
+/**
+ * Whether `point` — taken as coplanar with the triangle — lies inside
+ * it (the barycentric test, edges inclusive within the containment
+ * epsilon). A degenerate triangle contains nothing.
+ */
+function triangleContains(
+  [a, b, c]: readonly [DatumVec3, DatumVec3, DatumVec3],
+  point: DatumVec3,
+): boolean {
+  const ab = datumSubtract(b, a);
+  const ac = datumSubtract(c, a);
+  const ap = datumSubtract(point, a);
+  const d00 = datumDot(ab, ab);
+  const d01 = datumDot(ab, ac);
+  const d11 = datumDot(ac, ac);
+  const d20 = datumDot(ap, ab);
+  const d21 = datumDot(ap, ac);
+  const denominator = d00 * d11 - d01 * d01;
+  if (Math.abs(denominator) < 1e-18) return false;
+  const w1 = (d11 * d20 - d01 * d21) / denominator;
+  const w2 = (d00 * d21 - d01 * d20) / denominator;
+  return (
+    w1 >= -PATTERN_FACE_CONTAINMENT_EPSILON &&
+    w2 >= -PATTERN_FACE_CONTAINMENT_EPSILON &&
+    w1 + w2 <= 1 + PATTERN_FACE_CONTAINMENT_EPSILON
+  );
+}
+
+/**
+ * The bounding face's plane: the resolved face's centroid as the origin,
+ * the unit normal of the tessellated triangle that carries that centroid
+ * (on its plane and inside it), and the session's deterministic in-plane
+ * x axis (`inPlaneXAxisOf` — the same frame the session's face-datum
+ * planes carry, stable under float noise). `null` when no triangle
+ * carries the centroid — a curved or non-convex face whose plane cannot
+ * resolve honestly.
+ */
+function patternFacePlaneOf(
+  triangles: readonly [DatumVec3, DatumVec3, DatumVec3][],
+  centroid: DatumVec3,
+): ResolvedDatumPlane | null {
+  for (const triangle of triangles) {
+    const [a, b, c] = triangle;
+    const normal = unitDatumVec3(
+      datumCross(datumSubtract(b, a), datumSubtract(c, a)),
+      "face normal",
+    );
+    if (!normal.ok) continue;
+    if (!onPlane(centroid, a, normal.value)) continue;
+    if (!triangleContains(triangle, centroid)) continue;
+    const frame = orthonormalDatumFrame(
+      centroid,
+      normal.value,
+      inPlaneXAxisOf(normal.value),
+    );
+    return frame.ok ? frame.value : null;
+  }
+  return null;
+}
+
+/**
+ * Computes one patternFace body — the bridge's `runPatternFaceOperation`
+ * composition over the target's CURRENT solid: the face reference
+ * resolved against the target's topology snapshot (the topology cuts'
+ * resolution), the face's plane, its tessellated region (the target's
+ * triangles on that plane), the shared
+ * `planArrayPatternInstances` grid clipped to the region, one
+ * `solid.transform` copy per qualifying non-origin point, one
+ * `solid.union`. Fewer than two qualifying points refuse — the document
+ * pass falls back to the target's scene.
+ */
+export async function computePatternFaceScene(
+  context: ComputationContext,
+  request: PatternFaceSceneRequest,
+  computed: ComputedSolids = NO_COMPUTED_SOLIDS,
+): Promise<ComposedSceneResult> {
+  const target = await operandSolid(
+    context,
+    request.target,
+    computed,
+    "target",
+  );
+  const { ordinals, snapshot } = await resolveReferenceOrdinals(
+    context,
+    target,
+    request.targetBodyId,
+    [request.face],
+    "face",
+    "patternFace",
+  );
+  const faceOrdinal = ordinals[0];
+  const centroid = snapshot.entities.find(
+    (entity) => entity.kind === "face" && entity.ordinal === faceOrdinal,
+  )?.geometry.centroidAbsoluteMm;
+  if (centroid === undefined) {
+    throw new Error(
+      "face-plane-unresolved: the patternFace's bounding face carries no centroid in the target's topology snapshot.",
+    );
+  }
+  const { tessellation } = await context.request("solid.tessellate", {
+    solid: target,
+  });
+  const triangles = trianglesOf(tessellation);
+  const plane = patternFacePlaneOf(triangles, centroid);
+  if (plane === null) {
+    throw new Error(
+      "face-plane-unresolved: the patternFace's bounding face resolves to no single plane (a curved or non-convex face) — bound the grid with a planar face.",
+    );
+  }
+  const xAxis = plane.xAxis;
+  const yAxis = datumCross(plane.normal, xAxis);
+  const region = triangles.filter((triangle) =>
+    triangle.every((vertex) => onPlane(vertex, plane.origin, plane.normal)),
+  );
+  const plan = planArrayPatternInstances(request.legs);
+  const copies: WorkerSolidId[] = [];
+  for (const [ordinal, offset] of plan.offsets.entries()) {
+    const world: DatumVec3 = [
+      offset[0] * xAxis[0] + offset[1] * yAxis[0],
+      offset[0] * xAxis[1] + offset[1] * yAxis[1],
+      offset[0] * xAxis[2] + offset[1] * yAxis[2],
+    ];
+    const point = datumAdd(plane.origin, world);
+    if (!region.some((triangle) => triangleContains(triangle, point))) {
+      continue;
+    }
+    copies.push(
+      await translatedCopy(context, target, world, {
+        featureId: request.featureId,
+        index: ordinal,
+      }),
+    );
+  }
+  if (copies.length < 2) {
+    throw new Error(
+      `patternFace/no-instance: the patternFace placed ${String(copies.length)} grid point(s) inside the bounding face (a pattern needs at least 2) — move the grid onto the face, widen its spacing, or raise its counts.`,
+    );
   }
   const merged = await context.request("solid.union", { operands: copies });
   return {

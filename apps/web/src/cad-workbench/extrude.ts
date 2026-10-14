@@ -310,6 +310,8 @@ export interface ExtrudeSceneRequest {
   readonly taperRad?: number;
   /** The extrude feature's output body id (the rendered body). */
   readonly bodyId: string;
+  /** The extrude feature's id (the topological-naming namespace). */
+  readonly featureId?: string;
 }
 
 function signedLengthMm(value: AnyDimensionalValue): number | null {
@@ -384,19 +386,15 @@ export function sceneOperandOfBody(
       : null;
   }
   // The move-body feature is the translate kind carrying the authored
-  // parameter pair (the move reader's own gate — and it too serves only
-  // the FIRST qualifying translate); a display-state translate (fewer
-  // parameter inputs — the fixture plate's chain) stays data-only.
+  // parameter pair (the move reader's own gate — and the move reader
+  // serves EVERY qualifying translate, each its own moved body); a
+  // display-state translate (fewer parameter inputs — the fixture plate's
+  // chain) stays data-only.
   if (
     producer.kind === "translate" &&
     producer.inputs.filter((ref) => ref.kind === "parameter").length >= 4
   ) {
-    const served = document.features.find(
-      (entry) =>
-        entry.kind === "translate" &&
-        entry.inputs.filter((ref) => ref.kind === "parameter").length >= 4,
-    );
-    return served?.id === producer.id ? { kind: "computed", bodyId } : null;
+    return { kind: "computed", bodyId };
   }
   return null;
 }
@@ -405,10 +403,12 @@ export function sceneOperandOfBody(
  * Feature kinds whose readers emit a scene entry for EVERY feature of the
  * kind — so a body produced by any of them may serve as a computed
  * operand: the independent scenes' per-feature loop (revolve, sweep,
- * loft, helix) and the plural request readers (the booleans, the
- * duplicates, the transform patterns). Deliberately OUT: extrude (rides
- * its raw derivation — the datum re-resolution the composition order
- * demands), sheets (an open shell carries no solid a boolean may
+ * loft, helix, the box/sphere/cylinder/cone primitives) and the plural
+ * request readers (the booleans, the duplicates, the transform patterns,
+ * the fillet/chamfer/shell topology cuts, the moveFace/deleteFace/
+ * replaceFace face ops, patternFace). Deliberately OUT: extrude
+ * (rides its raw derivation — the datum re-resolution the composition
+ * order demands), sheets (an open shell carries no solid a boolean may
  * consume), wires/curves/sections (no volume), and the data-only kinds
  * (rotate, the short translate) the callers' own comments decline.
  */
@@ -417,12 +417,23 @@ const EVERY_FEATURE_OPERAND_PRODUCER_KINDS: ReadonlySet<string> = new Set([
   "sweep",
   "loft",
   "helix",
+  "box",
+  "sphere",
+  "cylinder",
+  "cone",
   "union",
   "subtract",
   "intersect",
   "duplicate",
   "patternLinear",
   "patternCircular",
+  "fillet",
+  "chamfer",
+  "shell",
+  "moveFace",
+  "deleteFace",
+  "replaceFace",
+  "patternFace",
 ]);
 
 /**
@@ -431,8 +442,8 @@ const EVERY_FEATURE_OPERAND_PRODUCER_KINDS: ReadonlySet<string> = new Set([
  * body ops, the mirror, and the legacy pattern readers. A body produced
  * by a later feature of the same kind carries no scene entry — the seam
  * declines it rather than advertise an operand the document pass cannot
- * supply. Kinds with NO scene producer at all (the primitives, the face
- * ops, patternFace, shell) are out of both sets for the same reason.
+ * supply. Kinds with NO scene producer at all are out of both sets for
+ * the same reason.
  */
 const FIRST_FEATURE_OPERAND_PRODUCER_KINDS: ReadonlySet<string> = new Set([
   "thread",
@@ -536,6 +547,7 @@ export function extrudeSceneRequestOfFeature(
     distanceMm,
     ...(taperRad === undefined ? {} : { taperRad }),
     bodyId,
+    featureId: feature.id,
   };
 }
 

@@ -233,6 +233,8 @@ import {
 } from "@slopcad/cad-core";
 import type {
   BRepBuilderAPI_MakeEdge,
+  BRepOffsetAPI_MakePipeShell,
+  BRepPrimAPI_MakePrism,
   gp_Pnt,
   OpenCascadeInstance,
   TopoDS_Edge,
@@ -339,9 +341,22 @@ import {
 } from "./occt-runtime";
 import {
   OCCT_TOPOLOGY_DEFAULT_KINDS,
-  OCCT_TOPOLOGY_IDENTITY_SCHEMA,
+  OCCT_TOPOLOGY_IDENTITY_SCHEMAS,
+  type OcctCreatedSource,
+  type OcctFaceNames,
+  type OcctHistoryBuilder,
+  type OcctNamedFace,
+  occtCarryFaceNames,
+  occtContainsSame,
+  occtDisposeHistory,
+  occtDistinctSubShapes,
   occtEdgesAtOrdinals,
   occtFacesAtOrdinals,
+  occtHistoryFaceNamer,
+  occtListShapes,
+  occtNameFaces,
+  occtNameHistoryFaces,
+  occtNamedEntitiesOf,
   occtShapeTopology,
 } from "./occt-topology";
 import {
@@ -511,10 +526,39 @@ export const OCCT_TESSELLATION_ANGULAR_TOLERANCE_RAD = 0.5;
  * `volume` and every solid-consuming operation decline it structurally
  * (an open shell bounds no material; a closed-solid approximation of one
  * would be a fabrication, the no-silent-wrong-number rule).
+ *
+ * `faceNames` (Phase N1) carries the construction names of the shape's
+ * faces, in collapsed face-exploration order, when the producing operation
+ * named them by history (primitives, extrude, revolve); `null` for every
+ * operation whose history is not tracked yet — its snapshot reports the
+ * legacy hash identities.
  */
 interface SolidPayload {
   shape: TopoDS_Shape | null;
   sheet: boolean;
+  faceNames: OcctFaceNames | null;
+}
+
+/** A profile-wire edge as the wire holds it, keyed by its loop segment. */
+interface KeyedProfileEdge {
+  readonly edge: TopoDS_Shape;
+  readonly key: string;
+}
+
+/**
+ * The sweep builders' shared history surface (Phase N1/N2b): the prism,
+ * the revolve and the pipe shell all report each profile edge's lateral
+ * faces as `Generated` and their end caps as `FirstShape`/`LastShape`.
+ */
+type SweepHistoryBuilder = Pick<
+  BRepOffsetAPI_MakePipeShell,
+  "Generated" | "FirstShape" | "LastShape"
+>;
+
+/** A built shape and its construction face names (Phase N1). */
+interface NamedShape {
+  readonly shape: TopoDS_Shape;
+  readonly faceNames: OcctFaceNames | null;
 }
 
 /**
@@ -699,13 +743,14 @@ export interface OcctKernel extends GeometryKernel {
 /**
  * Structural type of the pairwise boolean constructors this adapter folds
  * over (`BRepAlgoAPI_Fuse/Cut/Common`): embind classes satisfy it without
- * any casts, keeping the fold kernel-side generic.
+ * any casts, keeping the fold kernel-side generic. The builder's history
+ * (Phase N2) carries the operands' face names through each fold step.
  */
 interface BooleanBuilder {
   new (
     shape1: TopoDS_Shape,
     shape2: TopoDS_Shape,
-  ): {
+  ): OcctHistoryBuilder & {
     IsDone(): boolean;
     Shape(): TopoDS_Shape;
     delete(): void;
@@ -725,8 +770,26 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const oc = runtime[RUNTIME_BRAND];
   const tag = createSolidTag<SolidPayload>();
 
-  const wrapSolid = (shape: TopoDS_Shape): KernelSolid =>
-    tag.wrap({ shape, sheet: shapeIsSheet(shape, oc) });
+  const wrapSolid = (
+    shape: TopoDS_Shape,
+    faceNames: OcctFaceNames | null = null,
+  ): KernelSolid =>
+    tag.wrap({ shape, sheet: shapeIsSheet(shape, oc), faceNames });
+
+  /**
+   * Names a builder's own result faces from its history (Phase N1), freeing
+   * the history faces either way.
+   */
+  const namedByHistory = (
+    shape: TopoDS_Shape,
+    history: readonly OcctNamedFace[],
+  ): OcctFaceNames | null => {
+    try {
+      return occtNameFaces(oc, shape, occtHistoryFaceNamer(history));
+    } finally {
+      occtDisposeHistory(history);
+    }
+  };
 
   const shapeOf = (
     solid: KernelSolid,
@@ -1000,8 +1063,70 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     return shape;
   };
 
-  const newBox = (width: number, depth: number, height: number) =>
-    buildShape(new oc.BRepPrimAPI_MakeBox(width, depth, height));
+  /**
+   * The box with its faces named by construction (Phase N1): the maker's
+   * own face accessors, mapped to the box frame's `±X`/`±Y`/`±Z` roles
+   * (probed: OCCT's Back/Front are the x = 0 / x = width faces, Left/Right
+   * the y = 0 / y = depth faces).
+   */
+  const newBox = (
+    width: number,
+    depth: number,
+    height: number,
+    prefix: string,
+  ): NamedShape => {
+    const maker = new oc.BRepPrimAPI_MakeBox(width, depth, height);
+    try {
+      const shape = maker.Shape();
+      const history: OcctNamedFace[] = [
+        { face: maker.BackFace(), name: `${prefix}/-X` },
+        { face: maker.FrontFace(), name: `${prefix}/+X` },
+        { face: maker.LeftFace(), name: `${prefix}/-Y` },
+        { face: maker.RightFace(), name: `${prefix}/+Y` },
+        { face: maker.BottomFace(), name: `${prefix}/-Z` },
+        { face: maker.TopFace(), name: `${prefix}/+Z` },
+      ];
+      return { shape, faceNames: namedByHistory(shape, history) };
+    } finally {
+      maker.delete();
+    }
+  };
+
+  /**
+   * The role namer of the z-axis cylinder and cone (Phase N1): the
+   * `BRepPrimAPI_MakeOneAxis` makers expose only the lateral `Face()` and
+   * no cap accessors, and the cone is not a maker at all (`newCone` is a
+   * `MakeRevol` composition), so roles are classified in the construction
+   * frame — a planar face on the `z = 0` base is `start`, any other planar
+   * face `end`, every curved face `lateral`. Classification compares
+   * against the primitive's own height; the NAMES carry no dimension.
+   */
+  const primitiveRoleNamer =
+    (prefix: string, height: number) =>
+    (face: TopoDS_Shape): string => {
+      const occFace = oc.TopoDS.Face(face);
+      const adaptor = new oc.BRepAdaptor_Surface(occFace, true);
+      try {
+        if (adaptor.GetType() !== oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+          return `${prefix}/lateral`;
+        }
+      } finally {
+        adaptor.delete();
+        occFace.delete();
+      }
+      const props = new oc.GProp_GProps();
+      try {
+        oc.BRepGProp.SurfaceProperties(face, props, true, false);
+        const com = props.CentreOfMass();
+        try {
+          return `${prefix}/${com.Z() < height / 2 ? "start" : "end"}`;
+        } finally {
+          com.delete();
+        }
+      } finally {
+        props.delete();
+      }
+    };
 
   const newSphere = (radius: number) =>
     buildShape(new oc.BRepPrimAPI_MakeSphere(radius));
@@ -1112,20 +1237,34 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const profileWire = (
     loop: ProfileExtrudeInput["loop"],
     z = 0,
+    keyed?: KeyedProfileEdge[],
   ): TopoDS_Wire => {
     const mkWire = new oc.BRepBuilderAPI_MakeWire();
     const edges: TopoDS_Edge[] = [];
     const disposeWireAndEdges = (): void => {
       mkWire.delete();
       for (const edge of edges) edge.delete();
+      if (keyed !== undefined) {
+        for (const entry of keyed) entry.edge.delete();
+        keyed.length = 0;
+      }
     };
+    // Phase N1: `keyed` collects each edge AS THE WIRE HOLDS IT
+    // (`MakeWire.Edge()` — the wire may rebuild an added edge onto shared
+    // vertices), keyed by its loop-segment index; a spline's Bézier pieces
+    // key `<index>.<piece>`.
+    let segmentKey = "0";
     const addEdge = (mkEdge: BRepBuilderAPI_MakeEdge): void => {
       const edge = mkEdge.Edge();
       mkEdge.delete();
       mkWire.Add(edge);
       edges.push(edge);
+      if (keyed !== undefined) {
+        keyed.push({ edge: mkWire.Edge(), key: segmentKey });
+      }
     };
-    for (const segment of loop) {
+    for (const [segmentIndex, segment] of loop.entries()) {
+      segmentKey = String(segmentIndex);
       if (segment.kind === "line") {
         const p1 = new oc.gp_Pnt(segment.start[0], segment.start[1], z);
         const p2 = new oc.gp_Pnt(segment.end[0], segment.end[1], z);
@@ -1162,7 +1301,10 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       }
       if (segment.kind === "spline") {
         const chain = splineBezierChain(segment.flavor, segment.points);
-        for (const piece of chain) {
+        for (const [pieceIndex, piece] of chain.entries()) {
+          if (chain.length > 1) {
+            segmentKey = `${String(segmentIndex)}.${String(pieceIndex)}`;
+          }
           const array = new oc.NCollection_Array1_gp_Pnt(1, 4);
           array.SetValue(1, new oc.gp_Pnt(piece.b0.x, piece.b0.y, z));
           array.SetValue(2, new oc.gp_Pnt(piece.b1.x, piece.b1.y, z));
@@ -1223,6 +1365,23 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * {@link profileFace} for a keyed profile (Phase N1): a face that does
+   * not build also frees the keyed edges `profileWire` collected, so the
+   * error path disposes exactly what the `IsDone` failures do.
+   */
+  const keyedProfileFace = (
+    wire: TopoDS_Shape,
+    keyed: readonly KeyedProfileEdge[],
+  ): TopoDS_Shape => {
+    try {
+      return profileFace(wire);
+    } catch (error) {
+      for (const entry of keyed) entry.edge.delete();
+      throw error;
+    }
+  };
+
+  /**
    * Extracts the face of a UV-bounded `BRepBuilderAPI_MakeFace` build
    * (Phase 48's `createSheet` patch route), disposing the maker either
    * way and failing total inside the caller's no-throw boundary.
@@ -1241,6 +1400,86 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   };
 
   /**
+   * Reads a sweep builder's history into named faces (Phase N1): each
+   * keyed profile edge's `Generated` faces are `<prefix>/side/<key>`, and
+   * with `caps` the `FirstShape`/`LastShape` faces are `<prefix>/start` /
+   * `<prefix>/end`. The keyed edges are freed here.
+   *
+   * Probed: a FULL revolution rebuilds the planar faces its
+   * axis-perpendicular edges sweep (`IsDeleted(edge)`, empty `Generated`),
+   * while the circles its vertices sweep survive. Such an edge's face is
+   * then the one unclaimed result face bounded by every circle its
+   * vertices generated; zero or several candidates leave it unnamed (and
+   * so the whole solid unnamed) — never a guess.
+   */
+  const sweepHistory = (
+    maker: SweepHistoryBuilder,
+    shape: TopoDS_Shape,
+    keyed: readonly KeyedProfileEdge[],
+    prefix: string,
+    caps: boolean,
+  ): OcctNamedFace[] => {
+    const FACE = oc.TopAbs_ShapeEnum.TopAbs_FACE;
+    const EDGE = oc.TopAbs_ShapeEnum.TopAbs_EDGE;
+    const history: OcctNamedFace[] = [];
+    const rebuilt: KeyedProfileEdge[] = [];
+    for (const entry of keyed) {
+      const generated = maker.Generated(entry.edge);
+      const faces = occtListShapes(oc, generated, FACE);
+      generated.delete();
+      if (faces.length === 0) {
+        rebuilt.push(entry);
+        continue;
+      }
+      history.push(
+        ...occtNameHistoryFaces(
+          oc,
+          shape,
+          faces,
+          `${prefix}/side/${entry.key}`,
+        ),
+      );
+      entry.edge.delete();
+    }
+    if (caps) {
+      history.push({ face: maker.FirstShape(), name: `${prefix}/start` });
+      history.push({ face: maker.LastShape(), name: `${prefix}/end` });
+    }
+    for (const { edge, key } of rebuilt) {
+      const circles: TopoDS_Shape[] = [];
+      for (const vertex of occtDistinctSubShapes(
+        oc,
+        edge,
+        oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
+      )) {
+        const generated = maker.Generated(vertex);
+        circles.push(...occtListShapes(oc, generated, EDGE));
+        generated.delete();
+        vertex.delete();
+      }
+      edge.delete();
+      if (circles.length === 0) continue;
+      const candidates = occtDistinctSubShapes(oc, shape, FACE).filter(
+        (face) => {
+          const fits =
+            !history.some((entry) => entry.face.IsSame(face)) &&
+            circles.every((circle) => occtContainsSame(oc, face, circle, EDGE));
+          if (!fits) face.delete();
+          return fits;
+        },
+      );
+      for (const circle of circles) circle.delete();
+      const [only, ...others] = candidates;
+      if (only !== undefined && others.length === 0) {
+        history.push({ face: only, name: `${prefix}/side/${key}` });
+      } else {
+        for (const face of candidates) face.delete();
+      }
+    }
+    return history;
+  };
+
+  /**
    * The exact prism (Phase 26.1): profile wire → face →
    * `BRepPrimAPI_MakePrism` along local z, then the placement transform
    * (rotation first about the world-origin axis, translation second).
@@ -1254,8 +1493,10 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const newExtrusion = (
     input: ProfileExtrudeInput,
     height: number,
-  ): TopoDS_Shape => {
-    const wire = profileWire(input.loop);
+  ): NamedShape => {
+    const keyed: KeyedProfileEdge[] = [];
+    const wire = profileWire(input.loop, 0, keyed);
+    const prefix = input.featureId ?? "extrude";
     if (input.sheet === true) {
       const sweep =
         input.direction === -1
@@ -1266,11 +1507,15 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       sweep.delete();
       if (!mkPrism.IsDone()) {
         mkPrism.delete();
+        for (const entry of keyed) entry.edge.delete();
         throw new Error("the sheet prism did not build.");
       }
-      return buildShape(mkPrism);
+      const shape = mkPrism.Shape();
+      const history = sweepHistory(mkPrism, shape, keyed, prefix, false);
+      mkPrism.delete();
+      return { shape, faceNames: namedByHistory(shape, history) };
     }
-    const face = profileFace(wire);
+    const face = keyedProfileFace(wire, keyed);
     const sweep =
       input.direction === -1
         ? new oc.gp_Vec(0, 0, -height)
@@ -1280,9 +1525,13 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     sweep.delete();
     if (!mkPrism.IsDone()) {
       mkPrism.delete();
+      for (const entry of keyed) entry.edge.delete();
       throw new Error("the prism did not build.");
     }
-    return buildShape(mkPrism);
+    const shape = mkPrism.Shape();
+    const history = sweepHistory(mkPrism, shape, keyed, prefix, true);
+    mkPrism.delete();
+    return { shape, faceNames: namedByHistory(shape, history) };
   };
 
   /**
@@ -1299,12 +1548,17 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
    * cylindrical, the engine's draft domain. The caller has already run
    * the segment gate, so the surface-type classification below is a
    * defensive re-check, not the gate.
+   *
+   * Phase N2b: the drafter reports each drafted wall as `Generated` by its
+   * face (its `Modified` list stays empty, probed) and the caps as
+   * `Modified`, so every face keeps its name through the draft.
    */
   const draftPrismFaces = (
-    prism: TopoDS_Shape,
+    named: NamedShape,
     taper: number,
     direction: 1 | -1,
-  ): ParseResult<TopoDS_Shape, KernelError> => {
+  ): ParseResult<NamedShape, KernelError> => {
+    const prism = named.shape;
     const neutralOrigin = new oc.gp_Pnt(0, 0, 0);
     const neutralNormal = new oc.gp_Dir(0, 0, 1);
     const neutral = new oc.gp_Pln(neutralOrigin, neutralNormal);
@@ -1356,13 +1610,20 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       explorer.Next();
     }
     explorer.delete();
-    let result: ParseResult<TopoDS_Shape, KernelError>;
+    let result: ParseResult<NamedShape, KernelError>;
     if (failure !== null) {
       drafter.delete();
       result = fail(failure);
     } else {
-      // buildShape extracts Shape() and deletes the drafter exactly once.
-      result = ok(buildShape(drafter));
+      const drafted = drafter.Shape();
+      const faceNames = carryCreatedNames(
+        drafter,
+        drafted,
+        named,
+        createdSourcesOf(named, "face", null, "generated"),
+      );
+      drafter.delete();
+      result = ok({ shape: drafted, faceNames });
     }
     pull.delete();
     neutral.delete();
@@ -1381,8 +1642,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const newRevolution = (
     input: ProfileRevolveInput,
     sweep: number,
-  ): TopoDS_Shape => {
-    const wire = profileWire(input.loop);
+  ): NamedShape => {
+    const keyed: KeyedProfileEdge[] = [];
+    const wire = profileWire(input.loop, 0, keyed);
+    // Phase 48 sheet variant: revolve the WIRE — the surface of revolution
+    // the loop's own boundary sweeps, no start/end meridian caps (probed:
+    // the π-swept 5..10×0..5 rectangle answers exactly walls + annuli).
+    const carrier: TopoDS_Shape =
+      input.sheet === true ? wire : keyedProfileFace(wire, keyed);
     const [px, py] = input.axis.point;
     const [dx, dy] = input.axis.direction;
     const origin = new oc.gp_Pnt(px, py, 0);
@@ -1390,19 +1657,26 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     const axis = new oc.gp_Ax1(origin, direction);
     origin.delete();
     direction.delete();
-    // Phase 48 sheet variant: revolve the WIRE — the surface of revolution
-    // the loop's own boundary sweeps, no start/end meridian caps (probed:
-    // the π-swept 5..10×0..5 rectangle answers exactly walls + annuli).
-    const carrier: TopoDS_Shape =
-      input.sheet === true ? wire : profileFace(wire);
     const mkRevol = new oc.BRepPrimAPI_MakeRevol(carrier, axis, sweep, false);
     axis.delete();
     carrier.delete();
     if (!mkRevol.IsDone()) {
       mkRevol.delete();
+      for (const entry of keyed) entry.edge.delete();
       throw new Error("the revolution did not build.");
     }
-    return buildShape(mkRevol);
+    // A full turn closes on itself: its start/end meridians are not faces
+    // of the result, so only a partial sweep names caps.
+    const shape = mkRevol.Shape();
+    const history = sweepHistory(
+      mkRevol,
+      shape,
+      keyed,
+      input.featureId ?? "revolve",
+      input.sheet !== true && sweep < Math.PI * 2,
+    );
+    mkRevol.delete();
+    return { shape, faceNames: namedByHistory(shape, history) };
   };
 
   /**
@@ -1586,9 +1860,10 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     return wire;
   };
 
-  const newSweep = (input: ProfileSweepInput): TopoDS_Shape => {
+  const newSweep = (input: ProfileSweepInput): NamedShape => {
     const spine = sweepSpineWire(input.path);
-    const profile = profileWire(input.loop);
+    const keyed: KeyedProfileEdge[] = [];
+    const profile = profileWire(input.loop, 0, keyed);
     const mkPipe = new oc.BRepOffsetAPI_MakePipeShell(spine);
     mkPipe.SetMode(true);
     mkPipe.Add(profile, false, false);
@@ -1604,9 +1879,22 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     profile.delete();
     if (!ready || !built) {
       mkPipe.delete();
+      for (const entry of keyed) entry.edge.delete();
       throw new Error("the swept pipe did not build into a solid.");
     }
-    return buildShape(mkPipe);
+    // Phase N2b: the pipe shell names like the prism — each profile edge's
+    // `Generated` wall is `<feature>/side/<key>`, the solid's caps
+    // `<feature>/start` / `<feature>/end` (probed: one face per edge).
+    const shape = mkPipe.Shape();
+    const history = sweepHistory(
+      mkPipe,
+      shape,
+      keyed,
+      input.featureId ?? "sweep",
+      input.sheet !== true,
+    );
+    mkPipe.delete();
+    return { shape, faceNames: namedByHistory(shape, history) };
   };
 
   /**
@@ -1633,8 +1921,9 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
   const newLoft = (
     sections: readonly ProfileLoftSectionInput[],
     stations: readonly number[],
-    sheetLoft?: boolean,
-  ): TopoDS_Shape => {
+    sheetLoft: boolean,
+    prefix: string,
+  ): NamedShape => {
     // Phase 48: isSolid=false is the SHEET form — the ruled walls between
     // consecutive loops, no first/last caps (the probed 20×10 stations at
     // distance 8 answer exactly perimeter × distance).
@@ -1651,17 +1940,26 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       mkLoft.CheckCompatibility(false);
     }
     const wires: TopoDS_Wire[] = [];
+    const keyedSections: KeyedProfileEdge[][] = [];
+    const freeKeyed = (): void => {
+      for (const keyed of keyedSections) {
+        for (const entry of keyed) entry.edge.delete();
+      }
+    };
     for (let i = 0; i < sections.length; i += 1) {
       const section = sections[i];
       const z = stations[i];
       if (section === undefined || z === undefined) {
         mkLoft.delete();
         for (const wire of wires) wire.delete();
+        freeKeyed();
         throw new Error(
           "Invariant violation: validated loft sections are dense.",
         );
       }
-      let wire = profileWire(section.loop, z);
+      const keyed: KeyedProfileEdge[] = [];
+      keyedSections.push(keyed);
+      let wire = profileWire(section.loop, z, keyed);
       if (
         authoredCorrespondence &&
         !(polygonSignedArea(tessellateProfileLoop(section.loop)) > 0)
@@ -1683,9 +1981,59 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
     for (const wire of wires) wire.delete();
     if (!mkLoft.IsDone()) {
       mkLoft.delete();
+      freeKeyed();
       throw new Error("the ruled loft did not build into a solid.");
     }
-    return buildShape(mkLoft);
+    // Phase N2b: a section edge `Generated`s its whole wall column — the
+    // ruled wall of every span (probed: two faces per edge on a
+    // three-section loft, for every section). Each section in order claims
+    // the column walls not yet named; a wall's span is the station
+    // interval holding its centre (the loft is still in its local frame),
+    // so span s's wall of segment k is `<feature>/side/<s>/<key>`. A
+    // repartitioned (unequal-count) collection whose walls no section edge
+    // reports stays unnamed.
+    const shape = mkLoft.Shape();
+    const FACE = oc.TopAbs_ShapeEnum.TopAbs_FACE;
+    const history: OcctNamedFace[] = [];
+    if (!sheetLoft) {
+      history.push({ face: mkLoft.FirstShape(), name: `${prefix}/start` });
+      history.push({ face: mkLoft.LastShape(), name: `${prefix}/end` });
+    }
+    for (const keyed of keyedSections) {
+      for (const entry of keyed) {
+        const generated = mkLoft.Generated(entry.edge);
+        const walls = occtListShapes(oc, generated, FACE).filter((face) => {
+          const fresh = !history.some((named) => named.face.IsSame(face));
+          if (!fresh) face.delete();
+          return fresh;
+        });
+        generated.delete();
+        const bySpan = new Map<number, TopoDS_Shape[]>();
+        for (const wall of walls) {
+          const asFace = oc.TopoDS.Face(wall);
+          const z = faceNormalAndCenter(asFace).center[2];
+          asFace.delete();
+          let span = 0;
+          while (span < stations.length - 2 && (stations[span + 1] ?? z) <= z) {
+            span += 1;
+          }
+          bySpan.set(span, [...(bySpan.get(span) ?? []), wall]);
+        }
+        for (const [span, spanWalls] of bySpan) {
+          history.push(
+            ...occtNameHistoryFaces(
+              oc,
+              shape,
+              spanWalls,
+              `${prefix}/side/${String(span)}/${entry.key}`,
+            ),
+          );
+        }
+      }
+    }
+    freeKeyed();
+    mkLoft.delete();
+    return { shape, faceNames: namedByHistory(shape, history) };
   };
 
   /**
@@ -1779,42 +2127,151 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
    * Folds a pairwise boolean constructor over the operands (the binding has
    * no n-ary builder): `b(b(b(a₀, a₁), a₂), …)`. Operand payloads are never
    * deleted here — only fold intermediates, each as soon as the next step
-   * has consumed it.
+   * has consumed it. Each step carries the face names of both sides
+   * through the builder's history (Phase N2: the tool's names come from
+   * its own feature); one unnamed operand leaves the result unnamed.
    */
-  const foldBoolean = (
-    shapes: readonly TopoDS_Shape[],
+  const foldNamedBoolean = (
+    operands: readonly NamedShape[],
     Builder: BooleanBuilder,
     operation: string,
-  ): TopoDS_Shape => {
-    const first = shapes[0];
+  ): NamedShape => {
+    const first = operands[0];
     if (first === undefined) {
       throw new Error(
         "Invariant violation: operand validation guarantees a non-empty list.",
       );
     }
     let acc = first;
-    for (let i = 1; i < shapes.length; i += 1) {
-      const operand = shapes[i];
+    for (let i = 1; i < operands.length; i += 1) {
+      const operand = operands[i];
       if (operand === undefined) {
-        if (i > 1) acc.delete();
+        if (i > 1) acc.shape.delete();
         throw new Error(
           "Invariant violation: the operand list was validated to be dense.",
         );
       }
-      const algo = new Builder(acc, operand);
+      const algo = new Builder(acc.shape, operand.shape);
       if (!algo.IsDone()) {
         algo.delete();
-        if (i > 1) acc.delete();
+        if (i > 1) acc.shape.delete();
         throw new Error(
           `${operation}: the boolean build of operand ${i + 1} did not complete.`,
         );
       }
       const next = algo.Shape();
+      const faceNames = occtCarryFaceNames(oc, algo, next, [acc, operand]);
       algo.delete();
-      if (i > 1) acc.delete();
-      acc = next;
+      if (i > 1) acc.shape.delete();
+      acc = { shape: next, faceNames };
     }
     return acc;
+  };
+
+  /** {@link foldNamedBoolean} over unnamed shapes: the shape alone. */
+  const foldBoolean = (
+    shapes: readonly TopoDS_Shape[],
+    Builder: BooleanBuilder,
+    operation: string,
+  ): TopoDS_Shape =>
+    foldNamedBoolean(
+      shapes.map((shape) => ({ shape, faceNames: null })),
+      Builder,
+      operation,
+    ).shape;
+
+  /** A solid handle's shape paired with its stored face names. */
+  const namedOf = (
+    solid: KernelSolid | undefined,
+    shape: TopoDS_Shape,
+  ): NamedShape => ({
+    shape,
+    faceNames:
+      solid === undefined ? null : (tag.unwrap(solid)?.faceNames ?? null),
+  });
+
+  /**
+   * The named sources a feature's created faces are named from (Phase
+   * N2): the target's entities of `kind` — restricted to `only` when given
+   * — each as `<role>/<entity name>` (a null role keeps the entity's own
+   * name: a draft's re-built walls are the same faces), read from the
+   * builder's `history` list. Null when the target is unnamed. The sources
+   * are caller-owned (freed by {@link carryCreatedNames}).
+   */
+  const createdSourcesOf = (
+    target: NamedShape,
+    kind: "face" | "edge" | "vertex",
+    role: string | null,
+    history: OcctCreatedSource["history"],
+    only?: readonly TopoDS_Shape[],
+  ): OcctCreatedSource[] | null => {
+    const entities = occtNamedEntitiesOf(
+      oc,
+      target.shape,
+      kind,
+      target.faceNames,
+    );
+    if (entities === null) return null;
+    const sources: OcctCreatedSource[] = [];
+    for (const entity of entities) {
+      if (only === undefined || only.some((s) => s.IsSame(entity.shape))) {
+        sources.push({
+          source: entity.shape,
+          name: role === null ? entity.name : `${role}/${entity.name}`,
+          history,
+        });
+      } else {
+        entity.shape.delete();
+      }
+    }
+    return sources;
+  };
+
+  /**
+   * The created-face sources of an edge blend (fillet, chamfer): the
+   * selected edges, and every vertex — the corner patches where three
+   * blended edges meet are generated from their vertex.
+   */
+  const edgeBlendSourcesOf = (
+    target: NamedShape,
+    edges: readonly TopoDS_Shape[],
+    role: string,
+  ): OcctCreatedSource[] | null => {
+    const fromEdges = createdSourcesOf(
+      target,
+      "edge",
+      role,
+      "generated",
+      edges,
+    );
+    if (fromEdges === null) return null;
+    const fromVertices = createdSourcesOf(target, "vertex", role, "generated");
+    return [...fromEdges, ...(fromVertices ?? [])];
+  };
+
+  /**
+   * One single-target history step's face names (Phase N2): the target's
+   * names carried by {@link occtCarryFaceNames}, the created faces named
+   * from `created` (null — an unnamed target — leaves the result unnamed).
+   * Frees the sources.
+   */
+  const carryCreatedNames = (
+    builder: OcctHistoryBuilder,
+    result: TopoDS_Shape,
+    target: NamedShape,
+    created: readonly OcctCreatedSource[] | null,
+    dropped: readonly TopoDS_Shape[] = [],
+  ): OcctFaceNames | null => {
+    try {
+      return created === null
+        ? null
+        : occtCarryFaceNames(oc, builder, result, [target], {
+            created,
+            dropped,
+          });
+    } finally {
+      for (const source of created ?? []) source.source.delete();
+    }
   };
 
   const volumeOfShape = (shape: TopoDS_Shape): number => {
@@ -1937,13 +2394,21 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
    * The post-conditions are the adapter's honesty, not the engine's: a
    * result that collapsed (non-positive volume) or changed nothing
    * (within the no-op floor) is refused structured.
+   *
+   * Phase N2b naming: the prism's far cap IS the moved face (it keeps the
+   * face's name), its walls are `<feature>/side/<edge name>` (each
+   * `Generated` by one of the face's edges), its near cap
+   * `<feature>/base/<face name>`; the fuse/cut then carries the target's
+   * and the prism's names together (the face's old position is consumed).
    */
   const moveFaceByDisplacement = (
     operation: string,
-    shape: TopoDS_Shape,
+    target: NamedShape,
     face: TopoDS_Face,
     displacement: readonly [number, number, number],
-  ): KernelResult<TopoDS_Shape> => {
+    prefix: string,
+  ): KernelResult<NamedShape> => {
+    const shape = target.shape;
     const [dx, dy, dz] = displacement;
     const { normal } = faceNormalAndCenter(face);
     const outOfMaterial =
@@ -1977,13 +2442,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       );
     }
     const swept = prism.Shape();
+    const sweptNames = movedPrismNames(prism, swept, target, face, prefix);
     prism.delete();
     const algo =
       outOfMaterial > 0
         ? new oc.BRepAlgoAPI_Fuse(shape, swept)
         : new oc.BRepAlgoAPI_Cut(shape, swept);
-    swept.delete();
     if (!algo.IsDone()) {
+      swept.delete();
       algo.delete();
       return fail(
         kernelError(
@@ -1993,7 +2459,15 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       );
     }
     const moved = algo.Shape();
+    const faceNames =
+      sweptNames === null
+        ? null
+        : occtCarryFaceNames(oc, algo, moved, [
+            target,
+            { shape: swept, faceNames: sweptNames },
+          ]);
     algo.delete();
+    swept.delete();
     const after = volumeOfShape(moved);
     if (!Number.isFinite(after) || !(after > 0)) {
       moved.delete();
@@ -2013,7 +2487,80 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         ),
       );
     }
-    return ok(moved);
+    return ok({ shape: moved, faceNames });
+  };
+
+  /**
+   * Carried names under a feature role's prefix (Phase N2b: a pattern
+   * instance, a mirror copy), unchanged without one.
+   */
+  const prefixedNames = (
+    names: OcctFaceNames | null,
+    prefix: string | undefined,
+  ): OcctFaceNames | null =>
+    names === null || prefix === undefined
+      ? names
+      : Object.freeze(names.map((name) => `${prefix}/${name}`));
+
+  /**
+   * A carried naming whose names are pairwise distinct, else null (Phase
+   * N2b): an operation whose tool faces all share one created name keeps
+   * its naming only when one of them survives — two would be a guess.
+   */
+  const uniqueNamesOrNull = (
+    names: OcctFaceNames | null,
+  ): OcctFaceNames | null =>
+    names !== null && new Set(names).size === names.length ? names : null;
+
+  /**
+   * The names of a moved face's swept prism (see
+   * {@link moveFaceByDisplacement}), or null when the target is unnamed.
+   */
+  const movedPrismNames = (
+    prism: BRepPrimAPI_MakePrism,
+    swept: TopoDS_Shape,
+    target: NamedShape,
+    face: TopoDS_Face,
+    prefix: string,
+  ): OcctFaceNames | null => {
+    const faceName = createdSourcesOf(target, "face", null, "modified", [face]);
+    const bounding = occtDistinctSubShapes(
+      oc,
+      face,
+      oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+    );
+    const edges = createdSourcesOf(
+      target,
+      "edge",
+      `${prefix}/side`,
+      "generated",
+      bounding,
+    );
+    for (const edge of bounding) edge.delete();
+    const [own] = faceName ?? [];
+    for (const source of faceName ?? []) source.source.delete();
+    if (own === undefined || edges === null) {
+      for (const source of edges ?? []) source.source.delete();
+      return null;
+    }
+    const history: OcctNamedFace[] = [
+      { face: prism.LastShape(), name: own.name },
+      { face: prism.FirstShape(), name: `${prefix}/base/${own.name}` },
+    ];
+    for (const edge of edges) {
+      const generated = prism.Generated(edge.source);
+      history.push(
+        ...occtNameHistoryFaces(
+          oc,
+          swept,
+          occtListShapes(oc, generated, oc.TopAbs_ShapeEnum.TopAbs_FACE),
+          edge.name,
+        ),
+      );
+      generated.delete();
+      edge.source.delete();
+    }
+    return namedByHistory(swept, history);
   };
 
   /**
@@ -2049,7 +2596,13 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         if (!depth.ok) return fail(depth.error);
         const height = positiveLength(input.height, "height", "createBox");
         if (!height.ok) return fail(height.error);
-        return ok(wrapSolid(newBox(width.value, depth.value, height.value)));
+        const box = newBox(
+          width.value,
+          depth.value,
+          height.value,
+          input.featureId ?? "box",
+        );
+        return ok(wrapSolid(box.shape, box.faceNames));
       });
     },
 
@@ -2057,7 +2610,18 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       return run("createSphere", KERNEL_ERROR_CODES.invalidLength, () => {
         const radius = positiveLength(input.radius, "radius", "createSphere");
         if (!radius.ok) return fail(radius.error);
-        return ok(wrapSolid(newSphere(radius.value)));
+        const sphere = newSphere(radius.value);
+        return ok(
+          wrapSolid(
+            sphere,
+            occtNameFaces(
+              oc,
+              sphere,
+              // A sphere has one face and no planar caps: a constant role.
+              () => `${input.featureId ?? "sphere"}/surface`,
+            ),
+          ),
+        );
       });
     },
 
@@ -2067,7 +2631,17 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         if (!radius.ok) return fail(radius.error);
         const height = positiveLength(input.height, "height", "createCylinder");
         if (!height.ok) return fail(height.error);
-        return ok(wrapSolid(newCylinder(radius.value, height.value)));
+        const cylinder = newCylinder(radius.value, height.value);
+        return ok(
+          wrapSolid(
+            cylinder,
+            occtNameFaces(
+              oc,
+              cylinder,
+              primitiveRoleNamer(input.featureId ?? "cylinder", height.value),
+            ),
+          ),
+        );
       });
     },
 
@@ -2087,8 +2661,16 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         if (!topRadius.ok) return fail(topRadius.error);
         const height = positiveLength(input.height, "height", "createCone");
         if (!height.ok) return fail(height.error);
+        const cone = newCone(bottomRadius.value, topRadius.value, height.value);
         return ok(
-          wrapSolid(newCone(bottomRadius.value, topRadius.value, height.value)),
+          wrapSolid(
+            cone,
+            occtNameFaces(
+              oc,
+              cone,
+              primitiveRoleNamer(input.featureId ?? "cone", height.value),
+            ),
+          ),
         );
       });
     },
@@ -2507,12 +3089,17 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        let prism = newExtrusion(input, height.value);
+        const built = newExtrusion(input, height.value);
+        let prism = built.shape;
+        // Phase N2b: the draft carries every name through its history. The
+        // placement only re-locates the shape, keeping the names' order.
+        let faceNames = built.faceNames;
         if (taper !== undefined) {
-          const drafted = draftPrismFaces(prism, taper, input.direction);
+          const drafted = draftPrismFaces(built, taper, input.direction);
           prism.delete();
           if (!drafted.ok) return fail(drafted.error);
-          prism = drafted.value;
+          prism = drafted.value.shape;
+          faceNames = drafted.value.faceNames;
         }
         // Placement: rotation about the world-origin axis first, then the
         // translation — the transform composition, applied via
@@ -2538,7 +3125,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         );
         trsf.delete();
         prism.delete();
-        return ok(wrapSolid(placed));
+        return ok(wrapSolid(placed, faceNames));
       });
     },
 
@@ -2630,7 +3217,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        const revolved = newRevolution(input, sweep);
+        const { shape: revolved, faceNames } = newRevolution(input, sweep);
         // Placement: the transform composition (rotation first, translation
         // second), applied via BRepBuilderAPI_Transform like every placed
         // shape here.
@@ -2655,7 +3242,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         );
         trsf.delete();
         revolved.delete();
-        return ok(wrapSolid(placed));
+        return ok(wrapSolid(placed, faceNames));
       });
     },
 
@@ -3353,12 +3940,13 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           rot[2]?.[2] ?? 0,
           tz.value,
         );
+        // The placement only re-locates the shape, keeping the names' order.
         const placed = buildShape(
-          new oc.BRepBuilderAPI_Transform(piped, trsf, false, true),
+          new oc.BRepBuilderAPI_Transform(piped.shape, trsf, false, true),
         );
         trsf.delete();
-        piped.delete();
-        return ok(wrapSolid(placed));
+        piped.shape.delete();
+        return ok(wrapSolid(placed, piped.faceNames));
       });
     },
 
@@ -3505,6 +4093,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           input.sections,
           loftStations(input.sections),
           input.sheet === true,
+          input.featureId ?? "loft",
         );
         // Placement: the transform composition (rotation first, translation
         // second), applied via BRepBuilderAPI_Transform like every placed
@@ -3525,12 +4114,13 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           rot[2]?.[2] ?? 0,
           tz.value,
         );
+        // The placement only re-locates the shape, keeping the names' order.
         const placed = buildShape(
-          new oc.BRepBuilderAPI_Transform(lofted, trsf, false, true),
+          new oc.BRepBuilderAPI_Transform(lofted.shape, trsf, false, true),
         );
         trsf.delete();
-        lofted.delete();
-        return ok(wrapSolid(placed));
+        lofted.shape.delete();
+        return ok(wrapSolid(placed, lofted.faceNames));
       });
     },
 
@@ -3582,13 +4172,11 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           );
         }
         const mkFillet = new oc.BRepFilletAPI_MakeFillet(shape.value);
-        for (const edge of resolved.edges) {
-          mkFillet.Add(radius.value, edge);
-          edge.delete();
-        }
+        for (const edge of resolved.edges) mkFillet.Add(radius.value, edge);
         mkFillet.Build();
         if (!mkFillet.IsDone()) {
           mkFillet.delete();
+          for (const edge of resolved.edges) edge.delete();
           return fail(
             kernelError(
               KERNEL_ERROR_CODES.filletFailed,
@@ -3596,7 +4184,24 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        return ok(wrapSolid(buildShape(mkFillet)));
+        // Phase N2: each fillet face is `<feature>/fillet/<edge name>`,
+        // a corner patch `<feature>/fillet/<vertex name>`.
+        const target = namedOf(input.target, shape.value);
+        const created = edgeBlendSourcesOf(
+          target,
+          resolved.edges,
+          `${input.featureId ?? "fillet"}/fillet`,
+        );
+        for (const edge of resolved.edges) edge.delete();
+        const filleted = mkFillet.Shape();
+        const faceNames = carryCreatedNames(
+          mkFillet,
+          filleted,
+          target,
+          created,
+        );
+        mkFillet.delete();
+        return ok(wrapSolid(filleted, faceNames));
       });
     },
 
@@ -3655,11 +4260,11 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         const mkChamfer = new oc.BRepFilletAPI_MakeChamfer(shape.value);
         for (const edge of resolved.edges) {
           mkChamfer.Add(distance.value, edge);
-          edge.delete();
         }
         mkChamfer.Build();
         if (!mkChamfer.IsDone()) {
           mkChamfer.delete();
+          for (const edge of resolved.edges) edge.delete();
           return fail(
             kernelError(
               KERNEL_ERROR_CODES.chamferFailed,
@@ -3667,7 +4272,24 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        return ok(wrapSolid(buildShape(mkChamfer)));
+        // Phase N2: each bevel face is `<feature>/chamfer/<edge name>`, a
+        // corner patch `<feature>/chamfer/<vertex name>`.
+        const target = namedOf(input.target, shape.value);
+        const created = edgeBlendSourcesOf(
+          target,
+          resolved.edges,
+          `${input.featureId ?? "chamfer"}/chamfer`,
+        );
+        for (const edge of resolved.edges) edge.delete();
+        const chamfered = mkChamfer.Shape();
+        const faceNames = carryCreatedNames(
+          mkChamfer,
+          chamfered,
+          target,
+          created,
+        );
+        mkChamfer.delete();
+        return ok(wrapSolid(chamfered, faceNames));
       });
     },
 
@@ -3757,6 +4379,51 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         // no-throw run boundary normalizes that into the structured shell
         // failure below.
         const hollowed = maker.Shape();
+        // Phase N2: every kept face keeps its name and its offset wall is
+        // `<feature>/inner/<face name>`; a removed face's name is dropped
+        // (references to it resolve `missing`) and the rim the engine
+        // reports as its trimmed image is `<feature>/rim/<face name>`.
+        const target = namedOf(input.target, shape.value);
+        const role = input.featureId ?? "shell";
+        const removed = resolved.faces;
+        const inner = createdSourcesOf(
+          target,
+          "face",
+          `${role}/inner`,
+          "generated",
+        );
+        const rims = createdSourcesOf(
+          target,
+          "face",
+          `${role}/rim`,
+          "modified",
+          removed,
+        );
+        const created =
+          inner === null || rims === null
+            ? null
+            : [
+                ...inner.filter((source) => {
+                  const kept = !removed.some((face) =>
+                    face.IsSame(source.source),
+                  );
+                  if (!kept) source.source.delete();
+                  return kept;
+                }),
+                ...rims,
+              ];
+        if (created === null) {
+          for (const source of [...(inner ?? []), ...(rims ?? [])]) {
+            source.source.delete();
+          }
+        }
+        const faceNames = carryCreatedNames(
+          maker,
+          hollowed,
+          target,
+          created,
+          removed,
+        );
         maker.delete();
         closing.delete();
         for (const face of resolved.faces) face.delete();
@@ -3775,7 +4442,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        return ok(wrapSolid(hollowed));
+        return ok(wrapSolid(hollowed, faceNames));
       });
     },
 
@@ -3825,12 +4492,28 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
+        // Phase N2b: each cavity face is `Generated` by the target face it
+        // offsets (probed: one per face, none modified or deleted), so the
+        // cavity walls are `<feature>/inner/<face name>`; the cut then
+        // carries the outer skin's and the cavity's names together.
+        const target = namedOf(input.target, shape.value);
         const cavity = maker.Shape();
+        const cavityNames = carryCreatedNames(
+          maker,
+          cavity,
+          target,
+          createdSourcesOf(
+            target,
+            "face",
+            `${input.featureId ?? "thicken"}/inner`,
+            "generated",
+          ),
+        );
         maker.delete();
         const cut = new oc.BRepAlgoAPI_Cut(shape.value, cavity);
-        cavity.delete();
         if (!cut.IsDone()) {
           cut.delete();
+          cavity.delete();
           return fail(
             kernelError(
               KERNEL_ERROR_CODES.thickenFailed,
@@ -3839,7 +4522,15 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           );
         }
         const hollowed = cut.Shape();
+        const faceNames =
+          cavityNames === null
+            ? null
+            : occtCarryFaceNames(oc, cut, hollowed, [
+                target,
+                { shape: cavity, faceNames: cavityNames },
+              ]);
         cut.delete();
+        cavity.delete();
         // The closed-hollow post-condition: strictly positive volume,
         // strictly below the target's (the cavity removed material); the
         // engine's silently-degenerate answers never cross back.
@@ -3857,7 +4548,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        return ok(wrapSolid(hollowed));
+        return ok(wrapSolid(hollowed, faceNames));
       });
     },
 
@@ -3908,14 +4599,20 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           direction.value[1] / length,
           direction.value[2] / length,
         ];
-        const moved = moveFaceByDisplacement("moveFace", shape.value, face, [
-          unit[0] * distance.value,
-          unit[1] * distance.value,
-          unit[2] * distance.value,
-        ]);
+        const moved = moveFaceByDisplacement(
+          "moveFace",
+          namedOf(input.target, shape.value),
+          face,
+          [
+            unit[0] * distance.value,
+            unit[1] * distance.value,
+            unit[2] * distance.value,
+          ],
+          input.featureId ?? "moveFace",
+        );
         face.delete();
         if (!moved.ok) return fail(moved.error);
-        return ok(wrapSolid(moved.value));
+        return ok(wrapSolid(moved.value.shape, moved.value.faceNames));
       });
     },
 
@@ -4005,13 +4702,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             (origin[2] - center[2]) * normal[2];
           const moved = moveFaceByDisplacement(
             "replaceFace",
-            shape.value,
+            namedOf(input.target, shape.value),
             face,
             [normal[0] * station, normal[1] * station, normal[2] * station],
+            input.featureId ?? "replaceFace",
           );
           face.delete();
           if (!moved.ok) return fail(moved.error);
-          return ok(wrapSolid(moved.value));
+          return ok(wrapSolid(moved.value.shape, moved.value.faceNames));
         }
         // OBLIQUE: the covering-box cut keeping the volume-centroid side.
         // The centroid fixes the kept half-space from measured geometry —
@@ -4058,6 +4756,19 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           keepSide,
           bounds,
         });
+        // Phase N2b: the plane's new face is `<feature>/plane/<face name>`
+        // (the tool's surviving face); what remains of the target keeps
+        // its names through the cut.
+        const target = namedOf(input.target, shape.value);
+        const replacedSources = createdSourcesOf(
+          target,
+          "face",
+          null,
+          "modified",
+          [face],
+        );
+        const replacedName = replacedSources?.[0]?.name ?? null;
+        for (const source of replacedSources ?? []) source.source.delete();
         face.delete();
         if (plan.removedExtentMm <= 0) {
           return fail(
@@ -4148,9 +4859,9 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         transform.delete();
         const before = volumeOfShape(shape.value);
         const cut = new oc.BRepAlgoAPI_Cut(shape.value, tool);
-        tool.delete();
         if (!cut.IsDone()) {
           cut.delete();
+          tool.delete();
           return fail(
             kernelError(
               KERNEL_ERROR_CODES.faceOpFailed,
@@ -4159,7 +4870,27 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           );
         }
         const replaced = cut.Shape();
+        const faceNames =
+          replacedName === null
+            ? null
+            : uniqueNamesOrNull(
+                occtCarryFaceNames(oc, cut, replaced, [
+                  target,
+                  {
+                    shape: tool,
+                    faceNames: occtDistinctSubShapes(
+                      oc,
+                      tool,
+                      oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                    ).map((toolFace) => {
+                      toolFace.delete();
+                      return `${input.featureId ?? "replaceFace"}/plane/${replacedName}`;
+                    }),
+                  },
+                ]),
+              );
         cut.delete();
+        tool.delete();
         const after = volumeOfShape(replaced);
         if (!Number.isFinite(after) || !(after > 0)) {
           replaced.delete();
@@ -4182,7 +4913,7 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
             ),
           );
         }
-        return ok(wrapSolid(replaced));
+        return ok(wrapSolid(replaced, faceNames));
       });
     },
 
@@ -5161,9 +5892,12 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       return run("union", KERNEL_ERROR_CODES.invalidOperands, () => {
         const shapes = operandsOf(operands, 2, "union");
         if (!shapes.ok) return fail(shapes.error);
-        return ok(
-          wrapSolid(foldBoolean(shapes.value, oc.BRepAlgoAPI_Fuse, "union")),
+        const fused = foldNamedBoolean(
+          shapes.value.map((shape, index) => namedOf(operands[index], shape)),
+          oc.BRepAlgoAPI_Fuse,
+          "union",
         );
+        return ok(wrapSolid(fused.shape, fused.faceNames));
       });
     },
 
@@ -5176,15 +5910,17 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         if (!targetShape.ok) return fail(targetShape.error);
         const toolShapes = operandsOf(tools, 1, "subtract");
         if (!toolShapes.ok) return fail(toolShapes.error);
-        return ok(
-          wrapSolid(
-            foldBoolean(
-              [targetShape.value, ...toolShapes.value],
-              oc.BRepAlgoAPI_Cut,
-              "subtract",
+        const cut = foldNamedBoolean(
+          [
+            namedOf(target, targetShape.value),
+            ...toolShapes.value.map((shape, index) =>
+              namedOf(tools[index], shape),
             ),
-          ),
+          ],
+          oc.BRepAlgoAPI_Cut,
+          "subtract",
         );
+        return ok(wrapSolid(cut.shape, cut.faceNames));
       });
     },
 
@@ -5192,11 +5928,12 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
       return run("intersect", KERNEL_ERROR_CODES.invalidOperands, () => {
         const shapes = operandsOf(operands, 2, "intersect");
         if (!shapes.ok) return fail(shapes.error);
-        return ok(
-          wrapSolid(
-            foldBoolean(shapes.value, oc.BRepAlgoAPI_Common, "intersect"),
-          ),
+        const common = foldNamedBoolean(
+          shapes.value.map((shape, index) => namedOf(operands[index], shape)),
+          oc.BRepAlgoAPI_Common,
+          "intersect",
         );
+        return ok(wrapSolid(common.shape, common.faceNames));
       });
     },
 
@@ -5278,11 +6015,26 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
           trsf.delete();
           trsf = combined;
         }
-        const moved = buildShape(
-          new oc.BRepBuilderAPI_Transform(shape.value, trsf, false, true),
+        // Phase N2: the transform's history maps every face to its moved
+        // image, so the names carry over unchanged — under the instance's
+        // `<feature>/instance/<index>/` prefix when it places a pattern
+        // copy (Phase N2b).
+        const mover = new oc.BRepBuilderAPI_Transform(
+          shape.value,
+          trsf,
+          false,
+          true,
         );
         trsf.delete();
-        return ok(wrapSolid(moved));
+        const moved = mover.Shape();
+        const faceNames = prefixedNames(
+          occtCarryFaceNames(oc, mover, moved, [namedOf(solid, shape.value)]),
+          input.instance === undefined
+            ? undefined
+            : `${input.instance.featureId}/instance/${String(input.instance.index)}`,
+        );
+        mover.delete();
+        return ok(wrapSolid(moved, faceNames));
       });
     },
 
@@ -5331,11 +6083,26 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         const trsf = new oc.gp_Trsf();
         trsf.SetMirror(ax2);
         ax2.delete();
-        const mirrored = buildShape(
-          new oc.BRepBuilderAPI_Transform(shape.value, trsf, false, true),
+        // Phase N2b: the reflection's history maps every face to its image;
+        // a mirror feature's copy is `<feature>/mirror/<face name>` — without
+        // a feature, `mirror/mirror/<face name>` (the FeatureNamingInput
+        // fallback), so a copy fused with its seed never repeats a name.
+        const mirror = new oc.BRepBuilderAPI_Transform(
+          shape.value,
+          trsf,
+          false,
+          true,
         );
         trsf.delete();
-        return ok(wrapSolid(mirrored));
+        const mirrored = mirror.Shape();
+        const faceNames = prefixedNames(
+          occtCarryFaceNames(oc, mirror, mirrored, [
+            namedOf(solid, shape.value),
+          ]),
+          `${input.featureId ?? "mirror"}/mirror`,
+        );
+        mirror.delete();
+        return ok(wrapSolid(mirrored, faceNames));
       });
     },
 
@@ -5663,13 +6430,14 @@ export function occtKernelFromRuntime(runtime: OcctRuntime): OcctKernel {
         return ok({
           kernelId: OCCT_BACKEND_ID,
           persistentTopology: true,
-          identitySchemas: [OCCT_TOPOLOGY_IDENTITY_SCHEMA],
+          identitySchemas: OCCT_TOPOLOGY_IDENTITY_SCHEMAS,
           bodyId: options.bodyId,
           regeneration: options.regeneration,
           entities: occtShapeTopology(
             oc,
             shape.value,
             options.kinds ?? OCCT_TOPOLOGY_DEFAULT_KINDS,
+            tag.unwrap(solid)?.faceNames ?? null,
           ),
         });
       } catch (error) {

@@ -58,10 +58,13 @@ import { computeHelixScene } from "./helix-scene";
 import { computeHoleScene } from "./hole-scene";
 import { computeLoftScene } from "./loft-scene";
 import { computePadScene } from "./pad-scene";
+import { computeFaceOpScene } from "./face-op-scene";
+import { computePatternFaceScene } from "./pattern-scene";
 import { computePatternFeatureScene } from "./pattern-scene";
 import { computePatternPathScene } from "./pattern-scene";
 import { computePatternTransformScene } from "./pattern-scene";
 import { computeMirrorScene } from "./pattern-scene";
+import { computePrimitiveScene } from "./primitive-scene";
 import { computeRevolveScene } from "./revolve-scene";
 import {
   computeRibScene,
@@ -73,6 +76,7 @@ import { computePlateWithHole } from "./plate-scene";
 import { computeSheetScene } from "./sheet-scene";
 import { computeSweepScene } from "./sweep-scene";
 import { computeThreadScene } from "./thread-scene";
+import { computeTopologyCutScene } from "./topology-cut-scene";
 
 /** One rendered body's measurement, keyed by the body it renders under. */
 export interface DocumentSceneBodyMeasurement {
@@ -83,6 +87,20 @@ export interface DocumentSceneBodyMeasurement {
    * render layer answers with a both-sides material.
    */
   readonly openShell?: boolean;
+}
+
+/**
+ * One body's computed solid as the pass left it in the worker session: a
+ * rendered body, a compute-only consumed target (a fillet's box), or a
+ * refused lineage's re-executed extrude fallback. The solid stays alive as
+ * long as the pass is the visible state (the stale-result coordinator
+ * keeps exactly the visible pass's mints), so a later on-demand query
+ * — the agent plane's topology inventory — can address it without the
+ * pass itself doing any per-body topology work.
+ */
+export interface DocumentSceneComputedSolid {
+  readonly bodyId: string;
+  readonly solid: WorkerSolidId;
 }
 
 /** One body's structured worker refusal, carried to the session verbatim. */
@@ -109,6 +127,12 @@ export interface DocumentSceneMeasurement {
   readonly bodies: readonly DocumentSceneBodyMeasurement[];
   /** Per refused body: the structured refusal (the pass never throws). */
   readonly failures: readonly DocumentSceneFailure[];
+  /**
+   * Per COMPUTED body (rendered or compute-only), in computation order:
+   * the worker solid the pass built for it. Pure bookkeeping — the pass
+   * issues no request for it.
+   */
+  readonly solids: readonly DocumentSceneComputedSolid[];
 }
 
 /**
@@ -165,6 +189,10 @@ async function computeOneBodyScene(
       const composed = await computeHelixScene(context, scene.request);
       return { measurement: composed.measurement, solid: composed.solid };
     }
+    case "primitive": {
+      const composed = await computePrimitiveScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
     case "thread": {
       const composed = await computeThreadScene(context, scene.request);
       return { measurement: composed.measurement, solid: composed.solid };
@@ -203,6 +231,30 @@ async function computeOneBodyScene(
     }
     case "mirror": {
       const composed = await computeMirrorScene(context, scene.request);
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "topologyCut": {
+      const composed = await computeTopologyCutScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "faceOp": {
+      const composed = await computeFaceOpScene(
+        context,
+        scene.request,
+        computed,
+      );
+      return { measurement: composed.measurement, solid: composed.solid };
+    }
+    case "patternFace": {
+      const composed = await computePatternFaceScene(
+        context,
+        scene.request,
+        computed,
+      );
       return { measurement: composed.measurement, solid: composed.solid };
     }
     case "boolean": {
@@ -298,8 +350,19 @@ function fallbackSourcesOf(
       return [fallbackSourceOf(scene.request.base)];
     case "duplicate":
       return [fallbackSourceOf(scene.request.base)];
+    // Every target-consuming kind — a transform pattern, a fillet/chamfer/
+    // shell, a face op, a face pattern — renders its target's state when
+    // refused: the lineage's last valid solid (a refused op in a chain
+    // shows the previous op's output).
     case "patternTransform":
+    case "topologyCut":
+    case "faceOp":
+    case "patternFace":
       return [fallbackSourceOf(scene.request.target)];
+    // A primitive consumes nothing — no lineage to fall back to (the
+    // independent kinds' precedent): a refused primitive renders nothing.
+    case "primitive":
+      return [];
     default:
       return [];
   }
@@ -333,7 +396,8 @@ function unionBoundsInto(
  * its extrusion, a computed operand surfaces its pass measurement — the
  * body's current state, prior features included), and a fallback whose
  * body id already rendered (another refused lineage's same shared base)
- * never double-counts.
+ * never double-counts. Every solid the pass computed is reported by body
+ * id (`solids`) so an on-demand query can address it later.
  */
 export async function computeDocumentScene(
   context: ComputationContext,
@@ -348,6 +412,9 @@ export async function computeDocumentScene(
   // refused lineage's honest fallback state.
   const computedSolids = new Map<string, WorkerSolidId>();
   const computedMeasurements = new Map<string, PlateMeasurement>();
+  // Every solid the pass built, keyed by body id (the fallback extrusions
+  // included) — reported for the on-demand topology inventory.
+  const reportedSolids = new Map<string, WorkerSolidId>();
   for (const body of bodies) {
     const consumedOnly = body.consumedOnly === true;
     if (!consumedOnly && !renderableBodyIds.has(body.bodyId)) continue;
@@ -359,6 +426,7 @@ export async function computeDocumentScene(
       );
       if (computed.solid !== undefined) {
         computedSolids.set(body.bodyId, computed.solid);
+        reportedSolids.set(body.bodyId, computed.solid);
       }
       computedMeasurements.set(body.bodyId, computed.measurement);
       if (consumedOnly) continue;
@@ -391,12 +459,11 @@ export async function computeDocumentScene(
       if (!renderableBodyIds.has(fallback.request.bodyId)) continue;
       if (renderedIds.has(fallback.request.bodyId)) continue;
       try {
-        const measurement = (
-          await computeExtrudeScene(context, fallback.request)
-        ).measurement;
+        const composed = await computeExtrudeScene(context, fallback.request);
+        reportedSolids.set(fallback.request.bodyId, composed.solid);
         rendered.push({
           bodyId: fallback.request.bodyId,
-          measurement,
+          measurement: composed.measurement,
         });
         renderedIds.add(fallback.request.bodyId);
       } catch {
@@ -435,5 +502,6 @@ export async function computeDocumentScene(
         : { min: aggregate.min, max: aggregate.max },
     bodies: rendered,
     failures,
+    solids: [...reportedSolids].map(([bodyId, solid]) => ({ bodyId, solid })),
   };
 }

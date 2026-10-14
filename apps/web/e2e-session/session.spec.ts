@@ -225,8 +225,11 @@ const TREE = '[data-slot="cad-model-tree"]';
 const PROPERTY = '[data-slot="cad-property-panel"]';
 const TOOLBAR = '[data-slot="cad-toolbar"]';
 
-/** The eleven workbench WebMCP tools the complete page registers (Phase 7
- * + Phase 2.1 capture + the Phase 2.2 read tools). */
+/**
+ * The twelve workbench WebMCP tools the complete page registers (Phase 7,
+ * the read-only `cad_skill` authoring guide, the Phase 2.1 capture tool, and
+ * the Phase 2.2 read tools).
+ */
 const WORKBENCH_WEBMCP_TOOLS = [
   "cad_get_document_summary",
   "cad_list_commands",
@@ -236,6 +239,7 @@ const WORKBENCH_WEBMCP_TOOLS = [
   "cad_redo",
   "cad_apply_commands",
   "cad_measure",
+  "cad_skill",
   "cad_capture_views",
   "cad_get_document",
   "cad_get_diagnostics",
@@ -586,17 +590,6 @@ test("s03 complete workbench boots and the menu ships exactly the audited comman
       checklistCommandIds.filter((id) => !domIds.includes(id)),
       "checklist commands missing from the menu",
     ).toEqual([]);
-
-    // The local-face-operations DECLINE: no face-op verb row ships — the
-    // kernel capability has no workbench verb at this epoch (the audit's
-    // recorded finding), so the menu must not pretend otherwise.
-    expect(
-      domIds.filter((id) =>
-        /(^|-)(move-face|delete-face|replace-face|face-op)(-|$)/.test(id),
-      ),
-      "a face-op verb shipped without an audit entry",
-    ).toEqual([]);
-    recordDecline("local-face-operations-verb");
   });
 });
 
@@ -1235,15 +1228,15 @@ test("s07 sketch on a face, pad, and the driving-face edit — geometry follows"
   });
 });
 
-test("s08 honest kernel declines: sweep, helix, and thicken on the default route", async ({
+test("s08 the default route renders sweep, helix, and thicken on OCCT", async ({
   sessionPage: page,
 }) => {
-  await stage("s08 declines", async () => {
+  await stage("s08 default-route sweep", async () => {
+    // The default `/workbench-complete` route boots OCCT, so the features
+    // Manifold declines render here: the error surface stays empty, the
+    // timeline entry is valid, and the document volume gains the
+    // analytic body beside the boot plate.
     await openComplete(page);
-    const honestVolume = await waitForRootSettle(page, COMPLETE_ROOT);
-
-    // SWEEP commits, then declines honestly: the structured refusal on the
-    // error surface, the pixels unchanged, the timeline chip Failed.
     await enterSketchMode(page);
     await drawProfileSquare(page);
     await saveSketch(page);
@@ -1255,36 +1248,36 @@ test("s08 honest kernel declines: sweep, helix, and thicken on the default route
     await page.getByRole("option", { name: "sketch 1" }).click();
     await page.locator(`${DIALOG} [role="combobox"]`).nth(1).click();
     await page.getByRole("option", { name: "sketch 2" }).click();
+    const beforeSweep = await dispatchedCount(page, COMPLETE_ROOT);
     await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
     await expect(page.locator(DIALOG)).toBeHidden();
     await expect(page.locator(COMPLETE)).toHaveAttribute(
       "data-scene-kind",
       "sweep",
     );
-    await expect(page.locator("#workbench-complete-error")).toContainText(
-      "kernel/unsupported-operation",
-      { timeout: 30_000 },
-    );
+    const swept = await waitForRootSettle(page, COMPLETE_ROOT, {
+      afterDispatch: beforeSweep,
+    });
     expect(
-      await page.locator(COMPLETE).getAttribute("data-cad-rendered-volume"),
-    ).toBe(honestVolume);
-    const sweepTimeline = await readTimeline(page, COMPLETE_ROOT);
-    const sweepEntry = sweepTimeline.entries.find(
+      volumeNear(Number(swept), BOOT_PLATE_VOLUME + SWEEP_VOLUME),
+      `swept ${swept} vs analytic ${String(BOOT_PLATE_VOLUME + SWEEP_VOLUME)}`,
+    ).toBe(true);
+    await expect(page.locator("#workbench-complete-error")).toHaveText("");
+    const sweepEntry = (await readTimeline(page, COMPLETE_ROOT)).entries.find(
       (entry) => entry.kind === "sweep",
     );
-    expect(sweepEntry?.status).toBe("failed");
-    expect(sweepEntry?.diagnostics?.[0]?.message).toContain(
-      "kernel/unsupported-operation",
-    );
+    expect(sweepEntry?.status).toBe("valid");
+    expect(sweepEntry?.diagnostics ?? []).toEqual([]);
     cover("sweep-feature");
   });
 });
 
-test("s08b honest decline: helix on the default route", async ({
+test("s08b the default route renders the helix", async ({
   sessionPage: page,
 }) => {
-  await stage("s08b helix decline", async () => {
-    // HELIX commits and declines the same honest way.
+  await stage("s08b default-route helix", async () => {
+    // HELIX: the meridian sweeps to the derived screw volume beside the
+    // plate and the sweep.
     await enterSketchMode(page);
     await activateSketchTool(page, "rectangle");
     await clickCanvasPoint(page, 0, -0.75);
@@ -1292,49 +1285,68 @@ test("s08b honest decline: helix on the default route", async ({
     await saveSketch(page);
     await openDialogViaMenu(page, COMPLETE_ROOT, "helix");
     // The form's default pick is the pool's first sketch (the sweep
-    // profile, whose axial extent overlaps turns): pick the meridian —
-    // the sketch this stage just saved — explicitly.
+    // profile): pick the meridian — the sketch this stage just saved —
+    // explicitly.
     await page.locator(`${DIALOG} [role="combobox"]`).nth(0).click();
     await page.getByRole("option", { name: "sketch 3", exact: true }).click();
+    const beforeHelix = await dispatchedCount(page, COMPLETE_ROOT);
     await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
     await expect(page.locator(DIALOG)).toBeHidden();
     await expect(page.locator(COMPLETE)).toHaveAttribute(
       "data-scene-kind",
       "helix",
     );
-    await expect(page.locator("#workbench-complete-error")).toContainText(
-      "kernel/unsupported-operation",
-      { timeout: 30_000 },
+    const helical = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeHelix,
+      }),
     );
+    const helixDocument = BOOT_PLATE_VOLUME + SWEEP_VOLUME + HELIX_OCCT;
+    expect(
+      Math.abs(helical - helixDocument) / helixDocument,
+      `helical ${String(helical)} vs derived ${String(helixDocument)}`,
+    ).toBeLessThan(2e-3);
+    await expect(page.locator("#workbench-complete-error")).toHaveText("");
     const helixTimeline = await readTimeline(page, COMPLETE_ROOT);
     expect(
       helixTimeline.entries.find((entry) => entry.kind === "helix")?.status,
-    ).toBe("failed");
+    ).toBe("valid");
     cover("helix-feature");
   });
 });
 
-test("s08c honest decline: thicken on the default route", async ({
+test("s08c the default route renders the thicken", async ({
   sessionPage: page,
 }) => {
-  await stage("s08c thicken decline", async () => {
-    // THICKEN needs a feature-produced extrusion base: draw the rod first.
+  await stage("s08c default-route thicken", async () => {
+    // THICKEN needs a feature-produced extrusion base: draw the rod, then
+    // hollow it with 1 mm walls — the shell replaces the rod in the
+    // document volume.
+    const before = Number(await waitForRootSettle(page, COMPLETE_ROOT));
     await drawAndExtrudeRod(page, COMPLETE_ROOT);
     await openDialogViaMenu(page, COMPLETE_ROOT, "thicken");
+    await page.getByLabel("Wall thickness (mm)").fill("1");
+    const beforeThicken = await dispatchedCount(page, COMPLETE_ROOT);
     await page.locator(DIALOG).getByRole("button", { name: "Create" }).click();
     await expect(page.locator(DIALOG)).toBeHidden();
     await expect(page.locator(COMPLETE)).toHaveAttribute(
       "data-scene-kind",
       "thicken",
     );
-    await expect(page.locator("#workbench-complete-error")).toContainText(
-      "kernel/unsupported-operation",
-      { timeout: 30_000 },
+    const hollowed = Number(
+      await waitForRootSettle(page, COMPLETE_ROOT, {
+        afterDispatch: beforeThicken,
+      }),
     );
+    expect(
+      volumeNear(hollowed - before, THICKEN_VOLUME),
+      `the thicken added ${String(hollowed - before)} mm³`,
+    ).toBe(true);
+    await expect(page.locator("#workbench-complete-error")).toHaveText("");
     const thickenTimeline = await readTimeline(page, COMPLETE_ROOT);
     expect(
       thickenTimeline.entries.find((entry) => entry.kind === "thicken")?.status,
-    ).toBe("failed");
+    ).toBe("valid");
     cover("thicken-shell-feature");
   });
 });
@@ -4741,7 +4753,7 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench, project
   sessionPage: page,
 }) => {
   await stage("s27 webmcp agent surface", async () => {
-    // THE WORKBENCH SNAPSHOT: the eleven CAD tools the complete page
+    // THE WORKBENCH SNAPSHOT: the twelve CAD tools the complete page
     // mounts, each with a JSON object input schema and honest usage
     // annotations (the seam is snapshot-only — see readWebMcpSnapshot).
     await openComplete(page);
@@ -4761,6 +4773,9 @@ test("s27 the WebMCP agent surface: registry snapshots on the workbench, project
       annotationsOf(workbenchTools, "cad_get_document_summary"),
     ).toMatchObject({ readOnlyHint: true });
     expect(annotationsOf(workbenchTools, "cad_capture_views")).toMatchObject({
+      readOnlyHint: true,
+    });
+    expect(annotationsOf(workbenchTools, "cad_skill")).toMatchObject({
       readOnlyHint: true,
     });
     extra("webmcp-workbench-surface");
@@ -6304,6 +6319,572 @@ test("s40 agent server mode: the real relay against the loopback (env key, never
     expect(relayCalls[0]?.authorization).toBe("Bearer fixture-env-key");
     expect(relayCalls[0]?.model).toBe("fixture-primary");
     extra("agent-server-relay");
+  });
+});
+
+/** The pick overlay's published anchors: body id → ordinal → CSS point. */
+type TopologyAnchors = Readonly<
+  Record<string, Readonly<Record<string, readonly [number, number]>>>
+>;
+
+/**
+ * Reads the topology pick overlay's projected anchors once the visible
+ * scene's topology resolved (the panel's loading state cleared).
+ */
+async function readTopologyAnchors(page: Page): Promise<TopologyAnchors> {
+  const overlay = page.getByTestId("workbench-topology-pick-overlay");
+  await expect(page.getByTestId("workbench-topology-picks")).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(overlay).not.toHaveAttribute("data-topology-anchors", "{}");
+  return JSON.parse(
+    (await overlay.getAttribute("data-topology-anchors")) ?? "{}",
+  ) as TopologyAnchors;
+}
+
+/**
+ * The page points of `bodyId`'s markers a press can pick: in view, clear
+ * of the floating panel, at least 2 px from every other marker (any
+ * body — a consumed operand stays offered under its result, its untouched
+ * markers coincident; the published points are rounded to 0.1 px) so the
+ * canvas's nearest-anchor hit test lands on the pressed one, and owned by
+ * the canvas itself (floating view tools and panels overlap the viewport)
+ * — the clearest first.
+ */
+async function topologyMarkerPoints(
+  page: Page,
+  bodyId: string,
+): Promise<readonly { readonly x: number; readonly y: number }[]> {
+  const anchors = await readTopologyAnchors(page);
+  const overlay = page.getByTestId("workbench-topology-pick-overlay");
+  const frame = await overlay.boundingBox();
+  if (frame === null) throw new Error("the pick overlay has no layout box");
+  const panel = await page
+    .getByTestId("workbench-topology-pick-panel")
+    .boundingBox();
+  const all = Object.entries(anchors).flatMap(([body, points]) =>
+    Object.entries(points).map(([ordinal, point]) => ({
+      body,
+      ordinal,
+      point,
+    })),
+  );
+  const underPanel = (point: readonly [number, number]): boolean =>
+    panel !== null &&
+    frame.x + point[0] <= panel.x + panel.width + 8 &&
+    frame.y + point[1] <= panel.y + panel.height + 8;
+  const candidates = all
+    .filter(
+      (anchor) =>
+        anchor.body === bodyId &&
+        anchor.point[0] > 8 &&
+        anchor.point[1] > 8 &&
+        anchor.point[0] < frame.width - 8 &&
+        anchor.point[1] < frame.height - 8 &&
+        !underPanel(anchor.point),
+    )
+    .map((anchor) => ({
+      x: frame.x + anchor.point[0],
+      y: frame.y + anchor.point[1],
+      clearance: Math.min(
+        ...all
+          .filter(
+            (other) =>
+              other.body !== anchor.body || other.ordinal !== anchor.ordinal,
+          )
+          .map((other) =>
+            Math.hypot(
+              other.point[0] - anchor.point[0],
+              other.point[1] - anchor.point[1],
+            ),
+          ),
+      ),
+    }))
+    .filter((candidate) => candidate.clearance >= 2)
+    .sort((left, right) => right.clearance - left.clearance);
+  const onCanvas = await page.evaluate(
+    (points) =>
+      points.map(
+        ([x, y]) =>
+          document.elementFromPoint(x, y) instanceof HTMLCanvasElement,
+      ),
+    candidates.map((candidate) => [candidate.x, candidate.y] as const),
+  );
+  return candidates.filter((_, index) => onCanvas[index] === true);
+}
+
+/**
+ * Picks ONE marker of `bodyId` whose panel label (`Edge|Face <n> · <size>
+ * at (x, y, z)`) satisfies `accept`: each candidate is pressed, its target
+ * body and label read, and a rejected pick pressed again to un-pick it.
+ * Returns the accepted label.
+ */
+async function pickTopology(
+  page: Page,
+  bodyId: string,
+  accept: (label: string) => boolean = () => true,
+): Promise<string> {
+  const picked = page.getByTestId("workbench-topology-picks").locator("li");
+  const overlay = page.getByTestId("workbench-topology-pick-overlay");
+  const seen: string[] = [];
+  for (const point of await topologyMarkerPoints(page, bodyId)) {
+    await page.mouse.click(point.x, point.y);
+    const landed = await expect(picked)
+      .toHaveCount(1, { timeout: 3_000 })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!landed) continue;
+    const label = (await picked.first().textContent()) ?? "";
+    const target = await overlay.getAttribute("data-topology-picks");
+    if (target?.includes(`"bodyId":"${bodyId}"`) === true && accept(label)) {
+      return label;
+    }
+    seen.push(label);
+    await page.mouse.click(point.x, point.y);
+    await expect(picked).toHaveCount(0);
+  }
+  throw new Error(
+    `no marker of ${bodyId} matched the pick (seen: ${seen.join(" | ")})`,
+  );
+}
+
+/**
+ * Opens a topology-pick verb (fillet / chamfer / shell / face ops) through
+ * its command row and waits for its floating panel — and for the command
+ * menu's closing overlay to leave, since a viewport press under it would
+ * land on a menu row instead of the canvas.
+ */
+async function openPickVerb(
+  page: Page,
+  rootId: string,
+  commandId: string,
+): Promise<void> {
+  await runCommand(page, rootId, commandId);
+  await expect(page.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+  await expect(page.getByTestId("workbench-topology-pick-panel")).toBeVisible();
+}
+
+/**
+ * The topology pick panel's verb form: fills the given fields (by
+ * spinbutton label) and submits it, returning the settled volume.
+ */
+async function submitPickForm(
+  page: Page,
+  rootId: string,
+  fields: Readonly<Record<string, string>>,
+): Promise<string> {
+  const panel = page.getByTestId("workbench-topology-pick-panel");
+  for (const [label, value] of Object.entries(fields)) {
+    await panel
+      .getByRole("spinbutton", { name: label, exact: true })
+      .fill(value);
+  }
+  const before = await dispatchedCount(page, rootId);
+  await panel.getByRole("button", { name: "Create" }).click();
+  await expect(panel).toBeHidden({ timeout: 30_000 });
+  return waitForRootSettle(page, rootId, { afterDispatch: before });
+}
+
+/** Adds one primitive through its command row and settles the scene. */
+async function addPrimitive(
+  page: Page,
+  rootId: string,
+  kind: "box" | "sphere" | "cylinder" | "cone",
+  fields: Readonly<Record<string, string>>,
+): Promise<string> {
+  await openDialogViaMenu(page, rootId, `primitive-${kind}`);
+  for (const [label, value] of Object.entries(fields)) {
+    await page
+      .locator(DIALOG)
+      .getByRole("spinbutton", { name: label, exact: true })
+      .fill(value);
+  }
+  return submitDialogAndSettle(page, rootId, "Create");
+}
+
+test("s37 primitives: box, sphere, cylinder and cone through their command rows", async ({
+  sessionPage: page,
+}) => {
+  await stage("s37 primitives", async () => {
+    // The document scene renders EVERY visible body, so each primitive is
+    // measured as the settled volume's delta over the previous settle.
+    let previous = Number(await openComplete(page, OCCT_ROOT));
+    const rows: readonly {
+      readonly kind: "box" | "sphere" | "cylinder" | "cone";
+      readonly fields: Readonly<Record<string, string>>;
+      readonly volume: number;
+      readonly entry: string;
+    }[] = [
+      {
+        kind: "box",
+        fields: {
+          "Width x (mm)": "30",
+          "Depth y (mm)": "20",
+          "Height z (mm)": "10",
+        },
+        volume: 30 * 20 * 10,
+        entry: "primitive-box",
+      },
+      {
+        kind: "sphere",
+        fields: { "Radius (mm)": "8" },
+        volume: (4 / 3) * Math.PI * 8 ** 3,
+        entry: "primitive-sphere",
+      },
+      {
+        kind: "cylinder",
+        fields: { "Radius (mm)": "5", "Height z (mm)": "12" },
+        volume: Math.PI * 25 * 12,
+        entry: "primitive-cylinder",
+      },
+      {
+        kind: "cone",
+        fields: {
+          "Bottom radius (mm)": "6",
+          "Top radius (mm, 0 = sharp cone)": "3",
+          "Height z (mm)": "9",
+        },
+        volume: (Math.PI * 9 * (36 + 18 + 9)) / 3,
+        entry: "primitive-cone",
+      },
+    ];
+    for (const row of rows) {
+      const settled = Number(
+        await addPrimitive(page, OCCT_ROOT, row.kind, row.fields),
+      );
+      await expect(page.locator(OCCT)).toHaveAttribute(
+        "data-scene-kind",
+        "primitive",
+      );
+      expect(volumeNear(settled - previous, row.volume)).toBe(true);
+      previous = settled;
+      cover(row.entry);
+    }
+    const timeline = await readTimeline(page, OCCT_ROOT);
+    expect(
+      timeline.entries
+        .filter((entry) => rows.some((row) => row.kind === entry.kind))
+        .map((entry) => [entry.kind, entry.status]),
+    ).toEqual(rows.map((row) => [row.kind, "valid"]));
+  });
+});
+
+/** A pick label of an x-running box edge (its midpoint at x = 10). */
+const X_EDGE = /^Edge \d+ · 20(\.0+)? mm at \(10(\.0+)?, /;
+
+/** The absolute centroid `(x, y, z)` a pick label carries. */
+function centroidOf(label: string): readonly number[] {
+  const match = / at \(([^)]+)\)$/.exec(label);
+  return match === null
+    ? []
+    : (match[1] ?? "").split(",").map((value) => Number(value.trim()));
+}
+
+/** Any 20 mm edge of a 20 mm cube (every one of its twelve edges). */
+const CUBE_EDGE = /^Edge \d+ · 20(\.0+)? mm at /;
+
+/** The material an `r` fillet removes along a straight edge of length `l`. */
+const FILLET_LOSS = (radiusMm: number, lengthMm: number): number =>
+  (1 - Math.PI / 4) * radiusMm ** 2 * lengthMm;
+
+/** The material a symmetric `d` chamfer removes along a straight `l` edge. */
+const CHAMFER_LOSS = (distanceMm: number, lengthMm: number): number =>
+  0.5 * distanceMm ** 2 * lengthMm;
+
+test("s38 fillet an edge, edit the box width, the fillet still renders; then chamfer", async ({
+  sessionPage: page,
+}) => {
+  await stage("s38 fillet + width edit + chamfer", async () => {
+    const plate = Number(await openComplete(page, OCCT_ROOT));
+    const boxed = Number(
+      await addPrimitive(page, OCCT_ROOT, "box", {
+        "Width x (mm)": "20",
+        "Depth y (mm)": "20",
+        "Height z (mm)": "20",
+      }),
+    );
+    expect(volumeNear(boxed - plate, 20 ** 3)).toBe(true);
+
+    // FILLET one picked x-running edge of the box (20 mm): the r = 3
+    // round removes exactly one edge's worth of material.
+    await openPickVerb(page, OCCT_ROOT, "fillet");
+    await pickTopology(page, "body_box", (label) => X_EDGE.test(label));
+    const filleted = Number(
+      await submitPickForm(page, OCCT_ROOT, { "Radius (mm)": "3" }),
+    );
+    await expect(page.locator(OCCT)).toHaveAttribute(
+      "data-scene-kind",
+      "topologyCut",
+    );
+    expect(volumeNear(boxed - filleted, FILLET_LOSS(3, 20))).toBe(true);
+
+    // EDIT THE BOX WIDTH 20 → 30 through the parameter panel: the pick is
+    // a persistent name-based reference, so the fillet re-resolves on the
+    // widened box and STILL RENDERS — the box gains 10·20·20 and the round
+    // now runs the picked x edge's full 30 mm.
+    const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
+    await page.getByLabel("boxWidth", { exact: true }).fill("30");
+    await page.getByRole("button", { name: "Apply" }).click();
+    const widened = Number(
+      await waitForRootSettle(page, OCCT_ROOT, { afterDispatch: beforeEdit }),
+    );
+    await expect(page.locator(OCCT)).toHaveAttribute(
+      "data-scene-kind",
+      "topologyCut",
+    );
+    expect(
+      volumeNear(plate + 30 * 20 * 20 - widened, FILLET_LOSS(3, 30)),
+      `the widened fillet removes ${String(plate + 30 * 20 * 20 - widened)} mm³`,
+    ).toBe(true);
+    const filletTimeline = await readTimeline(page, OCCT_ROOT);
+    const fillet = filletTimeline.entries.find(
+      (entry) => entry.kind === "fillet",
+    );
+    expect(fillet?.status).toBe("valid");
+    expect(fillet?.diagnostics ?? []).toEqual([]);
+    cover("topology-fillet");
+
+    // CHAMFER a sharp edge of a second 20 mm cube placed beside the round
+    // (the filleted body's untouched edges sit under its consumed box's
+    // coincident markers, so they are not offered): the d = 2 bevel of
+    // any one cube edge removes exactly its triangular prism, ½·d²·L.
+    const cubed = Number(
+      await addPrimitive(page, OCCT_ROOT, "box", {
+        "Width x (mm)": "20",
+        "Depth y (mm)": "20",
+        "Height z (mm)": "20",
+        "Placement x (mm)": "45",
+      }),
+    );
+    expect(volumeNear(cubed - widened, 20 ** 3)).toBe(true);
+    await openPickVerb(page, OCCT_ROOT, "chamfer");
+    await pickTopology(page, "body_box_placed2", (label) =>
+      CUBE_EDGE.test(label),
+    );
+    const chamfered = Number(
+      await submitPickForm(page, OCCT_ROOT, {
+        "Distance (mm, symmetric)": "2",
+      }),
+    );
+    expect(
+      volumeNear(cubed - chamfered, CHAMFER_LOSS(2, 20)),
+      `the chamfer removes ${String(cubed - chamfered)} mm³`,
+    ).toBe(true);
+    await expect(page.locator(OCCT)).toHaveAttribute(
+      "data-scene-kind",
+      "topologyCut",
+    );
+    const timeline = await readTimeline(page, OCCT_ROOT);
+    expect(
+      timeline.entries
+        .filter((entry) => entry.kind === "fillet" || entry.kind === "chamfer")
+        .map((entry) => [entry.kind, entry.status]),
+    ).toEqual([
+      ["fillet", "valid"],
+      ["chamfer", "valid"],
+    ]);
+    cover("topology-chamfer");
+  });
+});
+
+test("s38b shell a box open at a picked face", async ({
+  sessionPage: page,
+}) => {
+  await stage("s38b shell", async () => {
+    // SHELL a fresh 20 mm cube open at ANY picked face (all six are
+    // 20 × 20): the 1 mm wall leaves the cube minus its 18 × 18 × 19
+    // hollow.
+    const plate = Number(await openComplete(page, OCCT_ROOT));
+    const boxed = Number(
+      await addPrimitive(page, OCCT_ROOT, "box", {
+        "Width x (mm)": "20",
+        "Depth y (mm)": "20",
+        "Height z (mm)": "20",
+      }),
+    );
+    expect(volumeNear(boxed - plate, 20 ** 3)).toBe(true);
+    await openPickVerb(page, OCCT_ROOT, "shell");
+    await pickTopology(page, "body_box");
+    const shelled = Number(
+      await submitPickForm(page, OCCT_ROOT, { "Wall thickness (mm)": "1" }),
+    );
+    await expect(page.locator(OCCT)).toHaveAttribute(
+      "data-scene-kind",
+      "topologyCut",
+    );
+    expect(volumeNear(shelled - plate, 20 ** 3 - 18 * 18 * 19)).toBe(true);
+    const timeline = await readTimeline(page, OCCT_ROOT);
+    expect(
+      timeline.entries.find((entry) => entry.kind === "shell")?.status,
+    ).toBe("valid");
+    cover("topology-shell");
+  });
+});
+
+test("s39 local face operations: move, delete and replace a picked face", async ({
+  sessionPage: page,
+}) => {
+  await stage("s39 face ops", async () => {
+    const plate = Number(await openComplete(page, OCCT_ROOT));
+    const boxed = Number(
+      await addPrimitive(page, OCCT_ROOT, "box", {
+        "Width x (mm)": "20",
+        "Depth y (mm)": "20",
+        "Height z (mm)": "20",
+      }),
+    );
+    expect(volumeNear(boxed - plate, 20 ** 3)).toBe(true);
+    // MOVE FACE: any picked cube face travels +5 mm along its own normal
+    // axis (read from the pick's centroid: the coordinate on a 0 / 20
+    // boundary) — outward from a max face grows the cube by 20·20·5,
+    // inward from a min face shrinks it by the same.
+    await openPickVerb(page, OCCT_ROOT, "move-face");
+    const moveLabel = await pickTopology(page, "body_box");
+    const centroid = centroidOf(moveLabel);
+    const axisIndex = centroid.findIndex(
+      (value) => Math.abs(value) < 1e-6 || Math.abs(value - 20) < 1e-6,
+    );
+    expect(axisIndex, `the face centroid ${moveLabel}`).toBeGreaterThanOrEqual(
+      0,
+    );
+    const panel = page.getByTestId("workbench-topology-pick-panel");
+    await panel.getByRole("combobox").click();
+    await page
+      .getByRole("option", { name: ["X axis", "Y axis", "Z axis"][axisIndex] })
+      .click();
+    const moved = Number(
+      await submitPickForm(page, OCCT_ROOT, { "Distance (mm, signed)": "5" }),
+    );
+    const outward = Math.abs((centroid[axisIndex] ?? 0) - 20) < 1e-6;
+    expect(
+      volumeNear(Math.abs(moved - boxed), 20 * 20 * 5),
+      `the moved face changed the cube by ${String(moved - boxed)} mm³`,
+    ).toBe(true);
+    expect(moved > boxed).toBe(outward);
+    cover("local-face-move");
+
+    // REPLACE FACE by a datum plane (the row needs a datum plane, so the
+    // face is read first): the clearest marker of the moved body is
+    // picked under the move verb (and the verb cancelled), a datum plane
+    // 2 mm INSIDE that face (its normal along the face's axis) is
+    // created, and the same marker — the anchors are deterministic for
+    // the unchanged scene — is replaced by it: the body loses the face's
+    // area × 2 mm.
+    await openPickVerb(page, OCCT_ROOT, "move-face");
+    const replaceLabel = await pickTopology(page, "body_moveFace");
+    await page
+      .getByTestId("workbench-topology-pick-panel")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await expect(
+      page.getByTestId("workbench-topology-pick-panel"),
+    ).toBeHidden();
+    const face = centroidOf(replaceLabel);
+    // The moved body's bounds: the picked face now sits 5 mm along its
+    // axis.
+    const low = [0, 0, 0].map((value, index) =>
+      index === axisIndex && !outward ? 5 : value,
+    );
+    const high = [20, 20, 20].map((value, index) =>
+      index === axisIndex && outward ? 25 : value,
+    );
+    const onBound = (bounds: readonly number[], index: number): boolean =>
+      Math.abs((face[index] ?? Number.NaN) - (bounds[index] ?? 0)) < 1e-6;
+    const normalIndex = [0, 1, 2].findIndex(
+      (index) => onBound(low, index) || onBound(high, index),
+    );
+    expect(
+      normalIndex,
+      `the face centroid ${replaceLabel}`,
+    ).toBeGreaterThanOrEqual(0);
+    const atMax = onBound(high, normalIndex);
+    const origin = face.map((value, index) =>
+      index === normalIndex ? value + (atMax ? -2 : 2) : value,
+    );
+    const axisNames = ["x", "y", "z"] as const;
+    await runCommand(page, OCCT_ROOT, "create-datum");
+    const datumDialog = page.locator(DIALOG);
+    await expect(datumDialog).toBeVisible();
+    const fillDatum = async (label: string, value: number): Promise<void> => {
+      await datumDialog
+        .getByRole("spinbutton", { name: label, exact: true })
+        .fill(String(value));
+    };
+    for (const [index, name] of axisNames.entries()) {
+      await fillDatum(`Origin ${name} (mm)`, origin[index] ?? 0);
+      await fillDatum(`Normal ${name}`, index === normalIndex ? 1 : 0);
+      await fillDatum(
+        `In-plane x ${name}`,
+        index === (normalIndex + 1) % 3 ? 1 : 0,
+      );
+    }
+    await datumDialog.getByRole("button", { name: "Create datum" }).click();
+    await expect(datumDialog).toBeHidden();
+    await openPickVerb(page, OCCT_ROOT, "replace-face");
+    expect(await pickTopology(page, "body_moveFace")).toBe(replaceLabel);
+    const replaced = Number(await submitPickForm(page, OCCT_ROOT, {}));
+    await expect(page.locator(OCCT)).toHaveAttribute(
+      "data-scene-kind",
+      "faceOp",
+    );
+    const replaceArea = Number(/ · ([\d.]+) mm²/.exec(replaceLabel)?.[1]);
+    expect(
+      volumeNear(moved - replaced, replaceArea * 2),
+      `the replaced face removed ${String(moved - replaced)} mm³`,
+    ).toBe(true);
+    cover("local-face-replace");
+
+    // DELETE FACE in BOTH modes: OCCT's binding cannot close the gap with
+    // or without heal (both are probed out), so each submission's honest
+    // answer is the structured refusal naming its mode and the scene keeps
+    // the replaced body. The refused feature is undone before the other
+    // mode is tried, so each timeline read carries exactly one deleteFace.
+    const healModes = [
+      { heal: true, note: "(with heal)" },
+      { heal: false, note: "(without heal)" },
+    ] as const;
+    for (const [index, mode] of healModes.entries()) {
+      if (index > 0) {
+        const beforeUndo = await dispatchedCount(page, OCCT_ROOT);
+        await runCommand(page, OCCT_ROOT, "undo");
+        const undone = Number(
+          await waitForRootSettle(page, OCCT_ROOT, {
+            afterDispatch: beforeUndo,
+          }),
+        );
+        expect(volumeNear(undone, replaced)).toBe(true);
+      }
+      await openPickVerb(page, OCCT_ROOT, "delete-face");
+      await pickTopology(page, "body_replaceFace");
+      const heal = page
+        .getByTestId("workbench-topology-pick-panel")
+        .getByRole("checkbox", {
+          name: "Heal: extend the neighbouring faces to close the gap",
+        });
+      await heal.setChecked(mode.heal);
+      const afterDelete = Number(await submitPickForm(page, OCCT_ROOT, {}));
+      expect(volumeNear(afterDelete, replaced)).toBe(true);
+      const deleteTimeline = await readTimeline(page, OCCT_ROOT);
+      expect(
+        deleteTimeline.entries
+          .filter((entry) =>
+            ["moveFace", "replaceFace", "deleteFace"].includes(entry.kind),
+          )
+          .map((entry) => [entry.kind, entry.status]),
+      ).toEqual([
+        ["moveFace", "valid"],
+        ["replaceFace", "valid"],
+        ["deleteFace", "failed"],
+      ]);
+      const refusal =
+        deleteTimeline.entries.find((entry) => entry.kind === "deleteFace")
+          ?.diagnostics?.[0]?.message ?? "";
+      expect(refusal).toContain("kernel/unsupported-operation");
+      expect(refusal).toContain(mode.note);
+    }
+    cover("local-face-delete");
   });
 });
 

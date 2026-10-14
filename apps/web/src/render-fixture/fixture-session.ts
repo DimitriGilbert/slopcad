@@ -6,8 +6,9 @@
  * workbench can reuse the same pipeline without duplicating it.
  */
 
-import type { SelectionReference } from "@slopcad/cad-core";
+import type { SelectionReference, TopologySnapshot } from "@slopcad/cad-core";
 import {
+  createBodyId,
   formatBoundsExtents,
   groupSyntheticFaces,
   serializeDimensionalValue,
@@ -18,6 +19,7 @@ import {
 } from "@slopcad/cad-core";
 import {
   createStaleResultCoordinator,
+  createWorkerIdGenerator,
   bootWorkerChannel,
   WorkerRequestFailure,
   type ComputationOutcome,
@@ -113,8 +115,30 @@ export function isPlateRenderState(
   return "tessellation" in state.measurement;
 }
 
+/**
+ * The visible document scene's topology inventory, queried on demand: per
+ * computed body the kernel's snapshot of the solid the visible pass built
+ * (labeled with the body id, at the visible revision). A body the query
+ * could not snapshot — the kernel declined, or a newer pass replaced the
+ * visible one mid-query and released its solid — is simply absent.
+ */
+export interface DocumentTopologyInventory {
+  /** The visible revision the snapshots stand at. */
+  readonly revision: number;
+  /** Per body id: the snapshot of its computed solid. */
+  readonly snapshots: ReadonlyMap<string, TopologySnapshot>;
+}
+
 /** The wired session a booted fixture exposes. */
 export interface RenderFixtureSession {
+  /**
+   * Queries the VISIBLE document scene's per-body topology on demand: one
+   * `solid.topology` per solid the visible pass computed (rendered bodies
+   * and compute-only consumed targets alike). The render pass itself does
+   * no topology work for this — only this call does. Resolves `null` when
+   * the visible state is not a document scene (or nothing settled yet).
+   */
+  documentTopology(): Promise<DocumentTopologyInventory | null>;
   /**
    * Records a parameter change and dispatches the plate computation —
    * optionally cutting a section first (Phase 46): with a request the
@@ -411,6 +435,7 @@ export type FixtureSessionBackend = "manifold" | "occt";
  */
 export type FeatureSceneKind =
   | "extrude"
+  | "primitive"
   | "revolve"
   | "sweep"
   | "loft"
@@ -425,6 +450,9 @@ export type FeatureSceneKind =
   | "patternFeature"
   | "patternPath"
   | "patternTransform"
+  | "topologyCut"
+  | "faceOp"
+  | "patternFace"
   | "mirror"
   | "duplicate"
   | "hole"
@@ -551,8 +579,13 @@ export function bootRenderFixtureSession(
       writeSurface();
     },
   );
+  // One id generator for every request on the channel: the coordinator's
+  // computations and the on-demand topology queries share the client, and
+  // request ids are single-use per channel.
+  const ids = createWorkerIdGenerator();
   const coordinator = createStaleResultCoordinator<FixtureRenderState>({
     client: boot.client,
+    ids,
   });
   const counters = { dispatched: 0, settled: 0 };
 
@@ -645,6 +678,30 @@ export function bootRenderFixtureSession(
   }
 
   return {
+    async documentTopology(): Promise<DocumentTopologyInventory | null> {
+      const visible = coordinator.visible();
+      if (visible === null || !("solids" in visible.state.measurement)) {
+        return null;
+      }
+      const revision = visible.revision;
+      const snapshots = new Map<string, TopologySnapshot>();
+      for (const { bodyId, solid } of visible.state.measurement.solids) {
+        try {
+          const { snapshot } = await boot.client.request(
+            "solid.topology",
+            { solid, bodyId: createBodyId(bodyId), regeneration: revision },
+            ids.nextRequestId(),
+          );
+          snapshots.set(bodyId, snapshot);
+        } catch (failure: unknown) {
+          // A declined snapshot (or a solid a newer pass already released)
+          // leaves the body out of the inventory; any non-protocol throw is
+          // a real bug and propagates.
+          if (!(failure instanceof WorkerRequestFailure)) throw failure;
+        }
+      }
+      return { revision, snapshots };
+    },
     dispatch(
       holeDiameterMm: number,
       section?: SectionDisplayRequest | null,

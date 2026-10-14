@@ -168,8 +168,9 @@ export type TopologyIdentityDatum = string | number | boolean;
 /**
  * The kernel-agnostic topology-identity payload: which kernel minted it,
  * under which schema, and the opaque data only that kernel interprets (for
- * OCCT the shape hash — see `OCCT_TOPOLOGY_IDENTITY_SCHEMA` in
- * `cad-kernel-occt`). No raw kernel handle ever crosses this type.
+ * OCCT the history-based construction name, or the legacy shape hash — see
+ * `OCCT_NAME_IDENTITY_SCHEMA` in `cad-kernel-occt`). No raw kernel handle
+ * ever crosses this type.
  */
 export interface TopologyIdentityPayload {
   readonly kernelId: string;
@@ -1272,6 +1273,41 @@ function repaired(
       }),
     }),
   );
+}
+
+/**
+ * The outcome of {@link repairMissingReference}: the reference in its final
+ * state (the resolved one unchanged, or its `repaired` successor) plus, when
+ * a `missing` reference's repair refused, the structured refusal — the
+ * caller names both the state and the refusal on its diagnostic.
+ */
+export interface RepairFallbackOutcome {
+  readonly reference: TopologyEntityReference;
+  readonly repairError?: ReferenceError;
+}
+
+/**
+ * The resolution sites' fallback for a `missing` reference (Phase N3): a
+ * name-based identity re-resolves `valid` across rebuilds on its own, but a
+ * reference into an operation's UNNAMED output (or into a deleted / split
+ * entity) stands `missing`, so the site tries the bounded geometric repair
+ * of {@link repairTopologyReference} against the same current snapshot
+ * before refusing. Any other state — and a missing reference with no
+ * snapshot to repair against — passes through unchanged; a refused repair
+ * keeps the reference `missing` and carries the refusal (ambiguous twins or
+ * no candidate), never a guess.
+ */
+export function repairMissingReference(
+  resolved: TopologyEntityReference,
+  snapshot: TopologySnapshot | null,
+): RepairFallbackOutcome {
+  if (resolved.validity.state !== "missing" || snapshot === null) {
+    return { reference: resolved };
+  }
+  const repairedReference = repairTopologyReference(resolved, snapshot);
+  return repairedReference.ok
+    ? { reference: repairedReference.value }
+    : { reference: resolved, repairError: repairedReference.error };
 }
 
 /**

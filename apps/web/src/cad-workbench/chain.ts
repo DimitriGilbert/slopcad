@@ -16,24 +16,24 @@
  *    distance parameter, the output body, and the `extrude` feature;
  *  - the hole action commits the five hole parameters, the output body,
  *    and the `hole` feature targeting the last extrude;
- *  - the fillet action commits the radius parameter, the picked edge's
- *    snapshot ordinal as a DIMENSIONLESS parameter (the hole axis
- *    selector's precedent: a structural address, not a physical
- *    quantity), the output body, and the `fillet` feature with one
- *    feature input (the target) and those two parameter inputs.
+ *  - the fillet action commits the radius parameter, a document
+ *    REFERENCE record holding the persistent topology reference minted
+ *    from the picked edge of the applied scene's target snapshot, the
+ *    output body, and the `fillet` feature in the bridge's canonical
+ *    layout: one feature input (the target), the reference input, and the
+ *    radius parameter input.
  *
- * The ordinal-as-parameter decision is disclosed against the alternative:
- * the bridge's canonical `fillet` layout carries Phase 22 persistent
- * REFERENCES, but this kernel's identity payloads are within-regeneration
- * shape hashes (allocation-address-derived — every rebuild produces a
- * disjoint set), so a minted reference resolves `missing` on the very next
- * dispatch, and the repair heuristic refuses measure-changing re-anchors
- * by design (a depth edit changes the recorded edge length — exactly the
- * pinned upstream-edit cascade). The snapshot-ordinal address is the
- * /worker-fillet precedent: on a rebuild-executing chain the snapshot is
- * the honest edge identity, the ordinals are deterministic per topology,
- * and a stale ordinal is judged by the KERNEL (`solid.fillet` rejects the
- * structured failure) — never a silent re-attach.
+ * The reference decision (Phase N3, replacing the earlier snapshot-ordinal
+ * parameter): the OCCT kernel's identity payloads are history-based
+ * construction names (`occt-name/1`), which read no dimension, so a
+ * reference minted in one dispatch re-resolves `valid` in every rebuild —
+ * including the upstream-edit cascade (a depth edit changes the edge's
+ * length, not its name). The chain scene resolves it per dispatch; a
+ * `missing` reference tries the bounded repair before the fillet stage
+ * refuses — never a silent re-attach. Documents authored before names
+ * (the radius parameter plus a DIMENSIONLESS edge-ordinal parameter —
+ * `./topology-cut`'s `chainFilletInputOf`) still read, their ordinals
+ * judged by the kernel.
  *
  * ## The scene request
  *
@@ -48,7 +48,6 @@
  */
 
 import type { CadDocument, FeatureRecord } from "@slopcad/cad-core";
-import { valueIn } from "@slopcad/cad-core";
 import type {
   ChainFilletRequest,
   ChainHoleRequest,
@@ -62,6 +61,11 @@ import {
   isStructuredHoleFeature,
   structuredHoleCutInputOfFeature,
 } from "./hole";
+import {
+  topologyCutInputOf,
+  topologyCutTargetBodyIdOf,
+  type TopologyCutSelection,
+} from "./topology-cut";
 
 /** The radius a fillet action creates its radius parameter with (mm). */
 export const CHAIN_FILLET_DEFAULT_RADIUS_MM = 3;
@@ -80,52 +84,24 @@ export function filletBaseFeatureOf(
 }
 
 /**
- * Reads one fillet feature's inputs in declared role order: one feature or
- * body input (the target) and two parameter inputs — the radius (a length,
- * strictly positive) and the picked edge's snapshot ordinal (dimensionless
- * integer). `null` when the layout is malformed or any parameter no longer
- * resolves.
+ * Reads one chain fillet feature's radius and edge selection through the
+ * document scene's topology-cut reader (`./topology-cut` — the ONE reader
+ * of both fillet layouts): the canonical reference form the pick authors,
+ * or the legacy single-ordinal form. `null` when the feature's target, its
+ * radius, or its selection no longer resolves.
  */
-export function chainFilletInputOf(
+export function chainFilletOf(
   document: CadDocument,
   feature: FeatureRecord,
-): { readonly radiusMm: number; readonly edgeOrdinal: number } | null {
-  const targetRefs = feature.inputs.filter(
-    (ref) => ref.kind === "feature" || ref.kind === "body",
-  );
-  const parameterRefs = feature.inputs.filter(
-    (ref) => ref.kind === "parameter",
-  );
-  if (targetRefs.length !== 1 || parameterRefs.length !== 2) return null;
-  const radiusRef = parameterRefs[0];
-  const edgeRef = parameterRefs[1];
-  if (radiusRef === undefined || edgeRef === undefined) return null;
-  const radiusParameter = document.parameters.parameters.find(
-    (candidate) => candidate.id === radiusRef.id,
-  );
-  const radiusMm =
-    radiusParameter === undefined ||
-    radiusParameter.value.dimension !== "length"
-      ? null
-      : valueIn(radiusParameter.value, "mm");
-  const edgeParameter = document.parameters.parameters.find(
-    (candidate) => candidate.id === edgeRef.id,
-  );
-  const edgeRaw =
-    edgeParameter === undefined ||
-    edgeParameter.value.dimension !== "dimensionless"
-      ? null
-      : valueIn(edgeParameter.value, "1");
-  if (
-    radiusMm === null ||
-    !(radiusMm > 0) ||
-    edgeRaw === null ||
-    !Number.isInteger(edgeRaw) ||
-    edgeRaw < 0
-  ) {
-    return null;
-  }
-  return { radiusMm, edgeOrdinal: edgeRaw };
+): {
+  readonly radiusMm: number;
+  readonly selection: TopologyCutSelection;
+} | null {
+  const targetBodyId = topologyCutTargetBodyIdOf(document, feature);
+  if (targetBodyId === null) return null;
+  const input = topologyCutInputOf(document, feature, "fillet", targetBodyId);
+  if (input === null) return null;
+  return { radiusMm: input.sizeMm, selection: input.selection };
 }
 
 /**
@@ -189,7 +165,7 @@ export function documentChainSceneRequest(
   for (const filletFeature of document.features) {
     if (filletFeature.kind !== "fillet") continue;
     if (solidTargetIdOf(filletFeature) !== filletBase.id) return null;
-    const fillet = chainFilletInputOf(document, filletFeature);
+    const fillet = chainFilletOf(document, filletFeature);
     if (fillet === null) return null;
     fillets.push({ featureId: filletFeature.id, ...fillet });
   }

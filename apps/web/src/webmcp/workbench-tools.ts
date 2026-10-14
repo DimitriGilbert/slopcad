@@ -8,10 +8,13 @@
  * one write path:
  *
  * - `cad_get_document_summary` — `store.getDocument()` (the store the
- *   document hook mirrors).
+ *   document hook mirrors) plus the per-body persistent face/edge
+ *   inventory, queried from the worker ON DEMAND through the engine's
+ *   `documentTopology()` (the render pass does no topology work for it).
  * - `cad_list_commands` / `cad_run_command` — the page's live command-menu
  *   vocabulary (`CadCommandDescriptor[]`; `run()` is the exact callback a
- *   menu row click fires).
+ *   menu row click fires); `cad_list_commands` also serves the authorable
+ *   `featureVocabulary` (./feature-vocabulary).
  * - `cad_set_parameter` — `store.applyCommand(setParameterCommand(...))`
  *   for numbers and `store.applyCommand(setParameterExpressionCommand(...))`
  *   for strings, the identical commits `useCadParameters().setValue` /
@@ -57,6 +60,7 @@ import {
   angle,
   area,
   type AnyDimensionalValue,
+  type BodyId,
   type CadCommand,
   type CadDocument,
   type Dimension,
@@ -64,13 +68,20 @@ import {
   type FeatureTimelineEntry,
   getParameter,
   length,
+  mintTopologyReference,
   printExpression,
   type ParameterId,
   parseCommand,
   parseExpression,
   type RenderCamera,
+  parseReferenceId,
+  type ReferenceId,
+  referenceProvenance,
   serializeDimensionalValue,
   serializeSelectionReference,
+  serializeTopologyReference,
+  type TopologyEntitySnapshot,
+  type TopologySnapshot,
   volume,
 } from "@slopcad/cad-core";
 import {
@@ -84,7 +95,10 @@ import {
   type CadStore,
 } from "@slopcad/cad-react";
 import type { CadCommandDescriptor } from "@slopcad/ui/components/cad/cad-command-menu";
-import type { FixtureRenderState } from "../render-fixture/fixture-session";
+import type {
+  DocumentTopologyInventory,
+  FixtureRenderState,
+} from "../render-fixture/fixture-session";
 import type { WorkbenchEngine } from "../cad-workbench/workbench-engine";
 import type { WebMcpToolEntry } from "./registry";
 
@@ -99,6 +113,7 @@ import {
   type CaptureViewRequest,
 } from "../cad-workbench/snapshot-export";
 import { assemblyDiagnostics, documentOutline } from "./document-outline";
+import { FEATURE_KIND_VOCABULARY } from "./feature-vocabulary";
 import { defineWebMcpTool } from "./registry";
 import { useWebMcpTools } from "./use-webmcp-tools";
 
@@ -115,6 +130,12 @@ export interface WorkbenchWebMcpSurface {
   readonly commands: () => readonly CadCommandDescriptor[];
   /** The engine's applied render state, or `null` before the first settle. */
   readonly appliedState: () => FixtureRenderState | null;
+  /**
+   * Queries the visible document scene's per-body topology snapshots on
+   * demand (the engine's `documentTopology`) — called ONLY by
+   * `cad_get_document_summary`, so no render pass pays for it.
+   */
+  readonly documentTopology: () => Promise<DocumentTopologyInventory | null>;
   /** The measure tool's last point-pair distance (mm), or `null`. */
   readonly measureText: () => string | null;
   /** The live viewport capture surface `cad_capture_views` drives. */
@@ -329,12 +350,115 @@ function sceneBodyIdOf(applied: FixtureRenderState): string | null {
   return bodyId === undefined ? null : String(bodyId);
 }
 
-/** The bodies the summary tool reports: identity, name, kind, visibility. */
-function bodySummaries(document: CadDocument) {
+/**
+ * How many leading characters of a body id the bounded fallback reference
+ * id keeps: with the `-<8 hex>` digest and the `_<kind>_<ordinal>` tail it
+ * stays inside the 64-character id payload for any realistic ordinal.
+ */
+const FALLBACK_BODY_SEGMENT_LENGTH = 40;
+
+/** The 32-bit FNV-1a digest of `text`, as eight lowercase hex digits. */
+function fnv1aHex(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * The deterministic reference id the inventory offers for one entity —
+ * the sketch-mode convert list's `ref_<body>_<kind>_<ordinal>` scheme.
+ * A body id long enough to overflow the reference id payload falls back
+ * to a bounded segment: its first characters plus a digest of the whole
+ * id, still deterministic and unique per body. Validation never throws —
+ * an entity no scheme can address reports `null`.
+ */
+function inventoryReferenceId(
+  bodyId: BodyId,
+  entity: TopologyEntitySnapshot,
+): ReferenceId | null {
+  const tail = `${entity.kind}_${String(entity.ordinal)}`;
+  const canonical = parseReferenceId(`ref_${bodyId}_${tail}`);
+  if (canonical.ok) return canonical.value;
+  const bounded = `${String(bodyId).slice(0, FALLBACK_BODY_SEGMENT_LENGTH)}-${fnv1aHex(String(bodyId))}`;
+  const fallback = parseReferenceId(`ref_${bounded}_${tail}`);
+  return fallback.ok ? fallback.value : null;
+}
+
+/**
+ * One body's persistent face/edge inventory: per entity its snapshot
+ * ordinal, geometric descriptor, and — when the kernel persists topology
+ * and the body's provenance is unambiguous — a minted, serialized
+ * persistent reference ready to store verbatim through `reference.create`
+ * (the payload the core bridge's reference readers parse and re-resolve
+ * by name on every later rebuild).
+ */
+function topologyInventory(
+  document: CadDocument,
+  bodyId: BodyId,
+  snapshot: TopologySnapshot | undefined,
+) {
+  if (snapshot === undefined) return null;
+  const provenance = referenceProvenance(document, bodyId);
+  const entries = (kind: "face" | "edge") =>
+    snapshot.entities
+      .filter((entity) => entity.kind === kind)
+      .map((entity) => {
+        const referenceId = inventoryReferenceId(bodyId, entity);
+        const minted =
+          referenceId !== null && snapshot.persistentTopology && provenance.ok
+            ? mintTopologyReference(
+                snapshot,
+                entity.ordinal,
+                provenance.value,
+                { id: referenceId, kind },
+              )
+            : null;
+        return {
+          geometry: entity.geometry,
+          ordinal: entity.ordinal,
+          reference:
+            minted !== null && minted.ok
+              ? serializeTopologyReference(minted.value)
+              : null,
+          referenceId,
+          referenced:
+            referenceId !== null &&
+            document.references.some((record) => record.id === referenceId),
+        };
+      });
+  return {
+    edges: entries("edge"),
+    faces: entries("face"),
+    persistent: snapshot.persistentTopology,
+    regeneration: snapshot.regeneration,
+  };
+}
+
+/**
+ * The bodies the summary tool reports: identity, name, kind, visibility,
+ * and the visible scene's persistent face/edge inventory (queried on
+ * demand). Every body the visible document scene computed a solid for
+ * carries one — rendered, fallback-rendered, or a consumed target an op
+ * builds on; it is `null` for a body the scene computed no solid for
+ * (hidden and unconsumed, not yet settled, its own scene refused, a
+ * sheet) or whose snapshot the kernel declined.
+ */
+function bodySummaries(
+  document: CadDocument,
+  inventory: DocumentTopologyInventory | null,
+) {
   return document.bodies.map((body) => ({
     id: String(body.id),
     kind: body.kind ?? "solid",
     name: body.name,
+    topology: topologyInventory(
+      document,
+      body.id,
+      inventory?.snapshots.get(String(body.id)),
+    ),
     visible: body.visible ?? true,
   }));
 }
@@ -517,13 +641,14 @@ export function createWorkbenchWebMcpTools(
     defineWebMcpTool({
       annotations: { readOnlyHint: true },
       description:
-        "Summarize the open CAD document: body, feature, and parameter counts, the feature kinds in the timeline, and every body and parameter record (ids, names, values in canonical units).",
+        "Summarize the open CAD document: body, feature, and parameter counts, `featureKinds` (the feature kinds IN THE TIMELINE — the authorable vocabulary is cad_list_commands' `featureVocabulary`), and every body and parameter record (ids, names, values in canonical units). Each body carries its persistent topology inventory (`topology.faces` / `topology.edges`: ordinal, geometry, and a ready-to-store persistent `reference` payload with its `referenceId`), computed on demand by this call from the visible scene — the selection addresses fillet/chamfer/shell/face-op inputs consume. Store a payload with `reference.create`, then wire `{ kind: \"reference\", id }` into the feature. Guarantee: a stored name-based reference survives rebuilds and dimension edits (re-resolved by name, not by ordinal); a reference whose entity was deleted, split ambiguously, or produced by an op that names nothing is never silently re-attached — it is repaired or refused, and the state is named (`valid` / `repaired` / `missing`, or a `reference-unresolved` refusal). `topology` is `null` for a body the visible scene computed no solid for (hidden and unconsumed, not yet settled, its own scene refused, a sheet) or whose snapshot the kernel declined — on Manifold EVERY body's `topology` is `null` (it reports no topology; do not poll — edge/face selection needs OCCT). A snapshot marked `persistent: false` carries no `reference` on its entries.",
       inputSchema: z.object({}),
       name: "cad_get_document_summary",
-      execute: () => {
+      execute: async () => {
         const document = surface.store.getDocument();
+        const inventory = await surface.documentTopology();
         return {
-          bodies: bodySummaries(document),
+          bodies: bodySummaries(document, inventory),
           counts: {
             bodies: document.bodies.length,
             features: document.features.length,
@@ -543,7 +668,7 @@ export function createWorkbenchWebMcpTools(
     defineWebMcpTool({
       annotations: { readOnlyHint: true },
       description:
-        "List the workbench command-menu vocabulary: every command id, label, group, and search keywords, with each command's current availability. This is the exact list the Ctrl/Cmd+K palette renders.",
+        "List the workbench command-menu vocabulary: every command id, label, group, and search keywords, with each command's current availability — the exact list the Ctrl/Cmd+K palette renders. `featureVocabulary` lists the authorable feature kinds (box/sphere/cylinder/cone primitives, fillet/chamfer/shell, moveFace/deleteFace/replaceFace, patternFace) with their canonical `feature.create` input layouts (declared-order inputs, dimensions, domains), authored through cad_apply_commands. Reference slots take a persistent edge/face reference minted from cad_get_document_summary's inventory.",
       inputSchema: z.object({}),
       name: "cad_list_commands",
       execute: () => ({
@@ -554,6 +679,7 @@ export function createWorkbenchWebMcpTools(
           keywords: command.keywords ?? null,
           label: command.label,
         })),
+        featureVocabulary: FEATURE_KIND_VOCABULARY,
         ok: true,
       }),
     }),
@@ -904,6 +1030,7 @@ export function useWorkbenchWebMcpTools({
         userCamera: () => live.current.capture.userCamera(),
       },
       commands: () => live.current.commands,
+      documentTopology: () => live.current.engine.documentTopology(),
       measureText: () => live.current.engine.measureText,
       mode: () => live.current.engine.mode,
       regenerationIssue: () => live.current.engine.regenerationIssue,

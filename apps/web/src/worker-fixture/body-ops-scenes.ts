@@ -93,8 +93,11 @@ async function extrudeOperand(
   });
 }
 
-/** Measures a settled solid the way every scene does. */
-async function measure(
+/**
+ * Measures a settled solid the way every scene does (shared with the
+ * primitive scene, `./primitive-scene`).
+ */
+export async function measure(
   context: ComputationContext,
   solid: WorkerSolidId,
 ): Promise<PlateMeasurement> {

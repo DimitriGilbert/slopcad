@@ -385,7 +385,7 @@ model exactly.
 ## The compile CLI
 
 ```
-pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>]
+pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>] [--commands <path>]
 ```
 
 - The model file's **default export** is rendered: a React element, or a
@@ -395,6 +395,16 @@ pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>]
   the repo's `.native.json` fixture extension. The output is raw JSON
   text — the workbench's open and the documents API's `nativeContent`
   both accept it exactly as written.
+- `--commands <path>` additionally writes the emission's command batch —
+  every committed transaction's commands, in order — as a JSON array. An
+  extensionless `--commands` path gains the repo's `.commands.json`
+  fixture extension. This is the generation path for the repo's
+  cad-jsx-compiled `*.commands.json` fixtures (e.g.
+  `fillet-box.commands.json`, compiled from
+  `packages/docs-examples/src/cadjsx/fillet-box.tsx`); regenerate those,
+  never hand-edit them. `parametric-cup.commands.json` is outside this
+  path: it is a hand-authored raw-CadCommand batch, not a cad-jsx model,
+  and the CLI cannot produce it.
 - The emitted document's id derives from the model file's basename
   (`hub-mount.tsx` → `doc_hub-mount`), sanitized into the id payload
   charset and length.
