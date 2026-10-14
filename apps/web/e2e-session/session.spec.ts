@@ -6624,6 +6624,9 @@ test("s42 fillet an edge, edit the box width, the fillet still renders; then cha
     // a persistent name-based reference, so the fillet re-resolves on the
     // widened box and STILL RENDERS — the box gains 10·20·20 and the round
     // now runs the picked x edge's full 30 mm.
+    // The agent-chat stages leave the right sidebar persisted on its chat
+    // view; the parameter panel lives in the panels view.
+    await page.getByTestId("right-sidebar-view-panels").click();
     const beforeEdit = await dispatchedCount(page, OCCT_ROOT);
     await page.getByLabel("boxWidth", { exact: true }).fill("30");
     await page.getByRole("button", { name: "Apply" }).click();
