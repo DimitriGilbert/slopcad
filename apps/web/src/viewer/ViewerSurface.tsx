@@ -27,7 +27,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { CadProvider } from "@slopcad/cad-react";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
@@ -51,7 +50,17 @@ import {
 import { STANDALONE_ASSETS } from "./standalone-assets";
 import { useViewerEngine, useViewerStore } from "./viewer-engine";
 
-import { useTRPC } from "@/utils/trpc";
+/**
+ * The id-based server share's resolved state, as the ROUTE (which sits
+ * under the app's tRPC and query providers) hands it down. The surface
+ * itself stays provider-free: the standalone export mounts it in a
+ * `file://`-opened single HTML with no providers at all.
+ */
+export type ServerShareState =
+  | { readonly kind: "none" }
+  | { readonly kind: "pending" }
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "text"; readonly text: string };
 
 /** Props of {@link ViewerSurface}. */
 export interface ViewerSurfaceProps {
@@ -77,12 +86,13 @@ export interface ViewerSurfaceProps {
   /** The injected document title (the standalone mount's). */
   readonly injectedTitle?: string | null;
   /**
-   * The id-based server share (the route's `?p=<id>`): fetched through
-   * the shares API and adopted on mount when the URL carries no
-   * fragment — the self-contained fragment link wins when both are
-   * present. Omitted by the standalone mount.
+   * The id-based server share's resolved state (the route fetched
+   * `?p=<id>` through the shares API before mounting). `"none"` by
+   * default — the standalone mount fetches nothing. Adopted on mount
+   * when the URL carries no fragment; the self-contained fragment link
+   * wins when both are present.
    */
-  readonly serverShareId?: string;
+  readonly serverShare?: ServerShareState;
   /**
    * The worker override (the standalone mount's inlined blob worker — a
    * stable, module-level factory: the engine boots exactly once). The
@@ -112,7 +122,7 @@ export function ViewerSurface({
   embed = false,
   injectedNativeText = null,
   injectedTitle = null,
-  serverShareId,
+  serverShare = { kind: "none" },
   variant,
   workerFactory,
 }: ViewerSurfaceProps): ReactElement {
@@ -123,7 +133,7 @@ export function ViewerSurface({
         embed={embed}
         injectedNativeText={injectedNativeText}
         injectedTitle={injectedTitle}
-        serverShareId={serverShareId}
+        serverShare={serverShare}
         variant={variant}
         workerFactory={workerFactory}
       />
@@ -141,14 +151,14 @@ function ViewerBody({
   embed,
   injectedNativeText,
   injectedTitle,
-  serverShareId,
+  serverShare,
   variant,
   workerFactory,
 }: {
   readonly embed: boolean;
   readonly injectedNativeText: string | null;
   readonly injectedTitle: string | null;
-  readonly serverShareId: string | undefined;
+  readonly serverShare: ServerShareState;
   readonly variant: "page" | "standalone";
   readonly workerFactory?: () => Worker;
 }): ReactElement {
@@ -162,7 +172,6 @@ function ViewerBody({
     { workerFactory },
   );
   const { adopt, applied, currentNativeText, noteRenderedFrame } = engine;
-  const trpc = useTRPC();
 
   // The loaded document's chrome facts (title, variable split) and the
   // load failure, surfaced verbatim in the empty state. The injected title
@@ -189,19 +198,9 @@ function ViewerBody({
     [adopt],
   );
 
-  // The id-based server share's document: fetched only when a share id
-  // rides the URL, never retried (a missing share is a dead link, not a
-  // transient). The fragment's decode failure resets the adopted flag;
-  // this query's failures land in the load error line below.
-  const serverShareQuery = useQuery({
-    ...trpc.shares.get.queryOptions({ id: serverShareId ?? "" }),
-    enabled: serverShareId !== undefined,
-    retry: false,
-  });
-
   // The document source, resolved once per mount: the injected text wins
   // (the standalone mount), else the URL fragment (the share link), else
-  // the id-based server share's fetched document. A decode, fetch, or
+  // the id-based server share the route already fetched. A decode or
   // parse failure lands in the empty state's error region — never a
   // blank page.
   useEffect(() => {
@@ -223,23 +222,16 @@ function ViewerBody({
       });
       return;
     }
-    if (serverShareId === undefined) return;
-    if (serverShareQuery.isError) {
-      adoptedRef.current = true;
-      setLoadError(`server share: ${serverShareQuery.error.message}`);
+    if (serverShare.kind === "none" || serverShare.kind === "pending") {
       return;
     }
-    if (serverShareQuery.data !== undefined) {
-      adoptText(serverShareQuery.data.nativeContent, "server share");
+    if (serverShare.kind === "error") {
+      adoptedRef.current = true;
+      setLoadError(`server share: ${serverShare.message}`);
+      return;
     }
-  }, [
-    adoptText,
-    injectedNativeText,
-    serverShareId,
-    serverShareQuery.data,
-    serverShareQuery.isError,
-    serverShareQuery.error,
-  ]);
+    adoptText(serverShare.text, "server share");
+  }, [adoptText, injectedNativeText, serverShare]);
 
   // -- Share link -----------------------------------------------------------
   const handleCopyShare = useCallback(
@@ -438,6 +430,7 @@ function ViewerBody({
             />
           ) : (
             <ViewerEmptyState
+              busy={serverShare.kind === "pending"}
               error={loadError}
               onLoad={adoptText}
               variant={variant}
@@ -488,10 +481,13 @@ async function fetchText(url: string): Promise<string> {
  * refusal (bad link payload, unparsable paste) surfaces verbatim here.
  */
 function ViewerEmptyState({
+  busy,
   error,
   onLoad,
   variant,
 }: {
+  /** A `?p=` share fetch is in flight — the paste zone is not the story. */
+  readonly busy: boolean;
   readonly error: string | null;
   readonly onLoad: (text: string, source: string) => void;
   readonly variant: "page" | "standalone";
@@ -528,6 +524,14 @@ function ViewerEmptyState({
           The viewer draws a parametric part and lets anyone re-drive it: the
           variables on the right are live, the solid follows.
         </p>
+        {busy ? (
+          <p
+            className="text-muted-foreground mt-3 font-mono text-xs"
+            data-testid="viewer-share-fetching"
+          >
+            fetching the shared part…
+          </p>
+        ) : null}
         <label
           className="text-muted-foreground mt-5 block font-mono text-[10.5px] font-medium uppercase tracking-[0.08em]"
           htmlFor="viewer-paste"

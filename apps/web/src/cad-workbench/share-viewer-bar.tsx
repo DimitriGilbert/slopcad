@@ -141,20 +141,27 @@ export function WorkbenchShareBar({
       {
         onSuccess: ({ id }) => {
           const url = `${window.location.origin}/viewer?p=${id}`;
-          void navigator.clipboard.writeText(url).then(
-            () => {
-              setState({
-                kind: "copied",
-                message: `viewer link copied — ${SERVER_LINK.note} · ${String(url.length)} chars`,
-              });
-            },
-            (error: unknown) => {
-              setState({
-                kind: "error",
-                message: `share failed: ${error instanceof Error ? error.message : String(error)}`,
-              });
-            },
-          );
+          // The deferred funnel the fragment paths use: a missing
+          // clipboard API (insecure context) throws SYNCHRONOUSLY on the
+          // property access — swallowed here into the promise chain, not
+          // into TanStack's mutation observer as an unhandled rejection
+          // that wedges the busy line forever.
+          void Promise.resolve()
+            .then(() => navigator.clipboard.writeText(url))
+            .then(
+              () => {
+                setState({
+                  kind: "copied",
+                  message: `viewer link copied — ${SERVER_LINK.note} · ${String(url.length)} chars`,
+                });
+              },
+              (error: unknown) => {
+                setState({
+                  kind: "error",
+                  message: `share failed: ${error instanceof Error ? error.message : String(error)}`,
+                });
+              },
+            );
         },
       },
     );

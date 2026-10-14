@@ -25,6 +25,8 @@ import { router, t } from "../index";
 import { createSharesRouter } from "./shares";
 
 const ALICE_ID = "user-alice";
+const CAP_USER_ID = "user-cap";
+const COLLIDE_USER_ID = "user-collide";
 
 /** The session half of the caller context, for the fixture user. */
 function testSession(userId: string) {
@@ -147,6 +149,47 @@ describe("shares router", () => {
     await expect(
       caller.shares.get({ id: "oneCharacterTooLong0" }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("refuses past the per-user live-share cap", async () => {
+    // A dedicated user keeps the count independent of the rows earlier
+    // tests created; the cap override comes through the factory deps, so
+    // the bound is exercised without two hundred real inserts.
+    await db
+      .insert(userTable)
+      .values({ id: CAP_USER_ID, name: "Cap", email: "cap@slopcad.test" });
+    const capped = t.createCallerFactory(
+      router({ shares: createSharesRouter({ db, maxSharesPerUser: 2 }) }),
+    )({ auth: null, session: testSession(CAP_USER_ID) });
+    const nativeContent = serializeEmptyDocument();
+    await capped.shares.create({ nativeContent });
+    await capped.shares.create({ nativeContent });
+    await expect(capped.shares.create({ nativeContent })).rejects.toMatchObject(
+      { code: "CONFLICT" },
+    );
+  });
+
+  it("retries an id collision on insert and refuses when every attempt collides", async () => {
+    // A constant id factory forces the UNIQUE-constraint path the real
+    // generator's 62¹⁰ space makes near-impossible: the first create
+    // takes the id, every later attempt collides on INSERT (the
+    // race-free check — no pre-select) and exhausts its retries.
+    await db.insert(userTable).values({
+      id: COLLIDE_USER_ID,
+      name: "Collide",
+      email: "collide@slopcad.test",
+    });
+    const CONSTANT_ID = "collide000";
+    const colliding = t.createCallerFactory(
+      router({ shares: createSharesRouter({ db, newId: () => CONSTANT_ID }) }),
+    )({ auth: null, session: testSession(COLLIDE_USER_ID) });
+    const first = await colliding.shares.create({
+      nativeContent: serializeEmptyDocument(),
+    });
+    expect(first.id).toBe(CONSTANT_ID);
+    await expect(
+      colliding.shares.create({ nativeContent: serializeEmptyDocument() }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
   });
 
   it("keeps serving a share after its creator's account is deleted", async () => {

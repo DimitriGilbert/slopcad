@@ -18,11 +18,19 @@
  *   a well-formed id that no row matches is NOT_FOUND, the same answer
  *   for every missing id, and the row carries no creator-facing data —
  *   the content is the share.
+ * - **The store is bounded per user.** Creation is authenticated but
+ *   still unbounded without a ceiling: one signed-in writer could grow
+ *   `share_link` monotonically (each row up to
+ *   `NATIVE_CONTENT_MAX_LENGTH`). `create` refuses past
+ *   `MAX_SHARES_PER_USER` live rows per user — a deliberate bound, not
+ *   an afterthought; raising it or adding an expiry/purge is a decision
+ *   to make in the open if it ever bites.
  *
  * The ids are 10 base62 characters from the platform CSPRNG with
  * rejection sampling (256 mod 62 ≠ 0, so the tail of the byte range is
- * discarded and every character is uniform) — 62¹⁰ ≈ 8×10¹⁷ ids, and a
- * collision is retried rather than surfaced.
+ * discarded and every character is uniform) — 62¹⁰ ≈ 8×10¹⁷ ids. A
+ * collision is handled by insert-first: the insert races nothing, a
+ * UNIQUE-constraint hit is a retry, and anything else is a real error.
  */
 
 import { randomBytes } from "node:crypto";
@@ -30,7 +38,7 @@ import { parseNativeCadDocumentFromString } from "@slopcad/cad-core";
 import { type SlopcadDatabase } from "@slopcad/db";
 import { shareLink as shareLinkTable } from "@slopcad/db/schema/shares";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { protectedProcedure, publicProcedure } from "../index";
@@ -45,6 +53,9 @@ const SHARE_ID_LENGTH = 10;
 
 /** The largest byte value the unbiased mapping accepts (62 × 4 = 248). */
 const SHARE_ID_BYTE_CEILING = 248;
+
+/** The most live shares one user may hold (the store's growth bound). */
+const MAX_SHARES_PER_USER = 200;
 
 /** The wire shape of a share id (also the `get` input's guard). */
 const shareIdSchema = z
@@ -71,14 +82,43 @@ function newShareId(): string {
 /** How many collision retries one create attempt gets before refusing. */
 const SHARE_ID_ATTEMPTS = 3;
 
-export function createSharesRouter(deps: { readonly db: SlopcadDatabase }) {
-  const { db } = deps;
+/**
+ * Whether `error` is the id PK's unique-constraint hit (a retry). Drizzle
+ * wraps engine errors ("Failed query: …"), so the sqlite message is
+ * matched through the cause chain, not just the wrapper's text.
+ */
+function isShareIdCollision(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < 4; depth += 1) {
+    if (current.message.includes("UNIQUE constraint failed: share_link.id")) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+/** The router's injectable dependencies (the overrides are for tests). */
+export interface SharesRouterDeps {
+  readonly db: SlopcadDatabase;
+  /** The per-user live-share ceiling (the default is the product bound). */
+  readonly maxSharesPerUser?: number;
+  /** The id factory (the default is the CSPRNG one; tests force collisions). */
+  readonly newId?: () => string;
+}
+
+export function createSharesRouter(deps: SharesRouterDeps) {
+  const {
+    db,
+    maxSharesPerUser = MAX_SHARES_PER_USER,
+    newId = newShareId,
+  } = deps;
   return {
     /**
      * Uploads one native document behind a fresh short id. The caller is
      * recorded as the creator (severed, not cascaded, if the account is
      * deleted — the link outlives its author the way a fragment link
-     * would).
+     * would) and may hold at most `maxSharesPerUser` live shares.
      */
     create: protectedProcedure
       .input(
@@ -95,20 +135,29 @@ export function createSharesRouter(deps: { readonly db: SlopcadDatabase }) {
             cause: parsed.error.code,
           });
         }
-        for (let attempt = 0; attempt < SHARE_ID_ATTEMPTS; attempt += 1) {
-          const id = newShareId();
-          const existing = await db
-            .select({ id: shareLinkTable.id })
-            .from(shareLinkTable)
-            .where(eq(shareLinkTable.id, id))
-            .limit(1);
-          if (existing[0] !== undefined) continue;
-          await db.insert(shareLinkTable).values({
-            id,
-            createdBy: ctx.session.user.id,
-            nativeContent: input.nativeContent,
+        const held = await db
+          .select({ value: count() })
+          .from(shareLinkTable)
+          .where(eq(shareLinkTable.createdBy, ctx.session.user.id));
+        if ((held[0]?.value ?? 0) >= maxSharesPerUser) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `Share cap reached: at most ${String(maxSharesPerUser)} live shares per user.`,
           });
-          return { id };
+        }
+        for (let attempt = 0; attempt < SHARE_ID_ATTEMPTS; attempt += 1) {
+          const id = newId();
+          try {
+            await db.insert(shareLinkTable).values({
+              id,
+              createdBy: ctx.session.user.id,
+              nativeContent: input.nativeContent,
+            });
+            return { id };
+          } catch (error) {
+            // Only the id PK collision is a retry; anything else is real.
+            if (!isShareIdCollision(error)) throw error;
+          }
         }
         throw new TRPCError({
           code: "CONFLICT",
