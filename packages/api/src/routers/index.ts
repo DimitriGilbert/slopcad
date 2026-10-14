@@ -8,6 +8,7 @@ import {
 import { createDocumentsRouter } from "./documents";
 import { createModelCatalogRouter } from "./model-catalog";
 import { createProjectsRouter } from "./projects";
+import { createSharesRouter } from "./shares";
 import { createSimulationsRouter } from "./simulations";
 
 export const appRouter = router({
@@ -23,6 +24,7 @@ export const appRouter = router({
   projects: createProjectsRouter({ db }),
   documents: createDocumentsRouter({ db }),
   simulations: createSimulationsRouter({ db }),
+  shares: createSharesRouter({ db }),
   modelCatalog: createModelCatalogRouter({ db }),
   agentConversations: createAgentConversationsRouter({ db }),
   serverProviders: createServerProvidersProcedure({ db }),
