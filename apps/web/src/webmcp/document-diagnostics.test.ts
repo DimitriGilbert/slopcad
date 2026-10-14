@@ -147,6 +147,7 @@ function bindTools(store: CadStore, state: SurfaceState): () => void {
   return bindWebMcpTools(
     createWorkbenchWebMcpTools({
       appliedState: () => state.applied,
+      documentTopology: () => Promise.resolve(null),
       capture: stubCaptureSurface(),
       commands: () => state.commands,
       measureText: () => state.measureText,
@@ -561,6 +562,7 @@ describe("cad_get_diagnostics", () => {
     const store = freshStore();
     const entries = createWorkbenchWebMcpTools({
       appliedState: () => null,
+      documentTopology: () => Promise.resolve(null),
       capture: stubCaptureSurface(),
       commands: () => [],
       measureText: () => null,

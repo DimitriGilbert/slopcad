@@ -1190,10 +1190,15 @@ describe("cad_skill", () => {
   it("states the same guarantee in the summary tool's own description", () => {
     const summary = createWorkbenchWebMcpTools({
       appliedState: () => null,
+      capture: stubCaptureSurface(),
       commands: () => [],
       documentTopology: () => Promise.resolve(null),
       measureText: () => null,
+      mode: () => "model",
+      regenerationIssue: () => null,
+      sketchSolve: () => null,
       store: freshStore(),
+      timeline: () => null,
     }).find((entry) => entry.name === "cad_get_document_summary");
     const description = summary?.description ?? "";
     expect(description).toContain("survives rebuilds and dimension edits");

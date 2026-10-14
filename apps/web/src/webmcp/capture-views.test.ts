@@ -142,6 +142,7 @@ function bindCaptureTools(options: {
   const unbind = bindWebMcpTools(
     createWorkbenchWebMcpTools({
       appliedState: () => options.applied,
+      documentTopology: () => Promise.resolve(null),
       capture: {
         canvas: () => (harness.canvasMounted ? FAKE_CANVAS : null),
         convention: () => options.convention ?? "third-angle",
@@ -590,6 +591,7 @@ describe("cad_capture_views (snapshot functions mocked)", () => {
   it("derives a JSON object schema for the registry snapshot", () => {
     const entries = createWorkbenchWebMcpTools({
       appliedState: () => null,
+      documentTopology: () => Promise.resolve(null),
       capture: {
         canvas: () => null,
         convention: () => "third-angle",

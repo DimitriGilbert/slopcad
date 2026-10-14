@@ -325,6 +325,9 @@ describe("sceneKindOfDocument picks the reopen scene", () => {
           sessionWithFeatureKinds(["extrude", "box"]),
           new Map(),
           null,
+          {},
+          null,
+          new Set(),
         ),
       ),
     );
