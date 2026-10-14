@@ -278,11 +278,16 @@ millimetres; any dimension may be authored with an explicit quantity
 (`angle(90, "deg")`, `dimensionless(4)`). The name must be a valid
 expression identifier — it is the document's identifier vocabulary.
 
-`<Body>` wraps at most one producing element (any primitive, operation,
-or `<Translate>`); that child's feature outputs the `<Body>`'s body
-instead of creating its own. A `<Body>` with no producer is a bare body
-record. A `<Translate>` wraps exactly one producing child (its child
-keeps its own body — the translate references the child's feature).
+`<Body>` captures at most one producing element (any primitive,
+operation, `<Translate>`, or `<Use feature="…"/>`); a real producer's
+feature outputs the `<Body>`'s body instead of creating its own. A
+`<Use>` claims the capture like any producer, but it shapes nothing:
+the referenced feature already owns its output body, so the captured
+body stands bare. A `<Body>` with no producer — or whose only producer
+is a `<Use>` — is therefore a bare body record. A second producer fails
+`cadjsx/body-producer-conflict`. A `<Translate>` wraps exactly one
+producing child (its child keeps its own body — the translate
+references the child's feature).
 
 The element tags are frozen, branded function values: callable only so
 JSX and `createElement` accept them as tags. They must never be invoked;
@@ -380,7 +385,7 @@ model exactly.
 ## The compile CLI
 
 ```
-pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>]
+pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>] [--commands <path>]
 ```
 
 - The model file's **default export** is rendered: a React element, or a
@@ -390,6 +395,16 @@ pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>]
   the repo's `.native.json` fixture extension. The output is raw JSON
   text — the workbench's open and the documents API's `nativeContent`
   both accept it exactly as written.
+- `--commands <path>` additionally writes the emission's command batch —
+  every committed transaction's commands, in order — as a JSON array. An
+  extensionless `--commands` path gains the repo's `.commands.json`
+  fixture extension. This is the generation path for the repo's
+  cad-jsx-compiled `*.commands.json` fixtures (e.g.
+  `fillet-box.commands.json`, compiled from
+  `packages/docs-examples/src/cadjsx/fillet-box.tsx`); regenerate those,
+  never hand-edit them. `parametric-cup.commands.json` is outside this
+  path: it is a hand-authored raw-CadCommand batch, not a cad-jsx model,
+  and the CLI cannot produce it.
 - The emitted document's id derives from the model file's basename
   (`hub-mount.tsx` → `doc_hub-mount`), sanitized into the id payload
   charset and length.

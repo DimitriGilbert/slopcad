@@ -278,6 +278,102 @@ describe("CadCommandMenu", () => {
       [...groups].map((group) => group.getAttribute("data-cad-command-group")),
     ).toEqual(["File", "History"]);
   });
+
+  it("keeps duplicate-label commands distinct: arrows move the highlight, Enter runs it", () => {
+    // The regression: cmdk selects by string equality on `value`, so two
+    // commands sharing a label were `aria-selected` simultaneously, the
+    // highlight could never move to the second (the store's Object.is
+    // guard), and Enter ran the first DOM match — the second command was
+    // keyboard-unreachable. The unique `label + id` composite value fixes
+    // all three; the label still leads the composite.
+    const list: CadCommandDescriptor[] = [
+      { id: "save-doc", label: "Save", group: "File", run: vi.fn() },
+      { id: "save-copy", label: "Save", group: "File", run: vi.fn() },
+    ];
+    const onOpenChange = vi.fn();
+    render(
+      <CadCommandMenu
+        commands={list}
+        onOpenChange={onOpenChange}
+        open={true}
+      />,
+    );
+    const first = document.querySelector('[data-cad-command-id="save-doc"]');
+    const second = document.querySelector('[data-cad-command-id="save-copy"]');
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    // Exactly ONE highlight despite the identical labels…
+    expect(first?.getAttribute("aria-selected")).toBe("true");
+    expect(second?.getAttribute("aria-selected")).toBe("false");
+
+    // …ArrowDown moves it to the second duplicate, ArrowUp back, Down
+    // again — the highlight genuinely travels between the duplicates.
+    const input = document.querySelector('[data-slot="command-input"]');
+    expect(input).not.toBeNull();
+    fireEvent.keyDown(input as HTMLElement, { key: "ArrowDown" });
+    expect(first?.getAttribute("aria-selected")).toBe("false");
+    expect(second?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(input as HTMLElement, { key: "ArrowUp" });
+    expect(first?.getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(input as HTMLElement, { key: "ArrowDown" });
+    expect(second?.getAttribute("aria-selected")).toBe("true");
+
+    // Enter runs the HIGHLIGHTED one (the second duplicate), closing the
+    // menu first; the first duplicate never runs.
+    fireEvent.keyDown(input as HTMLElement, { key: "Enter" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(list[1]?.run).toHaveBeenCalledTimes(1);
+    expect(list[0]?.run).not.toHaveBeenCalled();
+  });
+
+  it("runs the first duplicate when it is the one highlighted", () => {
+    const list: CadCommandDescriptor[] = [
+      { id: "save-doc", label: "Save", group: "File", run: vi.fn() },
+      { id: "save-copy", label: "Save", group: "File", run: vi.fn() },
+    ];
+    render(
+      <CadCommandMenu commands={list} onOpenChange={() => {}} open={true} />,
+    );
+    const input = document.querySelector('[data-slot="command-input"]');
+    expect(input).not.toBeNull();
+    // No navigation: the initial highlight sits on the first duplicate,
+    // and Enter runs exactly that one.
+    fireEvent.keyDown(input as HTMLElement, { key: "Enter" });
+    expect(list[0]?.run).toHaveBeenCalledTimes(1);
+    expect(list[1]?.run).not.toHaveBeenCalled();
+  });
+
+  it("drops a duplicate whose id alone matches the query", () => {
+    // The composite `label + id` value must never leak into the search
+    // haystack: ranking scores the label + keywords text only. "copy"
+    // lives ONLY in save-copy's id — the bare "Save" label cannot match
+    // it, so the duplicate must drop; were the composite to leak in,
+    // "Save save-copy" contains "copy" and the item would wrongly
+    // survive.
+    const list: CadCommandDescriptor[] = [
+      { id: "save-doc", label: "Save", group: "File", run: vi.fn() },
+      { id: "save-copy", label: "Save", group: "File", run: vi.fn() },
+      { id: "measure", label: "Measure", group: "Tools", run: vi.fn() },
+    ];
+    render(
+      <CadCommandMenu commands={list} onOpenChange={() => {}} open={true} />,
+    );
+    const input = document.querySelector('[data-slot="command-input"]');
+    expect(input).not.toBeNull();
+    fireEvent.change(input as HTMLElement, { target: { value: "copy" } });
+    // The rank premise: the bare label scores zero against the id-only
+    // token — only a leaked composite would score above zero.
+    expect(commandRank("Save", "copy")).toBe(0);
+    expect(
+      document.querySelector('[data-cad-command-id="save-copy"]'),
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-cad-command-id="save-doc"]'),
+    ).toBeNull();
+    // Nothing survived, so the empty state shows — the drop came from
+    // real filtering, not a broken render.
+    expect(screen.getByText(CAD_COMMAND_MENU_LABELS.empty)).not.toBeNull();
+  });
 });
 
 describe("commandRank", () => {

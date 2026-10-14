@@ -2,15 +2,22 @@
  * The browser entry of the OpenCascade worker (Phase 21.2): runs as a module
  * Web Worker and hosts the real OpenCascade kernel as a worker-protocol
  * responder over the web transport adapter — the twin of the Manifold web
- * entry, with the same two browser-specific disciplines plus one addition.
+ * entry, with the same browser-specific disciplines: the WASM asset pin,
+ * the synchronous buffering port subscription, the self-measured boot
+ * report, and the hosting-failure bridge that reports a dead boot instead
+ * of leaving the channel silent.
  *
  * Composition only — `./occt-worker` holds the shared hosting core. The
- * browser runtime pins the ~22 MB WASM asset exactly as the pre-spike proved
- * necessary (and as the Manifold entry does for its asset): `import wasmUrl
- * from "replicad-opencascadejs/wasm?url"` handed to the runtime as
+ * browser runtime resolves the ~22 MB WASM binary from the version-pinned
+ * jsDelivr URL first (`OCCT_WASM_CDN_URL`, `replicad-opencascadejs@1.1.0`)
+ * and, when that initialization fails, falls back to the bundled asset
+ * pinned exactly as the pre-spike proved necessary (and as the Manifold
+ * entry does for its asset): `import wasmUrl from
+ * "replicad-opencascadejs/wasm?url"` handed to the runtime as
  * `locateFile`, because the emscripten glue's own `new URL(...,
  * import.meta.url)` resolution points into Vite's prebundle directory where
- * the asset does not exist.
+ * the asset does not exist. The bundled asset stays in the build as the
+ * spare (see `createOcctRuntimeWithFallback`).
  *
  * ## A synchronous port subscription that buffers until the server is live
  *
@@ -31,18 +38,24 @@
  *
  * Module evaluation completes synchronously: the hosting is *started*, not
  * awaited, and the WASM boot proceeds over the worker's normal event loop
- * while early requests buffer. A hosting failure rejects the started
- * promise — an unhandled rejection on the worker scope (browser console
- * and error reporting) with a channel that will never answer; requests
- * dispatched to the dead channel simply never settle on their own.
+ * while early requests buffer. A hosting failure cannot hang the channel:
+ * the floated promise is caught, and while the thread can still speak the
+ * failure is posted to the main thread as the boot-failure report (see
+ * `@slopcad/cad-kernel`'s `worker-boot-failure-report`) — the marker
+ * `bootWorkerChannel` settles every in-flight request terminally on, so the
+ * hosting surface learns the failure and re-boots on the next exchange —
+ * after which the entry closes itself. (Without the bridge the rejection
+ * would stay inside this scope — an unhandled rejection with a channel that
+ * never answers.)
  *
  * ## The boot report
  *
  * Because OCCT's boot cost is a documented, load-bearing number (the
  * pre-spike's ~176–181 ms Node init plus the ~22 MB asset fetch), the entry
  * measures its own initialization — from module evaluation to runtime
- * ready — and posts it together with the bundler-pinned URL of the asset it
- * fetched as the boot report (see `./occt-worker-boot-report`) before
+ * ready — and posts it together with the URL of the asset the runtime
+ * actually booted from (the CDN pin, or the bundled spare) as the boot
+ * report (see `./occt-worker-boot-report`) before
  * hosting starts, so hosting surfaces (the `/worker-occt` fixture) can
  * display honest numbers instead of hiding the cost. The report is one
  * plain non-protocol message; every protocol endpoint's parse boundary
@@ -50,20 +63,45 @@
  */
 
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import type { WorkerTransport } from "@slopcad/cad-kernel";
-import { isWebWorkerMessagePort } from "@slopcad/cad-kernel";
+import type {
+  WebWorkerMessagePort,
+  WorkerTransport,
+} from "@slopcad/cad-kernel";
+import {
+  isWebWorkerMessagePort,
+  WORKER_BOOT_FAILURE_KEY,
+} from "@slopcad/cad-kernel";
 
 import { hostOcctWorker } from "./occt-worker";
 import {
   OCCT_WORKER_BOOT_REPORT_KEY,
   OCCT_WORKER_BOOT_WASM_URL_KEY,
 } from "./occt-worker-boot-report";
-import { createOcctRuntime } from "./occt-runtime";
+import {
+  createOcctRuntimeWithFallback,
+  OCCT_WASM_CDN_URL,
+} from "./occt-runtime";
+
+/**
+ * The dedicated-worker scope this entry needs: the message-port surface
+ * plus `close()`, the self-termination the boot-failure bridge uses to
+ * retire the thread once its report has crossed the channel.
+ */
+interface SelfCloseableWorkerScope extends WebWorkerMessagePort {
+  close(): void;
+}
+
+function isSelfCloseableWorkerScope(
+  input: unknown,
+): input is SelfCloseableWorkerScope {
+  if (!isWebWorkerMessagePort(input)) return false;
+  return typeof (input as { readonly close?: unknown }).close === "function";
+}
 
 const scope: unknown = globalThis;
-if (!isWebWorkerMessagePort(scope)) {
+if (!isSelfCloseableWorkerScope(scope)) {
   throw new Error(
-    "occt-worker.web needs the dedicated worker message scope (postMessage/addEventListener on self).",
+    "occt-worker.web needs the dedicated worker message scope (postMessage/addEventListener/close on self).",
   );
 }
 
@@ -103,16 +141,19 @@ scope.addEventListener("message", (event: { readonly data: unknown }) => {
 
 const bootStartedAt = performance.now();
 
-// Started, deliberately not awaited (the `void` operator marks the float
-// explicit): module evaluation returns synchronously so the worker's event
-// loop stays free for the WASM boot, while early requests buffer above. A
-// hosting failure remains visible — the rejected promise reports as an
-// unhandled rejection on the worker scope, and the channel never answers.
-void hostOcctWorker({
+// Started, deliberately not awaited: module evaluation returns synchronously
+// so the worker's event loop stays free for the WASM boot, while early
+// requests buffer above. The `.catch` is the hosting-failure bridge: the
+// rejection never fires the main thread's Worker `error` event, so it is
+// reported as the boot-failure report — `bootWorkerChannel`'s marker for
+// settling every in-flight request terminally — and the thread retires
+// itself instead of lingering as a channel that never answers.
+hostOcctWorker({
   transport,
   createRuntime: async () => {
-    const runtime = await createOcctRuntime({
-      locateFile: () => wasmUrl,
+    const located = await createOcctRuntimeWithFallback({
+      primaryUrl: OCCT_WASM_CDN_URL,
+      fallbackUrl: wasmUrl,
     });
     // The boot report rides before any protocol response can: the hosted
     // server has not subscribed yet, and the report is plain non-protocol
@@ -120,8 +161,14 @@ void hostOcctWorker({
     // along because only this side of the channel knows it.
     transport.send({
       [OCCT_WORKER_BOOT_REPORT_KEY]: performance.now() - bootStartedAt,
-      [OCCT_WORKER_BOOT_WASM_URL_KEY]: wasmUrl,
+      [OCCT_WORKER_BOOT_WASM_URL_KEY]: located.wasmUrl,
     });
-    return runtime;
+    return located.runtime;
   },
+}).catch((error: unknown) => {
+  const detail = error instanceof Error ? error.message : String(error);
+  transport.send({
+    [WORKER_BOOT_FAILURE_KEY]: `hosting the OpenCascade kernel failed: ${detail}`,
+  });
+  scope.close();
 });

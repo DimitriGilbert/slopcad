@@ -32,6 +32,10 @@ const ALLOWED_IMPORT_SOURCES: ReadonlySet<string> = new Set([
   "@react-three/fiber",
   "@slopcad/cad-core",
   "@slopcad/cad-react",
+  // The field overlay family's data source (Phase 62b): sim-core is the
+  // pure, React-free simulation data spine (field blocks, decoded grid
+  // semantics) — data, never a solver or worker surface.
+  "@slopcad/sim-core",
   "vitest",
   "@testing-library/react",
   "@testing-library/dom",

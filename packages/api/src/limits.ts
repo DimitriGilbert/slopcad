@@ -1,8 +1,9 @@
 /**
- * The project surface's shared limits (Phase 31): the single source the
- * routers validate against and the client forms render — a dependency-free
- * module so browser code can import it without dragging the server stack
- * (drizzle, the db singleton) into the bundle.
+ * The surfaces' shared input limits (project surface, Phase 31; agent chat,
+ * Phase 1.4): the single source the routers validate against and the client
+ * forms render — a dependency-free module so browser code can import it
+ * without dragging the server stack (drizzle, the db singleton) into the
+ * bundle.
  */
 
 /** The longest acceptable project name. */
@@ -24,3 +25,36 @@ export const DOCUMENT_NAME_MAX_LENGTH = 120;
  * the verbatim `document_version` row it stores.
  */
 export const NATIVE_CONTENT_MAX_LENGTH = 10 * 1024 * 1024;
+
+/** The longest acceptable agent conversation title. */
+export const AGENT_CONVERSATION_TITLE_MAX_LENGTH = 200;
+
+/**
+ * The most message parts one appended agent message may carry. The parts
+ * are opaque JSON (their concrete shapes belong to the chat runtime,
+ * Phase 3), so the count is the one structural bound the input boundary
+ * can enforce cheaply.
+ */
+export const AGENT_MESSAGE_MAX_PARTS = 256;
+
+/**
+ * The longest acceptable serialized form (`JSON.stringify`) of one appended
+ * message's `parts` array, in characters — the same rationale as
+ * `NATIVE_CONTENT_MAX_LENGTH`: bounding what an unbounded payload could
+ * force the server to store verbatim. Image feedback parts are
+ * base64-heavy and legitimately megabyte-scale, hence the same order of
+ * magnitude as a native document.
+ */
+export const AGENT_MESSAGE_PARTS_MAX_SERIALIZED_LENGTH = 10 * 1024 * 1024;
+
+/**
+ * The longest acceptable base64 form of a simulation run's binary payload
+ * (`simulations.put`'s `payloadBase64`), in characters. The payload is the
+ * SMR1 encoding of a run's field blocks — a Phase 63 2D reference grid is
+ * hundreds of KiB and 3D field series run multi-MiB — so the cap is 64 MiB
+ * of base64 text (48 MiB of decoded bytes): roughly two orders of magnitude
+ * of headroom over the roadmap's reference grids while bounding what an
+ * unbounded payload could force the server to decode and store verbatim
+ * (the same rationale as `NATIVE_CONTENT_MAX_LENGTH`).
+ */
+export const SIM_RESULT_PAYLOAD_MAX_BASE64_LENGTH = 64 * 1024 * 1024;

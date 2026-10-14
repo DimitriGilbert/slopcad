@@ -349,6 +349,14 @@ export interface CadSketchCanvasProps {
 /** Pick/hover tolerance, screen pixels. */
 const HIT_TOLERANCE_PX = 8;
 
+/**
+ * The maximum per-axis grid line count the canvas will draw. A valid-but
+ * pathological prop set (a near-zero scale against a millimetre step) stays
+ * inside the same guaranteed-bounded render as any degenerate one: past the
+ * budget the grid is skipped entirely — the axes and geometry still render.
+ */
+const GRID_LINE_BUDGET = 4096;
+
 function distanceToSegment(
   point: CadSketchPoint,
   a: CadSketchPoint,
@@ -647,45 +655,73 @@ export function CadSketchCanvas({
     return 1.5;
   };
 
+  // The grid is decoration, never worth a tab: degenerate props (a
+  // non-finite or non-positive scale or step — a zero step never advances
+  // the loop, a negative one runs it away, a zero scale makes the extent
+  // infinite) and extents the step cannot cover within the line budget
+  // render NO grid at all instead of an unbounded loop. The axes and the
+  // geometry are unaffected either way.
+  const gridEnabled =
+    Number.isFinite(scale) &&
+    scale > 0 &&
+    Number.isFinite(gridStep) &&
+    gridStep > 0;
   const gridLines: ReactNode[] = [];
-  const halfWidth = origin.x;
-  const halfHeight = height - origin.y;
-  const xExtent = Math.max(halfWidth, width - origin.x) / scale;
-  const yExtent = Math.max(origin.y, halfHeight) / scale;
-  for (let x = 0; x <= xExtent; x += gridStep) {
-    for (const signed of [x, -x]) {
-      const screen = toScreen({ x: signed, y: 0 });
-      gridLines.push(
-        signed === 0 ? null : (
-          <line
-            key={`grid-v-${String(signed)}`}
-            stroke="var(--color-border, #e4e4e7)"
-            strokeWidth={1}
-            x1={screen.x}
-            x2={screen.x}
-            y1={0}
-            y2={height}
-          />
-        ),
-      );
-    }
-  }
-  for (let y = 0; y <= yExtent; y += gridStep) {
-    for (const signed of [y, -y]) {
-      const screen = toScreen({ x: 0, y: signed });
-      gridLines.push(
-        signed === 0 ? null : (
-          <line
-            key={`grid-h-${String(signed)}`}
-            stroke="var(--color-border, #e4e4e7)"
-            strokeWidth={1}
-            x1={0}
-            x2={width}
-            y1={screen.y}
-            y2={screen.y}
-          />
-        ),
-      );
+  if (gridEnabled) {
+    const halfWidth = origin.x;
+    const halfHeight = height - origin.y;
+    const xExtent = Math.max(halfWidth, width - origin.x) / scale;
+    const yExtent = Math.max(origin.y, halfHeight) / scale;
+    // Count-then-index: the per-axis line count is validated BEFORE the
+    // loop, so a finite-but-astronomical extent (a near-zero scale) renders
+    // nothing rather than hanging, and indexing keeps each step exact (no
+    // accumulating float drift).
+    const xCount = xExtent / gridStep;
+    const yCount = yExtent / gridStep;
+    const bounded =
+      Number.isFinite(xCount) &&
+      xCount <= GRID_LINE_BUDGET &&
+      Number.isFinite(yCount) &&
+      yCount <= GRID_LINE_BUDGET;
+    if (bounded) {
+      for (let index = 0; index <= xCount; index += 1) {
+        const x = index * gridStep;
+        for (const signed of [x, -x]) {
+          const screen = toScreen({ x: signed, y: 0 });
+          gridLines.push(
+            signed === 0 ? null : (
+              <line
+                key={`grid-v-${String(signed)}`}
+                stroke="var(--color-border, #e4e4e7)"
+                strokeWidth={1}
+                x1={screen.x}
+                x2={screen.x}
+                y1={0}
+                y2={height}
+              />
+            ),
+          );
+        }
+      }
+      for (let index = 0; index <= yCount; index += 1) {
+        const y = index * gridStep;
+        for (const signed of [y, -y]) {
+          const screen = toScreen({ x: 0, y: signed });
+          gridLines.push(
+            signed === 0 ? null : (
+              <line
+                key={`grid-h-${String(signed)}`}
+                stroke="var(--color-border, #e4e4e7)"
+                strokeWidth={1}
+                x1={0}
+                x2={width}
+                y1={screen.y}
+                y2={screen.y}
+              />
+            ),
+          );
+        }
+      }
     }
   }
 

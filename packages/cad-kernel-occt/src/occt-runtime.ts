@@ -31,9 +31,16 @@
  *   `import wasmUrl from "replicad-opencascadejs/wasm?url"` (the exports
  *   map's `./wasm` subpath makes that import legal) — the same discipline
  *   as `manifold-worker.web.ts`.
+ * - The CDN-first browser boot ({@link createOcctRuntimeWithFallback}): the
+ *   worker entry resolves the asset from the version-pinned jsDelivr URL
+ *   ({@link OCCT_WASM_CDN_URL}) first and, when that initialization fails
+ *   (the emscripten glue's fetch of the binary rejected — offline, blocked,
+ *   or a CDN outage), re-initializes from the bundled `?url` asset, which
+ *   stays in the bundle as the spare.
  *
  * A failed initialization clears the memo so an environment fix can be
- * retried; concurrent callers await the same initialization.
+ * retried — the seam the CDN fallback rides; concurrent callers await the
+ * same initialization.
  */
 
 import init from "replicad-opencascadejs";
@@ -66,6 +73,16 @@ export interface OcctRuntimeOptions {
   readonly locateFile?: () => string;
 }
 
+/**
+ * The version-pinned jsDelivr URL of `replicad_single.wasm` — the exact
+ * `replicad-opencascadejs` version this package depends on (`1.1.0`),
+ * never a floating tag, so the CDN binary always matches the bundled glue
+ * (jsDelivr serves it with `access-control-allow-origin: *`,
+ * `application/wasm`, and an immutable one-year cache).
+ */
+export const OCCT_WASM_CDN_URL =
+  "https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.wasm";
+
 let runtimePromise: Promise<OcctRuntime> | undefined;
 
 /**
@@ -92,4 +109,49 @@ export function createOcctRuntime(
       });
   }
   return runtimePromise;
+}
+
+/** Options of {@link createOcctRuntimeWithFallback}. */
+export interface OcctRuntimeFallbackOptions {
+  /** The asset URL tried first (the browser entry's CDN pin). */
+  readonly primaryUrl: string;
+  /** The asset URL tried when the primary initialization fails. */
+  readonly fallbackUrl: string;
+}
+
+/** An initialized runtime together with the asset URL it booted from. */
+export interface LocatedOcctRuntime {
+  readonly runtime: OcctRuntime;
+  /** The URL of the WASM binary the runtime was instantiated from. */
+  readonly wasmUrl: string;
+}
+
+/**
+ * Initializes the shared runtime from `primaryUrl`, falling back to
+ * `fallbackUrl` when that initialization rejects — the emscripten glue
+ * rejects its factory when fetching the binary fails, and the memo's
+ * clear-on-failure makes the second attempt a fresh instantiation. Reports
+ * which asset served the runtime; when both attempts fail the rejection
+ * carries both causes.
+ */
+export async function createOcctRuntimeWithFallback(
+  options: OcctRuntimeFallbackOptions,
+): Promise<LocatedOcctRuntime> {
+  const { primaryUrl, fallbackUrl } = options;
+  try {
+    const runtime = await createOcctRuntime({ locateFile: () => primaryUrl });
+    return { runtime, wasmUrl: primaryUrl };
+  } catch (primaryError: unknown) {
+    try {
+      const runtime = await createOcctRuntime({
+        locateFile: () => fallbackUrl,
+      });
+      return { runtime, wasmUrl: fallbackUrl };
+    } catch (fallbackError: unknown) {
+      throw new AggregateError(
+        [primaryError, fallbackError],
+        `OpenCascade WASM initialization failed from both ${primaryUrl} and ${fallbackUrl}.`,
+      );
+    }
+  }
 }

@@ -160,9 +160,11 @@ import {
   serializeDimensionalValue,
 } from "@slopcad/cad-core";
 import type {
+  FeatureNamingInput,
   KernelBounds,
   KernelSolid,
   MirrorPlaneAxis,
+  PatternInstanceNamingInput,
   ProfilePlacementInput,
   ProfileSegmentInput,
   KernelWire,
@@ -238,25 +240,25 @@ export function isWorkerOperationId(
 }
 
 /** Input of `solid.createBox`: the box's extents along x, y, z. */
-export interface WorkerBoxInput {
+export interface WorkerBoxInput extends FeatureNamingInput {
   readonly width: LengthValue;
   readonly depth: LengthValue;
   readonly height: LengthValue;
 }
 
 /** Input of `solid.createSphere`: the radius. */
-export interface WorkerSphereInput {
+export interface WorkerSphereInput extends FeatureNamingInput {
   readonly radius: LengthValue;
 }
 
 /** Input of `solid.createCylinder`: the radius and height. */
-export interface WorkerCylinderInput {
+export interface WorkerCylinderInput extends FeatureNamingInput {
   readonly radius: LengthValue;
   readonly height: LengthValue;
 }
 
 /** Input of `solid.createCone`: the frustum radii and height. */
-export interface WorkerConeInput {
+export interface WorkerConeInput extends FeatureNamingInput {
   readonly bottomRadius: LengthValue;
   readonly topRadius: LengthValue;
   readonly height: LengthValue;
@@ -268,7 +270,7 @@ export interface WorkerConeInput {
  * normal, and the placement rotation+translation — the contract's
  * `ProfileExtrudeInput` carried across the wire.
  */
-export interface WorkerExtrudeInput {
+export interface WorkerExtrudeInput extends FeatureNamingInput {
   readonly loop: readonly ProfileSegmentInput[];
   readonly height: LengthValue;
   readonly direction: 1 | -1;
@@ -499,6 +501,8 @@ export interface WorkerTransformInput {
    * structure only.
    */
   readonly scale?: number;
+  /** The pattern instance the copy places (topological naming only). */
+  readonly instance?: PatternInstanceNamingInput;
 }
 
 /**
@@ -1135,18 +1139,22 @@ export interface SerializedWorkerOperationInputs {
     readonly width: SerializedWorkerLength;
     readonly depth: SerializedWorkerLength;
     readonly height: SerializedWorkerLength;
+    readonly featureId?: string;
   };
   readonly "solid.createSphere": {
     readonly radius: SerializedWorkerLength;
+    readonly featureId?: string;
   };
   readonly "solid.createCylinder": {
     readonly radius: SerializedWorkerLength;
     readonly height: SerializedWorkerLength;
+    readonly featureId?: string;
   };
   readonly "solid.createCone": {
     readonly bottomRadius: SerializedWorkerLength;
     readonly topRadius: SerializedWorkerLength;
     readonly height: SerializedWorkerLength;
+    readonly featureId?: string;
   };
   readonly "solid.extrude": {
     readonly loop: readonly SerializedProfileSegment[];
@@ -1166,6 +1174,7 @@ export interface SerializedWorkerOperationInputs {
     readonly taper?: SerializedWorkerAngle;
     /** The Phase 48 sheet flag — present exactly when the input carried it. */
     readonly sheet?: true;
+    readonly featureId?: string;
   };
   readonly "solid.revolve": {
     readonly loop: readonly SerializedProfileSegment[];
@@ -1256,8 +1265,12 @@ export interface SerializedWorkerOperationInputs {
       readonly axis: readonly [number, number, number];
       readonly angle: SerializedWorkerAngle;
     };
-    /** The optional uniform scale factor (Phase 41), last in key order. */
+    /** The optional uniform scale factor (Phase 41). */
     readonly scale?: number;
+    readonly instance?: {
+      readonly featureId: string;
+      readonly index: number;
+    };
   };
   readonly "solid.bounds": {
     readonly solid: string;
@@ -1967,6 +1980,52 @@ function parseProfileLoop(
 // Per-operation input codecs
 // ---------------------------------------------------------------------------
 
+/** The optional naming feature id, present exactly when the input carried it. */
+function serializedFeatureId(input: FeatureNamingInput): {
+  readonly featureId?: string;
+} {
+  return input.featureId === undefined ? {} : { featureId: input.featureId };
+}
+
+/** Parses the optional naming feature id: absent, or a non-empty string. */
+function parseFeatureIdField(
+  operation: WorkerOperationId,
+  field: unknown,
+): ParseResult<FeatureNamingInput, WorkerParseError> {
+  if (field === undefined) return ok({});
+  if (typeof field !== "string" || field.length === 0) {
+    return payloadError(
+      `The "${operation}" field "featureId" must be a non-empty string.`,
+      field,
+    );
+  }
+  return ok({ featureId: field });
+}
+
+/** Parses the optional pattern instance: a feature id and a whole index. */
+function parseInstanceField(
+  field: unknown,
+): ParseResult<
+  { readonly instance?: PatternInstanceNamingInput },
+  WorkerParseError
+> {
+  if (field === undefined) return ok({});
+  if (
+    !isPlainRecord(field) ||
+    typeof field.featureId !== "string" ||
+    field.featureId.length === 0 ||
+    typeof field.index !== "number" ||
+    !Number.isInteger(field.index) ||
+    field.index < 0
+  ) {
+    return payloadError(
+      'The "solid.transform" field "instance" must be { featureId: non-empty string, index: whole number }.',
+      field,
+    );
+  }
+  return ok({ instance: { featureId: field.featureId, index: field.index } });
+}
+
 function serializeBoxInput(
   input: WorkerBoxInput,
 ): SerializedWorkerOperationInput<"solid.createBox"> {
@@ -1974,6 +2033,7 @@ function serializeBoxInput(
     width: serializeDimensionalValue(input.width),
     depth: serializeDimensionalValue(input.depth),
     height: serializeDimensionalValue(input.height),
+    ...serializedFeatureId(input),
   };
 }
 
@@ -2000,13 +2060,26 @@ function parseBoxInput(
     record.value.height,
   );
   if (!height.ok) return height;
-  return ok({ width: width.value, depth: depth.value, height: height.value });
+  const featureId = parseFeatureIdField(
+    "solid.createBox",
+    record.value.featureId,
+  );
+  if (!featureId.ok) return featureId;
+  return ok({
+    width: width.value,
+    depth: depth.value,
+    height: height.value,
+    ...featureId.value,
+  });
 }
 
 function serializeSphereInput(
   input: WorkerSphereInput,
 ): SerializedWorkerOperationInput<"solid.createSphere"> {
-  return { radius: serializeDimensionalValue(input.radius) };
+  return {
+    radius: serializeDimensionalValue(input.radius),
+    ...serializedFeatureId(input),
+  };
 }
 
 function parseSphereInput(
@@ -2020,7 +2093,12 @@ function parseSphereInput(
     record.value.radius,
   );
   if (!radius.ok) return radius;
-  return ok({ radius: radius.value });
+  const featureId = parseFeatureIdField(
+    "solid.createSphere",
+    record.value.featureId,
+  );
+  if (!featureId.ok) return featureId;
+  return ok({ radius: radius.value, ...featureId.value });
 }
 
 function serializeCylinderInput(
@@ -2029,6 +2107,7 @@ function serializeCylinderInput(
   return {
     radius: serializeDimensionalValue(input.radius),
     height: serializeDimensionalValue(input.height),
+    ...serializedFeatureId(input),
   };
 }
 
@@ -2049,7 +2128,12 @@ function parseCylinderInput(
     record.value.height,
   );
   if (!height.ok) return height;
-  return ok({ radius: radius.value, height: height.value });
+  const featureId = parseFeatureIdField(
+    "solid.createCylinder",
+    record.value.featureId,
+  );
+  if (!featureId.ok) return featureId;
+  return ok({ radius: radius.value, height: height.value, ...featureId.value });
 }
 
 function serializeConeInput(
@@ -2059,6 +2143,7 @@ function serializeConeInput(
     bottomRadius: serializeDimensionalValue(input.bottomRadius),
     topRadius: serializeDimensionalValue(input.topRadius),
     height: serializeDimensionalValue(input.height),
+    ...serializedFeatureId(input),
   };
 }
 
@@ -2085,10 +2170,16 @@ function parseConeInput(
     record.value.height,
   );
   if (!height.ok) return height;
+  const featureId = parseFeatureIdField(
+    "solid.createCone",
+    record.value.featureId,
+  );
+  if (!featureId.ok) return featureId;
   return ok({
     bottomRadius: bottomRadius.value,
     topRadius: topRadius.value,
     height: height.value,
+    ...featureId.value,
   });
 }
 
@@ -2299,10 +2390,21 @@ function serializeExtrudeInput(
       : { taper: serializeDimensionalValue(input.taper) }),
     // The Phase 48 sheet flag rides last, exactly when present.
     ...(input.sheet === true ? { sheet: true } : {}),
+    ...serializedFeatureId(input),
   };
 }
 
 function parseExtrudeInput(
+  payload: unknown,
+): ParseResult<WorkerExtrudeInput, WorkerParseError> {
+  const geometry = parseExtrudeGeometry(payload);
+  if (!geometry.ok || !isPlainRecord(payload)) return geometry;
+  const featureId = parseFeatureIdField("solid.extrude", payload.featureId);
+  if (!featureId.ok) return featureId;
+  return ok({ ...geometry.value, ...featureId.value });
+}
+
+function parseExtrudeGeometry(
   payload: unknown,
 ): ParseResult<WorkerExtrudeInput, WorkerParseError> {
   const record = requirePayloadRecord("solid.extrude", payload);
@@ -3032,6 +3134,20 @@ function parseSubtractInput(
 function serializeTransformInput(
   input: WorkerTransformInput,
 ): SerializedWorkerOperationInput<"solid.transform"> {
+  const placement = serializeTransformPlacement(input);
+  if (input.instance === undefined) return placement;
+  return {
+    ...placement,
+    instance: {
+      featureId: input.instance.featureId,
+      index: input.instance.index,
+    },
+  };
+}
+
+function serializeTransformPlacement(
+  input: WorkerTransformInput,
+): SerializedWorkerOperationInput<"solid.transform"> {
   const translation = {
     x: serializeDimensionalValue(input.translation.x),
     y: serializeDimensionalValue(input.translation.y),
@@ -3058,6 +3174,16 @@ function serializeTransformInput(
 }
 
 function parseTransformInput(
+  payload: unknown,
+): ParseResult<WorkerTransformInput, WorkerParseError> {
+  const placement = parseTransformPlacement(payload);
+  if (!placement.ok || !isPlainRecord(payload)) return placement;
+  const instance = parseInstanceField(payload.instance);
+  if (!instance.ok) return instance;
+  return ok({ ...placement.value, ...instance.value });
+}
+
+function parseTransformPlacement(
   payload: unknown,
 ): ParseResult<WorkerTransformInput, WorkerParseError> {
   const record = requirePayloadRecord("solid.transform", payload);

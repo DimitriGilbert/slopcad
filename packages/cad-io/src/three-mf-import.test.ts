@@ -36,6 +36,7 @@ import {
   type ThreeMfImportResult,
   THREE_MF_IMPORT_ERROR_CODES,
   THREE_MF_IMPORT_MAX_PART_BYTES,
+  THREE_MF_IMPORT_MAX_XML_ELEMENTS,
   THREE_MF_UNIT_TO_MILLIMETER_FACTORS,
   importThreeMf,
 } from "./three-mf-import";
@@ -1763,6 +1764,78 @@ describe("importThreeMf rejects malformed input (per failure class)", () => {
         label,
       );
     }
+  });
+});
+
+describe("importThreeMf resource ceilings (parse-stage amplification bounds)", () => {
+  it("refuses a small package whose inflated model XML exceeds the element ceiling", () => {
+    // The amplification shape: a package of kilobytes on the wire (deflate)
+    // whose inflated model text asks for a million-plus-element DOM. The
+    // ceiling must refuse it as a structured result — never a throw, never
+    // the multi-GB parse.
+    const bombXml =
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n' +
+      '  <resources><object id="1" type="model"><mesh><vertices>\n' +
+      "<a/>".repeat(THREE_MF_IMPORT_MAX_XML_ELEMENTS) +
+      '</vertices><triangles><triangle v1="0" v2="0" v3="0"/></triangles></mesh></object></resources>\n' +
+      '  <build><item objectid="1"/></build>\n' +
+      "</model>\n";
+    const bombPackage = buildTestZip([
+      part("[Content_Types].xml", CONTENT_TYPES_XML),
+      part("_rels/.rels", RELS_XML),
+      part("3D/3dmodel.model", bombXml, 8),
+    ]);
+    expect(bombPackage.byteLength).toBeLessThan(1024 * 1024);
+    const error = expectImportFailure(
+      importThreeMf(bombPackage),
+      "three-mf-import/unsupported-structure",
+      "Model XML beyond the element ceiling",
+    );
+    expect(error.message).toContain(String(THREE_MF_IMPORT_MAX_XML_ELEMENTS));
+  });
+
+  it("imports a legal document of exactly the ceiling element count", () => {
+    // A model padded to EXACTLY THREE_MF_IMPORT_MAX_XML_ELEMENTS elements
+    // with foreign-namespace fillers — parsed and counted by the ceiling,
+    // skipped by the interpretation — must still import: the ceiling is a
+    // true ceiling (`>`), not one element below it. The element-open count
+    // of the built text is asserted below so the arithmetic here cannot
+    // silently drift off the boundary.
+    const fillerCount = THREE_MF_IMPORT_MAX_XML_ELEMENTS - 16;
+    const xml =
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:x="http://example.invalid/x">\n' +
+      '  <resources><object id="1" type="model"><mesh><vertices>\n' +
+      '<vertex x="0" y="0" z="0"/>\n' +
+      '<vertex x="10" y="0" z="0"/>\n' +
+      '<vertex x="0" y="10" z="0"/>\n' +
+      '<vertex x="0" y="0" z="10"/>\n' +
+      "<x:e/>\n".repeat(fillerCount) +
+      "</vertices><triangles>\n" +
+      '<triangle v1="0" v2="2" v3="1"/>\n' +
+      '<triangle v1="0" v2="3" v3="2"/>\n' +
+      '<triangle v1="0" v2="1" v3="3"/>\n' +
+      '<triangle v1="1" v2="2" v3="3"/>\n' +
+      "</triangles></mesh></object></resources>\n" +
+      '  <build><item objectid="1"/></build>\n' +
+      "</model>\n";
+    const elementOpens = xml.match(/<[A-Za-z_:]/g)?.length ?? 0;
+    expect(elementOpens).toBe(THREE_MF_IMPORT_MAX_XML_ELEMENTS);
+    const imported = unwrapImport(importThreeMf(modelPackage(xml)));
+    expect(imported.tessellation.positions).toEqual([
+      0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10,
+    ]);
+    expect(tessellationTriangleCount(imported.tessellation)).toBe(4);
+    expectConsistentMesh(imported);
+  });
+
+  it("still imports a tiny valid 3MF under the ceilings", () => {
+    const imported = unwrapImport(importThreeMf(modelPackage(TETRA_MODEL_XML)));
+    expect(imported.tessellation.positions).toEqual([
+      0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0, 10,
+    ]);
+    expect(tessellationTriangleCount(imported.tessellation)).toBe(4);
   });
 });
 

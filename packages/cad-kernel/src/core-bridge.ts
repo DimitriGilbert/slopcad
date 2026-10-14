@@ -429,8 +429,10 @@ import {
   type FeatureId,
   type FeatureInputRef,
   type FeatureRecord,
+  type ReferenceId,
   type ResolvedDatumAxis,
   type ResolvedDatumPlane,
+  type TopologyEntityReference,
   type TopologyView,
   angle as angleValue,
   length as lengthValue,
@@ -441,6 +443,7 @@ import {
   getDocumentReference,
   parseDatumPayload,
   parseTopologyReference,
+  repairMissingReference,
   resolveDatumPayload,
   resolveDocumentReference,
   transientSelectionOf,
@@ -1509,6 +1512,7 @@ function runDatumPlaneMirror(
     const mirrored = kernel.mirror(solid, {
       axis: plan.axis,
       offset: lengthValue(plan.offsetMm),
+      featureId: feature.id,
     });
     return mirrored.ok
       ? { ok: true, solid: mirrored.value }
@@ -1551,6 +1555,7 @@ function runDatumPlaneMirror(
   const reflected = kernel.mirror(rotated.value, {
     axis: "x",
     offset: lengthValue(0),
+    featureId: feature.id,
   });
   if (!reflected.ok) {
     return operationFailure(
@@ -2279,6 +2284,69 @@ function referenceKindOf(kind: TopologyCutKind): "edge" | "face" {
 }
 
 /**
+ * The current-regeneration resolution every topology-addressed executor
+ * shares (Phase N3): `resolveDocumentReference` against the view, then —
+ * for a `missing` reference (a deleted / split entity, or one inside an
+ * unnamed operation's output) — cad-core's `repairMissingReference`
+ * against the body's current snapshot before refusing. A name-based
+ * reference re-resolves `valid` across rebuilds on its own. Answers the
+ * resolved (`valid`) or `repaired` reference; every other outcome is a
+ * structured diagnostic whose data carries the validity state, its
+ * structural reason, and the repair's refusal code when one was tried.
+ */
+function resolveExecutorReference(
+  feature: FeatureRecord,
+  kind: string,
+  referenceId: ReferenceId,
+  entityLabel: string,
+  reference: TopologyEntityReference,
+  view: TopologyView,
+  document: CadDocument,
+):
+  | { readonly ok: true; readonly reference: TopologyEntityReference }
+  | { readonly ok: false; readonly diagnostic: Diagnostic } {
+  const resolved = resolveDocumentReference(document, reference, view);
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" could not resolve reference "${referenceId}": ${resolved.error.message}`,
+        location: { primary: feature.id, related: [referenceId] },
+        data: { referenceCode: resolved.error.code },
+      },
+    };
+  }
+  const { reference: outcome, repairError } = repairMissingReference(
+    resolved.value,
+    resolved.value.validity.state === "missing"
+      ? view.snapshotOf(resolved.value.bodyId)
+      : null,
+  );
+  const { state, reason } = outcome.validity;
+  if (state !== "valid" && state !== "repaired") {
+    return {
+      ok: false,
+      diagnostic: {
+        severity: "error",
+        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
+        message: `Feature "${feature.id}" of kind "${kind}" has an unresolved ${entityLabel} reference ("${referenceId}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration${repairError === undefined ? "" : `, and its repair refused: ${repairError.message}`}. Re-select the ${entityLabel} to mint a fresh reference.`,
+        location: { primary: feature.id, related: [referenceId] },
+        data: {
+          validityState: state,
+          ...(reason !== undefined ? { reason } : {}),
+          ...(repairError !== undefined
+            ? { repairCode: repairError.code }
+            : {}),
+        },
+      },
+    };
+  }
+  return { ok: true, reference: outcome };
+}
+
+/**
  * The shared executor path of the topology-addressed kinds — `fillet`
  * (Phase 26.5), `chamfer` (Phase 26.6), and `shell` (Phase 26.7, on the
  * FACE reference kind): the input layout is ONE feature/body input (the
@@ -2437,40 +2505,17 @@ function runEdgeCutOperation(
         ),
       };
     }
-    const resolved = resolveDocumentReference(
-      readers.document,
+    const resolved = resolveExecutorReference(
+      feature,
+      kind,
+      edgeRef.id,
+      referenceKind,
       parsed.value,
       view,
+      readers.document,
     );
-    if (!resolved.ok) {
-      return {
-        ok: false,
-        diagnostic: {
-          severity: "error",
-          code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-          message: `Feature "${feature.id}" of kind "${kind}" could not resolve reference "${edgeRef.id}": ${resolved.error.message}`,
-          location: { primary: feature.id, related: [edgeRef.id] },
-          data: { referenceCode: resolved.error.code },
-        },
-      };
-    }
-    const { state, reason } = resolved.value.validity;
-    if (state !== "valid" && state !== "repaired") {
-      return {
-        ok: false,
-        diagnostic: {
-          severity: "error",
-          code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-          message: `Feature "${feature.id}" of kind "${kind}" has an unresolved ${referenceKind} reference ("${edgeRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the ${referenceKind} to mint a fresh reference.`,
-          location: { primary: feature.id, related: [edgeRef.id] },
-          data: {
-            validityState: state,
-            ...(reason !== undefined ? { reason } : {}),
-          },
-        },
-      };
-    }
-    const selection = transientSelectionOf(resolved.value);
+    if (!resolved.ok) return resolved;
+    const selection = transientSelectionOf(resolved.reference);
     if (!selection.ok) {
       return {
         ok: false,
@@ -2514,14 +2559,21 @@ function runEdgeCutOperation(
   const cut = lengthValue(size.mm);
   const result =
     kind === "fillet"
-      ? kernel.fillet({ target: target.solid, edges: ordinals, radius: cut })
+      ? kernel.fillet({
+          featureId: feature.id,
+          target: target.solid,
+          edges: ordinals,
+          radius: cut,
+        })
       : kind === "chamfer"
         ? kernel.chamfer({
+            featureId: feature.id,
             target: target.solid,
             edges: ordinals,
             distance: cut,
           })
         : kernel.shell({
+            featureId: feature.id,
             target: target.solid,
             faces: ordinals,
             thickness: cut,
@@ -3112,6 +3164,7 @@ function runPatternOperation(
     for (let i = 1; i < count; i += 1) {
       const offset = i * spacing.mm;
       const placed = kernel.transform(target.solid, {
+        instance: { featureId: feature.id, index: i },
         x: lengthValue(offset * dx),
         y: lengthValue(offset * dy),
         z: lengthValue(offset * dz),
@@ -3212,6 +3265,7 @@ function runPatternOperation(
           );
         }
         const placed = kernel.transform(centered.value, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(axisOrigin[0]),
           y: lengthValue(axisOrigin[1]),
           z: lengthValue(axisOrigin[2]),
@@ -3262,6 +3316,7 @@ function runPatternOperation(
             : [0, 0, 1];
       for (let i = 1; i < count; i += 1) {
         const placed = kernel.transform(target.solid, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(0),
           y: lengthValue(0),
           z: lengthValue(0),
@@ -3653,6 +3708,7 @@ function runPatternFeatureOperation(
         continue;
       }
       const placed = kernel.transform(solid, {
+        instance: { featureId: feature.id, index: ordinal },
         x: lengthValue(offset[0]),
         y: lengthValue(offset[1]),
         z: lengthValue(offset[2]),
@@ -3888,6 +3944,7 @@ function runPatternPathOperation(
     const translation: DatumVec3 = [station.point[0], 0, station.point[1]];
     const placed = tangentFollow
       ? kernel.transform(target.solid, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(translation[0]),
           y: lengthValue(translation[1]),
           z: lengthValue(translation[2]),
@@ -3904,6 +3961,7 @@ function runPatternPathOperation(
           })(),
         })
       : kernel.transform(target.solid, {
+          instance: { featureId: feature.id, index: i },
           x: lengthValue(translation[0]),
           y: lengthValue(translation[1]),
           z: lengthValue(translation[2]),
@@ -4112,39 +4170,16 @@ function runPatternFaceOperation(
       ),
     };
   }
-  const resolved = resolveDocumentReference(
-    readers.document,
+  const resolved = resolveExecutorReference(
+    feature,
+    "patternFace",
+    referenceRef.id,
+    "face",
     parsed.value,
     view,
+    readers.document,
   );
-  if (!resolved.ok) {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "patternFace" could not resolve reference "${referenceRef.id}": ${resolved.error.message}`,
-        location: { primary: feature.id, related: [referenceRef.id] },
-        data: { referenceCode: resolved.error.code },
-      },
-    };
-  }
-  const { state, reason } = resolved.value.validity;
-  if (state !== "valid" && state !== "repaired") {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "patternFace" has an unresolved face reference ("${referenceRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the face to mint a fresh reference.`,
-        location: { primary: feature.id, related: [referenceRef.id] },
-        data: {
-          validityState: state,
-          ...(reason !== undefined ? { reason } : {}),
-        },
-      },
-    };
-  }
+  if (!resolved.ok) return resolved;
   const datumSeam = readers.datumTopology;
   if (datumSeam === undefined) {
     return {
@@ -4283,6 +4318,7 @@ function runPatternFaceOperation(
       offset[0] * xAxis[2] + offset[1] * yAxis[2],
     ];
     const placed = kernel.transform(target.solid, {
+      instance: { featureId: feature.id, index: ordinal },
       x: lengthValue(world[0]),
       y: lengthValue(world[1]),
       z: lengthValue(world[2]),
@@ -4557,6 +4593,7 @@ function runMirrorOperation(
   const result = kernel.mirror(target.solid, {
     axis,
     offset: lengthValue(offset.mm),
+    featureId: feature.id,
   });
   return result.ok
     ? { ok: true, solid: result.value }
@@ -4867,8 +4904,11 @@ function executeHoleCut(
 ): OperationOutcome {
   // The tool: a one-segment extruded circle (see HoleCutPlan — the extrude
   // op's own placement carries the axis orientation every kernel
-  // implements, so no rotation-gated transform is involved).
+  // implements, so no rotation-gated transform is involved). Phase N2: the
+  // tool is named under the hole feature (`<feature>/tool/...`), so the
+  // bore wall it leaves carries a feature-scoped, rebuild-stable name.
   const tool = kernel.extrude({
+    featureId: `${feature.id}/tool`,
     loop: [{ kind: "circle", center: [0, 0], radius: plan.toolRadiusMm }],
     height: lengthValue(plan.toolHeightMm),
     direction: 1,
@@ -5314,10 +5354,16 @@ function runStructuredHoleOperation(
   }
 
   // The composed cut: one tool solid per position (plus the threaded
-  // type's ridge sweep), ONE subtract, the measured post-condition.
+  // type's ridge sweep), ONE subtract, the measured post-condition. Phase
+  // N2: each position's tool is named under the hole feature and its
+  // position index (`<feature>/tool/<i>/...`), so the faces the cut leaves
+  // never share a name with another hole's or another position's.
   const tools: KernelSolid[] = [];
-  for (const position of planned.plan.positions) {
-    const tool = kernel.revolve(position.revolveTool);
+  for (const [index, position] of planned.plan.positions.entries()) {
+    const tool = kernel.revolve({
+      ...position.revolveTool,
+      featureId: `${feature.id}/tool/${index}`,
+    });
     if (!tool.ok) {
       return operationFailure(feature, tool.error.code, tool.error.message);
     }
@@ -5532,6 +5578,7 @@ function runSweepOperation(
     };
   }
   const sweepInput: ProfileSweepInput = {
+    featureId: feature.id,
     loop: resolvedProfile.value.loop,
     path: resolvedPath.value.path,
     placement: resolvedProfile.value.placement,
@@ -5668,6 +5715,7 @@ function runLoftOperation(
     });
   }
   const loftInput: ProfileLoftInput = {
+    featureId: feature.id,
     sections,
     placement: placement ?? {
       rotation: { axis: [0, 0, 1], angle: angleValue(0, "rad") },
@@ -6361,7 +6409,11 @@ function runRibOperation(
     };
   }
   const half = thickness.mm / 2;
+  // Phase N2: the two halves are named under the rib feature with distinct
+  // roles (`<feature>/up/...`, `<feature>/down/...`), so their faces carry
+  // feature-scoped names that never collide through the union.
   const ribUp = kernel.extrude({
+    featureId: `${feature.id}/up`,
     loop: resolvedProfile.value.loop,
     height: lengthValue(half),
     direction: 1,
@@ -6371,6 +6423,7 @@ function runRibOperation(
     return operationFailure(feature, ribUp.error.code, ribUp.error.message);
   }
   const ribDown = kernel.extrude({
+    featureId: `${feature.id}/down`,
     loop: resolvedProfile.value.loop,
     height: lengthValue(half),
     direction: -1,
@@ -6575,6 +6628,7 @@ function runThickenOperation(
     };
   }
   const result = kernel.thicken({
+    featureId: feature.id,
     target: target.solid,
     thickness: lengthValue(thickness.mm),
   });
@@ -6723,7 +6777,11 @@ function runSplitOperation(
     keepSide: sideValue.value,
     bounds: measured.value,
   });
+  // Phase N2b: the covering tool is named under the split feature
+  // (`<feature>/tool/side/<i>`, `<feature>/tool/start`), so the cut's
+  // new face carries a rebuild-stable name through the subtract.
   const tool = kernel.extrude({
+    featureId: `${feature.id}/tool`,
     loop: plan.toolLoop,
     height: lengthValue(plan.toolHeightMm),
     direction: 1,
@@ -6865,40 +6923,17 @@ function resolveLocalFaceReference(
       ),
     };
   }
-  const resolved = resolveDocumentReference(
-    readers.document,
+  const resolved = resolveExecutorReference(
+    feature,
+    kind,
+    faceRef.id,
+    "face",
     parsed.value,
     view,
+    readers.document,
   );
-  if (!resolved.ok) {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "${kind}" could not resolve reference "${faceRef.id}": ${resolved.error.message}`,
-        location: { primary: feature.id, related: [faceRef.id] },
-        data: { referenceCode: resolved.error.code },
-      },
-    };
-  }
-  const { state, reason } = resolved.value.validity;
-  if (state !== "valid" && state !== "repaired") {
-    return {
-      ok: false,
-      diagnostic: {
-        severity: "error",
-        code: DIAGNOSTIC_CODES.kernelFeatureInputInvalid,
-        message: `Feature "${feature.id}" of kind "${kind}" has an unresolved face reference ("${faceRef.id}"): it stands ${state}${reason === undefined ? "" : ` (${reason})`} against the current regeneration. Re-select the face to mint a fresh reference.`,
-        location: { primary: feature.id, related: [faceRef.id] },
-        data: {
-          validityState: state,
-          ...(reason !== undefined ? { reason } : {}),
-        },
-      },
-    };
-  }
-  const selection = transientSelectionOf(resolved.value);
+  if (!resolved.ok) return resolved;
+  const selection = transientSelectionOf(resolved.reference);
   if (!selection.ok) {
     return {
       ok: false,
@@ -7059,6 +7094,7 @@ function runLocalFaceOperation(
     const distance = readers.lengthParameter(distanceRef, "distance");
     if (!distance.ok) return { ok: false, diagnostic: distance.diagnostic };
     const result = kernel.moveFace({
+      featureId: feature.id,
       target: target.solid,
       face: face.ordinal,
       direction,
@@ -7100,6 +7136,7 @@ function runLocalFaceOperation(
       );
     }
     const result = kernel.replaceFace({
+      featureId: feature.id,
       target: target.solid,
       face: face.ordinal,
       plane: {
@@ -7192,6 +7229,7 @@ function runKernelOperation(
         };
       }
       const result = kernel.createBox({
+        featureId: feature.id,
         width: lengthValue(width),
         depth: lengthValue(depth),
         height: lengthValue(height),
@@ -7214,7 +7252,10 @@ function runKernelOperation(
           ),
         };
       }
-      const result = kernel.createSphere({ radius: lengthValue(radius) });
+      const result = kernel.createSphere({
+        featureId: feature.id,
+        radius: lengthValue(radius),
+      });
       return result.ok
         ? { ok: true, solid: result.value }
         : operationFailure(feature, result.error.code, result.error.message);
@@ -7237,6 +7278,7 @@ function runKernelOperation(
         };
       }
       const result = kernel.createCylinder({
+        featureId: feature.id,
         radius: lengthValue(radius),
         height: lengthValue(height),
       });
@@ -7267,6 +7309,7 @@ function runKernelOperation(
         };
       }
       const result = kernel.createCone({
+        featureId: feature.id,
         bottomRadius: lengthValue(bottomRadius),
         topRadius: lengthValue(topRadius),
         height: lengthValue(height),
@@ -7525,6 +7568,7 @@ function runKernelOperation(
         };
       }
       const sheetResult = kernel.extrude({
+        featureId: feature.id,
         loop: sheetProfile.value.loop,
         height: lengthValue(Math.abs(sheetDistance.mm)),
         direction: sheetDistance.mm > 0 ? 1 : -1,
@@ -8117,6 +8161,7 @@ function runKernelOperation(
         }
       }
       const result = kernel.extrude({
+        featureId: feature.id,
         loop: resolvedProfile.value.loop,
         height: lengthValue(Math.abs(distance.mm)),
         direction: distance.mm > 0 ? 1 : -1,
@@ -8319,6 +8364,7 @@ function runKernelOperation(
         axisDirection = [Math.cos(axisAngle.rad), Math.sin(axisAngle.rad)];
       }
       const revolveInput: ProfileRevolveInput = {
+        featureId: feature.id,
         loop: resolvedProfile.value.loop,
         axis: {
           point: [...axisPoint],

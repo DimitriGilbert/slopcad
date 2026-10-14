@@ -26,6 +26,8 @@ export interface ExtrudeSceneRequest {
   readonly distanceMm: number;
   /** The optional draft taper (Phase 41), canonical radians. */
   readonly taperRad?: number;
+  /** The extrude feature's id (the topological-naming namespace). */
+  readonly featureId?: string;
 }
 
 const mm = (value: number) => length(value, "mm");
@@ -50,6 +52,9 @@ export async function computeExtrudeScene(
     ...(request.taperRad === undefined
       ? {}
       : { taper: angle(request.taperRad) }),
+    ...(request.featureId === undefined
+      ? {}
+      : { featureId: request.featureId }),
   });
   const volume = await context.request("solid.volume", {
     solid: extruded.solid,

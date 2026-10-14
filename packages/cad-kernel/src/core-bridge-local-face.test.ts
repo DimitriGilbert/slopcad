@@ -105,6 +105,35 @@ function fixtureView(
 }
 
 /**
+ * `view` with every entity moved 5 mm along x — a vanished entity with no
+ * geometric repair candidate either (the Phase N3 fallback refuses).
+ */
+function movedView(view: TopologyView): TopologyView {
+  const shifted = (
+    point: readonly [number, number, number] | undefined,
+  ): readonly [number, number, number] | undefined =>
+    point === undefined ? undefined : [point[0] + 5, point[1], point[2]];
+  return {
+    ...view,
+    snapshotOf: (id) => {
+      const snapshot = view.snapshotOf(id);
+      if (snapshot === null) return null;
+      return {
+        ...snapshot,
+        entities: snapshot.entities.map((entity) => ({
+          ...entity,
+          geometry: {
+            ...entity.geometry,
+            centroidAbsoluteMm: shifted(entity.geometry.centroidAbsoluteMm),
+            centroidRelativeMm: shifted(entity.geometry.centroidRelativeMm),
+          },
+        })),
+      };
+    },
+  };
+}
+
+/**
  * Builds the local face document: the box, the minted face reference, an
  * optional datum plane, and the action feature of the given kind.
  */
@@ -290,7 +319,7 @@ describe("bridge local face ops: the capability gate and honest declines", () =>
 
 describe("bridge local face ops: the reference battery", () => {
   it("fails with a structured stale-reference diagnostic when the face vanished", () => {
-    const stale = fixtureView(bBlock, 999999);
+    const stale = movedView(fixtureView(bBlock, 999999));
     const { states } = runAction(buildDocument("deleteFace"), { view: stale });
     const status = states.get(fAction);
     expect(status?.state).toBe("failed");

@@ -165,7 +165,11 @@ const WORKPLANE_ORTHONORMALITY_TOLERANCE = 1e-9;
 /** One full turn in radians, for the angle canonicalization cad-sketch applies. */
 const TWO_PI = Math.PI * 2;
 
-/** Guards the walk against runaway recursion (a component returning itself forever). */
+/**
+ * Guards the walk against runaway recursion: a component returning
+ * itself forever, a children array containing itself, or a prop value
+ * containing itself.
+ */
 const MAX_TREE_DEPTH = 100;
 
 /** One input a feature declares, in wire shape. */
@@ -250,6 +254,18 @@ function compileError(
   input: unknown = null,
 ): CadJsxCompileError {
   return { code, message, input, path: [...path] };
+}
+
+/** The structured failure for a walk that outran {@link MAX_TREE_DEPTH}. */
+function treeTooDeepFailure(
+  path: readonly string[],
+  hint: string,
+): CadJsxCompileError {
+  return compileError(
+    CAD_JSX_ERROR_CODES.treeTooDeep,
+    `The model tree exceeds the maximum depth of ${MAX_TREE_DEPTH} (${hint}); compilation stopped here.`,
+    path,
+  );
 }
 
 function isPlainRecord(input: unknown): input is Record<string, unknown> {
@@ -341,6 +357,14 @@ function walkNode(
 ): ParseResult<NodeResult, CadJsxCompileError> {
   if (isIgnorableChild(node)) return ok(EMPTY_RESULT);
   if (Array.isArray(node)) {
+    // The element walk checks the same cap at its own entry; arrays
+    // recurse without an element between (a children array that
+    // contains itself), so the cap must hold here too.
+    if (ctx.depth >= MAX_TREE_DEPTH) {
+      return fail(
+        treeTooDeepFailure(ctx.path, "often an array that contains itself"),
+      );
+    }
     const producers: ProducerRef[] = [];
     for (const [index, child] of node.entries()) {
       const childCtx: WalkContext = {
@@ -375,11 +399,7 @@ function walkElement(
 ): ParseResult<NodeResult, CadJsxCompileError> {
   if (ctx.depth >= MAX_TREE_DEPTH) {
     return fail(
-      compileError(
-        CAD_JSX_ERROR_CODES.treeTooDeep,
-        `The model tree exceeds the maximum depth of ${MAX_TREE_DEPTH} (often a component that returns itself); compilation stopped here.`,
-        ctx.path,
-      ),
+      treeTooDeepFailure(ctx.path, "often a component that returns itself"),
     );
   }
   const tag: unknown = element.type;
@@ -504,7 +524,7 @@ function invokeComponent(
     depth: ctx.depth + 1,
   };
   for (const [key, value] of Object.entries(props.value)) {
-    const invalid = validatePropData(value, key, componentCtx.path);
+    const invalid = validatePropData(value, key, componentCtx.path, 0);
     if (invalid !== undefined) return fail(invalid);
   }
   // The class-component guard above ran first, so `tag` is a plain
@@ -548,13 +568,24 @@ function invokeComponent(
  * finite numbers, strings, booleans, null/undefined, arrays, plain objects,
  * and React elements. Functions (including promise `then` hooks), symbols,
  * bigints, NaN/Infinity, and class instances are rejected — the compiler
- * must be able to treat props as data.
+ * must be able to treat props as data. The depth cap bounds the recursion
+ * (a value that contains itself returns the structured failure instead of
+ * overflowing the stack).
  */
 function validatePropData(
   value: unknown,
   label: string,
   path: readonly string[],
+  depth: number,
 ): CadJsxCompileError | undefined {
+  if (depth >= MAX_TREE_DEPTH) {
+    return compileError(
+      CAD_JSX_ERROR_CODES.propsInvalid,
+      `The prop "${label}" nests deeper than the maximum of ${MAX_TREE_DEPTH} (often a value that contains itself); props must be plain serializable data.`,
+      path,
+      value,
+    );
+  }
   if (value === null || value === undefined) return undefined;
   switch (typeof value) {
     case "boolean":
@@ -589,7 +620,12 @@ function validatePropData(
       if (isValidElement(value)) return undefined;
       if (Array.isArray(value)) {
         for (const [index, entry] of value.entries()) {
-          const invalid = validatePropData(entry, `${label}[${index}]`, path);
+          const invalid = validatePropData(
+            entry,
+            `${label}[${index}]`,
+            path,
+            depth + 1,
+          );
           if (invalid !== undefined) return invalid;
         }
         return undefined;
@@ -604,7 +640,12 @@ function validatePropData(
           );
         }
         for (const [key, entry] of Object.entries(value)) {
-          const invalid = validatePropData(entry, `${label}.${key}`, path);
+          const invalid = validatePropData(
+            entry,
+            `${label}.${key}`,
+            path,
+            depth + 1,
+          );
           if (invalid !== undefined) return invalid;
         }
         return undefined;
@@ -1727,7 +1768,11 @@ function compileBooleanElement(
 /**
  * `<Use>`: consumes an already-produced feature by reference — the
  * shared-subtree mechanism. Emits no commands; resolves to the same
- * feature input a nested form would produce.
+ * feature input a nested form would produce. It is a first-class
+ * producer: inside a `<Body>` it claims the body's one-producer capture
+ * (a `<Use>` cannot shape the captured body — the referenced feature
+ * already produced its own — so the body stands bare), and refuses a
+ * second producer like any real one.
  */
 function compileUseElement(
   props: Record<string, unknown>,
@@ -1766,6 +1811,18 @@ function compileUseElement(
         parsed.value,
       ),
     );
+  }
+  if (ctx.capture !== undefined) {
+    if (ctx.capture.captured) {
+      return fail(
+        compileError(
+          CAD_JSX_ERROR_CODES.bodyProducerConflict,
+          `A <Body> may contain at most one producing element; the <Use> of feature "${parsed.value}" appeared after the body's shape was already declared.`,
+          ctx.path,
+        ),
+      );
+    }
+    ctx.capture.captured = true;
   }
   return ok({ producers: [{ featureId: parsed.value }] });
 }
@@ -3494,7 +3551,10 @@ function compileBodyElement(
   );
   if (!children.ok) return fail(children.error);
   // A <Body> is a container, not a producer: zero producers leaves a bare
-  // body record, one producer shaped it (enforced during the walk).
+  // body record, one producer shaped it. Every producer kind claims the
+  // capture during the walk — a real feature in emitFeature, a <Use>
+  // reference in compileUseElement — and each refuses a second, so the
+  // walked producers need no second check here.
   return ok(EMPTY_RESULT);
 }
 

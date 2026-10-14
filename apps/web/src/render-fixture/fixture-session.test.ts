@@ -16,6 +16,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as KernelModule from "@slopcad/cad-kernel";
+import { WorkerRequestFailure } from "@slopcad/cad-kernel";
 import type { DocumentBodySceneRequest } from "../cad-workbench/document-scene";
 import type { SceneDispatchOutcome } from "./fixture-session";
 import type {
@@ -25,6 +26,9 @@ import type {
   WorkerBootFailure,
   WorkerClient,
   WorkerCrashPort,
+  WorkerOperationId,
+  WorkerOperationInput,
+  WorkerOperationResult,
   WorkerTransport,
 } from "@slopcad/cad-kernel";
 
@@ -34,12 +38,30 @@ const controller = vi.hoisted(() => {
     failWith(failure: unknown): void;
   }[] = [];
   const crashCallbacks: Array<(failure: WorkerBootFailure) => void> = [];
+  /** How the fake client answers one direct request. */
+  type Respond = (operation: string, input: unknown) => Promise<unknown>;
+  /** The default answer: a request that never settles. */
+  const neverAnswers: Respond = () => new Promise(() => {});
+  /** Every direct client request the session issued, in order. */
+  const requests: { readonly operation: string; readonly input: unknown }[] =
+    [];
   return {
     pending,
     crashCallbacks,
+    requests,
+    /** The coordinator's visible state (`null`: nothing settled yet). */
+    visible: null as {
+      readonly revision: number;
+      readonly state: unknown;
+    } | null,
+    /** How the client answers one direct request. */
+    respond: neverAnswers,
     reset(): void {
       pending.length = 0;
       crashCallbacks.length = 0;
+      requests.length = 0;
+      this.visible = null;
+      this.respond = neverAnswers;
     },
     /** Fires the booted channel's crash callback (the boot's own report). */
     crash(message: string): void {
@@ -56,8 +78,17 @@ vi.mock("@slopcad/cad-kernel", async (importOriginal) => {
   const actual = await importOriginal<typeof KernelModule>();
   const revision = actual.createRevisionTag(1);
   const client: WorkerClient = {
-    // Never called: the coordinator below is the fake the session talks to.
-    request: () => new Promise(() => {}),
+    // The coordinator below is the fake the render dispatches talk to; only
+    // the on-demand topology query talks to the client directly.
+    request: <O extends WorkerOperationId>(
+      operation: O,
+      input: WorkerOperationInput<O>,
+    ): Promise<WorkerOperationResult<O>> => {
+      controller.requests.push({ operation, input });
+      return controller.respond(operation, input) as Promise<
+        WorkerOperationResult<O>
+      >;
+    },
     cancel: () => {},
     close: () => {},
   };
@@ -85,9 +116,16 @@ vi.mock("@slopcad/cad-kernel", async (importOriginal) => {
           failWith: reject,
         });
       }),
-    // The visible state stays empty: `settle()` then exercises exactly the
-    // surface bookkeeping (counters, status, error text) under test.
-    visible: () => null,
+    // The visible state stays empty unless a test sets it: `settle()` then
+    // exercises exactly the surface bookkeeping (counters, status, error
+    // text) under test.
+    visible: () =>
+      controller.visible === null
+        ? null
+        : {
+            revision: actual.createRevisionTag(controller.visible.revision),
+            state: controller.visible.state,
+          },
     drops: () => [],
     disposalFailures: () => [],
   };
@@ -356,6 +394,81 @@ describe("bootRenderFixtureSession error-surface reset", () => {
       bodyId: "body_one",
     });
 
+    session.dispose();
+  });
+
+  it("queries the visible document scene's topology only on demand", async () => {
+    vi.stubGlobal(
+      "Worker",
+      class {
+        addEventListener(): void {}
+        removeEventListener(): void {}
+        postMessage(): void {}
+        terminate(): void {}
+      },
+    );
+    mountSurface();
+    const session = bootRenderFixtureSession(
+      {
+        rootId: ROOT_ID,
+        statusId: STATUS_ID,
+        volumeId: VOLUME_ID,
+        errorId: ERROR_ID,
+      },
+      () => {},
+    );
+    // Nothing settled: no inventory, and no request issued.
+    expect(await session.documentTopology()).toBeNull();
+    // A settled single-solid scene carries no document solids.
+    controller.visible = {
+      revision: 4,
+      state: { measurement: { tessellation: { indices: [], positions: [] } } },
+    };
+    expect(await session.documentTopology()).toBeNull();
+    expect(controller.requests).toEqual([]);
+
+    // A settled document scene: one snapshot per computed solid, labeled
+    // with its body id at the visible revision; a declined body is absent.
+    controller.visible = {
+      revision: 4,
+      state: {
+        measurement: {
+          solids: [
+            { bodyId: "body_box", solid: "wsol_1" },
+            { bodyId: "body_round", solid: "wsol_2" },
+          ],
+        },
+      },
+    };
+    controller.respond = (operation, input) => {
+      expect(operation).toBe("solid.topology");
+      const { bodyId } = input as { readonly bodyId: string };
+      return bodyId === "body_round"
+        ? Promise.reject(
+            new WorkerRequestFailure({
+              code: "worker/operation-failed",
+              message: "declined",
+            }),
+          )
+        : Promise.resolve({ snapshot: { bodyId, probe: true } });
+    };
+    const inventory = await session.documentTopology();
+    expect(controller.requests).toEqual([
+      {
+        operation: "solid.topology",
+        input: { solid: "wsol_1", bodyId: "body_box", regeneration: 4 },
+      },
+      {
+        operation: "solid.topology",
+        input: { solid: "wsol_2", bodyId: "body_round", regeneration: 4 },
+      },
+    ]);
+    expect(inventory?.revision).toBe(4);
+    expect([...(inventory?.snapshots.keys() ?? [])]).toEqual(["body_box"]);
+    expect(inventory?.snapshots.get("body_box")).toEqual({
+      bodyId: "body_box",
+      probe: true,
+    });
     session.dispose();
   });
 });

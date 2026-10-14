@@ -87,10 +87,34 @@ export type WebMcpToolExecutionResult =
   | { readonly ok: true; readonly result: string }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
+/**
+ * The ownership handle {@link registerWebMcpTool} returns: the proof that
+ * THIS call put the entry under its name. Registration stays replace-by-
+ * name, so a later registration under the same name invalidates the
+ * earlier handle — and unregistering through a stale handle is a no-op
+ * that leaves the surviving registration (and the toolchange listeners)
+ * untouched. A host's cleanup therefore can never delete another host's
+ * live registration, which is what makes the documented multi-host role
+ * of the registry safe.
+ */
+export interface WebMcpToolRegistration {
+  /** The name this registration was filed under. */
+  readonly name: string;
+  /**
+   * Unregisters this registration's entry if — and only if — it still
+   * owns the name. True when the entry was removed (toolchange notified);
+   * false when a newer registration holds the name or it is already gone
+   * (a no-op, nothing notified).
+   */
+  readonly unregister: () => boolean;
+}
+
 /** The registered, executable tool plus its derived JSON Schema. */
 interface RegisteredTool {
   readonly entry: WebMcpToolEntry;
   readonly inputJsonSchema: object;
+  /** The registration that owns this entry (the stale-handle check). */
+  readonly owner: WebMcpToolRegistration;
 }
 
 /** Stable failure codes the registry itself produces. */
@@ -142,22 +166,44 @@ export function defineWebMcpTool<I extends ZodType>(
 
 /**
  * Registers (or replaces — idempotent by name) one tool and notifies the
- * toolchange listeners. The JSON Schema is derived here, eagerly: an
+ * toolchange listeners. Returns the registration's ownership handle:
+ * cleanup paths must unregister through it, so they remove the entry only
+ * while it is still theirs. The JSON Schema is derived here, eagerly: an
  * unrepresentable schema is a programming error and fails loudly at
  * registration, never at agent-execution time.
  */
-export function registerWebMcpTool(entry: WebMcpToolEntry): void {
+export function registerWebMcpTool(
+  entry: WebMcpToolEntry,
+): WebMcpToolRegistration {
   requireValidName(entry.name);
+  const registration: WebMcpToolRegistration = {
+    name: entry.name,
+    unregister: () => {
+      const current = registeredTools.get(entry.name);
+      if (current === undefined || current.owner !== registration) {
+        return false;
+      }
+      registeredTools.delete(entry.name);
+      notifyToolchange();
+      return true;
+    },
+  };
   registeredTools.set(entry.name, {
     entry,
     inputJsonSchema: z.toJSONSchema(entry.inputSchema),
+    owner: registration,
   });
   notifyToolchange();
+  return registration;
 }
 
 /**
- * Unregisters one tool by name. Idempotent: unregistering an absent name is
- * a no-op (and notifies nothing — toolchange fires only on real changes).
+ * Unregisters one tool by name, unconditionally — the administrative
+ * removal for teardown and tests. Bindings cleaning up after themselves
+ * must go through their {@link WebMcpToolRegistration} handles instead,
+ * which are scoped to what they own. Idempotent: unregistering an absent
+ * name is a no-op (and notifies nothing — toolchange fires only on real
+ * changes).
  */
 export function unregisterWebMcpTool(name: string): void {
   if (!registeredTools.delete(name)) return;

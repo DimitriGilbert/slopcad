@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { user } from "./auth";
+import { simulationRun } from "./simulation";
 
 /**
  * The persistence core (Phase 31): projects own documents, documents own
@@ -100,10 +101,11 @@ export const documentRelations = relations(document, ({ one, many }) => ({
 
 export const documentVersionRelations = relations(
   documentVersion,
-  ({ one }) => ({
+  ({ one, many }) => ({
     document: one(document, {
       fields: [documentVersion.documentId],
       references: [document.id],
     }),
+    simulationRuns: many(simulationRun),
   }),
 );

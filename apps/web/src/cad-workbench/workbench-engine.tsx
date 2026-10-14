@@ -29,6 +29,10 @@
  * - The readouts: selection key, face anchors, measure/distance/bounds/
  *   radius/mass-properties inspection states, and the machine timeline
  *   JSON.
+ * - The Phase 61d sim committed-application counters: the surfaced sim
+ *   worker client's notifications applied through the law-S6 ledger
+ *   (`./sim-application-ledger`), stamped synchronously as the
+ *   `data-sim-*` attribute family on the settle root.
  *
  * The host pushes the CURRENT projection into the store (the projection
  * access the active tool reads) — kept here, host-side state push, not
@@ -97,16 +101,29 @@ import {
   structuredHoleTypeOf,
 } from "@slopcad/cad-kernel";
 import type { Workplane } from "@slopcad/cad-sketch";
+import type { SimWorkerClient, SimWorkerNotification } from "@slopcad/sim-core";
 import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene";
 
 import {
   bootRenderFixtureSession,
+  type DocumentTopologyInventory,
   faceAnchorSurface,
   type FixtureRenderState,
   type RenderFixtureSession,
   type SceneDispatchOutcome,
 } from "../render-fixture/fixture-session";
 import { documentSceneBodies, renderableBodyIds } from "./document-scene";
+import {
+  applySimNotification,
+  createSimApplicationLedger,
+  type SimAppliedCounters,
+  SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE,
+  SIM_APPLIED_NOTIFICATIONS_ATTRIBUTE,
+  SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
+  SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
+  simAppliedCountersOf,
+} from "./sim-application-ledger";
+import { maxAuthoringOccurrencesOf } from "./authoring-counters";
 import { holeDiameterMm } from "../workbench-fixture/workbench-document";
 import { workbenchExecutor } from "../workbench-fixture/workbench-extended-document";
 import { workbenchSessionForBoot } from "./session";
@@ -191,6 +208,12 @@ import {
   moveBodyTargetFeatureOf,
   validateMoveBodySubmission,
 } from "./move-body";
+import { primitiveCreateCommands, type PrimitiveSubmission } from "./primitive";
+import {
+  topologyCutCreateCommands,
+  type TopologyCutSubmission,
+} from "./topology-pick";
+import { faceOpCreateCommands, type FaceOpSubmission } from "./face-op-pick";
 import {
   duplicateProducingFeature,
   validateDuplicateSubmission,
@@ -258,6 +281,18 @@ export interface WorkbenchEngineSurface {
    * the authored frame (byte-identical anchors).
    */
   readonly viewportId?: string;
+  /**
+   * The sim worker channel's client whose notifications the engine applies
+   * as committed applications (Phase 61d, law S6) — the 61b sim worker
+   * host (`bootSimWorkbenchWorker`) hands this out on its booted channel.
+   * Boot-time configuration like `backend`: the client's identity owns the
+   * subscription, so a host changing channels rewires here and remounting
+   * the host is the way to swap engines. Absent (the default): no sim run
+   * streams into this engine and the sim counters stay at their boot
+   * zeros. Rendering the applied fields is Phases 62+63's work; this seam
+   * is only the committed-application accounting.
+   */
+  readonly simClient?: SimWorkerClient;
 }
 
 /**
@@ -295,6 +330,9 @@ export type WorkbenchSceneKind =
   | "empty"
   | "plate"
   | "extrude"
+  | "primitive"
+  | "topologyCut"
+  | "faceOp"
   | "revolve"
   | "sweep"
   | "loft"
@@ -382,6 +420,13 @@ export interface WorkbenchEngine {
   readonly historyApi: ReturnType<typeof useCadHistory>;
   /** The applied render state, or `null` before the first settle. */
   readonly applied: AppliedRenderState | null;
+  /**
+   * Queries the visible document scene's per-body topology snapshots ON
+   * DEMAND (the agent plane's edge/face inventory) — the render pass does
+   * no topology work for it. `null` before a document scene settled or
+   * without a booted session.
+   */
+  readonly documentTopology: () => Promise<DocumentTopologyInventory | null>;
   /** The settled render-frame count (the scene's frame counter). */
   readonly renderedFrames: number;
   /**
@@ -390,6 +435,15 @@ export interface WorkbenchEngine {
    * belong to the document projection must not stamp it).
    */
   readonly noteRenderedFrame: (stampVolume: string | null) => void;
+  /**
+   * The sim committed-application counters (Phase 61d, law S6): every sim
+   * notification from the surfaced sim worker client that the engine
+   * ACTUALLY applied — the counter family behind the `data-sim-*`
+   * attributes e2e awaits instead of timeouts. Frozen at its boot zeros
+   * while no sim client rides the surface; a notification that arrives
+   * but does not apply (a gapped chunk, a retrograde step) moves nothing.
+   */
+  readonly simApplied: SimAppliedCounters;
   /** The suppressed feature set (authoring data, page-level). */
   readonly suppressed: ReadonlySet<FeatureId>;
   /** The rollback marker, or `null`. */
@@ -397,6 +451,13 @@ export interface WorkbenchEngine {
   readonly setRollback: (rollback: FeatureRollbackPoint | null) => void;
   /** Toggles one feature's suppression (the timeline chip's action). */
   readonly toggleSuppressed: (id: FeatureId) => void;
+  /**
+   * Replaces the whole suppressed set (the reopen path's bulk restore —
+   * the persisted set rides the native envelope's `suppressedFeatures`
+   * field through the bridge, and a field-free payload restores an empty
+   * set).
+   */
+  readonly setSuppressed: (next: ReadonlySet<FeatureId>) => void;
   /** The threaded loop's durable state map (tree/timeline statuses). */
   readonly regenerationStates: RegenerationStateMap | null;
   /** The joined timeline entries, or `null` before the first run. */
@@ -453,8 +514,15 @@ export interface WorkbenchEngine {
   readonly exportParameterTableCsv: () => string;
   /** Imports CSV text as parameter-table edits (one transaction). */
   readonly importParameterTableCsv: (text: string) => void;
-  /** The extrude create action (the sketch → solid UX bridge). */
-  readonly handleExtrude: (submission: SketchExtrudeSubmission) => void;
+  /**
+   * The extrude create action (the sketch → solid UX bridge). Returns the
+   * commit's structured outcome: a refused transaction surfaces its code
+   * and message through the sketch machine's extrude outcome instead of
+   * dying silently beside a "resolved" stamp.
+   */
+  readonly handleExtrude: (
+    submission: SketchExtrudeSubmission,
+  ) => FeatureFormOutcome;
   /** The revolve create action (the sketch → solid UX bridge). */
   readonly handleRevolve: (submission: SketchRevolveSubmission) => void;
   /** The hole create action (parameter-panel-driven defaults). */
@@ -652,6 +720,37 @@ export interface WorkbenchEngine {
     readonly keepToolBodies: boolean;
   }) => FeatureFormOutcome;
   /**
+   * The primitive create action (box / sphere / cylinder / cone): commits
+   * the dimension parameters, the output body, and the primitive feature
+   * — plus, for a non-zero placement, the move-layout `translate` over it
+   * — in ONE atomic transaction (`primitiveCreateCommands`). Primitives
+   * consume nothing, so the verb needs no prior geometry. A refusal
+   * commits nothing.
+   */
+  readonly handlePrimitive: (
+    submission: PrimitiveSubmission,
+  ) => FeatureFormOutcome;
+  /**
+   * The fillet / chamfer / shell create action (the chain workbench's
+   * pick surface on the complete bench): mints one persistent reference
+   * per picked snapshot ordinal on the snapshot the picks address, then
+   * commits the size parameter, the reference records, the output body,
+   * and the feature in the canonical bridge layout in ONE atomic
+   * transaction (`topologyCutCreateCommands`). A refusal commits nothing.
+   */
+  readonly handleTopologyCut: (
+    submission: TopologyCutSubmission,
+  ) => FeatureFormOutcome;
+  /**
+   * The moveFace / deleteFace / replaceFace create action (the topology
+   * cuts' pick surface with ONE face picked): mints the persistent face
+   * reference on the snapshot the pick addresses, then commits the kind's
+   * parameters, the reference record, the output body, and the feature in
+   * the canonical bridge layout in ONE atomic transaction
+   * (`faceOpCreateCommands`). A refusal commits nothing.
+   */
+  readonly handleFaceOp: (submission: FaceOpSubmission) => FeatureFormOutcome;
+  /**
    * The Phase 44 move-body create action: commits the translate
    * parameters and the translate feature (the existing kind, grown with
    * the optional rotation pair) targeting the document's last extrude in
@@ -741,6 +840,17 @@ export interface WorkbenchEngine {
    * when none).
    */
   readonly curvesJson: string;
+  /**
+   * Reseeds the per-mount authoring id counters from the LIVE document
+   * (the review fix for the whole-document adoption door): scans the
+   * session's engine-convention ids and advances every counter past the
+   * maximum occurrence in use. A host that swaps a whole document into
+   * this engine (`store.replaceSession` — the TSX import path, a document
+   * open) calls this right after the swap, so the next create action never
+   * re-mints an id the adopted document already registers — the exporter
+   * emits those ids explicitly, so every export round-trip would collide.
+   */
+  readonly reseedAuthoringCounters: () => void;
 }
 
 /**
@@ -752,7 +862,15 @@ export interface WorkbenchEngine {
 export function useWorkbenchEngine(
   surface: WorkbenchEngineSurface,
 ): WorkbenchEngine {
-  const { rootId, statusId, volumeId, errorId, backend, viewportId } = surface;
+  const {
+    rootId,
+    statusId,
+    volumeId,
+    errorId,
+    backend,
+    viewportId,
+    simClient,
+  } = surface;
   // The workbench mode is page-level authoring state: the model workspace
   // keeps its worker session alive across switches (hidden, not unmounted).
   const [mode, setMode] = useState<WorkbenchMode>("model");
@@ -768,6 +886,11 @@ export function useWorkbenchEngine(
 
   const [renderedFrames, setRenderedFrames] = useState(0);
   const sessionRef = useRef<RenderFixtureSession | null>(null);
+  const documentTopology = useCallback(
+    (): Promise<DocumentTopologyInventory | null> =>
+      sessionRef.current?.documentTopology() ?? Promise.resolve(null),
+    [],
+  );
 
   /**
    * Counts one settled projection frame and — synchronously, in the
@@ -787,6 +910,63 @@ export function useWorkbenchEngine(
     setRenderedFrames((frames) => frames + 1);
   };
 
+  // The Phase 61d sim committed-application bridge (law S6): the ledger
+  // the sim notifications apply through — the `renderedFrames` discipline
+  // (a counter that moves only on an ACTUAL application, with the
+  // synchronous root stamp beside it) over a `SettleLedger`-shaped stable
+  // object (created once, marked only by this path). A notification that
+  // arrives but does not apply commits nothing, so an e2e await on the
+  // `data-sim-*` family is an await on committed applications — never on
+  // arrivals, never on timeouts. No rAF, no frame loop: the demand-render
+  // law is untouched; rendering the applied fields is Phases 62+63's.
+  const [simLedger] = useState(createSimApplicationLedger);
+  const [simApplied, setSimApplied] = useState<SimAppliedCounters>(() =>
+    simAppliedCountersOf(simLedger),
+  );
+  const noteSimApplication = useCallback(
+    (notification: SimWorkerNotification): void => {
+      const committed = applySimNotification(simLedger, notification);
+      if (committed === null) return;
+      const root = document.getElementById(rootId);
+      if (root !== null) {
+        root.setAttribute(
+          SIM_APPLIED_NOTIFICATIONS_ATTRIBUTE,
+          String(committed.notifications),
+        );
+        root.setAttribute(
+          SIM_APPLIED_FIELD_CHUNKS_ATTRIBUTE,
+          String(committed.fieldChunks),
+        );
+        if (committed.progressStep !== null) {
+          root.setAttribute(
+            SIM_APPLIED_PROGRESS_STEP_ATTRIBUTE,
+            String(committed.progressStep),
+          );
+        }
+        if (committed.optimizationGeneration !== null) {
+          root.setAttribute(
+            SIM_APPLIED_OPTIMIZATION_GENERATION_ATTRIBUTE,
+            String(committed.optimizationGeneration),
+          );
+        }
+      }
+      setSimApplied(committed);
+    },
+    [rootId, simLedger],
+  );
+
+  // The 61b sim worker host's notifications wired to the bridge: the
+  // surfaced channel client's notification stream (progress and
+  // field-chunk deliveries for the requests IT holds pending) applies
+  // through the ledger above. Absent client: nothing subscribes and the
+  // counters stay at their boot zeros.
+  useEffect(() => {
+    if (simClient === undefined) return;
+    return simClient.onNotification((delivery) => {
+      noteSimApplication(delivery.notification);
+    });
+  }, [simClient, noteSimApplication]);
+
   // The executor stand-in: the document's hole parameter is the source of
   // truth; the worker computation follows it (the same pipeline as the
   // /render and Phase 14 fixtures).
@@ -795,7 +975,9 @@ export function useWorkbenchEngine(
   // -- The Phase 20 threaded regeneration loop ------------------------------
   // Page-level authoring state: the suppressed set and the rollback marker
   // are authoring data (not document data), so they live here and ride into
-  // every regenerate pass.
+  // every regenerate pass — and both persist through the native envelope's
+  // optional fields (the persistence bridge), so a reopened document
+  // restores them.
   const [suppressed, setSuppressed] = useState<ReadonlySet<FeatureId>>(
     () => new Set(),
   );
@@ -996,11 +1178,16 @@ export function useWorkbenchEngine(
   // the sketch record, the distance parameter, the output body, and the
   // extrude feature in ONE atomic transaction, then switch the scene to the
   // worker-executed extrusion and return to the model workspace. A refused
-  // transaction keeps everything unchanged. When the sketch session was
-  // anchored on a datum (sketch-on-face, Phase 39), the feature ALSO
+  // transaction keeps everything unchanged and returns its structured
+  // outcome (the review fix for the swallowed verdict: the sketch machine's
+  // extrude outcome reports the refusal instead of leaving a "resolved"
+  // stamp beside a silently unchanged document). When the sketch session
+  // was anchored on a datum (sketch-on-face, Phase 39), the feature ALSO
   // declares the datum as an input — the live anchor the scene re-resolves
   // on every dispatch (edit driving face — geometry follows).
-  const handleExtrude = (submission: SketchExtrudeSubmission): void => {
+  const handleExtrude = (
+    submission: SketchExtrudeSubmission,
+  ): FeatureFormOutcome => {
     const n = extrudeCount + 1;
     const suffix = n === 1 ? "" : String(n);
     const sketchId = createSketchDocumentId(`skd_extrude${suffix}`);
@@ -1039,12 +1226,19 @@ export function useWorkbenchEngine(
         },
       ],
     });
-    if (!applied.ok) return;
+    if (!applied.ok) {
+      return {
+        ok: false,
+        code: applied.error.code,
+        message: applied.error.message,
+      };
+    }
     setExtrudeCount(n);
     setActiveScene("extrude");
     // Through the wrapped setter: the extrude consumed the sketch anchor, and
     // a raw setMode would leave it alive to re-attach the NEXT sketch.
     wrappedSetMode("model");
+    return { ok: true };
   };
 
   // The Phase 39 sketch-on-face action: resolve the picked scene face into
@@ -1104,24 +1298,47 @@ export function useWorkbenchEngine(
         : { ...pickedReference, faceOrdinal };
     const n = datumCount + 1;
     const datumId = createDatumId(`dtm_face_plane${n === 1 ? "" : String(n)}`);
+    const datumName = `face plane ${String(n)}`;
+    const datumPayload: Record<string, unknown> = {
+      formatVersion: 1,
+      datumType: "plane",
+      definition: "faceOffset",
+      reference: referencePayload,
+      normalAtDefinition: [pick.normal[0], pick.normal[1], pick.normal[2]],
+      offsetMm: 0,
+    };
+    // The plane resolution runs BEFORE the commit (the review fix for the
+    // datum zombie): against the simulated document the transaction would
+    // produce — the record lookup the session resolution starts from — so
+    // an unresolvable face refuses with NOTHING committed. The old
+    // commit-then-resolve order left the committed datum in the tree while
+    // the action reported failure, and the un-advanced counter re-minted
+    // the same id on the next attempt — refused forever. The settled
+    // scene's computed-face source rides along so a COMPUTED body's face
+    // resolves here (the pick came from that same scene — the frames
+    // agree).
+    const simulated: CadDocument = {
+      ...workbenchDocument,
+      datums: [
+        ...workbenchDocument.datums,
+        { id: datumId, name: datumName, datum: datumPayload },
+      ],
+    };
+    const plane = resolveSessionDatumPlane(
+      simulated,
+      datumId,
+      computedFaces ?? undefined,
+    );
+    if (!plane.ok) {
+      return { ok: false, message: plane.error.message };
+    }
     const commit = documentApi.applyTransaction({
       commands: [
         {
           type: "datum.create",
           id: datumId,
-          name: `face plane ${String(n)}`,
-          datum: {
-            formatVersion: 1,
-            datumType: "plane",
-            definition: "faceOffset",
-            reference: referencePayload,
-            normalAtDefinition: [
-              pick.normal[0],
-              pick.normal[1],
-              pick.normal[2],
-            ],
-            offsetMm: 0,
-          },
+          name: datumName,
+          datum: datumPayload,
         },
       ],
     });
@@ -1129,17 +1346,8 @@ export function useWorkbenchEngine(
       return { ok: false, message: commit.error.message };
     }
     // Boot the sketch on the datum's RESOLVED plane — the resolution the
-    // scene request re-derives on every dispatch. The settled scene's
-    // computed-face source rides along so a COMPUTED body's face resolves
-    // here (the pick came from that same scene — the frames agree).
-    const plane = resolveSessionDatumPlane(
-      commit.value.document,
-      datumId,
-      computedFaces ?? undefined,
-    );
-    if (!plane.ok) {
-      return { ok: false, message: plane.error.message };
-    }
+    // scene request re-derives on every dispatch (resolved above, before
+    // the commit, so the anchor and the document can never disagree).
     setDatumCount(n);
     setSketchAnchor({
       datumId,
@@ -1530,6 +1738,44 @@ export function useWorkbenchEngine(
     setActiveScene("hole");
     return { ok: true };
   };
+
+  // The whole-document adoption door's reseed (the review fix for the
+  // imported-id collision): the per-mount counters above mint the engine
+  // convention ids, and a session swapped in over THIS engine instance
+  // (`store.replaceSession` — the TSX import path, a document open) can
+  // already carry them — the TSX exporter emits the document's literal ids
+  // as explicit props, so every export round-trip adopts ids like
+  // `skd_extrude`/`feat_extrude` and the next extrude would re-mint the
+  // same id, get refused by the atomic id guard, and (before the outcome
+  // channel) die silently. This scans the adopted document for each
+  // verb's id stems and advances every counter past the maximum in use.
+  // The store's LIVE getter: the React document snapshot is one commit
+  // stale inside the very event that swapped the session.
+  const reseedAuthoringCounters = useCallback((): void => {
+    const maxima = maxAuthoringOccurrencesOf(store.getDocument());
+    setExtrudeCount(maxima.extrude);
+    setRevolveCount(maxima.revolve);
+    setHoleCount(maxima.hole);
+    setStructuredHoleCount(maxima.structuredHole);
+    setSketchCount(maxima.sketch);
+    setSweepCount(maxima.sweep);
+    setLoftCount(maxima.loft);
+    setSurfaceCount(maxima.surface);
+    setHelixCount(maxima.helix);
+    setThreadCount(maxima.thread);
+    setRibCount(maxima.rib);
+    setScaleCount(maxima.scale);
+    setThickenCount(maxima.thicken);
+    setSplitCount(maxima.split);
+    setPatternCount(maxima.pattern);
+    setPatternPathCount(maxima.patternPath);
+    setMirrorCount(maxima.mirror);
+    setBooleanCount(maxima.boolean);
+    setMoveBodyCount(maxima.moveBody);
+    setDuplicateCount(maxima.duplicate);
+    setDatumCount(maxima.datum);
+    setCurveCount(maxima.curve);
+  }, [store]);
 
   // The Phase 38 save-sketch action: commit the CURRENT sketch as a
   // STANDALONE document sketch record (no feature — the sketch pool the
@@ -3135,6 +3381,71 @@ export function useWorkbenchEngine(
     return { ok: true };
   };
 
+  // The primitive action: plan the transaction (the plan enforces the
+  // reader's own domain, so a committed primitive always renders), then
+  // commit it — the ids mint from the document itself, so repeated verbs
+  // never collide.
+  const handlePrimitive = (
+    submission: PrimitiveSubmission,
+  ): FeatureFormOutcome => {
+    const plan = primitiveCreateCommands(workbenchDocument, submission);
+    if (!plan.ok) return plan;
+    const committed = documentApi.applyTransaction({
+      commands: plan.commands,
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setActiveScene(plan.placed ? "moveBody" : "primitive");
+    return { ok: true };
+  };
+
+  // The topology-cut action: plan the transaction from the picked snapshot
+  // (the plan enforces the reader's domain and mints every pick), then
+  // commit it — the ids mint from the document itself.
+  const handleTopologyCut = (
+    submission: TopologyCutSubmission,
+  ): FeatureFormOutcome => {
+    const plan = topologyCutCreateCommands(workbenchDocument, submission);
+    if (!plan.ok) return plan;
+    const committed = documentApi.applyTransaction({
+      commands: plan.commands,
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setActiveScene("topologyCut");
+    return { ok: true };
+  };
+
+  // The face-op action: plan the transaction from the picked snapshot
+  // (the plan enforces the reader's domain and mints the pick), then
+  // commit it — the ids mint from the document itself.
+  const handleFaceOp = (submission: FaceOpSubmission): FeatureFormOutcome => {
+    const plan = faceOpCreateCommands(workbenchDocument, submission);
+    if (!plan.ok) return plan;
+    const committed = documentApi.applyTransaction({
+      commands: plan.commands,
+    });
+    if (!committed.ok) {
+      return {
+        ok: false,
+        code: committed.error.code,
+        message: committed.error.message,
+      };
+    }
+    setActiveScene("faceOp");
+    return { ok: true };
+  };
+
   // The Phase 44 move-body action: commit the translate parameters and
   // the translate feature (the EXISTING kind, grown with the optional
   // rotation pair) targeting the document's LAST EXTRUDE in ONE atomic
@@ -4047,15 +4358,42 @@ export function useWorkbenchEngine(
   // displaced (and the bodies a row hid) are tracked so switching back — or
   // to another row — restores them; the rows themselves stay the only
   // persisted deltas.
+  //
+  // The review fix (the stale side-state): the tracked baseline describes
+  // ONE document — the exact state the apply produced. Any later commit (a
+  // manual edit, an undo, a redo) produces a different document and
+  // falsifies it, so the baseline is trusted only while the anchor document
+  // below is still the live one; a diverged apply re-derives everything
+  // from the LIVE document (current parameter values, current body
+  // visibility) and never force-restores the past over the user's edits —
+  // the apply switches forward from what the user sees now.
   const [activeConfigurationId, setActiveConfigurationId] =
     useState<ConfigurationId | null>(null);
   const [configurationNotice, setConfigurationNotice] = useState<string | null>(
     null,
   );
+  // The anchor: the exact document identity the last trusted apply
+  // produced, or `null` when no trusted baseline exists.
+  const configAnchorRef = useRef<CadDocument | null>(null);
   const baseValuesRef = useRef<ReadonlyMap<string, AnyDimensionalValue>>(
     new Map(),
   );
   const configHiddenBodiesRef = useRef<ReadonlySet<BodyId>>(new Set());
+
+  // The honest active marker: the moment the live document is no longer the
+  // state the apply produced, the marker would lie — an undo reverted the
+  // row's values, a manual edit moved past them — so it resets, and the
+  // baseline with it. The threaded derivation loop above re-runs on exactly
+  // this document-identity change; this companion effect rides the same
+  // trigger (every move away from the applied state, whatever produced it).
+  useEffect(() => {
+    if (activeConfigurationId === null) return;
+    if (configAnchorRef.current === workbenchDocument) return;
+    configAnchorRef.current = null;
+    baseValuesRef.current = new Map();
+    configHiddenBodiesRef.current = new Set();
+    setActiveConfigurationId(null);
+  }, [workbenchDocument, activeConfigurationId]);
 
   const applyConfiguration = useCallback(
     (id: ConfigurationId | null): void => {
@@ -4081,7 +4419,12 @@ export function useWorkbenchEngine(
             )?.parameterOverrides ?? [])
         ).map((override) => [override.parameterId, override.value]),
       );
-      const previousBase = baseValuesRef.current;
+      // A baseline is only true for the document it was captured on (the
+      // anchor). After any divergence the live values ARE the baseline.
+      const baselineStale = configAnchorRef.current !== document;
+      const previousBase = baselineStale
+        ? new Map<string, AnyDimensionalValue>()
+        : baseValuesRef.current;
       const nextBase = new Map(previousBase);
       const commands: CadCommand[] = [];
       for (const parameter of document.parameters.parameters) {
@@ -4099,7 +4442,9 @@ export function useWorkbenchEngine(
           nextBase.set(parameter.id, parameter.value);
         }
       }
-      const previousHidden = configHiddenBodiesRef.current;
+      const previousHidden = baselineStale
+        ? new Set<BodyId>()
+        : configHiddenBodiesRef.current;
       const nextHidden: ReadonlySet<BodyId> = new Set(
         effective?.hiddenBodies ?? [],
       );
@@ -4122,13 +4467,17 @@ export function useWorkbenchEngine(
           return;
         }
       }
+      // The store's LIVE getter: the hook snapshot is one commit stale
+      // inside this very event, and the anchor must name the document the
+      // apply just produced (or, for a no-command apply, the unchanged one).
+      configAnchorRef.current = store.getDocument();
       baseValuesRef.current = nextBase;
       configHiddenBodiesRef.current = nextHidden;
       setSuppressed(new Set(effective?.suppressedFeatures ?? []));
       setActiveConfigurationId(id);
       setConfigurationNotice(null);
     },
-    [documentApi, setSuppressed],
+    [documentApi, store, setSuppressed],
   );
 
   // Creating a row captures the CURRENT parameter values as its overrides —
@@ -4157,9 +4506,14 @@ export function useWorkbenchEngine(
         );
         return;
       }
+      // A row-manifest edit is not a move away from the applied state (the
+      // capture reads the current values; nothing applied changes), so
+      // re-anchor instead of letting the honest-marker effect misread this
+      // commit as divergence.
+      configAnchorRef.current = store.getDocument();
       setConfigurationNotice(null);
     },
-    [documentApi],
+    [documentApi, store],
   );
 
   const deleteConfiguration = useCallback(
@@ -4174,14 +4528,22 @@ export function useWorkbenchEngine(
         return;
       }
       if (activeConfigurationId === id) {
+        // The active row's applied state is deliberately dropped here (the
+        // base document takes over visually through the user's own action);
+        // its baseline goes with it — no stale side-state survives.
+        configAnchorRef.current = null;
         baseValuesRef.current = new Map();
         configHiddenBodiesRef.current = new Set();
         setSuppressed(new Set());
         setActiveConfigurationId(null);
+      } else {
+        // An INACTIVE row's manifest edit is not a move away from the
+        // applied state: re-anchor (same reasoning as the create path).
+        configAnchorRef.current = store.getDocument();
       }
       setConfigurationNotice(null);
     },
-    [documentApi, activeConfigurationId, setSuppressed],
+    [documentApi, store, activeConfigurationId, setSuppressed],
   );
 
   // The CSV parameter table: export is the domain's deterministic bytes;
@@ -4258,12 +4620,17 @@ export function useWorkbenchEngine(
     toolsApi,
     historyApi,
     applied,
+    documentTopology,
     renderedFrames,
     noteRenderedFrame,
+    simApplied,
     suppressed,
     rollback,
     setRollback,
     toggleSuppressed,
+    // The raw state dispatch: its updater-function arm is wider than the
+    // interface's bulk-restore signature needs, exactly like `setRollback`.
+    setSuppressed,
     regenerationStates: runState === null ? null : runState.states,
     timeline,
     executed: runState === null ? [] : runState.executed,
@@ -4315,6 +4682,9 @@ export function useWorkbenchEngine(
     handlePatternPath,
     handleMirror,
     handleBoolean,
+    handlePrimitive,
+    handleTopologyCut,
+    handleFaceOp,
     handleMoveBody,
     handleDuplicate,
     handleBodyRename,
@@ -4327,6 +4697,7 @@ export function useWorkbenchEngine(
     handleCreateDatum,
     handleCreateCurve,
     curvesJson,
+    reseedAuthoringCounters,
   };
 }
 

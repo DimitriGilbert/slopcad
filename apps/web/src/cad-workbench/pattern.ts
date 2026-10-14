@@ -16,8 +16,12 @@
  * (the `planHoleCut`/`planSplitCut` precedent).
  */
 
-import { valueIn, type AnyDimensionalValue } from "@slopcad/cad-core";
-import type { CadDocument, FeatureRecord } from "@slopcad/cad-core";
+import type {
+  AnyDimensionalValue,
+  CadDocument,
+  FeatureRecord,
+  TopologyEntityReference,
+} from "@slopcad/cad-core";
 import type { ArrayPatternLeg } from "@slopcad/cad-kernel";
 import type { SweepPathSegmentInput } from "@slopcad/cad-kernel";
 import {
@@ -34,7 +38,9 @@ import {
   type ExtrudeSceneRequest,
   type SceneOperand,
 } from "./extrude";
+import { magnitudeIn, parameterValueOf } from "./parameter-magnitude";
 import { sketchPathResolverOf } from "./sweep";
+import { topologyCutTargetBodyIdOf, topologyReferenceOf } from "./topology-cut";
 
 /** The pattern editor's authoring numbers, in the feature's leg order. */
 export interface PatternLegInput {
@@ -244,17 +250,6 @@ export function patternTargetFeatureOf(
   return bases[bases.length - 1];
 }
 
-/** Reads a parameter's canonical magnitude, or `null` off-dimension. */
-function magnitudeIn(
-  value: AnyDimensionalValue | undefined,
-  dimension: "length" | "dimensionless" | "angle",
-  unit: "mm" | "1" | "rad",
-): number | null {
-  if (value === undefined || value.dimension !== dimension) return null;
-  const magnitude = valueIn(value, unit);
-  return Number.isFinite(magnitude) ? magnitude : null;
-}
-
 /** The worker-scene payload one patternFeature feature executes as. */
 export interface PatternFeatureSceneRequest {
   /** The base extrusion every instance repeats. */
@@ -265,6 +260,8 @@ export interface PatternFeatureSceneRequest {
   readonly skips: readonly number[];
   /** The feature's output body id (the rendered body). */
   readonly bodyId: string;
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
 }
 
 /**
@@ -316,11 +313,13 @@ export function documentPatternFeatureSceneRequest(
   }
   const base = documentExtrudeRequest(document);
   if (base === null) return null;
-  return { base, legs, skips, bodyId };
+  return { base, legs, skips, bodyId, featureId: feature.id };
 }
 
 /** The worker-scene payload one patternPath feature executes as. */
 export interface PatternPathSceneRequest {
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
   /** The base extrusion every instance repeats. */
   readonly base: ExtrudeSceneRequest;
   /** The resolved path chain (the kernel contract's local XZ vocabulary). */
@@ -401,6 +400,7 @@ export function documentPatternPathSceneRequest(
     spacingMm: spacing,
     orientation,
     bodyId,
+    featureId: feature.id,
   };
 }
 
@@ -499,6 +499,8 @@ export type PatternTransformPlan =
 
 /** The worker-scene payload one patternLinear/patternCircular executes as. */
 export interface PatternTransformSceneRequest {
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
   /** The repeated solid's source (the feature's feature/body target). */
   readonly target: SceneOperand;
   /** The resolved copy plan. */
@@ -663,7 +665,110 @@ export function documentPatternTransformSceneRequests(
       }
     }
     if (pattern === null) continue;
-    requests.push({ target, pattern, bodyId });
+    requests.push({ target, pattern, bodyId, featureId: feature.id });
+  }
+  return requests;
+}
+
+/** The worker-scene payload one patternFace feature executes as. */
+export interface PatternFaceSceneRequest {
+  /** The producing feature's id (the topological-naming namespace). */
+  readonly featureId: string;
+  /** The repeated solid's source (the feature's feature/body target). */
+  readonly target: SceneOperand;
+  /** The target's body id — the snapshot label the reference resolves on. */
+  readonly targetBodyId: string;
+  /** The persistent bounding-face reference (resolved in the worker). */
+  readonly face: TopologyEntityReference;
+  /** The two grid legs, in declared order (the shared planner's input). */
+  readonly legs: readonly [ArrayPatternLeg, ArrayPatternLeg];
+  /** The feature's output body id (the rendered body). */
+  readonly bodyId: string;
+}
+
+/**
+ * Reads ONE patternFace leg triple at `cursor` (direction ANGLE, count
+ * DIMENSIONLESS, spacing LENGTH), or `null` off the bridge's
+ * `readArrayLeg` domain: a finite direction, a whole count of at least 2,
+ * a positive finite spacing.
+ */
+function patternFaceLegOf(
+  values: readonly (AnyDimensionalValue | undefined)[],
+  cursor: number,
+): ArrayPatternLeg | null {
+  const directionRad = magnitudeIn(values[cursor], "angle", "rad");
+  const count = magnitudeIn(values[cursor + 1], "dimensionless", "1");
+  const spacingMm = magnitudeIn(values[cursor + 2], "length", "mm");
+  if (directionRad === null || count === null || spacingMm === null) {
+    return null;
+  }
+  if (!Number.isInteger(count) || count < 2) return null;
+  if (spacingMm <= 0) return null;
+  return { directionRad, count, spacingMm };
+}
+
+/**
+ * Reads ONE patternFace feature into its worker-scene request, in the
+ * bridge's canonical layout (`runPatternFaceOperation`): EXACTLY one
+ * feature/body target, EXACTLY one FACE reference addressing the target's
+ * own body (the shared battery, `./topology-cut`'s `topologyReferenceOf`),
+ * and EXACTLY six parameters — two direction/count/spacing leg triples —
+ * whose grid total stays within `PATTERN_COUNT_LIMIT`. `null` on any
+ * breach (the refused feature renders nothing); the face's plane, its
+ * tessellated region, and the at-least-two-qualifying-points rule resolve
+ * against the target's CURRENT solid in the worker
+ * (`../worker-fixture/pattern-scene`).
+ */
+export function patternFaceSceneRequestOfFeature(
+  document: CadDocument,
+  feature: FeatureRecord,
+): PatternFaceSceneRequest | null {
+  if (feature.kind !== "patternFace") return null;
+  const bodyId = feature.outputs[0];
+  if (bodyId === undefined || feature.outputs.length !== 1) return null;
+  const targetBodyId = topologyCutTargetBodyIdOf(document, feature);
+  if (targetBodyId === null || targetBodyId === bodyId) return null;
+  const referenceRefs = feature.inputs.filter(
+    (ref) => ref.kind === "reference",
+  );
+  const faceRef = referenceRefs[0];
+  if (referenceRefs.length !== 1 || faceRef === undefined) return null;
+  const face = topologyReferenceOf(document, faceRef.id, "face", targetBodyId);
+  if (face === null) return null;
+  const parameterRefs = feature.inputs.filter(
+    (ref) => ref.kind === "parameter",
+  );
+  if (parameterRefs.length !== 6) return null;
+  const values = parameterRefs.map((ref) => parameterValueOf(document, ref.id));
+  const legOne = patternFaceLegOf(values, 0);
+  const legTwo = patternFaceLegOf(values, 3);
+  if (legOne === null || legTwo === null) return null;
+  if (legOne.count * legTwo.count > PATTERN_COUNT_LIMIT) return null;
+  const target = sceneOperandOfBody(document, targetBodyId);
+  if (target === null) return null;
+  return {
+    target,
+    targetBodyId,
+    face,
+    legs: [legOne, legTwo],
+    bodyId,
+    featureId: feature.id,
+  };
+}
+
+/**
+ * Reads EVERY patternFace feature of the document into its worker-scene
+ * request, in document order. A feature whose target, layout, or domain
+ * no longer resolves is skipped honestly — the other patterns still
+ * render.
+ */
+export function documentPatternFaceSceneRequests(
+  document: CadDocument,
+): readonly PatternFaceSceneRequest[] {
+  const requests: PatternFaceSceneRequest[] = [];
+  for (const feature of document.features) {
+    const request = patternFaceSceneRequestOfFeature(document, feature);
+    if (request !== null) requests.push(request);
   }
   return requests;
 }

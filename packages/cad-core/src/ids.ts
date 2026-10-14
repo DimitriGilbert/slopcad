@@ -41,6 +41,9 @@ export const CAD_ID_KINDS = [
   "mate",
   "joint",
   "configuration",
+  "simulation",
+  "motor",
+  "study",
 ] as const;
 
 export type CadIdKind = (typeof CAD_ID_KINDS)[number];
@@ -123,6 +126,29 @@ export type JointId = BrandedId<"joint">;
  * and hidden bodies that evaluates to an effective document view (Phase 57).
  */
 export type ConfigurationId = BrandedId<"configuration">;
+/**
+ * Identifier of a simulation scenario record (e.g. `sim_wind-tunnel`): the
+ * document-resident named row of simulation intent — kind, domain,
+ * boundary conditions, fluid and material selections, gravity, motor
+ * selection, backend preference — addressed over the SAME document exactly
+ * as a configuration row (Phase 61, ROADMAP-SIM law S1).
+ */
+export type SimulationId = BrandedId<"simulation">;
+/**
+ * Identifier of a document motor record (e.g. `mot_fan-drive`): the
+ * document-resident named motor spec — DC brushed, BLDC, or a tabulated
+ * torque-speed curve — that fan scenarios select to find an operating
+ * point (Phase 61, the materials precedent applied to motors).
+ */
+export type MotorId = BrandedId<"motor">;
+/**
+ * Identifier of a parametric optimization study record (e.g.
+ * `study_lightest-bracket`): the document-resident named row of optimization
+ * intent — genome, objectives, constraints, algorithm fields — that Phase 70
+ * of ROADMAP-SIM evolves against result summary scalars (the configurations
+ * discipline applied once more).
+ */
+export type StudyId = BrandedId<"study">;
 
 type CadIdTable = {
   document: DocumentId;
@@ -140,6 +166,9 @@ type CadIdTable = {
   mate: MateId;
   joint: JointId;
   configuration: ConfigurationId;
+  simulation: SimulationId;
+  motor: MotorId;
+  study: StudyId;
 };
 
 /** The branded id type of a given id kind. */
@@ -168,6 +197,9 @@ export const CAD_ID_PREFIXES: Readonly<Record<CadIdKind, string>> = {
   mate: "mat",
   joint: "jnt",
   configuration: "cfg",
+  simulation: "sim",
+  motor: "mot",
+  study: "study",
 };
 
 const PREFIX_TO_KIND: ReadonlyMap<string, CadIdKind> = new Map(
@@ -555,6 +587,51 @@ export function createConfigurationId(raw: string): ConfigurationId {
   return requireId("configuration", raw);
 }
 
+/** Parses untrusted input as a {@link SimulationId}. */
+export function parseSimulationId(
+  input: unknown,
+): ParseResult<SimulationId, IdParseError> {
+  return parseIdOfKind("simulation", input);
+}
+
+/**
+ * Adopts an explicit user-provided simulation scenario id exactly as given
+ * (`sim_…` wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createSimulationId(raw: string): SimulationId {
+  return requireId("simulation", raw);
+}
+
+/** Parses untrusted input as a {@link MotorId}. */
+export function parseMotorId(
+  input: unknown,
+): ParseResult<MotorId, IdParseError> {
+  return parseIdOfKind("motor", input);
+}
+
+/**
+ * Adopts an explicit user-provided motor record id exactly as given
+ * (`mot_…` wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createMotorId(raw: string): MotorId {
+  return requireId("motor", raw);
+}
+
+/** Parses untrusted input as a {@link StudyId}. */
+export function parseStudyId(
+  input: unknown,
+): ParseResult<StudyId, IdParseError> {
+  return parseIdOfKind("study", input);
+}
+
+/**
+ * Adopts an explicit user-provided study record id exactly as given
+ * (`study_…` wire format). Throws {@link CadIdValidationError} on mismatch.
+ */
+export function createStudyId(raw: string): StudyId {
+  return requireId("study", raw);
+}
+
 /**
  * Serializable per-kind counters of an {@link IdGenerator}. Persisting this
  * state lets a reloaded document resume id generation without collisions.
@@ -617,6 +694,9 @@ export interface IdGenerator {
   nextMateId(): MateId;
   nextJointId(): JointId;
   nextConfigurationId(): ConfigurationId;
+  nextSimulationId(): SimulationId;
+  nextMotorId(): MotorId;
+  nextStudyId(): StudyId;
   /** Immutable snapshot of the counters; round-trips through JSON. */
   state(): IdGeneratorState;
 }
@@ -637,6 +717,9 @@ const DEFAULT_GENERATOR_STATE: IdGeneratorState = Object.freeze({
   mate: 0,
   joint: 0,
   configuration: 0,
+  simulation: 0,
+  motor: 0,
+  study: 0,
 });
 
 /** Width of the zero-padded counter in generated ids (`feat_000042`). */
@@ -701,6 +784,9 @@ export function createIdGenerator(
     nextJointId: () => requireId("joint", nextRawId("joint")),
     nextConfigurationId: () =>
       requireId("configuration", nextRawId("configuration")),
+    nextSimulationId: () => requireId("simulation", nextRawId("simulation")),
+    nextMotorId: () => requireId("motor", nextRawId("motor")),
+    nextStudyId: () => requireId("study", nextRawId("study")),
     state: () => Object.freeze({ ...counters }),
   };
 }

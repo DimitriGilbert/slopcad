@@ -196,14 +196,16 @@ interface OcctWorkerSession {
 }
 
 export function CompleteWorkbenchPage({
-  backend,
+  backend = "occt",
   rootId = "workbench-complete-root",
 }: {
   /**
    * The worker backend the workbench boots (see
-   * {@link CompleteCadWorkbenchProps.backend}); the default `"manifold"` is
-   * the boot state the established baselines pin, and `"occt"` serves the
-   * sweep-capable route (Phase 38).
+   * {@link CompleteCadWorkbenchProps.backend}). The default `"occt"` is the
+   * workbench's backend: OpenCascade implements the core CAD features
+   * (sweep, loft, fillet, chamfer, shell, local face ops) that Manifold
+   * honestly declines. `"manifold"` stays available to the fixtures that
+   * pin it explicitly, so their established baselines do not move.
    */
   readonly backend?: FixtureSessionBackendId;
   /** The root element id (the machine surface's anchor; per route). */
@@ -484,8 +486,22 @@ function CompleteWorkbenchBody({
           return;
         }
         engine.store.replaceSession(parsed.session);
+        // The review fix (the counter reseed): the adopted session can
+        // carry engine-convention ids — the TSX exporter emits the
+        // document's literal ids as explicit props, so every export
+        // round-trip adopts ids like `skd_extrude`/`feat_extrude` — and
+        // without a reseed the next extrude re-mints one, the atomic
+        // transaction refuses, and the verb dies at the door. Advance every
+        // authoring counter past the maximum the adopted document uses.
+        engine.reseedAuthoringCounters();
         engine.setActiveScene(parsed.scene);
         engine.setRollback(parsed.rollback ?? null);
+        // The suppression restore mirrors the opened-document door: the
+        // imported document can carry suppressed timeline ids, and a
+        // field-free compile yields an empty set — either way the stale
+        // in-memory suppression of the prior session never survives the
+        // adoption (the parse result always populates the field).
+        engine.setSuppressed(parsed.suppressedFeatures);
         setImportError("");
         setImportOutcome({
           detail: `document applied: ${String(parsed.document.features.length)} features, ${String(parsed.document.bodies.length)} bodies`,

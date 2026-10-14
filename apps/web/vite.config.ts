@@ -2,6 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { nitro } from "nitro/vite";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 import { VIEWER_FRAME_HEADERS } from "./src/viewer/viewer-frame-policy";
@@ -38,6 +39,35 @@ export default defineConfig({
   },
   resolve: {
     tsconfigPaths: true,
+    // The `use-sync-external-store` shims ride the SSR graph through Base
+    // UI's `useStore` (and zustand / @tanstack/react-store): the package
+    // is CJS, and the bundler inlines it with a runtime `__require("react")`
+    // that loads a SECOND React instance from disk during SSR — the first
+    // store hook through that instance then throws "Cannot read properties
+    // of null (reading 'useSyncExternalStore')" and the route degrades to
+    // the client-only shell (rolldown-vite CJS interop emit; see the local
+    // with-selector shim under src/shims). React 19 always exports the
+    // native `useSyncExternalStore` — which the shim itself delegates to
+    // when present — so the shim subpath aliases onto the one bundled
+    // React. ORDER MATTERS: the deeper `/shim/with-selector` specifier
+    // must be listed BEFORE the bare `/shim` entry or the prefix match
+    // would capture it (the anchored regex also covers the `.js`-suffixed
+    // form zustand's ESM build imports).
+    alias: [
+      {
+        find: /^use-sync-external-store\/shim\/with-selector(?:\.js)?$/,
+        replacement: fileURLToPath(
+          new URL(
+            "./src/shims/use-sync-external-store-with-selector.ts",
+            import.meta.url,
+          ),
+        ),
+      },
+      {
+        find: "use-sync-external-store/shim",
+        replacement: "react",
+      },
+    ],
   },
   plugins: [
     tailwindcss(),

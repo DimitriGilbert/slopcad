@@ -15,19 +15,27 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createBodyId } from "@slopcad/cad-core";
+import type { TopologySnapshot } from "@slopcad/cad-core";
 import type { DuplicateSubmission } from "./duplicate";
+import type { FaceOpSubmission } from "./face-op-pick";
 import type { HoleFormValues } from "./feature-forms";
 import type { StructuredHoleSubmission } from "./hole-dialog";
+import type { PrimitiveSubmission } from "./primitive";
 import type { ThreadCutInputRef } from "./thread";
+import type { TopologyCutSubmission } from "./topology-pick";
 
 import {
   CurveFeatureForm,
   DuplicateFeatureForm,
+  FaceOpFeatureForm,
   HoleFeatureForm,
   MirrorFeatureForm,
   PatternFeatureForm,
   PatternPathFeatureForm,
+  PrimitiveFeatureForm,
   ThreadFeatureForm,
+  TopologyCutFeatureForm,
 } from "./feature-forms";
 
 afterEach(cleanup);
@@ -503,5 +511,266 @@ describe("DuplicateFeatureForm: the source picker and the $-able numbers", () =>
     editNumberField(/Copies/, "$nope");
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(refused).not.toHaveBeenCalled();
+  });
+});
+
+describe("PrimitiveFeatureForm: the kind's dimensions plus the placement", () => {
+  it("renders only the kind's dimension fields and submits the defaults at the kernel frame", async () => {
+    const onPrimitive = vi.fn<(submission: PrimitiveSubmission) => void>();
+    render(<PrimitiveFeatureForm kind="cylinder" onPrimitive={onPrimitive} />);
+    expect(screen.getByRole("form", { name: "Add a cylinder" })).toBeTruthy();
+    expect(numberFieldValue(/^Radius/)).toBe("10");
+    expect(numberFieldValue(/^Height z/)).toBe("20");
+    expect(screen.queryByLabelText(/^Width x/)).toBeNull();
+    expect(screen.queryByLabelText(/Bottom radius/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onPrimitive).toHaveBeenCalledTimes(1));
+    expect(onPrimitive.mock.calls[0]?.[0]).toEqual({
+      shape: { kind: "cylinder", radiusMm: 10, heightMm: 20 },
+      offsetMm: [0, 0, 0],
+    });
+  });
+
+  it("carries edited box dimensions and the placement offsets", async () => {
+    const onPrimitive = vi.fn<(submission: PrimitiveSubmission) => void>();
+    render(<PrimitiveFeatureForm kind="box" onPrimitive={onPrimitive} />);
+    editNumberField(/^Width x/, "40");
+    editNumberField(/^Depth y/, "30");
+    editNumberField(/^Height z/, "5");
+    editNumberField(/^Placement x/, "-15");
+    editNumberField(/^Placement z/, "2.5");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onPrimitive).toHaveBeenCalledTimes(1));
+    expect(onPrimitive.mock.calls[0]?.[0]).toEqual({
+      shape: { kind: "box", widthMm: 40, depthMm: 30, heightMm: 5 },
+      offsetMm: [-15, 0, 2.5],
+    });
+  });
+
+  it("accepts a sharp cone (top radius 0) and blocks a non-positive dimension", async () => {
+    const onPrimitive = vi.fn<(submission: PrimitiveSubmission) => void>();
+    const first = render(
+      <PrimitiveFeatureForm kind="cone" onPrimitive={onPrimitive} />,
+    );
+    expect(numberFieldValue(/^Top radius/)).toBe("0");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onPrimitive).toHaveBeenCalledTimes(1));
+    expect(onPrimitive.mock.calls[0]?.[0].shape).toEqual({
+      kind: "cone",
+      bottomRadiusMm: 10,
+      topRadiusMm: 0,
+      heightMm: 20,
+    });
+    first.unmount();
+
+    const refused = vi.fn<(submission: PrimitiveSubmission) => void>();
+    render(<PrimitiveFeatureForm kind="sphere" onPrimitive={refused} />);
+    editNumberField(/^Radius/, "0");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(
+      await screen.findByText(
+        "Enter a finite, strictly positive length in millimetres.",
+      ),
+    ).toBeTruthy();
+    expect(refused).not.toHaveBeenCalled();
+  });
+});
+
+/** A named persistent snapshot of `bodyId`: edges 0–1 and faces 0–1. */
+function topologySnapshotOf(bodyId: string): TopologySnapshot {
+  const entity = (kind: "edge" | "face", ordinal: number) => ({
+    kind,
+    ordinal,
+    identity: {
+      kernelId: "fixture-kernel",
+      schema: "fixture-snapshot-v1",
+      data: { hash: ordinal },
+    },
+    geometry:
+      kind === "edge"
+        ? { lengthMm: 10, centroidAbsoluteMm: [ordinal, 0, 0] as const }
+        : { areaMm2: 100, centroidAbsoluteMm: [0, 0, ordinal] as const },
+  });
+  return {
+    kernelId: "fixture-kernel",
+    persistentTopology: true,
+    identitySchemas: ["fixture-snapshot-v1"],
+    bodyId: createBodyId(bodyId),
+    regeneration: 0,
+    entities: [
+      entity("edge", 0),
+      entity("edge", 1),
+      entity("face", 0),
+      entity("face", 1),
+    ],
+  };
+}
+
+describe("TopologyCutFeatureForm: the viewport's picks plus the one size", () => {
+  const target = {
+    bodyId: "body_box",
+    name: "box",
+    snapshot: topologySnapshotOf("body_box"),
+  };
+
+  it("offers no pick field and submits the viewport-picked edges with the radius", async () => {
+    const onTopologyCut = vi.fn<(submission: TopologyCutSubmission) => void>();
+    render(
+      <TopologyCutFeatureForm
+        kind="fillet"
+        onTopologyCut={onTopologyCut}
+        pick={{ target, ordinals: [1] }}
+      />,
+    );
+    expect(screen.getByRole("form", { name: "Fillet edges" })).toBeTruthy();
+    expect(numberFieldValue(/^Radius/)).toBe("2");
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
+    editNumberField(/^Radius/, "3");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onTopologyCut).toHaveBeenCalledTimes(1));
+    expect(onTopologyCut.mock.calls[0]?.[0]).toEqual({
+      kind: "fillet",
+      snapshot: target.snapshot,
+      ordinals: [1],
+      sizeMm: 3,
+    });
+  });
+
+  it("carries the chamfer's symmetric distance", async () => {
+    const onTopologyCut = vi.fn<(submission: TopologyCutSubmission) => void>();
+    render(
+      <TopologyCutFeatureForm
+        kind="chamfer"
+        onTopologyCut={onTopologyCut}
+        pick={{ target, ordinals: [0, 1] }}
+      />,
+    );
+    expect(numberFieldValue(/^Distance/)).toBe("1");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onTopologyCut).toHaveBeenCalledTimes(1));
+    expect(onTopologyCut.mock.calls[0]?.[0]).toMatchObject({
+      kind: "chamfer",
+      ordinals: [0, 1],
+      sizeMm: 1,
+    });
+  });
+
+  it("refuses a non-positive shell thickness before submitting the picked faces", async () => {
+    const onTopologyCut = vi.fn<(submission: TopologyCutSubmission) => void>();
+    render(
+      <TopologyCutFeatureForm
+        kind="shell"
+        onTopologyCut={onTopologyCut}
+        pick={{ target, ordinals: [1] }}
+      />,
+    );
+    editNumberField(/^Wall thickness/, "0");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() =>
+      expect(screen.getByText(/strictly positive length/)).toBeTruthy(),
+    );
+    expect(onTopologyCut).not.toHaveBeenCalled();
+    editNumberField(/^Wall thickness/, "1.5");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onTopologyCut).toHaveBeenCalledTimes(1));
+    expect(onTopologyCut.mock.calls[0]?.[0]).toMatchObject({
+      kind: "shell",
+      ordinals: [1],
+      sizeMm: 1.5,
+    });
+  });
+});
+
+describe("FaceOpFeatureForm: the viewport's one face plus the kind's operation", () => {
+  const target = {
+    bodyId: "body_box",
+    name: "box",
+    snapshot: topologySnapshotOf("body_box"),
+  };
+  const datumPlanes = [{ id: "dtm_top", name: "top" }];
+
+  it("submits the viewport-picked face with the axis and signed distance", async () => {
+    const onFaceOp = vi.fn<(submission: FaceOpSubmission) => void>();
+    render(
+      <FaceOpFeatureForm
+        datumPlanes={datumPlanes}
+        kind="moveFace"
+        onFaceOp={onFaceOp}
+        pick={{ target, ordinals: [1] }}
+      />,
+    );
+    expect(screen.getByRole("form", { name: "Move a face" })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: /^Face/ })).toBeNull();
+    expect(numberFieldValue(/^Distance/)).toBe("1");
+    editNumberField(/^Distance/, "-2.5");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onFaceOp).toHaveBeenCalledTimes(1));
+    expect(onFaceOp.mock.calls[0]?.[0]).toEqual({
+      snapshot: target.snapshot,
+      ordinal: 1,
+      specification: { kind: "moveFace", axis: 3, distanceMm: -2.5 },
+    });
+  });
+
+  it("refuses a zero move distance before submitting", async () => {
+    const onFaceOp = vi.fn<(submission: FaceOpSubmission) => void>();
+    render(
+      <FaceOpFeatureForm
+        datumPlanes={datumPlanes}
+        kind="moveFace"
+        onFaceOp={onFaceOp}
+        pick={{ target, ordinals: [0] }}
+      />,
+    );
+    editNumberField(/^Distance/, "0");
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(
+      await screen.findByText(
+        "Enter a finite, non-zero distance in millimetres.",
+      ),
+    ).toBeTruthy();
+    expect(onFaceOp).not.toHaveBeenCalled();
+  });
+
+  it("carries deleteFace's heal flag (on by default, toggled off)", async () => {
+    const onFaceOp = vi.fn<(submission: FaceOpSubmission) => void>();
+    render(
+      <FaceOpFeatureForm
+        datumPlanes={datumPlanes}
+        kind="deleteFace"
+        onFaceOp={onFaceOp}
+        pick={{ target, ordinals: [0] }}
+      />,
+    );
+    expect(screen.queryByLabelText(/^Distance/)).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Heal/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onFaceOp).toHaveBeenCalledTimes(1));
+    expect(onFaceOp.mock.calls[0]?.[0]).toMatchObject({
+      ordinal: 0,
+      specification: { kind: "deleteFace", heal: false },
+    });
+  });
+
+  it("submits replaceFace with the first datum plane by default", async () => {
+    const onFaceOp = vi.fn<(submission: FaceOpSubmission) => void>();
+    render(
+      <FaceOpFeatureForm
+        datumPlanes={datumPlanes}
+        kind="replaceFace"
+        onFaceOp={onFaceOp}
+        pick={{ target, ordinals: [0] }}
+      />,
+    );
+    expect(
+      screen.getByRole("form", { name: "Replace a face by a datum plane" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onFaceOp).toHaveBeenCalledTimes(1));
+    expect(onFaceOp.mock.calls[0]?.[0]).toMatchObject({
+      ordinal: 0,
+      specification: { kind: "replaceFace", datumPlaneId: "dtm_top" },
+    });
   });
 });

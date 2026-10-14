@@ -2,7 +2,8 @@
  * The `compile` CLI entry (Phase 3): compiles a JSX-authored CAD model
  * file to the native `slopcad` document format's canonical text.
  *
- * Run: `pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>]`
+ * Run: `pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>]
+ * [--commands <path>]`
  * (tsx executes the entry — the runner pattern apps/web's `tsx scripts/*.ts`
  * scripts set; Node alone cannot import the workspace's TypeScript source,
  * whose extensionless relative imports node ESM refuses).
@@ -19,9 +20,9 @@
  *
  * The decisions live in `../src/cli.ts` (unit-tested there); this entry is
  * the I/O shell: parse argv, load the model module, render its default
- * export, compile to native, write stdout (always) and the --out file
- * (when requested), and exit with the documented code — 0 success,
- * 1 compile/validation error, 2 usage error.
+ * export, compile to native, write stdout (always), the --out file and
+ * the --commands batch file (when requested), and exit with the
+ * documented code — 0 success, 1 compile/validation error, 2 usage error.
  */
 
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -34,6 +35,7 @@ import {
   CLI_MODEL_ERROR_CODES,
   compileCliHelp,
   deriveDocumentId,
+  nativeCommandBatchText,
   parseCompileArguments,
   resolveModelExport,
 } from "../src/cli";
@@ -127,11 +129,27 @@ if (!native.ok) {
   );
 }
 
+/** Writes `text` to `path` (parents created) and notes it on stderr. */
+async function writeOutput(path: string, text: string): Promise<void> {
+  const absolute = resolve(path);
+  await mkdir(dirname(absolute), { recursive: true });
+  await writeFile(absolute, text, "utf8");
+  process.stderr.write(`cadjsx compile: wrote ${absolute}\n`);
+}
+
+const batch =
+  parsed.arguments.commandsPath === undefined
+    ? undefined
+    : nativeCommandBatchText(native.value);
+if (batch !== undefined && !batch.ok) {
+  failWith(EXIT_MODEL_ERROR, `${batch.error.code}: ${batch.error.message}`);
+}
+
 process.stdout.write(native.value);
 if (parsed.arguments.outPath !== undefined) {
-  const outPath = resolve(parsed.arguments.outPath);
-  await mkdir(dirname(outPath), { recursive: true });
-  await writeFile(outPath, native.value, "utf8");
-  process.stderr.write(`cadjsx compile: wrote ${outPath}\n`);
+  await writeOutput(parsed.arguments.outPath, native.value);
+}
+if (parsed.arguments.commandsPath !== undefined && batch !== undefined) {
+  await writeOutput(parsed.arguments.commandsPath, batch.value);
 }
 process.exit(EXIT_SUCCESS);

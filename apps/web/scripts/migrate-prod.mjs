@@ -1,18 +1,25 @@
 /**
  * Production database migration, run at container start before the Nitro
  * server boots (see docker-compose.yml). Applies the committed Drizzle
- * migration files in `packages/db/src/migrations/` to the libsql database at
- * DATABASE_URL, tracking applied files by tag in `_slopcad_migrations` so
- * restarts are no-ops. Each file is applied inside a transaction together
- * with its journal insert, so a failed migration leaves the database
- * untouched and the container refuses to boot a half-migrated schema.
+ * migrations listed in `packages/db/src/migrations/meta/_journal.json` to the
+ * libsql database at DATABASE_URL, tracked in drizzle-kit's own
+ * `__drizzle_migrations` journal table — the same table, columns, sha256
+ * hashes and epoch-millis `created_at` values written by `db:migrate`
+ * (drizzle-orm's libsql migrator) — so a database managed by either runner is
+ * seen as up to date by the other and restarts are no-ops. Each migration
+ * file is applied inside a transaction together with its journal insert, so
+ * a failed migration leaves the database untouched and the container refuses
+ * to boot a half-migrated schema.
  *
  * Plain node + `@libsql/client` only (a runtime dependency) — no tsx, no
  * workspace TS imports — because this runs in the image ahead of anything
- * bundled. Statement splitting mirrors `createInMemoryDb` in @slopcad/db.
+ * bundled. Statement splitting mirrors `createInMemoryDb` in @slopcad/db; the
+ * pending check and journal format mirror drizzle-orm's libsql migrator
+ * (apply entries whose `when` is newer than the newest applied `created_at`).
  */
 
-import { readdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 
@@ -25,30 +32,40 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const client = createClient({ url: databaseUrl });
-
-await client.execute(
-  "CREATE TABLE IF NOT EXISTS `_slopcad_migrations` (`tag` text PRIMARY KEY NOT NULL, `applied_at` text NOT NULL)",
+const journal = JSON.parse(
+  await readFile(`${migrationsFolder}/meta/_journal.json`, "utf8"),
 );
-const applied = new Set(
-  (await client.execute("SELECT `tag` FROM `_slopcad_migrations`")).rows.map(
-    (row) => row.tag,
-  ),
-);
-
-const files = (await readdir(migrationsFolder))
-  .filter((file) => file.endsWith(".sql"))
-  .sort();
-if (files.length === 0) {
-  console.error(`no migration files found in ${migrationsFolder}`);
+const entries = journal.entries;
+if (!Array.isArray(entries) || entries.length === 0) {
+  console.error(
+    `no migration entries in ${migrationsFolder}/meta/_journal.json`,
+  );
   process.exit(1);
 }
 
-for (const file of files) {
-  if (applied.has(file)) {
+const client = createClient({ url: databaseUrl });
+
+// The exact table drizzle-kit's `migrate` (drizzle-orm/libsql/migrator)
+// creates and consults: the newest `created_at` decides what is pending.
+await client.execute(
+  "CREATE TABLE IF NOT EXISTS `__drizzle_migrations` (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)",
+);
+const newest = await client.execute(
+  "SELECT `created_at` FROM `__drizzle_migrations` ORDER BY `created_at` DESC LIMIT 1",
+);
+const newestCreatedAt =
+  newest.rows[0] === undefined
+    ? Number.NEGATIVE_INFINITY
+    : Number(newest.rows[0].created_at);
+
+let appliedCount = 0;
+for (const entry of entries) {
+  if (Number(entry.when) <= newestCreatedAt) {
     continue;
   }
+  const file = `${entry.tag}.sql`;
   const content = await readFile(`${migrationsFolder}/${file}`, "utf8");
+  const hash = createHash("sha256").update(content).digest("hex");
   const statements = content
     .split("--> statement-breakpoint")
     .map((statement) => statement.trim())
@@ -59,8 +76,8 @@ for (const file of files) {
       await tx.execute(statement);
     }
     await tx.execute({
-      sql: "INSERT INTO `_slopcad_migrations` (`tag`, `applied_at`) VALUES (?, ?)",
-      args: [file, new Date().toISOString()],
+      sql: "INSERT INTO `__drizzle_migrations` (`hash`, `created_at`) VALUES (?, ?)",
+      args: [hash, entry.when],
     });
     await tx.commit();
   } catch (error) {
@@ -69,9 +86,10 @@ for (const file of files) {
     throw error;
   }
   console.log(`applied ${file}`);
+  appliedCount += 1;
 }
 
 client.close();
 console.log(
-  `migrations up to date: ${files.length} committed, ${files.length - applied.size} newly applied`,
+  `migrations up to date: ${entries.length} committed, ${appliedCount} newly applied`,
 );

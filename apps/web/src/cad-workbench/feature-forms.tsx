@@ -24,6 +24,7 @@ import type { FormedibleFieldConfig } from "@slopcad/ui/components/formedible/li
 import { expressionNumberProblem } from "@slopcad/ui/components/formedible/fields/expression-number-field";
 import { useRef, type ReactElement } from "react";
 import { DATUM_FORMAT_VERSION } from "@slopcad/cad-core";
+import type { TopologySnapshot } from "@slopcad/cad-core";
 import {
   DUPLICATE_COUNT_LIMIT,
   HOLE_TYPE_VALUES,
@@ -41,7 +42,28 @@ import {
 } from "./curves";
 import { BOOLEAN_DEFAULTS, type BooleanOperation } from "./boolean";
 import { MOVE_BODY_DEFAULTS } from "./move-body";
+import {
+  PRIMITIVE_DEFAULTS,
+  primitiveDimensionKeyOf,
+  primitiveRolesOf,
+  primitiveShapeOf,
+  type PrimitiveDimensionKey,
+  type PrimitiveKind,
+  type PrimitiveRole,
+  type PrimitiveSubmission,
+} from "./primitive";
 import { DUPLICATE_DEFAULTS, type DuplicateSubmission } from "./duplicate";
+import {
+  FACE_OP_DEFAULTS,
+  type FaceOpKind,
+  type FaceOpSpecification,
+  type FaceOpSubmission,
+} from "./face-op-pick";
+import {
+  TOPOLOGY_CUT_DEFAULT_SIZE_MM,
+  type TopologyCutKind,
+  type TopologyCutSubmission,
+} from "./topology-pick";
 import { HELIX_DEFAULTS } from "./helix";
 import {
   THREAD_DEFAULTS,
@@ -240,6 +262,45 @@ export interface CadFeatureFormLabels {
   readonly moveBodyAxisZ: string;
   readonly moveBodyAngle: string;
   readonly moveBodyHint: string;
+  readonly primitiveBoxTitle: string;
+  readonly primitiveSphereTitle: string;
+  readonly primitiveCylinderTitle: string;
+  readonly primitiveConeTitle: string;
+  readonly primitiveWidth: string;
+  readonly primitiveDepth: string;
+  readonly primitiveHeight: string;
+  readonly primitiveRadius: string;
+  readonly primitiveBottomRadius: string;
+  readonly primitiveTopRadius: string;
+  readonly primitivePlaceX: string;
+  readonly primitivePlaceY: string;
+  readonly primitivePlaceZ: string;
+  readonly primitiveHint: string;
+  readonly filletTitle: string;
+  readonly chamferTitle: string;
+  readonly shellTitle: string;
+  readonly topologyPickTarget: string;
+  readonly filletRadius: string;
+  readonly chamferDistance: string;
+  readonly shellThickness: string;
+  readonly topologyCutEdgesSection: string;
+  readonly shellFacesSection: string;
+  readonly topologyPickInstruction: string;
+  readonly topologyPickNone: string;
+  readonly topologyPickCancel: string;
+  readonly topologyCutHint: string;
+  readonly shellHint: string;
+  readonly moveFaceTitle: string;
+  readonly deleteFaceTitle: string;
+  readonly replaceFaceTitle: string;
+  readonly faceOpFace: string;
+  readonly moveFaceAxis: string;
+  readonly moveFaceDistance: string;
+  readonly deleteFaceHeal: string;
+  readonly replaceFacePlane: string;
+  readonly moveFaceHint: string;
+  readonly deleteFaceHint: string;
+  readonly replaceFaceHint: string;
   readonly duplicateTitle: string;
   readonly duplicateSource: string;
   readonly duplicateDx: string;
@@ -393,6 +454,52 @@ export const CAD_FEATURE_FORM_LABELS: CadFeatureFormLabels = {
   moveBodyAngle: "Rotation angle (deg)",
   moveBodyHint:
     "The move translates the latest extrusion by the offsets; the optional rotation turns it about the world axis through the origin first (rotation-capable kernels only).",
+  primitiveBoxTitle: "Add a box",
+  primitiveSphereTitle: "Add a sphere",
+  primitiveCylinderTitle: "Add a cylinder",
+  primitiveConeTitle: "Add a cone",
+  primitiveWidth: "Width x (mm)",
+  primitiveDepth: "Depth y (mm)",
+  primitiveHeight: "Height z (mm)",
+  primitiveRadius: "Radius (mm)",
+  primitiveBottomRadius: "Bottom radius (mm)",
+  primitiveTopRadius: "Top radius (mm, 0 = sharp cone)",
+  primitivePlaceX: "Placement x (mm)",
+  primitivePlaceY: "Placement y (mm)",
+  primitivePlaceZ: "Placement z (mm)",
+  primitiveHint:
+    "A primitive needs no sketch: it is built in its own frame (a box from its corner at the origin, a cylinder or cone standing on the origin along +z, a sphere centred on it), then moved by the placement offsets. The dimensions become named parameters you can edit later.",
+  filletTitle: "Fillet edges",
+  chamferTitle: "Chamfer edges",
+  shellTitle: "Shell a body",
+  topologyPickTarget: "Target body",
+  filletRadius: "Radius (mm)",
+  chamferDistance: "Distance (mm, symmetric)",
+  shellThickness: "Wall thickness (mm)",
+  topologyCutEdgesSection: "Edges to cut",
+  shellFacesSection: "Faces to open (removed)",
+  topologyPickInstruction:
+    "Click a marker in the viewport to pick it (orbit freely in between).",
+  topologyPickNone: "Nothing picked yet.",
+  topologyPickCancel: "Cancel",
+  topologyCutHint:
+    "Click the edges on the model: each marker is one edge of the target's current topology, and a second click un-picks it. Each pick is stored as a persistent, name-based reference, so it survives rebuilds and dimension edits.",
+  shellHint:
+    "The shell hollows the target to a uniform wall and opens it at every picked face. Each pick is stored as a persistent, name-based reference, so it survives rebuilds and dimension edits.",
+  moveFaceTitle: "Move a face",
+  deleteFaceTitle: "Delete a face",
+  replaceFaceTitle: "Replace a face by a datum plane",
+  faceOpFace: "Face",
+  moveFaceAxis: "Move along",
+  moveFaceDistance: "Distance (mm, signed)",
+  deleteFaceHeal: "Heal: extend the neighbouring faces to close the gap",
+  replaceFacePlane: "Replacement datum plane",
+  moveFaceHint:
+    "The picked face travels the signed distance along the world axis and its neighbouring faces follow. The pick is stored as a persistent, name-based reference; the axis and distance become named parameters you can edit later.",
+  deleteFaceHint:
+    "The picked face is removed from the boundary; healing extends the neighbouring faces to close the gap. A kernel that cannot close the solid honestly refuses, and the target renders in its place.",
+  replaceFaceHint:
+    "The picked face is re-closed onto the datum plane (create the plane first with the Datum button). The pick is stored as a persistent, name-based reference, so it survives rebuilds.",
   duplicateTitle: "Duplicate & transform a body",
   duplicateSource: "Source body",
   duplicateDx: "Step x (mm)",
@@ -2826,6 +2933,416 @@ export function MoveBodyFeatureForm({
   return (
     <form.Form
       aria-label={labels.moveBodyTitle}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/**
+ * Form values of the primitive form: the kind's `${role}Mm` dimensions
+ * (only the mounted kind's roles carry values) plus the placement.
+ */
+export interface PrimitiveFormValues
+  extends
+    Record<string, unknown>,
+    Readonly<Partial<Record<PrimitiveDimensionKey, number>>> {
+  readonly placeX: number;
+  readonly placeY: number;
+  readonly placeZ: number;
+}
+
+/**
+ * The form's starting values: the kind's defaults ({@link
+ * PRIMITIVE_DEFAULTS}), one `${role}Mm` per role, at the kernel frame.
+ */
+function primitiveFormDefaults(kind: PrimitiveKind): PrimitiveFormValues {
+  const shape: Readonly<Partial<Record<PrimitiveDimensionKey, number>>> =
+    PRIMITIVE_DEFAULTS[kind];
+  const dimensions: Partial<Record<PrimitiveDimensionKey, number>> = {};
+  for (const role of primitiveRolesOf(kind)) {
+    const key = primitiveDimensionKeyOf(role);
+    dimensions[key] = shape[key];
+  }
+  return { ...dimensions, placeX: 0, placeY: 0, placeZ: 0 };
+}
+
+/** The primitive form's title for one kind (the dialog heading too). */
+export function primitiveFormTitle(
+  kind: PrimitiveKind,
+  labels: CadFeatureFormLabels = CAD_FEATURE_FORM_LABELS,
+): string {
+  switch (kind) {
+    case "box":
+      return labels.primitiveBoxTitle;
+    case "sphere":
+      return labels.primitiveSphereTitle;
+    case "cylinder":
+      return labels.primitiveCylinderTitle;
+    case "cone":
+      return labels.primitiveConeTitle;
+  }
+}
+
+/**
+ * The primitive form (box / sphere / cylinder / cone): the kind's
+ * dimensions — positive lengths, the cone's top radius non-negative (0 is
+ * a sharp cone) — plus the placement offsets. The kind is fixed per mount
+ * (one command-menu verb per primitive); submission routes through the
+ * engine's primitive action, and a structured refusal surfaces verbatim
+ * in the dialog's error region.
+ */
+export function PrimitiveFeatureForm({
+  kind,
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onPrimitive,
+}: {
+  readonly kind: PrimitiveKind;
+  readonly labels?: CadFeatureFormLabels;
+  readonly onPrimitive: (submission: PrimitiveSubmission) => void;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const roleLabels: Readonly<Record<PrimitiveRole, string>> = {
+    width: labels.primitiveWidth,
+    depth: labels.primitiveDepth,
+    height: labels.primitiveHeight,
+    radius: labels.primitiveRadius,
+    bottomRadius: labels.primitiveBottomRadius,
+    topRadius: labels.primitiveTopRadius,
+  };
+  const placementField = (
+    name: "placeX" | "placeY" | "placeZ",
+    label: string,
+  ): FormedibleFieldConfig<PrimitiveFormValues> => ({
+    name,
+    required: true,
+    type: "number",
+    label,
+    inputClassName: "font-mono",
+    validation: (value) =>
+      typeof value === "number" && Number.isFinite(value)
+        ? null
+        : "Enter a finite offset in millimetres.",
+  });
+  const fields: readonly FormedibleFieldConfig<PrimitiveFormValues>[] = [
+    ...primitiveRolesOf(kind).map(
+      (role): FormedibleFieldConfig<PrimitiveFormValues> => {
+        const sharpAllowed = role === "topRadius";
+        return {
+          name: primitiveDimensionKeyOf(role),
+          required: true,
+          type: "number",
+          label: roleLabels[role],
+          inputClassName: "font-mono",
+          validation: (value) =>
+            typeof value === "number" &&
+            Number.isFinite(value) &&
+            (sharpAllowed ? value >= 0 : value > 0)
+              ? null
+              : sharpAllowed
+                ? "Enter a finite, non-negative radius in millimetres."
+                : "Enter a finite, strictly positive length in millimetres.",
+        };
+      },
+    ),
+    placementField("placeX", labels.primitivePlaceX),
+    placementField("placeY", labels.primitivePlaceY),
+    placementField("placeZ", labels.primitivePlaceZ),
+  ];
+  const form = useFormedible<PrimitiveFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: primitiveFormDefaults(kind),
+      onSubmit: ({ value }) => {
+        // The field validators enforce the reader's domain, so the shape
+        // resolves for every submission that reaches here.
+        const shape = primitiveShapeOf(
+          kind,
+          primitiveRolesOf(kind).map(
+            (role) => value[primitiveDimensionKeyOf(role)],
+          ),
+        );
+        if (shape === null) return;
+        onPrimitive({
+          shape,
+          offsetMm: [value.placeX, value.placeY, value.placeZ],
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={primitiveFormTitle(kind, labels)}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/**
+ * One pickable target of the topology-pick forms (the topology cuts and
+ * the face ops): the body's id and name plus the visible scene's topology
+ * snapshot of its solid (the addresses the picks are minted on).
+ */
+export interface CadTopologyPickTargetOption {
+  readonly bodyId: string;
+  readonly name: string;
+  readonly snapshot: TopologySnapshot;
+}
+
+/**
+ * The viewport picks a topology-pick form submits: the picked target and
+ * the snapshot ordinals picked on it. The picks come from the viewport's
+ * anchor gesture (`./topology-pick`), never from a form field.
+ */
+export interface CadTopologyPickSelection {
+  readonly target: CadTopologyPickTargetOption;
+  readonly ordinals: readonly number[];
+}
+
+/** Form values of the topology-cut form (the one size). */
+export interface TopologyCutFormValues extends Record<string, unknown> {
+  readonly sizeMm: number;
+}
+
+/** The topology-cut form's title for one kind (the dialog heading too). */
+export function topologyCutFormTitle(
+  kind: TopologyCutKind,
+  labels: CadFeatureFormLabels = CAD_FEATURE_FORM_LABELS,
+): string {
+  switch (kind) {
+    case "fillet":
+      return labels.filletTitle;
+    case "chamfer":
+      return labels.chamferTitle;
+    case "shell":
+      return labels.shellTitle;
+  }
+}
+
+/** The topology-cut dialog's hint for one kind. */
+export function topologyCutFormHint(
+  kind: TopologyCutKind,
+  labels: CadFeatureFormLabels = CAD_FEATURE_FORM_LABELS,
+): string {
+  switch (kind) {
+    case "fillet":
+    case "chamfer":
+      return labels.topologyCutHint;
+    case "shell":
+      return labels.shellHint;
+  }
+}
+
+/**
+ * The fillet / chamfer / shell form: the one size the bridge layout
+ * carries (radius, symmetric distance, or wall thickness). The picks —
+ * edges for fillet/chamfer, the faces to open for shell — are the
+ * viewport's ({@link CadTopologyPickSelection}); submission hands them
+ * with the snapshot they address to the engine's topology-cut action,
+ * which mints the persistent references; a structured refusal surfaces
+ * verbatim in the pick panel's error region.
+ */
+export function TopologyCutFeatureForm({
+  kind,
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onTopologyCut,
+  pick,
+}: {
+  readonly kind: TopologyCutKind;
+  readonly labels?: CadFeatureFormLabels;
+  readonly onTopologyCut: (submission: TopologyCutSubmission) => void;
+  readonly pick: CadTopologyPickSelection;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const sizeLabel =
+    kind === "fillet"
+      ? labels.filletRadius
+      : kind === "chamfer"
+        ? labels.chamferDistance
+        : labels.shellThickness;
+  const fields: readonly FormedibleFieldConfig<TopologyCutFormValues>[] = [
+    {
+      name: "sizeMm",
+      required: true,
+      type: "number",
+      label: sizeLabel,
+      inputClassName: "font-mono",
+      validation: (value) =>
+        typeof value === "number" && Number.isFinite(value) && value > 0
+          ? null
+          : "Enter a finite, strictly positive length in millimetres.",
+    },
+  ];
+  const form = useFormedible<TopologyCutFormValues>({
+    fields,
+    formOptions: {
+      defaultValues: { sizeMm: TOPOLOGY_CUT_DEFAULT_SIZE_MM[kind] },
+      onSubmit: ({ value }) => {
+        onTopologyCut({
+          kind,
+          snapshot: pick.target.snapshot,
+          ordinals: pick.ordinals,
+          sizeMm: value.sizeMm,
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={topologyCutFormTitle(kind, labels)}
+      className="space-y-3"
+      noValidate
+    />
+  );
+}
+
+/** Form values of the face-op form (the kind's operation). */
+export interface FaceOpFormValues extends Record<string, unknown> {
+  readonly axis: string;
+  readonly distanceMm: number;
+  readonly heal: boolean;
+  readonly datumPlaneId: string;
+}
+
+/** The face-op form's title for one kind (the dialog heading too). */
+export function faceOpFormTitle(
+  kind: FaceOpKind,
+  labels: CadFeatureFormLabels = CAD_FEATURE_FORM_LABELS,
+): string {
+  switch (kind) {
+    case "moveFace":
+      return labels.moveFaceTitle;
+    case "deleteFace":
+      return labels.deleteFaceTitle;
+    case "replaceFace":
+      return labels.replaceFaceTitle;
+  }
+}
+
+/** The face-op dialog's hint for one kind. */
+export function faceOpFormHint(
+  kind: FaceOpKind,
+  labels: CadFeatureFormLabels = CAD_FEATURE_FORM_LABELS,
+): string {
+  switch (kind) {
+    case "moveFace":
+      return labels.moveFaceHint;
+    case "deleteFace":
+      return labels.deleteFaceHint;
+    case "replaceFace":
+      return labels.replaceFaceHint;
+  }
+}
+
+/** The submitted values as the kind's specification. */
+function faceOpSpecificationOfValues(
+  kind: FaceOpKind,
+  value: FaceOpFormValues,
+): FaceOpSpecification {
+  switch (kind) {
+    case "moveFace":
+      return { kind, axis: Number(value.axis), distanceMm: value.distanceMm };
+    case "deleteFace":
+      return { kind, heal: value.heal };
+    case "replaceFace":
+      return { kind, datumPlaneId: value.datumPlaneId };
+  }
+}
+
+/**
+ * The moveFace / deleteFace / replaceFace form, per kind: the world axis
+ * and signed, non-zero distance; the heal flag; or the replacement datum
+ * plane. The ONE face is the viewport's pick
+ * ({@link CadTopologyPickSelection}); submission hands it with the
+ * snapshot it addresses to the engine's face-op action, which mints the
+ * persistent reference; a structured refusal surfaces verbatim in the
+ * pick panel's error region.
+ */
+export function FaceOpFeatureForm({
+  datumPlanes,
+  kind,
+  labels: labelOverrides = CAD_FEATURE_FORM_LABELS,
+  onFaceOp,
+  pick,
+}: {
+  readonly datumPlanes: readonly CadFeatureDatumOption[];
+  readonly kind: FaceOpKind;
+  readonly labels?: CadFeatureFormLabels;
+  readonly onFaceOp: (submission: FaceOpSubmission) => void;
+  readonly pick: CadTopologyPickSelection;
+}): ReactElement {
+  const labels = { ...CAD_FEATURE_FORM_LABELS, ...labelOverrides };
+  const kindFields: readonly FormedibleFieldConfig<FaceOpFormValues>[] =
+    kind === "moveFace"
+      ? [
+          {
+            name: "axis",
+            options: [
+              { value: "1", label: labels.moveBodyAxisX },
+              { value: "2", label: labels.moveBodyAxisY },
+              { value: "3", label: labels.moveBodyAxisZ },
+            ],
+            required: true,
+            type: "select",
+            label: labels.moveFaceAxis,
+          },
+          {
+            name: "distanceMm",
+            required: true,
+            type: "number",
+            label: labels.moveFaceDistance,
+            inputClassName: "font-mono",
+            validation: (value) =>
+              typeof value === "number" && Number.isFinite(value) && value !== 0
+                ? null
+                : "Enter a finite, non-zero distance in millimetres.",
+          },
+        ]
+      : kind === "deleteFace"
+        ? [{ name: "heal", type: "checkbox", label: labels.deleteFaceHeal }]
+        : [
+            {
+              name: "datumPlaneId",
+              options: datumPlanes.map((datum) => ({
+                value: datum.id,
+                label: datum.name,
+              })),
+              placeholder: labels.replaceFacePlane,
+              required: true,
+              type: "select",
+              label: labels.replaceFacePlane,
+            },
+          ];
+  const form = useFormedible<FaceOpFormValues>({
+    fields: kindFields,
+    formOptions: {
+      defaultValues: {
+        axis: String(FACE_OP_DEFAULTS.axis),
+        distanceMm: FACE_OP_DEFAULTS.distanceMm,
+        heal: FACE_OP_DEFAULTS.heal,
+        datumPlaneId: datumPlanes[0]?.id ?? "",
+      },
+      onSubmit: ({ value }) => {
+        const [ordinal] = pick.ordinals;
+        if (ordinal === undefined) return;
+        onFaceOp({
+          snapshot: pick.target.snapshot,
+          ordinal,
+          specification: faceOpSpecificationOfValues(kind, value),
+        });
+      },
+    },
+    resetOnSubmitSuccess: false,
+    submitLabel: labels.submit,
+  });
+  return (
+    <form.Form
+      aria-label={faceOpFormTitle(kind, labels)}
       className="space-y-3"
       noValidate
     />

@@ -130,6 +130,30 @@ export interface NativeFormatMigration {
  * version walk has a registered path; the envelope stamp is the gate that
  * keeps v8 readers off v9 documents whose duplicate features their
  * executors cannot build.
+ *
+ * The v9→v10 step (Phase 61, ROADMAP-SIM) carries the simulation spine's
+ * additive growth — the `simulations` and `motors` document sections, the
+ * `simulation`/`motor` id-generator counters, and the `motor.*` /
+ * `simulation.*` command types. It is the identity for the same family of
+ * reasons as the configurations step (v5→v6): the growth is standalone
+ * additive sections plus log-only command types, so v9 content is valid
+ * v10 content, and a new-section record or new-type COMMAND cannot occur
+ * in a v9 file (the writer that emits one stamps v10). The step exists so
+ * the version walk has a registered path; the envelope stamp is the gate
+ * that keeps v9 readers off v10 documents whose simulation intent and
+ * motor specs their substrates would silently drop.
+ *
+ * The v10→v11 step (Phase 70b, ROADMAP-SIM — the finale) carries the
+ * optimization studies' additive growth — the `studies` document section
+ * (SimStudy rows), the `study` id-generator counter, and the `study.*`
+ * command types. It is the identity for the same family of reasons as the
+ * simulation step: the growth is a standalone additive section plus
+ * log-only command types, so v10 content is valid v11 content, and a
+ * studies record or new-type COMMAND cannot occur in a v10 file (the
+ * writer that emits one stamps v11). The step exists so the version walk
+ * has a registered path; the envelope stamp is the gate that keeps v10
+ * readers off v11 documents whose optimization intent their substrates
+ * would silently drop.
  */
 export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
   Object.freeze([
@@ -173,7 +197,61 @@ export const NATIVE_FORMAT_MIGRATIONS: readonly NativeFormatMigration[] =
       to: 9,
       migrate: migrateV8ToV9,
     },
+    {
+      from: 9,
+      to: 10,
+      migrate: migrateV9ToV10,
+    },
+    {
+      from: 10,
+      to: 11,
+      migrate: migrateV10ToV11,
+    },
   ]);
+
+/**
+ * The v9→v10 content transform (the framework stamps `formatVersion`):
+ * the identity — the simulation-spine growth (the `simulations` and
+ * `motors` sections, their id-generator counters, the `motor.*` and
+ * `simulation.*` command types) is additive, so v9 content is already
+ * valid v10 content and nothing inside the document is rewritten.
+ */
+function migrateV9ToV10(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v9→v10 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
+
+/**
+ * The v10→v11 content transform (the framework stamps `formatVersion`):
+ * the identity — the studies growth (the `studies` section, the `study`
+ * id-generator counter, the `study.*` command types) is additive, so v10
+ * content is already valid v11 content and nothing inside the document is
+ * rewritten.
+ */
+function migrateV10ToV11(
+  input: unknown,
+): ParseResult<unknown, NativeMigrationError> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return fail(
+      migrationError(
+        NATIVE_MIGRATION_ERROR_CODES.migrationFailed,
+        "The v10→v11 migration needs a plain native document object.",
+        input,
+      ),
+    );
+  }
+  return ok(input);
+}
 
 /**
  * The v6→v7 content transform (the framework stamps `formatVersion`):

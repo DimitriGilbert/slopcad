@@ -52,7 +52,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactElement, ReactNode } from "react";
+import type { PointerEvent, ReactElement, ReactNode } from "react";
 import {
   serializeSelectionReference,
   selectionReferenceKey,
@@ -112,9 +112,18 @@ import type { FixtureSessionBackendId } from "../render-fixture/session-backend"
 import type { CurveAuthoring } from "./curves";
 import type { LoftSectionChoice } from "./loft";
 import { clippingPlanesOf } from "@slopcad/cad-r3f";
+import type { AgentToolsSurface } from "@slopcad/ui/agent/tools";
+import {
+  createAgentChatSessionSlot,
+  useAgentChatSession,
+} from "@slopcad/ui/agent/chat/session-slot";
 
 import { useWorkbenchWebMcpTools } from "../webmcp/workbench-tools";
+import { executeWebMcpTool } from "../webmcp/registry";
 import { completionJson } from "../render-fixture/fixture-session";
+import { createAgentChatCommands } from "../agent/chat/chat-commands";
+import { useAgentChatView } from "../agent/chat/view-state";
+import { WorkbenchRightSidebar } from "./right-sidebar";
 import {
   CAD_FEATURE_FORM_LABELS,
   CURVE_FORM_LABELS,
@@ -132,6 +141,12 @@ import {
   SplitFeatureForm,
   BooleanFeatureForm,
   MoveBodyFeatureForm,
+  PrimitiveFeatureForm,
+  primitiveFormTitle,
+  topologyCutFormTitle,
+  faceOpFormTitle,
+  type CadTopologyPickSelection,
+  type CadTopologyPickTargetOption,
   DuplicateFeatureForm,
   BodyRenameForm,
   type CadFeatureBodyOption,
@@ -148,6 +163,34 @@ import {
   type HoleFormValues,
 } from "./feature-forms";
 import { duplicateSourceOptions } from "./duplicate";
+import {
+  isPrimitiveKind,
+  PRIMITIVE_KINDS,
+  type PrimitiveKind,
+  type PrimitiveSubmission,
+} from "./primitive";
+import {
+  isTopologyCutKind,
+  nearestTopologyAnchor,
+  nextTopologyPicks,
+  TOPOLOGY_CUT_KINDS,
+  topologyPickOptionsOf,
+  topologyTargetAnchorsOf,
+  type TopologyCutKind,
+  type TopologyCutSubmission,
+  type TopologyPicks,
+  type TopologyPickVerb,
+} from "./topology-pick";
+import {
+  CadTopologyPickOverlay,
+  CadTopologyPickPanel,
+} from "./topology-pick-panel";
+import {
+  FACE_OP_KINDS,
+  isFaceOpKind,
+  type FaceOpKind,
+  type FaceOpSubmission,
+} from "./face-op-pick";
 import { CadCurveOverlay } from "./curve-overlay";
 import { CadDatumOverlay } from "./datum-overlay";
 import { CadHolePreviewGhost } from "./hole-ghost";
@@ -330,6 +373,50 @@ const LABELS = {
 } as const;
 
 /**
+ * The primitive verbs' search keywords: the kind's own name plus the
+ * synonyms an author types for it (`cube`, `ball`, `rod`, …) and the
+ * shared "primitive solid" vocabulary, so a blank-bench author finds the
+ * sketch-free path from the command menu.
+ */
+const PRIMITIVE_COMMAND_KEYWORDS: Readonly<Record<PrimitiveKind, string>> = {
+  box: "box cube cuboid block rectangular primitive solid create add",
+  sphere: "sphere ball round primitive solid create add",
+  cylinder: "cylinder rod tube round primitive solid create add",
+  cone: "cone taper frustum point primitive solid create add",
+};
+
+/**
+ * The topology-cut verbs' search keywords: the kind's name plus the
+ * synonyms an author types for it (`round`, `bevel`, `hollow`, …).
+ */
+const TOPOLOGY_CUT_COMMAND_KEYWORDS: Readonly<Record<TopologyCutKind, string>> =
+  {
+    fillet: "fillet round radius blend edge edges pick solid modify",
+    chamfer: "chamfer bevel edge edges distance pick solid modify",
+    shell: "shell hollow open face faces wall thickness pick solid modify",
+  };
+
+/**
+ * The face-op verbs' search keywords: the kind's name plus the synonyms
+ * an author types for it (`push`, `pull`, `remove`, `flatten`, …).
+ */
+const FACE_OP_COMMAND_KEYWORDS: Readonly<Record<FaceOpKind, string>> = {
+  moveFace: "move face push pull offset axis distance pick solid modify direct",
+  deleteFace: "delete face remove heal pick solid modify direct",
+  replaceFace: "replace face datum plane flatten trim pick solid modify direct",
+};
+
+/**
+ * The face-op verbs' command-menu ids: kebab-case, the menu's multi-word
+ * id convention (`move-body`, `pattern-path`, `sketch-on-face`).
+ */
+const FACE_OP_COMMAND_IDS: Readonly<Record<FaceOpKind, string>> = {
+  moveFace: "move-face",
+  deleteFace: "delete-face",
+  replaceFace: "replace-face",
+};
+
+/**
  * The first-run sketch hint's persistence: dismissed once per browser
  * (entering sketch mode counts as dismissed — the discovery worked).
  */
@@ -411,6 +498,9 @@ export function CompleteCadWorkbench({
     handleSplit,
     handleBoolean,
     handleMoveBody,
+    handlePrimitive,
+    handleTopologyCut,
+    handleFaceOp,
     handleDuplicate,
     handleBodyAppearance,
     handleBodyRename,
@@ -433,6 +523,14 @@ export function CompleteCadWorkbench({
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  // The configuration panel's CSV read failure (the engine never sees the
+  // file — the read dies in the panel's file input, before any CSV text
+  // exists). It rides the SAME notice region as the engine's configuration
+  // refusals and clears on the panel's next user action, mirroring the
+  // engine notice's own lifecycle.
+  const [csvImportReadError, setCsvImportReadError] = useState<string | null>(
+    null,
+  );
   // The Phase 38 feature dialog: the sweep/loft create forms. One dialog,
   // kind-switched; the last submission's structured refusal rides here (the
   // parameter panel's apply-failure precedent) and clears on the next open.
@@ -460,8 +558,31 @@ export function CompleteCadWorkbench({
     | "boolean"
     | "moveBody"
     | "duplicate"
+    | PrimitiveKind
+    | TopologyCutKind
+    | FaceOpKind
     | null
   >(null);
+  // The pick dialogs' surface (fillet/chamfer/shell and the face ops): the
+  // computed bodies whose VISIBLE solid the kernel can name (persistent
+  // topology), each with its on-demand snapshot — `null` while the query
+  // is in flight.
+  const [topologyPickTargets, setTopologyPickTargets] = useState<
+    readonly CadTopologyPickTargetOption[] | null
+  >(null);
+  // The failure text of a topology query that rejected (the worker died,
+  // or the kernel threw) — a terminal state, so the dialog never hangs on
+  // loading; `null` while no query has failed.
+  const [topologyPickQueryError, setTopologyPickQueryError] = useState<
+    string | null
+  >(null);
+  // The viewport picks of the open topology verb: ONE target body and the
+  // snapshot ordinals clicked on it (the chain's anchor gesture) — reset
+  // whenever the offered snapshots are re-read, so a pick always
+  // addresses the snapshot it was clicked on.
+  const [topologyPicks, setTopologyPicks] = useState<TopologyPicks | null>(
+    null,
+  );
   // The Phase 44 body rename dialog: which body's rename form is open.
   const [renameBodyId, setRenameBodyId] = useState<string | null>(null);
   const [featureOutcome, setFeatureOutcome] = useState<
@@ -798,6 +919,114 @@ export function CompleteCadWorkbench({
   // predicate, read through the duplicate module's own reader — a copy of
   // a copy is legal input, the verb's iterative use.
   const duplicateBodies = duplicateSourceOptions(workbenchDocument);
+  // The topology pick surface: while a fillet/chamfer/shell or a face-op
+  // dialog is open, query the SETTLED scene's topology on demand (never
+  // per render) and offer every computed body whose snapshot the kernel
+  // can name for the verb's entity kind. The query is tied to the applied
+  // scene: before the first settle the dialog stays loading, and every
+  // settle (the boot, or the pass a document edit dispatches) re-reads
+  // it, so the picks always come from the scene that settled last. A
+  // closed dialog or a superseded query never writes.
+  const { documentTopology } = engine;
+  const topologyPickDialog: TopologyPickVerb | null =
+    featureDialog !== null &&
+    (isTopologyCutKind(featureDialog) || isFaceOpKind(featureDialog))
+      ? featureDialog
+      : null;
+  useEffect(() => {
+    if (topologyPickDialog === null) return;
+    setTopologyPickTargets(null);
+    setTopologyPickQueryError(null);
+    setTopologyPicks(null);
+    // Only a scene settled on THIS document may be queried: while an edit's
+    // pass is in flight the visible scene is still the previous document's,
+    // and its snapshots would pair with the edited bodies. Picking stays
+    // disabled (no targets) until the matching scene is visible.
+    if (applied === null || !settled) return;
+    const queriedRevision = applied.revision;
+    let current = true;
+    void documentTopology().then(
+      (inventory) => {
+        if (!current) return;
+        if (inventory !== null && inventory.revision !== queriedRevision) {
+          return;
+        }
+        setTopologyPickTargets(
+          workbenchDocument.bodies.flatMap((body) => {
+            const snapshot = inventory?.snapshots.get(body.id);
+            return snapshot !== undefined &&
+              sceneOperandOfBody(workbenchDocument, body.id) !== null &&
+              topologyPickOptionsOf(snapshot, topologyPickDialog).length > 0
+              ? [{ bodyId: body.id, name: body.name, snapshot }]
+              : [];
+          }),
+        );
+      },
+      (error: unknown) => {
+        if (!current) return;
+        setTopologyPickQueryError(
+          error instanceof Error ? error.message : String(error),
+        );
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [
+    applied,
+    documentTopology,
+    settled,
+    topologyPickDialog,
+    workbenchDocument,
+  ]);
+  // The camera the anchors project through: the one the canvas renders
+  // (the session's user camera over the settled scene's own).
+  const topologyPickCamera =
+    applied === null
+      ? null
+      : (viewSession.userCamera ?? applied.state.projection.camera);
+  // The picks resolved against the offered targets: the picked target
+  // (its snapshot is the one the ordinals address) and its ordinals.
+  const topologyPickSelection: CadTopologyPickSelection | null = useMemo(() => {
+    if (topologyPicks === null || topologyPickTargets === null) return null;
+    const target = topologyPickTargets.find(
+      (option) => option.bodyId === topologyPicks.bodyId,
+    );
+    return target === undefined
+      ? null
+      : { target, ordinals: topologyPicks.ordinals };
+  }, [topologyPicks, topologyPickTargets]);
+  // The viewport pick gesture (the chain's `pickEdgeAt`): a pointer-down
+  // ON THE CANVAS selects the nearest projected anchor within the shared
+  // radius and folds it into the picks; a miss changes nothing, and a
+  // press on the floating panel or the view tools never picks.
+  const handleTopologyPickPointer = useCallback(
+    (event: PointerEvent<HTMLDivElement>): void => {
+      if (
+        topologyPickDialog === null ||
+        topologyPickTargets === null ||
+        topologyPickCamera === null ||
+        !(event.target instanceof HTMLCanvasElement)
+      ) {
+        return;
+      }
+      const frame = event.currentTarget.getBoundingClientRect();
+      const hit = nearestTopologyAnchor(
+        topologyTargetAnchorsOf(topologyPickTargets, topologyPickDialog, {
+          camera: topologyPickCamera,
+          width: frame.width,
+          height: frame.height,
+        }),
+        event.clientX - frame.left,
+        event.clientY - frame.top,
+      );
+      if (hit === null) return;
+      setTopologyPicks((current) =>
+        nextTopologyPicks(current, hit, topologyPickDialog),
+      );
+    },
+    [topologyPickCamera, topologyPickDialog, topologyPickTargets],
+  );
   // The body the rename dialog is renaming (its current name seeds the form).
   const renameBody =
     renameBodyId === null
@@ -968,6 +1197,27 @@ export function CompleteCadWorkbench({
     if (outcome.ok) setFeatureDialog(null);
   };
 
+  /** Runs a primitive submission (box/sphere/cylinder/cone), surfacing the refusal. */
+  const submitPrimitive = (submission: PrimitiveSubmission): void => {
+    const outcome = handlePrimitive(submission);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs a moveFace / deleteFace / replaceFace submission, surfacing the refusal. */
+  const submitFaceOp = (submission: FaceOpSubmission): void => {
+    const outcome = handleFaceOp(submission);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
+  /** Runs a fillet / chamfer / shell submission, surfacing the refusal. */
+  const submitTopologyCut = (submission: TopologyCutSubmission): void => {
+    const outcome = handleTopologyCut(submission);
+    setFeatureOutcome(outcome);
+    if (outcome.ok) setFeatureDialog(null);
+  };
+
   /** Runs the duplicate submission (Phase 60), surfacing the refusal. */
   const submitDuplicate = (
     specification: Parameters<typeof handleDuplicate>[0],
@@ -1062,7 +1312,10 @@ export function CompleteCadWorkbench({
         | "curve"
         | "boolean"
         | "moveBody"
-        | "duplicate",
+        | "duplicate"
+        | PrimitiveKind
+        | TopologyCutKind
+        | FaceOpKind,
     ): void => {
       setFeatureOutcome(null);
       if (kind === "hole") {
@@ -1099,6 +1352,16 @@ export function CompleteCadWorkbench({
     if (fallback === null) return;
     engine.setActiveScene(fallback);
   }, [activeScene, engine, workbenchDocument]);
+
+  // The agent chat view state (PLAN-AGENT-CHAT Phase 4.4, D16): the right
+  // sidebar's chat ↔ panels switch, persisted per browser — ONE source
+  // shared by the Phase 4.5 sidebar mount and the palette commands below.
+  const { setView: setAgentChatView, view: agentChatView } = useAgentChatView();
+  // The live agent session slot: the chat panel reports its surface once
+  // the Phase 4.5 mount renders it; until then the session-scoped agent
+  // commands stay honestly disabled instead of dispatching into nothing.
+  const agentChatSessionSlot = useMemo(() => createAgentChatSessionSlot(), []);
+  const agentChatSession = useAgentChatSession(agentChatSessionSlot);
 
   // The command list is derived once per relevant state identity; every
   // run() routes through a public surface (the hooks and page actions).
@@ -1241,6 +1504,44 @@ export function CompleteCadWorkbench({
           openFeatureDialog("hole");
         },
       },
+      // The primitive verbs: one row per kind, never disabled — a
+      // primitive consumes nothing, so the verb works on a blank bench.
+      ...PRIMITIVE_KINDS.map((kind) => ({
+        group: "Workspace",
+        id: `primitive-${kind}`,
+        keywords: PRIMITIVE_COMMAND_KEYWORDS[kind],
+        label: primitiveFormTitle(kind),
+        run: () => {
+          openFeatureDialog(kind);
+        },
+      })),
+      // The topology-cut verbs: disabled until the document computes a
+      // body to cut (the picks address a computed solid's topology).
+      ...TOPOLOGY_CUT_KINDS.map((kind) => ({
+        disabled: featureProducedBodies.length === 0,
+        group: "Workspace",
+        id: kind,
+        keywords: TOPOLOGY_CUT_COMMAND_KEYWORDS[kind],
+        label: topologyCutFormTitle(kind),
+        run: () => {
+          openFeatureDialog(kind);
+        },
+      })),
+      // The face-op verbs: disabled until the document computes a body to
+      // operate on (the face pick addresses a computed solid's topology);
+      // replaceFace also needs a datum plane to re-close the face onto.
+      ...FACE_OP_KINDS.map((kind) => ({
+        disabled:
+          featureProducedBodies.length === 0 ||
+          (kind === "replaceFace" && datumPlaneOptions.length === 0),
+        group: "Workspace",
+        id: FACE_OP_COMMAND_IDS[kind],
+        keywords: FACE_OP_COMMAND_KEYWORDS[kind],
+        label: faceOpFormTitle(kind),
+        run: () => {
+          openFeatureDialog(kind);
+        },
+      })),
       {
         disabled: !canAuthorSketchFeatures,
         group: "Workspace",
@@ -1481,8 +1782,20 @@ export function CompleteCadWorkbench({
         },
       },
     );
+    // The four agent chat commands (Phase 4.4): the toggle rides the
+    // shared view state; the session-scoped three dispatch through the
+    // live session the mounted chat panel reports.
+    list.push(
+      ...createAgentChatCommands({
+        session: agentChatSession,
+        view: agentChatView,
+        onViewChange: setAgentChatView,
+      }),
+    );
     return list;
   }, [
+    agentChatSession,
+    agentChatView,
     applied,
     canAuthorSketchFeatures,
     clearSelection,
@@ -1503,6 +1816,7 @@ export function CompleteCadWorkbench({
     openFeatureDialog,
     rollback,
     selectionApi.selected.length,
+    setAgentChatView,
     setMode,
     setRollback,
     showingPreview,
@@ -1511,10 +1825,32 @@ export function CompleteCadWorkbench({
     viewSession.userCamera,
   ]);
 
-  // The WebMCP binding (Phase 7): the eight workbench tools registered for
-  // the page's lifetime — always in the internal registry, mirrored to
-  // `document.modelContext` when the browser exposes the agent surface.
-  useWorkbenchWebMcpTools({ commands, engine });
+  // The WebMCP binding (Phase 7 + the Phase 2.1 capture tool + the site's
+  // authoring skill): the twelve workbench tools registered for the page's
+  // lifetime — always in the
+  // internal registry, mirrored to `document.modelContext` when the browser
+  // exposes the agent surface. The capture tool drives the page's own
+  // camera-overlay writer, frame ledger, and live canvas — the same
+  // machinery the snapshot-export commands run.
+  const webMcpEntries = useWorkbenchWebMcpTools({
+    capture: {
+      canvas: viewportCanvas,
+      convention: () => viewSession.convention,
+      renderedFrames: () => engine.renderedFrames,
+      rootId,
+      setUserCamera: handleViewUserCamera,
+      userCamera: () => viewSession.userCamera,
+    },
+    commands,
+    engine,
+  });
+  // The agent chat's tools surface (Phase 4.5, M2): the page's own bound
+  // tool set plus the registry executor — the same binding the WebMCP
+  // mirror serves, never a second tool set.
+  const agentToolsSurface = useMemo<AgentToolsSurface>(
+    () => ({ execute: executeWebMcpTool, tools: webMcpEntries }),
+    [webMcpEntries],
+  );
 
   // -- Default pieces (each exactly what its slot replaces) -----------------
 
@@ -1616,7 +1952,11 @@ export function CompleteCadWorkbench({
       {/* The canvas owns every pixel the docks leave it: full-bleed, no
           bezel, no stage — the machine fills its frame. The settle and
           selection stamps are unchanged. */}
-      <div className="relative min-h-0 flex-1">
+      <div
+        className="relative min-h-0 flex-1"
+        data-topology-picking={topologyPickDialog ?? undefined}
+        onPointerDown={handleTopologyPickPointer}
+      >
         <CadViewport
           cameraControls
           cameraOrbitDragEnabled={cameraOrbitDragAvailable}
@@ -1745,6 +2085,42 @@ export function CompleteCadWorkbench({
                   values={holeDialogValues}
                 />
               ) : null}
+              {/* The topology verbs' NON-MODAL pick surface: the
+                  projected anchors over the settled scene and the
+                  floating panel carrying the picks and the verb's form —
+                  the canvas stays live for orbit and pick. */}
+              {!showingPreview &&
+              topologyPickDialog !== null &&
+              topologyPickTargets !== null &&
+              topologyPickCamera !== null ? (
+                <CadTopologyPickOverlay
+                  camera={topologyPickCamera}
+                  picks={topologyPicks}
+                  targets={topologyPickTargets}
+                  verb={topologyPickDialog}
+                />
+              ) : null}
+              {!showingPreview && topologyPickDialog !== null ? (
+                <CadTopologyPickPanel
+                  datumPlanes={datumPlaneOptions}
+                  error={
+                    featureOutcome !== null && !featureOutcome.ok
+                      ? `${featureOutcome.code}: ${featureOutcome.message}`
+                      : null
+                  }
+                  key={topologyPickDialog}
+                  onCancel={() => {
+                    setFeatureDialog(null);
+                    setFeatureOutcome(null);
+                  }}
+                  onFaceOp={submitFaceOp}
+                  onTopologyCut={submitTopologyCut}
+                  queryError={topologyPickQueryError}
+                  selection={topologyPickSelection}
+                  targets={topologyPickTargets}
+                  verb={topologyPickDialog}
+                />
+              ) : null}
               {sketchOnFaceNote !== null ? (
                 <div
                   className="border-destructive/40 bg-background/95 text-destructive absolute top-2 right-2 max-w-sm rounded-sm border px-2 py-1 text-xs leading-4"
@@ -1810,7 +2186,8 @@ export function CompleteCadWorkbench({
                         <kbd className="border-current/40 border px-1 font-mono text-[10px]">
                           Ctrl+K
                         </kbd>{" "}
-                        and run “Sketch workspace”.
+                        and run “Sketch workspace” — or skip the sketch with a
+                        primitive (“Add a box”, sphere, cylinder, cone).
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
@@ -1825,6 +2202,17 @@ export function CompleteCadWorkbench({
                         variant="outline"
                       >
                         Start a sketch
+                      </Button>
+                      <Button
+                        data-testid="workbench-sketch-hint-primitive"
+                        onClick={() => {
+                          openFeatureDialog("box");
+                        }}
+                        size="xs"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Add a box
                       </Button>
                       <Button
                         aria-label="Dismiss the getting-started hint"
@@ -2015,14 +2403,21 @@ export function CompleteCadWorkbench({
     <CadConfigurationPanel
       configurations={configurationRows}
       activeConfigurationId={engine.activeConfigurationId}
-      notice={engine.configurationNotice}
-      onSwitch={(id) =>
+      notice={csvImportReadError ?? engine.configurationNotice}
+      onSwitch={(id) => {
+        setCsvImportReadError(null);
         engine.applyConfiguration(
           id === null ? null : createConfigurationId(id),
-        )
-      }
-      onCreate={(name) => engine.createConfiguration(name)}
-      onDelete={(id) => engine.deleteConfiguration(createConfigurationId(id))}
+        );
+      }}
+      onCreate={(name) => {
+        setCsvImportReadError(null);
+        engine.createConfiguration(name);
+      }}
+      onDelete={(id) => {
+        setCsvImportReadError(null);
+        engine.deleteConfiguration(createConfigurationId(id));
+      }}
       onExportCsv={() => {
         const csv = engine.exportParameterTableCsv();
         const blob = new Blob([csv], { type: "text/csv" });
@@ -2034,7 +2429,13 @@ export function CompleteCadWorkbench({
         URL.revokeObjectURL(url);
         return csv;
       }}
-      onImportCsv={(text) => engine.importParameterTableCsv(text)}
+      onImportCsv={(text) => {
+        // A successful read hands the surface back to the engine's own
+        // parse/commit refusals (this panel's only error region).
+        setCsvImportReadError(null);
+        engine.importParameterTableCsv(text);
+      }}
+      onImportError={setCsvImportReadError}
       className="w-full shrink-0 border-t border-border"
     />
   );
@@ -2783,29 +3184,24 @@ export function CompleteCadWorkbench({
           </div>
         </div>
         {viewport}
-        {/* Right dock: properties over parameters, each section its own
-            scroll, the parameter footer pinned. Same drawer discipline as
-            the left dock: invisible (out of the tab order) while closed. */}
-        <div
-          className={`border-border bg-card absolute inset-y-0 right-0 z-30 flex w-[272px] shrink-0 flex-col border-l shadow-2xl transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:bg-card/40 xl:shadow-none ${
-            panelsDrawerOpen
-              ? "visible translate-x-0"
-              : "invisible translate-x-full xl:visible xl:translate-x-0"
-          }`}
-          data-testid="workbench-panels-dock"
-        >
-          <div className="max-h-[55%] min-h-0 shrink-0 overflow-y-auto">
-            {propertyPanel}
-          </div>
-          {/* The parameter dock: the panel owns its internal scroll so
-              the pinned Apply footer stays on screen at any height. */}
-          <div className="flex min-h-0 flex-1 flex-col border-t border-border">
-            {parameterPanel}
-          </div>
-          <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-border">
-            {configurationPanel}
-          </div>
-        </div>
+        {/* Right dock (D16, Phase 4.5): the two-view sidebar — the
+            properties/parameters/configuration panels or the agent chat —
+            switched by the segmented control at its top, resizable by the
+            drag handle on its left edge. Same drawer discipline as the
+            left dock: invisible (out of the tab order) while closed. */}
+        <WorkbenchRightSidebar
+          configurationPanel={configurationPanel}
+          document={workbenchDocument}
+          drawerOpen={panelsDrawerOpen}
+          mode={mode}
+          onViewChange={setAgentChatView}
+          parameterPanel={parameterPanel}
+          propertyPanel={propertyPanel}
+          selection={selectionApi.selection}
+          sessionSlot={agentChatSessionSlot}
+          toolsSurface={agentToolsSurface}
+          view={agentChatView}
+        />
       </div>
       {/* The feature band: the document's history as its own full-width
           row between the workspace and the status bar (hidden, like every
@@ -2855,8 +3251,12 @@ export function CompleteCadWorkbench({
           `use-sync-external-store` shim, whose CJS factory re-requires
           `react` at runtime (a second React instance beside the bundled one
           the SSR renderer drives) → "Invalid hook call" → the whole route
-          degrades to the client-only shell. */}
-      {featureDialog !== null ? (
+          degrades to the client-only shell. (The bundler-level cure has
+          since landed: vite.config.ts aliases the shim subpaths onto the
+          single bundled React, so a stray server-mounted Root no longer
+          explodes — the discipline stands regardless: a closed dialog has
+          nothing to render server-side.) */}
+      {featureDialog !== null && topologyPickDialog === null ? (
         <Dialog
           onOpenChange={(open) => {
             if (!open) {
@@ -2915,13 +3315,19 @@ export function CompleteCadWorkbench({
                                                       : featureDialog ===
                                                           "moveBody"
                                                         ? CAD_FEATURE_FORM_LABELS.moveBodyTitle
-                                                        : featureDialog ===
-                                                            "duplicate"
-                                                          ? CAD_FEATURE_FORM_LABELS.duplicateTitle
+                                                        : isPrimitiveKind(
+                                                              featureDialog,
+                                                            )
+                                                          ? primitiveFormTitle(
+                                                              featureDialog,
+                                                            )
                                                           : featureDialog ===
-                                                              "curve"
-                                                            ? CURVE_FORM_LABELS.title
-                                                            : DATUM_FORM_LABELS.title}
+                                                              "duplicate"
+                                                            ? CAD_FEATURE_FORM_LABELS.duplicateTitle
+                                                            : featureDialog ===
+                                                                "curve"
+                                                              ? CURVE_FORM_LABELS.title
+                                                              : DATUM_FORM_LABELS.title}
               </DialogTitle>
             </DialogHeader>
             <p className="text-muted-foreground text-xs leading-snug">
@@ -2963,13 +3369,17 @@ export function CompleteCadWorkbench({
                                                   ? CAD_FEATURE_FORM_LABELS.booleanHint
                                                   : featureDialog === "moveBody"
                                                     ? CAD_FEATURE_FORM_LABELS.moveBodyHint
-                                                    : featureDialog ===
-                                                        "duplicate"
-                                                      ? CAD_FEATURE_FORM_LABELS.duplicateHint
+                                                    : isPrimitiveKind(
+                                                          featureDialog,
+                                                        )
+                                                      ? CAD_FEATURE_FORM_LABELS.primitiveHint
                                                       : featureDialog ===
-                                                          "curve"
-                                                        ? CURVE_FORM_LABELS.hint
-                                                        : DATUM_FORM_LABELS.hint}
+                                                          "duplicate"
+                                                        ? CAD_FEATURE_FORM_LABELS.duplicateHint
+                                                        : featureDialog ===
+                                                            "curve"
+                                                          ? CURVE_FORM_LABELS.hint
+                                                          : DATUM_FORM_LABELS.hint}
             </p>
             {featureDialog === "surface-create" ? (
               <CreateSheetForm
@@ -3073,6 +3483,12 @@ export function CompleteCadWorkbench({
               />
             ) : featureDialog === "moveBody" ? (
               <MoveBodyFeatureForm onMoveBody={submitMoveBody} />
+            ) : isPrimitiveKind(featureDialog) ? (
+              <PrimitiveFeatureForm
+                key={featureDialog}
+                kind={featureDialog}
+                onPrimitive={submitPrimitive}
+              />
             ) : featureDialog === "duplicate" ? (
               <DuplicateFeatureForm
                 bodies={duplicateBodies}

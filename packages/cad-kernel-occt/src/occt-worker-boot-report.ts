@@ -6,9 +6,10 @@
  *
  * The message carries the worker's own measurements and nothing else: the
  * OpenCascade initialization time (module evaluation → WASM runtime ready)
- * and the bundler-pinned URL of the WASM asset the worker fetched — the
+ * and the URL of the WASM asset the worker booted from (the version-pinned
+ * CDN URL, or the bundler-pinned spare when the CDN fetch failed) — the
  * main thread never imports the binding, so the worker is the only side
- * that knows the asset's hashed URL. It has no protocol shape: every
+ * that knows which asset served it. It has no protocol shape: every
  * protocol endpoint's parse boundary drops it, so it can never be
  * mis-correlated with a request.
  */
@@ -20,14 +21,14 @@ function isPlainRecord(input: unknown): input is Record<string, unknown> {
 /** Message key of the boot report: maps to the init time in milliseconds. */
 export const OCCT_WORKER_BOOT_REPORT_KEY = "slopcadOcctWorkerBootMs";
 
-/** Message key of the boot report: maps to the pinned WASM asset URL. */
+/** Message key of the boot report: maps to the booted WASM asset URL. */
 export const OCCT_WORKER_BOOT_WASM_URL_KEY = "slopcadOcctWorkerWasmUrl";
 
 /** What the boot report carries. */
 export interface OcctWorkerBootReport {
   /** The worker's own init measurement (module evaluation → runtime ready). */
   readonly bootMs: number;
-  /** The bundler-emitted URL of the ~22 MB WASM asset the worker fetched. */
+  /** The URL of the ~22 MB WASM asset the worker booted from. */
   readonly wasmUrl: string;
 }
 

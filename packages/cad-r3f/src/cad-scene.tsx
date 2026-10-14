@@ -72,7 +72,7 @@ import {
   useState,
 } from "react";
 import * as THREE from "three";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import {
   selectionReferenceKey,
   type RenderCamera,
@@ -303,6 +303,15 @@ export interface CadSceneProps {
    * chain, opt-in and unpinned — see `render-quality.ts`).
    */
   readonly renderQuality?: CadRenderQuality;
+  /**
+   * The field overlay slot (Phase 62b): arbitrary canvas children — the
+   * `field-overlays.tsx` family mounted INTO this scene, after the model.
+   * Absent (the default) renders nothing extra, so every pinned baseline
+   * is byte-identical to the pre-slot scene; overlays themselves follow
+   * the demand-render law (they invalidate on their own data changes and
+   * never run a frame loop).
+   */
+  readonly children?: ReactNode;
 }
 
 /**
@@ -434,7 +443,10 @@ function SceneModel({
  * priority > 0, so the composer IS the frame while quality mode is on).
  * Everything is fixed constants — same state, same bytes, run over run —
  * and the default path never mounts this component, so the pinned
- * boot raster is untouched (the opt-in/unpinned discipline).
+ * boot raster is untouched (the opt-in/unpinned discipline). The built
+ * chain is tracked and disposed whenever it is replaced (the memo rebuilds
+ * on a resize or a camera-kind swap) and on unmount (the quality toggle) —
+ * see the disposal effect below.
  */
 function QualityPostProcessor(): null {
   const gl = useThree((state) => state.gl);
@@ -455,23 +467,39 @@ function QualityPostProcessor(): null {
       invalidate();
     };
   }, [gl, invalidate]);
-  const composer = useMemo(() => {
+  // The built chain, tracked as a unit (composer + its SSAO pass) so every
+  // teardown path can release both. Keyed on size and camera identity: a
+  // resize or a camera-kind swap REPLACES the chain, unmount (quality
+  // toggled off) DROPS it.
+  const chain = useMemo(() => {
     if (gl === undefined) return null;
-    const chain = new EffectComposer(gl);
-    chain.addPass(new RenderPass(scene, camera));
+    const composer = new EffectComposer(gl);
+    composer.addPass(new RenderPass(scene, camera));
     const ssao = new SSAOPass(scene, camera, size.width, size.height);
     ssao.kernelRadius = CAD_QUALITY_SSAO_KERNEL_RADIUS_MM;
     ssao.minDistance = CAD_QUALITY_SSAO_MIN_DISTANCE_MM;
     ssao.maxDistance = CAD_QUALITY_SSAO_MAX_DISTANCE_MM;
-    chain.addPass(ssao);
-    chain.addPass(new OutputPass());
-    return chain;
+    composer.addPass(ssao);
+    composer.addPass(new OutputPass());
+    return { composer, ssao };
   }, [camera, gl, scene, size.height, size.width]);
+  // Disposal (three@0.186 semantics): the composer's dispose frees its two
+  // ping-pong targets and the copy pass ONLY — the SSAO pass holds its own
+  // render targets and materials, released solely by its explicit dispose.
+  // The cleanup runs on unmount and whenever the memo rebuilt (the closure's
+  // `chain` is the replaced value), so no rebuild strands the old chain's
+  // GPU targets on the shared canvas context.
   useEffect(() => {
-    composer?.setSize(size.width, size.height);
-  }, [composer, size.height, size.width]);
+    return () => {
+      chain?.ssao.dispose();
+      chain?.composer.dispose();
+    };
+  }, [chain]);
+  useEffect(() => {
+    chain?.composer.setSize(size.width, size.height);
+  }, [chain, size.height, size.width]);
   useFrame(() => {
-    composer?.render();
+    chain?.composer.render();
   }, 1);
   return null;
 }
@@ -589,6 +617,7 @@ export function CadScene({
   cameraControls = false,
   clippingPlanes,
   cameraOrbitDragEnabled = true,
+  children,
   displayMode,
   lightRig = CAD_LIGHT_RIG_STUDIO,
   onCameraState,
@@ -715,6 +744,9 @@ export function CadScene({
         selection={selection}
         settle={settle}
       />
+      {/* The Phase 62b field overlay slot: absent renders nothing, so the
+          boot raster and every pinned baseline are unchanged. */}
+      {children}
       <SelectionProbe
         onSelectionRendered={onSelectionRendered}
         selection={selection}

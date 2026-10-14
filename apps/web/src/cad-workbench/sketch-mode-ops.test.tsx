@@ -207,3 +207,67 @@ describe("SketchMode Phase 37 — arrays and drag surfaces", () => {
     expect(JSON.parse(dimensions || "[]")).toEqual([]);
   });
 });
+
+describe("SketchMode extrude outcome channel (review)", () => {
+  /** Draws the self-selecting hexagon the extrude action resolves. */
+  function drawHexagon(): void {
+    fireEvent.click(toolButton("polygon"));
+    fireCanvasPick(0, 0);
+    fireCanvasPick(20, 0);
+  }
+
+  it("surfaces a refused host commit through the machine's extrude outcome", async () => {
+    render(
+      <SketchMode
+        onExtrude={() => ({
+          ok: false,
+          code: "document/id-conflict",
+          message: 'An entity with id "skd_extrude" already exists.',
+        })}
+        onExit={() => {}}
+      />,
+    );
+    drawHexagon();
+    const extrude = document.querySelector('[data-testid="sketch-extrude"]');
+    expect(extrude).not.toBeNull();
+    fireEvent.click(extrude ?? document.body);
+    // The host's refusal overwrites the provisional resolved stamp: the
+    // machine surface reports the failed commit with its structured code,
+    // and the status line carries the same refusal.
+    await waitFor(() => {
+      expect(root().getAttribute("data-sketch-extrude")).toContain(
+        '"status":"failed"',
+      );
+    });
+    const outcome = JSON.parse(
+      root().getAttribute("data-sketch-extrude") ?? "{}",
+    ) as { readonly status: string; readonly code?: string };
+    expect(outcome.status).toBe("failed");
+    expect(outcome.code).toBe("document/id-conflict");
+    expect(root().getAttribute("data-sketch-tool-status")).toContain(
+      "already exists",
+    );
+  });
+
+  it("keeps the resolved verdict when the host accepts the commit", () => {
+    render(<SketchMode onExtrude={() => ({ ok: true })} onExit={() => {}} />);
+    drawHexagon();
+    const extrude = document.querySelector('[data-testid="sketch-extrude"]');
+    expect(extrude).not.toBeNull();
+    fireEvent.click(extrude ?? document.body);
+    expect(root().getAttribute("data-sketch-extrude")).toBe(
+      JSON.stringify({ status: "resolved" }),
+    );
+  });
+
+  it("keeps the pre-outcome behavior for a void-returning host", () => {
+    mountSketchMode();
+    drawHexagon();
+    const extrude = document.querySelector('[data-testid="sketch-extrude"]');
+    expect(extrude).not.toBeNull();
+    fireEvent.click(extrude ?? document.body);
+    expect(root().getAttribute("data-sketch-extrude")).toBe(
+      JSON.stringify({ status: "resolved" }),
+    );
+  });
+});

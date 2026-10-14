@@ -1,0 +1,64 @@
+[
+  {
+    "formatVersion": 1,
+    "type": "parameter.create",
+    "id": "param_filletBoxWidth",
+    "name": "filletBoxWidth",
+    "value": {
+      "dimension": "length",
+      "unit": "mm",
+      "value": 20
+    }
+  },
+  {
+    "formatVersion": 1,
+    "type": "parameter.create",
+    "id": "param_box-depth",
+    "name": "boxDepth",
+    "value": {
+      "dimension": "length",
+      "unit": "mm",
+      "value": 20
+    }
+  },
+  {
+    "formatVersion": 1,
+    "type": "parameter.create",
+    "id": "param_box-height",
+    "name": "boxHeight",
+    "value": {
+      "dimension": "length",
+      "unit": "mm",
+      "value": 30
+    }
+  },
+  {
+    "formatVersion": 1,
+    "type": "body.create",
+    "id": "body_box",
+    "name": "box"
+  },
+  {
+    "formatVersion": 1,
+    "type": "feature.create",
+    "id": "feat_box",
+    "kind": "box",
+    "inputs": [
+      {
+        "kind": "parameter",
+        "id": "param_filletBoxWidth"
+      },
+      {
+        "kind": "parameter",
+        "id": "param_box-depth"
+      },
+      {
+        "kind": "parameter",
+        "id": "param_box-height"
+      }
+    ],
+    "outputs": [
+      "body_box"
+    ]
+  }
+]

@@ -1,0 +1,175 @@
+{
+  "formatVersion": 9,
+  "metadata": {
+    "generator": "@slopcad/cad-jsx"
+  },
+  "document": {
+    "formatVersion": 1,
+    "id": "doc_fillet-box",
+    "idGenerator": {
+      "document": 0,
+      "parameter": 0,
+      "feature": 0,
+      "body": 0,
+      "reference": 0
+    },
+    "parameters": {
+      "parameters": [
+        {
+          "id": "param_filletBoxWidth",
+          "name": "filletBoxWidth",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 20
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_box-depth",
+          "name": "boxDepth",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 20
+          },
+          "expression": null,
+          "metadata": {}
+        },
+        {
+          "id": "param_box-height",
+          "name": "boxHeight",
+          "value": {
+            "dimension": "length",
+            "unit": "mm",
+            "value": 30
+          },
+          "expression": null,
+          "metadata": {}
+        }
+      ]
+    },
+    "bodies": [
+      {
+        "id": "body_box",
+        "name": "box"
+      }
+    ],
+    "features": [
+      {
+        "id": "feat_box",
+        "kind": "box",
+        "inputs": [
+          {
+            "kind": "parameter",
+            "id": "param_filletBoxWidth"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_box-depth"
+          },
+          {
+            "kind": "parameter",
+            "id": "param_box-height"
+          }
+        ],
+        "outputs": [
+          "body_box"
+        ]
+      }
+    ]
+  },
+  "history": {
+    "base": {
+      "formatVersion": 1,
+      "id": "doc_fillet-box",
+      "idGenerator": {
+        "document": 0,
+        "parameter": 0,
+        "feature": 0,
+        "body": 0,
+        "reference": 0
+      },
+      "parameters": {
+        "parameters": []
+      },
+      "bodies": [],
+      "features": []
+    },
+    "transactions": [
+      {
+        "formatVersion": 1,
+        "commands": [
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_filletBoxWidth",
+            "name": "filletBoxWidth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 20
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_box-depth",
+            "name": "boxDepth",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 20
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "parameter.create",
+            "id": "param_box-height",
+            "name": "boxHeight",
+            "value": {
+              "dimension": "length",
+              "unit": "mm",
+              "value": 30
+            }
+          },
+          {
+            "formatVersion": 1,
+            "type": "body.create",
+            "id": "body_box",
+            "name": "box"
+          },
+          {
+            "formatVersion": 1,
+            "type": "feature.create",
+            "id": "feat_box",
+            "kind": "box",
+            "inputs": [
+              {
+                "kind": "parameter",
+                "id": "param_filletBoxWidth"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_box-depth"
+              },
+              {
+                "kind": "parameter",
+                "id": "param_box-height"
+              }
+            ],
+            "outputs": [
+              "body_box"
+            ]
+          }
+        ]
+      }
+    ],
+    "cursor": 1
+  },
+  "regeneration": {
+    "formatVersion": 1,
+    "features": []
+  }
+}

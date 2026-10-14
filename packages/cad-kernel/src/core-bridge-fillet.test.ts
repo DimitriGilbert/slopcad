@@ -124,6 +124,35 @@ function fixtureView(
   };
 }
 
+/**
+ * `view` with every entity moved 5 mm along x — a vanished entity with no
+ * geometric repair candidate either (the Phase N3 fallback refuses).
+ */
+function movedView(view: TopologyView): TopologyView {
+  const shifted = (
+    point: readonly [number, number, number] | undefined,
+  ): readonly [number, number, number] | undefined =>
+    point === undefined ? undefined : [point[0] + 5, point[1], point[2]];
+  return {
+    ...view,
+    snapshotOf: (id) => {
+      const snapshot = view.snapshotOf(id);
+      if (snapshot === null) return null;
+      return {
+        ...snapshot,
+        entities: snapshot.entities.map((entity) => ({
+          ...entity,
+          geometry: {
+            ...entity.geometry,
+            centroidAbsoluteMm: shifted(entity.geometry.centroidAbsoluteMm),
+            centroidRelativeMm: shifted(entity.geometry.centroidRelativeMm),
+          },
+        })),
+      };
+    },
+  };
+}
+
 /** Builds the fillet document: box feature + reference record + fillet feature. */
 function buildFilletDocument(radiusMm: number): CadDocument {
   let document = createDocument(createDocumentId("doc_bridge_fillet"));
@@ -277,10 +306,11 @@ describe("bridge fillet: target + edge references + radius → kernel fillet", (
   });
 
   it("fails with a structured stale-reference diagnostic when the edge vanished", () => {
-    // A view whose snapshot carries a DIFFERENT hash: the minted identity
-    // died (the Phase 22 rebuild finding) → the reference stands missing →
+    // A view whose snapshot carries a DIFFERENT hash AND a moved entity:
+    // the minted identity died and no geometric repair candidate remains
+    // (Phase N3's fallback refuses) → the reference stands missing →
     // the fillet feature fails regeneration with the state named.
-    const stale = fixtureView(bBlock, 999999);
+    const stale = movedView(fixtureView(bBlock, 999999));
     const { states } = runFillet(buildFilletDocument(2), { view: stale });
     const status = states.get(fFillet);
     expect(status?.state).toBe("failed");
@@ -289,6 +319,18 @@ describe("bridge fillet: target + edge references + radius → kernel fillet", (
     expect(diagnostic?.severity).toBe("error");
     expect(JSON.stringify(diagnostic?.data ?? {})).toContain("missing");
     expect(diagnostic?.message).toContain("unresolved edge reference");
+    expect(diagnostic?.message).toContain("repair refused");
+    expect(diagnostic?.data).toMatchObject({ validityState: "missing" });
+    expect(diagnostic?.data).toHaveProperty("repairCode");
+  });
+
+  it("repairs a missing reference onto its unmoved edge before refusing (Phase N3)", () => {
+    // The identity died (a different hash) but the edge did not move: the
+    // bounded geometric repair re-anchors it and the fillet regenerates.
+    const { states } = runFillet(buildFilletDocument(2), {
+      view: fixtureView(bBlock, 999999),
+    });
+    expect(states.get(fFillet)?.state).toBe("valid");
   });
 
   it("fails structured on a transient-topology view (the non-persistent kernel stance)", () => {

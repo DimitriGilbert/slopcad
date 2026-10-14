@@ -9,6 +9,7 @@ import {
   type DatumVec3,
   type FeatureRecord,
   type ParseFailure,
+  type RenderObject,
   type RenderProjection,
   groupSyntheticFaces,
   syntheticFaceAnchor,
@@ -33,6 +34,17 @@ export interface SessionFaceReference {
    * face when the body moves.
    */
   readonly faceNormal: readonly [number, number, number];
+  /**
+   * Present exactly on COMPUTED-body references (a boolean, hole, pad, or
+   * moved body — a body whose plane source is its computed solid): the
+   * picked face's same-normal ordinal. The computed resolution filters the
+   * body's analytic face planes to those whose normal aligns with
+   * `faceNormal` and anchors to the face at this position — see the
+   * ordinal contract on {@link computedFacePlanesOfObject}. A plain
+   * extrusion's reference omits it: the two-cap path keys on the normal
+   * alone, exactly as it always has.
+   */
+  readonly faceOrdinal?: number;
 }
 
 /** Structured failures of the session datum resolver. */
@@ -117,6 +129,15 @@ interface CapPlane {
 }
 
 /**
+ * The face-normal alignment the datum reference's `faceNormal` must clear
+ * against a candidate plane's normal to count as the SAME face (both dot
+ * comparisons in the resolver — the extrude caps' and the computed faces'
+ * — share this one threshold; ~60°, generous to tessellation noise,
+ * strict enough to separate perpendicular faces).
+ */
+const FACE_NORMAL_ALIGNMENT_DOT = 0.5;
+
+/**
  * Derives the two cap planes of the body's producing extrude feature from
  * the driving sketch's workplane and the signed distance parameter.
  * `null` when the body has no producing extrude, the sketch no longer
@@ -183,14 +204,112 @@ function extrudeCapPlanesOfBody(
 }
 
 /**
+ * One analytic face plane of a computed body's settled mesh: a point on
+ * the face (the synthetic face's anchor — the largest triangle's centroid,
+ * strictly on the plane) and the face's unit mean normal.
+ */
+export interface ComputedFacePlane {
+  readonly origin: DatumVec3;
+  readonly normal: DatumVec3;
+}
+
+/**
+ * The computed-face source the datum resolution consults for COMPUTED
+ * bodies (a boolean, hole, pad, or moved body — a body whose geometry
+ * exists only as the scene pass's composition): per body id, the body's
+ * analytic face planes in synthetic-face ordinal order. The engine derives
+ * it from the applied projection — the settled scene ONE worker dispatch
+ * produced, cached until the next settle (the same staleness handling the
+ * pick itself rides). Scoping is the caller's contract: only
+ * COMPUTED-classified bodies (`sceneOperandOfBody`) belong in the source,
+ * so a plain extrusion's resolution can never take the computed path.
+ */
+export interface ComputedFaceSource {
+  readonly planesOf: (
+    bodyId: string,
+  ) => readonly ComputedFacePlane[] | undefined;
+}
+
+/**
+ * Derives a computed body's analytic face planes from its settled render
+ * object: the object's synthetic faces (the SAME grouping the picker
+ * addresses — face ordinals are the grouping's documented first-triangle
+ * order), each contributing a plane exactly when it has a single mean
+ * normal (a planar face). Curved faces (a bore wall) and degenerate faces
+ * contribute nothing — a reference anchored on them has no candidate at
+ * any ordinal and refuses, never a guessed plane.
+ *
+ * ## The ordinal contract for computed bodies
+ *
+ * Mirroring the extrude-cap path (caps ordered [front, back] by the
+ * document derivation; the recorded `faceNormal` picks the cap it aligns
+ * with): the candidate list is the body's planar synthetic faces IN
+ * SYNTHETIC-FACE ORDINAL ORDER, the datum's `faceOrdinal` is the picked
+ * face's position among the faces whose mean normal aligns with the
+ * recorded `faceNormal` (dot > {@link FACE_NORMAL_ALIGNMENT_DOT}), and
+ * resolution re-derives the list from the body's CURRENT computed mesh and
+ * indexes it by the recorded ordinal. Ordinal 0 is the first aligned face
+ * — exactly the face the cap path's first-match would pick when only one
+ * candidate exists. The ordinal is a pure function of (mesh, picked face):
+ * no Date, no random, no scene state beyond the mesh itself.
+ */
+export function computedFacePlanesOfObject(
+  object: RenderObject,
+): readonly ComputedFacePlane[] {
+  const grouping = groupSyntheticFaces(object);
+  const planes: ComputedFacePlane[] = [];
+  for (const face of grouping.faces) {
+    const meanNormal = syntheticFaceMeanNormal(object, grouping, face.index);
+    if (meanNormal === null) continue;
+    const anchor = syntheticFaceAnchor(object, grouping, face.index);
+    planes.push({
+      origin: [anchor[0], anchor[1], anchor[2]],
+      normal: [meanNormal[0], meanNormal[1], meanNormal[2]],
+    });
+  }
+  return planes;
+}
+
+/**
+ * The picked face's same-normal ordinal within one render object (the
+ * pick-time half of the ordinal contract above): the position of
+ * `faceIndex` among the object's synthetic faces whose mean normal aligns
+ * with the picked face's own. `null` when the face has no single normal
+ * (curved — the caller refuses before this matters) or the index is
+ * outside the grouping (the object and the selection disagree).
+ */
+export function computedFaceOrdinalOfObject(
+  object: RenderObject,
+  faceIndex: number,
+): number | null {
+  const grouping = groupSyntheticFaces(object);
+  const face = grouping.faces[faceIndex];
+  if (face === undefined || face.index !== faceIndex) return null;
+  const pickedNormal = syntheticFaceMeanNormal(object, grouping, faceIndex);
+  if (pickedNormal === null) return null;
+  let ordinal = 0;
+  for (const candidate of grouping.faces) {
+    if (candidate.index >= faceIndex) break;
+    const normal = syntheticFaceMeanNormal(object, grouping, candidate.index);
+    if (normal === null) continue;
+    if (dot(normal, pickedNormal) > FACE_NORMAL_ALIGNMENT_DOT) ordinal += 1;
+  }
+  return ordinal;
+}
+
+/**
  * The session datum resolver: explicit datum definitions resolve through
- * cad-core's own math; `sessionFace` references resolve analytically
- * against the referenced body's extrude caps (see the module docs). The
- * payload's `faceNormal` picks the cap; cad-core's datum resolution then
- * aligns the frame to the definition's recorded normal.
+ * cad-core's own math; `sessionFace` references resolve analytically —
+ * through the computed-face source when the reference names a body the
+ * source carries (a computed body: its planes ARE the truth the scene
+ * pass settled), otherwise against the referenced body's extrude caps (see
+ * the module docs). The payload's `faceNormal` (and, for computed bodies,
+ * `faceOrdinal`) picks the face; cad-core's datum resolution then aligns
+ * the frame to the definition's recorded normal.
  */
 export function sessionDatumResolverOf(
   document: CadDocument,
+  computedFaces?: ComputedFaceSource,
 ): DatumTopologyResolver {
   return {
     facePlane: (reference) => {
@@ -207,15 +326,20 @@ export function sessionDatumResolverOf(
       }
       const bodyId = (reference as { bodyId?: unknown }).bodyId;
       const faceNormal = (reference as { faceNormal?: unknown }).faceNormal;
+      const faceOrdinal = (reference as { faceOrdinal?: unknown }).faceOrdinal;
       if (
         typeof bodyId !== "string" ||
         !Array.isArray(faceNormal) ||
         faceNormal.length !== 3 ||
-        faceNormal.some((c) => typeof c !== "number" || !Number.isFinite(c))
+        faceNormal.some((c) => typeof c !== "number" || !Number.isFinite(c)) ||
+        (faceOrdinal !== undefined &&
+          (typeof faceOrdinal !== "number" ||
+            !Number.isSafeInteger(faceOrdinal) ||
+            faceOrdinal < 0))
       ) {
         return sessionFailure(
           SESSION_DATUM_ERROR_CODES.referenceInvalid,
-          "A session datum face reference must name its body id and the picked face normal.",
+          "A session datum face reference must name its body id and the picked face normal (a computed body adds its non-negative same-normal ordinal).",
           reference,
         );
       }
@@ -224,6 +348,48 @@ export function sessionDatumResolverOf(
         faceNormal[1] as number,
         faceNormal[2] as number,
       ];
+      // The computed path first — but only for a body the source carries
+      // (the source is scoped to computed-classified bodies, so a plain
+      // extrusion's resolution always falls through to the caps below,
+      // byte-identical). A body the source does not carry — no settled
+      // scene for it, or the caller supplied no source — refuses below
+      // exactly as before.
+      if (computedFaces !== undefined) {
+        const planes = computedFaces.planesOf(bodyId);
+        if (planes !== undefined) {
+          const candidates = planes.filter(
+            (plane) =>
+              dot(plane.normal, pickedNormal) > FACE_NORMAL_ALIGNMENT_DOT,
+          );
+          const ordinal = faceOrdinal ?? 0;
+          const picked = candidates[ordinal];
+          if (picked === undefined) {
+            return sessionFailure(
+              SESSION_DATUM_ERROR_CODES.faceNotResolvable,
+              candidates.length === 0
+                ? `Body "${bodyId}"'s computed scene has no planar face matching the picked face normal; the driving face changed or was curved, and the datum refuses to guess.`
+                : `Body "${bodyId}"'s computed scene has ${String(candidates.length)} face(s) matching the picked normal but none at same-normal ordinal ${String(ordinal)}; the computed topology changed, and the datum refuses to guess.`,
+              reference,
+            );
+          }
+          const normal = unit(picked.normal);
+          if (normal === null) {
+            return sessionFailure(
+              SESSION_DATUM_ERROR_CODES.faceNotResolvable,
+              `Body "${bodyId}"'s computed face has a degenerate normal; the datum plane cannot resolve.`,
+              reference,
+            );
+          }
+          return {
+            ok: true,
+            value: {
+              origin: picked.origin,
+              normal,
+              xAxis: inPlaneXAxisOf(normal),
+            },
+          };
+        }
+      }
       const caps = extrudeCapPlanesOfBody(document, bodyId);
       if (caps === null) {
         return sessionFailure(
@@ -232,7 +398,9 @@ export function sessionDatumResolverOf(
           reference,
         );
       }
-      const picked = caps.find((cap) => dot(cap.normal, pickedNormal) > 0.5);
+      const picked = caps.find(
+        (cap) => dot(cap.normal, pickedNormal) > FACE_NORMAL_ALIGNMENT_DOT,
+      );
       if (picked === undefined) {
         return sessionFailure(
           SESSION_DATUM_ERROR_CODES.faceNotResolvable,
@@ -276,10 +444,14 @@ export function sessionDatumResolverOf(
  * Resolves a datum plane record into the session's plane geometry
  * (origin, unit normal, in-plane unit x axis). Every failure — unknown
  * record, unparseable payload, unresolvable reference — is structured.
+ * The optional computed-face source activates the computed-body
+ * resolution path (see {@link sessionDatumResolverOf}); callers without a
+ * settled scene omit it and computed references refuse, as always.
  */
 export function resolveSessionDatumPlane(
   document: CadDocument,
   datumId: string,
+  computedFaces?: ComputedFaceSource,
 ):
   | {
       readonly ok: true;
@@ -327,7 +499,7 @@ export function resolveSessionDatumPlane(
   }
   const resolved = resolveDatumPayload(
     payload.value,
-    sessionDatumResolverOf(document),
+    sessionDatumResolverOf(document, computedFaces),
   );
   if (!resolved.ok) {
     // The resolver's own structured failure propagates verbatim — the
@@ -498,10 +670,17 @@ export function sceneFacePickOfSelection(
  * The kernel placement of a session datum plane — the same conversion the
  * sketch domain applies to its own workplanes, applied to the datum's
  * re-resolved frame. This is what lets an extrude feature whose inputs
- * name a datum follow the datum when the driving face moves.
+ * name a datum follow the datum when the driving face moves. The optional
+ * computed-face source threads through to the plane resolution (a datum
+ * anchored on a computed body re-resolves against the body's settled
+ * scene — see {@link resolveSessionDatumPlane}).
  */
-export function sessionDatumPlacement(document: CadDocument, datumId: string) {
-  const plane = resolveSessionDatumPlane(document, datumId);
+export function sessionDatumPlacement(
+  document: CadDocument,
+  datumId: string,
+  computedFaces?: ComputedFaceSource,
+) {
+  const plane = resolveSessionDatumPlane(document, datumId, computedFaces);
   if (!plane.ok) return plane;
   return {
     ok: true as const,
