@@ -31,7 +31,14 @@ import { CadProvider } from "@slopcad/cad-react";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 import { Button } from "@slopcad/ui/components/button";
-import { Download, Link2, Loader2 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@slopcad/ui/components/dropdown-menu";
+import { ChevronDown, Download, Link2, Loader2 } from "lucide-react";
+import type { NativeShareVariant } from "../cad-projects/native-document-bridge";
 import type { ViewerDocumentSummary } from "./viewer-document";
 
 import {
@@ -39,6 +46,8 @@ import {
   decodeNativeFromShare,
   encodeNativeForShare,
   SHARE_FORMAT_NOTE,
+  SHARE_VARIANTS,
+  SHARE_VARIANT_ORDER,
 } from "./share-codec";
 import {
   assembleStandaloneHtml,
@@ -195,32 +204,37 @@ function ViewerBody({
   }, [adoptText, injectedNativeText]);
 
   // -- Share link -----------------------------------------------------------
-  const handleCopyShare = useCallback((): void => {
-    setAction({ kind: "busy", message: "encoding share link…" });
-    const payload = encodeNativeForShare(currentNativeText())
-      .then((encoded) =>
-        navigator.clipboard.writeText(
-          `${window.location.origin}${buildSharePath(encoded)}`,
-        ),
-      )
-      .then(
-        () => ({ ok: true as const }),
-        (error: unknown) => ({
-          ok: false as const,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    void payload.then((outcome) => {
-      setAction(
-        outcome.ok
-          ? {
-              kind: "done",
-              message: "share link copied — the part rides in the URL",
-            }
-          : { kind: "error", message: `share link failed: ${outcome.message}` },
-      );
-    });
-  }, [currentNativeText]);
+  const handleCopyShare = useCallback(
+    (shareVariant: NativeShareVariant): void => {
+      setAction({ kind: "busy", message: "encoding share link…" });
+      const payload = encodeNativeForShare(currentNativeText(shareVariant))
+        .then((encoded) => {
+          const url = `${window.location.origin}${buildSharePath(encoded)}`;
+          return navigator.clipboard.writeText(url).then(() => url);
+        })
+        .then(
+          (url) => ({ ok: true as const, url }),
+          (error: unknown) => ({
+            ok: false as const,
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      void payload.then((outcome) => {
+        setAction(
+          outcome.ok
+            ? {
+                kind: "done",
+                message: `share link copied — ${SHARE_VARIANTS[shareVariant].note} · ${String(outcome.url.length)} chars`,
+              }
+            : {
+                kind: "error",
+                message: `share link failed: ${outcome.message}`,
+              },
+        );
+      });
+    },
+    [currentNativeText],
+  );
 
   // -- Standalone HTML export ------------------------------------------------
   const handleExport = useCallback((): void => {
@@ -297,16 +311,51 @@ function ViewerBody({
         </span>
         {variant === "page" && !embed ? (
           <>
-            <Button
-              data-testid="viewer-share"
-              disabled={!loaded || action?.kind === "busy"}
-              onClick={handleCopyShare}
-              size="xs"
-              variant="outline"
-            >
-              <Link2 data-icon="inline-start" />
-              Copy share link
-            </Button>
+            <div className="flex items-center">
+              <Button
+                className="rounded-r-none border-r-0"
+                data-testid="viewer-share"
+                disabled={!loaded || action?.kind === "busy"}
+                onClick={() => handleCopyShare("lean")}
+                size="xs"
+                variant="outline"
+              >
+                <Link2 data-icon="inline-start" />
+                Copy share link
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      aria-label="Choose share link format"
+                      className="rounded-l-none px-1"
+                      data-testid="viewer-share-variant"
+                      disabled={!loaded || action?.kind === "busy"}
+                      size="xs"
+                      variant="outline"
+                    />
+                  }
+                >
+                  <ChevronDown className="size-3" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-64">
+                  {SHARE_VARIANT_ORDER.map((shareVariant) => (
+                    <DropdownMenuItem
+                      data-testid={`viewer-share-variant-${shareVariant}`}
+                      key={shareVariant}
+                      onClick={() => handleCopyShare(shareVariant)}
+                    >
+                      <div className="flex flex-col">
+                        <span>{SHARE_VARIANTS[shareVariant].label}</span>
+                        <span className="text-muted-foreground text-[11px]">
+                          {SHARE_VARIANTS[shareVariant].hint}
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             <Button
               data-testid="viewer-export"
               disabled={!loaded || action?.kind === "busy"}

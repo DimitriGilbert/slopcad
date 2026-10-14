@@ -45,7 +45,10 @@ import {
 } from "@slopcad/cad-react";
 import type { SectionDisplayRequest } from "../render-fixture/plate-render-scene";
 
-import { serializeSessionToNativeText } from "../cad-projects/native-document-bridge";
+import {
+  serializeSessionToNativeText,
+  type NativeShareVariant,
+} from "../cad-projects/native-document-bridge";
 import {
   documentSceneBodies,
   renderableBodyIds,
@@ -136,7 +139,7 @@ export interface ViewerEngine {
    * share link encodes and the standalone export embeds. Edits made in
    * the viewer are part of it.
    */
-  readonly currentNativeText: () => string;
+  readonly currentNativeText: (variant?: NativeShareVariant) => string;
   /**
    * Counts one settled projection frame and stamps the scene's settle
    * volume into the root (`null` counts only — a frame that does not
@@ -210,7 +213,10 @@ export function useViewerEngine(
   );
 
   const currentNativeText = useCallback(
-    (): string =>
+    // The default stays the legacy file form: the standalone export embeds
+    // this text in a file it owns, where full fidelity matters and link
+    // size does not. The share paths pass their chosen variant.
+    (variant: NativeShareVariant = "legacy"): string =>
       serializeSessionToNativeText(
         store.getSession(),
         // The live states ride so a reopened share keeps its per-feature
@@ -223,6 +229,7 @@ export function useViewerEngine(
         {},
         null,
         NO_SUPPRESSED_FEATURES,
+        variant,
       ),
     [regenerationStates, rollback, store],
   );

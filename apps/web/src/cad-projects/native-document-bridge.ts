@@ -37,6 +37,17 @@ export type WorkbenchSceneKind =
   "empty" | "plate" | "extrude" | "primitive" | "revolve" | "hole";
 
 /**
+ * The native text's emission variants a share path can choose from (the
+ * save path always writes the legacy form). The variants change only the
+ * JSON presentation and the authoring history's presence — the format's
+ * parser accepts all three through the same replay, and the fragment
+ * grammar does not distinguish them (every variant rides `1d`/`1b`), so
+ * a link of any variant decodes on every page that can decode one of
+ * them.
+ */
+export type NativeShareVariant = "lean" | "compact" | "legacy";
+
+/**
  * Serializes a live session into the native format's canonical text,
  * together with the document-level fields the session does not carry:
  * the metadata record and the drawing envelope are passed through from
@@ -47,6 +58,18 @@ export type WorkbenchSceneKind =
  * survives the save. The format's serializer emits fixed key
  * order with sorted metadata, so the same session always persists to
  * identical bytes.
+ *
+ * The `variant` picks the emission form: `"legacy"` (the default, and
+ * the only form the save path writes) keeps the file encoding —
+ * two-space pretty JSON with a trailing newline and the full authoring
+ * history. `"compact"` emits the same value tree without the
+ * pretty-print whitespace (the parser is whitespace-blind). `"lean"`
+ * additionally collapses the history to the base-only form the format's
+ * own factory emits — the document is its own base, no transactions —
+ * because a viewer link's reader replays the part, not the authoring
+ * timeline. On a real part the lean link is roughly half the legacy
+ * link's length after deflate — the difference between a URL social
+ * platforms truncate and one they pass through.
  */
 export function serializeSessionToNativeText(
   session: CadSession,
@@ -55,17 +78,28 @@ export function serializeSessionToNativeText(
   metadata: Readonly<Record<string, ParameterMetadataValue>>,
   drawing: DrawingDocument | null,
   suppressedFeatures: ReadonlySet<FeatureId>,
+  variant: NativeShareVariant = "legacy",
 ): string {
   const native: NativeCadDocument = {
     document: session.document,
-    history: session.history,
+    // The lean variant's collapsed history must stay the factory's own
+    // shape (base = the current document, no entries): the parser replays
+    // the log over the base and refuses a state/log mismatch, and an
+    // empty replay of the document over itself is exactly what agrees.
+    history:
+      variant === "lean"
+        ? { base: session.document, entries: [], cursor: 0 }
+        : session.history,
     regeneration,
     metadata,
     rollback,
     suppressedFeatures,
     drawing,
   };
-  return stringifyNativeCadDocument(serializeNativeCadDocument(native));
+  const serialized = serializeNativeCadDocument(native);
+  return variant === "legacy"
+    ? stringifyNativeCadDocument(serialized)
+    : JSON.stringify(serialized);
 }
 
 /** The outcome of opening persisted text. */

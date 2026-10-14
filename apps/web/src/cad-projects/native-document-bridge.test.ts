@@ -26,6 +26,10 @@ import {
 } from "@slopcad/cad-core";
 
 import {
+  decodeNativeFromShare,
+  encodeNativeForShare,
+} from "../viewer/share-codec";
+import {
   type ParsedNativeSession,
   parseNativeTextToSession,
   sceneKindOfDocument,
@@ -332,5 +336,133 @@ describe("sceneKindOfDocument picks the reopen scene", () => {
       ),
     );
     expect(parsed.scene).toBe("primitive");
+  });
+});
+
+describe("the share variants: compact presentation, collapsed history", () => {
+  it("the lean variant collapses the history and round-trips through the parser", () => {
+    // The pad session carries one committed transaction; the lean form
+    // must drop it and still parse to the SAME document (the empty
+    // replay of the document over itself is the agreement the parser
+    // checks).
+    const parsed = parseOk(
+      parseNativeTextToSession(
+        serializeSessionToNativeText(
+          sessionWithPadFeature(),
+          new Map(),
+          null,
+          {},
+          null,
+          NO_SUPPRESSION,
+          "lean",
+        ),
+      ),
+    );
+    expect(parsed.document.features[0]?.id).toBe(PAD_FEATURE);
+    expect(parsed.session.history.entries).toHaveLength(0);
+  });
+
+  it("the lean collapse keeps the document-level authoring state (rollback, suppression)", () => {
+    // Those fields ride the envelope, not the history: a parked,
+    // suppressed timeline survives the collapse exactly as it survives
+    // a full save.
+    const parsed = parseOk(
+      parseNativeTextToSession(
+        serializeSessionToNativeText(
+          sessionWithPadFeature(),
+          new Map(),
+          { afterFeatureId: PAD_FEATURE },
+          {},
+          null,
+          new Set([PAD_FEATURE]),
+          "lean",
+        ),
+      ),
+    );
+    expect(parsed.rollback).toEqual({ afterFeatureId: PAD_FEATURE });
+    expect(parsed.suppressedFeatures).toEqual(new Set([PAD_FEATURE]));
+  });
+
+  it("the compact variant keeps the history and drops only the pretty-print", () => {
+    const saved = serializeSessionToNativeText(
+      sessionWithPadFeature(),
+      new Map(),
+      null,
+      {},
+      null,
+      NO_SUPPRESSION,
+      "compact",
+    );
+    expect(saved).not.toContain("\n");
+    const parsed = parseOk(parseNativeTextToSession(saved));
+    expect(parsed.session.history.entries).toHaveLength(1);
+    expect(parsed.document.features[0]?.id).toBe(PAD_FEATURE);
+  });
+
+  it("legacy is the default and the byte form every save writes", () => {
+    const session = sessionWithPadFeature();
+    const explicit = serializeSessionToNativeText(
+      session,
+      new Map(),
+      null,
+      {},
+      null,
+      NO_SUPPRESSION,
+      "legacy",
+    );
+    const defaulted = serializeSessionToNativeText(
+      session,
+      new Map(),
+      null,
+      {},
+      null,
+      NO_SUPPRESSION,
+    );
+    expect(explicit).toBe(defaulted);
+    // The file form is pretty JSON with a trailing newline.
+    expect(defaulted.endsWith("}\n")).toBe(true);
+    expect(defaulted).toContain("\n  ");
+  });
+
+  it("the sizes order legacy > compact > lean (the link-size story)", () => {
+    // A session with real history bulk: the pad commit plus a second
+    // feature commit, so the log the lean form drops is substantial.
+    const twoFeatures = sessionWithFeatureKinds(["extrude", "revolve"]);
+    const sizeOf = (variant: "lean" | "compact" | "legacy"): number =>
+      serializeSessionToNativeText(
+        twoFeatures,
+        new Map(),
+        null,
+        {},
+        null,
+        NO_SUPPRESSION,
+        variant,
+      ).length;
+    expect(sizeOf("legacy")).toBeGreaterThan(sizeOf("compact"));
+    expect(sizeOf("compact")).toBeGreaterThan(sizeOf("lean"));
+  });
+
+  it("a lean share round-trips through the fragment codec end to end", async () => {
+    const lean = serializeSessionToNativeText(
+      sessionWithPadFeature(),
+      new Map(),
+      null,
+      {},
+      null,
+      NO_SUPPRESSION,
+      "lean",
+    );
+    const payload = await encodeNativeForShare(lean);
+    // The fragment grammar does not distinguish variants: a lean link is
+    // an ordinary `1d` link.
+    expect(payload.startsWith("1d.")).toBe(true);
+    const decoded = await decodeNativeFromShare(payload);
+    expect(decoded.ok).toBe(true);
+    if (decoded.ok) {
+      expect(
+        parseOk(parseNativeTextToSession(decoded.text)).document.features[0]
+          ?.id,
+      ).toBe(PAD_FEATURE);
+    }
   });
 });

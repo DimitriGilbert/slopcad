@@ -29,7 +29,18 @@
  * output — so a crafted deflate bomb is refused by arithmetic and lands
  * in the structured error state, never an out-of-memory tab (see
  * {@link SHARE_PAYLOAD_MAX_CHARS} and {@link SHARE_INFLATE_MAX_BYTES}).
+ *
+ * The native text inside the fragment comes in three emission variants
+ * (see the persistence bridge's `NativeShareVariant`): the default lean
+ * form (compact JSON, collapsed history), the compact form (history
+ * kept), and the legacy file form (pretty JSON, history kept). The
+ * fragment grammar above does NOT distinguish them — all three ride the
+ * same `1d`/`1b` tags and decode on any page that knows the grammar, so
+ * links made before the variants existed keep working unchanged and
+ * links made in any variant are interchangeable.
  */
+
+import type { NativeShareVariant } from "../cad-projects/native-document-bridge";
 
 /** The fragment format version (bumped when the encoding ever changes). */
 const FORMAT_VERSION = "1";
@@ -42,7 +53,42 @@ const TAG_PLAIN = "b";
 
 /** What the UI tells the user about link size (honest limits, no surprises). */
 export const SHARE_FORMAT_NOTE =
-  "Share links carry the whole part in the URL (deflate-compressed, a few KB for a typical part). Very large documents can outgrow browser URL limits.";
+  "Share links carry the whole part in the URL (deflate-compressed; the default compact link omits the authoring history). Very large documents can outgrow browser URL limits.";
+
+/**
+ * The share picker's vocabulary: one entry per emission variant, keyed
+ * for a total lookup, with the label the menu shows and the note the
+ * copied feedback line names. The lean form is the default (first in
+ * {@link SHARE_VARIANT_ORDER}): a link's reader replays the part, not
+ * the authoring timeline, and the collapsed payload is roughly half the
+ * legacy size after deflate.
+ */
+export const SHARE_VARIANTS: Readonly<
+  Record<NativeShareVariant, { label: string; hint: string; note: string }>
+> = {
+  lean: {
+    label: "Compact link — no history",
+    hint: "the default; the smallest link",
+    note: "compact, no history",
+  },
+  compact: {
+    label: "Compact link — with history",
+    hint: "keeps the authoring timeline",
+    note: "compact, with history",
+  },
+  legacy: {
+    label: "Legacy format — pretty, with history",
+    hint: "byte-identical to pre-variant links",
+    note: "legacy, with history",
+  },
+};
+
+/** The menu's variant order: the default first. */
+export const SHARE_VARIANT_ORDER: readonly NativeShareVariant[] = [
+  "lean",
+  "compact",
+  "legacy",
+];
 
 /**
  * The longest base64 fragment body the decoder accepts: 8 MiB (2²³
