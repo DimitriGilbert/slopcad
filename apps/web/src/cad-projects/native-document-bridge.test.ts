@@ -20,6 +20,7 @@ import {
   createFeatureId,
   createSession,
   createSheetId,
+  undoSession,
   type CadSession,
   type DrawingDocument,
   type FeatureId,
@@ -440,6 +441,58 @@ describe("the share variants: compact presentation, collapsed history", () => {
       ).length;
     expect(sizeOf("legacy")).toBeGreaterThan(sizeOf("compact"));
     expect(sizeOf("compact")).toBeGreaterThan(sizeOf("lean"));
+  });
+
+  it("the lean collapse keeps the document a pending redo branch leaves behind", () => {
+    // The undo-then-share shape: the session's cursor sits before the
+    // log's end (a redo branch waits), so the document is NOT the replay
+    // of the full log. The lean form must carry exactly the post-undo
+    // document — the collapsed base agrees with it by construction,
+    // while a full save's replay agreement is what a future refactor
+    // could break here.
+    let session = sessionWithPadFeature();
+    session = requireOk(
+      applySessionTransaction(session, {
+        commands: [
+          {
+            type: "body.create",
+            id: createBodyId("body_extra"),
+            name: "extra",
+          },
+          {
+            type: "feature.create",
+            id: createFeatureId("feat_extra"),
+            kind: "box",
+            inputs: [],
+            outputs: [createBodyId("body_extra")],
+          },
+        ],
+      }),
+      "the second feature commit",
+    );
+    const undone = requireOk(undoSession(session), "the undo");
+    expect(undone.history.cursor).toBeLessThan(undone.history.entries.length);
+    const parsed = parseOk(
+      parseNativeTextToSession(
+        serializeSessionToNativeText(
+          undone,
+          new Map(),
+          null,
+          {},
+          null,
+          NO_SUPPRESSION,
+          "lean",
+        ),
+      ),
+    );
+    // The post-undo document survives; the redo branch does not ride.
+    expect(
+      parsed.document.features.some(
+        (feature) => feature.id === createFeatureId("feat_extra"),
+      ),
+    ).toBe(false);
+    expect(parsed.document.features[0]?.id).toBe(PAD_FEATURE);
+    expect(parsed.session.history.entries).toHaveLength(0);
   });
 
   it("a lean share round-trips through the fragment codec end to end", async () => {

@@ -10,8 +10,11 @@
  * link (compact JSON, collapsed history — the smallest fragment), and
  * the arrow opens the picker for the other emission variants (compact
  * with history, and the legacy file form byte-identical to pre-variant
- * links). Every variant rides the same fragment grammar, so any link
- * decodes on any page.
+ * links) plus the server link — the document uploaded behind a short
+ * public id (`/viewer?p=<id>`), for media that truncate long URLs.
+ * Every fragment variant rides the same grammar, so any link decodes on
+ * any page; the server link needs the shares API (and the signed-in
+ * session the workbench already guarantees).
  *
  * The control rides the composition's `statusBar` slot — laid into the
  * status row's free right end beside the default strip, NEVER as a
@@ -23,33 +26,38 @@
 
 import { useCallback, useState } from "react";
 import type { ReactElement } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { useCadStore } from "@slopcad/cad-react";
 import { Button } from "@slopcad/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@slopcad/ui/components/dropdown-menu";
-import { ChevronDown, Link2, Loader2 } from "lucide-react";
+import { DropdownMenuItem } from "@slopcad/ui/components/dropdown-menu";
+import { Link2, Loader2, Upload } from "lucide-react";
 import type { WorkbenchEngine } from "./workbench-engine";
 
 import {
   serializeSessionToNativeText,
   type NativeShareVariant,
 } from "../cad-projects/native-document-bridge";
+import { ShareVariantMenu } from "../viewer/share-variant-menu";
 import {
   buildSharePath,
   encodeNativeForShare,
   SHARE_VARIANTS,
-  SHARE_VARIANT_ORDER,
 } from "../viewer/share-codec";
+
+import { useTRPC } from "@/utils/trpc";
 
 /** One share action's honest feedback line. */
 interface ShareState {
   readonly kind: "busy" | "copied" | "error";
   readonly message: string;
 }
+
+/** The server share's menu label and copied feedback note. */
+const SERVER_LINK = {
+  label: "Server link — short id",
+  hint: "uploads the part; the smallest URL",
+  note: "server link, short id",
+} as const;
 
 /** The section: feedback line, then the split affordance — status-row height. */
 export function WorkbenchShareBar({
@@ -61,27 +69,44 @@ export function WorkbenchShareBar({
   >;
 }): ReactElement {
   const store = useCadStore("WorkbenchShareBar");
+  const trpc = useTRPC();
   const [state, setState] = useState<ShareState | null>(null);
 
-  const share = useCallback(
+  // The server link's upload: one mutation, its feedback folded into the
+  // bar's single state line (busy → copied/error) exactly like the
+  // fragment links.
+  const uploadShare = useMutation(
+    trpc.shares.create.mutationOptions({
+      onError: (error) => {
+        setState({ kind: "error", message: `share failed: ${error.message}` });
+      },
+    }),
+  );
+
+  /** The live session's native text in the given emission variant. */
+  const nativeText = useCallback(
+    (variant: NativeShareVariant): string =>
+      serializeSessionToNativeText(
+        store.getSession(),
+        engine.regenerationStates ?? new Map(),
+        engine.rollback,
+        // The share carries what the live session holds: the bare
+        // workbench boots from its authored document and never loads a
+        // file, so it persists neither metadata nor a drawing.
+        {},
+        null,
+        // The live suppressed set: a shared part keeps the suppressed
+        // timeline its sharer sees.
+        engine.suppressed,
+        variant,
+      ),
+    [engine, store],
+  );
+
+  const shareFragment = useCallback(
     (variant: NativeShareVariant): void => {
       setState({ kind: "busy", message: "encoding…" });
-      const encoded = encodeNativeForShare(
-        serializeSessionToNativeText(
-          store.getSession(),
-          engine.regenerationStates ?? new Map(),
-          engine.rollback,
-          // The share carries what the live session holds: the bare
-          // workbench boots from its authored document and never loads a
-          // file, so it persists neither metadata nor a drawing.
-          {},
-          null,
-          // The live suppressed set: a shared part keeps the suppressed
-          // timeline its sharer sees.
-          engine.suppressed,
-          variant,
-        ),
-      )
+      const encoded = encodeNativeForShare(nativeText(variant))
         .then((payload) => {
           const url = `${window.location.origin}${buildSharePath(payload)}`;
           return navigator.clipboard.writeText(url).then(() => url);
@@ -104,8 +129,45 @@ export function WorkbenchShareBar({
         );
       });
     },
-    [engine, store],
+    [nativeText],
   );
+
+  const shareServerLink = useCallback((): void => {
+    setState({ kind: "busy", message: "uploading the part…" });
+    uploadShare.mutate(
+      // The uploaded copy is the lean emission: the viewer replays the
+      // part, not the authoring timeline, and the row stays smallest.
+      { nativeContent: nativeText("lean") },
+      {
+        onSuccess: ({ id }) => {
+          const url = `${window.location.origin}/viewer?p=${id}`;
+          // The deferred funnel the fragment paths use: a missing
+          // clipboard API (insecure context) throws SYNCHRONOUSLY on the
+          // property access — swallowed here into the promise chain, not
+          // into TanStack's mutation observer as an unhandled rejection
+          // that wedges the busy line forever.
+          void Promise.resolve()
+            .then(() => navigator.clipboard.writeText(url))
+            .then(
+              () => {
+                setState({
+                  kind: "copied",
+                  message: `viewer link copied — ${SERVER_LINK.note} · ${String(url.length)} chars`,
+                });
+              },
+              (error: unknown) => {
+                setState({
+                  kind: "error",
+                  message: `share failed: ${error instanceof Error ? error.message : String(error)}`,
+                });
+              },
+            );
+        },
+      },
+    );
+  }, [nativeText, uploadShare]);
+
+  const busy = state?.kind === "busy" || uploadShare.isPending;
 
   return (
     <div
@@ -123,8 +185,8 @@ export function WorkbenchShareBar({
         <Button
           className="rounded-r-none border-r-0"
           data-testid="workbench-share-viewer"
-          disabled={state?.kind === "busy"}
-          onClick={() => share("lean")}
+          disabled={busy}
+          onClick={() => shareFragment("lean")}
           size="xs"
           variant="outline"
         >
@@ -135,38 +197,27 @@ export function WorkbenchShareBar({
           )}
           Share as viewer link
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                aria-label="Choose viewer link format"
-                className="rounded-l-none px-1"
-                data-testid="workbench-share-variant"
-                disabled={state?.kind === "busy"}
-                size="xs"
-                variant="outline"
-              />
-            }
+        <ShareVariantMenu
+          ariaLabel="Choose viewer link format"
+          disabled={busy}
+          onPick={shareFragment}
+          testidPrefix="workbench-share"
+        >
+          <DropdownMenuItem
+            data-testid="workbench-share-server"
+            onClick={shareServerLink}
           >
-            <ChevronDown className="size-3" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-64">
-            {SHARE_VARIANT_ORDER.map((variant) => (
-              <DropdownMenuItem
-                data-testid={`workbench-share-variant-${variant}`}
-                key={variant}
-                onClick={() => share(variant)}
-              >
-                <div className="flex flex-col">
-                  <span>{SHARE_VARIANTS[variant].label}</span>
-                  <span className="text-muted-foreground text-[11px]">
-                    {SHARE_VARIANTS[variant].hint}
-                  </span>
-                </div>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <div className="flex flex-col">
+              <span className="flex items-center gap-1">
+                <Upload className="size-3" />
+                {SERVER_LINK.label}
+              </span>
+              <span className="text-muted-foreground text-[11px]">
+                {SERVER_LINK.hint}
+              </span>
+            </div>
+          </DropdownMenuItem>
+        </ShareVariantMenu>
       </div>
     </div>
   );

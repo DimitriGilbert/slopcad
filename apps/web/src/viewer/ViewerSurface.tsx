@@ -31,23 +31,17 @@ import { CadProvider } from "@slopcad/cad-react";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 import { Button } from "@slopcad/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@slopcad/ui/components/dropdown-menu";
-import { ChevronDown, Download, Link2, Loader2 } from "lucide-react";
+import { Download, Link2, Loader2 } from "lucide-react";
 import type { NativeShareVariant } from "../cad-projects/native-document-bridge";
 import type { ViewerDocumentSummary } from "./viewer-document";
 
+import { ShareVariantMenu } from "./share-variant-menu";
 import {
   buildSharePath,
   decodeNativeFromShare,
   encodeNativeForShare,
   SHARE_FORMAT_NOTE,
   SHARE_VARIANTS,
-  SHARE_VARIANT_ORDER,
 } from "./share-codec";
 import {
   assembleStandaloneHtml,
@@ -55,6 +49,18 @@ import {
 } from "./standalone-html";
 import { STANDALONE_ASSETS } from "./standalone-assets";
 import { useViewerEngine, useViewerStore } from "./viewer-engine";
+
+/**
+ * The id-based server share's resolved state, as the ROUTE (which sits
+ * under the app's tRPC and query providers) hands it down. The surface
+ * itself stays provider-free: the standalone export mounts it in a
+ * `file://`-opened single HTML with no providers at all.
+ */
+export type ServerShareState =
+  | { readonly kind: "none" }
+  | { readonly kind: "pending" }
+  | { readonly kind: "error"; readonly message: string }
+  | { readonly kind: "text"; readonly text: string };
 
 /** Props of {@link ViewerSurface}. */
 export interface ViewerSurfaceProps {
@@ -80,6 +86,14 @@ export interface ViewerSurfaceProps {
   /** The injected document title (the standalone mount's). */
   readonly injectedTitle?: string | null;
   /**
+   * The id-based server share's resolved state (the route fetched
+   * `?p=<id>` through the shares API before mounting). `"none"` by
+   * default — the standalone mount fetches nothing. Adopted on mount
+   * when the URL carries no fragment; the self-contained fragment link
+   * wins when both are present.
+   */
+  readonly serverShare?: ServerShareState;
+  /**
    * The worker override (the standalone mount's inlined blob worker — a
    * stable, module-level factory: the engine boots exactly once). The
    * page mount omits it and boots the default fixture worker.
@@ -101,6 +115,16 @@ function downloadNameOf(title: string, extension: string): string {
 }
 
 /**
+ * The identity-stable `"none"` state (the standalone mount's default and
+ * the route's no-`?p=` arm): a module constant, so the adoption effect's
+ * dependency never churns on re-renders that change nothing.
+ */
+const NO_SERVER_SHARE_VALUE: ServerShareState = { kind: "none" };
+export const NO_SERVER_SHARE: Readonly<ServerShareState> = Object.freeze(
+  NO_SERVER_SHARE_VALUE,
+);
+
+/**
  * The store composition + provider shell: composed ONCE above the engine
  * body, exactly the workbench pages' structure.
  */
@@ -108,6 +132,7 @@ export function ViewerSurface({
   embed = false,
   injectedNativeText = null,
   injectedTitle = null,
+  serverShare = NO_SERVER_SHARE,
   variant,
   workerFactory,
 }: ViewerSurfaceProps): ReactElement {
@@ -118,6 +143,7 @@ export function ViewerSurface({
         embed={embed}
         injectedNativeText={injectedNativeText}
         injectedTitle={injectedTitle}
+        serverShare={serverShare}
         variant={variant}
         workerFactory={workerFactory}
       />
@@ -135,12 +161,14 @@ function ViewerBody({
   embed,
   injectedNativeText,
   injectedTitle,
+  serverShare,
   variant,
   workerFactory,
 }: {
   readonly embed: boolean;
   readonly injectedNativeText: string | null;
   readonly injectedTitle: string | null;
+  readonly serverShare: ServerShareState;
   readonly variant: "page" | "standalone";
   readonly workerFactory?: () => Worker;
 }): ReactElement {
@@ -181,9 +209,10 @@ function ViewerBody({
   );
 
   // The document source, resolved once per mount: the injected text wins
-  // (the standalone mount), else the URL fragment (the share link). A
-  // decode or parse failure lands in the empty state's error region —
-  // never a blank page.
+  // (the standalone mount), else the URL fragment (the share link), else
+  // the id-based server share the route already fetched. A decode or
+  // parse failure lands in the empty state's error region — never a
+  // blank page.
   useEffect(() => {
     if (adoptedRef.current) return;
     if (injectedNativeText !== null) {
@@ -191,17 +220,28 @@ function ViewerBody({
       return;
     }
     const hash = window.location.hash;
-    if (hash.length <= 1) return;
-    adoptedRef.current = true;
-    void decodeNativeFromShare(hash).then((result) => {
-      if (!result.ok) {
-        adoptedRef.current = false;
-        setLoadError(`share link: ${result.error}`);
-        return;
-      }
-      adoptText(result.text, "share link");
-    });
-  }, [adoptText, injectedNativeText]);
+    if (hash.length > 1) {
+      adoptedRef.current = true;
+      void decodeNativeFromShare(hash).then((result) => {
+        if (!result.ok) {
+          adoptedRef.current = false;
+          setLoadError(`share link: ${result.error}`);
+          return;
+        }
+        adoptText(result.text, "share link");
+      });
+      return;
+    }
+    if (serverShare.kind === "none" || serverShare.kind === "pending") {
+      return;
+    }
+    if (serverShare.kind === "error") {
+      adoptedRef.current = true;
+      setLoadError(`server share: ${serverShare.message}`);
+      return;
+    }
+    adoptText(serverShare.text, "server share");
+  }, [adoptText, injectedNativeText, serverShare]);
 
   // -- Share link -----------------------------------------------------------
   const handleCopyShare = useCallback(
@@ -323,38 +363,12 @@ function ViewerBody({
                 <Link2 data-icon="inline-start" />
                 Copy share link
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      aria-label="Choose share link format"
-                      className="rounded-l-none px-1"
-                      data-testid="viewer-share-variant"
-                      disabled={!loaded || action?.kind === "busy"}
-                      size="xs"
-                      variant="outline"
-                    />
-                  }
-                >
-                  <ChevronDown className="size-3" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-64">
-                  {SHARE_VARIANT_ORDER.map((shareVariant) => (
-                    <DropdownMenuItem
-                      data-testid={`viewer-share-variant-${shareVariant}`}
-                      key={shareVariant}
-                      onClick={() => handleCopyShare(shareVariant)}
-                    >
-                      <div className="flex flex-col">
-                        <span>{SHARE_VARIANTS[shareVariant].label}</span>
-                        <span className="text-muted-foreground text-[11px]">
-                          {SHARE_VARIANTS[shareVariant].hint}
-                        </span>
-                      </div>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ShareVariantMenu
+                ariaLabel="Choose share link format"
+                disabled={!loaded || action?.kind === "busy"}
+                onPick={handleCopyShare}
+                testidPrefix="viewer-share"
+              />
             </div>
             <Button
               data-testid="viewer-export"
@@ -426,6 +440,7 @@ function ViewerBody({
             />
           ) : (
             <ViewerEmptyState
+              busy={serverShare.kind === "pending"}
               error={loadError}
               onLoad={adoptText}
               variant={variant}
@@ -476,10 +491,13 @@ async function fetchText(url: string): Promise<string> {
  * refusal (bad link payload, unparsable paste) surfaces verbatim here.
  */
 function ViewerEmptyState({
+  busy,
   error,
   onLoad,
   variant,
 }: {
+  /** A `?p=` share fetch is in flight — the paste zone is not the story. */
+  readonly busy: boolean;
   readonly error: string | null;
   readonly onLoad: (text: string, source: string) => void;
   readonly variant: "page" | "standalone";
@@ -516,6 +534,14 @@ function ViewerEmptyState({
           The viewer draws a parametric part and lets anyone re-drive it: the
           variables on the right are live, the solid follows.
         </p>
+        {busy ? (
+          <p
+            className="text-muted-foreground mt-3 font-mono text-xs"
+            data-testid="viewer-share-fetching"
+          >
+            fetching the shared part…
+          </p>
+        ) : null}
         <label
           className="text-muted-foreground mt-5 block font-mono text-[10.5px] font-medium uppercase tracking-[0.08em]"
           htmlFor="viewer-paste"
