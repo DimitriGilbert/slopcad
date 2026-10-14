@@ -83,9 +83,11 @@ Branch: `document-feature-ops` (cut from `glm` @ `5f8256c`). PR against
 ---
 
 ## Phase 0: OCCT default + CDN wasm
+
 **Type**: Sequential. Commit after validation.
 
 **Requirements**:
+
 - OCCT becomes the workbench default backend (`CompleteWorkbenchPage`'s
   `backend` default / `/workbench-complete` route); fixtures that
   explicitly pin `backend="manifold"` keep it — established render
@@ -106,11 +108,13 @@ fixtures unchanged.
 ---
 
 ## Phase 1: Document scene producers
+
 **Type**: Sequential sub-phases + phase-wide validator, then commit.
 
 ### 1a: Primitives (`box`, `sphere`, `cylinder`, `cone`)
 
 **Requirements**:
+
 - `document*SceneRequest(s)` reader per established naming/style; every
   primitive feature produces a scene entry (every-feature producer, like
   extrude). Reuse core-bridge canonical layout — do not invent layouts.
@@ -136,6 +140,7 @@ reader, a `*.native.json` fixture containing `"kind": "box"`.
 ### 1b: Fillet, chamfer, shell
 
 **Requirements**:
+
 - Readers consuming the target's computed solid — admit through the
   computed-operand queue like booleans/patternTransform so chains order
   correctly (each op's output is the next op's target).
@@ -153,6 +158,7 @@ fallback.
 ### 1c: Face-ops + patternFace (`moveFace`, `deleteFace`, `replaceFace`, `patternFace`)
 
 **Requirements**:
+
 - Same admission model as 1b (computed-operand consumers).
 - Layouts per core-bridge ~6977: moveFace = target + face ref + axis +
   distance params; deleteFace = target + face ref + heal param;
@@ -174,20 +180,23 @@ fallback.
 ---
 
 ## Phase P: Park Phase 2 WIP
+
 **Type**: Sequential. No validator (no code change).
 
 - Commit this plan update on `document-feature-ops` first. Then commit the
   remaining uncommitted Phase 2 working tree to a side branch
   `document-feature-ops-p2-wip`, then return to `document-feature-ops` with a clean tree.
   Non-destructive (no stash/reset/clean). Phase 2 later reuses it (`git diff
-  document-feature-ops document-feature-ops-p2-wip`).
+document-feature-ops document-feature-ops-p2-wip`).
 
 ---
 
 ## Phase N1: History-based topological naming — core + primitives + extrude/revolve
+
 **Type**: Sequential. Commit after validation.
 
 **Requirements**:
+
 - New OCCT identity schema (e.g. `occt-name/1`): payload `data = { name }`, with
   `name` a deterministic string. It replaces the address hash as the identity a
   snapshot reports and a reference stores. The hash schema stays parseable, so
@@ -210,6 +219,7 @@ fallback.
   every name the same.
 
 **Tests** (OCCT-backed, `packages/cad-kernel-occt`):
+
 - An identical rebuild gives identical names.
 - A dimension change gives identical names.
 - A reference minted on build 1 resolves `valid` on build 2 through
@@ -228,6 +238,7 @@ because the identity schema changed is justified in the report.
 ---
 
 ## Phase N2: Carry names through topology-changing ops
+
 **Type**: Sequential sub-phases + phase-wide validator, then commit.
 
 Shared rule for every op: for each named input face, `Modified(face)` → same name.
@@ -240,17 +251,20 @@ output unnamed. References into unnamed output fall back to
 Every such op is listed in the occt-topology.ts module doc.
 
 ### N2a: Booleans, transforms, fillet, chamfer, shell
+
 - Fuse/Cut (the tool body's names come from its own feature), Transform (names
   preserved), MakeFillet (`<feature>/fillet/<edge name>`), MakeChamfer, MakeThickSolid
   (inner faces `<feature>/inner/<face name>`, removed faces deleted).
 
 ### N2b: Face-ops, patterns, remaining builders
+
 - moveFace/deleteFace/replaceFace, patternFace/patternFeature/patternTransform/mirror
   (instance index in the name), ThruSections/PipeShell (sweep/loft), Splitter
   (split), DraftAngle, thicken. Each one gets history-based names, or is marked
   unnamed and documented.
 
 **Tests per sub-phase** (OCCT-backed):
+
 - Chain `box → fillet(edge) → chamfer(edge of the fillet output)`: rebuild, then a
   box dimension edit. Every reference stays `valid` and the volumes match the
   analytic/probed values.
@@ -259,15 +273,18 @@ Every such op is listed in the occt-topology.ts module doc.
   geometric twins.
 
 ### Phase N2-wide validation
+
 - One validator reads all N2 code together: one naming helper shared by every op
   (no per-op copies), consistent suffix ordering, the unnamed-op list is complete.
 
 ---
 
 ## Phase N3: Wire name-based references end-to-end
+
 **Type**: Sequential. Commit after validation.
 
 **Requirements**:
+
 - Worker `resolveReferenceOrdinals` and the bridge's `resolveDocumentReference`
   sites resolve name-based references `valid` across `computeDocumentScene` passes.
   For a `missing` reference they try `repairTopologyReference` (unnamed-op
@@ -284,6 +301,7 @@ Phase 1 scene tests pass.
 ---
 
 ## Phase E: Make `test:session` runnable on this box
+
 **Type**: Sequential. No commit unless a real repo bug is found.
 
 - Diagnose why `pnpm --filter web run test:session` fails at webServer
@@ -295,9 +313,11 @@ Phase 1 scene tests pass.
 ---
 
 ## Phase 2: Agent plane (webmcp)
+
 **Type**: Sequential. Commit after validation.
 
 **Requirements**:
+
 - `cad_list_commands` verb vocabulary covers the new feature kinds with
   their canonical input layouts (so agents can author them via
   `cad_apply_commands`).
@@ -324,18 +344,22 @@ workbench-tools.test.tsx, core-bridge layouts.
 ---
 
 ## Phase 3: UI authoring
+
 **Type**: Sequential sub-phases + phase-wide validator, then commit.
 
 ### 3a: Primitive verbs + forms
+
 - Command-menu entries in complete-workbench.tsx (keyword + empty-state
   guidance pattern); feature forms for dimensions + placement.
 
 ### 3b: Fillet/chamfer/shell verbs + edge/face picking
+
 - Reuse the chain workbench's pick surface (name-based references after N3)
   — no new picking mechanism.
 - Forms: radius; distance(+angle); thickness + open-face selection.
 
 ### 3c: Face-op verbs + forms
+
 - moveFace (axis+distance), deleteFace (heal), replaceFace (datum plane).
 
 **Inputs**: complete-workbench.tsx (verb/keyword/form patterns),
@@ -349,9 +373,11 @@ renders (smoke via unit tests where the harness allows; e2e in Phase 4).
 ---
 
 ## Phase 4: e2e + fixtures
+
 **Type**: Sequential. Commit after validation.
 
 **Requirements**:
+
 - Manifest entries + session stages for every new command surface
   (s99 coverage gate).
 - One cad-jsx fixture exercising a primitive + fillet compiled to
@@ -364,6 +390,7 @@ packages/cad-jsx fixture conventions.
 
 **Validation**: `pnpm test:session` green incl. coverage gate.
 **Dependencies**: Phases 1–3, E.
+
 - Include one stage: fillet an edge, edit the box width, the fillet still renders.
 
 ---
