@@ -45,7 +45,11 @@ import {
   type TransactionError,
 } from "@slopcad/cad-core";
 
-import { setParameterCommand, setParameterExpressionCommand } from "./model";
+import {
+  clearParameterExpressionCommand,
+  setParameterCommand,
+  setParameterExpressionCommand,
+} from "./model";
 import { useCadStore } from "./provider";
 
 /** Structured failure of an expression-aware evaluation preview. */
@@ -128,7 +132,11 @@ export function useCadParameters(): CadParametersApi {
     id: ParameterId,
     value: AnyDimensionalValue,
   ): ParseResult<CadSession, TransactionError> =>
-    store.applyCommand(setParameterCommand(id, value));
+    store.applyCommand(
+      getParameter(collection, id)?.expression === null
+        ? clearParameterExpressionCommand(id, value)
+        : setParameterCommand(id, value),
+    );
 
   return {
     collection,

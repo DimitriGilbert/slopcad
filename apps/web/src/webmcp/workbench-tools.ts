@@ -90,6 +90,7 @@ import {
   type ViewAngleConvention,
 } from "@slopcad/cad-r3f";
 import {
+  clearParameterExpressionCommand,
   setParameterCommand,
   setParameterExpressionCommand,
   type CadStore,
@@ -741,10 +742,12 @@ export function createWorkbenchWebMcpTools(
         }
         let command: CadCommand;
         if (typeof input.value === "number") {
-          command = setParameterCommand(
-            input.id as ParameterId,
-            canonicalValue(parameter.value.dimension, input.value),
-          );
+          const value = canonicalValue(parameter.value.dimension, input.value);
+          // Literals use the clear form so dependent expressions re-derive.
+          command =
+            parameter.expression === null
+              ? clearParameterExpressionCommand(input.id as ParameterId, value)
+              : setParameterCommand(input.id as ParameterId, value);
         } else {
           const parsed = parseExpression(input.value);
           if (!parsed.ok) return refusalFromError(parsed.error);
