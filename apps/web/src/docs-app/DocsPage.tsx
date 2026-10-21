@@ -16,10 +16,12 @@ import {
   KERNEL_CAPABILITY_ROWS,
   runProjectionExample,
 } from "@slopcad/docs-examples";
-import { Badge } from "@slopcad/ui/components/badge";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
+import { Panel, PanelHeader } from "@slopcad/ui/components/cockpit/panel";
+import { Readout } from "@slopcad/ui/components/cockpit/property-row";
 
 import UserMenu from "../components/user-menu";
+import { PlateMark } from "../components/header";
 import { SchemePicker } from "../components/scheme-picker";
 import { ThemeToggle } from "../components/theme-toggle";
 import { FORMAT_ROWS } from "./format-history";
@@ -80,17 +82,21 @@ function Section({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <section id={id} className="border-t pt-10">
-      <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+    <section id={id} className="border-t border-rule pt-7">
+      <h2 className="label-section text-ink">{title}</h2>
       {lead !== undefined ? (
-        <p className="mt-2 max-w-prose text-sm leading-relaxed text-muted-foreground">
-          {lead}
-        </p>
+        <p className="mt-2 max-w-[72ch] text-body text-ink-dim">{lead}</p>
       ) : null}
-      <div className="mt-5">{children}</div>
+      <div className="mt-4">{children}</div>
     </section>
   );
 }
+
+/** A table cell's shared metrics: the manual is a reference, so rows are
+ * row-height, hairline-separated, and every value is tabular mono. */
+const TABLE_HEAD_CELL = "label-section px-2 py-1.5 text-left text-ink-faint";
+const TABLE_ROW =
+  "border-b border-rule/60 transition-colors duration-(--dur-state) last:border-b-0 hover:bg-well";
 
 /** The render-proof viewport: the projection example, rendered. */
 function RenderProofCard(): React.JSX.Element {
@@ -103,46 +109,39 @@ function RenderProofCard(): React.JSX.Element {
   }, []);
   const [settled, setSettled] = useState(false);
   return (
-    <article className="border-border bg-card/60 overflow-hidden rounded-lg border">
-      <header className="border-border bg-background/40 flex items-start justify-between gap-3 border-b px-4 py-3">
-        <div>
-          <h3 className="text-sm font-medium">
-            Render proof: the projected plate, live
-          </h3>
-          <p className="text-muted-foreground mt-0.5 font-mono text-[11px]">
-            packages/docs-examples/src/core/projection.ts → @slopcad/ui
-            CadViewport
-          </p>
-        </div>
-        <p
-          className="text-muted-foreground shrink-0 font-mono text-[11px]"
-          data-testid="docs-render-status"
-        >
-          {settled ? "settled" : "rendering…"}
-        </p>
-      </header>
-      <div className="p-4">
-        <div className="border-border/80 bg-background/50 rounded-lg border p-1">
-          <div className="overflow-hidden rounded-[6px]">
-            <CadViewport
-              projection={projection}
-              className="h-[320px] w-full"
-              onSettled={() => {
-                setSettled(true);
-              }}
-            />
-          </div>
-        </div>
-        <p className="text-muted-foreground mt-3 text-xs leading-relaxed">
-          The same kernel-neutral projection data the GLB exporter consumes,
-          drawn by the registry's own CAD viewport component: geometry, camera,
-          and lights from the deterministic scene, no host state.
-        </p>
-        <p className="sr-only" data-testid="docs-render-settled">
-          {settled ? "settled" : "pending"}
-        </p>
+    <Panel className="overflow-hidden">
+      <PanelHeader
+        title="Render proof: the projected plate, live"
+        titleAs="h3"
+        trailing={
+          <span data-testid="docs-render-status">
+            {settled ? "settled" : "rendering…"}
+          </span>
+        }
+      />
+      <p className="border-b border-rule bg-well/60 px-(--pad-panel) py-1 font-mono text-micro text-ink-faint">
+        packages/docs-examples/src/core/projection.ts → @slopcad/ui CadViewport
+      </p>
+      {/* The render sits on the viewport surface, flush to the panel — the
+          bed is a material, not a card inside a card. */}
+      <div className="bg-viewport">
+        <CadViewport
+          projection={projection}
+          className="h-[320px] w-full"
+          onSettled={() => {
+            setSettled(true);
+          }}
+        />
       </div>
-    </article>
+      <p className="border-t border-rule p-(--pad-panel) text-ui text-ink-dim">
+        The same kernel-neutral projection data the GLB exporter consumes, drawn
+        by the registry&apos;s own CAD viewport component: geometry, camera, and
+        lights from the deterministic scene, no host state.
+      </p>
+      <p className="sr-only" data-testid="docs-render-settled">
+        {settled ? "settled" : "pending"}
+      </p>
+    </Panel>
   );
 }
 
@@ -185,34 +184,35 @@ function TopicRail(): React.JSX.Element {
   return (
     <nav
       aria-label="Documentation topics"
-      className="hidden self-start pb-10 text-sm lg:sticky lg:top-6 lg:block"
+      className="hidden self-start pb-10 lg:sticky lg:top-(--gap-group) lg:block"
     >
-      <ol className="space-y-7" ref={rootRef}>
+      <ol className="space-y-5" ref={rootRef}>
         {DOCS_GROUPS.map((group) => {
           const groupActive = active === `group-${group.id}`;
           return (
             <li key={group.id}>
               <a
                 href={`#group-${group.id}`}
-                className={`block font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase transition-colors ${
-                  groupActive
-                    ? "text-primary"
-                    : "text-muted-foreground hover:text-foreground"
+                className={`label-section block transition-colors duration-(--dur-state) focus-instrument ${
+                  groupActive ? "text-ink" : "text-ink-faint hover:text-ink-dim"
                 }`}
               >
                 {group.title}
               </a>
-              <ul className="mt-2 space-y-0.5 border-l pl-3">
+              <ul className="mt-1.5 border-l border-rule pl-2.5">
                 {group.topics.map((topic) => {
                   const topicActive = active === `topic-${topic.id}`;
                   return (
                     <li key={topic.id}>
                       <a
                         href={`#topic-${topic.id}`}
-                        className={`-ml-px block border-l py-0.5 pl-3 text-[13px] transition-colors ${
+                        /* The rail's current entry is marked the way
+                           selection is marked everywhere: the signal edge
+                           and bright ink, never an accent-coloured label. */
+                        className={`-ml-px flex min-h-(--row-h) items-center border-l-2 pl-2.5 text-ui transition-colors duration-(--dur-state) focus-instrument ${
                           topicActive
-                            ? "border-primary text-primary"
-                            : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+                            ? "border-l-select-edge text-ink"
+                            : "border-l-transparent text-ink-dim hover:border-l-rule-strong hover:text-ink"
                         }`}
                       >
                         {topic.title}
@@ -236,71 +236,74 @@ export function DocsPage(): React.JSX.Element {
     [],
   );
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-border bg-background/90 sticky top-0 z-10 border-b backdrop-blur-sm">
-        <div className="mx-auto flex h-12 max-w-6xl items-center gap-6 px-6">
+    <div className="min-h-screen bg-chrome text-ink">
+      <header className="sticky top-0 z-10 border-b border-rule bg-chrome/95 backdrop-blur-sm">
+        <div className="mx-auto flex h-(--appbar-h) max-w-[1180px] items-center gap-(--gap-group) px-6">
           <Link
-            className="flex items-center gap-2 font-mono text-sm font-semibold tracking-tight"
+            className="flex items-center gap-2 focus-instrument"
             title="slopcad home"
             to="/"
           >
-            <span
-              aria-hidden="true"
-              className="border-primary/70 bg-primary/15 relative size-3 rounded-[3px] border"
-            >
-              <span className="border-primary absolute -top-[3px] -left-[3px] size-1.5 rounded-[2px] border" />
+            <PlateMark className="size-3 rounded-[3px]" />
+            <span className="font-display text-title font-semibold text-ink">
+              slopcad
             </span>
-            slopcad <span className="text-muted-foreground">/docs</span>
+            <span className="font-mono text-micro text-ink-faint">/docs</span>
           </Link>
-          <nav aria-label="Sections" className="hidden gap-1 sm:flex">
+          <nav
+            aria-label="Sections"
+            className="hidden gap-(--gap-tight) sm:flex"
+          >
             {SECTION_LINKS.map((link) => (
               <a
                 key={link.id}
                 href={`#${link.id}`}
-                className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm px-2.5 py-1 text-[13px] font-medium transition-colors"
+                className="flex h-(--tool-h) items-center rounded-sm px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) hover:bg-well hover:text-ink focus-instrument"
               >
                 {link.label}
               </a>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-(--gap)">
             <SchemePicker />
             <ThemeToggle />
             <UserMenu />
           </div>
         </div>
       </header>
-      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-[210px_minmax(0,1fr)]">
+      <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-(--gap-group) px-6 py-8 lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-10">
         <TopicRail />
-        <main className="min-w-0 space-y-10">
-          <section className="border-t-0 pt-0">
-            <p className="text-muted-foreground font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
-              Documentation
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+        <main className="min-w-0 space-y-8">
+          <section>
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-ink">
               The slopcad documentation
             </h1>
-            <p className="text-muted-foreground mt-3 max-w-prose text-sm leading-relaxed">
+            <p className="mt-3 max-w-[72ch] text-body text-ink-dim">
               Every guide lives in the repository under{" "}
-              <code className="border-border bg-muted/60 rounded-[3px] border px-1 py-px font-mono text-xs">
+              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data text-ink">
                 docs/guides/
               </code>
               , and every primary public API gets a runnable example under{" "}
-              <code className="border-border bg-muted/60 rounded-[3px] border px-1 py-px font-mono text-xs">
+              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data text-ink">
                 packages/docs-examples/
               </code>{" "}
               that the workspace gates typecheck, build, and run.{" "}
-              <code className="border-border bg-muted/60 rounded-[3px] border px-1 py-px font-mono text-xs">
+              <code className="rounded-[3px] border border-rule bg-well-deep px-1 py-px font-mono text-data text-ink">
                 pnpm verify
               </code>{" "}
               proves them, this page proves them again in your browser. The
               tables below are generated from the same source constants the code
               declares, not hand-maintained copies.
             </p>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{String(topicCount)} topics</Badge>
-              <Badge variant="secondary">verify-gated examples</Badge>
-            </div>
+            {/* The manual's own facts, as readouts rather than badges. */}
+            <dl className="mt-4 flex flex-wrap items-center gap-x-(--gap-group) gap-y-2 border-t border-rule pt-2.5">
+              <Readout label="topics">{String(topicCount)}</Readout>
+              <Readout label="groups">{String(DOCS_GROUPS.length)}</Readout>
+              <Readout label="kernels">
+                {String(KERNEL_CAPABILITY_ROWS.length)}
+              </Readout>
+              <Readout label="examples">verify-gated</Readout>
+            </dl>
           </section>
 
           <Section
@@ -327,21 +330,21 @@ export function DocsPage(): React.JSX.Element {
             title="Kernel capability matrix"
             lead="What each backend declares it can do, read from the kernels' own capability constants (packages/docs-examples/src/kernel/capabilities.ts). A declined operation answers the structured kernel/unsupported-operation, never a silently wrong result."
           >
-            <div className="border-border bg-card/60 overflow-x-auto rounded-lg border">
-              <table className="w-full min-w-[720px] border-collapse text-sm">
+            <Panel className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse">
                 <caption className="sr-only">
                   Declared capabilities of the four geometry kernel backends
                 </caption>
                 <thead>
-                  <tr className="border-border bg-background/40 border-b">
-                    <th scope="col" className="px-3 py-2 text-left font-medium">
+                  <tr className="border-b border-rule bg-well/60">
+                    <th scope="col" className={TABLE_HEAD_CELL}>
                       capability
                     </th>
                     {KERNEL_CAPABILITY_ROWS.map((row) => (
                       <th
                         scope="col"
                         key={row.backendId}
-                        className="text-muted-foreground px-3 py-2 text-center font-mono text-xs font-medium"
+                        className={`${TABLE_HEAD_CELL} text-center`}
                       >
                         {row.backendId}
                       </th>
@@ -350,13 +353,10 @@ export function DocsPage(): React.JSX.Element {
                 </thead>
                 <tbody>
                   {CAPABILITY_COLUMNS.map((column) => (
-                    <tr
-                      key={column.flag}
-                      className="border-border/70 border-b transition-colors last:border-0 hover:bg-muted/40"
-                    >
+                    <tr key={column.flag} className={TABLE_ROW}>
                       <th
                         scope="row"
-                        className="text-muted-foreground px-3 py-1.5 text-left text-xs font-normal"
+                        className="h-(--row-h) px-2 text-left text-ui font-normal text-ink-dim"
                       >
                         {column.label}
                       </th>
@@ -365,15 +365,13 @@ export function DocsPage(): React.JSX.Element {
                         return (
                           <td
                             key={row.backendId}
-                            className="px-3 py-1.5 text-center font-mono text-xs"
+                            className="h-(--row-h) px-2 text-center font-mono text-data tabular"
                             data-flag={`${row.backendId}:${column.flag}`}
                           >
                             <span
                               aria-hidden="true"
                               className={
-                                supported
-                                  ? "text-primary"
-                                  : "text-muted-foreground/50"
+                                supported ? "text-ink" : "text-ink-faint/60"
                               }
                             >
                               {supported ? "✓" : "—"}
@@ -388,8 +386,8 @@ export function DocsPage(): React.JSX.Element {
                   ))}
                 </tbody>
               </table>
-            </div>
-            <p className="text-muted-foreground mt-2 font-mono text-[11px]">
+            </Panel>
+            <p className="mt-2 font-mono text-micro text-ink-faint">
               ✓ declared · — declined (answers kernel/unsupported-operation)
             </p>
           </Section>
@@ -399,25 +397,25 @@ export function DocsPage(): React.JSX.Element {
             title="Formats and parametric history"
             lead="One format preserves the parametric model. Everything else is geometry exchange: deliberate, provenance-marked, and never a fake history."
           >
-            <div className="border-border bg-card/60 overflow-x-auto rounded-lg border">
-              <table className="w-full min-w-[720px] border-collapse text-sm">
+            <Panel className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse">
                 <caption className="sr-only">
                   Which exchange formats preserve parametric history
                 </caption>
                 <thead>
-                  <tr className="border-border bg-background/40 border-b">
-                    <th scope="col" className="px-3 py-2 text-left font-medium">
+                  <tr className="border-b border-rule bg-well/60">
+                    <th scope="col" className={TABLE_HEAD_CELL}>
                       format
                     </th>
-                    <th scope="col" className="px-3 py-2 text-left font-medium">
+                    <th scope="col" className={TABLE_HEAD_CELL}>
                       direction
                     </th>
-                    <th scope="col" className="px-3 py-2 text-left font-medium">
+                    <th scope="col" className={TABLE_HEAD_CELL}>
                       what a file carries
                     </th>
                     <th
                       scope="col"
-                      className="px-3 py-2 text-center font-medium"
+                      className={`${TABLE_HEAD_CELL} text-center`}
                     >
                       parametric history
                     </th>
@@ -425,28 +423,28 @@ export function DocsPage(): React.JSX.Element {
                 </thead>
                 <tbody>
                   {FORMAT_ROWS.map((row) => (
-                    <tr
-                      key={row.format}
-                      className="border-border/70 border-b transition-colors last:border-0 hover:bg-muted/40"
-                    >
+                    <tr key={row.format} className={TABLE_ROW}>
                       <th
                         scope="row"
-                        className="px-3 py-2 text-left font-mono text-xs font-normal"
+                        className="px-2 py-1.5 text-left font-mono text-data font-normal text-ink"
                       >
                         {row.format}
                       </th>
-                      <td className="text-muted-foreground px-3 py-2 text-xs">
+                      <td className="px-2 py-1.5 text-ui text-ink-dim">
                         {row.direction}
                       </td>
-                      <td className="text-muted-foreground px-3 py-2 text-xs">
+                      <td className="px-2 py-1.5 text-ui text-ink-dim">
                         {row.carries}
                       </td>
-                      <td className="px-3 py-2 text-center font-mono text-xs">
+                      {/* The one format that preserves history is the one
+                          fact this table exists to state, so it is the only
+                          cell allowed the signal colour. */}
+                      <td className="px-2 py-1.5 text-center font-mono text-data tabular">
                         <span
                           className={
                             row.history
-                              ? "text-primary font-medium"
-                              : "text-muted-foreground/60"
+                              ? "font-medium text-signal"
+                              : "text-ink-faint/60"
                           }
                           data-testid={`docs-format-${row.format.split(" ")[0]?.toLowerCase()}`}
                         >
@@ -457,7 +455,7 @@ export function DocsPage(): React.JSX.Element {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </Panel>
           </Section>
 
           {DOCS_GROUPS.map((group) => (
@@ -466,30 +464,34 @@ export function DocsPage(): React.JSX.Element {
               id={`group-${group.id}`}
               title={group.title}
             >
-              <ul className="border-border bg-card/60 divide-border/70 overflow-hidden rounded-lg border divide-y">
-                {group.topics.map((topic) => (
-                  <li
-                    key={topic.id}
-                    id={`topic-${topic.id}`}
-                    className="scroll-mt-20 px-4 py-3 transition-colors hover:bg-muted/40"
-                  >
-                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                      <h3 className="text-sm font-medium">{topic.title}</h3>
-                      <code className="border-border text-muted-foreground rounded-sm border bg-background/50 px-1.5 py-0.5 font-mono text-[11px]">
-                        {topic.guide}
-                      </code>
-                    </div>
-                    <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-                      {topic.summary}
-                    </p>
-                    {topic.example !== null ? (
-                      <p className="text-muted-foreground mt-1.5 font-mono text-[11px]">
-                        example: {topic.example}
+              <Panel>
+                <ul>
+                  {group.topics.map((topic) => (
+                    <li
+                      key={topic.id}
+                      id={`topic-${topic.id}`}
+                      className="scroll-mt-14 border-b border-rule/60 px-(--pad-panel) py-2 transition-colors duration-(--dur-state) last:border-b-0 hover:bg-well"
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-(--gap-group) gap-y-1">
+                        <h3 className="text-ui font-medium text-ink">
+                          {topic.title}
+                        </h3>
+                        <code className="font-mono text-micro text-ink-faint">
+                          {topic.guide}
+                        </code>
+                      </div>
+                      <p className="mt-0.5 max-w-[80ch] text-ui text-ink-dim">
+                        {topic.summary}
                       </p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+                      {topic.example !== null ? (
+                        <p className="mt-1 font-mono text-micro text-ink-faint">
+                          example: {topic.example}
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
             </Section>
           ))}
         </main>

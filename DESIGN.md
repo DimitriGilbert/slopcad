@@ -90,8 +90,8 @@ panel and section names — never above prose, never as an eyebrow.
 
 ## Density — the metrics are tokens
 
-24px row, 24px control, 28px tool button, 26px header, 240px rail, 8px panel
-pad, 6px row pad, 6px control gap. One edit to `cockpit.css` re-tunes every
+24px row, 24px control, 28px tool button, 26px panel header, 40px app bar,
+240px rail, 8px panel pad, 6px row pad, 6px control gap. One edit to `cockpit.css` re-tunes every
 panel, which is why no component may hardcode a height. Nothing inside a
 panel is taller than a tool button.
 

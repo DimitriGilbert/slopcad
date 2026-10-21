@@ -1,14 +1,19 @@
 /**
- * The app chrome: a slim instrument bar that stays out of the way of
- * the surfaces below it. Brand left (the machinist plate: amber mark,
- * engraved lowercase wordmark), primary destinations center, session
- * and the theme switch right. One line at every width that matters,
- * 44px tall — chrome, not a hero.
+ * The app bar: the instrument's title bar, 40px (`--appbar-h`) of chrome
+ * that stays out of the way of the surface below it. Brand left (the
+ * machinist plate mark and the engraved wordmark), primary destinations
+ * next to it, appearance and session right.
  *
- * Routes that carry their own full-width chrome (the docs manual's
- * sticky bar: brand, section jumps, theme toggle) take over the top of
- * the page; this bar yields to them so the page never stacks two
- * headers or two theme toggles.
+ * It is chrome, so it is built from chrome tokens: the frame surface, one
+ * hairline rule under it, ink-dim links that brighten on hover, and the
+ * current destination marked the way SELECTION is marked everywhere else
+ * in the product — the signal edge, no wash and no fill. That keeps the
+ * accent's three jobs intact (armed tool, selection, one confirm) instead
+ * of spending one on navigation.
+ *
+ * Routes that carry their own full-width chrome (the docs manual's sticky
+ * bar) take over the top of the page; this bar yields to them so the page
+ * never stacks two headers or two theme toggles.
  */
 
 import { Link, useLocation } from "@tanstack/react-router";
@@ -42,6 +47,21 @@ function embeddedViewer(pathname: string, search: unknown): boolean {
   );
 }
 
+/**
+ * The plate mark: an offset square pair in pure CSS — the wordmark's
+ * machined counterpart, drawn at the brand's own scale.
+ */
+export function PlateMark({ className }: { readonly className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`relative border border-signal/70 bg-signal/15 ${className ?? "size-3.5 rounded-[3px]"}`}
+    >
+      <span className="absolute -top-[3px] -left-[3px] size-1.5 rounded-[2px] border border-signal" />
+    </span>
+  );
+}
+
 export default function Header() {
   const location = useLocation();
   const selfChromed = SELF_CHROMED_ROUTES.some((prefix) =>
@@ -59,33 +79,30 @@ export default function Header() {
   ] as const;
 
   return (
-    <header className="border-border bg-card/60 h-11 shrink-0 border-b print:hidden">
-      <div className="flex h-full items-center gap-6 px-4">
+    <header className="h-(--appbar-h) shrink-0 border-b border-rule bg-chrome print:hidden">
+      <div className="flex h-full items-center gap-(--gap-group) px-(--pad-panel)">
         <Link
-          className="group flex items-center gap-2.5"
+          className="flex items-center gap-2 focus-instrument"
           title="slopcad home"
           to="/"
         >
-          {/* The machinist plate mark: an offset square pair, pure CSS. */}
-          <span
-            aria-hidden="true"
-            className="border-primary/70 bg-primary/15 relative size-3.5 rounded-[3px] border"
-          >
-            <span className="border-primary absolute -top-[3px] -left-[3px] size-1.5 rounded-[2px] border" />
-          </span>
-          <span className="font-display text-foreground text-sm font-semibold tracking-tight">
+          <PlateMark />
+          <span className="font-display text-title font-semibold text-ink">
             slopcad
           </span>
         </Link>
-        <nav aria-label="Primary" className="hidden items-center gap-1 sm:flex">
+        <nav
+          aria-label="Primary"
+          className="hidden items-center gap-(--gap-tight) sm:flex"
+        >
           {links.map(({ to, label }) => (
             <Link
               key={to}
               activeOptions={{ exact: to === "/" }}
-              className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm px-2.5 py-1 text-[13px] font-medium transition-colors"
+              className="flex h-(--tool-h) items-center rounded-sm border-b-2 border-b-transparent px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink focus-instrument"
               activeProps={{
                 className:
-                  "text-foreground bg-muted rounded-sm px-2.5 py-1 text-[13px] font-medium",
+                  "flex h-(--tool-h) items-center rounded-sm border-b-2 border-b-select-edge px-2 text-ui font-medium text-ink focus-instrument",
               }}
               to={to}
             >
@@ -93,7 +110,7 @@ export default function Header() {
             </Link>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-(--gap)">
           <SchemePicker />
           <ThemeToggle />
           <UserMenu />

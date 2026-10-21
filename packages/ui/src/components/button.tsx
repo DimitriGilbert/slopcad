@@ -13,8 +13,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
+        // The one filled variant. Its disabled state DROPS the accent
+        // entirely (the system's accent rule: the signal colour means
+        // armed / selected / confirmable — an action that cannot be taken
+        // is none of those, so a faded amber slab would be a lie).
         default:
-          "bg-primary text-primary-foreground hover:bg-primary/85 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--primary-foreground)_14%,transparent)] active:shadow-[inset_0_2px_6px_color-mix(in_oklch,var(--primary-foreground)_28%,transparent)]",
+          "bg-primary text-primary-foreground hover:bg-primary/85 shadow-[inset_0_1px_0_color-mix(in_oklch,var(--primary-foreground)_14%,transparent)] active:shadow-[inset_0_2px_6px_color-mix(in_oklch,var(--primary-foreground)_28%,transparent)] disabled:border-rule disabled:bg-well disabled:text-ink-faint disabled:shadow-none disabled:opacity-100",
         outline:
           "border-border bg-card text-foreground hover:border-input hover:bg-muted dark:bg-card/60 dark:hover:bg-muted aria-expanded:bg-muted",
         secondary:

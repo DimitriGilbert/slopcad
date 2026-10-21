@@ -31,6 +31,7 @@ import { CadProvider } from "@slopcad/cad-react";
 import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
 import { Button } from "@slopcad/ui/components/button";
+import { Panel, PanelHeader } from "@slopcad/ui/components/cockpit/panel";
 import { Download, Link2, Loader2 } from "lucide-react";
 import type { NativeShareVariant } from "../cad-projects/native-document-bridge";
 import type { ViewerDocumentSummary } from "./viewer-document";
@@ -326,15 +327,15 @@ function ViewerBody({
     >
       {/* The instrument bar: identity, the settle lamp, the DRO volume, and
           the two share affordances. One row, chrome-thin. */}
-      <div className="border-border bg-card/60 flex h-10 shrink-0 items-center gap-3 border-b px-3">
+      <div className="flex h-(--appbar-h) shrink-0 items-center gap-(--gap-group) border-b border-rule bg-panel px-(--pad-panel)">
         <span
-          className="font-display text-foreground truncate text-sm font-semibold tracking-tight"
+          className="font-display truncate text-title font-semibold text-ink"
           data-testid="viewer-title"
         >
           {displayTitle}
         </span>
         <span
-          className="text-muted-foreground font-mono text-[11px]"
+          className="font-mono text-micro text-ink-faint"
           aria-live="polite"
           data-testid="viewer-status"
           id="viewer-status"
@@ -342,8 +343,9 @@ function ViewerBody({
           …
         </span>
         <div className="flex-1" />
+        <span className="label-section shrink-0 text-ink-faint">vol</span>
         <span
-          className="text-muted-foreground font-mono text-xs tabular-nums"
+          className="shrink-0 font-mono text-data text-ink tabular"
           data-testid="viewer-volume"
           id="viewer-volume"
         >
@@ -386,20 +388,22 @@ function ViewerBody({
             </Button>
           </>
         ) : (
-          <span className="text-muted-foreground hidden font-mono text-[11px] sm:inline">
+          <span className="hidden font-mono text-micro text-ink-faint sm:inline">
             standalone export — runs offline
           </span>
         )}
       </div>
       {/* The action's honest feedback: the structured refusal of a clipboard
-          or fetch, or the done line with the real byte size. Assertable. */}
-      <div className="min-h-6 px-3 pt-1.5 text-xs" aria-live="polite">
+          or fetch, or the done line with the real byte size. Assertable.
+          The strip claims no height until it has something to say. */}
+      <div
+        className="flex flex-col gap-0.5 px-(--pad-panel) text-ui has-[span:not(:empty)]:border-b has-[span:not(:empty)]:border-rule has-[span:not(:empty)]:py-1"
+        aria-live="polite"
+      >
         {action !== null ? (
           <span
             className={
-              action.kind === "error"
-                ? "text-destructive"
-                : "text-muted-foreground"
+              action.kind === "error" ? "text-destructive" : "text-ink-dim"
             }
             data-action-kind={action.kind}
             data-testid="viewer-action"
@@ -424,8 +428,12 @@ function ViewerBody({
       {/* The split: part left, variables right; stacked under `lg` so an
           embed at any width scrolls, never overflows. */}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        {/* The stage IS the viewport surface — its own token material, not
+            the chrome's (see DESIGN.md: the viewport does not follow the
+            register), so a cold share page already reads as the instrument
+            bed the loaded part will be drawn on. */}
         <div
-          className="bg-background/40 relative min-h-[320px] min-w-0 flex-1 lg:min-h-0"
+          className="relative min-h-[320px] min-w-0 flex-1 bg-viewport lg:min-h-0"
           id={VIEWER_VIEWPORT_ID}
           data-testid="viewer-viewport"
         >
@@ -439,26 +447,32 @@ function ViewerBody({
               projection={applied === null ? null : applied.state.projection}
             />
           ) : (
-            <ViewerEmptyState
-              busy={serverShare.kind === "pending"}
-              error={loadError}
-              onLoad={adoptText}
-              variant={variant}
-            />
+            <>
+              <StageRegistration />
+              <ViewerEmptyState
+                busy={serverShare.kind === "pending"}
+                error={loadError}
+                onLoad={adoptText}
+                variant={variant}
+              />
+            </>
           )}
         </div>
-        <aside className="border-border flex w-full shrink-0 flex-col border-t lg:w-88 lg:border-t-0 lg:border-l">
+        <aside className="flex w-full shrink-0 flex-col border-t border-rule bg-panel lg:w-(--rail-w-wide) lg:border-t-0 lg:border-l">
           {loaded ? (
             <CadParameterPanel
               className="min-h-0 flex-1 rounded-none border-0"
               labels={{ title: "Variables" }}
             />
           ) : (
-            <div className="text-muted-foreground px-3 py-3 text-xs leading-relaxed">
-              Load a part to edit its variables. Edits commit as
-              <span className="font-mono"> parameter.set </span>
-              commands — the geometry re-drives live.
-            </div>
+            <>
+              <PanelHeader title="Variables" trailing="0" />
+              <p className="p-(--pad-panel) text-ui text-ink-dim">
+                Load a part to edit its variables. Edits commit as
+                <span className="font-mono text-ink"> parameter.set </span>
+                commands — the geometry re-drives live.
+              </p>
+            </>
           )}
         </aside>
       </div>
@@ -470,6 +484,31 @@ function ViewerBody({
           ? "no document loaded"
           : `${summary.title}: ${String(summary.literalParameters)} literal variables, ${String(summary.expressionParameters)} expression variables, ${String(summary.features)} features, ${String(summary.bodies)} bodies`}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The empty stage's registration marks: the same corner brackets the
+ * workbench wears around its viewport, drawn in the VIEWPORT's own rule
+ * token (not the chrome's) so they read as part of the bed. Decoration
+ * with a job: they state where the part will appear.
+ */
+function StageRegistration(): ReactElement {
+  const corners = [
+    "top-2 left-2 border-t border-l",
+    "top-2 right-2 border-t border-r",
+    "bottom-2 left-2 border-b border-l",
+    "bottom-2 right-2 border-b border-r",
+  ] as const;
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+      {corners.map((corner) => (
+        <span
+          key={corner}
+          className={`absolute size-3 border-viewport-rule-strong ${corner}`}
+        />
+      ))}
     </div>
   );
 }
@@ -517,101 +556,94 @@ function ViewerEmptyState({
 
   return (
     <div className="flex h-full items-center justify-center overflow-y-auto p-6">
-      <div className="border-border bg-card/60 w-full max-w-md rounded-lg border p-6">
-        {/* The machinist plate mark, at rest. */}
-        <div className="flex items-center gap-3">
-          <span
-            aria-hidden="true"
-            className="border-primary/70 bg-primary/15 relative size-4 rounded-[4px] border"
-          >
-            <span className="border-primary absolute -top-1 -left-1 size-2 rounded-[2px] border" />
-          </span>
-          <h1 className="font-display text-foreground text-base font-semibold tracking-tight">
-            Load a shared part
-          </h1>
-        </div>
-        <p className="text-muted-foreground mt-3 text-sm leading-relaxed">
-          The viewer draws a parametric part and lets anyone re-drive it: the
-          variables on the right are live, the solid follows.
-        </p>
-        {busy ? (
-          <p
-            className="text-muted-foreground mt-3 font-mono text-xs"
-            data-testid="viewer-share-fetching"
-          >
-            fetching the shared part…
+      {/* An overlay panel floating on the viewport bed: the one rung that
+          carries a shadow, because this surface really is above the stage. */}
+      <Panel elevation="overlay" className="w-full max-w-md">
+        <PanelHeader title="Load a shared part" titleAs="h1" />
+        <div className="p-(--pad-panel)">
+          <p className="text-body text-ink-dim">
+            The viewer draws a parametric part and lets anyone re-drive it: the
+            variables on the right are live, the solid follows.
           </p>
-        ) : null}
-        <label
-          className="text-muted-foreground mt-5 block font-mono text-[10.5px] font-medium uppercase tracking-[0.08em]"
-          htmlFor="viewer-paste"
-        >
-          Paste a native document
-        </label>
-        <textarea
-          className="border-input bg-background focus-visible:ring-ring mt-1.5 h-28 w-full rounded-sm border px-2 py-1.5 font-mono text-xs focus-visible:ring-2 focus-visible:outline-none"
-          data-testid="viewer-paste"
-          id="viewer-paste"
-          onChange={(event) => setPasted(event.target.value)}
-          placeholder={'{\n  "formatVersion": …,\n  "document": { … }\n}'}
-          spellCheck={false}
-          value={pasted}
-        />
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button
-            data-testid="viewer-load-paste"
-            disabled={pasted.trim() === ""}
-            onClick={() => onLoad(pasted, "pasted document")}
-            size="sm"
-          >
-            Load pasted document
-          </Button>
-          <Button
-            data-testid="viewer-load-file"
-            onClick={() => fileInputRef.current?.click()}
-            size="sm"
-            variant="outline"
-          >
-            Open a .json file
-          </Button>
-          <input
-            accept=".json,application/json"
-            aria-label="Open a native document file"
-            className="sr-only"
-            data-testid="viewer-file-input"
-            onChange={(event) => {
-              handleFile(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-            ref={fileInputRef}
-            type="file"
-          />
-          {fileName !== null ? (
-            <span className="text-muted-foreground font-mono text-[11px]">
-              {fileName}
-            </span>
+          {busy ? (
+            <p
+              className="mt-3 font-mono text-data text-ink-dim"
+              data-testid="viewer-share-fetching"
+            >
+              fetching the shared part…
+            </p>
           ) : null}
-        </div>
-        {error !== null ? (
-          <p
-            className="text-destructive mt-3 text-xs leading-relaxed"
-            data-testid="viewer-load-error"
+          <label
+            className="label-section mt-5 block text-ink-faint"
+            htmlFor="viewer-paste"
           >
-            {error}
-          </p>
-        ) : null}
-        <div className="border-border mt-5 border-t pt-3">
-          <p className="text-muted-foreground text-xs leading-relaxed">
-            {variant === "page" ? (
-              <>
-                In the workbench, <span className="font-mono">Share</span>{" "}
-                copies a link to this page with the part inside it.{" "}
-              </>
+            Paste a native document
+          </label>
+          <textarea
+            className="mt-1.5 h-28 w-full rounded-sm border border-rule-strong bg-well-deep px-2 py-1.5 font-mono text-data text-ink focus-instrument placeholder:text-ink-faint"
+            data-testid="viewer-paste"
+            id="viewer-paste"
+            onChange={(event) => setPasted(event.target.value)}
+            placeholder={'{\n  "formatVersion": …,\n  "document": { … }\n}'}
+            spellCheck={false}
+            value={pasted}
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-(--gap)">
+            <Button
+              data-testid="viewer-load-paste"
+              disabled={pasted.trim() === ""}
+              onClick={() => onLoad(pasted, "pasted document")}
+              size="sm"
+            >
+              Load pasted document
+            </Button>
+            <Button
+              data-testid="viewer-load-file"
+              onClick={() => fileInputRef.current?.click()}
+              size="sm"
+              variant="outline"
+            >
+              Open a .json file
+            </Button>
+            <input
+              accept=".json,application/json"
+              aria-label="Open a native document file"
+              className="sr-only"
+              data-testid="viewer-file-input"
+              onChange={(event) => {
+                handleFile(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+              ref={fileInputRef}
+              type="file"
+            />
+            {fileName !== null ? (
+              <span className="font-mono text-micro text-ink-faint">
+                {fileName}
+              </span>
             ) : null}
-            {SHARE_FORMAT_NOTE}
-          </p>
+          </div>
+          {error !== null ? (
+            <p
+              className="mt-3 text-ui text-destructive"
+              data-testid="viewer-load-error"
+            >
+              {error}
+            </p>
+          ) : null}
+          <div className="mt-5 border-t border-rule pt-2.5">
+            <p className="text-ui text-ink-dim">
+              {variant === "page" ? (
+                <>
+                  In the workbench, <span className="font-mono">Share</span>{" "}
+                  copies a link to this page with the part inside it.{" "}
+                </>
+              ) : null}
+              {SHARE_FORMAT_NOTE}
+            </p>
+          </div>
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }

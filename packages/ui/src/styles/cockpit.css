@@ -166,6 +166,7 @@
    * than 28px. Every primitive sizes itself from these, so one edit here
    * re-tunes the whole instrument.
    */
+  --appbar-h: 2.5rem;
   --row-h: 1.5rem;
   --row-h-lg: 1.75rem;
   --control-h: 1.5rem;

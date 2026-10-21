@@ -29,6 +29,7 @@ import { runComponentsExample } from "@slopcad/docs-examples/components/componen
 import { runFeaturesExample } from "@slopcad/docs-examples/kernel/features";
 import { runNativeFormatExample } from "@slopcad/docs-examples/core/native";
 import { CadProvider } from "@slopcad/cad-react";
+import { Panel, PanelHeader } from "@slopcad/ui/components/cockpit/panel";
 import {
   createGuideStore,
   GuideParameterPanel,
@@ -88,57 +89,56 @@ export function ExampleCard({
   children,
 }: ExampleCardProps): React.JSX.Element {
   return (
-    <article
-      className="border-border bg-card/60 data-[status=failed]:border-destructive/50 overflow-hidden rounded-lg border"
+    <Panel
+      className="overflow-hidden data-[status=failed]:border-destructive/50"
       data-status={status}
     >
-      <header className="border-border bg-background/40 flex items-start justify-between gap-3 border-b px-4 py-3">
-        <div>
-          <h3 className="text-sm font-medium">{title}</h3>
-          <p className="text-muted-foreground mt-0.5 font-mono text-[11px]">
-            {source}
-          </p>
-        </div>
-        <p
-          className="mt-0.5 flex shrink-0 items-center gap-1.5 font-mono text-[11px] tracking-wide"
-          data-testid="docs-example-status"
-        >
+      <PanelHeader
+        title={title}
+        titleAs="h3"
+        trailing={
           <span
-            aria-hidden="true"
-            className={`size-1.5 shrink-0 rounded-full ${
-              status === "ok"
-                ? "bg-status-ok"
-                : status === "running"
-                  ? "bg-signal motion-safe:animate-pulse"
-                  : "bg-destructive"
-            }`}
-          />
-          <span
-            className={
-              status === "failed" ? "text-destructive" : "text-muted-foreground"
-            }
+            className="flex items-center gap-1.5"
+            data-testid="docs-example-status"
           >
-            {status === "running" ? "running…" : status}
+            <span
+              aria-hidden="true"
+              className={`size-1.5 shrink-0 rounded-full ${
+                status === "ok"
+                  ? "bg-status-ok"
+                  : status === "running"
+                    ? "bg-signal motion-safe:animate-pulse"
+                    : "bg-destructive"
+              }`}
+            />
+            <span className={status === "failed" ? "text-destructive" : ""}>
+              {status === "running" ? "running…" : status}
+            </span>
           </span>
-        </p>
-      </header>
-      <div className="px-4 py-3">
+        }
+      />
+      <p className="border-b border-rule bg-well/60 px-(--pad-panel) py-1 font-mono text-micro text-ink-faint">
+        {source}
+      </p>
+      <div className="p-(--pad-panel)">
         {status === "failed" ? (
-          <p className="font-mono text-xs text-red-600 dark:text-red-400">
+          <p className="font-mono text-data text-destructive">
             the example failed; see the browser console
           </p>
         ) : (
-          <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-1">
+          /* The measured facts ARE property rows: label left, tabular
+             value right, one 24px line each, hairline between. */
+          <dl className="grid grid-cols-[minmax(0,1fr)_auto]">
             {facts.map((fact) => (
               <div
                 key={fact.label}
-                className="col-span-2 grid grid-cols-subgrid items-baseline"
+                className="col-span-2 grid min-h-(--row-h) grid-cols-subgrid items-center gap-x-(--gap-group) border-b border-rule/60 last:border-b-0"
               >
-                <dt className="text-muted-foreground truncate text-xs">
+                <dt className="truncate text-label text-ink-dim">
                   {fact.label}
                 </dt>
                 <dd
-                  className="text-right font-mono text-xs tabular-nums"
+                  className="text-right font-mono text-data text-ink tabular"
                   data-testid={`docs-fact-${slug(fact.label)}`}
                 >
                   {fact.value}
@@ -149,7 +149,7 @@ export function ExampleCard({
         )}
         {children}
       </div>
-    </article>
+    </Panel>
   );
 }
 
@@ -401,7 +401,7 @@ export function MeshExampleCard(): React.JSX.Element {
     >
       {downloadUrl !== null ? (
         <a
-          className="mt-3 inline-block font-mono text-[11px] underline underline-offset-4"
+          className="mt-2 inline-block font-mono text-micro text-ink-dim underline underline-offset-4 transition-colors duration-(--dur-state) hover:text-ink focus-instrument"
           href={downloadUrl}
           download="docs-example-plate.stl"
         >
