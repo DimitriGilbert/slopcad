@@ -35,6 +35,10 @@
  * shadcn/tailwind.css doesn't ship (see each file's header). */
 @import "./typeset.css";
 @import "./utilities.css";
+/* The instrument design system (surfaces, rules, ink, type scale, metrics,
+ * focus/selection semantics, the viewport's own token surface) layered over
+ * the palettes below — see the file header for the three rules it keeps. */
+@import "./cockpit.css";
 @source "../../../../apps/**/*.{ts,tsx}";
 @source "../**/*.{ts,tsx}";
 

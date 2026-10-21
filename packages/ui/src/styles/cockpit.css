@@ -1,0 +1,362 @@
+/*
+ * The cockpit layer — slopcad's instrument design system.
+ *
+ * `globals.css` owns the PALETTE: four schemes × two registers, each a
+ * hand-verified set of shadcn-shaped color tokens. This file owns the
+ * SYSTEM that sits on top of it: the surface ramp, the rule weights, the
+ * ink ramp, the type scale, the control metrics, the focus and selection
+ * semantics, the tinted elevation, and the viewport's own token surface.
+ *
+ * Three rules govern everything below.
+ *
+ * 1. ONE RAMP, FOUR SCHEMES. No surface, rule, ink or shadow value is
+ *    written per scheme. Every one of them is an oklab delta off that
+ *    scheme's own `--background` / `--foreground`, so a scheme contributes
+ *    its hue and chroma and inherits the whole system. The only values
+ *    that differ between the two registers are the ramp AMOUNTS (`--rise-*`,
+ *    `--sink-*`, `--rule-*-amount`), declared once in `:root` and once in
+ *    `.dark`. Adding a fifth scheme means adding a palette, not a ramp.
+ *
+ * 2. REGISTER IS THE MODE AXIS; SCHEME IS THE COLOR AXIS. A scheme never
+ *    flips the register — there is no light-chrome scheme and no dark-chrome
+ *    scheme, only the user's mode choice. (This is the resolution of the
+ *    `drafting` light-register conflict: Drafting Room is a palette, not a
+ *    register.)
+ *
+ * 3. THE VIEWPORT IS ITS OWN SURFACE. The 3D bed does not inherit the
+ *    chrome's register: Machinist keeps a night bed under light chrome on
+ *    purpose ("a scope on the light table"). So the viewport tokens are
+ *    declared per scheme × register from their own two inputs
+ *    (`--viewport`, `--viewport-contrast`) and derive their ink, rules and
+ *    scrim from THOSE, never from `--background`. The GL half of the same
+ *    surface — the grid, axes, model and selection ink the canvas draws —
+ *    lives in `components/cad/cad-studio-palette.ts`, typed and frozen for
+ *    three.js; this file covers the DOM half that frames and overlays it.
+ */
+
+/* ————————————————————————————————————————————————————————————————————
+ * The ramp amounts — the ONLY register-conditional values in the system.
+ *
+ * Light register: panels rise toward paper-white off a faintly grey frame,
+ * and wells sink. Dark register: everything rises off the frame in much
+ * smaller steps, because a dark ramp needs less distance to read.
+ * ———————————————————————————————————————————————————————————————————— */
+:root {
+  --rise: oklch(1 0 0);
+  --sink: oklch(0 0 0);
+
+  /* The light register has barely 2% of lightness headroom above paper, so
+   * its ladder runs almost to white immediately and the ELEVATION SIGNAL is
+   * carried mostly by rules and by the wells below the frame. The dark
+   * register is the reverse: it has room, so value does the work and the
+   * rules stay faint. Same ladder, two honest distributions. */
+  --rise-1: 70%;
+  --rise-2: 90%;
+  --rise-3: 100%;
+  --sink-1: 4.5%;
+  --sink-2: 9%;
+
+  --rule-amount: 15%;
+  --rule-strong-amount: 26%;
+  --ink-dim-amount: 70%;
+  --ink-faint-amount: 48%;
+  --shadow-amount: 16%;
+}
+
+.dark {
+  --rise-1: 4.5%;
+  --rise-2: 8%;
+  --rise-3: 11.5%;
+  --sink-1: 16%;
+  --sink-2: 28%;
+
+  --rule-amount: 11%;
+  --rule-strong-amount: 20%;
+  --ink-dim-amount: 72%;
+  --ink-faint-amount: 50%;
+  --shadow-amount: 40%;
+}
+
+/* ————————————————————————————————————————————————————————————————————
+ * The derived system. Declared once; every scheme and register picks it
+ * up because `var()` resolves against the root element's own values.
+ * ———————————————————————————————————————————————————————————————————— */
+:root {
+  /* — Surfaces: the five-rung elevation ladder.
+   *
+   *   well      inset: fields, tracks, code, the timeline gutter
+   *   chrome    the frame: header, rails, status bars, gaps
+   *   panel     a docked panel's face
+   *   raised    a panel that sits over another (inspector over tree)
+   *   overlay   popovers, menus, dialogs, the command palette
+   */
+  --chrome: var(--background);
+  --panel: color-mix(in oklab, var(--rise) var(--rise-1), var(--background));
+  --panel-raised: color-mix(
+    in oklab,
+    var(--rise) var(--rise-2),
+    var(--background)
+  );
+  --overlay: color-mix(in oklab, var(--rise) var(--rise-3), var(--background));
+  --well: color-mix(in oklab, var(--sink) var(--sink-1), var(--background));
+  --well-deep: color-mix(
+    in oklab,
+    var(--sink) var(--sink-2),
+    var(--background)
+  );
+
+  /* — Rules: two weights. `rule` separates, `rule-strong` encloses. */
+  --rule: color-mix(
+    in oklab,
+    var(--foreground) var(--rule-amount),
+    transparent
+  );
+  --rule-strong: color-mix(
+    in oklab,
+    var(--foreground) var(--rule-strong-amount),
+    transparent
+  );
+
+  /* — Ink: three steps of one family, never a second grey. */
+  --ink: var(--foreground);
+  --ink-dim: color-mix(
+    in oklab,
+    var(--foreground) var(--ink-dim-amount),
+    var(--background)
+  );
+  --ink-faint: color-mix(
+    in oklab,
+    var(--foreground) var(--ink-faint-amount),
+    var(--background)
+  );
+
+  /* — Elevation: shadows tinted to the scheme, never pure black. */
+  --shadow-ink: color-mix(in oklab, var(--background), oklch(0 0 0) 82%);
+  --elevation-panel: 0 1px 2px -1px
+    color-mix(in oklab, var(--shadow-ink) var(--shadow-amount), transparent);
+  --elevation-overlay:
+    0 10px 28px -10px
+      color-mix(
+        in oklab,
+        var(--shadow-ink) calc(var(--shadow-amount) + 18%),
+        transparent
+      ),
+    0 2px 6px -2px
+      color-mix(in oklab, var(--shadow-ink) var(--shadow-amount), transparent);
+
+  /* — Focus: an outline, not a glow. One ring everywhere, 2px, offset 1. */
+  --focus: var(--ring);
+  --focus-width: 2px;
+  --focus-offset: 1px;
+
+  /* — Selection: the signal color's daily job.
+   *
+   * `select-wash` fills a selected row, `select-edge` draws its marker,
+   * `select-ink` writes on the wash. One accent, three jobs, nothing else.
+   */
+  --select-edge: var(--signal);
+  --select-wash: color-mix(in oklab, var(--signal) 16%, transparent);
+  --select-wash-strong: color-mix(in oklab, var(--signal) 26%, transparent);
+  --select-ink: var(--foreground);
+
+  /* — Control metrics: the density contract.
+   *
+   * Dense but legible: a 24px row is the unit of the cockpit, a 28px tool
+   * button is the unit of a tool strip, and nothing in a panel is taller
+   * than 28px. Every primitive sizes itself from these, so one edit here
+   * re-tunes the whole instrument.
+   */
+  --row-h: 1.5rem;
+  --row-h-lg: 1.75rem;
+  --control-h: 1.5rem;
+  --control-h-sm: 1.25rem;
+  --tool-h: 1.75rem;
+  --header-h: 1.625rem;
+  --rail-w: 15rem;
+  --rail-w-wide: 17.5rem;
+  --rail-w-icon: 2.75rem;
+  --pad-panel: 0.5rem;
+  --pad-row: 0.375rem;
+  --gap-tight: 0.125rem;
+  --gap: 0.375rem;
+  --gap-group: 0.75rem;
+
+  /* — Transitions: short, flat, and never on layout properties. */
+  --ease-instrument: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur-press: 90ms;
+  --dur-state: 140ms;
+}
+
+/* ————————————————————————————————————————————————————————————————————
+ * The viewport surface — scheme × register, two inputs each.
+ *
+ * `--viewport` tracks the GL clear color of the matching studio palette
+ * byte for byte (so the DOM frame, the corner ticks and the readout scrim
+ * read as one material with the canvas). `--viewport-contrast` is the ink
+ * direction for that bed: near-white over a night bed, graphite over a
+ * paper bed. Everything else is derived below.
+ * ———————————————————————————————————————————————————————————————————— */
+:root {
+  /* Machinist (the default scheme) keeps the night bed in BOTH registers —
+   * its documented move, and the reason the viewport cannot be a function
+   * of the mode. The three scheme blocks below out-specify this one. */
+  --viewport: #101318;
+  --viewport-contrast: oklch(0.97 0.004 250);
+}
+
+:root[data-scheme="drafting"] {
+  --viewport: #e9e6df;
+  --viewport-contrast: oklch(0.28 0.012 80);
+}
+
+:root[data-scheme="drafting"].dark {
+  --viewport: #0e1219;
+  --viewport-contrast: oklch(0.95 0.008 85);
+}
+
+:root[data-scheme="studios"] {
+  --viewport: #eceef2;
+  --viewport-contrast: oklch(0.3 0.012 260);
+}
+
+:root[data-scheme="studios"].dark {
+  --viewport: #12151b;
+  --viewport-contrast: oklch(0.96 0.004 260);
+}
+
+:root[data-scheme="ember"] {
+  --viewport: #e3e7ea;
+  --viewport-contrast: oklch(0.3 0.01 260);
+}
+
+:root[data-scheme="ember"].dark {
+  --viewport: #111827;
+  --viewport-contrast: oklch(0.95 0.005 260);
+}
+
+:root {
+  /* Derived from the bed, never from the chrome. */
+  --viewport-ink: color-mix(
+    in oklab,
+    var(--viewport-contrast) 92%,
+    var(--viewport)
+  );
+  --viewport-ink-dim: color-mix(
+    in oklab,
+    var(--viewport-contrast) 62%,
+    var(--viewport)
+  );
+  --viewport-rule: color-mix(
+    in oklab,
+    var(--viewport-contrast) 24%,
+    transparent
+  );
+  --viewport-rule-strong: color-mix(
+    in oklab,
+    var(--viewport-contrast) 42%,
+    transparent
+  );
+  /* The readout scrim: the bed, thickened, so HUD text stays legible over
+   * geometry without becoming a second panel. */
+  --viewport-scrim: color-mix(in oklab, var(--viewport) 86%, transparent);
+  /* The one deterministic domain signal: selection amber, every scheme,
+   * every register — it matches `CAD_SELECTION_HIGHLIGHT_COLOR` exactly. */
+  --viewport-select: #f59e0b;
+}
+
+/* ————————————————————————————————————————————————————————————————————
+ * Tailwind registration: the system as utilities.
+ * ———————————————————————————————————————————————————————————————————— */
+@theme inline {
+  --color-chrome: var(--chrome);
+  --color-panel: var(--panel);
+  --color-panel-raised: var(--panel-raised);
+  --color-overlay: var(--overlay);
+  --color-well: var(--well);
+  --color-well-deep: var(--well-deep);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+  --color-select-edge: var(--select-edge);
+  --color-select-wash: var(--select-wash);
+  --color-select-wash-strong: var(--select-wash-strong);
+  --color-select-ink: var(--select-ink);
+  --color-viewport: var(--viewport);
+  --color-viewport-ink: var(--viewport-ink);
+  --color-viewport-ink-dim: var(--viewport-ink-dim);
+  --color-viewport-rule: var(--viewport-rule);
+  --color-viewport-rule-strong: var(--viewport-rule-strong);
+  --color-viewport-scrim: var(--viewport-scrim);
+  --color-viewport-select: var(--viewport-select);
+
+  --shadow-panel: var(--elevation-panel);
+  --shadow-overlay: var(--elevation-overlay);
+
+  /* — The cockpit type scale.
+   *
+   * Six sizes, each with its leading and tracking fixed, because an
+   * instrument that invents a seventh size per panel stops reading as one
+   * machine. `micro` and `label` are the chrome's voice (key caps, units,
+   * section headers); `ui` is every control and row; `data` is `ui` in
+   * tabular mono; `body` is the only size prose is allowed; `title` names
+   * a panel or a dialog.
+   */
+  --text-micro: 0.625rem;
+  --text-micro--line-height: 1.2;
+  --text-micro--letter-spacing: 0.04em;
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1.25;
+  --text-label--letter-spacing: 0.015em;
+  --text-ui: 0.75rem;
+  --text-ui--line-height: 1.3333;
+  --text-data: 0.75rem;
+  --text-data--line-height: 1.3333;
+  --text-body: 0.8125rem;
+  --text-body--line-height: 1.5;
+  --text-title: 0.9375rem;
+  --text-title--line-height: 1.3;
+  --text-title--letter-spacing: -0.006em;
+}
+
+/* ————————————————————————————————————————————————————————————————————
+ * The system's few base rules and utilities.
+ * ———————————————————————————————————————————————————————————————————— */
+@layer base {
+  /* Reduced motion is honoured system-wide: the cockpit's motion is only
+   * ever state feedback, so removing it costs nothing. */
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --dur-press: 0ms;
+      --dur-state: 0ms;
+    }
+  }
+}
+
+/* The one focus treatment in the product. */
+@utility focus-instrument {
+  outline: none;
+
+  &:focus-visible {
+    outline: var(--focus-width) solid var(--focus);
+    outline-offset: var(--focus-offset);
+  }
+}
+
+/* A section header's voice: the domain's own vernacular (every parametric
+ * CAD surface labels its panels this way), set small enough that the caps
+ * read as a rule rather than as shouting. */
+@utility label-section {
+  font-size: var(--text-micro);
+  line-height: var(--text-micro--line-height);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* Numbers in the chrome never reflow and never shift a column. */
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
