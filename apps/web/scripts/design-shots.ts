@@ -45,13 +45,14 @@ async function waitDocsReady(page: Page): Promise<void> {
   await page
     .getByTestId("docs-render-status")
     .waitFor({ state: "visible", timeout: 30_000 });
+  // Every live example must report ok. The count is deliberately NOT
+  // pinned here: the docs manual grows, and a shot harness that fails
+  // because a ninth example shipped is a harness that stops being run.
   await page.waitForFunction(() => {
     const statuses = Array.from(
       document.querySelectorAll('[data-testid="docs-example-status"]'),
     );
-    return (
-      statuses.length === 8 && statuses.every((n) => n.textContent === "ok")
-    );
+    return statuses.length > 0 && statuses.every((n) => n.textContent === "ok");
   });
   await page.evaluate(() => {
     document.getAnimations().forEach((animation) => animation.finish());
@@ -66,6 +67,8 @@ type Shot = {
   wait: (page: Page) => Promise<void>;
   viewport?: { width: number; height: number };
   fullPage?: boolean;
+  /** Skip the blur step — for shots whose SUBJECT is the focus ring. */
+  keepFocus?: boolean;
 };
 
 const SHOTS: Shot[] = [];
@@ -95,6 +98,21 @@ for (const scheme of SCHEMES) {
       viewport: { width: 1280, height: 800 },
       wait: waitComponentSettled,
     });
+    // The design-system spec sheet: every token and primitive in every
+    // state. The judged proof that ONE ramp serves all four schemes.
+    SHOTS.push({
+      name: `design-system-${scheme}-${theme}`,
+      path: "/design",
+      scheme,
+      theme,
+      viewport: { width: 1280, height: 800 },
+      wait: async (page) => {
+        await page
+          .getByTestId("design-system")
+          .waitFor({ state: "visible", timeout: 30_000 });
+      },
+      fullPage: true,
+    });
     SHOTS.push({
       name: `docs-${scheme}-${theme}`,
       path: "/docs",
@@ -104,34 +122,32 @@ for (const scheme of SCHEMES) {
       wait: waitDocsReady,
       fullPage: true,
     });
-    // The midflow selection chain: the plate body selected through the
-    // tree, every surface (amber row, amber body, measurement,
-    // properties, DRO sel 1, status bar) reporting the same truth.
-    SHOTS.push({
-      name: `workbench-midflow-${scheme}-${theme}`,
-      path: "/workbench-complete",
-      scheme,
-      theme,
-      viewport: { width: 1280, height: 800 },
-      wait: async (page) => {
-        await page
-          .locator('[data-node-key="body|body_plate"]')
-          .click({ timeout: 30_000 });
-        await page.waitForFunction(() => {
-          const root = document.getElementById("workbench-complete-root");
-          const volume = root?.getAttribute("data-volume") ?? "";
-          const settle = root?.getAttribute("data-cad-rendered-volume") ?? "";
-          const selection = root?.getAttribute("data-selection-key") ?? "";
-          return (
-            selection === "body|body_plate" &&
-            volume !== "" &&
-            volume === settle
-          );
-        });
-      },
-    });
+    // (The old `workbench-midflow-*` shot clicked `body|body_plate` in the
+    // tree at boot. The complete workbench now boots an EMPTY document
+    // behind its onboarding card, so there is no body to select and no
+    // such node to click — the shot had been shooting nothing. A selection
+    // shot returns with the workbench step, driven by a real authored
+    // flow rather than by a body that used to exist at boot.)
   }
 }
+
+// The focus treatment, caught in the act: the one thing on the spec sheet
+// that cannot be shown at rest. Tabbed to the first tool button, so the
+// 2px outline at its 1px offset is in the bytes.
+SHOTS.push({
+  name: "design-system-focus-machinist-dark",
+  path: "/design",
+  scheme: "machinist",
+  theme: "dark",
+  viewport: { width: 1280, height: 800 },
+  wait: async (page) => {
+    await page
+      .getByTestId("design-system")
+      .waitFor({ state: "visible", timeout: 30_000 });
+    await page.getByRole("button", { name: "Idle" }).focus();
+  },
+  keepFocus: true,
+});
 
 // The scheme picker itself, open — machinist dark, the default world.
 SHOTS.push({
@@ -190,10 +206,12 @@ async function main(): Promise<void> {
     await page.goto(baseUrl + shot.path);
     await shot.wait(page);
     await page.mouse.move(4, 4);
-    await page.evaluate(() => {
-      const element = document.activeElement;
-      if (element instanceof HTMLElement) element.blur();
-    });
+    if (shot.keepFocus !== true) {
+      await page.evaluate(() => {
+        const element = document.activeElement;
+        if (element instanceof HTMLElement) element.blur();
+      });
+    }
     await page.waitForTimeout(400);
     await page.screenshot({
       path: `${outDir}/${shot.name}.png`,

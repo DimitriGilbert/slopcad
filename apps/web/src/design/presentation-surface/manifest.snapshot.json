@@ -87,6 +87,12 @@
       "module": "routes/components.$componentId"
     },
     {
+      "id": "/design",
+      "path": "/design",
+      "fullPath": "/design",
+      "module": "routes/design"
+    },
+    {
       "id": "/docs",
       "path": "/docs",
       "fullPath": "/docs",
@@ -510,6 +516,7 @@
             "apps/web/src/components/header.tsx",
             "apps/web/src/components/scheme-picker.tsx",
             "apps/web/src/components/theme-toggle.tsx",
+            "apps/web/src/design/DesignSystemPage.tsx",
             "apps/web/src/docs-app/DocsPage.tsx",
             "apps/web/src/docs-app/live-examples.tsx",
             "apps/web/src/routes/_auth/dashboard.tsx",
@@ -533,6 +540,8 @@
             "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
             "packages/ui/src/components/cad/cad-toolbar.tsx",
+            "packages/ui/src/components/cockpit/property-row.tsx",
+            "packages/ui/src/components/cockpit/tool-button.tsx",
             "packages/ui/src/components/formedible/fields/array-field.tsx",
             "packages/ui/src/components/formedible/fields/expression-number-field.tsx",
             "packages/ui/src/components/formedible/fields/field-wrapper.tsx",
@@ -595,7 +604,14 @@
     {
       "attribute": "aria-keyshortcuts",
       "origin": "jsx",
-      "values": [],
+      "values": [
+        {
+          "value": "s",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
+          ]
+        }
+      ],
       "dynamicFiles": [
         "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
         "packages/ui/src/components/cad/cad-toolbar.tsx"
@@ -1197,6 +1213,7 @@
         "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
         "packages/ui/src/components/cad/cad-toolbar.tsx",
         "packages/ui/src/components/cad/cad-viewport.tsx",
+        "packages/ui/src/components/cockpit/tool-button.tsx",
         "packages/ui/src/components/formedible/fields/array-field.tsx",
         "packages/ui/src/components/formedible/fields/expression-number-field.tsx",
         "packages/ui/src/components/formedible/fields/multi-select-field.tsx",
@@ -1327,7 +1344,14 @@
     {
       "attribute": "aria-pressed",
       "origin": "jsx",
-      "values": [],
+      "values": [
+        {
+          "value": "true",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
+          ]
+        }
+      ],
       "dynamicFiles": [
         "apps/web/src/cad-workbench/SketchMode.tsx",
         "apps/web/src/cad-workbench/drawing-workbench.tsx",
@@ -2855,6 +2879,14 @@
       ]
     },
     {
+      "attribute": "data-elevation",
+      "origin": "jsx",
+      "values": [],
+      "dynamicFiles": [
+        "packages/ui/src/components/cockpit/panel.tsx"
+      ]
+    },
+    {
       "attribute": "data-error",
       "origin": "jsx",
       "values": [
@@ -4061,11 +4093,14 @@
         {
           "value": "true",
           "files": [
-            "packages/ui/src/components/cad/cad-model-tree.tsx"
+            "packages/ui/src/components/cad/cad-model-tree.tsx",
+            "packages/ui/src/components/cockpit/property-row.tsx"
           ]
         }
       ],
-      "dynamicFiles": []
+      "dynamicFiles": [
+        "packages/ui/src/components/cockpit/property-row.tsx"
+      ]
     },
     {
       "attribute": "data-selected-edge",
@@ -5842,6 +5877,12 @@
           ]
         },
         {
+          "value": "key-cap",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-button.tsx"
+          ]
+        },
+        {
           "value": "label",
           "files": [
             "packages/ui/src/components/label.tsx"
@@ -5938,6 +5979,36 @@
           ]
         },
         {
+          "value": "panel",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
+          "value": "panel-body",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
+          "value": "panel-header",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
+          "value": "panel-header-trailing",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
+          "value": "panel-section",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
           "value": "phone-country-menu",
           "files": [
             "packages/ui/src/components/formedible/fields/phone-field.tsx"
@@ -5980,6 +6051,24 @@
           ]
         },
         {
+          "value": "property-label",
+          "files": [
+            "packages/ui/src/components/cockpit/property-row.tsx"
+          ]
+        },
+        {
+          "value": "property-row",
+          "files": [
+            "packages/ui/src/components/cockpit/property-row.tsx"
+          ]
+        },
+        {
+          "value": "property-value",
+          "files": [
+            "packages/ui/src/components/cockpit/property-row.tsx"
+          ]
+        },
+        {
           "value": "radio-group",
           "files": [
             "packages/ui/src/components/radio-group.tsx"
@@ -6001,6 +6090,12 @@
           "value": "rating-half",
           "files": [
             "packages/ui/src/components/formedible/fields/rating-field.tsx"
+          ]
+        },
+        {
+          "value": "readout",
+          "files": [
+            "packages/ui/src/components/cockpit/property-row.tsx"
           ]
         },
         {
@@ -6100,6 +6195,12 @@
           ]
         },
         {
+          "value": "status-dot",
+          "files": [
+            "packages/ui/src/components/cockpit/property-row.tsx"
+          ]
+        },
+        {
           "value": "switch",
           "files": [
             "packages/ui/src/components/switch.tsx"
@@ -6115,6 +6216,18 @@
           "value": "textarea",
           "files": [
             "packages/ui/src/components/textarea.tsx"
+          ]
+        },
+        {
+          "value": "tool-button",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-button.tsx"
+          ]
+        },
+        {
+          "value": "tool-group",
+          "files": [
+            "packages/ui/src/components/cockpit/tool-button.tsx"
           ]
         },
         {
@@ -6748,6 +6861,12 @@
           "value": "create-project-panel",
           "files": [
             "apps/web/src/routes/_auth/projects.index.tsx"
+          ]
+        },
+        {
+          "value": "design-system",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
           ]
         },
         {
@@ -7767,6 +7886,7 @@
         "apps/web/src/cad-workbench/interference-workbench.tsx",
         "apps/web/src/cad-workbench/viewport-view-tools.tsx",
         "apps/web/src/components/scheme-picker.tsx",
+        "apps/web/src/design/DesignSystemPage.tsx",
         "apps/web/src/docs-app/DocsPage.tsx",
         "apps/web/src/docs-app/live-examples.tsx",
         "apps/web/src/viewer/share-variant-menu.tsx",
@@ -7805,6 +7925,14 @@
       "values": [],
       "dynamicFiles": [
         "apps/web/src/cad-workbench/drawing-workbench.tsx"
+      ]
+    },
+    {
+      "attribute": "data-tone",
+      "origin": "jsx",
+      "values": [],
+      "dynamicFiles": [
+        "packages/ui/src/components/cockpit/property-row.tsx"
       ]
     },
     {
@@ -8126,6 +8254,12 @@
       "origin": "jsx",
       "values": [
         {
+          "value": "a docked face",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
+          ]
+        },
+        {
           "value": "alert",
           "files": [
             "apps/web/src/agent/chat/agent-settings.tsx",
@@ -8183,6 +8317,7 @@
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
             "packages/ui/src/components/cad/cad-toolbar.tsx",
             "packages/ui/src/components/cad/cad-viewport.tsx",
+            "packages/ui/src/components/cockpit/tool-button.tsx",
             "packages/ui/src/components/field.tsx",
             "packages/ui/src/components/input-group.tsx"
           ]
@@ -8197,6 +8332,12 @@
             "apps/web/src/sim-workbench/mechanism-motion.tsx",
             "apps/web/src/sim-workbench/study-pareto.tsx",
             "packages/ui/src/components/cad/cad-sketch-canvas.tsx"
+          ]
+        },
+        {
+          "value": "inset fields",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
           ]
         },
         {
@@ -8219,10 +8360,22 @@
           ]
         },
         {
+          "value": "menus, dialogs",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
+          ]
+        },
+        {
           "value": "option",
           "files": [
             "packages/ui/src/components/cad/cad-parameter-manager.tsx",
             "packages/ui/src/components/formedible/fields/expression-number-field.tsx"
+          ]
+        },
+        {
+          "value": "panel over panel",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
           ]
         },
         {
@@ -8274,9 +8427,21 @@
           ]
         },
         {
+          "value": "the frame",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
+          ]
+        },
+        {
           "value": "tooltip",
           "files": [
             "packages/ui/src/components/formedible/fields/field-wrapper.tsx"
+          ]
+        },
+        {
+          "value": "tracks, key caps",
+          "files": [
+            "apps/web/src/design/DesignSystemPage.tsx"
           ]
         },
         {

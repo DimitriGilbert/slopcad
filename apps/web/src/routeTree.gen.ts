@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteRouteImport } from './routes/_auth/route'
+import { Route as DesignRouteImport } from './routes/design'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as DrawingsRouteImport } from './routes/drawings'
 import { Route as IoRouteImport } from './routes/io'
@@ -52,6 +53,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const AuthRouteRoute = AuthRouteRouteImport.update({
   id: '/_auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesignRoute = DesignRouteImport.update({
+  id: '/design',
+  path: '/design',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocsRoute = DocsRouteImport.update({
@@ -223,6 +229,7 @@ const ApiTrpcSplatRoute = ApiTrpcSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/design': typeof DesignRoute
   '/docs': typeof DocsRoute
   '/drawings': typeof DrawingsRoute
   '/io': typeof IoRoute
@@ -259,6 +266,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/design': typeof DesignRoute
   '/docs': typeof DocsRoute
   '/drawings': typeof DrawingsRoute
   '/io': typeof IoRoute
@@ -297,6 +305,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_auth': typeof AuthRouteRouteWithChildren
+  '/design': typeof DesignRoute
   '/docs': typeof DocsRoute
   '/drawings': typeof DrawingsRoute
   '/io': typeof IoRoute
@@ -335,6 +344,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/design'
     | '/docs'
     | '/drawings'
     | '/io'
@@ -371,6 +381,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/design'
     | '/docs'
     | '/drawings'
     | '/io'
@@ -408,6 +419,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_auth'
+    | '/design'
     | '/docs'
     | '/drawings'
     | '/io'
@@ -446,6 +458,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
+  DesignRoute: typeof DesignRoute
   DocsRoute: typeof DocsRoute
   DrawingsRoute: typeof DrawingsRoute
   IoRoute: typeof IoRoute
@@ -491,6 +504,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/design': {
+      id: '/design'
+      path: '/design'
+      fullPath: '/design'
+      preLoaderRoute: typeof DesignRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/docs': {
@@ -748,6 +768,7 @@ const AuthRouteRouteWithChildren = AuthRouteRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRouteRoute: AuthRouteRouteWithChildren,
+  DesignRoute: DesignRoute,
   DocsRoute: DocsRoute,
   DrawingsRoute: DrawingsRoute,
   IoRoute: IoRoute,
