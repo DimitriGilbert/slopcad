@@ -404,7 +404,11 @@ pnpm --filter @slopcad/cad-jsx compile <model.tsx> [--out <path>] [--commands <p
   `packages/docs-examples/src/cadjsx/fillet-box.tsx`); regenerate those,
   never hand-edit them. `parametric-cup.commands.json` is outside this
   path: it is a hand-authored raw-CadCommand batch, not a cad-jsx model,
-  and the CLI cannot produce it.
+  and the CLI cannot produce it. Its committed companion
+  (`parametric-cup.native.json`) regenerates from that batch over a
+  clean empty base with
+  `pnpm --filter web write-native-parametric-cup-fixture` — the cup
+  content only, no template leftovers.
 - The emitted document's id derives from the model file's basename
   (`hub-mount.tsx` → `doc_hub-mount`), sanitized into the id payload
   charset and length.

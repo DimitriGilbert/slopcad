@@ -158,8 +158,13 @@ pnpm --filter @slopcad/cad-jsx compile \
   (e.g. `fillet-box`) — regenerate those, never hand-edit them.
   `parametric-cup.commands.json` is outside this path: it is a
   hand-authored raw-CadCommand batch, not a cad-jsx model, and the CLI
-  cannot produce it. The primitive fixture (`fillet-box.native.json` +
-  `fillet-box.commands.json`) regenerates with:
+  cannot produce it. Its committed companion
+  (`parametric-cup.native.json`) regenerates from that batch over a
+  clean empty base with
+  `pnpm --filter web write-native-parametric-cup-fixture` — the cup
+  content only, no template leftovers. The primitive fixture
+  (`fillet-box.native.json` + `fillet-box.commands.json`) regenerates
+  with:
 
   ```bash
   pnpm --filter @slopcad/cad-jsx compile \

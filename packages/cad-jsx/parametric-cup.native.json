@@ -1,9 +1,11 @@
 {
-  "formatVersion": 9,
-  "metadata": {},
+  "formatVersion": 11,
+  "metadata": {
+    "generator": "parametric-cup.commands.json"
+  },
   "document": {
     "formatVersion": 1,
-    "id": "doc_cad_workbench",
+    "id": "doc_parametric-cup",
     "idGenerator": {
       "document": 0,
       "parameter": 0,
@@ -13,105 +15,6 @@
     },
     "parameters": {
       "parameters": [
-        {
-          "id": "param_hole_diameter",
-          "name": "holeDiameter",
-          "value": {
-            "dimension": "length",
-            "unit": "mm",
-            "value": 8
-          },
-          "expression": null,
-          "metadata": {}
-        },
-        {
-          "id": "param_translate_x",
-          "name": "translate_x",
-          "value": {
-            "dimension": "length",
-            "unit": "mm",
-            "value": 0
-          },
-          "expression": null,
-          "metadata": {}
-        },
-        {
-          "id": "param_translate_y",
-          "name": "translate_y",
-          "value": {
-            "dimension": "length",
-            "unit": "mm",
-            "value": 0
-          },
-          "expression": null,
-          "metadata": {}
-        },
-        {
-          "id": "param_translate_z",
-          "name": "translate_z",
-          "value": {
-            "dimension": "length",
-            "unit": "mm",
-            "value": 0
-          },
-          "expression": null,
-          "metadata": {}
-        },
-        {
-          "id": "param_rotate_z",
-          "name": "rotate_z",
-          "value": {
-            "dimension": "angle",
-            "unit": "rad",
-            "value": 0
-          },
-          "expression": null,
-          "metadata": {}
-        },
-        {
-          "id": "param_volume_hint",
-          "name": "volumeHint",
-          "value": {
-            "dimension": "length",
-            "unit": "mm",
-            "value": 16
-          },
-          "expression": {
-            "kind": "binary",
-            "operator": "*",
-            "left": {
-              "kind": "identifier",
-              "name": "holeDiameter"
-            },
-            "right": {
-              "kind": "number",
-              "value": 2
-            }
-          },
-          "metadata": {}
-        },
-        {
-          "id": "param_bore_radius",
-          "name": "boreRadius",
-          "value": {
-            "dimension": "length",
-            "unit": "mm",
-            "value": 4
-          },
-          "expression": {
-            "kind": "binary",
-            "operator": "/",
-            "left": {
-              "kind": "identifier",
-              "name": "holeDiameter"
-            },
-            "right": {
-              "kind": "number",
-              "value": 2
-            }
-          },
-          "metadata": {}
-        },
         {
           "id": "param_baseWidth",
           "name": "baseWidth",
@@ -582,11 +485,6 @@
     },
     "bodies": [
       {
-        "id": "body_plate",
-        "name": "plate",
-        "visible": false
-      },
-      {
         "id": "body_cup-shell",
         "name": "cup shell"
       },
@@ -629,48 +527,6 @@
     ],
     "features": [
       {
-        "id": "feat_translate_plate",
-        "kind": "translate",
-        "inputs": [
-          {
-            "kind": "body",
-            "id": "body_plate"
-          },
-          {
-            "kind": "parameter",
-            "id": "param_translate_x"
-          },
-          {
-            "kind": "parameter",
-            "id": "param_translate_y"
-          },
-          {
-            "kind": "parameter",
-            "id": "param_translate_z"
-          }
-        ],
-        "outputs": ["body_plate"]
-      },
-      {
-        "id": "feat_rotate_plate",
-        "kind": "rotate",
-        "inputs": [
-          {
-            "kind": "body",
-            "id": "body_plate"
-          },
-          {
-            "kind": "feature",
-            "id": "feat_translate_plate"
-          },
-          {
-            "kind": "parameter",
-            "id": "param_rotate_z"
-          }
-        ],
-        "outputs": ["body_plate"]
-      },
-      {
         "id": "feat_cup-revolve",
         "kind": "revolve",
         "inputs": [
@@ -687,7 +543,9 @@
             "id": "param_cup-revolve-axis"
           }
         ],
-        "outputs": ["body_cup-shell"]
+        "outputs": [
+          "body_cup-shell"
+        ]
       },
       {
         "id": "feat_handle-0",
@@ -706,7 +564,9 @@
             "id": "param_handle-0-axis"
           }
         ],
-        "outputs": ["body_handle-0"]
+        "outputs": [
+          "body_handle-0"
+        ]
       },
       {
         "id": "feat_handle-1",
@@ -725,7 +585,9 @@
             "id": "param_handle-1-axis"
           }
         ],
-        "outputs": ["body_handle-1"]
+        "outputs": [
+          "body_handle-1"
+        ]
       },
       {
         "id": "feat_handle-2",
@@ -744,7 +606,9 @@
             "id": "param_handle-2-axis"
           }
         ],
-        "outputs": ["body_handle-2"]
+        "outputs": [
+          "body_handle-2"
+        ]
       },
       {
         "id": "feat_handle-3",
@@ -763,7 +627,9 @@
             "id": "param_handle-3-axis"
           }
         ],
-        "outputs": ["body_handle-3"]
+        "outputs": [
+          "body_handle-3"
+        ]
       },
       {
         "id": "feat_handle-4",
@@ -782,7 +648,9 @@
             "id": "param_handle-4-axis"
           }
         ],
-        "outputs": ["body_handle-4"]
+        "outputs": [
+          "body_handle-4"
+        ]
       },
       {
         "id": "feat_handle-5",
@@ -801,7 +669,9 @@
             "id": "param_handle-5-axis"
           }
         ],
-        "outputs": ["body_handle-5"]
+        "outputs": [
+          "body_handle-5"
+        ]
       },
       {
         "id": "feat_cavity",
@@ -820,7 +690,9 @@
             "id": "param_cup-revolve-axis"
           }
         ],
-        "outputs": ["body_cavity"]
+        "outputs": [
+          "body_cavity"
+        ]
       },
       {
         "id": "feat_cup-union",
@@ -855,7 +727,9 @@
             "id": "feat_handle-5"
           }
         ],
-        "outputs": ["body_cup-union"]
+        "outputs": [
+          "body_cup-union"
+        ]
       },
       {
         "id": "feat_cup",
@@ -870,7 +744,9 @@
             "id": "feat_cavity"
           }
         ],
-        "outputs": ["body_cup"]
+        "outputs": [
+          "body_cup"
+        ]
       }
     ],
     "sketches": [
@@ -878,110 +754,220 @@
         "id": "skd_cup2",
         "name": "cup profile v2",
         "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "normal": {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            },
+            "xAxis": {
+              "x": 0,
+              "y": 0,
+              "z": 1
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_anchor",
+              "kind": "line",
+              "construction": true,
+              "fixed": true,
+              "x1": 0,
+              "y1": 0,
+              "x2": 10,
+              "y2": 0
+            },
+            {
+              "id": "skent_l0",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 0,
+              "x2": 0,
+              "y2": 30
+            },
+            {
+              "id": "skent_l1",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 0,
+              "y1": 30,
+              "x2": 22,
+              "y2": 34.4
+            },
+            {
+              "id": "skent_l2",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 22,
+              "y1": 34.4,
+              "x2": 22,
+              "y2": 40.6
+            },
+            {
+              "id": "skent_l3",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 22,
+              "y1": 40.6,
+              "x2": 38,
+              "y2": 40.6
+            },
+            {
+              "id": "skent_l4",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 38,
+              "y1": 40.6,
+              "x2": 38,
+              "y2": 37.6
+            },
+            {
+              "id": "skent_l5",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 38,
+              "y1": 37.6,
+              "x2": 50,
+              "y2": 40
+            },
+            {
+              "id": "skent_l6",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 50,
+              "y1": 40,
+              "x2": 50,
+              "y2": 0
+            },
+            {
+              "id": "skent_l7",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 50,
+              "y1": 0,
+              "x2": 0,
+              "y2": 0
+            }
+          ],
           "constraints": [
             {
+              "id": "skcon_c1",
+              "kind": "coincident",
               "first": {
                 "entity": "skent_l0",
                 "point": "end"
               },
-              "id": "skcon_c1",
-              "kind": "coincident",
               "second": {
                 "entity": "skent_l1",
                 "point": "start"
               }
             },
             {
-              "first": {
-                "entity": "skent_l1",
-                "point": "end"
-              },
               "id": "skcon_c2",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_l1",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_l2",
                 "point": "start"
               }
             },
             {
-              "first": {
-                "entity": "skent_l2",
-                "point": "end"
-              },
               "id": "skcon_c3",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_l2",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_l3",
                 "point": "start"
               }
             },
             {
-              "first": {
-                "entity": "skent_l3",
-                "point": "end"
-              },
               "id": "skcon_c4",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_l3",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_l4",
                 "point": "start"
               }
             },
             {
-              "first": {
-                "entity": "skent_l4",
-                "point": "end"
-              },
               "id": "skcon_c5",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_l4",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_l5",
                 "point": "start"
               }
             },
             {
-              "first": {
-                "entity": "skent_l5",
-                "point": "end"
-              },
               "id": "skcon_c6",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_l5",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_l6",
                 "point": "start"
               }
             },
             {
+              "id": "skcon_c7",
+              "kind": "coincident",
               "first": {
                 "entity": "skent_l6",
                 "point": "end"
               },
-              "id": "skcon_c7",
-              "kind": "coincident",
               "second": {
                 "entity": "skent_l7",
                 "point": "start"
               }
             },
             {
+              "id": "skcon_c11",
+              "kind": "coincident",
               "first": {
                 "entity": "skent_l0",
                 "point": "start"
               },
-              "id": "skcon_c11",
-              "kind": "coincident",
               "second": {
                 "entity": "skent_anchor",
                 "point": "start"
               }
             },
             {
+              "id": "skcon_d12",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d12",
-              "kind": "distanceX",
               "second": {
                 "entity": "skent_l0",
                 "point": "end"
@@ -993,13 +979,12 @@
               }
             },
             {
+              "id": "skcon_d13",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d13",
-              "kind": "distanceX",
-              "parameterId": "param_bandZ1",
               "second": {
                 "entity": "skent_l1",
                 "point": "end"
@@ -1008,15 +993,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 22
-              }
+              },
+              "parameterId": "param_bandZ1"
             },
             {
+              "id": "skcon_d14",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d14",
-              "kind": "distanceX",
               "second": {
                 "entity": "skent_l2",
                 "point": "end"
@@ -1028,12 +1014,12 @@
               }
             },
             {
+              "id": "skcon_d15",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d15",
-              "kind": "distanceX",
               "second": {
                 "entity": "skent_l3",
                 "point": "end"
@@ -1045,13 +1031,12 @@
               }
             },
             {
+              "id": "skcon_d16",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d16",
-              "kind": "distanceX",
-              "parameterId": "param_bandZ2",
               "second": {
                 "entity": "skent_l4",
                 "point": "end"
@@ -1060,16 +1045,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 38
-              }
+              },
+              "parameterId": "param_bandZ2"
             },
             {
+              "id": "skcon_d17",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d17",
-              "kind": "distanceX",
-              "parameterId": "param_height",
               "second": {
                 "entity": "skent_l5",
                 "point": "end"
@@ -1078,16 +1063,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 50
-              }
+              },
+              "parameterId": "param_height"
             },
             {
+              "id": "skcon_d18",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d18",
-              "kind": "distanceX",
-              "parameterId": "param_height",
               "second": {
                 "entity": "skent_l6",
                 "point": "end"
@@ -1096,16 +1081,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 50
-              }
+              },
+              "parameterId": "param_height"
             },
             {
+              "id": "skcon_d21",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d21",
-              "kind": "distanceY",
-              "parameterId": "param_baseR",
               "second": {
                 "entity": "skent_l0",
                 "point": "end"
@@ -1114,16 +1099,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 30
-              }
+              },
+              "parameterId": "param_baseR"
             },
             {
+              "id": "skcon_d22",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d22",
-              "kind": "distanceY",
-              "parameterId": "param_rW1",
               "second": {
                 "entity": "skent_l1",
                 "point": "end"
@@ -1132,15 +1117,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 34.4
-              }
+              },
+              "parameterId": "param_rW1"
             },
             {
+              "id": "skcon_d23",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d23",
-              "kind": "distanceY",
               "second": {
                 "entity": "skent_l2",
                 "point": "end"
@@ -1152,12 +1138,12 @@
               }
             },
             {
+              "id": "skcon_d24",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d24",
-              "kind": "distanceY",
               "second": {
                 "entity": "skent_l3",
                 "point": "end"
@@ -1169,13 +1155,12 @@
               }
             },
             {
+              "id": "skcon_d25",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d25",
-              "kind": "distanceY",
-              "parameterId": "param_rW2",
               "second": {
                 "entity": "skent_l4",
                 "point": "end"
@@ -1184,16 +1169,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 37.6
-              }
+              },
+              "parameterId": "param_rW2"
             },
             {
+              "id": "skcon_d26",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_d26",
-              "kind": "distanceY",
-              "parameterId": "param_topR",
               "second": {
                 "entity": "skent_l5",
                 "point": "end"
@@ -1202,122 +1187,595 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 40
-              }
+              },
+              "parameterId": "param_topR"
             },
             {
+              "id": "skcon_c8",
+              "kind": "coincident",
               "first": {
                 "entity": "skent_l7",
                 "point": "end"
               },
-              "id": "skcon_c8",
-              "kind": "coincident",
               "second": {
                 "entity": "skent_l0",
                 "point": "start"
               }
             }
-          ],
-          "entities": [
-            {
-              "construction": true,
-              "fixed": true,
-              "id": "skent_anchor",
-              "kind": "line",
-              "x1": 0,
-              "x2": 10,
-              "y1": 0,
-              "y2": 0
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l0",
-              "kind": "line",
-              "x1": 0,
-              "x2": 0,
-              "y1": 0,
-              "y2": 30
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l1",
-              "kind": "line",
-              "x1": 0,
-              "x2": 22,
-              "y1": 30,
-              "y2": 34.4
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l2",
-              "kind": "line",
-              "x1": 22,
-              "x2": 22,
-              "y1": 34.4,
-              "y2": 40.6
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l3",
-              "kind": "line",
-              "x1": 22,
-              "x2": 38,
-              "y1": 40.6,
-              "y2": 40.6
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l4",
-              "kind": "line",
-              "x1": 38,
-              "x2": 38,
-              "y1": 40.6,
-              "y2": 37.6
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l5",
-              "kind": "line",
-              "x1": 38,
-              "x2": 50,
-              "y1": 37.6,
-              "y2": 40
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l6",
-              "kind": "line",
-              "x1": 50,
-              "x2": 50,
-              "y1": 40,
-              "y2": 0
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_l7",
-              "kind": "line",
-              "x1": 50,
-              "x2": 0,
-              "y1": 0,
-              "y2": 0
-            }
-          ],
+          ]
+        }
+      },
+      {
+        "id": "skd_grip-0",
+        "name": "handle 0",
+        "sketch": {
           "formatVersion": 2,
           "workplane": {
+            "origin": {
+              "x": 42.5,
+              "y": 0,
+              "z": 30
+            },
             "normal": {
-              "x": 1,
+              "x": 0.6427876096865394,
+              "y": 0,
+              "z": 0.766044443118978
+            },
+            "xAxis": {
+              "x": 0,
+              "y": 1,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_hanch",
+              "kind": "line",
+              "construction": true,
+              "fixed": true,
+              "x1": 0,
+              "y1": 0,
+              "x2": 10,
+              "y2": 0
+            },
+            {
+              "id": "skent_hc",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": 10,
+              "radius": 3
+            }
+          ],
+          "constraints": [
+            {
+              "id": "skcon_h1",
+              "kind": "distanceX",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 0
+              }
+            },
+            {
+              "id": "skcon_h2",
+              "kind": "distanceY",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 10
+              },
+              "parameterId": "param_handleMajor"
+            },
+            {
+              "id": "skcon_h3",
+              "kind": "radius",
+              "entity": "skent_hc",
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 3
+              },
+              "parameterId": "param_handleTube"
+            }
+          ]
+        }
+      },
+      {
+        "id": "skd_grip-1",
+        "name": "handle 1",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 21.250000000000004,
+              "y": 36.80607966083864,
+              "z": 30
+            },
+            "normal": {
+              "x": 0.32139380484326974,
+              "y": 0.5566703992264194,
+              "z": 0.766044443118978
+            },
+            "xAxis": {
+              "x": -0.8660254037844386,
+              "y": 0.5000000000000001,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_hanch",
+              "kind": "line",
+              "construction": true,
+              "fixed": true,
+              "x1": 0,
+              "y1": 0,
+              "x2": 10,
+              "y2": 0
+            },
+            {
+              "id": "skent_hc",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": 10,
+              "radius": 3
+            }
+          ],
+          "constraints": [
+            {
+              "id": "skcon_h1",
+              "kind": "distanceX",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 0
+              }
+            },
+            {
+              "id": "skcon_h2",
+              "kind": "distanceY",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 10
+              },
+              "parameterId": "param_handleMajor"
+            },
+            {
+              "id": "skcon_h3",
+              "kind": "radius",
+              "entity": "skent_hc",
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 3
+              },
+              "parameterId": "param_handleTube"
+            }
+          ]
+        }
+      },
+      {
+        "id": "skd_grip-2",
+        "name": "handle 2",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": -21.24999999999999,
+              "y": 36.80607966083865,
+              "z": 30
+            },
+            "normal": {
+              "x": -0.3213938048432695,
+              "y": 0.5566703992264195,
+              "z": 0.766044443118978
+            },
+            "xAxis": {
+              "x": -0.8660254037844387,
+              "y": -0.4999999999999998,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_hanch",
+              "kind": "line",
+              "construction": true,
+              "fixed": true,
+              "x1": 0,
+              "y1": 0,
+              "x2": 10,
+              "y2": 0
+            },
+            {
+              "id": "skent_hc",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": 10,
+              "radius": 3
+            }
+          ],
+          "constraints": [
+            {
+              "id": "skcon_h1",
+              "kind": "distanceX",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 0
+              }
+            },
+            {
+              "id": "skcon_h2",
+              "kind": "distanceY",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 10
+              },
+              "parameterId": "param_handleMajor"
+            },
+            {
+              "id": "skcon_h3",
+              "kind": "radius",
+              "entity": "skent_hc",
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 3
+              },
+              "parameterId": "param_handleTube"
+            }
+          ]
+        }
+      },
+      {
+        "id": "skd_grip-3",
+        "name": "handle 3",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": -42.5,
+              "y": 5.204748896376251e-15,
+              "z": 30
+            },
+            "normal": {
+              "x": -0.6427876096865394,
+              "y": 7.871877887341986e-17,
+              "z": 0.766044443118978
+            },
+            "xAxis": {
+              "x": -1.2246467991473532e-16,
+              "y": -1,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_hanch",
+              "kind": "line",
+              "construction": true,
+              "fixed": true,
+              "x1": 0,
+              "y1": 0,
+              "x2": 10,
+              "y2": 0
+            },
+            {
+              "id": "skent_hc",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": 10,
+              "radius": 3
+            }
+          ],
+          "constraints": [
+            {
+              "id": "skcon_h1",
+              "kind": "distanceX",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 0
+              }
+            },
+            {
+              "id": "skcon_h2",
+              "kind": "distanceY",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 10
+              },
+              "parameterId": "param_handleMajor"
+            },
+            {
+              "id": "skcon_h3",
+              "kind": "radius",
+              "entity": "skent_hc",
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 3
+              },
+              "parameterId": "param_handleTube"
+            }
+          ]
+        }
+      },
+      {
+        "id": "skd_grip-4",
+        "name": "handle 4",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": -21.250000000000018,
+              "y": -36.806079660838634,
+              "z": 30
+            },
+            "normal": {
+              "x": -0.32139380484326996,
+              "y": -0.5566703992264193,
+              "z": 0.766044443118978
+            },
+            "xAxis": {
+              "x": 0.8660254037844384,
+              "y": -0.5000000000000004,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_hanch",
+              "kind": "line",
+              "construction": true,
+              "fixed": true,
+              "x1": 0,
+              "y1": 0,
+              "x2": 10,
+              "y2": 0
+            },
+            {
+              "id": "skent_hc",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": 10,
+              "radius": 3
+            }
+          ],
+          "constraints": [
+            {
+              "id": "skcon_h1",
+              "kind": "distanceX",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 0
+              }
+            },
+            {
+              "id": "skcon_h2",
+              "kind": "distanceY",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 10
+              },
+              "parameterId": "param_handleMajor"
+            },
+            {
+              "id": "skcon_h3",
+              "kind": "radius",
+              "entity": "skent_hc",
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 3
+              },
+              "parameterId": "param_handleTube"
+            }
+          ]
+        }
+      },
+      {
+        "id": "skd_grip-5",
+        "name": "handle 5",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 21.250000000000004,
+              "y": -36.80607966083864,
+              "z": 30
+            },
+            "normal": {
+              "x": 0.32139380484326974,
+              "y": -0.5566703992264194,
+              "z": 0.766044443118978
+            },
+            "xAxis": {
+              "x": 0.8660254037844386,
+              "y": 0.5000000000000001,
+              "z": 0
+            }
+          },
+          "entities": [
+            {
+              "id": "skent_hanch",
+              "kind": "line",
+              "construction": true,
+              "fixed": true,
+              "x1": 0,
+              "y1": 0,
+              "x2": 10,
+              "y2": 0
+            },
+            {
+              "id": "skent_hc",
+              "kind": "circle",
+              "construction": false,
+              "fixed": false,
+              "cx": 0,
+              "cy": 10,
+              "radius": 3
+            }
+          ],
+          "constraints": [
+            {
+              "id": "skcon_h1",
+              "kind": "distanceX",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 0
+              }
+            },
+            {
+              "id": "skcon_h2",
+              "kind": "distanceY",
+              "first": {
+                "entity": "skent_hanch",
+                "point": "start"
+              },
+              "second": {
+                "entity": "skent_hc",
+                "point": "center"
+              },
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 10
+              },
+              "parameterId": "param_handleMajor"
+            },
+            {
+              "id": "skcon_h3",
+              "kind": "radius",
+              "entity": "skent_hc",
+              "value": {
+                "dimension": "length",
+                "unit": "mm",
+                "value": 3
+              },
+              "parameterId": "param_handleTube"
+            }
+          ]
+        }
+      },
+      {
+        "id": "skd_cavity",
+        "name": "cavity",
+        "sketch": {
+          "formatVersion": 2,
+          "workplane": {
+            "origin": {
+              "x": 0,
               "y": 0,
               "z": 0
             },
-            "origin": {
-              "x": 0,
+            "normal": {
+              "x": 1,
               "y": 0,
               "z": 0
             },
@@ -1326,628 +1784,115 @@
               "y": 0,
               "z": 1
             }
-          }
-        }
-      },
-      {
-        "id": "skd_grip-0",
-        "name": "handle 0",
-        "sketch": {
-          "constraints": [
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h1",
-              "kind": "distanceX",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 0
-              }
-            },
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h2",
-              "kind": "distanceY",
-              "parameterId": "param_handleMajor",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 10
-              }
-            },
-            {
-              "entity": "skent_hc",
-              "id": "skcon_h3",
-              "kind": "radius",
-              "parameterId": "param_handleTube",
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 3
-              }
-            }
-          ],
+          },
           "entities": [
             {
+              "id": "skent_anchor",
+              "kind": "line",
               "construction": true,
               "fixed": true,
-              "id": "skent_hanch",
-              "kind": "line",
               "x1": 0,
-              "x2": 10,
               "y1": 0,
+              "x2": 10,
               "y2": 0
             },
             {
-              "construction": false,
-              "cx": 0,
-              "cy": 10,
-              "fixed": false,
-              "id": "skent_hc",
-              "kind": "circle",
-              "radius": 3
-            }
-          ],
-          "formatVersion": 2,
-          "workplane": {
-            "normal": {
-              "x": 0.6427876096865394,
-              "y": 0,
-              "z": 0.766044443118978
-            },
-            "origin": {
-              "x": 42.5,
-              "y": 0,
-              "z": 30
-            },
-            "xAxis": {
-              "x": 0,
-              "y": 1,
-              "z": 0
-            }
-          }
-        }
-      },
-      {
-        "id": "skd_grip-1",
-        "name": "handle 1",
-        "sketch": {
-          "constraints": [
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h1",
-              "kind": "distanceX",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 0
-              }
-            },
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h2",
-              "kind": "distanceY",
-              "parameterId": "param_handleMajor",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 10
-              }
-            },
-            {
-              "entity": "skent_hc",
-              "id": "skcon_h3",
-              "kind": "radius",
-              "parameterId": "param_handleTube",
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 3
-              }
-            }
-          ],
-          "entities": [
-            {
-              "construction": true,
-              "fixed": true,
-              "id": "skent_hanch",
+              "id": "skent_c0",
               "kind": "line",
-              "x1": 0,
-              "x2": 10,
+              "construction": false,
+              "fixed": false,
+              "x1": 3,
               "y1": 0,
+              "x2": 3,
+              "y2": 27
+            },
+            {
+              "id": "skent_c1",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 3,
+              "y1": 27,
+              "x2": 50,
+              "y2": 37
+            },
+            {
+              "id": "skent_c2",
+              "kind": "line",
+              "construction": false,
+              "fixed": false,
+              "x1": 50,
+              "y1": 37,
+              "x2": 50,
               "y2": 0
             },
             {
-              "construction": false,
-              "cx": 0,
-              "cy": 10,
-              "fixed": false,
-              "id": "skent_hc",
-              "kind": "circle",
-              "radius": 3
-            }
-          ],
-          "formatVersion": 2,
-          "workplane": {
-            "normal": {
-              "x": 0.32139380484326974,
-              "y": 0.5566703992264194,
-              "z": 0.766044443118978
-            },
-            "origin": {
-              "x": 21.250000000000004,
-              "y": 36.80607966083864,
-              "z": 30
-            },
-            "xAxis": {
-              "x": -0.8660254037844386,
-              "y": 0.5000000000000001,
-              "z": 0
-            }
-          }
-        }
-      },
-      {
-        "id": "skd_grip-2",
-        "name": "handle 2",
-        "sketch": {
-          "constraints": [
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h1",
-              "kind": "distanceX",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 0
-              }
-            },
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h2",
-              "kind": "distanceY",
-              "parameterId": "param_handleMajor",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 10
-              }
-            },
-            {
-              "entity": "skent_hc",
-              "id": "skcon_h3",
-              "kind": "radius",
-              "parameterId": "param_handleTube",
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 3
-              }
-            }
-          ],
-          "entities": [
-            {
-              "construction": true,
-              "fixed": true,
-              "id": "skent_hanch",
+              "id": "skent_c3",
               "kind": "line",
-              "x1": 0,
-              "x2": 10,
-              "y1": 0,
-              "y2": 0
-            },
-            {
               "construction": false,
-              "cx": 0,
-              "cy": 10,
               "fixed": false,
-              "id": "skent_hc",
-              "kind": "circle",
-              "radius": 3
+              "x1": 50,
+              "y1": 0,
+              "x2": 3,
+              "y2": 0
             }
           ],
-          "formatVersion": 2,
-          "workplane": {
-            "normal": {
-              "x": -0.3213938048432695,
-              "y": 0.5566703992264195,
-              "z": 0.766044443118978
-            },
-            "origin": {
-              "x": -21.24999999999999,
-              "y": 36.80607966083865,
-              "z": 30
-            },
-            "xAxis": {
-              "x": -0.8660254037844387,
-              "y": -0.4999999999999998,
-              "z": 0
-            }
-          }
-        }
-      },
-      {
-        "id": "skd_grip-3",
-        "name": "handle 3",
-        "sketch": {
           "constraints": [
             {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h1",
-              "kind": "distanceX",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 0
-              }
-            },
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h2",
-              "kind": "distanceY",
-              "parameterId": "param_handleMajor",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 10
-              }
-            },
-            {
-              "entity": "skent_hc",
-              "id": "skcon_h3",
-              "kind": "radius",
-              "parameterId": "param_handleTube",
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 3
-              }
-            }
-          ],
-          "entities": [
-            {
-              "construction": true,
-              "fixed": true,
-              "id": "skent_hanch",
-              "kind": "line",
-              "x1": 0,
-              "x2": 10,
-              "y1": 0,
-              "y2": 0
-            },
-            {
-              "construction": false,
-              "cx": 0,
-              "cy": 10,
-              "fixed": false,
-              "id": "skent_hc",
-              "kind": "circle",
-              "radius": 3
-            }
-          ],
-          "formatVersion": 2,
-          "workplane": {
-            "normal": {
-              "x": -0.6427876096865394,
-              "y": 7.871877887341985e-17,
-              "z": 0.766044443118978
-            },
-            "origin": {
-              "x": -42.5,
-              "y": 5.204748896376251e-15,
-              "z": 30
-            },
-            "xAxis": {
-              "x": -1.2246467991473532e-16,
-              "y": -1,
-              "z": 0
-            }
-          }
-        }
-      },
-      {
-        "id": "skd_grip-4",
-        "name": "handle 4",
-        "sketch": {
-          "constraints": [
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h1",
-              "kind": "distanceX",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 0
-              }
-            },
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h2",
-              "kind": "distanceY",
-              "parameterId": "param_handleMajor",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 10
-              }
-            },
-            {
-              "entity": "skent_hc",
-              "id": "skcon_h3",
-              "kind": "radius",
-              "parameterId": "param_handleTube",
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 3
-              }
-            }
-          ],
-          "entities": [
-            {
-              "construction": true,
-              "fixed": true,
-              "id": "skent_hanch",
-              "kind": "line",
-              "x1": 0,
-              "x2": 10,
-              "y1": 0,
-              "y2": 0
-            },
-            {
-              "construction": false,
-              "cx": 0,
-              "cy": 10,
-              "fixed": false,
-              "id": "skent_hc",
-              "kind": "circle",
-              "radius": 3
-            }
-          ],
-          "formatVersion": 2,
-          "workplane": {
-            "normal": {
-              "x": -0.32139380484326996,
-              "y": -0.5566703992264193,
-              "z": 0.766044443118978
-            },
-            "origin": {
-              "x": -21.250000000000018,
-              "y": -36.806079660838634,
-              "z": 30
-            },
-            "xAxis": {
-              "x": 0.8660254037844384,
-              "y": -0.5000000000000004,
-              "z": 0
-            }
-          }
-        }
-      },
-      {
-        "id": "skd_grip-5",
-        "name": "handle 5",
-        "sketch": {
-          "constraints": [
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h1",
-              "kind": "distanceX",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 0
-              }
-            },
-            {
-              "first": {
-                "entity": "skent_hanch",
-                "point": "start"
-              },
-              "id": "skcon_h2",
-              "kind": "distanceY",
-              "parameterId": "param_handleMajor",
-              "second": {
-                "entity": "skent_hc",
-                "point": "center"
-              },
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 10
-              }
-            },
-            {
-              "entity": "skent_hc",
-              "id": "skcon_h3",
-              "kind": "radius",
-              "parameterId": "param_handleTube",
-              "value": {
-                "dimension": "length",
-                "unit": "mm",
-                "value": 3
-              }
-            }
-          ],
-          "entities": [
-            {
-              "construction": true,
-              "fixed": true,
-              "id": "skent_hanch",
-              "kind": "line",
-              "x1": 0,
-              "x2": 10,
-              "y1": 0,
-              "y2": 0
-            },
-            {
-              "construction": false,
-              "cx": 0,
-              "cy": 10,
-              "fixed": false,
-              "id": "skent_hc",
-              "kind": "circle",
-              "radius": 3
-            }
-          ],
-          "formatVersion": 2,
-          "workplane": {
-            "normal": {
-              "x": 0.32139380484326974,
-              "y": -0.5566703992264194,
-              "z": 0.766044443118978
-            },
-            "origin": {
-              "x": 21.250000000000004,
-              "y": -36.80607966083864,
-              "z": 30
-            },
-            "xAxis": {
-              "x": 0.8660254037844386,
-              "y": 0.5000000000000001,
-              "z": 0
-            }
-          }
-        }
-      },
-      {
-        "id": "skd_cavity",
-        "name": "cavity",
-        "sketch": {
-          "constraints": [
-            {
-              "first": {
-                "entity": "skent_c0",
-                "point": "end"
-              },
               "id": "skcon_cv_c0",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_c0",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_c1",
                 "point": "start"
               }
             },
             {
-              "first": {
-                "entity": "skent_c1",
-                "point": "end"
-              },
               "id": "skcon_cv_c1",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_c1",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_c2",
                 "point": "start"
               }
             },
             {
-              "first": {
-                "entity": "skent_c2",
-                "point": "end"
-              },
               "id": "skcon_cv_c2",
               "kind": "coincident",
+              "first": {
+                "entity": "skent_c2",
+                "point": "end"
+              },
               "second": {
                 "entity": "skent_c3",
                 "point": "start"
               }
             },
             {
+              "id": "skcon_cv_c3",
+              "kind": "coincident",
               "first": {
                 "entity": "skent_c3",
                 "point": "end"
               },
-              "id": "skcon_cv_c3",
-              "kind": "coincident",
               "second": {
                 "entity": "skent_c0",
                 "point": "start"
               }
             },
             {
+              "id": "skcon_cv_d0",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d0",
-              "kind": "distanceX",
-              "parameterId": "param_wallT",
               "second": {
                 "entity": "skent_c0",
                 "point": "end"
@@ -1956,16 +1901,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 3
-              }
+              },
+              "parameterId": "param_wallT"
             },
             {
+              "id": "skcon_cv_d1",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d1",
-              "kind": "distanceY",
-              "parameterId": "param_innerBaseR",
               "second": {
                 "entity": "skent_c0",
                 "point": "end"
@@ -1974,16 +1919,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 27
-              }
+              },
+              "parameterId": "param_innerBaseR"
             },
             {
+              "id": "skcon_cv_d2",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d2",
-              "kind": "distanceX",
-              "parameterId": "param_height",
               "second": {
                 "entity": "skent_c1",
                 "point": "end"
@@ -1992,16 +1937,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 50
-              }
+              },
+              "parameterId": "param_height"
             },
             {
+              "id": "skcon_cv_d3",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d3",
-              "kind": "distanceY",
-              "parameterId": "param_innerTopR",
               "second": {
                 "entity": "skent_c1",
                 "point": "end"
@@ -2010,16 +1955,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 37
-              }
+              },
+              "parameterId": "param_innerTopR"
             },
             {
+              "id": "skcon_cv_d4",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d4",
-              "kind": "distanceX",
-              "parameterId": "param_height",
               "second": {
                 "entity": "skent_c2",
                 "point": "end"
@@ -2028,15 +1973,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 50
-              }
+              },
+              "parameterId": "param_height"
             },
             {
+              "id": "skcon_cv_d5",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d5",
-              "kind": "distanceY",
               "second": {
                 "entity": "skent_c2",
                 "point": "end"
@@ -2048,13 +1994,12 @@
               }
             },
             {
+              "id": "skcon_cv_d6",
+              "kind": "distanceX",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d6",
-              "kind": "distanceX",
-              "parameterId": "param_wallT",
               "second": {
                 "entity": "skent_c3",
                 "point": "end"
@@ -2063,15 +2008,16 @@
                 "dimension": "length",
                 "unit": "mm",
                 "value": 3
-              }
+              },
+              "parameterId": "param_wallT"
             },
             {
+              "id": "skcon_cv_d7",
+              "kind": "distanceY",
               "first": {
                 "entity": "skent_anchor",
                 "point": "start"
               },
-              "id": "skcon_cv_d7",
-              "kind": "distanceY",
               "second": {
                 "entity": "skent_c3",
                 "point": "end"
@@ -2082,95 +2028,15 @@
                 "value": 0
               }
             }
-          ],
-          "entities": [
-            {
-              "construction": true,
-              "fixed": true,
-              "id": "skent_anchor",
-              "kind": "line",
-              "x1": 0,
-              "x2": 10,
-              "y1": 0,
-              "y2": 0
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_c0",
-              "kind": "line",
-              "x1": 3,
-              "x2": 3,
-              "y1": 0,
-              "y2": 27
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_c1",
-              "kind": "line",
-              "x1": 3,
-              "x2": 50,
-              "y1": 27,
-              "y2": 37
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_c2",
-              "kind": "line",
-              "x1": 50,
-              "x2": 50,
-              "y1": 37,
-              "y2": 0
-            },
-            {
-              "construction": false,
-              "fixed": false,
-              "id": "skent_c3",
-              "kind": "line",
-              "x1": 50,
-              "x2": 3,
-              "y1": 0,
-              "y2": 0
-            }
-          ],
-          "formatVersion": 2,
-          "workplane": {
-            "normal": {
-              "x": 1,
-              "y": 0,
-              "z": 0
-            },
-            "origin": {
-              "x": 0,
-              "y": 0,
-              "z": 0
-            },
-            "xAxis": {
-              "x": 0,
-              "y": 0,
-              "z": 1
-            }
-          }
+          ]
         }
-      }
-    ],
-    "sections": [
-      {
-        "id": "sec_mid_height",
-        "name": "mid-height",
-        "origin": [15, 10, 5],
-        "normal": [0, 0, 1],
-        "keepSide": 1,
-        "enabled": false
       }
     ]
   },
   "history": {
     "base": {
       "formatVersion": 1,
-      "id": "doc_cad_workbench",
+      "id": "doc_parametric-cup",
       "idGenerator": {
         "document": 0,
         "parameter": 0,
@@ -2179,168 +2045,10 @@
         "reference": 0
       },
       "parameters": {
-        "parameters": [
-          {
-            "id": "param_hole_diameter",
-            "name": "holeDiameter",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 8
-            },
-            "expression": null,
-            "metadata": {}
-          },
-          {
-            "id": "param_translate_x",
-            "name": "translate_x",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 0
-            },
-            "expression": null,
-            "metadata": {}
-          },
-          {
-            "id": "param_translate_y",
-            "name": "translate_y",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 0
-            },
-            "expression": null,
-            "metadata": {}
-          },
-          {
-            "id": "param_translate_z",
-            "name": "translate_z",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 0
-            },
-            "expression": null,
-            "metadata": {}
-          },
-          {
-            "id": "param_rotate_z",
-            "name": "rotate_z",
-            "value": {
-              "dimension": "angle",
-              "unit": "rad",
-              "value": 0
-            },
-            "expression": null,
-            "metadata": {}
-          },
-          {
-            "id": "param_volume_hint",
-            "name": "volumeHint",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 16
-            },
-            "expression": {
-              "kind": "binary",
-              "operator": "*",
-              "left": {
-                "kind": "identifier",
-                "name": "holeDiameter"
-              },
-              "right": {
-                "kind": "number",
-                "value": 2
-              }
-            },
-            "metadata": {}
-          },
-          {
-            "id": "param_bore_radius",
-            "name": "boreRadius",
-            "value": {
-              "dimension": "length",
-              "unit": "mm",
-              "value": 4
-            },
-            "expression": {
-              "kind": "binary",
-              "operator": "/",
-              "left": {
-                "kind": "identifier",
-                "name": "holeDiameter"
-              },
-              "right": {
-                "kind": "number",
-                "value": 2
-              }
-            },
-            "metadata": {}
-          }
-        ]
+        "parameters": []
       },
-      "bodies": [
-        {
-          "id": "body_plate",
-          "name": "plate"
-        }
-      ],
-      "features": [
-        {
-          "id": "feat_translate_plate",
-          "kind": "translate",
-          "inputs": [
-            {
-              "kind": "body",
-              "id": "body_plate"
-            },
-            {
-              "kind": "parameter",
-              "id": "param_translate_x"
-            },
-            {
-              "kind": "parameter",
-              "id": "param_translate_y"
-            },
-            {
-              "kind": "parameter",
-              "id": "param_translate_z"
-            }
-          ],
-          "outputs": ["body_plate"]
-        },
-        {
-          "id": "feat_rotate_plate",
-          "kind": "rotate",
-          "inputs": [
-            {
-              "kind": "body",
-              "id": "body_plate"
-            },
-            {
-              "kind": "feature",
-              "id": "feat_translate_plate"
-            },
-            {
-              "kind": "parameter",
-              "id": "param_rotate_z"
-            }
-          ],
-          "outputs": ["body_plate"]
-        }
-      ],
-      "sections": [
-        {
-          "id": "sec_mid_height",
-          "name": "mid-height",
-          "origin": [15, 10, 5],
-          "normal": [0, 0, 1],
-          "keepSide": 1,
-          "enabled": false
-        }
-      ]
+      "bodies": [],
+      "features": []
     },
     "transactions": [
       {
@@ -2750,110 +2458,220 @@
             "id": "skd_cup2",
             "name": "cup profile v2",
             "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 0,
+                  "y": 0,
+                  "z": 0
+                },
+                "normal": {
+                  "x": 1,
+                  "y": 0,
+                  "z": 0
+                },
+                "xAxis": {
+                  "x": 0,
+                  "y": 0,
+                  "z": 1
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_anchor",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_l0",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 0,
+                  "y2": 30
+                },
+                {
+                  "id": "skent_l1",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 0,
+                  "y1": 30,
+                  "x2": 22,
+                  "y2": 34.4
+                },
+                {
+                  "id": "skent_l2",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 22,
+                  "y1": 34.4,
+                  "x2": 22,
+                  "y2": 40.6
+                },
+                {
+                  "id": "skent_l3",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 22,
+                  "y1": 40.6,
+                  "x2": 38,
+                  "y2": 40.6
+                },
+                {
+                  "id": "skent_l4",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 38,
+                  "y1": 40.6,
+                  "x2": 38,
+                  "y2": 37.6
+                },
+                {
+                  "id": "skent_l5",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 38,
+                  "y1": 37.6,
+                  "x2": 50,
+                  "y2": 40
+                },
+                {
+                  "id": "skent_l6",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 50,
+                  "y1": 40,
+                  "x2": 50,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_l7",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 50,
+                  "y1": 0,
+                  "x2": 0,
+                  "y2": 0
+                }
+              ],
               "constraints": [
                 {
+                  "id": "skcon_c1",
+                  "kind": "coincident",
                   "first": {
                     "entity": "skent_l0",
                     "point": "end"
                   },
-                  "id": "skcon_c1",
-                  "kind": "coincident",
                   "second": {
                     "entity": "skent_l1",
                     "point": "start"
                   }
                 },
                 {
-                  "first": {
-                    "entity": "skent_l1",
-                    "point": "end"
-                  },
                   "id": "skcon_c2",
                   "kind": "coincident",
+                  "first": {
+                    "entity": "skent_l1",
+                    "point": "end"
+                  },
                   "second": {
                     "entity": "skent_l2",
                     "point": "start"
                   }
                 },
                 {
-                  "first": {
-                    "entity": "skent_l2",
-                    "point": "end"
-                  },
                   "id": "skcon_c3",
                   "kind": "coincident",
+                  "first": {
+                    "entity": "skent_l2",
+                    "point": "end"
+                  },
                   "second": {
                     "entity": "skent_l3",
                     "point": "start"
                   }
                 },
                 {
-                  "first": {
-                    "entity": "skent_l3",
-                    "point": "end"
-                  },
                   "id": "skcon_c4",
                   "kind": "coincident",
+                  "first": {
+                    "entity": "skent_l3",
+                    "point": "end"
+                  },
                   "second": {
                     "entity": "skent_l4",
                     "point": "start"
                   }
                 },
                 {
-                  "first": {
-                    "entity": "skent_l4",
-                    "point": "end"
-                  },
                   "id": "skcon_c5",
                   "kind": "coincident",
+                  "first": {
+                    "entity": "skent_l4",
+                    "point": "end"
+                  },
                   "second": {
                     "entity": "skent_l5",
                     "point": "start"
                   }
                 },
                 {
-                  "first": {
-                    "entity": "skent_l5",
-                    "point": "end"
-                  },
                   "id": "skcon_c6",
                   "kind": "coincident",
+                  "first": {
+                    "entity": "skent_l5",
+                    "point": "end"
+                  },
                   "second": {
                     "entity": "skent_l6",
                     "point": "start"
                   }
                 },
                 {
+                  "id": "skcon_c7",
+                  "kind": "coincident",
                   "first": {
                     "entity": "skent_l6",
                     "point": "end"
                   },
-                  "id": "skcon_c7",
-                  "kind": "coincident",
                   "second": {
                     "entity": "skent_l7",
                     "point": "start"
                   }
                 },
                 {
+                  "id": "skcon_c11",
+                  "kind": "coincident",
                   "first": {
                     "entity": "skent_l0",
                     "point": "start"
                   },
-                  "id": "skcon_c11",
-                  "kind": "coincident",
                   "second": {
                     "entity": "skent_anchor",
                     "point": "start"
                   }
                 },
                 {
+                  "id": "skcon_d12",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d12",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_l0",
                     "point": "end"
@@ -2865,13 +2683,12 @@
                   }
                 },
                 {
+                  "id": "skcon_d13",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d13",
-                  "kind": "distanceX",
-                  "parameterId": "param_bandZ1",
                   "second": {
                     "entity": "skent_l1",
                     "point": "end"
@@ -2880,15 +2697,16 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 22
-                  }
+                  },
+                  "parameterId": "param_bandZ1"
                 },
                 {
+                  "id": "skcon_d14",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d14",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_l2",
                     "point": "end"
@@ -2900,12 +2718,12 @@
                   }
                 },
                 {
+                  "id": "skcon_d15",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d15",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_l3",
                     "point": "end"
@@ -2917,13 +2735,12 @@
                   }
                 },
                 {
+                  "id": "skcon_d16",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d16",
-                  "kind": "distanceX",
-                  "parameterId": "param_bandZ2",
                   "second": {
                     "entity": "skent_l4",
                     "point": "end"
@@ -2932,16 +2749,16 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 38
-                  }
+                  },
+                  "parameterId": "param_bandZ2"
                 },
                 {
+                  "id": "skcon_d17",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d17",
-                  "kind": "distanceX",
-                  "parameterId": "param_height",
                   "second": {
                     "entity": "skent_l5",
                     "point": "end"
@@ -2950,16 +2767,16 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 50
-                  }
+                  },
+                  "parameterId": "param_height"
                 },
                 {
+                  "id": "skcon_d18",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d18",
-                  "kind": "distanceX",
-                  "parameterId": "param_height",
                   "second": {
                     "entity": "skent_l6",
                     "point": "end"
@@ -2968,16 +2785,16 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 50
-                  }
+                  },
+                  "parameterId": "param_height"
                 },
                 {
+                  "id": "skcon_d21",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d21",
-                  "kind": "distanceY",
-                  "parameterId": "param_baseR",
                   "second": {
                     "entity": "skent_l0",
                     "point": "end"
@@ -2986,16 +2803,16 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 30
-                  }
+                  },
+                  "parameterId": "param_baseR"
                 },
                 {
+                  "id": "skcon_d22",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d22",
-                  "kind": "distanceY",
-                  "parameterId": "param_rW1",
                   "second": {
                     "entity": "skent_l1",
                     "point": "end"
@@ -3004,15 +2821,16 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 34.4
-                  }
+                  },
+                  "parameterId": "param_rW1"
                 },
                 {
+                  "id": "skcon_d23",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d23",
-                  "kind": "distanceY",
                   "second": {
                     "entity": "skent_l2",
                     "point": "end"
@@ -3024,12 +2842,12 @@
                   }
                 },
                 {
+                  "id": "skcon_d24",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d24",
-                  "kind": "distanceY",
                   "second": {
                     "entity": "skent_l3",
                     "point": "end"
@@ -3041,13 +2859,12 @@
                   }
                 },
                 {
+                  "id": "skcon_d25",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d25",
-                  "kind": "distanceY",
-                  "parameterId": "param_rW2",
                   "second": {
                     "entity": "skent_l4",
                     "point": "end"
@@ -3056,16 +2873,16 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 37.6
-                  }
+                  },
+                  "parameterId": "param_rW2"
                 },
                 {
+                  "id": "skcon_d26",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_anchor",
                     "point": "start"
                   },
-                  "id": "skcon_d26",
-                  "kind": "distanceY",
-                  "parameterId": "param_topR",
                   "second": {
                     "entity": "skent_l5",
                     "point": "end"
@@ -3074,131 +2891,22 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 40
-                  }
+                  },
+                  "parameterId": "param_topR"
                 },
                 {
+                  "id": "skcon_c8",
+                  "kind": "coincident",
                   "first": {
                     "entity": "skent_l7",
                     "point": "end"
                   },
-                  "id": "skcon_c8",
-                  "kind": "coincident",
                   "second": {
                     "entity": "skent_l0",
                     "point": "start"
                   }
                 }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_anchor",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l0",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 0,
-                  "y1": 0,
-                  "y2": 30
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l1",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 22,
-                  "y1": 30,
-                  "y2": 34.4
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l2",
-                  "kind": "line",
-                  "x1": 22,
-                  "x2": 22,
-                  "y1": 34.4,
-                  "y2": 40.6
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l3",
-                  "kind": "line",
-                  "x1": 22,
-                  "x2": 38,
-                  "y1": 40.6,
-                  "y2": 40.6
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l4",
-                  "kind": "line",
-                  "x1": 38,
-                  "x2": 38,
-                  "y1": 40.6,
-                  "y2": 37.6
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l5",
-                  "kind": "line",
-                  "x1": 38,
-                  "x2": 50,
-                  "y1": 37.6,
-                  "y2": 40
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l6",
-                  "kind": "line",
-                  "x1": 50,
-                  "x2": 50,
-                  "y1": 40,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_l7",
-                  "kind": "line",
-                  "x1": 50,
-                  "x2": 0,
-                  "y1": 0,
-                  "y2": 0
-                }
-              ],
-              "formatVersion": 2,
-              "workplane": {
-                "normal": {
-                  "x": 1,
-                  "y": 0,
-                  "z": 0
-                },
-                "origin": {
-                  "x": 0,
-                  "y": 0,
-                  "z": 0
-                },
-                "xAxis": {
-                  "x": 0,
-                  "y": 0,
-                  "z": 1
-                }
-              }
+              ]
             }
           },
           {
@@ -3207,14 +2915,53 @@
             "id": "skd_grip-0",
             "name": "handle 0",
             "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 42.5,
+                  "y": 0,
+                  "z": 30
+                },
+                "normal": {
+                  "x": 0.6427876096865394,
+                  "y": 0,
+                  "z": 0.766044443118978
+                },
+                "xAxis": {
+                  "x": 0,
+                  "y": 1,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_hanch",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_hc",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": 10,
+                  "radius": 3
+                }
+              ],
               "constraints": [
                 {
+                  "id": "skcon_h1",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h1",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3226,13 +2973,12 @@
                   }
                 },
                 {
+                  "id": "skcon_h2",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h2",
-                  "kind": "distanceY",
-                  "parameterId": "param_handleMajor",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3241,59 +2987,21 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 10
-                  }
+                  },
+                  "parameterId": "param_handleMajor"
                 },
                 {
-                  "entity": "skent_hc",
                   "id": "skcon_h3",
                   "kind": "radius",
-                  "parameterId": "param_handleTube",
+                  "entity": "skent_hc",
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
                     "value": 3
-                  }
+                  },
+                  "parameterId": "param_handleTube"
                 }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_hanch",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "cx": 0,
-                  "cy": 10,
-                  "fixed": false,
-                  "id": "skent_hc",
-                  "kind": "circle",
-                  "radius": 3
-                }
-              ],
-              "formatVersion": 2,
-              "workplane": {
-                "normal": {
-                  "x": 0.6427876096865394,
-                  "y": 0,
-                  "z": 0.766044443118978
-                },
-                "origin": {
-                  "x": 42.5,
-                  "y": 0,
-                  "z": 30
-                },
-                "xAxis": {
-                  "x": 0,
-                  "y": 1,
-                  "z": 0
-                }
-              }
+              ]
             }
           },
           {
@@ -3302,14 +3010,53 @@
             "id": "skd_grip-1",
             "name": "handle 1",
             "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 21.250000000000004,
+                  "y": 36.80607966083864,
+                  "z": 30
+                },
+                "normal": {
+                  "x": 0.32139380484326974,
+                  "y": 0.5566703992264194,
+                  "z": 0.766044443118978
+                },
+                "xAxis": {
+                  "x": -0.8660254037844386,
+                  "y": 0.5000000000000001,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_hanch",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_hc",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": 10,
+                  "radius": 3
+                }
+              ],
               "constraints": [
                 {
+                  "id": "skcon_h1",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h1",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3321,13 +3068,12 @@
                   }
                 },
                 {
+                  "id": "skcon_h2",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h2",
-                  "kind": "distanceY",
-                  "parameterId": "param_handleMajor",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3336,59 +3082,21 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 10
-                  }
+                  },
+                  "parameterId": "param_handleMajor"
                 },
                 {
-                  "entity": "skent_hc",
                   "id": "skcon_h3",
                   "kind": "radius",
-                  "parameterId": "param_handleTube",
+                  "entity": "skent_hc",
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
                     "value": 3
-                  }
+                  },
+                  "parameterId": "param_handleTube"
                 }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_hanch",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "cx": 0,
-                  "cy": 10,
-                  "fixed": false,
-                  "id": "skent_hc",
-                  "kind": "circle",
-                  "radius": 3
-                }
-              ],
-              "formatVersion": 2,
-              "workplane": {
-                "normal": {
-                  "x": 0.32139380484326974,
-                  "y": 0.5566703992264194,
-                  "z": 0.766044443118978
-                },
-                "origin": {
-                  "x": 21.250000000000004,
-                  "y": 36.80607966083864,
-                  "z": 30
-                },
-                "xAxis": {
-                  "x": -0.8660254037844386,
-                  "y": 0.5000000000000001,
-                  "z": 0
-                }
-              }
+              ]
             }
           },
           {
@@ -3397,14 +3105,53 @@
             "id": "skd_grip-2",
             "name": "handle 2",
             "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": -21.24999999999999,
+                  "y": 36.80607966083865,
+                  "z": 30
+                },
+                "normal": {
+                  "x": -0.3213938048432695,
+                  "y": 0.5566703992264195,
+                  "z": 0.766044443118978
+                },
+                "xAxis": {
+                  "x": -0.8660254037844387,
+                  "y": -0.4999999999999998,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_hanch",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_hc",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": 10,
+                  "radius": 3
+                }
+              ],
               "constraints": [
                 {
+                  "id": "skcon_h1",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h1",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3416,13 +3163,12 @@
                   }
                 },
                 {
+                  "id": "skcon_h2",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h2",
-                  "kind": "distanceY",
-                  "parameterId": "param_handleMajor",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3431,59 +3177,21 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 10
-                  }
+                  },
+                  "parameterId": "param_handleMajor"
                 },
                 {
-                  "entity": "skent_hc",
                   "id": "skcon_h3",
                   "kind": "radius",
-                  "parameterId": "param_handleTube",
+                  "entity": "skent_hc",
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
                     "value": 3
-                  }
+                  },
+                  "parameterId": "param_handleTube"
                 }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_hanch",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "cx": 0,
-                  "cy": 10,
-                  "fixed": false,
-                  "id": "skent_hc",
-                  "kind": "circle",
-                  "radius": 3
-                }
-              ],
-              "formatVersion": 2,
-              "workplane": {
-                "normal": {
-                  "x": -0.3213938048432695,
-                  "y": 0.5566703992264195,
-                  "z": 0.766044443118978
-                },
-                "origin": {
-                  "x": -21.24999999999999,
-                  "y": 36.80607966083865,
-                  "z": 30
-                },
-                "xAxis": {
-                  "x": -0.8660254037844387,
-                  "y": -0.4999999999999998,
-                  "z": 0
-                }
-              }
+              ]
             }
           },
           {
@@ -3492,14 +3200,53 @@
             "id": "skd_grip-3",
             "name": "handle 3",
             "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": -42.5,
+                  "y": 5.204748896376251e-15,
+                  "z": 30
+                },
+                "normal": {
+                  "x": -0.6427876096865394,
+                  "y": 7.871877887341986e-17,
+                  "z": 0.766044443118978
+                },
+                "xAxis": {
+                  "x": -1.2246467991473532e-16,
+                  "y": -1,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_hanch",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_hc",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": 10,
+                  "radius": 3
+                }
+              ],
               "constraints": [
                 {
+                  "id": "skcon_h1",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h1",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3511,13 +3258,12 @@
                   }
                 },
                 {
+                  "id": "skcon_h2",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h2",
-                  "kind": "distanceY",
-                  "parameterId": "param_handleMajor",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3526,59 +3272,21 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 10
-                  }
+                  },
+                  "parameterId": "param_handleMajor"
                 },
                 {
-                  "entity": "skent_hc",
                   "id": "skcon_h3",
                   "kind": "radius",
-                  "parameterId": "param_handleTube",
+                  "entity": "skent_hc",
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
                     "value": 3
-                  }
+                  },
+                  "parameterId": "param_handleTube"
                 }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_hanch",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "cx": 0,
-                  "cy": 10,
-                  "fixed": false,
-                  "id": "skent_hc",
-                  "kind": "circle",
-                  "radius": 3
-                }
-              ],
-              "formatVersion": 2,
-              "workplane": {
-                "normal": {
-                  "x": -0.6427876096865394,
-                  "y": 7.871877887341985e-17,
-                  "z": 0.766044443118978
-                },
-                "origin": {
-                  "x": -42.5,
-                  "y": 5.204748896376251e-15,
-                  "z": 30
-                },
-                "xAxis": {
-                  "x": -1.2246467991473532e-16,
-                  "y": -1,
-                  "z": 0
-                }
-              }
+              ]
             }
           },
           {
@@ -3587,14 +3295,53 @@
             "id": "skd_grip-4",
             "name": "handle 4",
             "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": -21.250000000000018,
+                  "y": -36.806079660838634,
+                  "z": 30
+                },
+                "normal": {
+                  "x": -0.32139380484326996,
+                  "y": -0.5566703992264193,
+                  "z": 0.766044443118978
+                },
+                "xAxis": {
+                  "x": 0.8660254037844384,
+                  "y": -0.5000000000000004,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_hanch",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_hc",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": 10,
+                  "radius": 3
+                }
+              ],
               "constraints": [
                 {
+                  "id": "skcon_h1",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h1",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3606,13 +3353,12 @@
                   }
                 },
                 {
+                  "id": "skcon_h2",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h2",
-                  "kind": "distanceY",
-                  "parameterId": "param_handleMajor",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3621,59 +3367,21 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 10
-                  }
+                  },
+                  "parameterId": "param_handleMajor"
                 },
                 {
-                  "entity": "skent_hc",
                   "id": "skcon_h3",
                   "kind": "radius",
-                  "parameterId": "param_handleTube",
+                  "entity": "skent_hc",
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
                     "value": 3
-                  }
+                  },
+                  "parameterId": "param_handleTube"
                 }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_hanch",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "cx": 0,
-                  "cy": 10,
-                  "fixed": false,
-                  "id": "skent_hc",
-                  "kind": "circle",
-                  "radius": 3
-                }
-              ],
-              "formatVersion": 2,
-              "workplane": {
-                "normal": {
-                  "x": -0.32139380484326996,
-                  "y": -0.5566703992264193,
-                  "z": 0.766044443118978
-                },
-                "origin": {
-                  "x": -21.250000000000018,
-                  "y": -36.806079660838634,
-                  "z": 30
-                },
-                "xAxis": {
-                  "x": 0.8660254037844384,
-                  "y": -0.5000000000000004,
-                  "z": 0
-                }
-              }
+              ]
             }
           },
           {
@@ -3682,14 +3390,53 @@
             "id": "skd_grip-5",
             "name": "handle 5",
             "sketch": {
+              "formatVersion": 2,
+              "workplane": {
+                "origin": {
+                  "x": 21.250000000000004,
+                  "y": -36.80607966083864,
+                  "z": 30
+                },
+                "normal": {
+                  "x": 0.32139380484326974,
+                  "y": -0.5566703992264194,
+                  "z": 0.766044443118978
+                },
+                "xAxis": {
+                  "x": 0.8660254037844386,
+                  "y": 0.5000000000000001,
+                  "z": 0
+                }
+              },
+              "entities": [
+                {
+                  "id": "skent_hanch",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_hc",
+                  "kind": "circle",
+                  "construction": false,
+                  "fixed": false,
+                  "cx": 0,
+                  "cy": 10,
+                  "radius": 3
+                }
+              ],
               "constraints": [
                 {
+                  "id": "skcon_h1",
+                  "kind": "distanceX",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h1",
-                  "kind": "distanceX",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3701,13 +3448,12 @@
                   }
                 },
                 {
+                  "id": "skcon_h2",
+                  "kind": "distanceY",
                   "first": {
                     "entity": "skent_hanch",
                     "point": "start"
                   },
-                  "id": "skcon_h2",
-                  "kind": "distanceY",
-                  "parameterId": "param_handleMajor",
                   "second": {
                     "entity": "skent_hc",
                     "point": "center"
@@ -3716,59 +3462,21 @@
                     "dimension": "length",
                     "unit": "mm",
                     "value": 10
-                  }
+                  },
+                  "parameterId": "param_handleMajor"
                 },
                 {
-                  "entity": "skent_hc",
                   "id": "skcon_h3",
                   "kind": "radius",
-                  "parameterId": "param_handleTube",
+                  "entity": "skent_hc",
                   "value": {
                     "dimension": "length",
                     "unit": "mm",
                     "value": 3
-                  }
+                  },
+                  "parameterId": "param_handleTube"
                 }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_hanch",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "cx": 0,
-                  "cy": 10,
-                  "fixed": false,
-                  "id": "skent_hc",
-                  "kind": "circle",
-                  "radius": 3
-                }
-              ],
-              "formatVersion": 2,
-              "workplane": {
-                "normal": {
-                  "x": 0.32139380484326974,
-                  "y": -0.5566703992264194,
-                  "z": 0.766044443118978
-                },
-                "origin": {
-                  "x": 21.250000000000004,
-                  "y": -36.80607966083864,
-                  "z": 30
-                },
-                "xAxis": {
-                  "x": 0.8660254037844386,
-                  "y": 0.5000000000000001,
-                  "z": 0
-                }
-              }
+              ]
             }
           },
           {
@@ -3838,7 +3546,9 @@
                 "id": "param_cup-revolve-axis"
               }
             ],
-            "outputs": ["body_cup-shell"]
+            "outputs": [
+              "body_cup-shell"
+            ]
           },
           {
             "formatVersion": 1,
@@ -3859,7 +3569,9 @@
                 "id": "param_handle-0-axis"
               }
             ],
-            "outputs": ["body_handle-0"]
+            "outputs": [
+              "body_handle-0"
+            ]
           },
           {
             "formatVersion": 1,
@@ -3880,7 +3592,9 @@
                 "id": "param_handle-1-axis"
               }
             ],
-            "outputs": ["body_handle-1"]
+            "outputs": [
+              "body_handle-1"
+            ]
           },
           {
             "formatVersion": 1,
@@ -3901,7 +3615,9 @@
                 "id": "param_handle-2-axis"
               }
             ],
-            "outputs": ["body_handle-2"]
+            "outputs": [
+              "body_handle-2"
+            ]
           },
           {
             "formatVersion": 1,
@@ -3922,7 +3638,9 @@
                 "id": "param_handle-3-axis"
               }
             ],
-            "outputs": ["body_handle-3"]
+            "outputs": [
+              "body_handle-3"
+            ]
           },
           {
             "formatVersion": 1,
@@ -3943,7 +3661,9 @@
                 "id": "param_handle-4-axis"
               }
             ],
-            "outputs": ["body_handle-4"]
+            "outputs": [
+              "body_handle-4"
+            ]
           },
           {
             "formatVersion": 1,
@@ -3964,7 +3684,9 @@
                 "id": "param_handle-5-axis"
               }
             ],
-            "outputs": ["body_handle-5"]
+            "outputs": [
+              "body_handle-5"
+            ]
           },
           {
             "formatVersion": 1,
@@ -4142,259 +3864,15 @@
             "id": "skd_cavity",
             "name": "cavity",
             "sketch": {
-              "constraints": [
-                {
-                  "first": {
-                    "entity": "skent_c0",
-                    "point": "end"
-                  },
-                  "id": "skcon_cv_c0",
-                  "kind": "coincident",
-                  "second": {
-                    "entity": "skent_c1",
-                    "point": "start"
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_c1",
-                    "point": "end"
-                  },
-                  "id": "skcon_cv_c1",
-                  "kind": "coincident",
-                  "second": {
-                    "entity": "skent_c2",
-                    "point": "start"
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_c2",
-                    "point": "end"
-                  },
-                  "id": "skcon_cv_c2",
-                  "kind": "coincident",
-                  "second": {
-                    "entity": "skent_c3",
-                    "point": "start"
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_c3",
-                    "point": "end"
-                  },
-                  "id": "skcon_cv_c3",
-                  "kind": "coincident",
-                  "second": {
-                    "entity": "skent_c0",
-                    "point": "start"
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d0",
-                  "kind": "distanceX",
-                  "parameterId": "param_wallT",
-                  "second": {
-                    "entity": "skent_c0",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 3
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d1",
-                  "kind": "distanceY",
-                  "parameterId": "param_innerBaseR",
-                  "second": {
-                    "entity": "skent_c0",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 27
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d2",
-                  "kind": "distanceX",
-                  "parameterId": "param_height",
-                  "second": {
-                    "entity": "skent_c1",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 50
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d3",
-                  "kind": "distanceY",
-                  "parameterId": "param_innerTopR",
-                  "second": {
-                    "entity": "skent_c1",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 37
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d4",
-                  "kind": "distanceX",
-                  "parameterId": "param_height",
-                  "second": {
-                    "entity": "skent_c2",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 50
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d5",
-                  "kind": "distanceY",
-                  "second": {
-                    "entity": "skent_c2",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 0
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d6",
-                  "kind": "distanceX",
-                  "parameterId": "param_wallT",
-                  "second": {
-                    "entity": "skent_c3",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 3
-                  }
-                },
-                {
-                  "first": {
-                    "entity": "skent_anchor",
-                    "point": "start"
-                  },
-                  "id": "skcon_cv_d7",
-                  "kind": "distanceY",
-                  "second": {
-                    "entity": "skent_c3",
-                    "point": "end"
-                  },
-                  "value": {
-                    "dimension": "length",
-                    "unit": "mm",
-                    "value": 0
-                  }
-                }
-              ],
-              "entities": [
-                {
-                  "construction": true,
-                  "fixed": true,
-                  "id": "skent_anchor",
-                  "kind": "line",
-                  "x1": 0,
-                  "x2": 10,
-                  "y1": 0,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_c0",
-                  "kind": "line",
-                  "x1": 3,
-                  "x2": 3,
-                  "y1": 0,
-                  "y2": 27
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_c1",
-                  "kind": "line",
-                  "x1": 3,
-                  "x2": 50,
-                  "y1": 27,
-                  "y2": 37
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_c2",
-                  "kind": "line",
-                  "x1": 50,
-                  "x2": 50,
-                  "y1": 37,
-                  "y2": 0
-                },
-                {
-                  "construction": false,
-                  "fixed": false,
-                  "id": "skent_c3",
-                  "kind": "line",
-                  "x1": 50,
-                  "x2": 3,
-                  "y1": 0,
-                  "y2": 0
-                }
-              ],
               "formatVersion": 2,
               "workplane": {
-                "normal": {
-                  "x": 1,
+                "origin": {
+                  "x": 0,
                   "y": 0,
                   "z": 0
                 },
-                "origin": {
-                  "x": 0,
+                "normal": {
+                  "x": 1,
                   "y": 0,
                   "z": 0
                 },
@@ -4403,7 +3881,251 @@
                   "y": 0,
                   "z": 1
                 }
-              }
+              },
+              "entities": [
+                {
+                  "id": "skent_anchor",
+                  "kind": "line",
+                  "construction": true,
+                  "fixed": true,
+                  "x1": 0,
+                  "y1": 0,
+                  "x2": 10,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_c0",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 3,
+                  "y1": 0,
+                  "x2": 3,
+                  "y2": 27
+                },
+                {
+                  "id": "skent_c1",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 3,
+                  "y1": 27,
+                  "x2": 50,
+                  "y2": 37
+                },
+                {
+                  "id": "skent_c2",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 50,
+                  "y1": 37,
+                  "x2": 50,
+                  "y2": 0
+                },
+                {
+                  "id": "skent_c3",
+                  "kind": "line",
+                  "construction": false,
+                  "fixed": false,
+                  "x1": 50,
+                  "y1": 0,
+                  "x2": 3,
+                  "y2": 0
+                }
+              ],
+              "constraints": [
+                {
+                  "id": "skcon_cv_c0",
+                  "kind": "coincident",
+                  "first": {
+                    "entity": "skent_c0",
+                    "point": "end"
+                  },
+                  "second": {
+                    "entity": "skent_c1",
+                    "point": "start"
+                  }
+                },
+                {
+                  "id": "skcon_cv_c1",
+                  "kind": "coincident",
+                  "first": {
+                    "entity": "skent_c1",
+                    "point": "end"
+                  },
+                  "second": {
+                    "entity": "skent_c2",
+                    "point": "start"
+                  }
+                },
+                {
+                  "id": "skcon_cv_c2",
+                  "kind": "coincident",
+                  "first": {
+                    "entity": "skent_c2",
+                    "point": "end"
+                  },
+                  "second": {
+                    "entity": "skent_c3",
+                    "point": "start"
+                  }
+                },
+                {
+                  "id": "skcon_cv_c3",
+                  "kind": "coincident",
+                  "first": {
+                    "entity": "skent_c3",
+                    "point": "end"
+                  },
+                  "second": {
+                    "entity": "skent_c0",
+                    "point": "start"
+                  }
+                },
+                {
+                  "id": "skcon_cv_d0",
+                  "kind": "distanceX",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c0",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 3
+                  },
+                  "parameterId": "param_wallT"
+                },
+                {
+                  "id": "skcon_cv_d1",
+                  "kind": "distanceY",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c0",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 27
+                  },
+                  "parameterId": "param_innerBaseR"
+                },
+                {
+                  "id": "skcon_cv_d2",
+                  "kind": "distanceX",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c1",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 50
+                  },
+                  "parameterId": "param_height"
+                },
+                {
+                  "id": "skcon_cv_d3",
+                  "kind": "distanceY",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c1",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 37
+                  },
+                  "parameterId": "param_innerTopR"
+                },
+                {
+                  "id": "skcon_cv_d4",
+                  "kind": "distanceX",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c2",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 50
+                  },
+                  "parameterId": "param_height"
+                },
+                {
+                  "id": "skcon_cv_d5",
+                  "kind": "distanceY",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c2",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 0
+                  }
+                },
+                {
+                  "id": "skcon_cv_d6",
+                  "kind": "distanceX",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c3",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 3
+                  },
+                  "parameterId": "param_wallT"
+                },
+                {
+                  "id": "skcon_cv_d7",
+                  "kind": "distanceY",
+                  "first": {
+                    "entity": "skent_anchor",
+                    "point": "start"
+                  },
+                  "second": {
+                    "entity": "skent_c3",
+                    "point": "end"
+                  },
+                  "value": {
+                    "dimension": "length",
+                    "unit": "mm",
+                    "value": 0
+                  }
+                }
+              ]
             }
           },
           {
@@ -4437,7 +4159,9 @@
                 "id": "param_cup-revolve-axis"
               }
             ],
-            "outputs": ["body_cavity"]
+            "outputs": [
+              "body_cavity"
+            ]
           },
           {
             "formatVersion": 1,
@@ -4474,7 +4198,9 @@
                 "id": "feat_handle-5"
               }
             ],
-            "outputs": ["body_cup-union"]
+            "outputs": [
+              "body_cup-union"
+            ]
           },
           {
             "formatVersion": 1,
@@ -4491,13 +4217,9 @@
                 "id": "feat_cavity"
               }
             ],
-            "outputs": ["body_cup"]
-          },
-          {
-            "formatVersion": 1,
-            "type": "body.update",
-            "id": "body_plate",
-            "visible": false
+            "outputs": [
+              "body_cup"
+            ]
           }
         ]
       }
@@ -4506,67 +4228,6 @@
   },
   "regeneration": {
     "formatVersion": 1,
-    "features": [
-      {
-        "id": "feat_translate_plate",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_rotate_plate",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_cup-revolve",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_handle-0",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_handle-1",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_handle-2",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_handle-3",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_handle-4",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_handle-5",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_cavity",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_cup-union",
-        "state": "valid",
-        "diagnostics": []
-      },
-      {
-        "id": "feat_cup",
-        "state": "valid",
-        "diagnostics": []
-      }
-    ]
+    "features": []
   }
 }

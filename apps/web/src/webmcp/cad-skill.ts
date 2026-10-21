@@ -232,7 +232,7 @@ app. Cycles and unknown identifiers are refused.
 ## Worked batch — a hollow cup (the proven pattern)
 
 The reference implementation is
-\`packages/cad-jsx/parametric-cup.commands.json\` in this repo — 73
+\`packages/cad-jsx/parametric-cup.commands.json\` in this repo — 72
 commands that build a tapered hollow cup with six welded torus handles.
 The pattern it proves:
 
@@ -249,8 +249,9 @@ The pattern it proves:
    INTO the wall — any overlap welds in the boolean).
 6. \`feature.create\` union over [outer, handles...] → \`feat_cup-union\`.
 7. \`feature.create\` subtract [feat_cup-union, feat_cavity] → \`feat_cup\`.
-8. \`body.update\` the starter plate \`{"id":"body_plate","visible":false}\`
-   if the template document carries one — it pokes through the floor.
+
+The workbench boots a CLEAN empty document — no starter bodies or
+parameters to hide or undo; the batch alone defines the model.
 
 ## Gotchas learned the hard way
 

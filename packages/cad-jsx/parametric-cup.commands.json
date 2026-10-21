@@ -1350,11 +1350,5 @@
       { "kind": "feature", "id": "feat_cavity" }
     ],
     "outputs": ["body_cup"]
-  },
-  {
-    "formatVersion": 1,
-    "type": "body.update",
-    "id": "body_plate",
-    "visible": false
   }
 ]
