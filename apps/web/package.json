@@ -29,7 +29,9 @@
     "test:matrix": "playwright test -c playwright.matrix.config.ts",
     "write-native-compatibility-fixture": "tsx scripts/write-native-compatibility-fixture.ts",
     "write-native-helix-thread-fixture": "tsx scripts/write-native-helix-thread-fixture.ts",
-    "write-native-parametric-cup-fixture": "tsx scripts/write-native-parametric-cup-fixture.ts"
+    "write-native-parametric-cup-fixture": "tsx scripts/write-native-parametric-cup-fixture.ts",
+    "surface:manifest": "tsx scripts/presentation-surface-manifest.ts",
+    "surface:check": "tsx scripts/presentation-surface-manifest.ts --check"
   },
   "dependencies": {
     "@libsql/client": "catalog:",

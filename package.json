@@ -57,6 +57,8 @@
     "tutorial:record": "pnpm --filter web tutorial:record",
     "tutorial:cut": "pnpm --filter web tutorial:cut",
     "audit:command-surface": "node scripts/command-surface-audit.mjs",
+    "surface:manifest": "pnpm --filter web surface:manifest",
+    "surface:check": "pnpm --filter web surface:check",
     "webkit:deps": "bash scripts/webkit-user-deps.sh"
   },
   "dependencies": {
