@@ -45,6 +45,7 @@ import {
 import {
   extractProviderModels,
   filterProviderModels,
+  isProviderMap,
 } from "./model-catalog-filter";
 
 /** Cache lifetime of a fetched catalog: 24 hours (D7). */
@@ -119,22 +120,6 @@ async function selectCatalogEntries(
     deprecated: row.deprecated,
     fetchedAt: row.fetchedAt.toISOString(),
   }));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Is a parsed 200 body shaped like a models.dev `api.json` entry for this
- * provider — a top-level object carrying a record under the provider id?
- * Narrowing the `models` value itself stays the filter's job; anything
- * else here (an error object such as a rate-limit page, a bare array,
- * `null`) is a wrong-shape body that counts as an upstream failure, never
- * as an authoritative empty catalog.
- */
-function isProviderMap(payload: unknown, provider: string): boolean {
-  return isRecord(payload) && isRecord(payload[provider]);
 }
 
 /**

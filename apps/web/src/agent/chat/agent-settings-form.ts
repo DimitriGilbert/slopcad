@@ -95,8 +95,9 @@ export type AgentModelPickerSource = "catalog" | "endpoint";
 
 /**
  * D14's scoping, as one pure lookup: the four named providers list from
- * the server's models.dev catalog cache; `openai-compatible` lists from
- * its own endpoint's `/models`; no provider chosen means no source yet.
+ * the browser's models.dev catalog cache (BYOK — fetched and cached
+ * client-side, no auth); `openai-compatible` lists from its own
+ * endpoint's `/models`; no provider chosen means no source yet.
  */
 export function modelPickerSourceFor(
   provider: AgentProviderId | null,
@@ -124,7 +125,7 @@ export function liveProviderOf(
  * The catalog-scoped view of a provider choice (D14): the id itself when
  * it is one of the four named providers, `null` for the BYO-endpoint
  * provider (never catalog-backed) and for no choice — typed so callers
- * hand the result straight to `modelCatalog.list`/`refresh`.
+ * hand the result straight to the browser catalog loader.
  */
 export function namedCatalogProviderOf(
   provider: AgentProviderId | null,

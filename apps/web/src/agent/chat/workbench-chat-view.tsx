@@ -10,8 +10,9 @@
  *   object, the selection, or the workbench mode (the same path the
  *   agent itself takes — never a second summary implementation);
  * - the selected model's catalog `reasoning_options` entry, looked up
- *   from the same provider-scoped `modelCatalog.list` query the settings
- *   sheet's picker rides (D14);
+ *   from the same provider-scoped browser catalog query the settings
+ *   sheet's picker rides (D14 — the catalog loads browser-direct from
+ *   models.dev, no auth);
  * - the Phase 3.4 browser store (OPFS-backed) with the opt-in sync
  *   transport bound to the agentConversations tRPC mutations;
  * - the shared catalog force-refresh handle (D7) — one mutation, one
@@ -40,11 +41,11 @@ import {
   EmptyTitle,
 } from "@slopcad/ui/components/empty";
 import type { NamedProviderId } from "@slopcad/api/providers";
+import { NAMED_PROVIDER_IDS } from "@slopcad/api/providers";
 import { AGENT_CONVERSATION_TITLE_MAX_LENGTH } from "@slopcad/api/limits";
 import type { AgentToolsSurface } from "@slopcad/ui/agent/tools";
 import type { AgentConfig } from "@slopcad/ui/agent/config/store";
 import type { AgentChatSessionSlot } from "@slopcad/ui/agent/chat/session-slot";
-import { AGENT_PROVIDER_IDS } from "@slopcad/ui/agent/providers";
 import { AgentChatPanel } from "@slopcad/ui/agent/chat/agent-chat-panel";
 import { toast } from "sonner";
 import type { AgentChatStore } from "../persistence/store";
@@ -53,6 +54,11 @@ import type { AgentSyncTransport } from "../persistence/sync";
 import { openBrowserAgentChatStore } from "../persistence/browser";
 import { executeWebMcpTool, subscribeWebMcpTools } from "../../webmcp/registry";
 import { namedCatalogProviderOf } from "./agent-settings-form";
+import {
+  AGENT_MODEL_CATALOG_QUERY_KEY,
+  agentModelCatalogQueryOptions,
+  refreshAgentModelCatalog,
+} from "./model-catalog";
 
 import { useTRPC } from "@/utils/trpc";
 
@@ -110,15 +116,15 @@ export interface AgentCatalogRefresh {
 }
 
 /**
- * One user-readable line out of a failed refresh: the server's own
- * message when it carries one (the typed staleOrError gateway text, the
- * auth error), a transport line otherwise.
+ * One user-readable line out of a failed refresh: the loader's own
+ * reason when it carries one (the typed AgentModelCatalogError text),
+ * a transport line otherwise.
  */
 function refreshFailureLine(cause: unknown): string {
   if (cause instanceof Error && cause.message.trim() !== "") {
     return `The catalog refresh failed: ${cause.message.trim()}`;
   }
-  return "The catalog refresh failed — the request never reached the server.";
+  return "The catalog refresh failed — the request never completed.";
 }
 
 /**
@@ -131,21 +137,21 @@ function refreshFailureLine(cause: unknown): string {
  * the workbench's own re-renders (React's maximum-update-depth error).
  */
 export function useAgentCatalogRefresh(): AgentCatalogRefresh {
-  const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const refreshMutation = useMutation(
-    trpc.modelCatalog.refresh.mutationOptions(),
-  );
+  const refreshMutation = useMutation({
+    mutationFn: (input: { provider: NamedProviderId }) =>
+      refreshAgentModelCatalog(input.provider),
+  });
   const mutationRef = useRef(refreshMutation);
   mutationRef.current = refreshMutation;
   const refresh = useCallback(
     (provider: NamedProviderId, notify: AgentCatalogRefreshNotify = "note") => {
       mutationRef.current.mutate(
-        { force: true, provider },
+        { provider },
         {
           onSuccess: () => {
             void queryClient.invalidateQueries({
-              queryKey: trpc.modelCatalog.list.queryKey(),
+              queryKey: AGENT_MODEL_CATALOG_QUERY_KEY,
             });
           },
           onError: (cause) => {
@@ -160,7 +166,7 @@ export function useAgentCatalogRefresh(): AgentCatalogRefresh {
         },
       );
     },
-    [queryClient, trpc],
+    [queryClient],
   );
   const outcome = isRefreshOutcome(refreshMutation.data?.outcome)
     ? refreshMutation.data.outcome
@@ -286,21 +292,26 @@ export function AgentChatSidebarView({
   const getDocumentSummary = useDocumentSummary(document, selection, mode);
 
   // The selected model's reasoning option (D8): the provider-scoped
-  // catalog query, deduped with the settings sheet's by key. The
-  // disabled-state input is the canonical list's first id (never a
+  // browser catalog query, deduped with the settings sheet's by key. The
+  // disabled-state input is the canonical named list's first id (never a
   // hand-picked provider): the query never runs without a named one.
   const namedProvider = namedCatalogProviderOf(config.provider);
-  const catalogQuery = useQuery(
-    trpc.modelCatalog.list.queryOptions(
-      { provider: namedProvider ?? AGENT_PROVIDER_IDS[0] },
-      { enabled: namedProvider !== null, retry: false },
-    ),
-  );
+  const catalogQuery = useQuery({
+    ...agentModelCatalogQueryOptions(namedProvider ?? NAMED_PROVIDER_IDS[0]),
+    enabled: namedProvider !== null,
+    retry: false,
+  });
   const reasoningOption = useMemo((): ModelReasoningOption | undefined => {
-    if (namedProvider === null || config.modelId === null) {
+    const data = catalogQuery.data;
+    if (
+      namedProvider === null ||
+      config.modelId === null ||
+      data === undefined ||
+      data.kind === "unavailable"
+    ) {
       return undefined;
     }
-    const options = catalogQuery.data?.find(
+    const options = data.entries.find(
       (entry) => entry.modelId === config.modelId,
     )?.reasoningOptions;
     return options === null || options === undefined ? undefined : options[0];

@@ -2,9 +2,9 @@
  * Agent-settings shot harness: drives the REAL workbench on a dev or
  * built server to the open agent settings dialog and screenshots it, so
  * the reworked provider/model surface can be judged like every other
- * cockpit surface. The tRPC catalog queries are intercepted — a
- * populated picker needs a signed-in catalog, and an unauthenticated
- * shot would only ever show the honest error state.
+ * cockpit surface. The catalog is a browser-direct models.dev fetch now
+ * (BYOK — no auth), so the shot intercepts that URL and serves a
+ * models.dev-shaped fixture; `serverProviders` stays tRPC-intercepted.
  *
  * Usage: npx tsx scripts/agent-settings-shot.ts <baseUrl> <outDir>
  *
@@ -18,86 +18,74 @@ import { chromium, type Page } from "@playwright/test";
 const baseUrl = process.argv[2] ?? "http://localhost:3201";
 const outDir = process.argv[3] ?? ".zcode/shots/agent-settings";
 
-/** The catalog entries the intercepted `modelCatalog.list` serves. */
-const CATALOG = [
-  {
-    contextLimit: 400000,
-    deprecated: false,
-    fetchedAt: "2026-10-07T00:00:00.000Z",
-    modelId: "gpt-5.2",
-    name: "GPT-5.2",
-    provider: "openai",
-    reasoningOptions: null,
-    releaseDate: "2026-01-15",
-    vision: true,
+/** A `YYYY-MM-DD` date `days` before today — release dates must stay inside the picker's 6-month recency window. */
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * The models.dev-shaped payload the intercepted `api.json` fetch serves —
+ * the RAW upstream shape (snake_case fields, `models` keyed by id); the
+ * picker filter applies the real vision/recency rules to it.
+ */
+const CATALOG_PAYLOAD = {
+  openai: {
+    id: "openai",
+    models: {
+      "gpt-5.2": {
+        limit: { context: 400000 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        name: "GPT-5.2",
+        release_date: daysAgo(20),
+      },
+      "gpt-5.1": {
+        limit: { context: 400000 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        name: "GPT-5.1",
+        reasoning_options: [
+          { type: "effort", values: ["low", "medium", "high"] },
+        ],
+        release_date: daysAgo(50),
+      },
+      "gpt-5.1-codex": {
+        limit: { context: 400000 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        name: "GPT-5.1 Codex",
+        release_date: daysAgo(50),
+      },
+      "gpt-4.1": {
+        limit: { context: 1047576 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        name: "GPT-4.1",
+        release_date: daysAgo(100),
+      },
+      "gpt-4o": {
+        limit: { context: 128000 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        name: "GPT-4o",
+        release_date: daysAgo(120),
+      },
+      o3: {
+        limit: { context: 200000 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        name: "o3",
+        reasoning_options: [
+          { type: "effort", values: ["low", "medium", "high"] },
+        ],
+        release_date: daysAgo(140),
+      },
+      "o4-mini": {
+        limit: { context: 200000 },
+        modalities: { input: ["text", "image"], output: ["text"] },
+        name: "o4-mini",
+        reasoning_options: [
+          { type: "effort", values: ["low", "medium", "high"] },
+        ],
+        release_date: daysAgo(150),
+      },
+    },
   },
-  {
-    contextLimit: 400000,
-    deprecated: false,
-    fetchedAt: "2026-10-07T00:00:00.000Z",
-    modelId: "gpt-5.1",
-    name: "GPT-5.1",
-    provider: "openai",
-    reasoningOptions: [{ type: "effort", values: ["low", "medium", "high"] }],
-    releaseDate: "2025-11-13",
-    vision: true,
-  },
-  {
-    contextLimit: 400000,
-    deprecated: false,
-    fetchedAt: "2026-10-07T00:00:00.000Z",
-    modelId: "gpt-5.1-codex",
-    name: "GPT-5.1 Codex",
-    provider: "openai",
-    reasoningOptions: null,
-    releaseDate: "2025-11-13",
-    vision: true,
-  },
-  {
-    contextLimit: 1047576,
-    deprecated: false,
-    fetchedAt: "2026-10-07T00:00:00.000Z",
-    modelId: "gpt-4.1",
-    name: "GPT-4.1",
-    provider: "openai",
-    reasoningOptions: null,
-    releaseDate: "2025-04-14",
-    vision: true,
-  },
-  {
-    contextLimit: 128000,
-    deprecated: false,
-    fetchedAt: "2026-10-07T00:00:00.000Z",
-    modelId: "gpt-4o",
-    name: "GPT-4o",
-    provider: "openai",
-    reasoningOptions: null,
-    releaseDate: "2025-05-13",
-    vision: true,
-  },
-  {
-    contextLimit: 200000,
-    deprecated: false,
-    fetchedAt: "2026-10-07T00:00:00.000Z",
-    modelId: "o3",
-    name: "o3",
-    provider: "openai",
-    reasoningOptions: [{ type: "effort", values: ["low", "medium", "high"] }],
-    releaseDate: "2025-04-16",
-    vision: true,
-  },
-  {
-    contextLimit: 200000,
-    deprecated: false,
-    fetchedAt: "2026-10-07T00:00:00.000Z",
-    modelId: "o4-mini",
-    name: "o4-mini",
-    provider: "openai",
-    reasoningOptions: [{ type: "effort", values: ["low", "medium", "high"] }],
-    releaseDate: "2025-04-16",
-    vision: true,
-  },
-];
+};
 
 /** The seeded, configured agent (localStorage is the config backend). */
 const AGENT_CONFIG = {
@@ -191,9 +179,18 @@ async function main(): Promise<void> {
       },
     );
     const page = await context.newPage();
-    // A populated picker needs the signed-in catalog cache; intercepting
-    // the two queries the sheet mounts keeps the shot honest about
-    // layout without standing up an authenticated session.
+    // The picker's catalog is the browser's own models.dev fetch — the
+    // shot intercepts it with the fixture payload so the surface renders
+    // the populated layout without touching the real upstream.
+    await page.route("https://models.dev/api.json", async (route) => {
+      await route.fulfill({
+        body: JSON.stringify(CATALOG_PAYLOAD),
+        contentType: "application/json",
+        status: 200,
+      });
+    });
+    // serverProviders stays a tRPC query — intercept it so the mode
+    // option renders its client-only truth.
     await page.route("**/api/trpc/*", async (route) => {
       const url = new URL(route.request().url());
       const procedures = url.pathname
@@ -202,9 +199,6 @@ async function main(): Promise<void> {
       const answers = procedures.map((procedure) => {
         // No transformer is configured on the client link: `result.data`
         // is the raw value, not the `{json: value}` envelope.
-        if (procedure === "modelCatalog.list") {
-          return { result: { data: CATALOG } };
-        }
         if (procedure === "serverProviders") {
           return { result: { data: { allowed: false } } };
         }

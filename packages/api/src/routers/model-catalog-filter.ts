@@ -92,12 +92,27 @@ function acceptsImageInput(raw: Record<string, unknown>): boolean {
 }
 
 /**
+ * Is a parsed body shaped like a models.dev `api.json` entry for this
+ * provider — a top-level object carrying a record under the provider id?
+ * Anything else (an error object such as a rate-limit page, a bare array,
+ * `null`) is a wrong-shape body that counts as an upstream failure, never
+ * as an authoritative empty catalog. Shared by the server refresh and the
+ * browser-side catalog loader.
+ */
+export function isProviderMap(payload: unknown, provider: string): boolean {
+  return isRecord(payload) && isRecord(payload[provider]);
+}
+
+/**
  * Narrows a raw `reasoning_options` value to well-formed entries, keeping
  * only the three documented types and their well-typed companions. Absent,
  * empty, or entirely malformed declarations collapse to null ("the model
- * declares none").
+ * declares none"). Exported so the browser-side cache reader narrows stored
+ * rows with the same rule the fetch path applies.
  */
-function parseReasoningOptions(value: unknown): ModelReasoningOption[] | null {
+export function parseReasoningOptions(
+  value: unknown,
+): ModelReasoningOption[] | null {
   if (!Array.isArray(value)) return null;
   const parsed: ModelReasoningOption[] = [];
   for (const entry of value) {

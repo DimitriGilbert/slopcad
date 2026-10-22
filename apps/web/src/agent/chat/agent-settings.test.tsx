@@ -11,10 +11,11 @@
  * - a failed catalog refresh renders an error note instead of idling
  *   the refresh row silently (R1F4).
  *
- * The tRPC client is mocked at the `useTRPC` seam: the sheet consumes
- * only `queryOptions` results, so the fake serves the two queries the
- * sheet mounts (server-mode availability, the catalog list) without any
- * network — the runtime fetch guard stays intact.
+ * The catalog is now a BROWSER fetch (BYOK — no auth): the sheet's
+ * `./model-catalog` module is mocked at the query-options seam so no
+ * fetch ever runs (the runtime fetch guard stays intact), and the
+ * `useTRPC` mock serves only the remaining server-side query —
+ * server-mode availability.
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -25,7 +26,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelReasoningOption } from "@slopcad/db/schema/model-catalog";
 import type {
   AgentConfig,
@@ -63,20 +64,39 @@ const testCatalog = vi.hoisted(() => [
 
 vi.mock("@/utils/trpc", () => ({
   useTRPC: () => ({
-    modelCatalog: {
-      list: {
-        queryOptions: () => ({
-          queryFn: () => Promise.resolve(testCatalog),
-          queryKey: ["modelCatalog", "list", "test"],
-        }),
-      },
-    },
     serverProviders: {
       queryOptions: () => ({
         queryFn: () => Promise.resolve({ allowed: false }),
         queryKey: ["serverProviders", "test"],
       }),
     },
+  }),
+}));
+
+/**
+ * The browser catalog's mutable per-test result: the default is the
+ * healthy fresh-cache answer; failure tests rewrite it before render.
+ * The query key carries the provider so per-provider rerenders behave.
+ */
+const catalogState = vi.hoisted(() => {
+  interface CatalogResult {
+    entries: unknown[];
+    kind: "ready" | "stale" | "unavailable";
+    outcome: string;
+    reason?: string;
+  }
+  const result: CatalogResult = {
+    entries: [],
+    kind: "ready",
+    outcome: "fresh-cache",
+  };
+  return { result };
+});
+
+vi.mock("./model-catalog", () => ({
+  agentModelCatalogQueryOptions: (provider: string) => ({
+    queryFn: () => Promise.resolve(catalogState.result),
+    queryKey: ["agent-model-catalog", "test", provider],
   }),
 }));
 
@@ -92,6 +112,16 @@ window.ResizeObserver = ResizeObserverStub;
 Element.prototype.scrollIntoView = (): void => {};
 
 afterEach(cleanup);
+
+// Every test starts from the healthy fresh-cache answer; failure tests
+// rewrite the result before rendering.
+beforeEach(() => {
+  catalogState.result = {
+    entries: testCatalog,
+    kind: "ready",
+    outcome: "fresh-cache",
+  };
+});
 
 /** A configured openai agent with keys stored for two providers. */
 function configuredConfig(): AgentConfig {
@@ -293,5 +323,50 @@ describe("AgentSettingsSheet (R1F4: a failed refresh renders its error note)", (
     expect(
       screen.getByTestId("agent-settings-refresh-row").textContent,
     ).not.toContain("failed");
+  });
+});
+
+describe("AgentSettingsSheet (browser catalog load failures)", () => {
+  it("names the upstream reason when the catalog cannot load and nothing is cached", async () => {
+    catalogState.result = {
+      entries: [],
+      kind: "unavailable",
+      outcome: "",
+      reason: "models.dev answered HTTP 503",
+    };
+    renderSheet();
+
+    const row = await screen.findByTestId("agent-settings-refresh-row");
+    await waitFor(() => {
+      expect(row.textContent).toContain(
+        "The model catalog could not be loaded — nothing cached",
+      );
+    });
+    const note = await screen.findByTestId("agent-settings-refresh-error");
+    expect(note.textContent).toContain("models.dev answered HTTP 503");
+    expect(note.getAttribute("role")).toBe("alert");
+  });
+
+  it("serves the stale list, labelled, when revalidation fails over a cache", async () => {
+    catalogState.result = {
+      entries: testCatalog,
+      kind: "stale",
+      outcome: "",
+      reason: "models.dev could not be reached: offline",
+    };
+    renderSheet();
+
+    const row = await screen.findByTestId("agent-settings-refresh-row");
+    await waitFor(() => {
+      expect(row.textContent).toContain("2 cached models shown");
+      expect(row.textContent).toContain("offline");
+    });
+    // The stale list is still a served list — the picker keeps options.
+    fireEvent.click(screen.getByLabelText("Model"));
+    const input = await screen.findByPlaceholderText("Search models…");
+    fireEvent.change(input, { target: { value: "test" } });
+    expect(
+      await screen.findByRole("option", { name: /Test Model A/ }),
+    ).not.toBeNull();
   });
 });

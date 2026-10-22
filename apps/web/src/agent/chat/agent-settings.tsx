@@ -8,9 +8,10 @@
  * The form itself is pure config: the schema, field list, and value
  * mappings live in the sibling `-form` module (node-tested there); this
  * component only binds the runtime inputs — `serverProviders()` for the
- * mode option (D13), `modelCatalog.list` for the four named providers'
- * picker (D14), and the BYO-endpoint `/models` fetch for
- * `openai-compatible` (D14) — and hands the submitted values to the
+ * mode option (D13), the browser-side models.dev catalog query for the
+ * four named providers' picker (D14 — BYOK: no account, no auth, the
+ * catalog loads browser-direct), and the BYO-endpoint `/models` fetch
+ * for `openai-compatible` (D14) — and hands the submitted values to the
  * host's `onApplySettings`, which owns the config store write.
  *
  * The catalog plumbing keys on the form's LIVE provider selection (D14),
@@ -22,9 +23,10 @@
  * Mounts ONLY while open (the io dialogs' `if (!open) return null`
  * discipline): a closed Base UI dialog never enters the server-rendered
  * tree, and the catalog/provider queries run only while the sheet is
- * open. Both queries tolerate the unauthenticated workbench example —
- * the protected procedures answer errors, the sheet degrades to
- * "no models cached" with the raw id input always present (D5).
+ * open. The catalog fetch needs no auth; `serverProviders` tolerates the
+ * unauthenticated workbench example by answering an error — and a failed
+ * catalog load degrades to "no models cached" with the raw id input
+ * always present (D5).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -49,14 +51,13 @@ import type {
   AgentConfig,
   AgentConfigSetResult,
 } from "@slopcad/ui/agent/config/store";
+import { NAMED_PROVIDER_IDS } from "@slopcad/api/providers";
 import type { AgentCatalogRefresh } from "./workbench-chat-view";
-import {
-  AGENT_PROVIDER_IDS,
-  type AgentProviderId,
-} from "@slopcad/ui/agent/providers";
+import type { AgentProviderId } from "@slopcad/ui/agent/providers";
 import { listOpenAiCompatibleModels } from "@slopcad/ui/agent/providers/openai-compatible";
 
 import { AgentModelPickerField } from "./agent-model-picker";
+import { agentModelCatalogQueryOptions } from "./model-catalog";
 import {
   agentSettingsSchema,
   agentSettingsValuesFromConfig,
@@ -133,20 +134,26 @@ export function AgentSettingsSheet({
     config.provider,
   );
 
-  // The catalog cache for the LIVE named provider (D14) — the same query
-  // the chat view's reasoning lookup rides, deduped by key. The
-  // disabled-state input is the canonical list's first id (never a
+  // The catalog cache for the LIVE named provider (D14) — the browser's
+  // own models.dev fetch (BYOK: unauthenticated by design), the same
+  // query the chat view's reasoning lookup rides, deduped by key. The
+  // disabled-state input is the canonical named list's first id (never a
   // hand-picked provider): the query never runs without a named provider.
   const namedProvider = namedCatalogProviderOf(liveProvider);
-  const catalogQuery = useQuery(
-    trpc.modelCatalog.list.queryOptions(
-      { provider: namedProvider ?? AGENT_PROVIDER_IDS[0] },
-      { enabled: namedProvider !== null, retry: false },
-    ),
-  );
+  const catalogQuery = useQuery({
+    ...agentModelCatalogQueryOptions(namedProvider ?? NAMED_PROVIDER_IDS[0]),
+    enabled: namedProvider !== null,
+    retry: false,
+  });
+  const catalogData = catalogQuery.data;
   const catalogEntries = useMemo(
-    () => (namedProvider === null ? [] : (catalogQuery.data ?? [])),
-    [catalogQuery.data, namedProvider],
+    () =>
+      namedProvider === null ||
+      catalogData === undefined ||
+      catalogData.kind === "unavailable"
+        ? []
+        : catalogData.entries,
+    [catalogData, namedProvider],
   );
 
   // The BYO-endpoint provider's own /models list (D14), fetched on demand.
@@ -191,21 +198,26 @@ export function AgentSettingsSheet({
         ? { kind: "empty", message: "Pick a provider to load its catalog." }
         : catalogQuery.isPending
           ? { kind: "loading" }
-          : catalogQuery.isError
+          : catalogQuery.isError || catalogData?.kind === "unavailable"
             ? {
                 kind: "error",
                 message:
-                  catalogEntries.length === 0
-                    ? "The catalog could not be loaded and nothing is cached — type a raw id or force-refresh."
-                    : "The catalog could not be reloaded — showing the last cached list.",
+                  catalogData?.kind === "unavailable"
+                    ? `The catalog could not be loaded and nothing is cached — ${catalogData.reason}. Type a raw id or force-refresh.`
+                    : "The catalog could not be loaded and nothing is cached — type a raw id or force-refresh.",
               }
-            : catalogEntries.length === 0
+            : catalogData?.kind === "stale"
               ? {
-                  kind: "empty",
-                  message:
-                    "No models cached for this provider — force-refresh the catalog or type a raw id.",
+                  kind: "error",
+                  message: `The catalog could not be reloaded — ${catalogData.reason}. Showing the last cached list.`,
                 }
-              : { kind: "ready" };
+              : catalogEntries.length === 0
+                ? {
+                    kind: "empty",
+                    message:
+                      "No models cached for this provider — force-refresh the catalog or type a raw id.",
+                  }
+                : { kind: "ready" };
     return {
       emptyText:
         "No models cached for this provider — force-refresh the catalog or type a raw id.",
@@ -218,6 +230,7 @@ export function AgentSettingsSheet({
       status,
     };
   }, [
+    catalogData,
     catalogEntries,
     catalogQuery.isError,
     catalogQuery.isPending,
@@ -396,6 +409,20 @@ export function AgentSettingsSheet({
   // handle carries the failure's readable reason and it takes precedence
   // over the (stale, pre-failure) outcome union.
   const refreshFailed = catalogRefresh.error !== null;
+  // A load-time catalog failure names its reason in the same band slot a
+  // refresh outcome would occupy — a failed fetch is never a silent
+  // empty list. `ready` loads carry no reason by construction.
+  const catalogLoadReason =
+    pickerSource === "catalog"
+      ? catalogQuery.isError
+        ? catalogQuery.error instanceof Error &&
+          catalogQuery.error.message.trim() !== ""
+          ? catalogQuery.error.message.trim()
+          : "the catalog request could not be completed"
+        : catalogData !== undefined && catalogData.kind !== "ready"
+          ? catalogData.reason
+          : null
+      : null;
   const refreshNote =
     pickerSource === "catalog"
       ? catalogRefresh.isPending
@@ -403,7 +430,7 @@ export function AgentSettingsSheet({
         : refreshFailed
           ? catalogRefresh.error
           : catalogRefresh.outcome === null
-            ? null
+            ? catalogLoadReason
             : catalogRefresh.outcome === "refetched"
               ? "Catalog refetched."
               : catalogRefresh.outcome === "not-modified"
@@ -416,6 +443,15 @@ export function AgentSettingsSheet({
           ? null
           : "The endpoint exposes no usable /models — type the model id below."
         : null;
+  // The note's alert treatment: the refresh handle's own failure, or a
+  // displayed load reason that left the picker with NOTHING to serve
+  // (a stale list's reason reads as a plain warning note — the entries
+  // it kept are already labelled by the headline).
+  const noteIsError =
+    refreshFailed ||
+    (catalogRefresh.outcome === null &&
+      !catalogRefresh.isPending &&
+      (catalogQuery.isError || catalogData?.kind === "unavailable"));
 
   // The status band's headline + lamp: the live source's own truth —
   // what's actually in the list right now — with the refresh note riding
@@ -425,25 +461,25 @@ export function AgentSettingsSheet({
     pickerSource === "catalog"
       ? catalogQuery.isPending
         ? "Loading the model catalog…"
-        : catalogQuery.isError
-          ? catalogEntries.length === 0
-            ? "The model catalog could not be loaded — nothing cached"
-            : `The catalog could not be reloaded — ${String(catalogEntries.length)} cached models shown`
-          : catalogEntries.length === 0
-            ? "No models cached for this provider"
-            : `${String(catalogEntries.length)} models in the cached catalog`
+        : catalogQuery.isError || catalogData?.kind === "unavailable"
+          ? "The model catalog could not be loaded — nothing cached"
+          : catalogData?.kind === "stale"
+            ? `The catalog could not be reloaded — ${String(catalogEntries.length)} cached models shown`
+            : catalogEntries.length === 0
+              ? "No models cached for this provider"
+              : `${String(catalogEntries.length)} models in the cached catalog`
       : pickerSource === "endpoint"
         ? endpointModels.length === 0
           ? "No models discovered on the endpoint"
           : `${String(endpointModels.length)} models discovered on the endpoint`
         : null;
   const statusTone: StatusTone =
-    refreshFailed || catalogQuery.isError
+    refreshFailed || catalogQuery.isError || catalogData?.kind === "unavailable"
       ? "error"
       : catalogQuery.isPending || catalogRefresh.isPending
         ? "parked"
         : pickerSource === "catalog"
-          ? catalogEntries.length === 0
+          ? catalogData?.kind === "stale" || catalogEntries.length === 0
             ? "warn"
             : "ok"
           : pickerSource === "endpoint"
@@ -504,12 +540,12 @@ export function AgentSettingsSheet({
               {refreshNote === null ? null : (
                 <span
                   className={` ${
-                    refreshFailed ? "text-destructive" : "ink-faint"
+                    noteIsError ? "text-destructive" : "ink-faint"
                   }`}
                   data-testid={
-                    refreshFailed ? "agent-settings-refresh-error" : undefined
+                    noteIsError ? "agent-settings-refresh-error" : undefined
                   }
-                  role={refreshFailed ? "alert" : undefined}
+                  role={noteIsError ? "alert" : undefined}
                 >
                   {" — "}
                   {refreshNote}
