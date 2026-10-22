@@ -14,6 +14,9 @@
  *   modeled   a real body created through the command menu + its dialog
  *   selected  that body selected in the model tree — the selection chain
  *             lit end to end (tree row, properties, measurement, DRO)
+ *   collapsed both rails collapsed to `--rail-w-icon` — the icon-rail
+ *             state, which is the layout at every width below 1280 and
+ *             one toggle away above it
  *
  * `modeled` is also shot at the 768 drawer band, the width the floor
  * contract pins.
@@ -133,12 +136,22 @@ async function walk(
       await shoot(page, `workbench-modeled-${suffix}`, taken);
     }
 
-    if (states.includes("selected")) {
+    if (states.includes("selected") || states.includes("collapsed")) {
       // The selection chain: a body row picked in the model tree.
       const bodyRow = page.locator("[data-node-key^='body|']").first();
       await bodyRow.click({ timeout: 30_000 });
       await waitSettled(page);
-      await shoot(page, `workbench-selected-${suffix}`, taken);
+      if (states.includes("selected")) {
+        await shoot(page, `workbench-selected-${suffix}`, taken);
+      }
+    }
+
+    if (states.includes("collapsed")) {
+      // The rails' collapsed state, reached through the product's own
+      // toggles — the same two controls an operator presses.
+      await page.getByTestId("workbench-toggle-tree").click();
+      await page.getByTestId("workbench-toggle-panels").click();
+      await shoot(page, `workbench-collapsed-${suffix}`, taken);
     }
   }
 
@@ -158,7 +171,7 @@ async function main(): Promise<void> {
         scheme,
         register,
         1280,
-        ["boot", "palette", "dialog", "modeled", "selected"],
+        ["boot", "palette", "dialog", "modeled", "selected", "collapsed"],
         taken,
       );
       await walk(browser, scheme, register, 768, ["modeled"], taken);
