@@ -445,6 +445,7 @@
       "values": [],
       "dynamicFiles": [
         "packages/ui/src/components/cad/cad-parameter-manager.tsx",
+        "packages/ui/src/components/cockpit/panel.tsx",
         "packages/ui/src/components/formedible/fields/expression-number-field.tsx",
         "packages/ui/src/components/formedible/fields/object-field.tsx"
       ]
@@ -472,9 +473,11 @@
       "origin": "jsx",
       "values": [],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx",
         "packages/ui/src/components/cad/cad-model-tree.tsx",
         "packages/ui/src/components/cad/cad-parameter-manager.tsx",
+        "packages/ui/src/components/cockpit/panel.tsx",
         "packages/ui/src/components/formedible/fields/combobox-field.tsx",
         "packages/ui/src/components/formedible/fields/expression-number-field.tsx",
         "packages/ui/src/components/formedible/fields/field-wrapper.tsx",
@@ -515,8 +518,11 @@
             "apps/web/src/cad-workbench/datum-overlay.tsx",
             "apps/web/src/cad-workbench/feature-timeline-strip.tsx",
             "apps/web/src/cad-workbench/hole-ghost.tsx",
+            "apps/web/src/cad-workbench/measurement-section.tsx",
             "apps/web/src/cad-workbench/topology-pick-panel.tsx",
             "apps/web/src/cad-workbench/viewport-view-tools.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx",
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
             "apps/web/src/component-preview/ComponentPreviewPage.tsx",
             "apps/web/src/components/header.tsx",
@@ -537,6 +543,7 @@
             "packages/ui/src/agent/chat/parts/tool-call-part.tsx",
             "packages/ui/src/agent/chat/parts/tool-result-part.tsx",
             "packages/ui/src/agent/chat/parts/ui-resource-part.tsx",
+            "packages/ui/src/components/cad/cad-configuration-panel.tsx",
             "packages/ui/src/components/cad/cad-io-dialog.tsx",
             "packages/ui/src/components/cad/cad-model-tree.tsx",
             "packages/ui/src/components/cad/cad-parameter-manager.tsx",
@@ -545,6 +552,7 @@
             "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
             "packages/ui/src/components/cad/cad-sketch-toolbar.tsx",
             "packages/ui/src/components/cad/cad-toolbar.tsx",
+            "packages/ui/src/components/cockpit/panel.tsx",
             "packages/ui/src/components/cockpit/property-row.tsx",
             "packages/ui/src/components/cockpit/tool-button.tsx",
             "packages/ui/src/components/cockpit/tool-flyout.tsx",
@@ -634,6 +642,12 @@
       "attribute": "aria-label",
       "origin": "jsx",
       "values": [
+        {
+          "value": "Agent chat",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
+          ]
+        },
         {
           "value": "Agent settings",
           "files": [
@@ -970,6 +984,12 @@
           ]
         },
         {
+          "value": "Panels",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
+          ]
+        },
+        {
           "value": "Pareto scatter: the final front and the dominated survivors over the selected objectives",
           "files": [
             "apps/web/src/sim-workbench/study-pareto.tsx"
@@ -1026,7 +1046,7 @@
         {
           "value": "Resize the right sidebar",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
@@ -1060,9 +1080,9 @@
           ]
         },
         {
-          "value": "Right sidebar view",
+          "value": "section",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/measurement-section.tsx"
           ]
         },
         {
@@ -1158,13 +1178,13 @@
         {
           "value": "Toggle model tree",
           "files": [
-            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx"
           ]
         },
         {
           "value": "Toggle panels",
           "files": [
-            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
@@ -1183,6 +1203,12 @@
           "value": "Version history",
           "files": [
             "apps/web/src/cad-projects/ProjectWorkbenchPage.tsx"
+          ]
+        },
+        {
+          "value": "view cut",
+          "files": [
+            "apps/web/src/cad-workbench/measurement-section.tsx"
           ]
         },
         {
@@ -1216,6 +1242,8 @@
         "apps/web/src/cad-workbench/feature-timeline-strip.tsx",
         "apps/web/src/cad-workbench/topology-pick-panel.tsx",
         "apps/web/src/cad-workbench/viewport-view-tools.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx",
         "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx",
         "apps/web/src/components/theme-toggle.tsx",
         "apps/web/src/sim-workbench/SimWorkbenchPage.tsx",
@@ -1362,7 +1390,7 @@
         {
           "value": "vertical",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         }
       ],
@@ -1384,8 +1412,8 @@
         "apps/web/src/cad-workbench/drawing-workbench.tsx",
         "apps/web/src/cad-workbench/feature-timeline-strip.tsx",
         "apps/web/src/cad-workbench/measurement-section.tsx",
-        "apps/web/src/cad-workbench/right-sidebar.tsx",
         "apps/web/src/cad-workbench/viewport-view-tools.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
         "packages/ui/src/components/cad/cad-model-tree.tsx",
         "packages/ui/src/components/cad/cad-parameter-panel.tsx",
         "packages/ui/src/components/cad/cad-sketch-inspector.tsx",
@@ -1420,7 +1448,7 @@
         }
       ],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/right-sidebar.tsx"
+        "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
       ]
     },
     {
@@ -1435,7 +1463,7 @@
         }
       ],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/right-sidebar.tsx"
+        "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
       ]
     },
     {
@@ -1443,7 +1471,7 @@
       "origin": "jsx",
       "values": [],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/right-sidebar.tsx",
+        "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
         "packages/ui/src/components/formedible/layout/form-progress.tsx"
       ]
     },
@@ -1485,7 +1513,7 @@
       "origin": "jsx",
       "values": [],
       "dynamicFiles": [
-        "apps/web/src/cad-workbench/right-sidebar.tsx"
+        "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
       ]
     },
     {
@@ -2493,6 +2521,35 @@
       "dynamicFiles": [
         "apps/web/src/cad-workbench/CadChainWorkbenchPage.tsx"
       ]
+    },
+    {
+      "attribute": "data-chrome",
+      "origin": "jsx",
+      "values": [],
+      "dynamicFiles": [
+        "packages/ui/src/components/cad/cad-model-tree.tsx"
+      ]
+    },
+    {
+      "attribute": "data-collapsed",
+      "origin": "jsx",
+      "values": [
+        {
+          "value": "false",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx"
+          ]
+        },
+        {
+          "value": "true",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx",
+            "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx"
+          ]
+        }
+      ],
+      "dynamicFiles": []
     },
     {
       "attribute": "data-command-log",
@@ -6053,6 +6110,18 @@
           ]
         },
         {
+          "value": "panel-section-content",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
+          "value": "panel-section-toggle",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
           "value": "phone-country-menu",
           "files": [
             "packages/ui/src/components/formedible/fields/phone-field.tsx"
@@ -6390,10 +6459,24 @@
     {
       "attribute": "data-state",
       "origin": "jsx",
-      "values": [],
+      "values": [
+        {
+          "value": "closed",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        },
+        {
+          "value": "open",
+          "files": [
+            "packages/ui/src/components/cockpit/panel.tsx"
+          ]
+        }
+      ],
       "dynamicFiles": [
         "packages/ui/src/components/attachment.tsx",
-        "packages/ui/src/components/cad/cad-model-tree.tsx"
+        "packages/ui/src/components/cad/cad-model-tree.tsx",
+        "packages/ui/src/components/cockpit/panel.tsx"
       ]
     },
     {
@@ -7362,25 +7445,25 @@
         {
           "value": "right-sidebar-resize-handle",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
           "value": "right-sidebar-view-chat",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
           "value": "right-sidebar-view-panels",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
           "value": "right-sidebar-view-switch",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
@@ -7813,7 +7896,7 @@
         {
           "value": "workbench-panels-dock",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
@@ -7963,13 +8046,13 @@
         {
           "value": "workbench-toggle-panels",
           "files": [
-            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {
           "value": "workbench-toggle-tree",
           "files": [
-            "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx"
           ]
         },
         {
@@ -8011,7 +8094,7 @@
         {
           "value": "workbench-tree-dock",
           "files": [
-            "apps/web/src/cad-workbench/complete-workbench.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx"
           ]
         },
         {
@@ -8427,6 +8510,18 @@
           ]
         },
         {
+          "value": "left",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-model-rail.tsx"
+          ]
+        },
+        {
+          "value": "right",
+          "files": [
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
+          ]
+        },
+        {
           "value": "top",
           "files": [
             "apps/web/src/cad-workbench/zones/workbench-tool-strip.tsx"
@@ -8497,7 +8592,6 @@
             "apps/web/src/cad-workbench/CadWorkbenchPage.tsx",
             "apps/web/src/cad-workbench/SketchMode.tsx",
             "apps/web/src/cad-workbench/complete-workbench.tsx",
-            "apps/web/src/cad-workbench/right-sidebar.tsx",
             "apps/web/src/cad-workbench/viewport-view-tools.tsx",
             "apps/web/src/cad-workbench/zones/workbench-status-band.tsx",
             "packages/ui/src/components/cad/cad-model-tree.tsx",
@@ -8590,7 +8684,7 @@
         {
           "value": "separator",
           "files": [
-            "apps/web/src/cad-workbench/right-sidebar.tsx"
+            "apps/web/src/cad-workbench/zones/workbench-inspector-rail.tsx"
           ]
         },
         {

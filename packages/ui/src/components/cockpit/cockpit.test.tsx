@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { Panel, PanelBody, PanelHeader, PanelSection } from "./panel";
@@ -56,6 +56,83 @@ describe("Panel", () => {
     const section = container.querySelector("[data-slot='panel-section']");
     expect(section).not.toBeNull();
     expect(section?.className).not.toContain("bg-panel");
+  });
+
+  it("is a plain named group until asked to disclose", () => {
+    const { container } = render(
+      <PanelSection title="Measurement">
+        <PropertyRow label="Volume">5501.553</PropertyRow>
+      </PanelSection>,
+    );
+    expect(
+      container.querySelector("[data-slot='panel-section-toggle']"),
+    ).toBeNull();
+    expect(
+      container
+        .querySelector("[data-slot='panel-section']")
+        ?.getAttribute("data-state"),
+    ).toBeNull();
+  });
+
+  it("discloses through a labelled button that publishes its state", () => {
+    const { container } = render(
+      <PanelSection collapsible id="rail-measure" title="Measurement">
+        <PropertyRow label="Volume">5501.553</PropertyRow>
+      </PanelSection>,
+    );
+    const toggle = screen.getByRole("button", { name: "Measurement" });
+    const section = container.querySelector("[data-slot='panel-section']");
+    const content = container.querySelector(
+      "[data-slot='panel-section-content']",
+    );
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle.getAttribute("aria-controls")).toBe("rail-measure-content");
+    expect(content?.id).toBe("rail-measure-content");
+    expect(section?.getAttribute("data-state")).toBe("open");
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(section?.getAttribute("data-state")).toBe("closed");
+    // Hidden, never unmounted: a closed section keeps its content's state.
+    expect(content?.className).toBe("hidden");
+    expect(screen.getByText("5501.553")).not.toBeNull();
+  });
+
+  it("honours a controlled open state and reports every toggle", () => {
+    const seen: boolean[] = [];
+    render(
+      <PanelSection
+        collapsible
+        onOpenChange={(next) => seen.push(next)}
+        open={false}
+        title="Parameters"
+      >
+        <PropertyRow label="width">20</PropertyRow>
+      </PanelSection>,
+    );
+    const toggle = screen.getByRole("button", { name: "Parameters" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    // Controlled: the prop still wins, and the host heard the request.
+    expect(seen).toEqual([true]);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("keeps a trailing control outside the disclosure button", () => {
+    render(
+      <PanelSection
+        collapsible
+        title="Selection"
+        trailing={<button type="button">clear</button>}
+      >
+        rows
+      </PanelSection>,
+    );
+    const toggle = screen.getByRole("button", { name: "Selection" });
+    const clear = screen.getByRole("button", { name: "clear" });
+    expect(toggle.contains(clear)).toBe(false);
   });
 });
 

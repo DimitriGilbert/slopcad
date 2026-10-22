@@ -18,6 +18,7 @@
  */
 
 import type { ReactElement, ReactNode } from "react";
+import { Scissors, Slice } from "lucide-react";
 import { PanelHeader } from "@slopcad/ui/components/cockpit/panel";
 import { PropertyRow } from "@slopcad/ui/components/cockpit/property-row";
 import {
@@ -50,6 +51,16 @@ export interface WorkbenchMeasurementSectionProps {
   readonly onToggleSectionClipped: () => void;
   /** Toggles the section view mode. */
   readonly onToggleSectionViewMode: () => void;
+  /**
+   * Suppresses the block's own name strip and top rule, for a host that
+   * already supplies both. The cockpit's inspector rail wraps this block
+   * in a collapsible `PanelSection` named "Measurement" (LAYOUT.md 3.6
+   * moved it from LEFT to RIGHT, where it belongs: a measurement is a
+   * property of the selection, not part of the document's structure), so
+   * a second "MEASUREMENT" band under it would be pure duplication. The
+   * legacy Phase 15 page keeps the strip — its DOM is pinned.
+   */
+  readonly hideHeader?: boolean;
 }
 
 /**
@@ -93,6 +104,7 @@ export function WorkbenchMeasurementSection({
   boundsState,
   distanceSource,
   distanceText,
+  hideHeader = false,
   massPropertiesState,
   radiusState,
   sectionState,
@@ -111,39 +123,54 @@ export function WorkbenchMeasurementSection({
   return (
     <section
       aria-label="Measurement"
-      className="w-full shrink-0 border-t border-rule"
+      className={
+        hideHeader
+          ? "w-full min-w-0 shrink-0"
+          : "w-full shrink-0 border-t border-rule"
+      }
     >
-      <PanelHeader className="bg-well/60" title="Measurement" />
+      {hideHeader ? null : (
+        <PanelHeader className="bg-well/60" title="Measurement" />
+      )}
       {/* The Phase 46 section display controls: the persisted plane's clip
           toggle and the view-mode toggle (the cut solid with cap faces).
           Both are ARMED TOOLS, so their pressed appearance is the
           primitive's: `aria-pressed` carries the truth and `ToolButton`
-          paints the one sanctioned wash plus a 1px signal edge. They used
-          to tint their LABEL amber as well, which made an armed clip read
-          as loud as the selected body beside it. */}
+          paints the one sanctioned wash plus a 1px signal edge.
+
+          Step 3 took them the rest of the way into the strip's dialect:
+          icon controls whose `aria-label` and `title` carry the words the
+          buttons used to print ("section", "view cut"), so the rail reads
+          as one instrument instead of two text chips on a tool row. */}
       <ToolGroup
-        className="px-(--pad-panel) py-1"
+        className="border-b border-rule/60 px-(--pad-panel) py-(--gap-tight)"
         label="Section display"
         separated={false}
       >
         <ToolButton
+          aria-label="section"
           aria-pressed={sectionClipped}
-          className="font-mono"
           data-testid="section-clip-toggle"
           onClick={onToggleSectionClipped}
-          size="sm"
+          size="icon"
+          title="Clip the scene with the persisted section plane."
         >
-          section
+          <Scissors aria-hidden="true" />
         </ToolButton>
         <ToolButton
+          aria-label="view cut"
           aria-pressed={sectionViewMode}
-          className="font-mono"
           data-testid="section-view-toggle"
           disabled={!sectionClipped}
           onClick={onToggleSectionViewMode}
-          size="sm"
+          size="icon"
+          title={
+            sectionClipped
+              ? "Show the cut solid with its cap faces instead of the clipped shell."
+              : "Clip the scene first; the cut solid needs a section plane."
+          }
         >
-          view cut
+          <Slice aria-hidden="true" />
         </ToolButton>
       </ToolGroup>
       {measured ? (

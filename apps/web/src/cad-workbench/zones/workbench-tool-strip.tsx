@@ -30,11 +30,12 @@
  * ## What this zone deliberately does not own
  *
  * The document plate moved OUT — it is status, and it now lives in
- * `WorkbenchStatusBand`. The two dock toggles are still here and still
- * `xl:hidden`, because below that breakpoint the rails ARE drawers and
- * above it they are inline; they become rail-collapse toggles owned by
- * LEFT and RIGHT when those zones gain a collapsed state (step 3), and a
- * toggle that did nothing above `xl` would be a fake control today.
+ * `WorkbenchStatusBand`. The two dock toggles moved OUT in step 3 — they
+ * are rail state, and `WorkbenchModelRail` / `WorkbenchInspectorRail`
+ * each own their own, keeping the `workbench-toggle-tree` and
+ * `workbench-toggle-panels` testids and accessible names. With them went
+ * the last `xl:hidden` in this file: there is now no class in this zone
+ * that depends on the viewport's width.
  *
  * ## One-member families
  *
@@ -47,7 +48,6 @@
 
 import { useMemo } from "react";
 import type { ReactElement, ReactNode, RefObject } from "react";
-import { PanelLeft, PanelRight } from "lucide-react";
 import { CAD_MODEL_COMMAND_ICONS } from "@slopcad/ui/components/cad/cad-tool-icons";
 import type { CadModelCommandId } from "@slopcad/ui/components/cad/cad-tool-icons";
 import {
@@ -142,12 +142,6 @@ export interface WorkbenchToolStripProps {
   readonly onRedo: () => void;
   /** The file-exchange cluster, or `null` when the host wires no adapters. */
   readonly io: WorkbenchStripIo | null;
-  /** The left dock's drawer state (below the dock breakpoint). */
-  readonly treeDrawerOpen: boolean;
-  readonly onToggleTreeDrawer: () => void;
-  /** The right dock's drawer state (below the dock breakpoint). */
-  readonly panelsDrawerOpen: boolean;
-  readonly onTogglePanelsDrawer: () => void;
   /** Hidden (never unmounted) while the sketch editor owns the frame. */
   readonly hidden: boolean;
 }
@@ -191,12 +185,8 @@ export function WorkbenchToolStrip({
   onQuickHole,
   onRedo,
   onSketchOnFace,
-  onToggleTreeDrawer,
-  onTogglePanelsDrawer,
   onUndo,
-  panelsDrawerOpen,
   toolbar,
-  treeDrawerOpen,
 }: WorkbenchToolStripProps): ReactElement {
   const {
     bodyCount,
@@ -456,41 +446,13 @@ export function WorkbenchToolStrip({
       data-zone="top"
       label="Model tools"
       overflow={
-        <>
-          <ToolFlyout
-            items={families.surface}
-            label="Surface"
-            triggerTestId="complete-surface-family"
-          />
-          <ToolButton
-            aria-expanded={panelsDrawerOpen}
-            aria-label="Toggle panels"
-            className="xl:hidden"
-            data-testid="workbench-toggle-panels"
-            onClick={onTogglePanelsDrawer}
-            size="icon"
-            title="Toggle the properties and parameters dock"
-          >
-            <PanelRight aria-hidden="true" />
-          </ToolButton>
-        </>
+        <ToolFlyout
+          items={families.surface}
+          label="Surface"
+          triggerTestId="complete-surface-family"
+        />
       }
     >
-      {/* Below the dock breakpoint the rails are drawers; above it they are
-          inline, and the toggle has nothing to toggle until step 3 gives
-          them a collapsed state. */}
-      <ToolGroup className="xl:hidden" label="Docks" separated={false}>
-        <ToolButton
-          aria-expanded={treeDrawerOpen}
-          aria-label="Toggle model tree"
-          data-testid="workbench-toggle-tree"
-          onClick={onToggleTreeDrawer}
-          size="icon"
-          title="Toggle the model tree dock"
-        >
-          <PanelLeft aria-hidden="true" />
-        </ToolButton>
-      </ToolGroup>
       {/* The slot's node, insulated: a host replacement never inherits the
           strip's first-cluster rule or loses its own. */}
       <div className="flex shrink-0 items-center">{toolbar}</div>

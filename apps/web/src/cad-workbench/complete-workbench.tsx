@@ -88,11 +88,6 @@ import {
   type CadImportHeldEntry,
   type CadImportOutcome,
 } from "@slopcad/ui/components/cad/cad-io-dialog";
-import { CadModelTree } from "@slopcad/ui/components/cad/cad-model-tree";
-import { CadParameterPanel } from "@slopcad/ui/components/cad/cad-parameter-panel";
-import { CadConfigurationPanel } from "@slopcad/ui/components/cad/cad-configuration-panel";
-import type { CadConfigurationRow } from "@slopcad/ui/components/cad/cad-configuration-panel";
-import { CadPropertyPanel } from "@slopcad/ui/components/cad/cad-property-panel";
 import { CadStatusBar } from "@slopcad/ui/components/cad/cad-status-bar";
 import { CadToolbar } from "@slopcad/ui/components/cad/cad-toolbar";
 import { CadViewport } from "@slopcad/ui/components/cad/cad-viewport";
@@ -112,14 +107,23 @@ import {
   createAgentChatSessionSlot,
   useAgentChatSession,
 } from "@slopcad/ui/agent/chat/session-slot";
+import type { WorkbenchModelRailDatum } from "./zones/workbench-model-rail";
 
 import { useWorkbenchWebMcpTools } from "../webmcp/workbench-tools";
 import { executeWebMcpTool } from "../webmcp/registry";
 import { completionJson } from "../render-fixture/fixture-session";
 import { createAgentChatCommands } from "../agent/chat/chat-commands";
 import { useAgentChatView } from "../agent/chat/view-state";
-import { WorkbenchRightSidebar } from "./right-sidebar";
+import { useWorkbenchRailState } from "./rail-state";
+import {
+  configurationPanelSlotDefault,
+  modelTreeSlotDefault,
+  parameterPanelSlotDefault,
+  propertyPanelSlotDefault,
+} from "./zones/rail-slot-defaults";
 import { describeArmedTool } from "./tool-options";
+import { WorkbenchInspectorRail } from "./zones/workbench-inspector-rail";
+import { WorkbenchModelRail } from "./zones/workbench-model-rail";
 import { WorkbenchStatusBand } from "./zones/workbench-status-band";
 import {
   WorkbenchToolStrip,
@@ -603,11 +607,12 @@ export function CompleteCadWorkbench({
   // document) and back to "settled" when the regenerated scene's first
   // settled frame stamps. An import preview never settles the document.
   const [settledDocument, setSettledDocument] = useState<unknown>(null);
-  // Below the dock breakpoint the docks become overlay drawers: one DOM
-  // instance per dock, slid in and out by transform, returned to the flex
-  // flow at `xl` — so the machine surfaces never unmount at any width.
-  const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
-  const [panelsDrawerOpen, setPanelsDrawerOpen] = useState(false);
+  // The two rails' own state (LEFT and RIGHT): collapsed-to-icon-width
+  // per rail plus the disclosure of every rail section, persisted per
+  // browser. This replaces the width-conditional drawer the docks used
+  // to be — see ./rail-state for why width may pick a DEFAULT and never
+  // the existence of a control.
+  const rails = useWorkbenchRailState();
   // The dialog trigger buttons: the dialogs open from state (these buttons,
   // the palette's File commands), so the primitive cannot track the opener
   // itself — these refs are the documented focus-restoration points.
@@ -657,31 +662,6 @@ export function CompleteCadWorkbench({
     },
     [],
   );
-  // A scrimmed overlay answers Escape: an open drawer closes on the key at
-  // window level — unless a tool is live, because the viewport's documented
-  // Escape surface (cancel the armed tool) owns the key first.
-  useEffect(() => {
-    if (!treeDrawerOpen && !panelsDrawerOpen) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      // A genuinely armed tool (not the resting select) owns Escape first —
-      // the viewport's documented cancel surface.
-      if (toolsApi.phase === "active" && toolsApi.activeToolId !== "select") {
-        return;
-      }
-      setTreeDrawerOpen(false);
-      setPanelsDrawerOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [panelsDrawerOpen, toolsApi.activeToolId, toolsApi.phase, treeDrawerOpen]);
-
   const ioSurface: CadWorkbenchIo = useMemo(
     () =>
       io === undefined
@@ -889,6 +869,19 @@ export function CompleteCadWorkbench({
       ? [{ id: datum.id, name: datum.name }]
       : [];
   });
+  // The LEFT rail's Datums section: every datum record, named verbatim,
+  // with its parsed kind beside it. Unlike the pools above this one is
+  // not filtered to a type — the rail lists the document's datum
+  // geometry, and an unreadable payload says so rather than vanishing.
+  const railDatums: readonly WorkbenchModelRailDatum[] =
+    workbenchDocument.datums.map((datum) => {
+      const payload = parseDatumPayload(datum.datum);
+      return {
+        id: datum.id,
+        kind: payload.ok ? payload.value.datumType : null,
+        name: datum.name,
+      };
+    });
   // The sheet-body pool the surface forms pick from (Phase 49): the
   // document's SHEET bodies, name verbatim.
   const sheetOptions: readonly {
@@ -2271,59 +2264,64 @@ export function CompleteCadWorkbench({
               : "bg-status-ok"
           }`}
         />
-        {showingPreview ? (
-          <>
-            <span className="text-ink tabular">
-              import · {ioSurface.preview?.source ?? ""}
-            </span>
-            <span>
-              tris{" "}
-              <span className={DRO_VALUE}>
-                {ioSurface.preview === null
-                  ? "…"
-                  : String(ioSurface.preview.triangles)}
+        {/* The static facts: the band's shrinkable half. */}
+        <div className="flex min-w-0 items-center gap-(--gap-group) overflow-hidden">
+          {showingPreview ? (
+            <>
+              <span className="text-ink tabular">
+                import · {ioSurface.preview?.source ?? ""}
               </span>
-            </span>
-            <span>
-              vol{" "}
-              <span className={DRO_VALUE}>
-                {ioSurface.preview === null
-                  ? "…"
-                  : `${ioSurface.preview.volumeText} mm³`}
+              <span>
+                tris{" "}
+                <span className={DRO_VALUE}>
+                  {ioSurface.preview === null
+                    ? "…"
+                    : String(ioSurface.preview.triangles)}
+                </span>
               </span>
-            </span>
-            <span className="hidden xl:inline">
-              geometry only, not in the document
-            </span>
-          </>
-        ) : applied === null ? (
-          <span className="text-ink tabular">computing…</span>
-        ) : (
-          <>
-            <span className="text-ink tabular">{engine.activeScene}</span>
-            <span>
-              extents{" "}
-              <span className={DRO_VALUE}>
-                {formatBoundsExtents(applied.state.measurement.bounds)}
+              <span>
+                vol{" "}
+                <span className={DRO_VALUE}>
+                  {ioSurface.preview === null
+                    ? "…"
+                    : `${ioSurface.preview.volumeText} mm³`}
+                </span>
               </span>
-            </span>
-            <span>
-              vol{" "}
-              <span className={DRO_VALUE}>
-                {`${applied.state.measurement.volume.toFixed(3)} mm³`}
+              <span>geometry only, not in the document</span>
+            </>
+          ) : applied === null ? (
+            <span className="text-ink tabular">computing…</span>
+          ) : (
+            <>
+              <span className="text-ink tabular">{engine.activeScene}</span>
+              <span>
+                extents{" "}
+                <span className={DRO_VALUE}>
+                  {formatBoundsExtents(applied.state.measurement.bounds)}
+                </span>
               </span>
-            </span>
-            <span>
-              tris{" "}
-              <span className={DRO_VALUE}>
-                {String(applied.state.measurement.triangles)}
+              <span>
+                vol{" "}
+                <span className={DRO_VALUE}>
+                  {`${applied.state.measurement.volume.toFixed(3)} mm³`}
+                </span>
               </span>
-            </span>
-          </>
-        )}
+              <span>
+                tris{" "}
+                <span className={DRO_VALUE}>
+                  {String(applied.state.measurement.triangles)}
+                </span>
+              </span>
+            </>
+          )}
+        </div>
         {/* The live tool state rides the DRO's right end: what is armed,
-            and how it cancels. */}
-        <span className="ml-auto hidden items-center gap-(--gap-group) sm:flex">
+            and how it cancels. It used to be `hidden … sm:flex` — the
+            most VOLATILE fact in the band, deleted by viewport width.
+            It is `shrink-0` now instead: the band's static facts (scene,
+            extents, volume, triangles) give up their width first, and
+            what is armed is always on screen. */}
+        <span className="ml-auto flex shrink-0 items-center gap-(--gap-group)">
           {toolsApi.phase === "active" && toolsApi.activeToolId !== null ? (
             <span>
               tool{" "}
@@ -2342,116 +2340,38 @@ export function CompleteCadWorkbench({
     </div>
   );
 
-  // Inside the docks the panels shed their floating-card chrome: the dock
-  // IS the chrome (flush sections, hairline dividers, no radius), while the
-  // components keep their standalone card look everywhere else.
-  const flushPanel = "w-full shrink-0 rounded-none border-0 bg-transparent";
-  const defaultModelTree =
-    regenerationStates === null ? null : (
-      <CadModelTree
-        bodyDisplay={(bodyId) => {
-          const body = workbenchDocument.bodies.find(
-            (candidate) => candidate.id === bodyId,
-          );
-          return body === undefined
-            ? undefined
-            : {
-                visible: body.visible !== false,
-                isolated: body.isolated === true,
-                appearance: body.appearance,
-              };
-        }}
-        onBodyAction={(action) => {
-          if (action.type === "rename") {
-            setRenameBodyId(action.bodyId);
-            return;
-          }
-          if (action.type === "toggle-visibility") {
-            const body = workbenchDocument.bodies.find(
-              (candidate) => candidate.id === action.bodyId,
-            );
-            if (body === undefined) return;
-            handleBodyVisibility(action.bodyId, body.visible === false);
-            return;
-          }
-          if (action.type === "appearance") {
-            handleBodyAppearance(action.bodyId, action.presetId);
-            return;
-          }
-          const body = workbenchDocument.bodies.find(
-            (candidate) => candidate.id === action.bodyId,
-          );
-          if (body === undefined) return;
-          handleBodyIsolate(action.bodyId, body.isolated !== true);
-        }}
-        regenerationStates={regenerationStates}
-        className="w-full rounded-none border-0 bg-transparent"
-      />
-    );
-
-  const defaultPropertyPanel = (
-    <CadPropertyPanel
-      regenerationStates={regenerationStates ?? undefined}
-      className={flushPanel}
-    />
-  );
-
-  const defaultParameterPanel = (
-    <CadParameterPanel className="w-full min-h-0 flex-1 rounded-none border-0 bg-transparent" />
-  );
-
-  // The Phase 57 configuration surface: the switcher, the row table, the
-  // Formedible create form, and the CSV row, wired to the engine's
-  // configuration actions. Export writes the deterministic CSV through the
-  // browser's download path; import reads the chosen file's text.
-  const configurationRows: readonly CadConfigurationRow[] =
-    workbenchDocument.configurations.map((configuration) => ({
-      id: configuration.id,
-      name: configuration.name,
-      overrides: configuration.parameterOverrides.length,
-      suppressed: configuration.suppressedFeatures.length,
-      hidden: configuration.hiddenBodies.length,
-    }));
-  const defaultConfigurationPanel = (
-    <CadConfigurationPanel
-      configurations={configurationRows}
-      activeConfigurationId={engine.activeConfigurationId}
-      notice={csvImportReadError ?? engine.configurationNotice}
-      onSwitch={(id) => {
-        setCsvImportReadError(null);
-        engine.applyConfiguration(
-          id === null ? null : createConfigurationId(id),
-        );
-      }}
-      onCreate={(name) => {
-        setCsvImportReadError(null);
-        engine.createConfiguration(name);
-      }}
-      onDelete={(id) => {
-        setCsvImportReadError(null);
-        engine.deleteConfiguration(createConfigurationId(id));
-      }}
-      onExportCsv={() => {
-        const csv = engine.exportParameterTableCsv();
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = "parameters.csv";
-        anchor.click();
-        URL.revokeObjectURL(url);
-        return csv;
-      }}
-      onImportCsv={(text) => {
-        // A successful read hands the surface back to the engine's own
-        // parse/commit refusals (this panel's only error region).
-        setCsvImportReadError(null);
-        engine.importParameterTableCsv(text);
-      }}
-      onImportError={setCsvImportReadError}
-      className="w-full shrink-0 border-t border-rule"
-    />
-  );
+  // The rails' default content (see ./zones/rail-slot-defaults): the slot
+  // contract is unchanged — a host function slot still replaces any of
+  // these wholesale — but the ELEMENTS are zone content and now live with
+  // the zones.
+  const defaultModelTree = modelTreeSlotDefault({
+    document: workbenchDocument,
+    onBodyAppearance: handleBodyAppearance,
+    onBodyIsolate: handleBodyIsolate,
+    onBodyVisibility: handleBodyVisibility,
+    onRenameBody: setRenameBodyId,
+    regenerationStates,
+  });
+  const defaultPropertyPanel = propertyPanelSlotDefault(regenerationStates);
+  const defaultParameterPanel = parameterPanelSlotDefault();
+  const defaultConfigurationPanel = configurationPanelSlotDefault({
+    activeConfigurationId: engine.activeConfigurationId,
+    document: workbenchDocument,
+    notice: csvImportReadError ?? engine.configurationNotice,
+    onClearReadError: () => {
+      setCsvImportReadError(null);
+    },
+    onCreate: engine.createConfiguration,
+    onDelete: (id) => {
+      engine.deleteConfiguration(createConfigurationId(id));
+    },
+    onExportCsv: engine.exportParameterTableCsv,
+    onImportCsv: engine.importParameterTableCsv,
+    onReadError: setCsvImportReadError,
+    onSwitch: (id) => {
+      engine.applyConfiguration(id === null ? null : createConfigurationId(id));
+    },
+  });
 
   // The band owns the bottom rule and the surface, so the strip inside it
   // renders transparent and borderless (the contract documented on the
@@ -2662,18 +2582,8 @@ export function CompleteCadWorkbench({
         onQuickHole={handleHole}
         onRedo={historyApi.redo}
         onSketchOnFace={sketchOnSelectedFace}
-        onToggleTreeDrawer={() => {
-          setPanelsDrawerOpen(false);
-          setTreeDrawerOpen((open) => !open);
-        }}
-        onTogglePanelsDrawer={() => {
-          setTreeDrawerOpen(false);
-          setPanelsDrawerOpen((open) => !open);
-        }}
         onUndo={historyApi.undo}
-        panelsDrawerOpen={panelsDrawerOpen}
         toolbar={toolbar}
-        treeDrawerOpen={treeDrawerOpen}
       />
       {/* TOP′ — the armed tool's own options strip. Present only while a
           tool is live, and never in sketch mode (whose strip is step 4's). */}
@@ -2696,49 +2606,41 @@ export function CompleteCadWorkbench({
           parameters={workbenchDocument.parameters}
         />
       ) : null}
-      {/* The workspace: an edge-to-edge machine bed. Tree dock flush
-          left, the viewport owning every remaining pixel, properties and
-          parameters flush right — regions divided by hairlines, not
-          floating cards. Below `xl` the docks slide out as overlay
-          drawers (one DOM instance each: translated off-canvas when
-          closed, returned to the flex flow at the breakpoint), and the
-          viewport keeps the whole bed to itself. Hidden (not unmounted)
-          in sketch mode. */}
+      {/* The workspace: an edge-to-edge machine bed. LEFT rail flush
+          left, the viewport owning every remaining pixel, RIGHT rail
+          flush right — regions divided by hairlines, not floating cards.
+          Both rails are real zone components now, in the flex flow at
+          every width, each with its own collapse state; the off-canvas
+          drawer, the `xl:hidden` scrim and the `invisible` tab-order
+          dance are deleted. Hidden (not unmounted) in sketch mode. */}
       <div
-        className={`relative flex min-h-0 flex-1 overflow-hidden ${
+        className={`relative min-h-0 flex-1 overflow-hidden ${
           mode === "sketch" ? "hidden" : "flex"
         }`}
       >
-        {/* The drawer scrim (below xl only). */}
-        {(treeDrawerOpen || panelsDrawerOpen) && (
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 z-20 bg-black/40 xl:hidden"
-            onClick={() => {
-              setTreeDrawerOpen(false);
-              setPanelsDrawerOpen(false);
-            }}
-          />
-        )}
-        {/* Left dock: the model tree over the measurement readouts, one
-            scrolling column, full height. As a drawer it slides from the
-            left; closed it is `invisible`, so its fields never sit in the
-            tab order off-screen (visibility flips at the transition's
-            end on close, start on open — the slide survives). */}
-        <div
-          className={`absolute inset-y-0 left-0 z-30 flex w-(--rail-w) shrink-0 flex-col border-r border-rule bg-panel shadow-overlay transition-[transform,visibility] duration-200 xl:static xl:z-auto xl:shadow-none ${
-            treeDrawerOpen
-              ? "visible translate-x-0"
-              : "invisible -translate-x-full xl:visible xl:translate-x-0"
-          }`}
-          data-testid="workbench-tree-dock"
-        >
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            {modelTree}
+        <WorkbenchModelRail
+          collapsed={rails.isCollapsed("model")}
+          datums={railDatums}
+          isSectionOpen={rails.isSectionOpen}
+          modelTree={modelTree}
+          onSectionOpenChange={rails.setSectionOpen}
+          onToggleCollapsed={() => {
+            rails.toggleCollapsed("model");
+          }}
+          sketches={sketchOptions}
+        />
+        {viewport}
+        <WorkbenchInspectorRail
+          collapsed={rails.isCollapsed("inspector")}
+          configurationPanel={configurationPanel}
+          document={workbenchDocument}
+          isSectionOpen={rails.isSectionOpen}
+          measurementSection={
             <WorkbenchMeasurementSection
               boundsState={engine.boundsState}
               distanceSource={distanceSource}
               distanceText={distanceText}
+              hideHeader
               massPropertiesState={engine.massPropertiesState}
               radiusState={engine.radiusState}
               sectionClipped={engine.sectionClipped}
@@ -2747,23 +2649,17 @@ export function CompleteCadWorkbench({
               onToggleSectionClipped={engine.toggleSectionClipped}
               onToggleSectionViewMode={engine.toggleSectionViewMode}
             />
-          </div>
-        </div>
-        {viewport}
-        {/* Right dock (D16, Phase 4.5): the two-view sidebar — the
-            properties/parameters/configuration panels or the agent chat —
-            switched by the segmented control at its top, resizable by the
-            drag handle on its left edge. Same drawer discipline as the
-            left dock: invisible (out of the tab order) while closed. */}
-        <WorkbenchRightSidebar
-          configurationPanel={configurationPanel}
-          document={workbenchDocument}
-          drawerOpen={panelsDrawerOpen}
+          }
           mode={mode}
+          onSectionOpenChange={rails.setSectionOpen}
+          onToggleCollapsed={() => {
+            rails.toggleCollapsed("inspector");
+          }}
           onViewChange={setAgentChatView}
           parameterPanel={parameterPanel}
           propertyPanel={propertyPanel}
           selection={selectionApi.selection}
+          selectionCount={selectionApi.selected.length}
           sessionSlot={agentChatSessionSlot}
           toolsSurface={agentToolsSurface}
           view={agentChatView}

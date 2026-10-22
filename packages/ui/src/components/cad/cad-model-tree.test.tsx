@@ -916,3 +916,77 @@ describe("CadModelTree appearance picker state (Phase 59)", () => {
     expect(chipColor).toBe("#123456");
   });
 });
+
+/**
+ * The enclosure contract (LAYOUT.md 3.4): the tree stops owning chrome
+ * when a cockpit rail supplies it, and the machine surface is identical
+ * either way — moving the tree into a `PanelSection` must not move a
+ * single id, role, or `data-*` the harnesses read.
+ */
+describe("CadModelTree chrome", () => {
+  it("keeps the card enclosure and its own name band by default", () => {
+    renderInProvider(
+      createCadStore({ session: createSession(buildTreeDocument()) }),
+    );
+    const root = document.querySelector("[data-slot='cad-model-tree']");
+    expect(root?.getAttribute("data-chrome")).toBe("card");
+    expect(root?.className).toContain("border");
+    // The band repeats the tree's name above the `role="tree"` region.
+    expect(
+      [...document.querySelectorAll("[data-slot='cad-model-tree'] > div")].some(
+        (element) =>
+          element.getAttribute("role") === null &&
+          element.textContent === CAD_MODEL_TREE_LABELS.treeLabel,
+      ),
+    ).toBe(true);
+  });
+
+  it("drops the container surface and the duplicate name band when flush", () => {
+    renderInProvider(
+      createCadStore({ session: createSession(buildTreeDocument()) }),
+      { chrome: "flush" },
+    );
+    const root = document.querySelector("[data-slot='cad-model-tree']");
+    expect(root?.getAttribute("data-chrome")).toBe("flush");
+    expect(root?.className).not.toContain("bg-card");
+    expect(root?.className).not.toContain("border-border");
+    expect(root?.className).not.toContain("w-56");
+    expect(
+      [...document.querySelectorAll("[data-slot='cad-model-tree'] > div")].some(
+        (element) =>
+          element.getAttribute("role") === null &&
+          element.textContent === CAD_MODEL_TREE_LABELS.treeLabel,
+      ),
+    ).toBe(false);
+  });
+
+  it("carries the same rows, ids and attributes under either enclosure", () => {
+    const document_ = buildTreeDocument();
+    renderInProvider(createCadStore({ session: createSession(document_) }));
+    const card = [...document.querySelectorAll("[data-node-key]")].map(
+      (element) => `${element.id}|${element.getAttribute("data-node-key")}`,
+    );
+    cleanup();
+    renderInProvider(createCadStore({ session: createSession(document_) }), {
+      chrome: "flush",
+    });
+    const flush = [...document.querySelectorAll("[data-node-key]")].map(
+      (element) => `${element.id}|${element.getAttribute("data-node-key")}`,
+    );
+    expect(flush).toEqual(card);
+    expect(flush.length).toBeGreaterThan(0);
+  });
+
+  it("wears the cockpit selection mark — wash plus the inline-start edge", () => {
+    const store = createCadStore({
+      session: createSession(buildTreeDocument()),
+    });
+    renderInProvider(store, { chrome: "flush" });
+    fireEvent.click(row("body|body_plate"));
+    const selected = row("body|body_plate");
+    expect(selected.getAttribute("data-selected")).toBe("true");
+    expect(selected.className).toContain("border-l-select-edge");
+    expect(selected.className).toContain("bg-select-wash");
+    expect(selected.className).not.toContain("bg-accent");
+  });
+});

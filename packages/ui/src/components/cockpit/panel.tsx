@@ -1,5 +1,7 @@
 import { cn } from "cn";
+import { useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
 
 /**
  * `Panel` — the cockpit's enclosure primitive.
@@ -123,32 +125,115 @@ function PanelBody({
  * same small-caps voice as a panel header, and its rows below. Sections
  * never nest and never carry their own surface — the stack must read as
  * one continuous panel, not as a pile of cards.
+ *
+ * ## Disclosure
+ *
+ * `collapsible` turns the name strip into a disclosure button: a chevron
+ * at the inline start, `aria-expanded` carrying the truth, and
+ * `aria-controls` pointing at the content region. This is what lets a
+ * rail stack four concerns in one scroll without the percentage height
+ * caps the old right dock used (`max-h-[55%]` / `max-h-[45%]`) — the
+ * operator closes what they are not using instead of every section
+ * fighting for a share of the column.
+ *
+ * Closed content is HIDDEN, never unmounted (the cockpit's restore
+ * discipline — a closed section keeps its scroll position, its form
+ * state and its selection), and `display:none` takes it out of the tab
+ * order and the accessibility tree at the same time.
+ *
+ * State is uncontrolled by default (`defaultOpen`) and controlled when
+ * `open` is supplied, so a rail can persist the whole disclosure map.
+ * `trailing` stays OUTSIDE the button: a count is decoration, but a
+ * control in that slot must stay independently clickable.
  */
 function PanelSection({
   className,
   title,
   trailing,
+  collapsible = false,
+  defaultOpen = true,
+  open,
+  onOpenChange,
   children,
+  id,
   ...props
 }: Omit<ComponentProps<"div">, "title"> & {
   readonly title: ReactNode;
   readonly trailing?: ReactNode;
+  /** Turns the name strip into a disclosure button. */
+  readonly collapsible?: boolean;
+  /** The uncontrolled initial disclosure state. */
+  readonly defaultOpen?: boolean;
+  /** The controlled disclosure state (wins over `defaultOpen`). */
+  readonly open?: boolean;
+  /** Called with the next disclosure state on every toggle. */
+  readonly onOpenChange?: (open: boolean) => void;
 }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const isOpen = !collapsible || (open ?? uncontrolledOpen);
+  const contentId = id === undefined ? undefined : `${id}-content`;
+
+  const name = (
+    <span className="label-section truncate text-ink-faint">{title}</span>
+  );
+
   return (
     <div
       data-slot="panel-section"
-      className={cn("flex min-w-0 flex-col", className)}
+      data-state={collapsible ? (isOpen ? "open" : "closed") : undefined}
+      className={cn("flex min-w-0 shrink-0 flex-col", className)}
+      id={id}
       {...props}
     >
       <div className="flex h-(--header-h) shrink-0 items-center gap-(--gap) border-t border-rule bg-well/60 px-(--pad-panel)">
-        <span className="label-section truncate text-ink-faint">{title}</span>
+        {collapsible ? (
+          <button
+            aria-controls={contentId}
+            aria-expanded={isOpen}
+            className={cn(
+              "-mx-1 flex min-w-0 flex-1 items-center gap-(--gap-tight) rounded-sm px-1",
+              "h-full cursor-pointer text-left transition-colors",
+              "duration-(--dur-state) ease-(--ease-instrument) focus-instrument",
+              "hover:bg-well",
+            )}
+            data-slot="panel-section-toggle"
+            onClick={() => {
+              const next = !isOpen;
+              setUncontrolledOpen(next);
+              onOpenChange?.(next);
+            }}
+            type="button"
+          >
+            <ChevronRight
+              aria-hidden="true"
+              className={cn(
+                "size-3 shrink-0 text-ink-faint transition-transform",
+                "duration-(--dur-state) ease-(--ease-instrument)",
+                isOpen && "rotate-90",
+              )}
+            />
+            {name}
+          </button>
+        ) : (
+          name
+        )}
         {trailing === undefined ? null : (
           <span className="ml-auto flex shrink-0 items-center gap-(--gap-tight) text-data text-ink-faint tabular">
             {trailing}
           </span>
         )}
       </div>
-      {children}
+      {collapsible ? (
+        <div
+          className={isOpen ? "flex min-w-0 flex-col" : "hidden"}
+          data-slot="panel-section-content"
+          id={contentId}
+        >
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }

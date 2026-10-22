@@ -139,11 +139,12 @@ import {
   type TransactionError,
 } from "@slopcad/cad-react";
 import { cn } from "cn";
+import { SlidersHorizontal } from "lucide-react";
 import type { FormedibleFieldConfig } from "../formedible/lib/types";
 
 import { Button } from "../button";
 import { PanelHeader } from "../cockpit/panel";
-import { ToolButton } from "../cockpit/tool-button";
+import { ToolButton, ToolGroup } from "../cockpit/tool-button";
 import { COCKPIT_FORM } from "./cad-form-density";
 import { useFormedible } from "../formedible/hooks/use-formedible";
 import {
@@ -242,6 +243,14 @@ export interface CadParameterPanelProps {
   readonly labels?: Partial<CadParameterPanelLabels>;
   /** Extends the container classes; width defaults to the content. */
   readonly className?: string;
+  /**
+   * Suppresses the panel's own name strip, for a host that already
+   * supplies one (a cockpit rail's collapsible `PanelSection`). The
+   * manage toggle does NOT disappear with it: it moves into a one-button
+   * tool row at the top of the body, as an icon control carrying the
+   * same accessible name (LAYOUT.md 3.5).
+   */
+  readonly hideHeader?: boolean;
 }
 
 /** The form key of a literal parameter's value field. */
@@ -372,6 +381,7 @@ function useOptionalCadStore(): CadStore | null {
  */
 export function CadParameterPanel({
   className,
+  hideHeader = false,
   evaluate: evaluateProp,
   labels: labelOverrides,
   onApply,
@@ -665,18 +675,43 @@ export function CadParameterPanel({
           strip's own slot: one 26px name band per panel, the section voice
           once, and the armed treatment of the toggle supplied by
           `ToolButton` instead of a per-panel ghost button. */}
-      <PanelHeader title={mergedLabels.title}>
-        {managerApply === undefined ? null : (
-          <ToolButton
-            aria-pressed={managing}
-            className="ml-auto"
-            onClick={() => setManaging((current) => !current)}
-            size="sm"
+      {hideHeader ? (
+        // Headerless (a rail section owns the name): the manage toggle
+        // becomes an icon control in its own tool row, keeping the exact
+        // accessible name the text button carried.
+        managerApply === undefined ? null : (
+          <ToolGroup
+            className="justify-end border-b border-rule px-(--pad-panel) py-(--gap-tight)"
+            label={mergedLabels.title}
+            separated={false}
           >
-            {managing ? mergedLabels.manageClose : mergedLabels.manage}
-          </ToolButton>
-        )}
-      </PanelHeader>
+            <ToolButton
+              aria-label={
+                managing ? mergedLabels.manageClose : mergedLabels.manage
+              }
+              aria-pressed={managing}
+              onClick={() => setManaging((current) => !current)}
+              size="icon"
+              title={managing ? mergedLabels.manageClose : mergedLabels.manage}
+            >
+              <SlidersHorizontal aria-hidden="true" />
+            </ToolButton>
+          </ToolGroup>
+        )
+      ) : (
+        <PanelHeader title={mergedLabels.title}>
+          {managerApply === undefined ? null : (
+            <ToolButton
+              aria-pressed={managing}
+              className="ml-auto"
+              onClick={() => setManaging((current) => !current)}
+              size="sm"
+            >
+              {managing ? mergedLabels.manageClose : mergedLabels.manage}
+            </ToolButton>
+          )}
+        </PanelHeader>
+      )}
       {managing && managerApply !== undefined ? (
         // The manage mode replaces the edit form (the edit-in-place flow is
         // untouched for the default mode); the manager mirrors the LIVE

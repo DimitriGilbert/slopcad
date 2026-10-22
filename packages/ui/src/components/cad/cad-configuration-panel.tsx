@@ -31,6 +31,8 @@
  * discipline): the panel never pretends to apply.
  */
 
+import { Download, Upload, X } from "lucide-react";
+
 import { useFormedible } from "../formedible/hooks/use-formedible";
 import { PanelHeader } from "../cockpit/panel";
 import { ToolButton, ToolGroup } from "../cockpit/tool-button";
@@ -102,6 +104,13 @@ export interface CadConfigurationPanelProps {
   readonly notice?: string | null;
   readonly labels?: Partial<CadConfigurationPanelLabels>;
   readonly className?: string;
+  /**
+   * Suppresses the panel's own name strip, for a host that already
+   * supplies one — a cockpit rail's collapsible `PanelSection` (LAYOUT.md
+   * 3.5). The section's `aria-label` on this element still names it, so
+   * nothing loses its accessible name.
+   */
+  readonly hideHeader?: boolean;
 }
 
 // Deliberately lenient at the form layer (and schema-free — the CAD
@@ -158,6 +167,7 @@ export function CadConfigurationPanel({
   notice = null,
   labels: labelOverrides,
   className = "",
+  hideHeader = false,
 }: CadConfigurationPanelProps) {
   const labels = { ...CAD_CONFIGURATION_PANEL_LABELS, ...labelOverrides };
 
@@ -205,7 +215,7 @@ export function CadConfigurationPanel({
           `h3` so the heading stays in the document outline; the padding
           moved off the panel and onto the body, because the switcher's rows
           run edge to edge like every other row in the cockpit. */}
-      <PanelHeader title={labels.title} titleAs="h3" />
+      {hideHeader ? null : <PanelHeader title={labels.title} titleAs="h3" />}
 
       <fieldset
         role="radiogroup"
@@ -307,9 +317,10 @@ export function CadConfigurationPanel({
                         data-configuration-delete={row.id}
                         onClick={() => onDelete(row.id)}
                         size="sm"
+                        title={`${labels.deleteLabel}: ${row.name}`}
                         tone="destructive"
                       >
-                        ×
+                        <X aria-hidden="true" />
                       </ToolButton>
                     )}
                   </td>
@@ -321,9 +332,19 @@ export function CadConfigurationPanel({
 
         {onCreate === undefined ? null : <createForm.Form />}
 
+        {/* The parameter-table exchange: icon controls, the strip's
+            dialect (step 2) — the name the text buttons carried is now the
+            `aria-label` and the `title`, so nothing lost a name. */}
         <ToolGroup label="Parameter table" separated={false}>
           {onExportCsv === undefined ? null : (
-            <ToolButton onClick={exportCsv}>{labels.exportCsv}</ToolButton>
+            <ToolButton
+              aria-label={labels.exportCsv}
+              onClick={exportCsv}
+              size="icon"
+              title={labels.exportCsv}
+            >
+              <Download aria-hidden="true" />
+            </ToolButton>
           )}
           {onImportCsv === undefined ? null : (
             /*
@@ -334,8 +355,11 @@ export function CadConfigurationPanel({
              * and the label still activates it — but it stops drawing
              * itself, and the label wears the product's control treatment.
              */
-            <label className="inline-flex h-(--tool-h) cursor-pointer items-center gap-(--gap) rounded-sm border border-transparent px-2 text-ui font-medium text-ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-(--focus)">
-              <span>{labels.importCsv}</span>
+            <label
+              className="inline-flex size-(--tool-h) cursor-pointer items-center justify-center rounded-sm border border-transparent text-ink-dim transition-colors duration-(--dur-state) ease-(--ease-instrument) hover:bg-well hover:text-ink has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-1 has-[:focus-visible]:outline-(--focus)"
+              title={labels.importCsv}
+            >
+              <Upload aria-hidden="true" className="size-3.5 shrink-0" />
               <input
                 type="file"
                 accept=".csv,text/csv"

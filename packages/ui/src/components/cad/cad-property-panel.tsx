@@ -197,6 +197,13 @@ export interface CadPropertyPanelProps {
   readonly labels?: Partial<CadPropertyPanelLabels>;
   /** Extends the container classes; width defaults to the content. */
   readonly className?: string;
+  /**
+   * Suppresses the panel's own name strip, for a host that already
+   * supplies one — a cockpit rail's collapsible `PanelSection` carries
+   * the name and the count, and two stacked name strips is exactly the
+   * duplication the rail zones exist to delete (LAYOUT.md 3.5).
+   */
+  readonly hideHeader?: boolean;
 }
 
 /** The visual presentation of one feature regeneration status. */
@@ -549,6 +556,7 @@ function PropertySection({
  */
 export function CadPropertyPanel({
   className,
+  hideHeader = false,
   document: documentProp,
   labels: labelOverrides,
   onRemoveFeature,
@@ -603,12 +611,14 @@ export function CadPropertyPanel({
           count used to be printed in the SIGNAL colour — an accent spent on
           a number, which is the one thing DESIGN.md says it may never
           decorate. */}
-      <PanelHeader
-        title={labels.title}
-        trailing={
-          cadDocument === undefined ? undefined : String(selection.length)
-        }
-      />
+      {hideHeader ? null : (
+        <PanelHeader
+          title={labels.title}
+          trailing={
+            cadDocument === undefined ? undefined : String(selection.length)
+          }
+        />
+      )}
       {cadDocument === undefined ? (
         <p className="px-(--pad-row) py-(--gap) text-ui text-ink-dim">
           {labels.emptyDocument}

@@ -292,6 +292,23 @@ export interface CadModelTreeProps {
   readonly labels?: Partial<CadModelTreeLabels>;
   /** Extends the container classes; width defaults to the content. */
   readonly className?: string;
+  /**
+   * Who owns the tree's enclosure (LAYOUT.md 3.4).
+   *
+   * - `"card"` (default) — the standalone look every fixture and demo
+   *   page pins: a bordered, filled, 224px card with its own name band.
+   * - `"flush"` — the tree renders ROWS ONLY. No container surface, no
+   *   border, no width, and no name band, because a cockpit rail's
+   *   `PanelSection` already supplies the enclosure and the name; two
+   *   name strips stacked is the duplication the zone extraction exists
+   *   to delete. The rows also take the cockpit's own selection idiom
+   *   (wash plus the signal edge on the inline start) instead of the
+   *   `bg-accent` + inset-ring the card look uses.
+   *
+   * Every `data-*`, `id`, `role` and `aria-*` is identical in both: the
+   * machine surface does not know which enclosure it is sitting in.
+   */
+  readonly chrome?: "card" | "flush";
 }
 
 /** Visual presentation of one regeneration state: the status dot and text. */
@@ -996,6 +1013,7 @@ function AppearancePicker({
 export function CadModelTree({
   assembly,
   bodyDisplay,
+  chrome = "card",
   className,
   document: documentProp,
   labels: labelOverrides,
@@ -1008,6 +1026,8 @@ export function CadModelTree({
     ...CAD_MODEL_TREE_LABELS,
     ...labelOverrides,
   };
+  /** Rows-only: the host rail owns the enclosure and the name strip. */
+  const flush = chrome === "flush";
   const documentApi = useOptionalCadDocument();
   const selectionApi = useOptionalCadSelection();
 
@@ -1153,12 +1173,28 @@ export function CadModelTree({
         aria-selected={selected}
         className={cn(
           "outline-none focus-visible:ring-1 focus-visible:ring-ring/80",
-          "cursor-default rounded-[3px]",
-          selected
-            ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
-            : pick === undefined
-              ? "opacity-80"
-              : "hover:bg-muted",
+          "cursor-default",
+          // The cockpit idiom: selection is a wash plus the signal edge on
+          // the inline start (DESIGN.md), the same mark `PropertyRow`
+          // draws, so a selected tree row and a selected property row
+          // read as one state. The card look keeps its ring.
+          flush
+            ? cn(
+                "rounded-none border-l-2 border-l-transparent",
+                selected
+                  ? "border-l-select-edge bg-select-wash text-select-ink"
+                  : pick === undefined
+                    ? "opacity-80"
+                    : "hover:bg-well",
+              )
+            : cn(
+                "rounded-[3px]",
+                selected
+                  ? "bg-accent text-accent-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklch,var(--signal)_30%,transparent)]"
+                  : pick === undefined
+                    ? "opacity-80"
+                    : "hover:bg-muted",
+              ),
         )}
         aria-disabled={
           pick === undefined || row.reference === null || undefined
@@ -1194,7 +1230,14 @@ export function CadModelTree({
           handleRowKeyDown(row, event);
         }}
       >
-        <div className="flex min-w-0 items-center gap-1.5 px-1.5 py-1">
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-1.5",
+            // The density contract: a rail row is `--row-h`, padded by
+            // `--pad-row`. The card look keeps its own looser padding.
+            flush ? "min-h-(--row-h) px-(--pad-row)" : "px-1.5 py-1",
+          )}
+        >
           {collapsible ? (
             <span
               aria-hidden="true"
@@ -1222,7 +1265,11 @@ export function CadModelTree({
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
-              row.depth === 0 ? "font-medium" : "text-muted-foreground",
+              row.depth === 0
+                ? "font-medium"
+                : flush
+                  ? "text-ink-dim"
+                  : "text-muted-foreground",
             )}
           >
             {row.label}
@@ -1245,7 +1292,13 @@ export function CadModelTree({
           ) : null}
         </div>
         {collapsible && expanded ? (
-          <div className="border-border ml-[11px] border-l pl-1" role="group">
+          <div
+            className={cn(
+              "ml-[11px] border-l pl-1",
+              flush ? "border-rule" : "border-border",
+            )}
+            role="group"
+          >
             {row.children.map((child) => renderRow(child))}
           </div>
         ) : null}
@@ -1264,23 +1317,36 @@ export function CadModelTree({
   return (
     <div
       className={cn(
-        "border-border bg-card/60 w-56 overflow-hidden rounded-md border text-sm",
+        flush
+          ? "min-w-0 text-ui"
+          : "border-border bg-card/60 w-56 overflow-hidden rounded-md border text-sm",
         className,
       )}
+      data-chrome={chrome}
       data-slot="cad-model-tree"
     >
-      <div className="text-muted-foreground border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
-        {labels.treeLabel}
-      </div>
+      {/* The card look's own name band. A rail supplies the name through
+          its `PanelSection`, so the flush tree never draws a second one. */}
+      {flush ? null : (
+        <div className="text-muted-foreground border-border bg-background/40 border-b px-2.5 py-1.5 font-mono text-[10.5px] font-medium tracking-[0.08em] uppercase">
+          {labels.treeLabel}
+        </div>
+      )}
       {rows.length === 0 ? (
-        <div className="text-muted-foreground px-2.5 py-2 text-xs">
+        <div
+          className={cn(
+            flush
+              ? "px-(--pad-row) py-(--gap) text-ui text-ink-dim"
+              : "text-muted-foreground px-2.5 py-2 text-xs",
+          )}
+        >
           {labels.emptyDocument}
         </div>
       ) : (
         <div
           aria-label={labels.treeLabel}
           aria-multiselectable="true"
-          className="select-none p-1"
+          className={cn("select-none", flush ? "py-(--gap-tight)" : "p-1")}
           role="tree"
         >
           {shape?.groups.map((group) => renderRow(group.row))}
