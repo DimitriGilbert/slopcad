@@ -2052,8 +2052,12 @@ export function CompleteCadWorkbench({
           translucent plate with a black drop. It used to be bordered,
           washed, icon-tinted AND word-tinted in the signal colour: four
           accents on one transient card, while the armed tool had to make
-          do with the same hue. The one signal mark it keeps is the verb
-          it is teaching. */}
+          do with the same hue. It now keeps NONE of them: the last one
+          was the taught verb, tinted amber mid-sentence, and the accent
+          rule has no entry for a word in prose — it has the armed tool,
+          the selected entity and one confirming action. A verb this card
+          is teaching is emphasised the way prose emphasises, in the
+          instrument's own ink. */}
       <div className="flex items-start gap-(--gap-group) rounded-md border border-rule-strong bg-overlay px-3 py-2 shadow-overlay">
         <span
           aria-hidden="true"
@@ -2067,7 +2071,7 @@ export function CompleteCadWorkbench({
         <div className="min-w-0 max-w-[22rem]">
           <p className="text-ui text-ink">
             Start a sketch to build geometry — draw a profile, then{" "}
-            <span className="font-medium text-signal">Extrude</span>.
+            <span className="font-medium text-ink">Extrude</span>.
           </p>
           <p className="mt-0.5 text-label text-ink-dim">
             The guide plate is your starter document. Or press{" "}

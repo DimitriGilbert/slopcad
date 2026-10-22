@@ -31,6 +31,14 @@
  * names a full-frame slot for it instead of trapping it in a corner box
  * whose size its own `inset-0` child would then define.
  *
+ * The cost of that freedom is that a self-positioning layer is invisible
+ * to the slots' layout, so the strip and the centre slot once overlapped
+ * for real. They now agree through a TOKEN rather than through geometry:
+ * the strip is `--hud-corner-w` wide and the centre slot stops that far
+ * short of the trailing edge, centring its child in what is left. A
+ * future corner item wider than the token widens the token, not one of
+ * the two call sites.
+ *
  * ## Pointer discipline
  *
  * The layer and every slot are `pointer-events-none`; a control inside
@@ -154,8 +162,17 @@ export function CadViewportHud({
       <HudSlot className="bottom-2 left-2" name="bottom-left">
         {bottomLeft}
       </HudSlot>
+      {/* The centre slot is centred in the space the CORNERS LEAVE, not
+          on the viewport's midline. `left-1/2` + `w-max` let it grow
+          under the bottom-right furniture (the view-tools strip,
+          `--hud-corner-w` wide), and at boot the getting-started card
+          covered half that strip's display-mode track in every scheme.
+          Stretching the slot between the gutters and centring INSIDE it
+          fixes that without squeezing the card: it keeps its natural
+          width while the clear area is wide enough, and is capped by the
+          corner rather than by the frame. */}
       <HudSlot
-        className="bottom-3 left-1/2 w-max max-w-[calc(100%-1rem)] -translate-x-1/2"
+        className="bottom-3 left-2 right-[calc(var(--hud-corner-w)+0.75rem)] flex justify-center"
         name="bottom-center"
       >
         {bottomCenter}
