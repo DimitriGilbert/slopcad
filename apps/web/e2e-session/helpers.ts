@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { Download, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
+import { cadSketchToolFamilyOf } from "@slopcad/ui/components/cad/cad-tool-icons";
 import type { SettleAnchor } from "../e2e-render/helpers";
 import type {
   WebMcpToolAnnotations,
@@ -66,29 +67,56 @@ export async function clickCanvasPoint(
     .click({ position: canvasPoint(x, y) });
 }
 
-/** Activates a sketch tool through the sketch toolbar. */
+/**
+ * Activates a sketch tool through the sketch toolbar. The strip folds its
+ * constraint and dimension kinds into `ToolFlyout` families, so a member
+ * that is not the family's current FACE lives in the family's menu: open
+ * the family first, then take the member (the component-level battery's
+ * `toolButton` discipline — `sketch-mode-bindings.test.tsx`). A lone tool,
+ * and a member the face currently shows (the face follows the armed
+ * tool), is a direct `data-sketch-tool-id` hit.
+ */
 export async function activateSketchTool(
   page: Page,
   toolId: string,
 ): Promise<void> {
-  await page.locator(`[data-sketch-tool-id="${toolId}"]`).click();
+  const direct = page.locator(`${SKETCH} [data-sketch-tool-id="${toolId}"]`);
+  if ((await direct.count()) > 0) {
+    await direct.first().click();
+  } else {
+    const family = cadSketchToolFamilyOf(toolId);
+    if (family === undefined) {
+      throw new Error(`sketch tool ${toolId} has no strip control`);
+    }
+    await page.locator(`[data-testid="sketch-family-${family.id}"]`).click();
+    await page
+      .locator(`[role="menuitem"][data-sketch-tool-id="${toolId}"]`)
+      .click();
+  }
   await expect(page.locator(SKETCH)).toHaveAttribute(
     "data-sketch-tool",
     toolId,
   );
 }
 
-/** The complete workbench re-shows its hint on every page load: dismiss it.
- * The hint mounts AFTER the settle stamp (a delayed getting-started float),
- * so the dismissal waits briefly for it instead of racing the mount — and
- * bounded, so a hint-free page never stalls. */
-async function dismissHint(page: Page): Promise<void> {
+/** The complete workbench re-shows its hint on a feature-less document:
+ * dismiss it when it mounts. The root publishes the hint's truth as
+ * `data-sketch-hint` (open|dismissed), so the wait reads the machine
+ * surface — a populated document (the boot plate's own timeline) retires
+ * the hint instantly and never stalls the step. */
+async function dismissHint(page: Page, rootId: string): Promise<void> {
   const dismiss = page.locator('[data-testid="workbench-sketch-hint-dismiss"]');
   try {
-    await dismiss.click({ timeout: 3_000 });
+    await expect(page.locator(`#${rootId}`)).toHaveAttribute(
+      "data-sketch-hint",
+      "open",
+      { timeout: 2_000 },
+    );
+    await dismiss.click();
     await page.waitForTimeout(150);
   } catch {
-    // The hint did not mount on this load (already dismissed this session).
+    // The hint retired before it mounted (populated document) or was
+    // already dismissed this session.
   }
 }
 
@@ -100,7 +128,7 @@ export async function openComplete(
   await page.goto(
     rootId === OCCT_ROOT ? "/workbench-complete-occt" : "/workbench-complete",
   );
-  await dismissHint(page);
+  await dismissHint(page, rootId);
   return waitForSettledScene(page, rootId);
 }
 

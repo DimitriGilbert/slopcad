@@ -560,9 +560,12 @@ test("s03 complete workbench boots and the menu ships exactly the audited comman
     await expect(
       page.getByLabel("holeDiameter", { exact: true }),
     ).toBeVisible();
-    await expect(page.locator('[data-slot="cad-status-bar"]')).toContainText(
-      "tool = select (active)",
+    // The armed-tool/selection facts live in the viewport's own DRO band
+    // now (one fact, one place — the status band keeps document facts).
+    await expect(page.getByTestId("viewport-dro")).toContainText(
+      "tool select · Esc cancels",
     );
+    await expect(page.getByTestId("viewport-dro")).toContainText("sel 0");
     const timeline = await readTimeline(page, COMPLETE_ROOT);
     expect(timeline.entries.map((entry) => entry.kind)).toEqual([
       "translate",
@@ -950,6 +953,19 @@ test("s05d delete refusals and the command-vocabulary delete", async ({
   sessionPage: page,
 }) => {
   await stage("s05d delete", async () => {
+    // The armed SELECT tool owns the Selection section while it is live
+    // (the property panel stays mounted under it, hidden); the DRO's
+    // "Esc cancels" retires the arming and hands the section back — the
+    // same gesture s05b pins on the measure tool.
+    await page
+      .locator(`#${VIEWPORT_COMPLETE} [aria-label="CAD viewport"]`)
+      .focus();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(COMPLETE)).toHaveAttribute(
+      "data-tool-phase",
+      "cancelled",
+    );
+
     // The upstream feature's delete REFUSES structurally: the domain's
     // verbatim refusal surfaces and NOTHING is issued (the command log
     // — accumulated across this whole session — stands unchanged).
@@ -5917,10 +5933,11 @@ test("s34 agent chat: the right-sidebar view (D16), settings, and the four palet
     cover("agent-settings");
     await page.getByLabel("Provider", { exact: true }).click();
     await page.getByRole("option", { name: "OpenAI", exact: true }).click();
+    // The model field is a command picker now: the trigger opens the
+    // portaled list, whose options are the catalog rows (name + mono id).
     const modelField = page.getByLabel("Model", { exact: true });
     await modelField.click();
-    // The catalog option buttons carry the model id beneath the label.
-    const catalogOption = dialog.locator("button:has(span.text-xs)").first();
+    const catalogOption = page.getByRole("option").first();
     await expect(catalogOption).toBeVisible();
     await catalogOption.click();
     await page.getByRole("button", { name: "Save settings" }).click();
@@ -5929,14 +5946,17 @@ test("s34 agent chat: the right-sidebar view (D16), settings, and the four palet
 
     // D7 + the palette refresh command: force-refresh the configured named
     // provider against the loopback fixture's models.dev JSON — the REAL
-    // refresh path runs (fetch → filter → replace rows), and the sheet
-    // reports the outcome.
+    // refresh path runs (fetch → filter → compare), and the sheet reports
+    // the outcome. The seeded cache IS the fixture, so the honest answer
+    // is the no-change verdict — the refresh dedupes on content
+    // (model-catalog.ts's providers compare), it never prints a fake
+    // "refetched" over identical bytes.
     await runCommand(page, COMPLETE_ROOT, "agent-catalog-refresh");
     cover("agent-catalog-refresh");
     await runCommand(page, COMPLETE_ROOT, "agent-settings");
     await expect(dialog).toBeVisible();
     await expect(page.getByTestId("agent-settings-refresh-row")).toContainText(
-      "Catalog refetched.",
+      "Catalog unchanged upstream.",
     );
 
     // D14: reconfigure onto the BYO endpoint — the endpoint's OWN /models
@@ -5953,13 +5973,10 @@ test("s34 agent chat: the right-sidebar view (D16), settings, and the four palet
     // it is emptied for the endpoint's own model to be the pick.
     await page.getByLabel("Model id", { exact: true }).fill("");
     await page.getByTestId("agent-settings-refetch-endpoint").click();
-    // The picker's dropdown opens on focus; its options arrive from the
-    // re-fetched endpoint list (async, debounced). The remembered Model
-    // field still carries the openai pick, which would FILTER the endpoint
-    // list — it is cleared so the empty query lists the endpoint's models.
-    await modelField.fill("");
+    // The picker's options arrive from the re-fetched endpoint list
+    // (async); the search box opens empty, so the whole list shows.
     await modelField.click();
-    const endpointOption = dialog.getByRole("button", {
+    const endpointOption = page.getByRole("option", {
       name: "fixture-primary",
       exact: true,
     });
